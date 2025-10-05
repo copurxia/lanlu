@@ -24,7 +24,7 @@ public class SearchController {
         let start = 0
         let count = 20
         
-        let archives = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count))
+        let (archives, totalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count))
         
         // 手动构建JSON数组
         var archivesJson = "["
@@ -53,7 +53,7 @@ public class SearchController {
         }
         archivesJson += "]"
         
-        let result = "{\"data\":" + archivesJson + ",\"draw\":0,\"recordsFiltered\":" + archives.size.toString() + ",\"recordsTotal\":" + archives.size.toString() + "}"
+        let result = "{\"data\":" + archivesJson + ",\"draw\":0,\"recordsFiltered\":" + archives.size.toString() + ",\"recordsTotal\":" + totalCount.toString() + "}"
         ctx.json(result)
     }
 

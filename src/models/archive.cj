@@ -117,32 +117,61 @@ public class ArchiveModel {
     /**
      * 搜索归档
      */
-    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32): Array<Archive> {
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32): (Array<Archive>, Int64) {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
                 var archives: ArrayList<Archive> = ArrayList<Archive>()
                 try {
+                    println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}")
+                    
+                    // 首先获取总记录数
+                    var countSql = "SELECT COUNT(*) FROM archives"
+                    if (filter.size > 0) {
+                        countSql += " WHERE title LIKE ? OR filename LIKE ?"
+                    }
+                    
+                    println("执行计数SQL: ${countSql}")
+                    let countStmt = conn.prepareStatement(countSql)
+                    var totalCount = 0
+                    
+                    if (filter.size > 0) {
+                        countStmt.set<String>(1, "%${filter}%")
+                        countStmt.set<String>(2, "%${filter}%")
+                    }
+                    
+                    let countRs = countStmt.query()
+                    if (countRs.next()) {
+                        totalCount = countRs.getOrNull<Int64>(0) ?? 0
+                        println("获取到总记录数: ${totalCount}")
+                    } else {
+                        println("无法获取总记录数")
+                    }
+                    // 确保关闭第一个查询的结果集
+                    countRs.close()
+                    
+                    // 然后查询分页数据
                     var sql = "SELECT id, arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives"
-
+                    
                     if (filter.size > 0) {
                         sql += " WHERE title LIKE ? OR filename LIKE ?"
                     }
-
+                    
                     sql += " ORDER BY created_at DESC LIMIT ${count} OFFSET ${start}"
-
+                    
                     // 打印SQL语句用于调试
-                    println("执行SQL: ${sql}")
+                    println("执行数据SQL: ${sql}")
                     println("参数 - filter: '${filter}', start: ${start}, count: ${count}")
-
+                    
                     let stmt = conn.prepareStatement(sql)
-
+                    
                     if (filter.size > 0) {
                         stmt.set<String>(1, "%${filter}%")
                         stmt.set<String>(2, "%${filter}%")
                     }
-
+                    
                     let rs = stmt.query()
+                    println("SQL查询执行完成")
 
                     while (rs.next()) {
                         let archive = Archive()
@@ -168,16 +197,18 @@ public class ArchiveModel {
                         }
                     }
 
+                    let resultArray = archives.toArray()
+                    println("返回${resultArray.size}条记录，总记录数: ${totalCount}")
                     conn.close()
-                    return archives.toArray()
+                    return (resultArray, totalCount)
                 } catch (e: Exception) {
                     println("搜索归档失败: ${e}")
                     conn.close()
-                    return Array<Archive>()
+                    return (Array<Archive>(), 0)
                 }
             case None =>
                 println("无法连接到数据库")
-                return Array<Archive>()
+                return (Array<Archive>(), 0)
         }
     }
 
