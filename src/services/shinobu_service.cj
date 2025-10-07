@@ -969,8 +969,8 @@ public class ShinobuService {
      * 获取当前时间（毫秒）
      */
     private func getCurrentTimeMillis(): Int64 {
-        // 简单实现
-        return 1234567890
+        // 获取当前时间的毫秒数
+        return getTimeMillis()
     }
     
     

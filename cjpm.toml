@@ -18,6 +18,6 @@
 
 [target]
   [target.x86_64-unknown-linux-gnu]
-    compile-option = "--cfg \"ohos=false\""
+    compile-option = "-O2 --cfg \"ohos=false\""
     [target.x86_64-unknown-linux-gnu.bin-dependencies]
       path-option = [ "${CANGJIE_STDX_PATH}/linux_x86_64_llvm/static/stdx" ]
