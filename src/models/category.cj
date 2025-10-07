@@ -42,7 +42,7 @@ public class CategoryModel {
                         
                         // 获取分类下的档案
                         let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
-                        archiveStmt.set(1, category.id)
+                        archiveStmt.set(0, category.id)
                         let archiveRs = archiveStmt.query()
                         
                         var archiveIds: ArrayList<String> = ArrayList<String>()
@@ -76,7 +76,7 @@ public class CategoryModel {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("SELECT catid, name, search, pinned FROM categories WHERE catid = ?")
-                    stmt.set(1, id)
+                    stmt.set(0, id)
                     let rs = stmt.query()
                     
                     if (rs.next()) {
@@ -88,7 +88,7 @@ public class CategoryModel {
                         
                         // 获取分类下的档案
                         let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
-                        archiveStmt.set(1, category.id)
+                        archiveStmt.set(0, category.id)
                         let archiveRs = archiveStmt.query()
                         
                         var archiveIds: ArrayList<String> = ArrayList<String>()
@@ -122,10 +122,10 @@ public class CategoryModel {
                 try {
                     let newId = "SET_" + DateTime.now().toString()
                     let stmt = conn.prepareStatement("INSERT INTO categories (catid, name, search, pinned) VALUES (?, ?, ?, ?)")
-                    stmt.set(1, newId)
-                    stmt.set(2, name)
-                    stmt.set(3, search)
-                    stmt.set(4, false)
+                    stmt.set(0, newId)
+                    stmt.set(1, name)
+                    stmt.set(2, search)
+                    stmt.set(3, false)
                     let result = stmt.update()
                     
                     conn.close()
@@ -157,9 +157,9 @@ public class CategoryModel {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("UPDATE categories SET name = ?, search = ? WHERE catid = ?")
-                    stmt.set(1, name)
-                    stmt.set(2, search)
-                    stmt.set(3, id)
+                    stmt.set(0, name)
+                    stmt.set(1, search)
+                    stmt.set(2, id)
                     let result = stmt.update()
                     
                     conn.close()
@@ -185,12 +185,12 @@ public class CategoryModel {
                 try {
                     // 先删除分类与档案的关联
                     let deleteRelationsStmt = conn.prepareStatement("DELETE FROM archive_categories WHERE category_id = ?")
-                    deleteRelationsStmt.set(1, id)
+                    deleteRelationsStmt.set(0, id)
                     deleteRelationsStmt.update()
                     
                     // 再删除分类
                     let stmt = conn.prepareStatement("DELETE FROM categories WHERE catid = ?")
-                    stmt.set(1, id)
+                    stmt.set(0, id)
                     let result = stmt.update()
                     
                     conn.close()
@@ -215,8 +215,8 @@ public class CategoryModel {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("INSERT INTO archive_categories (archive_id, category_id) VALUES (?, ?)")
-                    stmt.set(1, archiveId)
-                    stmt.set(2, categoryId)
+                    stmt.set(0, archiveId)
+                    stmt.set(1, categoryId)
                     let result = stmt.update()
                     
                     conn.close()
@@ -241,8 +241,8 @@ public class CategoryModel {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("DELETE FROM archive_categories WHERE archive_id = ? AND category_id = ?")
-                    stmt.set(1, archiveId)
-                    stmt.set(2, categoryId)
+                    stmt.set(0, archiveId)
+                    stmt.set(1, categoryId)
                     let result = stmt.update()
                     
                     conn.close()

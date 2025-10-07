@@ -81,7 +81,7 @@ public class ArchiveModel {
             case Some(conn) => try {
                 let stmt = conn.prepareStatement(
                     "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives WHERE arcid = ?")
-                stmt.set(1, id)
+                stmt.set(0, id)
                 let rs = stmt.query()
 
                 if (rs.next()) {
@@ -232,4 +232,5 @@ public class ArchiveModel {
     public static func getArchiveFile(id: String): String {
         return "/api/archives/${id}/file"
     }
+    
 }
