@@ -257,26 +257,18 @@ public class ArchiveDao {
     /**
      * 插入归档记录 - 专门为 ShinobuService 提供的方法
      */
-    public static func insertArchive(archiveId: String, fileName: String, fileSize: Int64, fileModTime: Int64, filePath: String): Bool {
+    public static func insertArchive(archiveId: String, title: String, fileName: String, fileSize: Int64, fileModTime: Int64, filePath: String): Bool {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
-                    // 添加详细日志以调试SQL语句
-                    println("=== insertArchive 调试信息 ===")
-                    println("archiveId: '${archiveId}'")
-                    println("fileName: '${fileName}'")
-                    println("fileSize: ${fileSize}")
-                    println("fileModTime: ${fileModTime}")
-                    println("filePath: '${filePath}'")
-                    
                     // 使用数据库的默认值来处理时间戳，避免格式问题
                     let sql = "INSERT INTO archives (arcid, title, filename, summary, thumbhash, relative_path, file_size, isnew, pagecount, last_read_time, progress) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                     
                     let stmt = conn.prepareStatement(sql)
                     
                     stmt.set(0, archiveId)
-                    stmt.set(1, fileName)  // 默认使用文件名作为标题
+                    stmt.set(1, title)  // 使用传入的标题
                     stmt.set(2, fileName)
                     stmt.set(3, "")  // summary
                     stmt.set(4, "")  // thumbhash
@@ -545,6 +537,51 @@ public class ArchiveDao {
                 }
             } catch (e: Exception) {
                 println("根据路径获取归档失败: ${e}")
+                conn.close()
+                return None
+            }
+            case None =>
+                println("无法连接到数据库")
+                return None
+        }
+    }
+
+    /**
+     * 根据相对路径和文件名获取归档
+     */
+    public static func getByPathAndFilename(relativePath: String, filename: String): Option<ArchiveData> {
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) => try {
+                let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives WHERE relative_path = ? AND filename = ?")
+                stmt.set(0, relativePath)
+                stmt.set(1, filename)
+                let rs = stmt.query()
+                
+                if (rs.next()) {
+                    let archive = ArchiveData()
+                    archive.id = rs.getOrNull<String>(0) ?? ""
+                    archive.title = rs.getOrNull<String>(1) ?? ""
+                    archive.filename = rs.getOrNull<String>(2) ?? ""
+                    archive.summary = rs.getOrNull<String>(3) ?? ""
+                    archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                    archive.created_at = rs.getOrNull<String>(5) ?? ""
+                    archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                    archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                    archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                    archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                    archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                    archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                    archive.progress = rs.getOrNull<Int32>(12) ?? 0
+                    
+                    conn.close()
+                    return Some(archive)
+                } else {
+                    conn.close()
+                    return None
+                }
+            } catch (e: Exception) {
+                println("根据路径和文件名获取归档失败: ${e}")
                 conn.close()
                 return None
             }

@@ -47,9 +47,9 @@ public class ShinobuService {
     private var mutex: Mutex  = Mutex()
     
     // 配置 - 使用静态变量存储配置
-    private static var archivePath: String
-    private static var thumbnailPath: String
-    private static var cachePath: String
+    private static var archivePath: Path
+    private static var thumbnailPath: Path
+    private static var cachePath: Path
     private static var bsdtarPath: String
     
     // 扫描和缩略图配置 - 使用静态变量存储配置
@@ -91,11 +91,16 @@ public class ShinobuService {
         Dotenv.config()
         
         // 读取配置
-        archivePath = getVariable("ARCHIVE_PATH") ?? "./data/archive"
-        thumbnailPath = getVariable("THUMBNAIL_PATH") ?? "./data/thumb"
-        cachePath = getVariable("CACHE_PATH") ?? "./data/cache"
+        let archivePathStr = getVariable("ARCHIVE_PATH") ?? "./data/archive"
+        let thumbnailPathStr = getVariable("THUMBNAIL_PATH") ?? "./data/thumb"
+        let cachePathStr = getVariable("CACHE_PATH") ?? "./data/cache"
         bsdtarPath = getVariable("BSDTAR_PATH") ?? "bsdtar"
-        
+
+        // 转换为 Path 类型并规范化
+        archivePath = canonicalize(archivePathStr)
+        thumbnailPath = canonicalize(thumbnailPathStr)
+        cachePath = canonicalize(cachePathStr)
+
         // 读取扫描和缩略图配置
         let autoScanStr = getVariable("ENABLE_AUTO_SCAN") ?? "true"
         enableAutoScan = autoScanStr == "true"
@@ -134,6 +139,27 @@ public class ShinobuService {
     }
     
     /**
+     * 获取归档路径
+     */
+    public static func getArchivePath(): Path {
+        return archivePath
+    }
+    
+    /**
+     * 获取缩略图路径
+     */
+    public static func getThumbnailPath(): Path {
+        return thumbnailPath
+    }
+    
+    /**
+     * 获取缓存路径
+     */
+    public static func getCachePath(): Path {
+        return cachePath
+    }
+    
+    /**
      * 启动 Shinobu 服务
      */
     public func start(): Bool {
@@ -155,9 +181,9 @@ public class ShinobuService {
         currentPid = getCurrentProcessId()
         
         println("Shinobu service starting with configuration:")
-        println("  Archive path: ${archivePath}")
-        println("  Thumbnail path: ${thumbnailPath}")
-        println("  Cache path: ${cachePath}")
+        println("  Archive path: ${archivePath.toString()}")
+        println("  Thumbnail path: ${thumbnailPath.toString()}")
+        println("  Cache path: ${cachePath.toString()}")
         println("  BSDTAR path: ${bsdtarPath}")
         println("  Enable auto scan: ${enableAutoScan}")
         println("  Enable initial scan: ${enableInitialScan}")
@@ -255,16 +281,16 @@ public class ShinobuService {
         var errorCount: Int64 = 0
         var errors: Array<String> = Array<String>()
         
-        println("Starting archive scan in directory: ${ShinobuService.archivePath}")
+        println("Starting archive scan in directory: ${ShinobuService.archivePath.toString()}")
 
         // 检查目录是否存在
-        if (!directoryExists(ShinobuService.archivePath)) {
-            println("Archive directory does not exist: ${ShinobuService.archivePath}")
-            return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${ShinobuService.archivePath}"])
+        if (!directoryExists(ShinobuService.archivePath.toString())) {
+            println("Archive directory does not exist: ${ShinobuService.archivePath.toString()}")
+            return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${ShinobuService.archivePath.toString()}"])
         }
 
         // 递归扫描目录
-        let archiveFiles = findArchiveFiles(ShinobuService.archivePath)
+        let archiveFiles = findArchiveFiles(ShinobuService.archivePath.toString())
         println("Found ${archiveFiles.size} archive files to process")
         
         for (filePath in archiveFiles) {
@@ -371,7 +397,9 @@ public class ShinobuService {
         
         try {
             // 0. 检查文件是否已经存在于数据库中，并获取其信息
-            let existingArchive = ArchiveDao.getByPath(filePath)
+            let relativePath = calculateRelativePath(filePath)
+            let fileName = getFullFileName(filePath)
+            let existingArchive = ArchiveDao.getByPathAndFilename(relativePath, fileName)
             
             match (existingArchive) {
                 case Some(archive) =>
@@ -465,12 +493,16 @@ public class ShinobuService {
             let archiveId = generateArchiveId(filePath)
             
             // 获取文件信息
-            let fileName = getFileName(filePath)
+            let fileName = getFullFileName(filePath)  // 使用完整文件名
+            let defaultTitle = generateDefaultTitle(filePath)  // 生成不带后缀的标题
             let fileSize = getArchiveFileSize(filePath)
             let fileModTime = getArchiveFileModTime(filePath)
             
+            // 计算相对于 archivePath 的相对路径（不包含文件名）
+            let relativePath = calculateRelativePath(filePath)
+            
             // 使用 DAO 层执行数据库插入操作
-            let success = ArchiveDao.insertArchive(archiveId, fileName, fileSize, fileModTime, filePath)
+            let success = ArchiveDao.insertArchive(archiveId, defaultTitle, fileName, fileSize, fileModTime, relativePath)
             if (!success) {
                 return ProcessResultData(false, "", "Failed to create archive record in database")
             }
@@ -524,14 +556,14 @@ public class ShinobuService {
         }
         
         // 3. 直接提取图片文件到封面目录，不进行分辨率转换
-        let thumbnailPath = joinPath(thumbnailPath, "${archiveId}.${getFileExtension(firstImageEntry)}")
-        let extractResult = extractArchiveEntry(archivePath, firstImageEntry, thumbnailPath)
+        let thumbnailFilePath = joinPath(thumbnailPath.toString(), "${archiveId}.${getFileExtension(firstImageEntry)}")
+        let extractResult = extractArchiveEntry(archivePath, firstImageEntry, thumbnailFilePath)
         if (!extractResult.success) {
             return extractResult
         }
         
         logger.info("Successfully generated thumbnail for archive: ${archiveId}")
-        return ProcessResultData(true, thumbnailPath, "")
+        return ProcessResultData(true, thumbnailFilePath, "")
     }
     
     /**
@@ -829,6 +861,82 @@ public class ShinobuService {
             return fileName
         }
         return filePath
+    }
+    
+    /**
+     * 计算相对于 archivePath 的相对路径（不包含文件名）
+     */
+    private func calculateRelativePath(fullPath: String): String {
+        try {
+            // 规范化完整路径
+            let normalizedPath = canonicalize(Path(fullPath))
+            let fullPathStr = normalizedPath.toString()
+            
+            // 获取父目录路径
+            let parentDir = getParentDirectory(fullPathStr)
+            
+            // 计算相对于 archivePath 的相对路径
+            let archivePathStr = archivePath.toString()
+            
+            // 确保 fullPath 以 archivePath 开头
+            if (parentDir.startsWith(archivePathStr)) {
+                // 移除 archivePath 前缀，获取相对路径
+                let relativePath = parentDir.replace(archivePathStr, "")
+                
+                // 移除可能的前导斜杠
+                if (relativePath.startsWith("/")) {
+                    let parts = relativePath.split("/")
+                    var result = ""
+                    for (i in 1..parts.size) {
+                        if (i > 1) {
+                            result += "/"
+                        }
+                        result += parts[i]
+                    }
+                    return result
+                } else {
+                    return relativePath
+                }
+            } else {
+                // 如果路径不在 archivePath 下，返回空字符串作为后备
+                logger.error("Path ${fullPathStr} is not under archive path ${archivePathStr}")
+                return ""
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to calculate relative path for ${fullPath}: ${e.message}")
+            return ""
+        }
+    }
+    
+    /**
+     * 获取完整文件名（包含后缀）
+     */
+    private func getFullFileName(filePath: String): String {
+        let parts = filePath.split("/")
+        if (parts.size > 0) {
+            return parts[parts.size - 1]
+        }
+        return filePath
+    }
+    
+    /**
+     * 生成默认标题（去除文件后缀名）
+     */
+    private func generateDefaultTitle(filePath: String): String {
+        let fileName = getFullFileName(filePath)
+        let parts = fileName.split(".")
+        if (parts.size > 1) {
+            // 去除最后一个后缀
+            var title = ""
+            for (i in 0..(parts.size - 1)) {
+                if (i > 0) {
+                    title += "."
+                }
+                title += parts[i]
+            }
+            return title
+        }
+        return fileName
     }
     
     /**
@@ -1174,7 +1282,7 @@ public class ShinobuService {
                 
                 // 简单的轮询实现：每隔一定时间检查目录变化
                 // 实际应该使用文件系统监视 API
-                var lastFileCount = countFilesInDirectory(archivePath)
+                var lastFileCount = countFilesInDirectory(archivePath.toString())
                 println("Initial file count in archive directory: ${lastFileCount}")
                 
                 runningMutex.lock()
@@ -1193,7 +1301,7 @@ public class ShinobuService {
                     }
                     
                     // 检查目录中的文件数量是否变化
-                    let currentFileCount = countFilesInDirectory(archivePath)
+                    let currentFileCount = countFilesInDirectory(archivePath.toString())
                     if (currentFileCount != lastFileCount) {
                         println("File change detected: ${lastFileCount} -> ${currentFileCount} files, triggering scan...")
                         scanArchives()
@@ -1299,11 +1407,17 @@ public class ShinobuService {
             println("Found ${archives.size} archives without thumbnails")
             
             for (archive in archives) {
-                let archivePath = joinPath(archivePath, archive.relative_path)
-                
-                if (fileExists(archivePath)) {
+                // 组装完整路径：archivePath + relative_path + filename
+                let dirPath = if (archive.relative_path.size > 0) {
+                    joinPath(archivePath.toString(), archive.relative_path)
+                } else {
+                    archivePath.toString()
+                }
+                let archiveFilePath = joinPath(dirPath, archive.filename)
+
+                if (fileExists(archiveFilePath)) {
                     println("Generating thumbnail for: ${archive.filename} (${archive.id})")
-                    let result = generateThumbnail(archivePath, archive.id)
+                    let result = generateThumbnail(archiveFilePath, archive.id)
                     
                     if (result.success) {
                         // 更新数据库中的缩略图hash
