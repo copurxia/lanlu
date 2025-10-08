@@ -27,6 +27,10 @@ class Logger {
     public func debug(message: String) {
         println("[DEBUG] ${message}")
     }
+    
+    public func warn(message: String) {
+        println("[WARN] ${message}")
+    }
 }
 
 let logger = Logger()
@@ -555,11 +559,37 @@ public class ShinobuService {
             return ProcessResultData(false, "", "No image files found in archive")
         }
         
-        // 3. 直接提取图片文件到封面目录，不进行分辨率转换
-        let thumbnailFilePath = joinPath(thumbnailPath.toString(), "${archiveId}.${getFileExtension(firstImageEntry)}")
-        let extractResult = extractArchiveEntry(archivePath, firstImageEntry, thumbnailFilePath)
+        // 3. 提取图片文件到临时目录
+        let tempImagePath = joinPath(cachePath.toString(), "${archiveId}_temp.${getFileExtension(firstImageEntry)}")
+        let extractResult = extractArchiveEntry(archivePath, firstImageEntry, tempImagePath)
         if (!extractResult.success) {
             return extractResult
+        }
+        
+        // 4. 使用ImageMagick进行分辨率转换和格式转换为JPG
+        let thumbnailFilePath = joinPath(thumbnailPath.toString(), "${archiveId}.jpg")
+        let convertResult = convertImageToJpg(tempImagePath, thumbnailFilePath)
+        
+        // 5. 清理临时文件
+        try {
+            if (fileExists(tempImagePath)) {
+                // 使用系统命令删除文件
+                let (exitCode, _, _) = executeWithOutput(
+                    "rm",
+                    ["-f", tempImagePath],
+                    stdOut: ProcessRedirect.Pipe,
+                    stdErr: ProcessRedirect.Pipe
+                )
+                if (exitCode != 0) {
+                    logger.warn("Failed to delete temp file: ${tempImagePath}")
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to delete temp file: ${tempImagePath}, error: ${e.message}")
+        }
+        
+        if (!convertResult.success) {
+            return convertResult
         }
         
         logger.info("Successfully generated thumbnail for archive: ${archiveId}")
@@ -1114,6 +1144,76 @@ public class ShinobuService {
         }
     }
     
+    /**
+     * 使用ImageMagick将图片转换为JPG格式并进行分辨率转换
+     */
+    private func convertImageToJpg(inputPath: String, outputPath: String): ProcessResultData {
+        try {
+            logger.debug("Converting image to JPG: ${inputPath} -> ${outputPath}")
+            
+            // 确保输出目录存在
+            let outputDir = getParentDirectory(outputPath)
+            if (!directoryExists(outputDir)) {
+                Directory.create(outputDir, recursive: true)
+            }
+            
+            // 使用ImageMagick的convert工具进行转换
+            // 由于executeWithOutput函数限制参数数量，我们分两步执行
+            // 第一步：调整大小 - 宽500px，最大高1000px（保持比例）
+            let resizedPath = joinPath(cachePath.toString(), "temp_resized.jpg")
+            let (resizeExitCode, resizeStdout, resizeStderr) = executeWithOutput(
+                "convert",
+                [inputPath, "-resize", "500x1000>", resizedPath],
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            
+            if (resizeExitCode != 0) {
+                let error = String.fromUtf8(resizeStderr)
+                logger.error("Failed to resize image: ${error}")
+                return ProcessResultData(false, "", error)
+            }
+            
+            // 第二步：设置质量并输出到最终路径
+            let (qualityExitCode, qualityStdout, qualityStderr) = executeWithOutput(
+                "convert",
+                [resizedPath, "-quality", "85", outputPath],
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            
+            // 清理临时文件
+            try {
+                if (fileExists(resizedPath)) {
+                    let (rmExitCode, _, _) = executeWithOutput(
+                        "rm",
+                        ["-f", resizedPath],
+                        stdOut: ProcessRedirect.Pipe,
+                        stdErr: ProcessRedirect.Pipe
+                    )
+                    if (rmExitCode != 0) {
+                        logger.warn("Failed to delete temp resized file: ${resizedPath}")
+                    }
+                }
+            } catch (e: Exception) {
+                logger.warn("Failed to delete temp resized file: ${resizedPath}, error: ${e.message}")
+            }
+            
+            if (qualityExitCode == 0) {
+                logger.info("Successfully converted image to JPG: ${outputPath}")
+                return ProcessResultData(true, outputPath, "")
+            } else {
+                let error = String.fromUtf8(qualityStderr)
+                logger.error("Failed to convert image to JPG: ${error}")
+                return ProcessResultData(false, "", error)
+            }
+        } catch (e: Exception) {
+            let error = "Exception converting image to JPG: ${e.message}"
+            logger.error(error)
+            return ProcessResultData(false, "", error)
+        }
+    }
+
     private func addError(errors: Array<String>, error: String): Array<String> {
         // 简单实现：返回原数组（实际应该添加错误）
         return errors

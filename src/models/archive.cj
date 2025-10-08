@@ -190,7 +190,7 @@ public class ArchiveModel {
      */
     public static func getThumbnailFilePath(id: String, page: Int32): String {
         let thumbnailDir = ShinobuService.getThumbnailPath().toString()
-        let extension = if (page == 1) { "jpg" } else { "jpg" }  // 实际可能需要根据档案类型调整
+        let extension = "jpg"
         
         let archiveIdPath = "${thumbnailDir}/${id}.${extension}"
         println("Trying archiveId path: ${archiveIdPath}")
@@ -224,7 +224,7 @@ public class ArchiveModel {
         }
         
         let thumbnailDir = ShinobuService.getThumbnailPath().toString()
-        let extension = if (page == 1) { "jpg" } else { "jpg" }
+        let extension = "jpg"
         let thumbnailPath = "${thumbnailDir}/${id}.${extension}"
         
         println("Checking if thumbnail exists at: ${thumbnailPath}")
