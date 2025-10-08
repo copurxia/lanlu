@@ -170,6 +170,39 @@ public class ArchiveModel {
         println("返回${archives.size}条记录，总记录数: ${totalCount}")
         return (archives.toArray(), totalCount)
     }
+    
+    /**
+     * 搜索归档（带过滤条件）
+     */
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool): (Array<Archive>, Int64) {
+        println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}', newOnly=${newOnly}, untaggedOnly=${untaggedOnly}")
+        
+        // 使用DAO层获取数据
+        let (archiveDataArray, totalCount) = ArchiveDao.searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly)
+        
+        var archives: ArrayList<Archive> = ArrayList<Archive>()
+        for (data in archiveDataArray) {
+            let archive = Archive()
+            archive.id = data.id
+            archive.title = data.title
+            archive.filename = data.filename
+            archive.summary = data.summary
+            archive.thumbhash = data.thumbhash
+            archive.created_at = data.created_at
+            archive.updated_at = data.updated_at
+            archive.relative_path = data.relative_path
+            archive.file_size = data.file_size
+            archive.isNew = data.isNew
+            archive.pagecount = data.pagecount
+            archive.last_read_time = data.last_read_time
+            archive.progress = data.progress
+            archive.tags = data.tags
+            archives.add(archive)
+        }
+        
+        println("返回${archives.size}条记录，总记录数: ${totalCount}")
+        return (archives.toArray(), totalCount)
+    }
 
     /**
      * 获取归档元数据

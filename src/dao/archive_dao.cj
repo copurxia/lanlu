@@ -123,26 +123,57 @@ public class ArchiveDao {
      * 搜索归档
      */
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String): (Array<ArchiveData>, Int64) {
+        return searchArchives(filter, category, start, count, sortby, order, false, false)
+    }
+    
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool): (Array<ArchiveData>, Int64) {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                 try {
-                println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}'")
+                println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}', newOnly=${newOnly}, untaggedOnly=${untaggedOnly}")
                 
                 // 首先获取总记录数
                 var countSql = "SELECT COUNT(*) FROM archives_with_tags"
+                var whereConditions: ArrayList<String> = ArrayList<String>()
+                
                 if (filter.size > 0) {
-                    countSql += " WHERE title LIKE ? OR filename LIKE ?"
+                    whereConditions.add("(title LIKE ? OR filename LIKE ?)")
+                }
+                
+                // 添加新归档过滤条件
+                if (newOnly) {
+                    whereConditions.add("isnew = true")
+                }
+                
+                // 添加无标签过滤条件
+                if (untaggedOnly) {
+                    whereConditions.add("(tags IS NULL OR tags = '')")
+                }
+                
+                // 组合 WHERE 条件
+                if (whereConditions.size > 0) {
+                    var whereClause = ""
+                    for (i in 0..whereConditions.size) {
+                        if (i > 0) {
+                            whereClause += " AND "
+                        }
+                        whereClause += whereConditions[i]
+                    }
+                    countSql += " WHERE " + whereClause
                 }
                 
                 println("执行计数SQL: ${countSql}")
                 let countStmt = conn.prepareStatement(countSql)
                 var totalCount = 0
                 
+                var paramIndex = 1
                 if (filter.size > 0) {
-                    countStmt.set<String>(1, "%${filter}%")
-                    countStmt.set<String>(2, "%${filter}%")
+                    countStmt.set<String>(paramIndex, "%${filter}%")
+                    paramIndex++
+                    countStmt.set<String>(paramIndex, "%${filter}%")
+                    paramIndex++
                 }
                 
                 let countRs = countStmt.query()
@@ -158,20 +189,37 @@ public class ArchiveDao {
                 // 然后查询分页数据，使用archives_with_tags视图获取标签信息
                 var sql = "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, tags FROM archives_with_tags"
                 
-                if (filter.size > 0) {
-                    sql += " WHERE title LIKE ? OR filename LIKE ?"
+                // 使用相同的 WHERE 条件
+                if (whereConditions.size > 0) {
+                    var whereClause = ""
+                    for (i in 0..whereConditions.size) {
+                        if (i > 0) {
+                            whereClause += " AND "
+                        }
+                        whereClause += whereConditions[i]
+                    }
+                    sql += " WHERE " + whereClause
                 }
                 
                 // 处理排序参数
-                let orderByColumn = match (sortby) {
-                    case "title" => "title"
-                    case "lastread" => "created_at"  // archives_with_tags视图没有last_read_time，使用created_at代替
-                    case _ => "title"  // 默认按标题排序
+                if (sortby == "RANDOM()") {
+                    // 对于随机排序，使用 RANDOM() 函数
+                    // 为了确保每次查询都有不同的随机结果，使用 ORDER BY RANDOM() DESC
+                    // 这样可以避免某些数据库版本中 RANDOM() 的缓存问题
+                    sql += " ORDER BY RANDOM() DESC"  // 使用 DESC 以获得更好的随机分布
+                } else if (sortby == "title") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY title ${orderDirection}"
+                } else if (sortby == "lastread") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY created_at ${orderDirection}"  // archives_with_tags视图没有last_read_time，使用created_at代替
+                } else {
+                    // 默认按标题排序
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY title ${orderDirection}"
                 }
                 
-                let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                
-                sql += " ORDER BY ${orderByColumn} ${orderDirection} LIMIT ${count} OFFSET ${start}"
+                sql += " LIMIT ${count} OFFSET ${start}"
                 
                 // 打印SQL语句用于调试
                 println("执行数据SQL: ${sql}")
@@ -179,9 +227,12 @@ public class ArchiveDao {
                 
                 let stmt = conn.prepareStatement(sql)
                 
+                paramIndex = 1
                 if (filter.size > 0) {
-                    stmt.set<String>(1, "%${filter}%")
-                    stmt.set<String>(2, "%${filter}%")
+                    stmt.set<String>(paramIndex, "%${filter}%")
+                    paramIndex++
+                    stmt.set<String>(paramIndex, "%${filter}%")
+                    paramIndex++
                 }
                 
                 let rs = stmt.query()

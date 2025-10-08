@@ -5,6 +5,8 @@ import cjoy.json.*
 import lrr4cj.models.*
 import lrr4cj.views.*
 import std.convert.*
+import std.time.*
+import std.random.*
 
 /**
  * 搜索控制器
@@ -84,45 +86,9 @@ public class SearchController {
         let newOnly = newOnlyStr == "true"
         let untaggedOnly = untaggedOnlyStr == "true"
         
-        // 首先获取所有符合条件的归档
-        let (allArchives, totalCount) = ArchiveModel.searchArchives(filter, category, 0, 1000, "title", "asc")
-        
-        // 过滤条件
-        var filteredArchives: ArrayList<Archive> = ArrayList<Archive>()
-        for (archive in allArchives) {
-            var include = true
-            
-            // 只显示新的归档
-            if (newOnly && !archive.isNew) {
-                include = false
-            }
-            
-            // 只显示无标签的归档
-            if (untaggedOnly && archive.tags.size > 0) {
-                include = false
-            }
-            
-            if (include) {
-                filteredArchives.add(archive)
-            }
-        }
-        
-        // 随机打乱
-        let shuffled = filteredArchives.toArray()
-        // 简单的随机打乱实现
-        for (i in shuffled.size - 1..0) {
-            let j = (i + 1) % (i + 1)  // 简单的随机数生成
-            let temp = shuffled[i]
-            shuffled[i] = shuffled[j]
-            shuffled[j] = temp
-        }
-        
-        // 获取前count个
-        var resultArchives: ArrayList<Archive> = ArrayList<Archive>()
-        let limit = if (shuffled.size < Int64(count)) { shuffled.size } else { Int64(count) }
-        for (i in 0..limit) {
-            resultArchives.add(shuffled[i])
-        }
+        // 使用数据库级别的随机排序和过滤条件来获取随机归档
+        // 将过滤条件移到SQL查询中，提高性能
+        let (resultArchives, totalCount) = ArchiveModel.searchArchives(filter, category, 0, count, "RANDOM()", "desc", newOnly, untaggedOnly)
         
         // 手动构建JSON数组，按照API文档要求的格式
         var archivesJson = "["
@@ -169,4 +135,5 @@ public class SearchController {
         let suggestions = "[\"suggestion1\",\"suggestion2\",\"suggestion3\"]"
         ResponseView.successJson(ctx, suggestions, "获取搜索建议成功")
     }
+
 }
