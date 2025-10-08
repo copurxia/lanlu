@@ -24,6 +24,7 @@ public class ArchiveData {
     public var pagecount: Int32 = 0
     public var last_read_time: String = ""
     public var progress: Int32 = 0
+    public var tags: String = ""
 }
 
 /**
@@ -121,16 +122,16 @@ public class ArchiveDao {
     /**
      * 搜索归档
      */
-    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32): (Array<ArchiveData>, Int64) {
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String): (Array<ArchiveData>, Int64) {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                 try {
-                println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}")
+                println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}'")
                 
                 // 首先获取总记录数
-                var countSql = "SELECT COUNT(*) FROM archives"
+                var countSql = "SELECT COUNT(*) FROM archives_with_tags"
                 if (filter.size > 0) {
                     countSql += " WHERE title LIKE ? OR filename LIKE ?"
                 }
@@ -154,14 +155,23 @@ public class ArchiveDao {
                 // 确保关闭第一个查询的结果集
                 countRs.close()
                 
-                // 然后查询分页数据
-                var sql = "SELECT id, arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives"
+                // 然后查询分页数据，使用archives_with_tags视图获取标签信息
+                var sql = "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, tags FROM archives_with_tags"
                 
                 if (filter.size > 0) {
                     sql += " WHERE title LIKE ? OR filename LIKE ?"
                 }
                 
-                sql += " ORDER BY created_at DESC LIMIT ${count} OFFSET ${start}"
+                // 处理排序参数
+                let orderByColumn = match (sortby) {
+                    case "title" => "title"
+                    case "lastread" => "created_at"  // archives_with_tags视图没有last_read_time，使用created_at代替
+                    case _ => "title"  // 默认按标题排序
+                }
+                
+                let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                
+                sql += " ORDER BY ${orderByColumn} ${orderDirection} LIMIT ${count} OFFSET ${start}"
                 
                 // 打印SQL语句用于调试
                 println("执行数据SQL: ${sql}")
@@ -181,18 +191,20 @@ public class ArchiveDao {
                     let archive = ArchiveData()
                     try {
                         archive.id = rs.getOrNull<String>(0) ?? ""
-                        archive.title = rs.getOrNull<String>(1) ?? ""
-                        archive.filename = rs.getOrNull<String>(2) ?? ""
+                        archive.filename = rs.getOrNull<String>(1) ?? ""
+                        archive.title = rs.getOrNull<String>(2) ?? ""
                         archive.summary = rs.getOrNull<String>(3) ?? ""
                         archive.thumbhash = rs.getOrNull<String>(4) ?? ""
                         archive.created_at = rs.getOrNull<String>(5) ?? ""
                         archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                        archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                        archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                        archive.isNew = rs.getOrNull<Bool>(9) ?? false
-                        archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
-                        archive.last_read_time = rs.getOrNull<String>(11) ?? ""
-                        archive.progress = rs.getOrNull<Int32>(12) ?? 0
+                        archive.tags = rs.getOrNull<String>(7) ?? ""
+                        // 设置默认值，这些字段在archives_with_tags视图中没有
+                        archive.relative_path = ""
+                        archive.file_size = 0
+                        archive.isNew = false
+                        archive.pagecount = 0
+                        archive.last_read_time = ""
+                        archive.progress = 0
                         archives.add(archive)
                     } catch (e: Exception) {
                         println("读取字段时出错: ${e}")

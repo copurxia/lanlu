@@ -19,6 +19,12 @@ public class SearchRoutes {
             SearchController.searchArchives(ctx)
         })
 
+        // 随机获取归档
+        router.get("/api/search/random", { ctx =>
+            AuthMiddleware.requiredAuth(ctx)
+            SearchController.getRandomArchives(ctx)
+        })
+
         // 清除搜索缓存
         router.delete("/api/search/cache", { ctx =>
             AuthMiddleware.requiredAuth(ctx)
