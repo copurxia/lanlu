@@ -4,6 +4,9 @@ import cjoy.json.*
 import std.database.sql.*
 import lrr4cj.config.*
 import std.collection.*
+import std.fs.*
+import lrr4cj.services.*
+import lrr4cj.dao.*
 
 /**
  * 归档数据模型
@@ -76,42 +79,22 @@ public class ArchiveModel {
      * 根据 ID 获取归档
      */
     public static func getArchiveById(id: String): Archive {
-        let connOpt = DatabaseConfig.createConnection()
-        match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives WHERE arcid = ?")
-                stmt.set(0, id)
-                let rs = stmt.query()
-
-                if (rs.next()) {
-                    let archive = Archive()
-                    archive.id = rs.getOrNull<String>(1) ?? ""
-                    archive.title = rs.getOrNull<String>(2) ?? ""
-                    archive.filename = rs.getOrNull<String>(3) ?? ""
-                    archive.summary = rs.getOrNull<String>(4) ?? ""
-                    archive.thumbhash = rs.getOrNull<String>(5) ?? ""
-                    archive.created_at = rs.getOrNull<String>(6) ?? ""
-                    archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                    archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                    archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                    archive.isNew = rs.getOrNull<Bool>(10) ?? false
-                    archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
-                    archive.last_read_time = rs.getOrNull<String>(12) ?? ""
-                    archive.progress = rs.getOrNull<Int32>(13) ?? 0
-
-                    conn.close()
-                    return archive
-                }
-
-                conn.close()
-            } catch (e: Exception) {
-                println("查询归档失败: ${e}")
-                conn.close()
-            }
-            case None => println("无法连接到数据库")
-        }
-        return Archive()
+        let archiveData = ArchiveDao.getArchiveById(id)
+        let archive = Archive()
+        archive.id = archiveData.id
+        archive.title = archiveData.title
+        archive.filename = archiveData.filename
+        archive.summary = archiveData.summary
+        archive.thumbhash = archiveData.thumbhash
+        archive.created_at = archiveData.created_at
+        archive.updated_at = archiveData.updated_at
+        archive.relative_path = archiveData.relative_path
+        archive.file_size = archiveData.file_size
+        archive.isNew = archiveData.isNew
+        archive.pagecount = archiveData.pagecount
+        archive.last_read_time = archiveData.last_read_time
+        archive.progress = archiveData.progress
+        return archive
     }
 
     /**
@@ -224,6 +207,64 @@ public class ArchiveModel {
      */
     public static func getArchiveThumbnail(id: String): String {
         return "/api/archives/${id}/thumbnail"
+    }
+
+    /**
+     * 获取归档缩略图的文件系统路径
+     */
+    public static func getThumbnailFilePath(id: String, page: Int32): String {
+        let thumbnailDir = ShinobuService.getThumbnailPath().toString()
+        let extension = if (page == 1) { "jpg" } else { "jpg" }  // 实际可能需要根据档案类型调整
+        
+        let archiveIdPath = "${thumbnailDir}/${id}.${extension}"
+        println("Trying archiveId path: ${archiveIdPath}")
+        
+        try {
+            let filePath = Path(archiveIdPath)
+            if (exists(filePath)) {
+                let fileInfo = FileInfo(filePath)
+                if (fileInfo.isRegular()) {
+                    println("Found thumbnail using archiveId: ${archiveIdPath}")
+                    return archiveIdPath
+                }
+            }
+        } catch (e: Exception) {
+            println("Error checking archiveId file: ${e}")
+        }
+        
+        println("Thumbnail not found for archive: ${id}")
+        return ""
+    }
+
+    /**
+     * 检查缩略图文件是否存在
+     */
+    public static func thumbnailExists(id: String, page: Int32): Bool {
+        // 使用DAO层直接获取thumbhash，避免循环依赖
+        let thumbhash = ArchiveDao.getThumbnailHash(id)
+        if (thumbhash.size == 0) {
+            println("No thumbhash found for archive: ${id}")
+            return false
+        }
+        
+        let thumbnailDir = ShinobuService.getThumbnailPath().toString()
+        let extension = if (page == 1) { "jpg" } else { "jpg" }
+        let thumbnailPath = "${thumbnailDir}/${id}.${extension}"
+        
+        println("Checking if thumbnail exists at: ${thumbnailPath}")
+        try {
+            let filePath = Path(thumbnailPath)
+            if (exists(filePath)) {
+                let fileInfo = FileInfo(filePath)
+                println("Thumbnail file exists and is regular: ${fileInfo.isRegular()}")
+                return fileInfo.isRegular()
+            }
+            println("Thumbnail file does not exist")
+            return false
+        } catch (e: Exception) {
+            println("Error checking thumbnail file: ${e}")
+            return false
+        }
     }
 
     /**

@@ -47,19 +47,19 @@ public class ArchiveDao {
 
                     while (rs.next()) {
                         let archive = ArchiveData()
-                        archive.id = rs.getOrNull<String>(1) ?? ""
-                        archive.title = rs.getOrNull<String>(2) ?? ""
-                        archive.filename = rs.getOrNull<String>(3) ?? ""
-                        archive.summary = rs.getOrNull<String>(4) ?? ""
-                        archive.thumbhash = rs.getOrNull<String>(5) ?? ""
-                        archive.created_at = rs.getOrNull<String>(6) ?? ""
-                        archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                        archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                        archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                        archive.isNew = rs.getOrNull<Bool>(10) ?? false
-                        archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
-                        archive.last_read_time = rs.getOrNull<String>(12) ?? ""
-                        archive.progress = rs.getOrNull<Int32>(13) ?? 0
+                        archive.id = rs.getOrNull<String>(0) ?? ""
+                        archive.title = rs.getOrNull<String>(1) ?? ""
+                        archive.filename = rs.getOrNull<String>(2) ?? ""
+                        archive.summary = rs.getOrNull<String>(3) ?? ""
+                        archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                        archive.created_at = rs.getOrNull<String>(5) ?? ""
+                        archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                        archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                        archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                        archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                        archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                        archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                        archive.progress = rs.getOrNull<Int32>(12) ?? 0
                         archives.add(archive)
                     }
 
@@ -90,19 +90,19 @@ public class ArchiveDao {
 
                 if (rs.next()) {
                     let archive = ArchiveData()
-                    archive.id = rs.getOrNull<String>(1) ?? ""
-                    archive.title = rs.getOrNull<String>(2) ?? ""
-                    archive.filename = rs.getOrNull<String>(3) ?? ""
-                    archive.summary = rs.getOrNull<String>(4) ?? ""
-                    archive.thumbhash = rs.getOrNull<String>(5) ?? ""
-                    archive.created_at = rs.getOrNull<String>(6) ?? ""
-                    archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                    archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                    archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                    archive.isNew = rs.getOrNull<Bool>(10) ?? false
-                    archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
-                    archive.last_read_time = rs.getOrNull<String>(12) ?? ""
-                    archive.progress = rs.getOrNull<Int32>(13) ?? 0
+                    archive.id = rs.getOrNull<String>(0) ?? ""
+                    archive.title = rs.getOrNull<String>(1) ?? ""
+                    archive.filename = rs.getOrNull<String>(2) ?? ""
+                    archive.summary = rs.getOrNull<String>(3) ?? ""
+                    archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                    archive.created_at = rs.getOrNull<String>(5) ?? ""
+                    archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                    archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                    archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                    archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                    archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                    archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                    archive.progress = rs.getOrNull<Int32>(12) ?? 0
 
                     conn.close()
                     return archive
@@ -179,21 +179,20 @@ public class ArchiveDao {
 
                 while (rs.next()) {
                     let archive = ArchiveData()
-                    // 使用索引读取数据，跳过progress字段避免索引14的问题
                     try {
-                        archive.id = rs.getOrNull<String>(1) ?? ""
-                        archive.title = rs.getOrNull<String>(2) ?? ""
-                        archive.filename = rs.getOrNull<String>(3) ?? ""
-                        archive.summary = rs.getOrNull<String>(4) ?? ""
-                        archive.thumbhash = rs.getOrNull<String>(5) ?? ""
-                        archive.created_at = rs.getOrNull<String>(6) ?? ""
-                        archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                        archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                        archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                        archive.isNew = rs.getOrNull<Bool>(10) ?? false
-                        archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
-                        archive.last_read_time = rs.getOrNull<String>(12) ?? ""
-                        archive.progress = rs.getOrNull<Int32>(13) ?? 0
+                        archive.id = rs.getOrNull<String>(0) ?? ""
+                        archive.title = rs.getOrNull<String>(1) ?? ""
+                        archive.filename = rs.getOrNull<String>(2) ?? ""
+                        archive.summary = rs.getOrNull<String>(3) ?? ""
+                        archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                        archive.created_at = rs.getOrNull<String>(5) ?? ""
+                        archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                        archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                        archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                        archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                        archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                        archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                        archive.progress = rs.getOrNull<Int32>(12) ?? 0
                         archives.add(archive)
                     } catch (e: Exception) {
                         println("读取字段时出错: ${e}")
@@ -445,19 +444,19 @@ public class ArchiveDao {
 
                 while (rs.next()) {
                     let archive = ArchiveData()
-                    archive.id = rs.getOrNull<String>(1) ?? ""
-                    archive.title = rs.getOrNull<String>(2) ?? ""
-                    archive.filename = rs.getOrNull<String>(3) ?? ""
-                    archive.summary = rs.getOrNull<String>(4) ?? ""
-                    archive.thumbhash = rs.getOrNull<String>(5) ?? ""
-                    archive.created_at = rs.getOrNull<String>(6) ?? ""
-                    archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                    archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                    archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                    archive.isNew = rs.getOrNull<Bool>(10) ?? false
-                    archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
-                    archive.last_read_time = rs.getOrNull<String>(12) ?? ""
-                    archive.progress = rs.getOrNull<Int32>(13) ?? 0
+                    archive.id = rs.getOrNull<String>(0) ?? ""
+                    archive.title = rs.getOrNull<String>(1) ?? ""
+                    archive.filename = rs.getOrNull<String>(2) ?? ""
+                    archive.summary = rs.getOrNull<String>(3) ?? ""
+                    archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                    archive.created_at = rs.getOrNull<String>(5) ?? ""
+                    archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                    archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                    archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                    archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                    archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                    archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                    archive.progress = rs.getOrNull<Int32>(12) ?? 0
                     archives.add(archive)
                 }
                 conn.close()
@@ -588,6 +587,36 @@ public class ArchiveDao {
             case None =>
                 println("无法连接到数据库")
                 return None
+        }
+    }
+    
+    /**
+     * 获取归档的缩略图hash
+     */
+    public static func getThumbnailHash(archiveId: String): String {
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) => try {
+                let stmt = conn.prepareStatement("SELECT thumbhash FROM archives WHERE arcid = ?")
+                stmt.set(0, archiveId)
+                let rs = stmt.query()
+                
+                if (rs.next()) {
+                    let thumbhash = rs.getOrNull<String>(0) ?? ""
+                    conn.close()
+                    return thumbhash
+                }
+                
+                conn.close()
+                return ""
+            } catch (e: Exception) {
+                println("获取缩略图hash失败: ${e}")
+                conn.close()
+                return ""
+            }
+            case None =>
+                println("无法连接到数据库")
+                return ""
         }
     }
 }
