@@ -754,6 +754,121 @@ public class ShinobuService {
     }
     
     /**
+     * 获取归档中的文件列表（不解压）
+     */
+    public func getArchiveFileList(archiveId: String): Array<String> {
+        logger.info("Getting file list for archive: ${archiveId}")
+        
+        // 检查归档是否存在
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) {
+            logger.error("Archive not found: ${archiveId}")
+            return []
+        }
+        
+        let archivePath = joinPath(joinPath(ShinobuService.getArchivePath().toString(), archive.relative_path), archive.filename)
+        logger.info("Archive path: ${archivePath}")
+        
+        // 检查归档文件是否存在
+        if (!fileExists(archivePath)) {
+            logger.error("Archive file not found: ${archivePath}")
+            return []
+        }
+        
+        // 使用 bsdtar 列出归档内容
+        try {
+            logger.info("Executing bsdtar -tf ${archivePath}")
+            let (exitCode, stdout, stderr) = executeWithOutput(
+                bsdtarPath,
+                ["-tf", archivePath],
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            
+            logger.info("bsdtar exit code: ${exitCode}")
+            
+            if (exitCode == 0) {
+                // 解析输出，获取文件列表
+                let output = String.fromUtf8(stdout)
+                logger.info("Archive content output: ${output}")
+                let lines = output.split("\n")
+                var fileList: ArrayList<String> = ArrayList<String>()
+                
+                for (line in lines) {
+                    if (line.size > 0 && isImageFile(line)) {
+                        fileList.add(line)
+                        logger.info("Found image file: ${line}")
+                    }
+                }
+                
+                logger.info("Total image files found: ${fileList.size}")
+                return fileList.toArray()
+            } else {
+                let error = String.fromUtf8(stderr)
+                logger.error("Failed to list archive contents: ${error}")
+                return []
+            }
+        } catch (e: Exception) {
+            logger.error("Exception listing archive contents: ${e.message}")
+            return []
+        }
+    }
+    
+    /**
+     * 从压缩包中提取单个文件到内存流
+     */
+    public func extractArchiveEntryToStream(archivePath: String, entryName: String): (Int32, Array<UInt8>, Array<UInt8>) {
+        try {
+            logger.debug("Attempting to extract entry: ${entryName} from archive: ${archivePath}")
+            
+            // 使用 bsdtar 的 -xO 选项直接输出到标准输出
+            let (exitCode, stdout, stderr) = executeWithOutput(
+                bsdtarPath,
+                ["-xO", "-f", archivePath, entryName],
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            
+            if (exitCode == 0) {
+                logger.info("Successfully extracted ${entryName} to stream")
+                return (Int32(exitCode), stdout, stderr)
+            } else {
+                let error = String.fromUtf8(stderr)
+                logger.error("Failed to extract archive entry: ${error}")
+                return (Int32(exitCode), Array<UInt8>(), stderr)
+            }
+        } catch (e: Exception) {
+            logger.error("Exception extracting archive entry: ${e.message}")
+            return (1, Array<UInt8>(), Array<UInt8>())
+        }
+    }
+    
+    /**
+     * 检查文件是否为图片文件
+     */
+    private func isImageFile(filename: String): Bool {
+        return filename.endsWith(".jpg") ||
+               filename.endsWith(".jpeg") ||
+               filename.endsWith(".png") ||
+               filename.endsWith(".gif") ||
+               filename.endsWith(".bmp") ||
+               filename.endsWith(".webp") ||
+               filename.endsWith(".JPG") ||
+               filename.endsWith(".JPEG") ||
+               filename.endsWith(".PNG") ||
+               filename.endsWith(".GIF") ||
+               filename.endsWith(".BMP") ||
+               filename.endsWith(".WEBP")
+    }
+    
+    /**
+     * 生成任务ID
+     */
+    private func generateJobId(): Int64 {
+        return getCurrentTimeMillis()
+    }
+    
+    /**
      * 获取文件扩展名
      */
     private func getFileExtension(filePath: String): String {

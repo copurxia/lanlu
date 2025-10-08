@@ -25,6 +25,12 @@ public class ArchiveRoutes {
             ArchiveController.getArchive(ctx)
         })
 
+        // 获取归档元数据
+        router.get("/api/archives/{id}/metadata", { ctx =>
+            AuthMiddleware.requiredAuth(ctx)
+            ArchiveController.getMetadata(ctx)
+        })
+
         // 更新归档元数据
         router.put("/api/archives/{id}/metadata", { ctx =>
             AuthMiddleware.requiredAuth(ctx)
@@ -47,6 +53,12 @@ public class ArchiveRoutes {
         router.get("/api/archives/{id}/files/{fileIndex}", { ctx =>
             AuthMiddleware.requiredAuth(ctx)
             ArchiveController.getFile(ctx)
+        })
+
+        // 获取归档页面
+        router.get("/api/archives/{id}/page", { ctx =>
+            AuthMiddleware.requiredAuth(ctx)
+            ArchiveController.getPage(ctx)
         })
 
         // 提取归档

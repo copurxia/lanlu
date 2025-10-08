@@ -631,4 +631,67 @@ public class ArchiveDao {
                 return ""
         }
     }
+    
+    /**
+     * 根据 ID 获取归档元数据（包含标签）
+     */
+    public static func getArchiveMetadataById(id: String): ArchiveData {
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) => try {
+                // 使用 archives_with_tags 视图获取包含标签的数据
+                let stmt = conn.prepareStatement(
+                    "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, tags FROM archives_with_tags WHERE arcid = ?")
+                stmt.set(0, id)
+                let rs = stmt.query()
+
+                if (rs.next()) {
+                    let archive = ArchiveData()
+                    archive.id = rs.getOrNull<String>(0) ?? ""
+                    archive.filename = rs.getOrNull<String>(1) ?? ""
+                    archive.title = rs.getOrNull<String>(2) ?? ""
+                    archive.summary = rs.getOrNull<String>(3) ?? ""
+                    archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                    archive.created_at = rs.getOrNull<String>(5) ?? ""
+                    archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                    archive.tags = rs.getOrNull<String>(7) ?? ""
+                    
+                    // 关闭第一个查询的资源
+                    rs.close()
+                    stmt.close()
+                    
+                    // 获取其他字段信息
+                    let detailStmt = conn.prepareStatement(
+                        "SELECT relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives WHERE arcid = ?")
+                    detailStmt.set(0, id)
+                    let detailRs = detailStmt.query()
+                    
+                    if (detailRs.next()) {
+                        archive.relative_path = detailRs.getOrNull<String>(0) ?? ""
+                        archive.file_size = detailRs.getOrNull<Int64>(1) ?? 0
+                        archive.isNew = detailRs.getOrNull<Bool>(2) ?? false
+                        archive.pagecount = detailRs.getOrNull<Int32>(3) ?? 0
+                        archive.last_read_time = detailRs.getOrNull<String>(4) ?? ""
+                        archive.progress = detailRs.getOrNull<Int32>(5) ?? 0
+                    }
+                    
+                    // 关闭第二个查询的资源
+                    detailRs.close()
+                    detailStmt.close()
+                    conn.close()
+                    return archive
+                }
+
+                // 关闭资源
+                rs.close()
+                stmt.close()
+                conn.close()
+            } catch (e: Exception) {
+                println("查询归档元数据失败: ${e}")
+                conn.close()
+            }
+            case None => println("无法连接到数据库")
+        }
+        return ArchiveData()
+    }
 }
