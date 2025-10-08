@@ -8,6 +8,7 @@ import lrr4cj.routes.api.categories.*
 import lrr4cj.routes.api.minion.*
 import lrr4cj.routes.api.tankoubons.*
 import lrr4cj.routes.api.shinobu.*
+import lrr4cj.controllers.*
 
 /**
  * API路由注册
@@ -33,4 +34,9 @@ public func registerApiRoutes(router: JoyRouters) {
 
     // 注册Shinobu相关路由
     registerShinobuRoutes(router)
+    
+    // 注册服务器信息路由
+    router.get("/api/info", { ctx =>
+        InfoController.getServerInfo(ctx)
+    })
 }

@@ -10,6 +10,7 @@ import lrr4cj.routes.api.categories.*
 import lrr4cj.routes.api.minion.*
 import lrr4cj.routes.api.tankoubons.*
 import lrr4cj.routes.api.shinobu.*
+import lrr4cj.routes.api.*
 
 /**
  * 路由注册模块
@@ -46,6 +47,9 @@ public class Routes {
         
         // 注册 API Shinobu路由
         registerShinobuRoutes(router)
+        
+        // 注册所有 API 路由（包括 /api/info）
+        registerApiRoutes(router)
         
         // 注册根路由
         registerRootRoute(router)
