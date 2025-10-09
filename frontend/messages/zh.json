@@ -18,6 +18,7 @@
     "close": "关闭",
     "open": "打开",
     "download": "下载",
+    "swipeHint": "左右滑动切换页面",
     "upload": "上传",
     "filter": "筛选",
     "sort": "排序",
@@ -138,7 +139,15 @@
     "details": "详情",
     "read": "阅读",
     "pages": "{count} 页",
-    "progressRead": "已读 {progress}/{total}"
+    "progressRead": "已读 {progress}/{total}",
+    "preview": "预览",
+    "contentPreview": "内容预览",
+    "previewPage": "预览页面 {current}/{total}",
+    "loadPreviewError": "加载预览失败",
+    "noPreviewPages": "没有可预览的页面",
+    "loadMore": "加载更多",
+    "pageThumbnails": "页面缩略图",
+    "clickToRead": "点击阅读此页"
   },
   "reader": {
     "page": "页面 {current} / {total}",

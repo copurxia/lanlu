@@ -64,9 +64,21 @@ export function HomeArchiveCard({ archive }: HomeArchiveCardProps) {
             className="w-full h-full object-cover"
             onError={(e) => {
               const target = e.target as HTMLImageElement;
-              target.src = '/placeholder-cover.jpg';
+              // 隐藏失败的图片，显示占位符
+              target.style.display = 'none';
+              const placeholder = target.nextElementSibling as HTMLElement;
+              if (placeholder) {
+                placeholder.classList.remove('hidden');
+              }
             }}
           />
+          {/* 无封面时显示的占位符 - 默认隐藏 */}
+          <div className="hidden absolute inset-0 flex items-center justify-center bg-muted">
+            <div className="text-center text-muted-foreground">
+              <div className="text-2xl mb-2">📚</div>
+              <div className="text-xs">{t('archive.noCover')}</div>
+            </div>
+          </div>
         </div>
         <div className="p-3">
           <h3 className="font-medium text-sm line-clamp-2 mb-2 min-h-[2.5rem]">

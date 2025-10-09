@@ -18,6 +18,7 @@
     "close": "Close",
     "open": "Open",
     "download": "Download",
+    "swipeHint": "Swipe left or right to change pages",
     "upload": "Upload",
     "filter": "Filter",
     "sort": "Sort Order",
@@ -132,7 +133,15 @@
     "details": "Details",
     "read": "Read",
     "pages": "{count} pages",
-    "progressRead": "Read {progress}/{total}"
+    "progressRead": "Read {progress}/{total}",
+    "preview": "Preview",
+    "contentPreview": "Content Preview",
+    "previewPage": "Preview Page {current}/{total}",
+    "loadPreviewError": "Failed to load preview",
+    "noPreviewPages": "No pages available for preview",
+    "loadMore": "Load More",
+    "pageThumbnails": "Page Thumbnails",
+    "clickToRead": "Click to read this page"
   },
   "reader": {
     "page": "Page {current} / {total}",
