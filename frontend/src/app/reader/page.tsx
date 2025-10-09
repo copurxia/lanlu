@@ -18,7 +18,7 @@ function ReaderContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [fitMode, setFitMode] = useState<'contain' | 'width'>('contain');
+  const [fitMode, setFitMode] = useState<'contain' | 'width' | 'height'>('contain');
   const [touchStart, setTouchStart] = useState<number | null>(null);
   const [touchEnd, setTouchEnd] = useState<number | null>(null);
   const [imageLoading, setImageLoading] = useState(true);
@@ -130,7 +130,11 @@ function ReaderContent() {
   };
 
   const toggleFitMode = () => {
-    setFitMode(prev => prev === 'contain' ? 'width' : 'contain');
+    setFitMode(prev => {
+      if (prev === 'contain') return 'width';
+      if (prev === 'width') return 'height';
+      return 'contain';
+    });
   };
 
   if (loading) {
@@ -162,7 +166,7 @@ function ReaderContent() {
   const currentImageUrl = pages[currentPage];
 
   return (
-    <div className="min-h-screen bg-black text-white flex flex-col">
+    <div className="h-screen bg-black text-white flex flex-col overflow-hidden">
       {/* 顶部工具栏 */}
       <div className="bg-gray-900 p-4 flex items-center justify-between">
         <div className="flex items-center space-x-4">
@@ -186,10 +190,12 @@ function ReaderContent() {
           >
             {fitMode === 'contain' ? (
               <Minimize2 className="w-4 h-4 mr-2" />
-            ) : (
+            ) : fitMode === 'width' ? (
               <Maximize2 className="w-4 h-4 mr-2" />
+            ) : (
+              <Maximize2 className="w-4 h-4 mr-2 rotate-90" />
             )}
-            {fitMode === 'contain' ? '适应高度' : '适应宽度'}
+            {fitMode === 'contain' ? '适应屏幕' : fitMode === 'width' ? '适应宽度' : '适应高度'}
           </Button>
           <Button 
             variant="outline" 
@@ -203,7 +209,7 @@ function ReaderContent() {
       </div>
 
       {/* 主要阅读区域 */}
-      <div className="flex-1 flex items-center justify-center p-4 relative">
+      <div className="flex-1 flex items-center justify-center p-4 relative overflow-hidden">
         {/* 上一页按钮 */}
         <Button
           variant="outline"
@@ -217,7 +223,7 @@ function ReaderContent() {
 
         {/* 图片显示区域 */}
         <div
-          className="flex items-center justify-center max-w-full max-h-full touch-pan-y relative"
+          className="flex items-center justify-center w-full h-full touch-pan-y relative"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
@@ -231,8 +237,10 @@ function ReaderContent() {
             src={currentImageUrl}
             alt={`页面 ${currentPage + 1}`}
             className={`
-              max-w-full max-h-full object-contain select-none touch-none
-              ${fitMode === 'width' ? 'w-full h-auto' : ''}
+              object-contain select-none touch-none
+              ${fitMode === 'width' ? 'w-full h-auto max-h-full' : ''}
+              ${fitMode === 'height' ? 'h-full w-auto max-w-full' : ''}
+              ${fitMode === 'contain' ? 'max-w-full max-h-full' : ''}
               ${imageLoading ? 'opacity-0' : 'opacity-100'}
             `}
             onLoad={handleImageLoad}

@@ -52,4 +52,8 @@ export class ArchiveService {
       return `/api/archives/${id}/page?path=${path}`;
     }
   }
+
+  static getDownloadUrl(id: string): string {
+    return `/api/archives/${id}/download`;
+  }
 }

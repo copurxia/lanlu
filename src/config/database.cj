@@ -133,6 +133,43 @@ public class DatabaseConfig {
                     let stmt8 = conn.prepareStatement(createMinionJobsTable)
                     stmt8.update()
                     
+                    // 创建archives_with_tags视图
+                    let createArchivesWithTagsView = """
+                    CREATE OR REPLACE VIEW archives_with_tags AS
+                    SELECT
+                        a.arcid,
+                        a.filename,
+                        a.title,
+                        a.summary,
+                        a.thumbhash,
+                        a.created_at,
+                        a.updated_at,
+                        a.relative_path,
+                        a.file_size,
+                        a.isnew,
+                        a.pagecount,
+                        a.last_read_time,
+                        a.progress,
+                        COALESCE(
+                            STRING_AGG(
+                                CASE
+                                    WHEN t.namespace IS NOT NULL AND t.namespace != ''
+                                    THEN t.namespace || ':' || t.value
+                                    ELSE t.value
+                                END,
+                                ', '
+                            ),
+                            ''
+                        ) as tags
+                    FROM archives a
+                    LEFT JOIN archive_tags at ON a.id = at.archive_id
+                    LEFT JOIN tags t ON at.tag_id = t.id
+                    GROUP BY a.arcid, a.filename, a.title, a.summary, a.thumbhash, a.created_at, a.updated_at, a.relative_path, a.file_size, a.isnew, a.pagecount, a.last_read_time, a.progress
+                    """
+                    
+                    let stmt9 = conn.prepareStatement(createArchivesWithTagsView)
+                    stmt9.update()
+                    
                     conn.close()
                     return true
                 } catch (e: Exception) {

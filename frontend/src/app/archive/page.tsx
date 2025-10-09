@@ -103,7 +103,16 @@ function ArchiveDetailContent() {
                 开始阅读
               </Button>
             </Link>
-            <Button variant="outline" className="w-full">
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                if (metadata) {
+                  const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
+                  window.open(downloadUrl, '_blank');
+                }
+              }}
+            >
               <Download className="w-4 h-4 mr-2" />
               下载归档
             </Button>

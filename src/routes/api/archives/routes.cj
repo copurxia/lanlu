@@ -55,6 +55,12 @@ public class ArchiveRoutes {
             ArchiveController.getFile(ctx)
         })
 
+        // 下载归档
+        router.get("/api/archives/{id}/download", { ctx =>
+            AuthMiddleware.requiredAuth(ctx)
+            ArchiveController.downloadArchive(ctx)
+        })
+
         // 获取归档页面
         router.get("/api/archives/{id}/page", { ctx =>
             AuthMiddleware.requiredAuth(ctx)

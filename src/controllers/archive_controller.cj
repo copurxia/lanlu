@@ -415,6 +415,63 @@ public class ArchiveController {
         ctx.json(result)
     }
 
+    // GET /api/archives/{id}/download
+    public static func downloadArchive(ctx: JoyContext): Unit {
+        let id = ctx.getParam("id").getOrThrow()
+        
+        // 检查ID是否为空
+        if (id.size == 0) {
+            let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.json(errorResponse)
+            return
+        }
+        
+        // 检查归档是否存在
+        let archive = ArchiveModel.getArchiveById(id)
+        if (archive.id.size == 0) {
+            let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Archive not found\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.json(errorResponse)
+            return
+        }
+        
+        // 获取ShinobuService实例
+        let shinobu = ShinobuService.getInstance()
+        
+        // 构建归档文件完整路径
+        let archivePath = ShinobuService.getArchivePath().toString()
+        let fullArchivePath = if (archive.relative_path.size > 0) {
+            "${archivePath}/${archive.relative_path}/${archive.filename}"
+        } else {
+            "${archivePath}/${archive.filename}"
+        }
+        
+        // 检查文件是否存在并读取文件内容
+        try {
+            let filePath = Path(fullArchivePath)
+            let file = File(filePath, Read)
+            let fileInfo = file.info
+            let fileSize = fileInfo.size
+            let buffer = Array<Byte>(fileSize, {_ => 0})
+            let bytesRead = file.read(buffer)
+            file.close()
+            
+            // 设置响应头
+            ctx.header("Content-Type", "application/octet-stream")
+            ctx.header("Content-Disposition", "attachment; filename=\"${archive.filename}\"")
+            ctx.header("Content-Length", "${fileSize}")
+            ctx.status(HttpStatusCode.STATUS_OK)
+            
+            // 返回文件内容
+            ctx.data(buffer)
+        } catch (e: Exception) {
+            let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Failed to read archive file: ${e.message}\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json(errorResponse)
+        }
+    }
+
     // GET /api/archives/{id}/page
     public static func getPage(ctx: JoyContext): Unit {
         let id = ctx.getParam("id").getOrThrow()

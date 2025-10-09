@@ -184,7 +184,7 @@ public class ArchiveDao {
                 countRs.close()
                 
                 // 然后查询分页数据，使用archives_with_tags视图获取标签信息
-                var sql = "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, tags FROM archives_with_tags"
+                var sql = "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress, tags FROM archives_with_tags"
                 
                 // 使用相同的 WHERE 条件
                 if (whereConditions.size > 0) {
@@ -242,14 +242,13 @@ public class ArchiveDao {
                         archive.thumbhash = rs.getOrNull<String>(4) ?? ""
                         archive.created_at = rs.getOrNull<String>(5) ?? ""
                         archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                        archive.tags = rs.getOrNull<String>(7) ?? ""
-                        // 设置默认值，这些字段在archives_with_tags视图中没有
-                        archive.relative_path = ""
-                        archive.file_size = 0
-                        archive.isNew = false
-                        archive.pagecount = 0
-                        archive.last_read_time = ""
-                        archive.progress = 0
+                        archive.tags = rs.getOrNull<String>(13) ?? ""
+                        archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                        archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                        archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                        archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                        archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                        archive.progress = rs.getOrNull<Int32>(12) ?? 0
                         archives.add(archive)
                     } catch (e: Exception) {
                         println("读取字段时出错: ${e}")
@@ -686,7 +685,7 @@ public class ArchiveDao {
             case Some(conn) => try {
                 // 使用 archives_with_tags 视图获取包含标签的数据
                 let stmt = conn.prepareStatement(
-                    "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, tags FROM archives_with_tags WHERE arcid = ?")
+                    "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, isnew, pagecount, last_read_time, progress, tags FROM archives_with_tags WHERE arcid = ?")
                 stmt.set(0, id)
                 let rs = stmt.query()
 
@@ -699,30 +698,17 @@ public class ArchiveDao {
                     archive.thumbhash = rs.getOrNull<String>(4) ?? ""
                     archive.created_at = rs.getOrNull<String>(5) ?? ""
                     archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                    archive.tags = rs.getOrNull<String>(7) ?? ""
+                    archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                    archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                    archive.isNew = rs.getOrNull<Bool>(9) ?? false
+                    archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                    archive.last_read_time = rs.getOrNull<String>(11) ?? ""
+                    archive.progress = rs.getOrNull<Int32>(12) ?? 0
+                    archive.tags = rs.getOrNull<String>(13) ?? ""
                     
-                    // 关闭第一个查询的资源
+                    // 关闭查询的资源
                     rs.close()
                     stmt.close()
-                    
-                    // 获取其他字段信息
-                    let detailStmt = conn.prepareStatement(
-                        "SELECT relative_path, file_size, isnew, pagecount, last_read_time, progress FROM archives WHERE arcid = ?")
-                    detailStmt.set(0, id)
-                    let detailRs = detailStmt.query()
-                    
-                    if (detailRs.next()) {
-                        archive.relative_path = detailRs.getOrNull<String>(0) ?? ""
-                        archive.file_size = detailRs.getOrNull<Int64>(1) ?? 0
-                        archive.isNew = detailRs.getOrNull<Bool>(2) ?? false
-                        archive.pagecount = detailRs.getOrNull<Int32>(3) ?? 0
-                        archive.last_read_time = detailRs.getOrNull<String>(4) ?? ""
-                        archive.progress = detailRs.getOrNull<Int32>(5) ?? 0
-                    }
-                    
-                    // 关闭第二个查询的资源
-                    detailRs.close()
-                    detailStmt.close()
                     conn.close()
                     return archive
                 }
