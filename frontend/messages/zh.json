@@ -163,6 +163,20 @@
     "missingId": "缺少归档ID参数",
     "fetchError": "获取归档页面失败",
     "noPages": "没有可显示的页面",
-    "backToArchive": "返回详情页"
+    "backToArchive": "返回详情页",
+    "readingMode": "阅读模式",
+    "singlePage": "单页",
+    "webtoon": "条漫",
+    "leftToRight": "从左到右",
+    "rightToLeft": "从右到左",
+    "topToBottom": "从上到下",
+    "zoom": "缩放",
+    "zoomIn": "放大",
+    "zoomOut": "缩小",
+    "resetZoom": "重置缩放",
+    "settings": "设置",
+    "hideToolbar": "隐藏工具栏",
+    "showToolbar": "显示工具栏",
+    "autoHide": "自动隐藏"
   }
 }

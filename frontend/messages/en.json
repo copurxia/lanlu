@@ -157,6 +157,20 @@
     "missingId": "Missing archive ID parameter",
     "fetchError": "Failed to fetch archive pages",
     "noPages": "No displayable pages",
-    "backToArchive": "Back to Details"
+    "backToArchive": "Back to Details",
+    "readingMode": "Reading Mode",
+    "singlePage": "Single Page",
+    "webtoon": "Webtoon",
+    "leftToRight": "Left to Right",
+    "rightToLeft": "Right to Left",
+    "topToBottom": "Top to Bottom",
+    "zoom": "Zoom",
+    "zoomIn": "Zoom In",
+    "zoomOut": "Zoom Out",
+    "resetZoom": "Reset Zoom",
+    "settings": "Settings",
+    "hideToolbar": "Hide Toolbar",
+    "showToolbar": "Show Toolbar",
+    "autoHide": "Auto Hide"
   }
 }

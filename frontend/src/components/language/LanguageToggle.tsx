@@ -48,7 +48,11 @@ export function LanguageButton() {
     <Button
       variant="ghost"
       size="icon"
-      onClick={toggleLanguage}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        toggleLanguage();
+      }}
       className="h-9 w-9 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted"
       title={language === 'zh' ? '切换到英文' : 'Switch to Chinese'}
     >
