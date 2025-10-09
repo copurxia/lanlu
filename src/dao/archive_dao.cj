@@ -25,6 +25,26 @@ public class ArchiveData {
     public var last_read_time: String = ""
     public var progress: Int32 = 0
     public var tags: String = ""
+    
+    /**
+     * 获取文件扩展名
+     */
+    public func getExtension(): String {
+        if (filename.size > 0) {
+            let parts = filename.split(".")
+            if (parts.size > 1) {
+                return parts[parts.size - 1]
+            }
+        }
+        return ""
+    }
+    
+    /**
+     * 获取文件大小（别名，与API文档一致）
+     */
+    public func size(): Int64 {
+        return file_size
+    }
 }
 
 /**

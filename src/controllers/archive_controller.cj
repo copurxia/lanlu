@@ -120,12 +120,20 @@ public class ArchiveController {
         // 手动构建JSON响应，符合API文档规范
         var metadataJson = "{"
         metadataJson += "\"arcid\":\"${archive.id}\","
+        metadataJson += "\"title\":\"${archive.title}\","
+        metadataJson += "\"filename\":\"${archive.filename}\","
+        metadataJson += "\"summary\":\"${archive.summary}\","
+        metadataJson += "\"tags\":\"${archive.tags}\","
         metadataJson += "\"isnew\":\"${archive.isNew}\","
         metadataJson += "\"pagecount\":${archive.pagecount},"
         metadataJson += "\"progress\":${archive.progress},"
-        metadataJson += "\"tags\":\"${archive.tags}\","
         metadataJson += "\"lastreadtime\":${lastreadtime},"
-        metadataJson += "\"title\":\"${archive.title}\""
+        metadataJson += "\"file_size\":${archive.file_size},"
+        metadataJson += "\"size\":${archive.file_size},"
+        metadataJson += "\"extension\":\"${archive.getExtension()}\","
+        metadataJson += "\"created_at\":\"${archive.created_at}\","
+        metadataJson += "\"updated_at\":\"${archive.updated_at}\","
+        metadataJson += "\"relative_path\":\"${archive.relative_path}\""
         metadataJson += "}"
         
         ctx.json(metadataJson)
