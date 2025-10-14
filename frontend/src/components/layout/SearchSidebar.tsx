@@ -32,7 +32,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [category, setCategory] = useState('');
-  const [sortBy, setSortBy] = useState('lastread');
+  const [sortBy, setSortBy] = useState('date_added');
   const [sortOrder, setSortOrder] = useState('desc');
   const [dateFrom, setDateFrom] = useState<Date>();
   const [dateTo, setDateTo] = useState<Date>();
@@ -189,9 +189,9 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
-                  <SelectItem value="dateadded">{t('home.dateAdded')}</SelectItem>
-                  <SelectItem value="title">{t('archive.title')}</SelectItem>
+                  <SelectItem value="lastreadtime">{t('home.lastRead')}</SelectItem>
+                  <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+                  <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
                 </SelectContent>
               </Select>
               

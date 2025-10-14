@@ -227,9 +227,18 @@ public class ArchiveDao {
                 } else if (sortby == "title") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY title ${orderDirection}"
-                } else if (sortby == "lastread") {
+                } else if (sortby == "lastread" || sortby == "lastreadtime") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY created_at ${orderDirection}"  // archives_with_tags视图没有last_read_time，使用created_at代替
+                    sql += " ORDER BY last_read_time ${orderDirection}"
+                } else if (sortby == "date_added") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY created_at ${orderDirection}"
+                } else if (sortby == "pagecount") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY pagecount ${orderDirection}"
+                } else if (sortby == "size") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY file_size ${orderDirection}"
                 } else {
                     // 默认按标题排序
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }

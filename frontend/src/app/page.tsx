@@ -23,7 +23,7 @@ export default function HomePage() {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
-  const [sortBy, setSortBy] = useState('lastreadtime');
+  const [sortBy, setSortBy] = useState('date_added');
   const [sortOrder, setSortOrder] = useState('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTags, setSearchTags] = useState<string[]>([]);
@@ -165,19 +165,15 @@ export default function HomePage() {
                     <Select value={sortBy} onValueChange={setSortBy}>
                       <SelectTrigger className="w-[140px] h-8">
                         <SelectValue>
-                          {sortBy === 'title' && t('home.title')}
                           {sortBy === 'lastreadtime' && t('home.lastRead')}
                           {sortBy === 'date_added' && t('home.dateAdded')}
                           {sortBy === 'pagecount' && t('home.pageCount')}
-                          {sortBy === 'size' && t('home.size')}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="title">{t('home.title')}</SelectItem>
                         <SelectItem value="lastreadtime">{t('home.lastRead')}</SelectItem>
                         <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
                         <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
-                        <SelectItem value="size">{t('home.size')}</SelectItem>
                       </SelectContent>
                     </Select>
                     
