@@ -462,7 +462,9 @@ public class ArchiveController {
         
         // 检查文件是否存在并读取文件内容
         try {
-            let filePath = Path(fullArchivePath)
+            // 对于文件访问，需要解析软链接到实际路径
+            let actualPath = FileUtils.resolvePath(fullArchivePath)
+            let filePath = Path(actualPath)
             let file = File(filePath, Read)
             let fileInfo = file.info
             let fileSize = fileInfo.size
@@ -530,8 +532,10 @@ public class ArchiveController {
                 
                 // 使用bsdtar直接提取文件到内存，不写入文件
                 try {
+                    // 对于文件访问，需要解析软链接到实际路径
+                    let actualPath = FileUtils.resolvePath(fullArchivePath)
                     // 使用 bsdtar 的 -xO 选项直接输出到标准输出
-                    let (exitCode, stdout, stderr) = shinobu.extractArchiveEntryToStream(fullArchivePath, path)
+                    let (exitCode, stdout, stderr) = shinobu.extractArchiveEntryToStream(actualPath, path)
                     
                     if (exitCode == 0) {
                         // 根据文件扩展名设置Content-Type

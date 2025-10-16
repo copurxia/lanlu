@@ -1,8 +1,6 @@
 package lrr4cj.utils
 
 import std.fs.*
-import std.io.*
-import std.process.*
 
 /**
  * 文件工具类
@@ -80,6 +78,33 @@ public class FileUtils {
             return "${bytes / (1024 * 1024 * 1024)} GB"
         }
     }
+    
+    /**
+     * 解析路径，如果是软链接则返回其目标路径，否则返回原路径
+     */
+    public static func resolvePath(path: String): String {
+        try {
+            let filePath = Path(path)
+            if (exists(filePath)) {
+                let fileInfo = FileInfo(filePath)
+                
+                // 如果是软链接，获取其目标路径
+                if (fileInfo.isSymbolicLink()) {
+                    try {
+                        let targetPath = SymbolicLink.readFrom(path, recursive: false)
+                        return targetPath.toString()
+                    } catch (e: FSException) {
+                        // 如果解析失败，返回原路径
+                        return path
+                    }
+                }
+            }
+            return path
+        } catch (e: Exception) {
+            // 如果出错，返回原路径
+            return path
+        }
+    }
 }
 
 /**
@@ -110,6 +135,7 @@ public class ImageUtils {
     public static func getThumbnailUrl(archiveId: String, page: Int32): String {
         return "/thumb/${archiveId}/${page}.jpg"
     }
+    
 }
 
 /**

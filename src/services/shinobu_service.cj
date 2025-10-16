@@ -66,6 +66,9 @@ public class ShinobuService {
     private static var maxConcurrentJobs: Int32
     private static var scanFallbackIntervalMs: Int64
     private static var enableFileWatcher: Bool
+    private static var enableDbCheck: Bool
+    private static var dbCheckIntervalCron: String
+    private static var enableInitialDbCheck: Bool
     
     // 任务管理
     private var currentJobs: Int32 = 0
@@ -75,6 +78,7 @@ public class ShinobuService {
     private var scanThread: Option<String> = Option<String>.None
     private var thumbnailThread: Option<String> = Option<String>.None
     private var fileWatcherThread: Option<String> = Option<String>.None
+    private var dbCheckThread: Option<String> = Option<String>.None
     
     // 任务控制标志
     private var isTaskRunning: Bool = false
@@ -134,6 +138,15 @@ public class ShinobuService {
         
         let fallbackIntervalStr = getVariable("SCAN_FALLBACK_INTERVAL_MS") ?? "300000"
         scanFallbackIntervalMs = Int64.parse(fallbackIntervalStr)
+        
+        // 数据库检查配置
+        let dbCheckStr = getVariable("ENABLE_DB_CHECK") ?? "true"
+        enableDbCheck = dbCheckStr == "true"
+        
+        dbCheckIntervalCron = getVariable("DB_CHECK_INTERVAL_CRON") ?? "0 2 * * *"  // 默认每天凌晨2点
+        
+        let initialDbCheckStr = getVariable("ENABLE_INITIAL_DB_CHECK") ?? "true"
+        enableInitialDbCheck = initialDbCheckStr == "true"
         
         enableFileWatcher = true
     }
@@ -207,6 +220,9 @@ public class ShinobuService {
         println("  Max concurrent jobs: ${maxConcurrentJobs}")
         println("  Scan fallback interval: ${scanFallbackIntervalMs}ms")
         println("  Enable file watcher: ${enableFileWatcher}")
+        println("  Enable initial database check: ${enableInitialDbCheck}")
+        println("  Enable database check: ${enableDbCheck}")
+        println("  Database check interval cron: ${dbCheckIntervalCron}")
         
         // 如果启用初始扫描，启动时进行一次扫描
         if (enableInitialScan) {
@@ -233,6 +249,21 @@ public class ShinobuService {
         // 启动文件监视器（如果启用）
         if (enableFileWatcher) {
             startFileWatcher()
+        }
+        
+        // 如果启用初始数据库检查，启动时进行一次检查
+        if (enableInitialDbCheck) {
+            println("Starting initial database check...")
+            checkDatabaseFiles()
+        } else {
+            println("Initial database check is disabled")
+        }
+        
+        // 启动数据库检查（如果启用）
+        if (enableDbCheck) {
+            startScheduledDbCheck()
+        } else {
+            println("Database check is disabled")
         }
         
         return true
@@ -348,6 +379,7 @@ public class ShinobuService {
     /**
      * 递归查找压缩包文件
      */
+
     private func findArchiveFiles(dirPath: String): Array<String> {
         var result: Array<String> = Array<String>()
         
@@ -369,8 +401,11 @@ public class ShinobuService {
                     let subFiles = findArchiveFiles(fullPath)
                     result = combineArrays(result, subFiles)
                 } else if (fileExists(fullPath)) {
+                    // 解析软链接，获取实际文件路径
+                    let actualPath = FileUtils.resolvePath(fullPath)
+                    
                     // 检查文件扩展名
-                    let ext = getFileExtension(fullPath)
+                    let ext = getFileExtension(actualPath)
                     println("Entry is file, extension: ${ext}")
                     // 检查扩展名是否匹配
                     var isSupported = false
@@ -382,8 +417,9 @@ public class ShinobuService {
                         }
                     }
                     if (isSupported) {
+                        // 使用原始路径（软链接路径）而不是实际路径，以便用户可以通过软链接访问文件
                         result = addFile(result, fullPath)
-                        println("Added file to result: ${fullPath}")
+                        println("Added file to result: ${fullPath} (points to ${actualPath})")
                     } else {
                         println("Extension ${ext} not supported")
                     }
@@ -432,6 +468,7 @@ public class ShinobuService {
         
         try {
             // 0. 检查文件是否已经存在于数据库中，并获取其信息
+            // 使用原始路径计算相对路径，保留软链接
             let relativePath = calculateRelativePath(filePath)
             let fileName = getFullFileName(filePath)
             let existingArchive = ArchiveDao.getByPathAndFilename(relativePath, fileName)
@@ -562,8 +599,11 @@ public class ShinobuService {
      * 生成缩略图
      */
     private func generateThumbnail(archivePath: String, archiveId: String): ProcessResultData {
+        // 对于文件操作，需要解析软链接到实际路径
+        let actualArchivePath = FileUtils.resolvePath(archivePath)
+        
         // 1. 列出压缩包内容
-        let entries = listArchiveEntries(archivePath)
+        let entries = listArchiveEntries(actualArchivePath)
         if (entries.size == 0) {
             return ProcessResultData(false, "", "No entries found in archive")
         }
@@ -592,7 +632,7 @@ public class ShinobuService {
         
         // 3. 提取图片文件到临时目录
         let tempImagePath = joinPath(cachePath.toString(), "${archiveId}_temp.${getFileExtension(firstImageEntry)}")
-        let extractResult = extractArchiveEntry(archivePath, firstImageEntry, tempImagePath)
+        let extractResult = extractArchiveEntry(actualArchivePath, firstImageEntry, tempImagePath)
         if (!extractResult.success) {
             return extractResult
         }
@@ -947,7 +987,9 @@ public class ShinobuService {
     private func getArchiveFileModTime(filePath: String): Int64 {
         try {
             logger.debug("Getting file modification time for: ${filePath}")
-            let path = Path(filePath)
+            // 对于文件信息获取，需要解析软链接到实际路径
+            let actualPath = FileUtils.resolvePath(filePath)
+            let path = Path(actualPath)
             let file = File(path, Read)
             let fileInfo = file.info
             file.close()
@@ -970,7 +1012,9 @@ public class ShinobuService {
     private func getArchiveFileSize(filePath: String): Int64 {
         try {
             logger.debug("Getting file size for: ${filePath}")
-            let path = Path(filePath)
+            // 对于文件信息获取，需要解析软链接到实际路径
+            let actualPath = FileUtils.resolvePath(filePath)
+            let path = Path(actualPath)
             let file = File(path, Read)
             let fileInfo = file.info
             file.close()
@@ -1041,17 +1085,17 @@ public class ShinobuService {
     
     /**
      * 计算相对于 archivePath 的相对路径（不包含文件名）
+     * 注意：此函数保留软链接路径，不解析软链接到实际目标
      */
     private func calculateRelativePath(fullPath: String): String {
         try {
-            // 规范化完整路径
-            let normalizedPath = canonicalize(Path(fullPath))
-            let fullPathStr = normalizedPath.toString()
+            // 不使用 canonicalize，直接使用原始路径以保留软链接
+            let fullPathStr = fullPath
             
             // 获取父目录路径
             let parentDir = getParentDirectory(fullPathStr)
             
-            // 计算相对于 archivePath 的相对路径
+            // 计算相对于 archivePath 的相对路径，同样不使用 canonicalize
             let archivePathStr = archivePath.toString()
             
             // 确保 fullPath 以 archivePath 开头
@@ -1157,6 +1201,27 @@ public class ShinobuService {
                 let dirPath = Path(path)
                 if (exists(dirPath)) {
                     let fileInfo = FileInfo(dirPath)
+                    
+                    // 如果是软链接，获取其目标并检查目标目录
+                    if (fileInfo.isSymbolicLink()) {
+                        try {
+                            // 读取软链接的目标路径
+                            let targetPath = SymbolicLink.readFrom(path, recursive: false)
+                            logger.info("Path ${path} is a symbolic link pointing to ${targetPath.toString()}")
+                            
+                            // 检查目标路径是否存在
+                            if (exists(targetPath)) {
+                                let targetFileInfo = FileInfo(targetPath)
+                                return targetFileInfo.isDirectory()
+                            }
+                            return false
+                        } catch (e: FSException) {
+                            logger.error("Failed to read symbolic link ${path}: ${e.message}")
+                            return false
+                        }
+                    }
+                    
+                    // 如果不是软链接，直接检查是否是目录
                     return fileInfo.isDirectory()
                 }
                 return false
@@ -1176,6 +1241,27 @@ public class ShinobuService {
                 let filePath = Path(path)
                 if (exists(filePath)) {
                     let fileInfo = FileInfo(filePath)
+                    
+                    // 如果是软链接，获取其目标并检查目标文件
+                    if (fileInfo.isSymbolicLink()) {
+                        try {
+                            // 读取软链接的目标路径
+                            let targetPath = SymbolicLink.readFrom(path, recursive: false)
+                            logger.info("Path ${path} is a symbolic link pointing to ${targetPath.toString()}")
+                            
+                            // 检查目标路径是否存在
+                            if (exists(targetPath)) {
+                                let targetFileInfo = FileInfo(targetPath)
+                                return targetFileInfo.isRegular()
+                            }
+                            return false
+                        } catch (e: FSException) {
+                            logger.error("Failed to read symbolic link ${path}: ${e.message}")
+                            return false
+                        }
+                    }
+                    
+                    // 如果不是软链接，直接检查是否是常规文件
                     return fileInfo.isRegular()
                 }
                 return false
@@ -1514,6 +1600,87 @@ public class ShinobuService {
     }
     
     /**
+     * 启动定时数据库检查任务
+     */
+    private func startScheduledDbCheck() {
+        if (enableDbCheck) {
+            // 生成线程ID
+            let threadId = "db-check-${DateTime.nowUTC().toUnixTimeStamp()}"
+            dbCheckThread = Option<String>.Some(threadId)
+            
+            spawn {
+                println("Starting scheduled database check with cron: ${dbCheckIntervalCron}")
+                
+                // 简单的定时实现：每隔一定时间执行一次
+                // 实际应该解析 cron 表达式并精确调度
+                let intervalSeconds = parseCronToSeconds(dbCheckIntervalCron)
+                
+                runningMutex.lock()
+                let running = isTaskRunning
+                runningMutex.unlock()
+                
+                while (running) {
+                    sleep(Duration.second * intervalSeconds)
+                    
+                    runningMutex.lock()
+                    let stillRunning = isTaskRunning
+                    runningMutex.unlock()
+                    
+                    if (!stillRunning) {
+                        break
+                    }
+                    
+                    println("Executing scheduled database check...")
+                    checkDatabaseFiles()
+                }
+                
+                println("Scheduled database check thread stopped")
+            }
+        }
+    }
+    
+    /**
+     * 检查数据库中的文件是否仍然存在
+     */
+    private func checkDatabaseFiles() {
+        let archives = ArchiveDao.getAllArchives()
+        var deletedCount: Int64 = 0
+        
+        for (archive in archives) {
+            let relativePath = archive.relative_path
+            if (relativePath.size == 0) {
+                continue
+            }
+            
+            // 构建完整路径：archivePath + relativePath + filename
+            let archiveBasePath = ShinobuService.getArchivePath().toString()
+            let fullPath = joinPath(archiveBasePath, relativePath)
+            let fullFilePath = joinPath(fullPath, archive.filename)
+            
+            println("检查文件: ${fullFilePath}")
+            
+            // 检查文件是否存在（支持软链接）
+            if (!fileExists(fullFilePath)) {
+                println("文件不存在，从数据库中删除: ${fullFilePath}")
+                if (ArchiveDao.delete(archive.id)) {
+                    deletedCount++
+                    println("已删除数据库记录: ${archive.id} - ${archive.title}")
+                } else {
+                    println("删除数据库记录失败: ${archive.id} - ${archive.title}")
+                }
+            } else {
+                println("文件存在: ${fullFilePath}")
+            }
+        }
+        
+        if (deletedCount > 0) {
+            println("数据库检查完成，共删除 ${deletedCount} 个不存在的文件记录")
+        } else {
+            println("数据库检查完成，所有文件都存在")
+        }
+    }
+    
+    /**
      * 启动文件监视器
      */
     private func startFileWatcher() {
@@ -1594,9 +1761,17 @@ public class ShinobuService {
             case Option<String>.None => ()
         }
         
+        match (dbCheckThread) {
+            case Option<String>.Some(_) =>
+                // 线程会在 isTaskRunning = false 时自动退出
+                ()
+            case Option<String>.None => ()
+        }
+        
         scanThread = Option<String>.None
         thumbnailThread = Option<String>.None
         fileWatcherThread = Option<String>.None
+        dbCheckThread = Option<String>.None
         
         println("All scheduled tasks stopped")
     }
@@ -1663,6 +1838,7 @@ public class ShinobuService {
 
                 if (fileExists(archiveFilePath)) {
                     println("Generating thumbnail for: ${archive.filename} (${archive.id})")
+                    // generateThumbnail 函数内部已经处理了软链接解析
                     let result = generateThumbnail(archiveFilePath, archive.id)
                     
                     if (result.success) {
