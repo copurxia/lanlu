@@ -325,18 +325,29 @@ public class ShinobuService {
         var processedCount: Int64 = 0
         var errorCount: Int64 = 0
         var errors: Array<String> = Array<String>()
-        
-        println("Starting archive scan in directory: ${ShinobuService.archivePath.toString()}")
+
+        println("=== STARTING ARCHIVE SCAN ===")
+        println("Archive path: ${ShinobuService.archivePath.toString()}")
 
         // 检查目录是否存在
-        if (!directoryExists(ShinobuService.archivePath.toString())) {
+        println("Checking if directory exists...")
+        let dirExists = directoryExists(ShinobuService.archivePath.toString())
+        println("Directory exists: ${dirExists}")
+
+        if (!dirExists) {
             println("Archive directory does not exist: ${ShinobuService.archivePath.toString()}")
             return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${ShinobuService.archivePath.toString()}"])
         }
 
+        println("Directory exists, starting file scan...")
         // 递归扫描目录
         let archiveFiles = findArchiveFiles(ShinobuService.archivePath.toString())
+        println("=== SCAN COMPLETE ===")
         println("Found ${archiveFiles.size} archive files to process")
+        println("Archive files list:")
+        for (i in 0..archiveFiles.size) {
+            println("  [${i+1}] ${archiveFiles[i]}")
+        }
         
         for (filePath in archiveFiles) {
             if (!isRunning) {
@@ -382,31 +393,37 @@ public class ShinobuService {
 
     private func findArchiveFiles(dirPath: String): Array<String> {
         var result: Array<String> = Array<String>()
-        
+
         try {
             if (!directoryExists(dirPath)) {
                 return result
             }
-            
+
             let entries = listDirectory(dirPath)
             println("Scanning directory: ${dirPath}, found ${entries.size} entries")
-            
+
             for (entry in entries) {
                 let fullPath = joinPath(dirPath, entry)
                 println("Processing entry: ${entry}, full path: ${fullPath}")
-                
+
+                // 检查是否为软链接目录
+                let actualPath = FileUtils.resolvePath(fullPath)
+                let isSymlink = fullPath != actualPath
+                let symlinkInfo = if (isSymlink) { " (symlink)" } else { "" }
+                println("Entry resolved to: ${actualPath} ${symlinkInfo}")
+
                 if (directoryExists(fullPath)) {
-                    // 递归处理子目录
-                    println("Entry is directory, recursing...")
-                    let subFiles = findArchiveFiles(fullPath)
+                    // 递归处理子目录（包括软链接目录）
+                    println("Entry is directory${symlinkInfo}, recursing...")
+                    // 对于软链接目录，使用解析后的实际路径进行递归
+                    let recursivePath = if (isSymlink) { actualPath } else { fullPath }
+                    let subFiles = findArchiveFiles(recursivePath)
                     result = combineArrays(result, subFiles)
                 } else if (fileExists(fullPath)) {
-                    // 解析软链接，获取实际文件路径
-                    let actualPath = FileUtils.resolvePath(fullPath)
-                    
-                    // 检查文件扩展名
+                    // 检查文件扩展名（使用实际路径的扩展名，但记录软链接路径）
                     let ext = getFileExtension(actualPath)
-                    println("Entry is file, extension: ${ext}")
+                    println("Entry is file${symlinkInfo}, extension: ${ext}")
+
                     // 检查扩展名是否匹配
                     var isSupported = false
                     for (supportedExt in SUPPORTED_ARCHIVE_EXTENSIONS) {
@@ -416,20 +433,24 @@ public class ShinobuService {
                             break
                         }
                     }
+
                     if (isSupported) {
                         // 使用原始路径（软链接路径）而不是实际路径，以便用户可以通过软链接访问文件
                         result = addFile(result, fullPath)
-                        println("Added file to result: ${fullPath} (points to ${actualPath})")
+                        let targetInfo = if (isSymlink) { "(points to ${actualPath})" } else { "" }
+                        println("Added file to result: ${fullPath} ${targetInfo}")
                     } else {
                         println("Extension ${ext} not supported")
                     }
+                } else {
+                    println("Entry is neither a directory nor a file, skipping...")
                 }
             }
         } catch (e: Exception) {
             // 记录错误但继续处理其他文件
             println("Error scanning directory ${dirPath}: ${e.message}")
         }
-        
+
         return result
     }
     
@@ -1277,46 +1298,113 @@ public class ShinobuService {
     
     private func listDirectory(path: String): Array<String> {
         try {
+            println("=== LIST DIRECTORY START ===")
+            println("Path to list: ${path}")
+
             // 检查路径是否包含有效的 Unicode 字符
             try {
                 let dirPath = Path(path)
                 var files = Array<String>()
-                
-                // 检查路径是否存在且是目录
-                if (exists(dirPath)) {
+
+                // 检查路径是否存在
+                println("Checking if path exists...")
+                let pathExists = exists(dirPath)
+                println("Path exists: ${pathExists}")
+
+                if (pathExists) {
                     let fileInfo = FileInfo(dirPath)
+                    println("File info retrieved, checking type...")
+
+                    var isDirectory = false
+                    var isSymlink = false
+
+                    // 检查是否为目录（包括软链接目录）
                     if (fileInfo.isDirectory()) {
+                        isDirectory = true
+                        println("Path is a regular directory")
+                    } else if (fileInfo.isSymbolicLink()) {
+                        isSymlink = true
+                        println("Path is a symbolic link, checking target...")
+
+                        // 如果是软链接，检查其目标是否是目录
+                        try {
+                            let targetPath = SymbolicLink.readFrom(path, recursive: false)
+                            println("Symlink target: ${targetPath.toString()}")
+
+                            if (exists(targetPath)) {
+                                let targetFileInfo = FileInfo(targetPath)
+                                isDirectory = targetFileInfo.isDirectory()
+                                println("Symlink target exists, is directory: ${isDirectory}")
+
+                                if (isDirectory) {
+                                    logger.info("Path ${path} is a symbolic link to directory: ${targetPath.toString()}")
+                                    println("✓ Symlink points to directory: ${targetPath.toString()}")
+                                } else {
+                                    println("✗ Symlink target is not a directory")
+                                }
+                            } else {
+                                println("✗ Symlink target does not exist: ${targetPath.toString()}")
+                            }
+                        } catch (e: FSException) {
+                            logger.error("Failed to read symbolic link ${path}: ${e.message}")
+                            println("✗ Failed to read symlink: ${e.message}")
+                        }
+                    } else {
+                        println("Path is neither directory nor symlink")
+                    }
+
+                    if (isDirectory) {
+                        println("✓ Directory confirmed, listing entries...")
                         // 使用 Directory.readFrom 获取目录中的文件和子目录
                         let entries = Directory.readFrom(dirPath)
-                        
+                        println("Directory.readFrom returned ${entries.size} entries")
+
                         for (entry in entries) {
-                            // 只添加文件，跳过子目录
-                            if (entry.isRegular()) {
+                            // 添加文件、子目录和软链接，以便 findArchiveFiles 函数能正确处理所有类型
+                            if (entry.isRegular() || entry.isDirectory() || entry.isSymbolicLink()) {
                                 // 处理可能的 Unicode 问题
                                 try {
                                     let fileName = entry.name.toString()
+                                    var entryType = ""
+                                    if (entry.isRegular()) {
+                                        entryType = "file"
+                                    } else if (entry.isDirectory()) {
+                                        entryType = "directory"
+                                    } else if (entry.isSymbolicLink()) {
+                                        entryType = "symlink"
+                                    }
+                                    println("  -> Found ${entryType}: ${fileName}")
                                     files = addFile(files, fileName)
                                 } catch (unicodeError: Exception) {
-                                    logger.info("Skipping file with invalid Unicode name: ${unicodeError.message}")
+                                    logger.info("Skipping entry with invalid Unicode name: ${unicodeError.message}")
+                                    println("  -> Skipping entry with invalid Unicode name")
                                 }
+                            } else {
+                                let fileName = entry.name.toString()
+                                println("  -> Skipping entry (other type): ${fileName}")
                             }
                         }
-                        
-                        logger.info("Found ${files.size} files in directory: ${path}")
+
+                        println("=== LIST DIRECTORY COMPLETE ===")
+                        println("Found ${files.size} entries in directory: ${path}")
                         return files
                     } else {
+                        println("✗ Path is not a directory: ${path}")
                         logger.error("Path is not a directory: ${path}")
                         return Array<String>()
                     }
                 } else {
+                    println("✗ Directory does not exist: ${path}")
                     logger.error("Directory does not exist: ${path}")
                     return Array<String>()
                 }
             } catch (unicodeError: Exception) {
+                println("✗ Unicode error in directory path '${path}': ${unicodeError.message}")
                 logger.error("Unicode error in directory path '${path}': ${unicodeError.message}")
                 return Array<String>()
             }
         } catch (e: Exception) {
+            println("✗ Exception listing directory: ${e.message}")
             logger.error("Exception listing directory: ${e.message}")
             return Array<String>()
         }

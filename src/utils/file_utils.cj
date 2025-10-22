@@ -81,29 +81,92 @@ public class FileUtils {
     
     /**
      * 解析路径，如果是软链接则返回其目标路径，否则返回原路径
+     * 支持递归解析软链接（最多10层，防止循环）
      */
     public static func resolvePath(path: String): String {
+        println("=== RESOLVE PATH START ===")
+        println("Original path: ${path}")
+
+        const MAX_SYMLINK_DEPTH = 10
+        var currentPath = path
+        var depth = 0
+
         try {
-            let filePath = Path(path)
-            if (exists(filePath)) {
+            while (depth < MAX_SYMLINK_DEPTH) {
+                println("resolvePath: Level ${depth}, current path: ${currentPath}")
+
+                let filePath = Path(currentPath)
+                if (!exists(filePath)) {
+                    println("resolvePath: Path does not exist: ${currentPath}")
+                    break
+                }
+
                 let fileInfo = FileInfo(filePath)
-                
+                println("resolvePath: FileInfo - isSymbolicLink: ${fileInfo.isSymbolicLink()}, isDirectory: ${fileInfo.isDirectory()}")
+
                 // 如果是软链接，获取其目标路径
                 if (fileInfo.isSymbolicLink()) {
                     try {
-                        let targetPath = SymbolicLink.readFrom(path, recursive: false)
-                        return targetPath.toString()
+                        let targetPath = SymbolicLink.readFrom(currentPath, recursive: false)
+                        let newTarget = targetPath.toString()
+                        println("resolvePath: Symlink target: ${newTarget}")
+
+                        // 检查是否为绝对路径
+                        if (newTarget.startsWith("/")) {
+                            currentPath = newTarget
+                            println("resolvePath: Absolute target, new path: ${currentPath}")
+                        } else {
+                            // 相对路径需要基于当前目录的父目录进行解析
+                            let parentDir = getParentDirectory(currentPath)
+                            currentPath = joinPath(parentDir, newTarget)
+                            println("resolvePath: Relative target, parent: ${parentDir}, new path: ${currentPath}")
+                        }
+
+                        depth++
+                        println("resolvePath: Resolved symlink level ${depth}: ${currentPath}")
                     } catch (e: FSException) {
-                        // 如果解析失败，返回原路径
-                        return path
+                        // 如果解析失败，返回当前路径
+                        println("resolvePath: Failed to resolve symlink at ${currentPath}: ${e.message}")
+                        break
                     }
+                } else {
+                    // 不是软链接，停止解析
+                    println("resolvePath: Not a symlink, final path: ${currentPath}")
+                    break
                 }
             }
-            return path
+
+            if (depth >= MAX_SYMLINK_DEPTH) {
+                println("resolvePath: Warning: Maximum symlink depth (${MAX_SYMLINK_DEPTH}) reached for path: ${path}")
+            }
+
+            println("resolvePath: Final resolved path: ${currentPath}")
+            println("=== RESOLVE PATH END ===")
+            return currentPath
         } catch (e: Exception) {
             // 如果出错，返回原路径
+            println("resolvePath: Error resolving path ${path}: ${e.message}")
+            println("=== RESOLVE PATH END ===")
             return path
         }
+    }
+
+    /**
+     * 获取父目录路径
+     */
+    public static func getParentDirectory(filePath: String): String {
+        let parts = filePath.split("/")
+        if (parts.size > 1) {
+            var result = ""
+            for (i in 0..parts.size - 1) {
+                if (result.size > 0) {
+                    result += "/"
+                }
+                result += parts[i]
+            }
+            return result
+        }
+        return ""
     }
 }
 
