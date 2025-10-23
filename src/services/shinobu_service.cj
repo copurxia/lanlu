@@ -344,28 +344,67 @@ public class ShinobuService {
         let archiveFiles = findArchiveFiles(ShinobuService.archivePath.toString())
         println("=== SCAN COMPLETE ===")
         println("Found ${archiveFiles.size} archive files to process")
-        println("Archive files list:")
-        for (i in 0..archiveFiles.size) {
-            println("  [${i+1}] ${archiveFiles[i]}")
+
+        // 统计软链接目录下的文件数量
+        var symlinkFileCount = 0
+        var regularFileCount = 0
+        for (filePath in archiveFiles) {
+            if (filePath.contains("/archive ori/")) {
+                symlinkFileCount += 1
+            } else {
+                regularFileCount += 1
+            }
+        }
+
+        println("Archive files summary:")
+        println("  Regular files: ${regularFileCount}")
+        println("  Symlink files (archive ori): ${symlinkFileCount}")
+        println("Archive files list (first 10):")
+        let displayCount = if (archiveFiles.size > 10) { 10 } else { archiveFiles.size }
+        for (i in 0..displayCount) {
+            let fileTag = if (archiveFiles[i].contains("/archive ori/")) { "[SYMLINK]" } else { "[REGULAR]" }
+            println("  [${i+1}] ${fileTag} ${archiveFiles[i]}")
+        }
+        if (archiveFiles.size > 10) {
+            println("  ... and ${archiveFiles.size - 10} more files")
         }
         
-        for (filePath in archiveFiles) {
+        println("Starting to process ${archiveFiles.size} archive files...")
+
+        for (i in 0..archiveFiles.size) {
+            let filePath = archiveFiles[i]
+
             if (!isRunning) {
                 println("Scan interrupted: service stopped")
                 break // 服务已停止
             }
-            
+
             // 等待可用的任务槽位
             while (!canAddJob() && isRunning) {
                 sleep(Duration.second * 1) // 等待1秒后重试
             }
-            
+
             if (!isRunning) {
                 println("Scan interrupted: service stopped")
                 break // 服务已停止
             }
-            
-            println("Processing archive: ${filePath}")
+
+            // 对于大量文件，每处理100个输出进度
+            if (archiveFiles.size > 100 && (i + 1) % 100 == 0) {
+                println("Progress: Processing ${i + 1}/${archiveFiles.size} (${processedCount} successful, ${errorCount} failed)")
+            }
+
+            println("Processing archive [${i + 1}/${archiveFiles.size}]: ${filePath}")
+
+            // 检查文件是否仍然存在（防止扫描期间文件被删除）
+            if (!fileExists(filePath)) {
+                println("File no longer exists, skipping: ${filePath}")
+                errorCount++
+                let errorMsg = "File no longer exists"
+                errors = addError(errors, "${filePath}: ${errorMsg}")
+                continue
+            }
+
             // 处理单个文件
             let result = processArchiveFile(filePath)
             if (result.success) {
@@ -379,6 +418,12 @@ public class ShinobuService {
                 } else {
                     errors = addError(errors, "Unknown error")
                 }
+            }
+
+            // 对于非常大的文件集合，添加短暂延迟以避免系统过载
+            if (archiveFiles.size > 1000 && (i + 1) % 50 == 0) {
+                println("Taking brief pause to prevent system overload...")
+                sleep(Duration.millisecond * 100)
             }
         }
         
@@ -402,34 +447,44 @@ public class ShinobuService {
             let entries = listDirectory(dirPath)
             println("Scanning directory: ${dirPath}, found ${entries.size} entries")
 
+            // 如果是软链接目录且有大量文件，添加警告
+            if (dirPath.contains("archive ori") && entries.size > 500) {
+                println("WARNING: Large symlink directory detected (${entries.size} entries). This may take a while...")
+                logger.warn("Large symlink directory found: ${dirPath} with ${entries.size} entries")
+            }
+
             for (entry in entries) {
                 let fullPath = joinPath(dirPath, entry)
-                println("Processing entry: ${entry}, full path: ${fullPath}")
+
+                // 减少详细日志输出以提高性能
+                if (result.size % 100 == 0 || dirPath.contains("archive ori")) {
+                    println("Processing entry: ${entry} (found ${result.size} archives so far)")
+                }
 
                 // 检查是否为软链接目录
                 let actualPath = FileUtils.resolvePath(fullPath)
                 let isSymlink = fullPath != actualPath
-                let symlinkInfo = if (isSymlink) { " (symlink)" } else { "" }
-                println("Entry resolved to: ${actualPath} ${symlinkInfo}")
 
                 if (directoryExists(fullPath)) {
                     // 递归处理子目录（包括软链接目录）
-                    println("Entry is directory${symlinkInfo}, recursing...")
-                    // 对于软链接目录，使用解析后的实际路径进行递归
-                    let recursivePath = if (isSymlink) { actualPath } else { fullPath }
-                    let subFiles = findArchiveFiles(recursivePath)
+                    // 重要修复：始终使用软链接路径进行递归，以保持路径一致性
+                    // 这样可以确保 calculateRelativePath 函数能正确计算相对路径
+                    let subFiles = findArchiveFiles(fullPath)
                     result = combineArrays(result, subFiles)
+
+                    // 递归完成后输出进度
+                    if (subFiles.size > 0) {
+                        println("Completed scanning ${entry}: found ${subFiles.size} archives (total: ${result.size})")
+                    }
                 } else if (fileExists(fullPath)) {
                     // 检查文件扩展名（使用实际路径的扩展名，但记录软链接路径）
                     let ext = getFileExtension(actualPath)
-                    println("Entry is file${symlinkInfo}, extension: ${ext}")
 
                     // 检查扩展名是否匹配
                     var isSupported = false
                     for (supportedExt in SUPPORTED_ARCHIVE_EXTENSIONS) {
                         if (ext == supportedExt) {
                             isSupported = true
-                            println("Extension ${ext} matches supported format ${supportedExt}")
                             break
                         }
                     }
@@ -437,18 +492,20 @@ public class ShinobuService {
                     if (isSupported) {
                         // 使用原始路径（软链接路径）而不是实际路径，以便用户可以通过软链接访问文件
                         result = addFile(result, fullPath)
-                        let targetInfo = if (isSymlink) { "(points to ${actualPath})" } else { "" }
-                        println("Added file to result: ${fullPath} ${targetInfo}")
-                    } else {
-                        println("Extension ${ext} not supported")
+
+                        // 对于软链接目录下的文件，每100个输出一次进度
+                        if (fullPath.contains("archive ori") && result.size % 100 == 0) {
+                            println("Progress: found ${result.size} archives in symlink directory")
+                        }
                     }
-                } else {
-                    println("Entry is neither a directory nor a file, skipping...")
                 }
             }
+
+            println("Completed scanning ${dirPath}: found ${result.size} total archives")
         } catch (e: Exception) {
             // 记录错误但继续处理其他文件
             println("Error scanning directory ${dirPath}: ${e.message}")
+            logger.error("Error scanning directory ${dirPath}: ${e.message}")
         }
 
         return result
@@ -497,18 +554,25 @@ public class ShinobuService {
             match (existingArchive) {
                 case Some(archive) =>
                     logger.info("Archive already exists in database: ${filePath}")
-                    
+
+                    // 检查是否需要更新相对路径（针对现有空的relative_path记录）
+                    var shouldUpdateRelativePath = false
+                    if (archive.relative_path.size == 0) {
+                        shouldUpdateRelativePath = true
+                        logger.info("Archive has empty relative_path, updating: ${archive.id}")
+                    }
+
                     // 检查是否需要生成缩略图
                     if (archive.thumbhash.size == 0) {
                         logger.info("Thumbnail hash is empty, generating thumbnail for existing archive: ${archive.id}")
-                        
+
                         // 生成缩略图
                         let thumbnailResult = generateThumbnail(filePath, archive.id)
                         if (!thumbnailResult.success) {
                             decrementJobCount()
                             return thumbnailResult
                         }
-                        
+
                         // 生成缩略图的hash并更新到数据库
                         if (thumbnailResult.success && thumbnailResult.archiveId.size > 0) {
                             let thumbHash = generateFileHash(thumbnailResult.archiveId)
@@ -519,10 +583,21 @@ public class ShinobuService {
                                 logger.info("Updated thumbnail hash for existing archive: ${archive.id}")
                             }
                         }
-                        
+
                         decrementJobCount()
                         return ProcessResultData(true, archive.id, "")
                     } else {
+                        // 如果只需要更新相对路径，就在这里更新
+                        if (shouldUpdateRelativePath) {
+                            // 使用专门的updateArchiveRelativePath方法来更新相对路径
+                            let updateResult = ArchiveDao.updateArchiveRelativePath(archive.id, relativePath)
+                            if (!updateResult) {
+                                logger.error("Failed to update relative path for archive: ${archive.id}")
+                            } else {
+                                logger.info("Updated relative path for existing archive: ${archive.id} -> ${relativePath}")
+                            }
+                        }
+
                         decrementJobCount()
                         logger.info("Archive already has thumbnail: ${filePath}")
                         return ProcessResultData(false, "", "Archive already exists with thumbnail")
@@ -741,9 +816,11 @@ public class ShinobuService {
      * 计算归档文件中的图片数量
      */
     private func countImagesInArchive(archivePath: String): Int32 {
-        let entries = listArchiveEntries(archivePath)
+        // 对于文件操作，需要解析软链接到实际路径
+        let actualArchivePath = FileUtils.resolvePath(archivePath)
+        let entries = listArchiveEntries(actualArchivePath)
         var imageCount: Int32 = 0
-        
+
         for (entry in entries) {
             let ext = getFileExtension(entry)
             // 检查扩展名是否匹配
@@ -758,8 +835,8 @@ public class ShinobuService {
                 imageCount++
             }
         }
-        
-        logger.debug("Found ${imageCount} images in archive: ${archivePath}")
+
+        logger.debug("Found ${imageCount} images in archive: ${archivePath} (actual: ${actualArchivePath})")
         return imageCount
     }
     
@@ -798,12 +875,16 @@ public class ShinobuService {
     private func extractArchiveEntry(archivePath: String, entryName: String, outputPath: String): ProcessResultData {
         try {
             logger.debug("Attempting to extract entry: ${entryName} from archive: ${archivePath}")
-            
+
+            // 对于文件操作，需要解析软链接到实际路径
+            let actualArchivePath = FileUtils.resolvePath(archivePath)
+            logger.debug("Using actual archive path for extraction: ${actualArchivePath}")
+
             // 使用 bsdtar 的 -xO 选项直接输出到标准输出
             // 这样可以避免使用 -C 选项导致的问题
             let (exitCode, stdout, stderr) = executeWithOutput(
                 bsdtarPath,
-                ["-xO", "-f", archivePath, entryName],
+                ["-xO", "-f", actualArchivePath, entryName],
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe
             )
@@ -850,49 +931,53 @@ public class ShinobuService {
      */
     public func getArchiveFileList(archiveId: String): Array<String> {
         logger.info("Getting file list for archive: ${archiveId}")
-        
+
         // 检查归档是否存在
         let archive = ArchiveDao.getArchiveById(archiveId)
         if (archive.id.size == 0) {
             logger.error("Archive not found: ${archiveId}")
             return []
         }
-        
+
         let archivePath = joinPath(joinPath(ShinobuService.getArchivePath().toString(), archive.relative_path), archive.filename)
         logger.info("Archive path: ${archivePath}")
-        
-        // 检查归档文件是否存在
+
+        // 检查归档文件是否存在（支持软链接）
         if (!fileExists(archivePath)) {
             logger.error("Archive file not found: ${archivePath}")
             return []
         }
-        
+
+        // 对于文件操作，需要解析软链接到实际路径
+        let actualArchivePath = FileUtils.resolvePath(archivePath)
+        logger.info("Actual archive path for operations: ${actualArchivePath}")
+
         // 使用 bsdtar 列出归档内容
         try {
-            logger.info("Executing bsdtar -tf ${archivePath}")
+            logger.info("Executing bsdtar -tf ${actualArchivePath}")
             let (exitCode, stdout, stderr) = executeWithOutput(
                 bsdtarPath,
-                ["-tf", archivePath],
+                ["-tf", actualArchivePath],
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe
             )
-            
+
             logger.info("bsdtar exit code: ${exitCode}")
-            
+
             if (exitCode == 0) {
                 // 解析输出，获取文件列表
                 let output = String.fromUtf8(stdout)
                 logger.info("Archive content output: ${output}")
                 let lines = output.split("\n")
                 var fileList: ArrayList<String> = ArrayList<String>()
-                
+
                 for (line in lines) {
                     if (line.size > 0 && isImageFile(line)) {
                         fileList.add(line)
                         logger.info("Found image file: ${line}")
                     }
                 }
-                
+
                 logger.info("Total image files found: ${fileList.size}")
                 return fileList.toArray()
             } else {
@@ -912,15 +997,19 @@ public class ShinobuService {
     public func extractArchiveEntryToStream(archivePath: String, entryName: String): (Int32, Array<UInt8>, Array<UInt8>) {
         try {
             logger.debug("Attempting to extract entry: ${entryName} from archive: ${archivePath}")
-            
+
+            // 对于文件操作，需要解析软链接到实际路径
+            let actualArchivePath = FileUtils.resolvePath(archivePath)
+            logger.debug("Using actual archive path for extraction: ${actualArchivePath}")
+
             // 使用 bsdtar 的 -xO 选项直接输出到标准输出
             let (exitCode, stdout, stderr) = executeWithOutput(
                 bsdtarPath,
-                ["-xO", "-f", archivePath, entryName],
+                ["-xO", "-f", actualArchivePath, entryName],
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe
             )
-            
+
             if (exitCode == 0) {
                 logger.info("Successfully extracted ${entryName} to stream")
                 return (Int32(exitCode), stdout, stderr)
@@ -1110,38 +1199,131 @@ public class ShinobuService {
      */
     private func calculateRelativePath(fullPath: String): String {
         try {
-            // 不使用 canonicalize，直接使用原始路径以保留软链接
-            let fullPathStr = fullPath
-            
-            // 获取父目录路径
-            let parentDir = getParentDirectory(fullPathStr)
-            
-            // 计算相对于 archivePath 的相对路径，同样不使用 canonicalize
-            let archivePathStr = archivePath.toString()
-            
-            // 确保 fullPath 以 archivePath 开头
-            if (parentDir.startsWith(archivePathStr)) {
-                // 移除 archivePath 前缀，获取相对路径
-                let relativePath = parentDir.replace(archivePathStr, "")
-                
+            // 重要修改：不使用 FileUtils.resolvePath 解析软链接
+            // 直接使用原始路径进行计算，以保留软链接目录结构
+            let parentDir = getParentDirectory(fullPath)
+
+            // 获取archivePath，使用静态成员以确保一致性
+            let archiveBasePath = ShinobuService.archivePath.toString()
+            let resolvedArchiveBasePath = FileUtils.resolvePath(archiveBasePath)
+
+            logger.debug("Original full path: ${fullPath}")
+            logger.debug("Archive base path: ${archiveBasePath}")
+            logger.debug("Resolved archive base path: ${resolvedArchiveBasePath}")
+            logger.debug("Parent directory: ${parentDir}")
+
+            // 确保parentDir也是绝对路径进行比较
+            let resolvedParentDir = FileUtils.resolvePath(parentDir)
+            logger.debug("Resolved parent directory: ${resolvedParentDir}")
+
+            // 首先尝试使用解析后的archivePath与解析后的父目录比较
+            if (resolvedParentDir.startsWith(resolvedArchiveBasePath)) {
+                // 移除基础路径前缀，获取相对路径
+                let relativePath = resolvedParentDir.replace(resolvedArchiveBasePath, "")
+
                 // 移除可能的前导斜杠
                 if (relativePath.startsWith("/")) {
                     let parts = relativePath.split("/")
                     var result = ""
+                    var firstNonEmpty = true
                     for (i in 1..parts.size) {
-                        if (i > 1) {
-                            result += "/"
+                        if (parts[i].size > 0) {
+                            if (!firstNonEmpty) {
+                                result += "/"
+                            }
+                            result += parts[i]
+                            firstNonEmpty = false
                         }
-                        result += parts[i]
                     }
+                    logger.debug("Calculated relative path for ${fullPath}: ${result}")
                     return result
-                } else {
+                } else if (relativePath.size > 0) {
+                    logger.debug("Calculated relative path for ${fullPath}: ${relativePath}")
                     return relativePath
+                } else {
+                    logger.debug("Empty relative path for ${fullPath}")
+                    return ""
                 }
             } else {
-                // 如果路径不在 archivePath 下，返回空字符串作为后备
-                logger.error("Path ${fullPathStr} is not under archive path ${archivePathStr}")
-                return ""
+                // 如果解析后的路径不匹配，尝试使用原始archivePath
+                logger.debug("Trying with original archive path: ${archiveBasePath}")
+
+                if (parentDir.startsWith(archiveBasePath)) {
+                    // 移除 archivePath 前缀，获取相对路径
+                    let relativePath = parentDir.replace(archiveBasePath, "")
+
+                    // 移除可能的前导斜杠
+                    if (relativePath.startsWith("/")) {
+                        let parts = relativePath.split("/")
+                        var result = ""
+                        var firstNonEmpty = true
+                        for (i in 1..parts.size) {
+                            if (parts[i].size > 0) {
+                                if (!firstNonEmpty) {
+                                    result += "/"
+                                }
+                                result += parts[i]
+                                firstNonEmpty = false
+                            }
+                        }
+                        logger.debug("Calculated relative path (original) for ${fullPath}: ${result}")
+                        return result
+                    } else if (relativePath.size > 0) {
+                        logger.debug("Calculated relative path (original) for ${fullPath}: ${relativePath}")
+                        return relativePath
+                    } else {
+                        logger.debug("Empty relative path (original) for ${fullPath}")
+                        return ""
+                    }
+                } else {
+                    // 如果路径不在任何路径下，尝试查找可能的父目录匹配
+                    logger.error("Path ${resolvedParentDir} is not under archive path ${resolvedArchiveBasePath} or ${archiveBasePath}")
+                    logger.debug("Attempting to find relative path by directory traversal...")
+
+                    // 尝试逐级向上查找匹配的目录
+                    var currentPath = resolvedParentDir
+                    while (currentPath.size > resolvedArchiveBasePath.size) {
+                        if (currentPath.startsWith(resolvedArchiveBasePath)) {
+                            let relativePath = currentPath.replace(resolvedArchiveBasePath, "")
+                            if (relativePath.startsWith("/")) {
+                                let parts = relativePath.split("/")
+                                var result = ""
+                                var firstNonEmpty = true
+                                for (i in 1..parts.size) {
+                                    if (parts[i].size > 0) {
+                                        if (!firstNonEmpty) {
+                                            result += "/"
+                                        }
+                                        result += parts[i]
+                                        firstNonEmpty = false
+                                    }
+                                }
+                                logger.debug("Found relative path by traversal: ${result}")
+                                return result
+                            } else if (relativePath.size > 0) {
+                                logger.debug("Found relative path by traversal: ${relativePath}")
+                                return relativePath
+                            }
+                        }
+                        // 向上移动一级目录
+                        let parts = currentPath.split("/")
+                        if (parts.size > 1) {
+                            var newPath = ""
+                            for (i in 0..parts.size - 1) {
+                                if (i > 0) {
+                                    newPath += "/"
+                                }
+                                newPath += parts[i]
+                            }
+                            currentPath = newPath
+                        } else {
+                            break
+                        }
+                    }
+
+                    logger.error("Could not find relative path for ${resolvedParentDir}")
+                    return ""
+                }
             }
         } catch (e: Exception) {
             logger.error("Failed to calculate relative path for ${fullPath}: ${e.message}")
@@ -1188,12 +1370,22 @@ public class ShinobuService {
         if (parts.size > 1) {
             var result = ""
             for (i in 0..parts.size - 1) {
-                if (result.size > 0) {
+                // 特殊处理：如果是第一个部分且为空（绝对路径），添加根目录斜杠
+                if (i == 0 && parts[i].size == 0) {
                     result += "/"
+                } else {
+                    if (result.size > 0 && result != "/") {
+                        result += "/"
+                    }
+                    result += parts[i]
                 }
-                result += parts[i]
             }
             return result
+        } else if (parts.size == 1) {
+            // 如果只有一个部分，且是根路径，返回根路径
+            if (parts[0].size == 0) {
+                return "/"
+            }
         }
         return ""
     }
@@ -1355,8 +1547,18 @@ public class ShinobuService {
 
                     if (isDirectory) {
                         println("✓ Directory confirmed, listing entries...")
+
+                        // 对于软链接目录，使用实际目标路径进行读取
+                        let targetPath: String
+                        if (isSymlink) {
+                            targetPath = SymbolicLink.readFrom(path, recursive: false).toString()
+                            logger.info("Using symlink target path for directory listing: ${targetPath}")
+                        } else {
+                            targetPath = path
+                        }
+
                         // 使用 Directory.readFrom 获取目录中的文件和子目录
-                        let entries = Directory.readFrom(dirPath)
+                        let entries = Directory.readFrom(Path(targetPath))
                         println("Directory.readFrom returned ${entries.size} entries")
 
                         for (entry in entries) {
@@ -1375,6 +1577,11 @@ public class ShinobuService {
                                     }
                                     println("  -> Found ${entryType}: ${fileName}")
                                     files = addFile(files, fileName)
+
+                                    // 特别记录软链接目录，以便调试
+                                    if (entry.isSymbolicLink()) {
+                                        logger.info("Found symlink entry: ${fileName} in directory ${path}")
+                                    }
                                 } catch (unicodeError: Exception) {
                                     logger.info("Skipping entry with invalid Unicode name: ${unicodeError.message}")
                                     println("  -> Skipping entry with invalid Unicode name")
@@ -1411,7 +1618,33 @@ public class ShinobuService {
     }
     
     private func joinPath(base: String, part: String): String {
-        return "${base}/${part}"
+        // 移除base末尾的斜杠和part开头的斜杠，避免双斜杠
+        let cleanBase = if (base.endsWith("/")) {
+            let parts = base.split("")
+            var result = ""
+            for (i in 0..parts.size - 1) {
+                result += parts[i]
+            }
+            result
+        } else {
+            base
+        }
+        let cleanPart = if (part.startsWith("/")) {
+            let parts = part.split("")
+            var result = ""
+            for (i in 1..parts.size) {
+                result += parts[i]
+            }
+            result
+        } else {
+            part
+        }
+
+        if (cleanPart.size > 0) {
+            return "${cleanBase}/${cleanPart}"
+        } else {
+            return cleanBase
+        }
     }
     
     /**
@@ -1419,13 +1652,17 @@ public class ShinobuService {
      */
     private func executeWithOutput(command: String, args: Array<String>, stdOut: ProcessRedirect, stdErr: ProcessRedirect): (Int32, Array<UInt8>, Array<UInt8>) {
         try {
-            // 构建完整的命令字符串用于日志
+            // 构建完整的命令字符串用于日志，对包含空格的参数加引号
             var fullCmd = command
             for (arg in args) {
-                fullCmd += " " + arg
+                if (arg.contains(" ") || arg.contains("\t") || arg.contains("\"") || arg.contains("'")) {
+                    fullCmd += " \"" + arg.replace("\"", "\\\"") + "\""
+                } else {
+                    fullCmd += " " + arg
+                }
             }
             logger.info("Executing command with args: ${fullCmd}")
-            
+
             // 使用仓颉语言的 launch 函数执行命令
             // 根据文档，我们需要正确传递参数
             if (args.size == 0) {
@@ -1470,13 +1707,13 @@ public class ShinobuService {
     private func convertImageToJpg(inputPath: String, outputPath: String): ProcessResultData {
         try {
             logger.debug("Converting image to JPG: ${inputPath} -> ${outputPath}")
-            
+
             // 确保输出目录存在
             let outputDir = getParentDirectory(outputPath)
             if (!directoryExists(outputDir)) {
                 Directory.create(outputDir, recursive: true)
             }
-            
+
             // 使用ImageMagick的convert工具进行转换
             // 由于executeWithOutput函数限制参数数量，我们分两步执行
             // 第一步：调整大小 - 宽500px，最大高1000px（保持比例）
@@ -1487,13 +1724,13 @@ public class ShinobuService {
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe
             )
-            
+
             if (resizeExitCode != 0) {
                 let error = String.fromUtf8(resizeStderr)
                 logger.error("Failed to resize image: ${error}")
                 return ProcessResultData(false, "", error)
             }
-            
+
             // 第二步：设置质量并输出到最终路径
             let (qualityExitCode, qualityStdout, qualityStderr) = executeWithOutput(
                 "convert",
@@ -1501,7 +1738,7 @@ public class ShinobuService {
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe
             )
-            
+
             // 清理临时文件
             try {
                 if (fileExists(resizedPath)) {
@@ -1518,7 +1755,7 @@ public class ShinobuService {
             } catch (e: Exception) {
                 logger.warn("Failed to delete temp resized file: ${resizedPath}, error: ${e.message}")
             }
-            
+
             if (qualityExitCode == 0) {
                 logger.info("Successfully converted image to JPG: ${outputPath}")
                 return ProcessResultData(true, outputPath, "")
@@ -2261,3 +2498,4 @@ public class ScanResultData {
         this.errors = errors
     }
 }
+

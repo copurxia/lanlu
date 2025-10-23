@@ -501,12 +501,37 @@ public class ArchiveDao {
                 stmt.set(0, pageCount)
                 stmt.set(1, thumbHash)
                 stmt.set(2, archiveId)
-                
+
                 let result = stmt.update()
                 conn.close()
                 return true
             } catch (e: Exception) {
                 println("更新归档详情失败: ${e}")
+                conn.close()
+                return false
+            }
+            case None =>
+                println("无法连接到数据库")
+                return false
+        }
+    }
+
+    /**
+     * 更新归档的相对路径
+     */
+    public static func updateArchiveRelativePath(archiveId: String, relativePath: String): Bool {
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) => try {
+                let stmt = conn.prepareStatement("UPDATE archives SET relative_path = ? WHERE arcid = ?")
+                stmt.set(0, relativePath)
+                stmt.set(1, archiveId)
+
+                let result = stmt.update()
+                conn.close()
+                return true
+            } catch (e: Exception) {
+                println("更新归档相对路径失败: ${e}")
                 conn.close()
                 return false
             }
@@ -755,4 +780,5 @@ public class ArchiveDao {
         }
         return ArchiveData()
     }
-}
+
+    }
