@@ -7,7 +7,9 @@ import std.fs.*
 import std.time.*
 import std.env.*
 import std.convert.*
+import stdx.log.*
 import dotenv.Dotenv
+import lrr4cj.utils.*
 
 /**
  * 数据库配置类
@@ -67,11 +69,11 @@ public class DatabaseConfig {
                     let conn = ds.connect()
                     return Some(conn)
                 } catch (e: Exception) {
-                    println("数据库连接失败")
+                    getLogger("database").error("数据库连接失败")
                     return None
                 }
             case None =>
-                println("无法获取opengauss驱动")
+                getLogger("database").error("无法获取opengauss驱动")
                 return None
         }
     }
@@ -173,11 +175,11 @@ public class DatabaseConfig {
                     conn.close()
                     return true
                 } catch (e: Exception) {
-                    println("数据库初始化失败")
+                    getLogger("database").error("数据库初始化失败")
                     return false
                 }
             case None =>
-                println("无法连接到数据库")
+                getLogger("database").error("无法连接到数据库")
                 return false
         }
     }

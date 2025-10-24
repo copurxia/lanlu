@@ -9,32 +9,14 @@ import std.convert.*
 import std.crypto.digest.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
+import stdx.log.*
 import cjoy.json.*
 import lrr4cj.config.*
 import lrr4cj.dao.*
 import lrr4cj.utils.*
 import dotenv.Dotenv
 
-// 简单的日志记录器
-class Logger {
-    public func info(message: String) {
-        println("[INFO] ${message}")
-    }
-    
-    public func error(message: String) {
-        println("[ERROR] ${message}")
-    }
-    
-    public func debug(message: String) {
-        println("[DEBUG] ${message}")
-    }
-    
-    public func warn(message: String) {
-        println("[WARN] ${message}")
-    }
-}
-
-let logger = Logger()
+let logger = getLogger("shinobu")
 
 /**
  * Shinobu 后台工作服务
@@ -207,43 +189,43 @@ public class ShinobuService {
         isRunning = true
         currentPid = getCurrentProcessId()
         
-        println("Shinobu service starting with configuration:")
-        println("  Archive path: ${archivePath.toString()}")
-        println("  Thumbnail path: ${thumbnailPath.toString()}")
-        println("  Cache path: ${cachePath.toString()}")
-        println("  BSDTAR path: ${bsdtarPath}")
-        println("  Enable auto scan: ${enableAutoScan}")
-        println("  Enable initial scan: ${enableInitialScan}")
-        println("  Scan interval cron: ${scanIntervalCron}")
-        println("  Enable auto thumbnail: ${enableAutoThumbnail}")
-        println("  Thumbnail interval cron: ${thumbnailIntervalCron}")
-        println("  Max concurrent jobs: ${maxConcurrentJobs}")
-        println("  Scan fallback interval: ${scanFallbackIntervalMs}ms")
-        println("  Enable file watcher: ${enableFileWatcher}")
-        println("  Enable initial database check: ${enableInitialDbCheck}")
-        println("  Enable database check: ${enableDbCheck}")
-        println("  Database check interval cron: ${dbCheckIntervalCron}")
+        logger.info("Shinobu service starting with configuration",
+            ("archive_path", archivePath.toString()),
+            ("thumbnail_path", thumbnailPath.toString()),
+            ("cache_path", cachePath.toString()),
+            ("bsdtar_path", bsdtarPath),
+            ("enable_auto_scan", enableAutoScan.toString()),
+            ("enable_initial_scan", enableInitialScan.toString()),
+            ("scan_interval_cron", scanIntervalCron),
+            ("enable_auto_thumbnail", enableAutoThumbnail.toString()),
+            ("thumbnail_interval_cron", thumbnailIntervalCron),
+            ("max_concurrent_jobs", maxConcurrentJobs.toString()),
+            ("scan_fallback_interval_ms", scanFallbackIntervalMs.toString()),
+            ("enable_file_watcher", enableFileWatcher.toString()),
+            ("enable_initial_db_check", enableInitialDbCheck.toString()),
+            ("enable_db_check", enableDbCheck.toString()),
+            ("db_check_interval_cron", dbCheckIntervalCron))
         
         // 如果启用初始扫描，启动时进行一次扫描
         if (enableInitialScan) {
-            println("Starting initial archive scan...")
+            logger.debug("Starting initial archive scan...")
             spawnScanThread()
         } else {
-            println("Initial scan is disabled")
+            logger.info("Initial scan is disabled")
         }
         
         // 如果启用自动扫描，启动定时任务
         if (enableAutoScan) {
             startScheduledScan()
         } else {
-            println("Auto scan is disabled")
+            logger.info("Auto scan is disabled")
         }
         
         // 如果启用自动缩略图生成，启动定时任务
         if (enableAutoThumbnail) {
             startScheduledThumbnail()
         } else {
-            println("Auto thumbnail generation is disabled")
+            logger.info("Auto thumbnail generation is disabled")
         }
         
         // 启动文件监视器（如果启用）
@@ -253,17 +235,17 @@ public class ShinobuService {
         
         // 如果启用初始数据库检查，启动时进行一次检查
         if (enableInitialDbCheck) {
-            println("Starting initial database check...")
+            logger.info("Starting initial database check...")
             checkDatabaseFiles()
         } else {
-            println("Initial database check is disabled")
+            logger.info("Initial database check is disabled")
         }
         
         // 启动数据库检查（如果启用）
         if (enableDbCheck) {
             startScheduledDbCheck()
         } else {
-            println("Database check is disabled")
+            logger.info("Database check is disabled")
         }
         
         return true
@@ -326,24 +308,24 @@ public class ShinobuService {
         var errorCount: Int64 = 0
         var errors: Array<String> = Array<String>()
 
-        println("=== STARTING ARCHIVE SCAN ===")
-        println("Archive path: ${ShinobuService.archivePath.toString()}")
+        logger.debug("Starting archive scan")
+        logger.debug("Archive path", ("path", ShinobuService.archivePath.toString()))
 
         // 检查目录是否存在
-        println("Checking if directory exists...")
+        logger.debug("Checking if directory exists")
         let dirExists = directoryExists(ShinobuService.archivePath.toString())
-        println("Directory exists: ${dirExists}")
+        logger.debug("Directory exists", ("exists", dirExists.toString()))
 
         if (!dirExists) {
-            println("Archive directory does not exist: ${ShinobuService.archivePath.toString()}")
+            logger.error("Archive directory does not exist", ("path", ShinobuService.archivePath.toString()))
             return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${ShinobuService.archivePath.toString()}"])
         }
 
-        println("Directory exists, starting file scan...")
+        logger.debug("Directory exists, starting file scan")
         // 递归扫描目录
         let archiveFiles = findArchiveFiles(ShinobuService.archivePath.toString())
-        println("=== SCAN COMPLETE ===")
-        println("Found ${archiveFiles.size} archive files to process")
+        logger.debug("Archive scan completed")
+        logger.info("Found archive files to process", ("count", archiveFiles.size.toString()))
 
         // 统计软链接目录下的文件数量
         var symlinkFileCount = 0
@@ -356,26 +338,25 @@ public class ShinobuService {
             }
         }
 
-        println("Archive files summary:")
-        println("  Regular files: ${regularFileCount}")
-        println("  Symlink files (archive ori): ${symlinkFileCount}")
-        println("Archive files list (first 10):")
+        logger.info("Archive files summary",
+            ("regular_files", regularFileCount.toString()),
+            ("symlink_files", symlinkFileCount.toString()))
         let displayCount = if (archiveFiles.size > 10) { 10 } else { archiveFiles.size }
         for (i in 0..displayCount) {
             let fileTag = if (archiveFiles[i].contains("/archive ori/")) { "[SYMLINK]" } else { "[REGULAR]" }
-            println("  [${i+1}] ${fileTag} ${archiveFiles[i]}")
+            logger.debug("Found archive file", ("index", (i+1).toString()), ("tag", fileTag), ("file", archiveFiles[i]))
         }
         if (archiveFiles.size > 10) {
-            println("  ... and ${archiveFiles.size - 10} more files")
+            logger.debug("Additional files not shown", ("count", (archiveFiles.size - 10).toString()))
         }
         
-        println("Starting to process ${archiveFiles.size} archive files...")
+        logger.info("Starting to process archives", ("count", archiveFiles.size.toString()))
 
         for (i in 0..archiveFiles.size) {
             let filePath = archiveFiles[i]
 
             if (!isRunning) {
-                println("Scan interrupted: service stopped")
+                logger.warn("Scan interrupted: service stopped")
                 break // 服务已停止
             }
 
@@ -385,20 +366,20 @@ public class ShinobuService {
             }
 
             if (!isRunning) {
-                println("Scan interrupted: service stopped")
+                logger.warn("Scan interrupted: service stopped")
                 break // 服务已停止
             }
 
             // 对于大量文件，每处理100个输出进度
             if (archiveFiles.size > 100 && (i + 1) % 100 == 0) {
-                println("Progress: Processing ${i + 1}/${archiveFiles.size} (${processedCount} successful, ${errorCount} failed)")
+                logger.debug("Archive processing progress", ("current", (i + 1).toString()), ("total", archiveFiles.size.toString()), ("success", processedCount.toString()), ("failed", errorCount.toString()))
             }
 
-            println("Processing archive [${i + 1}/${archiveFiles.size}]: ${filePath}")
+            logger.debug("Processing archive", ("index", (i + 1).toString()), ("total", archiveFiles.size.toString()), ("file", filePath))
 
             // 检查文件是否仍然存在（防止扫描期间文件被删除）
             if (!fileExists(filePath)) {
-                println("File no longer exists, skipping: ${filePath}")
+                logger.warn("File no longer exists, skipping", ("file", filePath))
                 errorCount++
                 let errorMsg = "File no longer exists"
                 errors = addError(errors, "${filePath}: ${errorMsg}")
@@ -409,10 +390,10 @@ public class ShinobuService {
             let result = processArchiveFile(filePath)
             if (result.success) {
                 processedCount++
-                println("Successfully processed: ${filePath} -> ${result.archiveId}")
+                logger.info("Successfully processed archive", ("file", filePath), ("archive_id", result.archiveId))
             } else {
                 errorCount++
-                println("Failed to process: ${filePath} - ${result.error}")
+                logger.error("Failed to process archive", ("file", filePath), ("error", result.error))
                 if (result.error.size > 0) {
                     errors = addError(errors, result.error)
                 } else {
@@ -422,13 +403,13 @@ public class ShinobuService {
 
             // 对于非常大的文件集合，添加短暂延迟以避免系统过载
             if (archiveFiles.size > 1000 && (i + 1) % 50 == 0) {
-                println("Taking brief pause to prevent system overload...")
+                logger.debug("Taking brief pause to prevent system overload")
                 sleep(Duration.millisecond * 100)
             }
         }
         
         let duration = getCurrentTimeMillis() - startTime
-        println("Scan completed: ${processedCount} files processed, ${errorCount} errors, ${duration}ms")
+        logger.info("Archive scan completed", ("processed", processedCount.toString()), ("errors", errorCount.toString()), ("duration_ms", duration.toString()))
         return ScanResultData(processedCount, errorCount, duration, errors)
     }
     
@@ -445,11 +426,11 @@ public class ShinobuService {
             }
 
             let entries = listDirectory(dirPath)
-            println("Scanning directory: ${dirPath}, found ${entries.size} entries")
+            logger.debug("Scanning directory", ("directory", dirPath), ("entries", entries.size.toString()))
 
             // 如果是软链接目录且有大量文件，添加警告
             if (dirPath.contains("archive ori") && entries.size > 500) {
-                println("WARNING: Large symlink directory detected (${entries.size} entries). This may take a while...")
+                logger.warn("Large symlink directory detected", ("entries", entries.size.toString()))
                 logger.warn("Large symlink directory found: ${dirPath} with ${entries.size} entries")
             }
 
@@ -458,7 +439,7 @@ public class ShinobuService {
 
                 // 减少详细日志输出以提高性能
                 if (result.size % 100 == 0 || dirPath.contains("archive ori")) {
-                    println("Processing entry: ${entry} (found ${result.size} archives so far)")
+                    logger.debug("Processing directory entry", ("entry", entry), ("archives_found", result.size.toString()))
                 }
 
                 // 检查是否为软链接目录
@@ -474,7 +455,7 @@ public class ShinobuService {
 
                     // 递归完成后输出进度
                     if (subFiles.size > 0) {
-                        println("Completed scanning ${entry}: found ${subFiles.size} archives (total: ${result.size})")
+                        logger.debug("Completed scanning entry", ("entry", entry), ("sub_archives", subFiles.size.toString()), ("total_archives", result.size.toString()))
                     }
                 } else if (fileExists(fullPath)) {
                     // 检查文件扩展名（使用实际路径的扩展名，但记录软链接路径）
@@ -495,16 +476,16 @@ public class ShinobuService {
 
                         // 对于软链接目录下的文件，每100个输出一次进度
                         if (fullPath.contains("archive ori") && result.size % 100 == 0) {
-                            println("Progress: found ${result.size} archives in symlink directory")
+                            logger.debug("Symlink directory scan progress", ("archives_found", result.size.toString()))
                         }
                     }
                 }
             }
 
-            println("Completed scanning ${dirPath}: found ${result.size} total archives")
+            logger.debug("Completed scanning directory", ("directory", dirPath), ("total_archives", result.size.toString()))
         } catch (e: Exception) {
             // 记录错误但继续处理其他文件
-            println("Error scanning directory ${dirPath}: ${e.message}")
+            logger.error("Error scanning directory", ("directory", dirPath), ("error", e.message))
             logger.error("Error scanning directory ${dirPath}: ${e.message}")
         }
 
@@ -1490,8 +1471,7 @@ public class ShinobuService {
     
     private func listDirectory(path: String): Array<String> {
         try {
-            println("=== LIST DIRECTORY START ===")
-            println("Path to list: ${path}")
+            logger.debug("Starting directory listing", ("path", path))
 
             // 检查路径是否包含有效的 Unicode 字符
             try {
@@ -1499,13 +1479,13 @@ public class ShinobuService {
                 var files = Array<String>()
 
                 // 检查路径是否存在
-                println("Checking if path exists...")
+                logger.debug("Checking if path exists", ("path", path))
                 let pathExists = exists(dirPath)
-                println("Path exists: ${pathExists}")
+                logger.debug("Path exists", ("exists", pathExists.toString()))
 
                 if (pathExists) {
                     let fileInfo = FileInfo(dirPath)
-                    println("File info retrieved, checking type...")
+                    logger.debug("File info retrieved, checking type")
 
                     var isDirectory = false
                     var isSymlink = false
@@ -1513,40 +1493,40 @@ public class ShinobuService {
                     // 检查是否为目录（包括软链接目录）
                     if (fileInfo.isDirectory()) {
                         isDirectory = true
-                        println("Path is a regular directory")
+                        logger.debug("Path is a regular directory", ("path", path))
                     } else if (fileInfo.isSymbolicLink()) {
                         isSymlink = true
-                        println("Path is a symbolic link, checking target...")
+                        logger.debug("Path is a symbolic link, checking target", ("path", path))
 
                         // 如果是软链接，检查其目标是否是目录
                         try {
                             let targetPath = SymbolicLink.readFrom(path, recursive: false)
-                            println("Symlink target: ${targetPath.toString()}")
+                            logger.debug("Symlink target", ("target", targetPath.toString()))
 
                             if (exists(targetPath)) {
                                 let targetFileInfo = FileInfo(targetPath)
                                 isDirectory = targetFileInfo.isDirectory()
-                                println("Symlink target exists, is directory: ${isDirectory}")
+                                logger.debug("Symlink target exists and is directory", ("target", targetPath.toString()))
 
                                 if (isDirectory) {
                                     logger.info("Path ${path} is a symbolic link to directory: ${targetPath.toString()}")
-                                    println("✓ Symlink points to directory: ${targetPath.toString()}")
+                                    logger.debug("Symlink points to directory", ("target", targetPath.toString()))
                                 } else {
-                                    println("✗ Symlink target is not a directory")
+                                    logger.warn("Symlink target is not a directory", ("target", targetPath.toString()))
                                 }
                             } else {
-                                println("✗ Symlink target does not exist: ${targetPath.toString()}")
+                                logger.warn("Symlink target does not exist", ("target", targetPath.toString()))
                             }
                         } catch (e: FSException) {
                             logger.error("Failed to read symbolic link ${path}: ${e.message}")
-                            println("✗ Failed to read symlink: ${e.message}")
+                            logger.warn("Failed to read symlink", ("error", e.message))
                         }
                     } else {
-                        println("Path is neither directory nor symlink")
+                        logger.debug("Path is neither directory nor symlink", ("path", path))
                     }
 
                     if (isDirectory) {
-                        println("✓ Directory confirmed, listing entries...")
+                        logger.debug("Directory confirmed, listing entries", ("path", path))
 
                         // 对于软链接目录，使用实际目标路径进行读取
                         let targetPath: String
@@ -1559,7 +1539,7 @@ public class ShinobuService {
 
                         // 使用 Directory.readFrom 获取目录中的文件和子目录
                         let entries = Directory.readFrom(Path(targetPath))
-                        println("Directory.readFrom returned ${entries.size} entries")
+                        logger.debug("Directory entries returned", ("count", entries.size.toString()))
 
                         for (entry in entries) {
                             // 添加文件、子目录和软链接，以便 findArchiveFiles 函数能正确处理所有类型
@@ -1575,7 +1555,7 @@ public class ShinobuService {
                                     } else if (entry.isSymbolicLink()) {
                                         entryType = "symlink"
                                     }
-                                    println("  -> Found ${entryType}: ${fileName}")
+                                    logger.debug("Found directory entry", ("type", entryType), ("file", fileName))
                                     files = addFile(files, fileName)
 
                                     // 特别记录软链接目录，以便调试
@@ -1584,34 +1564,33 @@ public class ShinobuService {
                                     }
                                 } catch (unicodeError: Exception) {
                                     logger.info("Skipping entry with invalid Unicode name: ${unicodeError.message}")
-                                    println("  -> Skipping entry with invalid Unicode name")
+                                    logger.debug("Skipping entry with invalid Unicode name")
                                 }
                             } else {
                                 let fileName = entry.name.toString()
-                                println("  -> Skipping entry (other type): ${fileName}")
+                                logger.debug("Skipping entry (other type)", ("file", fileName))
                             }
                         }
 
-                        println("=== LIST DIRECTORY COMPLETE ===")
-                        println("Found ${files.size} entries in directory: ${path}")
+                        logger.debug("Directory listing completed", ("path", path), ("entries", files.size.toString()))
                         return files
                     } else {
-                        println("✗ Path is not a directory: ${path}")
+                        logger.warn("Path is not a directory", ("path", path))
                         logger.error("Path is not a directory: ${path}")
                         return Array<String>()
                     }
                 } else {
-                    println("✗ Directory does not exist: ${path}")
+                    logger.warn("Directory does not exist", ("path", path))
                     logger.error("Directory does not exist: ${path}")
                     return Array<String>()
                 }
             } catch (unicodeError: Exception) {
-                println("✗ Unicode error in directory path '${path}': ${unicodeError.message}")
+                logger.warn("Unicode error in directory path", ("path", path), ("error", unicodeError.message))
                 logger.error("Unicode error in directory path '${path}': ${unicodeError.message}")
                 return Array<String>()
             }
         } catch (e: Exception) {
-            println("✗ Exception listing directory: ${e.message}")
+            logger.error("Exception listing directory", ("error", e.message), ("path", path))
             logger.error("Exception listing directory: ${e.message}")
             return Array<String>()
         }
@@ -1822,7 +1801,7 @@ public class ShinobuService {
             // 简单哈希：使用文件大小和路径
             return "${content.size}_${filePath.hashCode()}"
         } catch (e: Exception) {
-            println("Error calculating file hash: ${e.message}")
+            logger.error("Error calculating file hash", ("error", e.message))
             return "${filePath.hashCode()}"
         }
     }
@@ -1837,9 +1816,9 @@ public class ShinobuService {
             scanThread = Option<String>.Some(threadId)
             
             spawn {
-                println("Starting initial archive scan...")
+                logger.debug("Starting initial archive scan...")
                 scanArchives()
-                println("Initial archive scan completed")
+                logger.debug("Initial archive scan completed")
             }
         }
     }
@@ -1854,7 +1833,7 @@ public class ShinobuService {
             scanThread = Option<String>.Some(threadId)
             
             spawn {
-                println("Starting scheduled scan with cron: ${scanIntervalCron}")
+                logger.info("Starting scheduled scan", ("cron", scanIntervalCron))
                 
                 // 简单的定时实现：每隔一定时间执行一次
                 // 实际应该解析 cron 表达式并精确调度
@@ -1875,11 +1854,11 @@ public class ShinobuService {
                         break
                     }
                     
-                    println("Executing scheduled scan...")
+                    logger.debug("Executing scheduled scan")
                     scanArchives()
                 }
                 
-                println("Scheduled scan thread stopped")
+                logger.info("Scheduled scan thread stopped")
             }
         }
     }
@@ -1894,7 +1873,7 @@ public class ShinobuService {
             thumbnailThread = Option<String>.Some(threadId)
             
             spawn {
-                println("Starting scheduled thumbnail generation with cron: ${thumbnailIntervalCron}")
+                logger.info("Starting scheduled thumbnail generation", ("cron", thumbnailIntervalCron))
                 
                 // 简单的定时实现：每隔一定时间执行一次
                 // 实际应该解析 cron 表达式并精确调度
@@ -1915,11 +1894,11 @@ public class ShinobuService {
                         break
                     }
                     
-                    println("Executing scheduled thumbnail generation...")
+                    logger.info("Executing scheduled thumbnail generation")
                     generateAllThumbnails()
                 }
                 
-                println("Scheduled thumbnail generation thread stopped")
+                logger.info("Scheduled thumbnail generation thread stopped")
             }
         }
     }
@@ -1934,7 +1913,7 @@ public class ShinobuService {
             dbCheckThread = Option<String>.Some(threadId)
             
             spawn {
-                println("Starting scheduled database check with cron: ${dbCheckIntervalCron}")
+                logger.info("Starting scheduled database check", ("cron", dbCheckIntervalCron))
                 
                 // 简单的定时实现：每隔一定时间执行一次
                 // 实际应该解析 cron 表达式并精确调度
@@ -1955,11 +1934,11 @@ public class ShinobuService {
                         break
                     }
                     
-                    println("Executing scheduled database check...")
+                    logger.info("Executing scheduled database check")
                     checkDatabaseFiles()
                 }
                 
-                println("Scheduled database check thread stopped")
+                logger.info("Scheduled database check thread stopped")
             }
         }
     }
@@ -1971,7 +1950,7 @@ public class ShinobuService {
         let archives = ArchiveDao.getAllArchives()
         var deletedCount: Int64 = 0
 
-        println("Starting database file check for ${archives.size} archives...")
+        logger.info("Starting database file check", ("count", archives.size.toString()))
 
         for (archive in archives) {
             // 正确构建完整路径：archivePath + relativePath + filename
@@ -1987,26 +1966,26 @@ public class ShinobuService {
                 fullFilePath = joinPath(archiveBasePath, archive.filename)
             }
 
-            println("Checking file: ${fullFilePath}")
+            logger.debug("Checking file", ("file", fullFilePath))
 
             // 检查文件是否存在（支持软链接）
             if (!fileExists(fullFilePath)) {
-                println("File not found, deleting from database: ${fullFilePath}")
+                logger.warn("File not found, deleting from database", ("file", fullFilePath))
                 if (ArchiveDao.delete(archive.id)) {
                     deletedCount++
-                    println("Deleted database record: ${archive.id} - ${archive.title}")
+                    logger.info("Deleted database record", ("id", archive.id.toString()), ("title", archive.title))
                 } else {
-                    println("Failed to delete database record: ${archive.id} - ${archive.title}")
+                    logger.error("Failed to delete database record", ("id", archive.id.toString()), ("title", archive.title))
                 }
             } else {
-                println("File exists: ${fullFilePath}")
+                logger.debug("File exists", ("file", fullFilePath))
             }
         }
 
         if (deletedCount > 0) {
-            println("Database check completed, deleted ${deletedCount} records for non-existent files")
+            logger.info("Database check completed with deletions", ("deleted_count", deletedCount.toString()))
         } else {
-            println("Database check completed, all files exist")
+            logger.info("Database check completed, all files exist")
         }
     }
     
@@ -2020,13 +1999,13 @@ public class ShinobuService {
             fileWatcherThread = Option<String>.Some(threadId)
             
             spawn {
-                println("Starting file watcher for directory: ${archivePath}")
-                println("File watcher polling interval: ${scanFallbackIntervalMs}ms")
+                logger.debug("Starting file watcher", ("directory", archivePath.toString()))
+                logger.debug("File watcher polling interval", ("interval_ms", scanFallbackIntervalMs.toString()))
                 
                 // 简单的轮询实现：每隔一定时间检查目录变化
                 // 实际应该使用文件系统监视 API
                 var lastFileCount = countFilesInDirectory(archivePath.toString())
-                println("Initial file count in archive directory: ${lastFileCount}")
+                logger.debug("Initial file count in archive directory", ("count", lastFileCount.toString()))
                 
                 runningMutex.lock()
                 let running = isTaskRunning
@@ -2046,18 +2025,18 @@ public class ShinobuService {
                     // 检查目录中的文件数量是否变化
                     let currentFileCount = countFilesInDirectory(archivePath.toString())
                     if (currentFileCount != lastFileCount) {
-                        println("File change detected: ${lastFileCount} -> ${currentFileCount} files, triggering scan...")
+                        logger.debug("File change detected, triggering scan", ("previous_count", lastFileCount.toString()), ("current_count", currentFileCount.toString()))
                         scanArchives()
                         lastFileCount = currentFileCount
                     } else {
-                        println("File watcher check: no changes detected (current count: ${currentFileCount})")
+                        logger.debug("File watcher check: no changes detected", ("count", currentFileCount.toString()))
                     }
                 }
                 
-                println("File watcher thread stopped")
+                logger.info("File watcher thread stopped")
             }
         } else {
-            println("File watcher is disabled")
+            logger.info("File watcher is disabled")
         }
     }
     
@@ -2103,7 +2082,7 @@ public class ShinobuService {
         fileWatcherThread = Option<String>.None
         dbCheckThread = Option<String>.None
         
-        println("All scheduled tasks stopped")
+        logger.info("All scheduled tasks stopped")
     }
     
     /**
@@ -2137,7 +2116,7 @@ public class ShinobuService {
                 }
             }
         } catch (e: Exception) {
-            println("Error counting files in directory: ${dirPath}")
+            logger.error("Error counting files in directory", ("directory", dirPath))
         }
         
         return count
@@ -2147,7 +2126,7 @@ public class ShinobuService {
      * 生成所有缺失的缩略图
      */
     private func generateAllThumbnails() {
-        println("Starting thumbnail generation for archives without thumbnails...")
+        logger.info("Starting thumbnail generation for archives without thumbnails")
         var processedCount: Int64 = 0
         var skippedCount: Int64 = 0
         var errorCount: Int64 = 0
@@ -2155,7 +2134,7 @@ public class ShinobuService {
         try {
             // 获取所有没有缩略图的归档记录
             let archives = ArchiveDao.getArchivesWithoutThumbnails()
-            println("Found ${archives.size} archives without thumbnails")
+            logger.info("Found archives without thumbnails", ("count", archives.size.toString()))
             
             for (archive in archives) {
                 // 组装完整路径：archivePath + relative_path + filename
@@ -2167,7 +2146,7 @@ public class ShinobuService {
                 let archiveFilePath = joinPath(dirPath, archive.filename)
 
                 if (fileExists(archiveFilePath)) {
-                    println("Generating thumbnail for: ${archive.filename} (${archive.id})")
+                    logger.info("Generating thumbnail", ("file", archive.filename), ("id", archive.id))
                     // generateThumbnail 函数内部已经处理了软链接解析
                     let result = generateThumbnail(archiveFilePath, archive.id)
                     
@@ -2175,24 +2154,24 @@ public class ShinobuService {
                         // 更新数据库中的缩略图hash
                         if (ArchiveDao.updateThumbHash(archive.id, archive.id)) {
                             processedCount++
-                            println("Thumbnail generated and database updated for: ${archive.filename}")
+                            logger.info("Thumbnail generated and database updated", ("file", archive.filename))
                         } else {
                             errorCount++
-                            println("Failed to update database for: ${archive.filename}")
+                            logger.error("Failed to update database", ("file", archive.filename))
                         }
                     } else {
                         errorCount++
-                        println("Failed to generate thumbnail for ${archive.filename}: ${result.error}")
+                        logger.error("Failed to generate thumbnail", ("file", archive.filename), ("error", result.error))
                     }
                 } else {
                     skippedCount++
-                    println("Archive file not found, skipping: ${archive.relative_path}")
+                    logger.warn("Archive file not found, skipping", ("file", archive.relative_path))
                 }
             }
             
-            println("Thumbnail generation completed: ${processedCount} generated, ${skippedCount} skipped, ${errorCount} errors")
+            logger.info("Thumbnail generation completed", ("generated", processedCount.toString()), ("skipped", skippedCount.toString()), ("errors", errorCount.toString()))
         } catch (e: Exception) {
-            println("Error generating thumbnails: ${e}")
+            logger.error("Error generating thumbnails", ("error", e.toString()))
         }
     }
     
@@ -2361,7 +2340,7 @@ public class ShinobuService {
             case Option<String>.Some(_) =>
                 // 线程会在 isTaskRunning = false 时自动退出
                 fileWatcherThread = Option<String>.None
-                println("File watcher stopped")
+                logger.info("File watcher stopped")
             case Option<String>.None =>
                 ()
         }

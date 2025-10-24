@@ -2,9 +2,11 @@ package lrr4cj.dao
 
 import std.database.sql.*
 import lrr4cj.config.*
+import lrr4cj.utils.*
 import std.collection.*
 import std.io.*
 import std.time.*
+import stdx.log.*
 
 /**
  * 标签数据访问对象
@@ -61,11 +63,11 @@ public class TagDao {
                 conn.close()
                 true
             } catch (e: Exception) {
-                println("Error updating archive tags: ${e}")
+                getLogger("tag_dao").error("Error updating archive tags", ("error", e.message))
                 try {
                     conn.close()
                 } catch (closeException: Exception) {
-                    println("Error closing database connection: ${closeException}")
+                    getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
                 }
                 false
             }
@@ -140,7 +142,7 @@ public class TagDao {
                 
                 ""
             } catch (e: Exception) {
-                println("Error getting archive tags: ${e}")
+                getLogger("tag_dao").error("Error getting archive tags", ("error", e.message))
                 ""
             }
         }

@@ -2,9 +2,11 @@ package lrr4cj.dao
 
 import std.database.sql.*
 import lrr4cj.config.*
+import lrr4cj.utils.*
 import std.collection.*
 import std.io.*
 import std.time.*
+import stdx.log.*
 
 /**
  * 归档数据结构
@@ -87,12 +89,12 @@ public class ArchiveDao {
                     conn.close()
                     return archives.toArray()
                 } catch (e: Exception) {
-                    println("查询归档失败: ${e}")
+                    getLogger("archive_dao").error("查询归档失败", ("error", e.message))
                     conn.close()
                     return Array<ArchiveData>()
                 }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return Array<ArchiveData>()
         }
     }
@@ -131,10 +133,10 @@ public class ArchiveDao {
 
                 conn.close()
             } catch (e: Exception) {
-                println("查询归档失败: ${e}")
+                getLogger("archive_dao").error("查询归档失败", ("error", e.message))
                 conn.close()
             }
-            case None => println("无法连接到数据库")
+            case None => getLogger("archive_dao").error("无法连接到数据库")
         }
         return ArchiveData()
     }
@@ -152,7 +154,15 @@ public class ArchiveDao {
             case Some(conn) =>
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                 try {
-                println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}', newOnly=${newOnly}, untaggedOnly=${untaggedOnly}")
+                getLogger("archive_dao").debug("开始搜索归档",
+                                       ("filter", filter),
+                                       ("category", category),
+                                       ("start", start.toString()),
+                                       ("count", count.toString()),
+                                       ("sortby", sortby),
+                                       ("order", order),
+                                       ("newOnly", newOnly.toString()),
+                                       ("untaggedOnly", untaggedOnly.toString()))
                 
                 // 首先获取总记录数
                 var countSql = "SELECT COUNT(*) FROM archives_with_tags"
@@ -184,7 +194,7 @@ public class ArchiveDao {
                     countSql += " WHERE " + whereClause
                 }
                 
-                println("执行计数SQL: ${countSql}")
+                getLogger("archive_dao").debug("执行计数SQL", ("sql", countSql))
                 let countStmt = conn.prepareStatement(countSql)
                 var totalCount = 0
                 
@@ -196,9 +206,9 @@ public class ArchiveDao {
                 let countRs = countStmt.query()
                 if (countRs.next()) {
                     totalCount = countRs.getOrNull<Int64>(0) ?? 0
-                    println("获取到总记录数: ${totalCount}")
+                    getLogger("archive_dao").debug("获取到总记录数", ("count", totalCount.toString()))
                 } else {
-                    println("无法获取总记录数")
+                    getLogger("archive_dao").error("无法获取总记录数")
                 }
                 // 确保关闭第一个查询的结果集
                 countRs.close()
@@ -248,8 +258,8 @@ public class ArchiveDao {
                 sql += " LIMIT ${count} OFFSET ${start}"
                 
                 // 打印SQL语句用于调试
-                println("执行数据SQL: ${sql}")
-                println("参数 - filter: '${filter}', start: ${start}, count: ${count}")
+                getLogger("archive_dao").debug("执行数据SQL", ("sql", sql))
+                getLogger("archive_dao").debug("SQL参数", ("filter", filter), ("start", start.toString()), ("count", count.toString()))
                 
                 let stmt = conn.prepareStatement(sql)
                 
@@ -259,7 +269,7 @@ public class ArchiveDao {
                 }
                 
                 let rs = stmt.query()
-                println("SQL查询执行完成")
+                getLogger("archive_dao").debug("SQL查询执行完成")
 
                 while (rs.next()) {
                     let archive = ArchiveData()
@@ -280,22 +290,22 @@ public class ArchiveDao {
                         archive.progress = rs.getOrNull<Int32>(12) ?? 0
                         archives.add(archive)
                     } catch (e: Exception) {
-                        println("读取字段时出错: ${e}")
+                        getLogger("archive_dao").error("读取字段时出错", ("error", e.message))
                         throw e
                     }
                 }
 
                 let resultArray = archives.toArray()
-                println("返回${resultArray.size}条记录，总记录数: ${totalCount}")
+                getLogger("archive_dao").info("查询完成", ("records", resultArray.size.toString()), ("total_count", totalCount.toString()))
                 conn.close()
                 return (resultArray, totalCount)
             } catch (e: Exception) {
-                println("搜索归档失败: ${e}")
+                getLogger("archive_dao").error("搜索归档失败", ("error", e.message))
                 conn.close()
                 return (Array<ArchiveData>(), 0)
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return (Array<ArchiveData>(), 0)
         }
     }
@@ -328,12 +338,12 @@ public class ArchiveDao {
                 conn.close()
                 return true  // 简化实现，假设更新成功
             } catch (e: Exception) {
-                println("创建归档失败: ${e}")
+                getLogger("archive_dao").error("创建归档失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -365,15 +375,15 @@ public class ArchiveDao {
                     
                     let result = stmt.update()
                     conn.close()
-                    println("Successfully inserted archive record: ${archiveId}")
+                    getLogger("archive_dao").info("归档记录插入成功", ("archive_id", archiveId))
                     return true
                 } catch (e: Exception) {
-                    println("Failed to execute insert statement: ${e.message}")
+                    getLogger("archive_dao").error("插入语句执行失败", ("error", e.message))
                     conn.close()
                     return false
                 }
             case None =>
-                println("Failed to connect to database")
+                getLogger("archive_dao").error("Failed to connect to database")
                 return false
         }
     }
@@ -406,12 +416,12 @@ public class ArchiveDao {
                 // 简化实现，假设没有异常就是成功
                 return true
             } catch (e: Exception) {
-                println("更新归档失败: ${e}")
+                getLogger("archive_dao").error("更新归档失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -430,12 +440,12 @@ public class ArchiveDao {
                 conn.close()
                 return true  // 简化实现，假设更新成功
             } catch (e: Exception) {
-                println("删除归档失败: ${e}")
+                getLogger("archive_dao").error("删除归档失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -455,12 +465,12 @@ public class ArchiveDao {
                 conn.close()
                 return true
             } catch (e: Exception) {
-                println("更新归档页数失败: ${e}")
+                getLogger("archive_dao").error("更新归档页数失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -480,12 +490,12 @@ public class ArchiveDao {
                 conn.close()
                 return true
             } catch (e: Exception) {
-                println("更新归档缩略图hash失败: ${e}")
+                getLogger("archive_dao").error("更新归档缩略图hash失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -506,12 +516,12 @@ public class ArchiveDao {
                 conn.close()
                 return true
             } catch (e: Exception) {
-                println("更新归档详情失败: ${e}")
+                getLogger("archive_dao").error("更新归档详情失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -531,12 +541,12 @@ public class ArchiveDao {
                 conn.close()
                 return true
             } catch (e: Exception) {
-                println("更新归档相对路径失败: ${e}")
+                getLogger("archive_dao").error("更新归档相对路径失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -573,12 +583,12 @@ public class ArchiveDao {
                 conn.close()
                 return archives.toArray()
             } catch (e: Exception) {
-                println("获取无缩略图归档失败: ${e}")
+                getLogger("archive_dao").error("获取无缩略图归档失败", ("error", e.message))
                 conn.close()
                 return Array<ArchiveData>()
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return Array<ArchiveData>()
         }
     }
@@ -602,12 +612,12 @@ public class ArchiveDao {
                 conn.close()
                 return count > 0
             } catch (e: Exception) {
-                println("检查归档存在性失败: ${e}")
+                getLogger("archive_dao").error("检查归档存在性失败", ("error", e.message))
                 conn.close()
                 return false
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
     }
@@ -646,12 +656,12 @@ public class ArchiveDao {
                     return None
                 }
             } catch (e: Exception) {
-                println("根据路径获取归档失败: ${e}")
+                getLogger("archive_dao").error("根据路径获取归档失败", ("error", e.message))
                 conn.close()
                 return None
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return None
         }
     }
@@ -691,12 +701,12 @@ public class ArchiveDao {
                     return None
                 }
             } catch (e: Exception) {
-                println("根据路径和文件名获取归档失败: ${e}")
+                getLogger("archive_dao").error("根据路径和文件名获取归档失败", ("error", e.message))
                 conn.close()
                 return None
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return None
         }
     }
@@ -721,12 +731,12 @@ public class ArchiveDao {
                 conn.close()
                 return ""
             } catch (e: Exception) {
-                println("获取缩略图hash失败: ${e}")
+                getLogger("archive_dao").error("获取缩略图hash失败", ("error", e.message))
                 conn.close()
                 return ""
             }
             case None =>
-                println("无法连接到数据库")
+                getLogger("archive_dao").error("无法连接到数据库")
                 return ""
         }
     }
@@ -773,10 +783,10 @@ public class ArchiveDao {
                 stmt.close()
                 conn.close()
             } catch (e: Exception) {
-                println("查询归档元数据失败: ${e}")
+                getLogger("archive_dao").error("查询归档元数据失败", ("error", e.message))
                 conn.close()
             }
-            case None => println("无法连接到数据库")
+            case None => getLogger("archive_dao").error("无法连接到数据库")
         }
         return ArchiveData()
     }

@@ -1,6 +1,7 @@
 package lrr4cj.utils
 
 import std.fs.*
+import stdx.log.*
 
 /**
  * 文件工具类
@@ -57,10 +58,10 @@ public class FileUtils {
             if (!exists(path)) {
                 // 使用 Directory.create 创建目录
                 Directory.create(path, recursive: true)
-                println("Created directory: ${path}")
+                getLogger("file_utils").info("Created directory", ("path", path.toString()))
             }
         } catch (e: Exception) {
-            println("Failed to create directory ${path}: ${e}")
+            getLogger("file_utils").error("Failed to create directory", ("path", path.toString()), ("error", e.message))
         }
     }
     
@@ -84,8 +85,7 @@ public class FileUtils {
      * 支持递归解析软链接（最多10层，防止循环）
      */
     public static func resolvePath(path: String): String {
-        println("=== RESOLVE PATH START ===")
-        println("Original path: ${path}")
+        getLogger("file_utils").debug("=== RESOLVE PATH START ===", ("original_path", path))
 
         const MAX_SYMLINK_DEPTH = 10
         var currentPath = path
@@ -93,60 +93,59 @@ public class FileUtils {
 
         try {
             while (depth < MAX_SYMLINK_DEPTH) {
-                println("resolvePath: Level ${depth}, current path: ${currentPath}")
+                getLogger("file_utils").debug("resolvePath: Level", ("depth", depth.toString()), ("current_path", currentPath.toString()))
 
                 let filePath = Path(currentPath)
                 if (!exists(filePath)) {
-                    println("resolvePath: Path does not exist: ${currentPath}")
+                    getLogger("file_utils").debug("resolvePath: Path does not exist", ("path", currentPath.toString()))
                     break
                 }
 
                 let fileInfo = FileInfo(filePath)
-                println("resolvePath: FileInfo - isSymbolicLink: ${fileInfo.isSymbolicLink()}, isDirectory: ${fileInfo.isDirectory()}")
+                getLogger("file_utils").debug("resolvePath: FileInfo", ("is_symbolic_link", fileInfo.isSymbolicLink().toString()), ("is_directory", fileInfo.isDirectory().toString()))
 
                 // 如果是软链接，获取其目标路径
                 if (fileInfo.isSymbolicLink()) {
                     try {
                         let targetPath = SymbolicLink.readFrom(currentPath, recursive: false)
                         let newTarget = targetPath.toString()
-                        println("resolvePath: Symlink target: ${newTarget}")
+                        getLogger("file_utils").debug("resolvePath: Symlink target", ("target", newTarget.toString()))
 
                         // 检查是否为绝对路径
                         if (newTarget.startsWith("/")) {
                             currentPath = newTarget
-                            println("resolvePath: Absolute target, new path: ${currentPath}")
+                            getLogger("file_utils").debug("resolvePath: Absolute target", ("new_path", currentPath.toString()))
                         } else {
                             // 相对路径需要基于当前目录的父目录进行解析
                             let parentDir = getParentDirectory(currentPath)
                             currentPath = joinPath(parentDir, newTarget)
-                            println("resolvePath: Relative target, parent: ${parentDir}, new path: ${currentPath}")
+                            getLogger("file_utils").debug("resolvePath: Relative target", ("parent", parentDir.toString()), ("new_path", currentPath.toString()))
                         }
 
                         depth++
-                        println("resolvePath: Resolved symlink level ${depth}: ${currentPath}")
+                        getLogger("file_utils").debug("resolvePath: Resolved symlink", ("depth", depth.toString()), ("path", currentPath.toString()))
                     } catch (e: FSException) {
                         // 如果解析失败，返回当前路径
-                        println("resolvePath: Failed to resolve symlink at ${currentPath}: ${e.message}")
+                        getLogger("file_utils").warn("resolvePath: Failed to resolve symlink", ("path", currentPath.toString()), ("error", e.message))
                         break
                     }
                 } else {
                     // 不是软链接，停止解析
-                    println("resolvePath: Not a symlink, final path: ${currentPath}")
+                    getLogger("file_utils").debug("resolvePath: Not a symlink", ("final_path", currentPath.toString()))
                     break
                 }
             }
 
             if (depth >= MAX_SYMLINK_DEPTH) {
-                println("resolvePath: Warning: Maximum symlink depth (${MAX_SYMLINK_DEPTH}) reached for path: ${path}")
+                getLogger("file_utils").warn("resolvePath: Maximum symlink depth reached", ("max_depth", MAX_SYMLINK_DEPTH.toString()), ("path", path))
             }
 
-            println("resolvePath: Final resolved path: ${currentPath}")
-            println("=== RESOLVE PATH END ===")
+            getLogger("file_utils").debug("=== RESOLVE PATH END ===", ("final_resolved_path", currentPath.toString()))
             return currentPath
         } catch (e: Exception) {
             // 如果出错，返回原路径
-            println("resolvePath: Error resolving path ${path}: ${e.message}")
-            println("=== RESOLVE PATH END ===")
+            getLogger("file_utils").error("resolvePath: Error resolving path", ("path", path), ("error", e.message))
+            getLogger("file_utils").debug("=== RESOLVE PATH END ===")
             return path
         }
     }
