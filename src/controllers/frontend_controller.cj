@@ -12,156 +12,113 @@ public class FrontendController {
     /**
      * 统一的路径服务函数
      * 根据请求路径自动判断是文件还是目录，目录时自动添加index.html
+     * @param baseDir 前端静态文件的基础目录，默认为 "frontend/out"
      */
-    public static func servePath(ctx: JoyContext) {
+    public static func servePath(ctx: JoyContext, baseDir!: String = "frontend/out") {
         try {
-            // 获取通配符路径参数，如果没有则为空字符串（根路径）
+            // 获取并清理路径
             let path = ctx.getParam("*") ?? ""
-            println("Request path: ${path}")
-            
-            // 移除查询参数，只保留路径部分
-            let cleanPath = if (path.contains("?")) {
-                path.split("?")[0]
-            } else {
-                path
-            }
-            println("Clean path: ${cleanPath}")
+            let cleanPath = if (path.contains("?")) { path.split("?")[0] } else { path }
+            println("Request path: ${path}, Clean path: ${cleanPath}, Base dir: ${baseDir}")
 
-            // 特殊处理：如果路径为空或为"/"，直接使用index.html
-            var filePath = if (cleanPath.isEmpty() || cleanPath == "/") {
+            // 处理根路径
+            if (cleanPath.isEmpty() || cleanPath == "/") {
                 println("Root path request, using index.html")
-                "frontend/out/index.html"
-            } else {
-                // 构建完整的文件路径
-                let fullPath = "frontend/out/${cleanPath}"
-                println("Initial file path: ${fullPath}")
+                return serveFile(ctx, "${baseDir}/index.html")
+            }
 
-                // 检查文件是否存在且是文件（不是目录）
-                if (exists(fullPath) && !FileInfo(fullPath).isDirectory()) {
-                    fullPath
-                } else {
-                    // 如果是目录或文件不存在，尝试添加index.html
-                    var indexPath = fullPath
-                    if (!indexPath.endsWith("/")) {
-                        indexPath = indexPath + "/"
-                    }
-                    indexPath = indexPath + "index.html"
-                    println("Directory or file not found, trying with index.html: ${indexPath}")
-                    indexPath
+            // 构建基础路径
+            let basePath = "${baseDir}/${cleanPath}"
+            println("Initial file path: ${basePath}")
+
+            // 尝试直接访问文件
+            if (exists(basePath) && !FileInfo(basePath).isDirectory()) {
+                return serveFile(ctx, basePath)
+            }
+
+            // 尝试React路由映射（针对.txt文件）
+            if (cleanPath.endsWith(".txt")) {
+                let dirPath = cleanPath.replace(".txt", "")
+                let txtIndexPath = "${baseDir}/${dirPath}/index.txt"
+                println("Trying React route mapping: ${txtIndexPath}")
+                
+                if (exists(txtIndexPath)) {
+                    return serveFile(ctx, txtIndexPath)
                 }
             }
 
-            println("Final file path: ${filePath}")
+            // 尝试添加index.html
+            let indexPath = if (basePath.endsWith("/")) { 
+                basePath + "index.html" 
+            } else { 
+                basePath + "/index.html" 
+            }
+            println("Directory or file not found, trying with index.html: ${indexPath}")
 
-            // 再次检查文件是否存在
-            if (!exists(filePath)) {
-                println("File not found: ${filePath}")
-                FrontendController.serve404(ctx)
-                return
+            if (exists(indexPath)) {
+                return serveFile(ctx, indexPath)
             }
 
-            let file = File(Path(filePath), Read)
-            let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
-            let bytesRead = file.read(buffer)
-            file.close()
-
-            if (bytesRead > 0) {
-                // 根据文件扩展名设置Content-Type
-                let contentType = getContentType(filePath)
-                ctx.header("Content-Type", contentType)
-
-                ctx.data(buffer.slice(0, bytesRead))
-            } else {
-                FrontendController.serve404(ctx)
-            }
+            // 所有尝试都失败，返回404
+            println("File not found: ${indexPath}")
+            FrontendController.serve404(ctx)
+            
         } catch (ex: Exception) {
             ctx.status(500).string("Error serving file: ${ex.message}")
         }
     }
 
     /**
-     * 服务指定路径 - 为了兼容性保留
-     * @deprecated 使用 servePath(ctx) 替代
+     * 服务文件内容
      */
-    public static func servePathWithParam(ctx: JoyContext, path: String) {
-        try {
-            // 模拟通配符参数，然后调用统一函数
-            // 这里我们创建一个临时的参数处理
-            let filePath = if (path.isEmpty()) { "" } else { path }
+    private static func serveFile(ctx: JoyContext, filePath: String) {
+        println("Serving file: ${filePath}")
+        
+        if (!exists(filePath)) {
+            println("File not found: ${filePath}")
+            FrontendController.serve404(ctx)
+            return
+        }
 
-            // 构建完整的文件路径
-            var fullFilePath = "frontend/out/${filePath}"
+        let file = File(Path(filePath), Read)
+        let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
+        let bytesRead = file.read(buffer)
+        file.close()
 
-            // 如果是目录路径，添加index.html
-            if (!fullFilePath.endsWith("/") && !fullFilePath.endsWith(".html")) {
-                fullFilePath = fullFilePath + "/index.html"
-            } else if (!fullFilePath.endsWith(".html")) {
-                fullFilePath = fullFilePath + "index.html"
-            }
-
-            if (!exists(fullFilePath)) {
-                ctx.status(404).string("File not found: ${path}")
-                return
-            }
-
-            let file = File(Path(fullFilePath), Read)
-            let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
-            let bytesRead = file.read(buffer)
-            file.close()
-
-            if (bytesRead > 0) {
-                ctx.header("Content-Type", "text/html; charset=utf-8")
-                ctx.data(buffer.slice(0, bytesRead))
-            } else {
-                ctx.status(404).string("Failed to read file: ${path}")
-            }
-        } catch (ex: Exception) {
-            ctx.status(500).string("Error serving path: ${ex.message}")
+        if (bytesRead > 0) {
+            let contentType = getContentType(filePath)
+            ctx.header("Content-Type", contentType)
+            ctx.data(buffer.slice(0, bytesRead))
+        } else {
+            FrontendController.serve404(ctx)
         }
     }
 
     /**
-     * 服务前端首页 - 为了兼容性保留
-     * @deprecated 使用 servePath(ctx) 替代
-     */
-    public static func serveIndex(ctx: JoyContext) {
-        servePath(ctx)
-    }
-
-    /**
-     * 服务指定路径 - 为了兼容性保留（重命名以避免冲突）
-     * @deprecated 使用 servePath(ctx) 替代
-     */
-    public static func servePathDeprecated(ctx: JoyContext, path: String) {
-        servePathWithParam(ctx, path)
-    }
-
-    /**
-     * 服务静态资源 - 为了兼容性保留
-     * @deprecated 使用 servePath(ctx) 替代
-     */
-    public static func serveStatic(ctx: JoyContext) {
-        servePath(ctx)
-    }
-
-    /**
      * 服务404
+     * @param baseDir 前端静态文件的基础目录，默认为 "frontend/out"
      */
-    public static func serve404(ctx: JoyContext) {
+    public static func serve404(ctx: JoyContext, baseDir!: String = "frontend/out") {
         try {
-            let file = File(Path("frontend/404/index.html"), Read)
-            let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
-            let bytesRead = file.read(buffer)
-            file.close()
+            // 尝试使用自定义404页面
+            let custom404Path = "${baseDir}/404/index.html"
+            if (exists(custom404Path)) {
+                let file = File(Path(custom404Path), Read)
+                let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
+                let bytesRead = file.read(buffer)
+                file.close()
 
-            if (bytesRead > 0) {
-                ctx.header("Content-Type", "text/html; charset=utf-8")
-                ctx.status(404).data(buffer.slice(0, bytesRead))
-            } else {
-                ctx.status(404).string("Failed to read index file")
+                if (bytesRead > 0) {
+                    ctx.header("Content-Type", "text/html; charset=utf-8")
+                    ctx.status(404).data(buffer.slice(0, bytesRead))
+                    return
+                }
             }
+
+            // 如果自定义404不存在，返回默认错误信息
+            ctx.status(404).string("404 - Page not found")
         } catch (ex: Exception) {
-            ctx.status(500).string("Error serving index: ${ex.message}")
+            ctx.status(500).string("Error serving 404 page: ${ex.message}")
         }
     }
 
