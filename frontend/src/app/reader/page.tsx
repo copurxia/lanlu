@@ -171,9 +171,14 @@ function ReaderContent() {
     
     // 如果是条漫模式且提供了图片元素，记录图片高度
     if (readingMode === 'webtoon' && imgElement) {
-      const containerWidth = Math.min(webtoonContainerRef.current?.clientWidth || window.innerWidth, window.innerWidth * 0.9);
+      // 优化PC端显示：为PC端设置更合适的宽度限制
+      const isPC = window.innerWidth >= 1024; // PC屏幕判断
+      const maxContainerWidth = isPC
+        ? Math.min(800, window.innerWidth * 0.8) // PC端最大800px，或屏幕宽度的80%
+        : Math.min(window.innerWidth * 0.95, 1200); // 移动端保持原逻辑
+
       const aspectRatio = imgElement.naturalHeight / imgElement.naturalWidth;
-      const imageHeight = containerWidth * aspectRatio;
+      const imageHeight = maxContainerWidth * aspectRatio;
       
       setImageHeights(prev => {
         const newHeights = [...prev];
@@ -204,19 +209,19 @@ function ReaderContent() {
   // 计算可见范围的函数
   const calculateVisibleRange = useCallback((scrollTop: number, containerHeight: number) => {
     if (pages.length === 0 || imageHeights.length === 0) {
-      return { start: 0, end: 2 };
+      return { start: 0, end: Math.min(2, pages.length - 1) };
     }
 
     let accumulatedHeight = 0;
     let startIndex = 0;
-    let endIndex = 0;
-    const bufferHeight = containerHeight * 1.5; // 减少缓冲区到1.5倍屏幕高度，减少页面长度
+    let endIndex = pages.length - 1;
+    const bufferHeight = containerHeight * 2; // 增加缓冲区到2倍屏幕高度，确保平滑滚动
 
     // 找到开始索引
     for (let i = 0; i < imageHeights.length; i++) {
-      const imageHeight = imageHeights[i] || containerHeight; // 使用容器高度作为默认值
-      if (accumulatedHeight + imageHeight > scrollTop - bufferHeight / 2) {
-        startIndex = Math.max(0, i - 1); // 减少前置页面数量
+      const imageHeight = imageHeights[i] || containerHeight;
+      if (accumulatedHeight + imageHeight > scrollTop - bufferHeight) {
+        startIndex = Math.max(0, i - 2); // 增加前置页面数量，确保平滑
         break;
       }
       accumulatedHeight += imageHeight;
@@ -227,24 +232,25 @@ function ReaderContent() {
     for (let i = 0; i < imageHeights.length; i++) {
       const imageHeight = imageHeights[i] || containerHeight;
       accumulatedHeight += imageHeight;
-      if (accumulatedHeight > scrollTop + containerHeight + bufferHeight / 2) {
-        endIndex = Math.min(imageHeights.length - 1, i + 1); // 减少后置页面数量
+      if (accumulatedHeight > scrollTop + containerHeight + bufferHeight) {
+        endIndex = Math.min(imageHeights.length - 1, i + 2); // 增加后置页面数量，确保平滑
         break;
       }
     }
 
-    // 如果没有找到结束索引，说明到了底部
-    if (endIndex === 0) {
-      endIndex = Math.min(imageHeights.length - 1, startIndex + 3); // 减少默认范围
+    // 确保范围有效且合理
+    startIndex = Math.max(0, startIndex);
+    endIndex = Math.min(pages.length - 1, endIndex);
+    
+    // 确保至少显示3页，除非总页数不足
+    if (endIndex - startIndex < 2 && pages.length > 2) {
+      const center = Math.floor((startIndex + endIndex) / 2);
+      startIndex = Math.max(0, center - 1);
+      endIndex = Math.min(pages.length - 1, center + 1);
     }
 
-    // 确保至少渲染当前页和前后各一页
-    const currentPageIndex = Math.floor(scrollTop / (containerHeight * 0.8));
-    startIndex = Math.min(startIndex, Math.max(0, currentPageIndex - 1));
-    endIndex = Math.max(endIndex, Math.min(pages.length - 1, currentPageIndex + 1));
-
     return { start: startIndex, end: endIndex };
-  }, [pages.length, imageHeights.length]);
+  }, [pages.length, imageHeights]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (e.target instanceof HTMLInputElement) return;
@@ -444,16 +450,19 @@ function ReaderContent() {
   useEffect(() => {
     if (pages.length > 0 && imageHeights.length !== pages.length) {
       // 使用更合理的默认高度初始化数组
-      const containerWidth = Math.min(window.innerWidth * 0.9, window.innerWidth);
-      const defaultHeight = Math.min(window.innerHeight * 0.8, containerWidth * 1.2); // 减少默认高度
+      const isPC = window.innerWidth >= 1024; // PC屏幕判断
+      const containerWidth = isPC
+        ? Math.min(800, window.innerWidth * 0.8) // PC端最大800px，或屏幕宽度的80%
+        : Math.min(window.innerWidth * 0.95, window.innerWidth);
+      const defaultHeight = Math.min(window.innerHeight * 0.7, containerWidth * 1.5); // PC端降低默认高度
       setImageHeights(new Array(pages.length).fill(defaultHeight));
       
       // 设置初始容器高度
-      const viewportHeight = window.innerHeight - 140; // 减去工具栏等高度
+      const viewportHeight = window.innerHeight - 100; // 优化工具栏高度计算
       setContainerHeight(viewportHeight);
       
       // 设置初始可见范围
-      setVisibleRange({ start: 0, end: 1 }); // 减少初始渲染范围
+      setVisibleRange({ start: 0, end: Math.min(3, pages.length - 1) }); // 增加初始渲染范围
     }
   }, [pages.length, imageHeights.length]);
 
@@ -561,14 +570,25 @@ function ReaderContent() {
               const imgElement = entry.target as HTMLImageElement;
               const index = parseInt(imgElement.dataset.index || '0');
               
-              // 如果图片进入视窗，开始加载
-              setImagesLoading(prev => {
-                const updated = new Set(prev);
-                if (!loadedImages.has(index)) {
+              // 如果图片进入视窗且未加载，开始加载
+              if (!loadedImages.has(index) && !imagesLoading.has(index)) {
+                setImagesLoading(prev => {
+                  const updated = new Set(prev);
                   updated.add(index);
-                }
-                return updated;
-              });
+                  return updated;
+                });
+                
+                // 预加载相邻图片
+                [index - 1, index + 1].forEach(adjacentIndex => {
+                  if (adjacentIndex >= 0 && adjacentIndex < pages.length && !loadedImages.has(adjacentIndex) && !imagesLoading.has(adjacentIndex)) {
+                    setImagesLoading(prev => {
+                      const updated = new Set(prev);
+                      updated.add(adjacentIndex);
+                      return updated;
+                    });
+                  }
+                });
+              }
               
               // 加载后停止观察该元素
               observerRef.current?.unobserve(imgElement);
@@ -576,13 +596,13 @@ function ReaderContent() {
           });
         },
         {
-          rootMargin: '800px' // 增加预加载距离到800px，防止快速翻页时出现白色区域
+          rootMargin: '1000px 0px 1000px 0px' // 增加预加载距离，优化快速滚动体验
         }
       );
 
-      // 只观察可见范围内的图片元素
+      // 观察可见范围内的所有图片元素
       imageRefs.current.forEach((img, index) => {
-        if (img && !imagesLoading.has(index) && !loadedImages.has(index) && index >= visibleRange.start && index <= visibleRange.end) {
+        if (img && index >= visibleRange.start && index <= visibleRange.end) {
           img.dataset.index = index.toString();
           observerRef.current?.observe(img);
         }
@@ -592,7 +612,7 @@ function ReaderContent() {
     return () => {
       observerRef.current?.disconnect();
     };
-  }, [readingMode, imagesLoading, visibleRange, loadedImages]);
+  }, [readingMode, imagesLoading, visibleRange, loadedImages, pages.length]);
 
   // 清理防抖定时器
   useEffect(() => {
@@ -609,9 +629,12 @@ function ReaderContent() {
       imageRefs.current.forEach((img, index) => {
         if (img && img.complete && img.naturalHeight > 0 && !imageHeights[index]) {
           // 如果图片已经加载完成但还没有记录高度，计算高度
-          const containerWidth = Math.min(webtoonContainerRef.current?.clientWidth || window.innerWidth, window.innerWidth * 0.9);
+          const isPC = window.innerWidth >= 1024; // PC屏幕判断
+          const maxContainerWidth = isPC
+            ? Math.min(800, window.innerWidth * 0.8) // PC端最大800px，或屏幕宽度的80%
+            : Math.min(window.innerWidth * 0.95, 1200); // 移动端保持原逻辑
           const aspectRatio = img.naturalHeight / img.naturalWidth;
-          const imageHeight = containerWidth * aspectRatio;
+          const imageHeight = maxContainerWidth * aspectRatio;
           
           setImageHeights(prev => {
             const newHeights = [...prev];
@@ -702,27 +725,36 @@ function ReaderContent() {
         </div>
       </div>
 
-      {/* 悬浮进度条 - 只在非条漫模式显示 */}
-      {readingMode !== 'webtoon' && (
-        <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-background/95 backdrop-blur-sm border border-border rounded-full px-6 py-3 transition-opacity duration-300 z-50 shadow-lg ${showToolbar ? 'opacity-100' : 'opacity-0'}`}>
-          <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-2">
-              <Slider
-                value={[currentPage]}
-                onValueChange={(value) => {
-                  setCurrentPage(value[0]);
-                  resetTransform();
-                }}
-                max={pages.length - 1}
-                min={0}
-                step={1}
-                className="w-40 sm:w-64 h-2"
-              />
-              <span className="text-sm whitespace-nowrap font-medium text-foreground">{currentPage + 1}/{pages.length}</span>
-            </div>
+      {/* 悬浮进度条 - 所有阅读模式都显示 */}
+      <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 bg-background/95 backdrop-blur-sm border border-border rounded-full px-6 py-3 transition-opacity duration-300 z-50 shadow-lg ${showToolbar ? 'opacity-100' : 'opacity-0'}`}>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <Slider
+              value={[currentPage]}
+              onValueChange={(value) => {
+                const newPage = value[0];
+                setCurrentPage(newPage);
+                resetTransform();
+
+                // 条漫模式下需要滚动到对应位置
+                if (readingMode === 'webtoon' && webtoonContainerRef.current) {
+                  let accumulatedHeight = 0;
+                  for (let i = 0; i < newPage; i++) {
+                    const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+                    accumulatedHeight += imageHeight;
+                  }
+                  webtoonContainerRef.current.scrollTop = accumulatedHeight;
+                }
+              }}
+              max={pages.length - 1}
+              min={0}
+              step={1}
+              className="w-40 sm:w-64 h-2"
+            />
+            <span className="text-sm whitespace-nowrap font-medium text-foreground">{currentPage + 1}/{pages.length}</span>
           </div>
         </div>
-      )}
+      </div>
 
       {/* 主要阅读区域 */}
       <div 
@@ -794,10 +826,20 @@ function ReaderContent() {
               }
               
               scrollTimeoutRef.current = setTimeout(() => {
-                const scrollPercentage = container.scrollTop / (container.scrollHeight - container.clientHeight);
-                const pageIndex = Math.floor(scrollPercentage * pages.length);
-                if (pageIndex !== currentPage && pageIndex >= 0 && pageIndex < pages.length) {
-                  setCurrentPage(pageIndex);
+                // 更精确的页面索引计算
+                let accumulatedHeight = 0;
+                let newPageIndex = 0;
+                for (let i = 0; i < imageHeights.length; i++) {
+                  const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+                  accumulatedHeight += imageHeight;
+                  if (accumulatedHeight > container.scrollTop + container.clientHeight * 0.3) {
+                    newPageIndex = i;
+                    break;
+                  }
+                }
+                
+                if (newPageIndex !== currentPage && newPageIndex >= 0 && newPageIndex < pages.length) {
+                  setCurrentPage(newPageIndex);
                 }
                 
                 // 更新可见范围
@@ -806,22 +848,26 @@ function ReaderContent() {
                 
                 // 更新容器高度
                 setContainerHeight(container.clientHeight);
-              }, 50); // 50ms防抖延迟
+              }, 30); // 减少防抖延迟到30ms
             }}
           >
             <div
-              className="flex flex-col items-center max-w-none mx-auto relative"
+              className="flex flex-col items-center mx-auto relative"
               style={{
-                // 设置更精确的总高度，减少页面长度异常
-                minHeight: `${imageHeights.length > 0 ? imageHeights.reduce((sum, height) => sum + (height || containerHeight || window.innerHeight * 0.8), 0) : pages.length * (containerHeight || window.innerHeight * 0.8)}px`
+                // 精确计算总高度，确保滚动条准确
+                height: `${imageHeights.length > 0 ? imageHeights.reduce((sum, height) => sum + (height || containerHeight || window.innerHeight * 0.7), 0) : pages.length * (containerHeight || window.innerHeight * 0.7)}px`,
+                // 根据设备类型动态设置最大宽度
+                maxWidth: window.innerWidth >= 1024 ? '800px' : '1200px',
+                width: '100%',
+                padding: window.innerWidth >= 1024 ? '0 1rem' : '0' // PC端添加左右边距
               }}
             >
               {/* 上方占位符 */}
               {visibleRange.start > 0 && (
                 <div
                   style={{
-                    height: `${Array.from({length: visibleRange.start}, (_, i) => imageHeights[i] || containerHeight || window.innerHeight * 0.8).reduce((sum, height) => sum + height, 0)}px`,
-                    minHeight: '1px' // 确保占位符至少有1px高度
+                    height: `${Array.from({length: visibleRange.start}, (_, i) => imageHeights[i] || containerHeight || window.innerHeight * 0.7).reduce((sum, height) => sum + height, 0)}px`,
+                    minHeight: '1px'
                   }}
                   className="w-full"
                 />
@@ -830,16 +876,16 @@ function ReaderContent() {
               {/* 渲染可见范围内的图片 */}
               {pages.slice(visibleRange.start, visibleRange.end + 1).map((page, index) => {
                 const actualIndex = visibleRange.start + index;
-                const imageHeight = imageHeights[actualIndex] || containerHeight || window.innerHeight;
+                const imageHeight = imageHeights[actualIndex] || containerHeight || window.innerHeight * 0.7;
                 
                 return (
                   <div key={actualIndex} className="relative w-full">
                     {imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) && (
                       <div
-                        className="absolute inset-0 flex items-center justify-center bg-black/50 z-20"
+                        className="absolute inset-0 flex items-center justify-center bg-black/30 z-20"
                         style={{
-                          height: imageHeights[actualIndex] ? `${imageHeights[actualIndex]}px` : 'auto',
-                          minHeight: '200px' // 确保加载指示器有足够高度
+                          height: `${imageHeight}px`,
+                          minHeight: '100px'
                         }}
                       >
                         <Spinner size="lg" />
@@ -849,10 +895,8 @@ function ReaderContent() {
                     <div
                       className="relative flex justify-center w-full"
                       style={{
-                        cursor: scale > 1 ? 'grab' : 'default',
-                        // 完全自适应高度，让图片内容决定容器高度
-                        height: 'auto',
-                        minHeight: loadedImages.has(actualIndex) ? 'auto' : '200px' // 只有未加载时设置最小高度
+                        height: `${imageHeight}px`,
+                        minHeight: '100px'
                       }}
                     >
                       <img
@@ -867,22 +911,16 @@ function ReaderContent() {
                           ${imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) ? 'opacity-0' : 'opacity-100'}
                         `}
                         style={{
-                          // 保存图片的变换状态，避免模式切换时重置
-                          transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                          transition: 'transform 0.1s ease-out',
-                          // 确保图片不超出视图宽度和高度
-                          maxWidth: '100vw',
+                          // 确保图片不会超出容器宽度
+                          maxWidth: '100%',
+                          maxHeight: '100%',
                           width: 'auto',
                           height: 'auto',
-                          // 限制最大高度为视口高度的90%，避免超出视图
-                          maxHeight: '90vh',
-                          // 确保图片按比例显示且紧密贴合
                           display: 'block',
-                          objectFit: 'contain'
+                          margin: '0 auto'
                         }}
                         onLoad={(e) => {
                           handleImageLoad(actualIndex, e.currentTarget);
-                          // 图片加载完成后缓存它
                           cacheImage(page, actualIndex);
                         }}
                         onError={() => handleImageError(actualIndex)}
@@ -901,9 +939,9 @@ function ReaderContent() {
                   style={{
                     height: `${Array.from({length: pages.length - visibleRange.end - 1}, (_, i) => {
                       const index = visibleRange.end + 1 + i;
-                      return imageHeights[index] || containerHeight || window.innerHeight * 0.8;
+                      return imageHeights[index] || containerHeight || window.innerHeight * 0.7;
                     }).reduce((sum, height) => sum + height, 0)}px`,
-                    minHeight: '1px' // 确保占位符至少有1px高度
+                    minHeight: '1px'
                   }}
                   className="w-full"
                 />
