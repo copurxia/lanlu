@@ -14,6 +14,7 @@ class EHentaiLoginPlugin extends BasePlugin {
       namespace: "ehlogin",
       author: "Difegue",
       version: "2.3",
+      icon: "https://e-hentai.org/favicon.ico",
       description: "Handles login to E-H. If you have an account that can access fjorded content or exhentai, adding the credentials here will make more archives available for parsing.",
       parameters: [
         { type: "int", desc: "ipb_member_id cookie" },
