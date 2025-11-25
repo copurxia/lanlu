@@ -5,6 +5,7 @@ import lrr4cj.config.*
 import lrr4cj.services.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
+import lrr4cj.models.*
 import std.io.*
 import std.convert.*
 import cjoy.*
@@ -54,6 +55,16 @@ main(): Int64 {
         logger.info("Database initialized successfully")
     } else {
         logger.error("Failed to initialize database")
+        return 1
+    }
+
+    // 初始化Minion任务表
+    logger.info("Application starting... step 9a: initializing minion task tables")
+    let minionTablesInitialized = MinionModel.initialize()
+    if (minionTablesInitialized) {
+        logger.info("Minion task tables initialized successfully")
+    } else {
+        logger.error("Failed to initialize minion task tables")
         return 1
     }
 

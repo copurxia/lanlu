@@ -25,7 +25,7 @@ export interface UploadResult {
 
 // 上传状态接口
 export interface UploadStatus {
-  uploadId: string;
+  taskId: string;
   fileName: string;
   fileSize: number;
   totalChunks: number;
@@ -85,8 +85,8 @@ export class ChunkedUploadService {
       const totalChunks = Math.ceil(file.size / this.CHUNK_SIZE);
       
       // 4. 初始化上传会话
-      const uploadId = await this.initUploadSession(file.name, file.size, fileHash, totalChunks);
-      if (!uploadId) {
+      const taskId = await this.initUploadSession(file.name, file.size, fileHash, totalChunks, metadata);
+      if (!taskId) {
         return { success: false, error: 'Failed to initialize upload session' };
       }
 
@@ -97,7 +97,7 @@ export class ChunkedUploadService {
       // 6. 上传剩余分片
       const firstUploadResult = await this.uploadChunksConcurrently(
         file,
-        uploadId,
+        taskId,
         remainingChunks,
         totalChunks,
         callbacks
@@ -113,7 +113,7 @@ export class ChunkedUploadService {
         // 重传失败的分片
         const retryResult = await this.uploadChunksConcurrently(
           file,
-          uploadId,
+          taskId,
           firstUploadResult.failedChunks,
           totalChunks,
           callbacks
@@ -146,7 +146,7 @@ export class ChunkedUploadService {
       }
 
       // 9. 完成上传
-      return await this.completeUpload(uploadId, fileHash, metadata, file.name);
+      return await this.completeUpload(taskId);
 
     } catch (error) {
       console.error('Chunked upload failed:', error);
@@ -214,46 +214,54 @@ export class ChunkedUploadService {
     fileName: string,
     fileSize: number,
     fileHash: string,
-    totalChunks: number
+    totalChunks: number,
+    metadata: UploadMetadata
   ): Promise<string | null> {
     try {
-      // 生成简单的上传ID（客户端生成）
-      const uploadId = `upload_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // 调用服务器初始化上传会话
+      // 调用服务器初始化上传会话 - 服务器会返回taskId
       try {
         const response = await apiClient.post('/api/archives/upload/init', {
-          uploadId,
-          fileName,
-          fileSize,
-          fileHash,
-          totalChunks
+          filename: fileName,
+          file_checksum: fileHash,
+          filesize: fileSize,
+          chunk_size: this.CHUNK_SIZE,
+          total_chunks: totalChunks,
+          title: metadata.title || '',
+          tags: metadata.tags || '',
+          summary: metadata.summary || '',
+          category_id: metadata.categoryId || ''
         });
-        
+
         if (response.data.success !== 1) {
           console.error('Server failed to initialize upload session:', response.data.error);
           return null;
         }
+
+        const taskId = response.data.taskId;
+        if (!taskId) {
+          console.error('Server did not return taskId');
+          return null;
+        }
+
+        // 保存上传会话信息到localStorage
+        const session = {
+          taskId,
+          fileName,
+          fileSize,
+          fileHash,
+          totalChunks,
+          completedChunks: [],
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        };
+
+        localStorage.setItem(`upload_${taskId}`, JSON.stringify(session));
+
+        return taskId;
       } catch (serverError) {
         console.error('Failed to call server init upload session:', serverError);
         return null;
       }
-      
-      // 保存上传会话信息到localStorage
-      const session = {
-        uploadId,
-        fileName,
-        fileSize,
-        fileHash,
-        totalChunks,
-        completedChunks: [],
-        status: 'pending',
-        createdAt: new Date().toISOString()
-      };
-      
-      localStorage.setItem(`upload_${uploadId}`, JSON.stringify(session));
-      
-      return uploadId;
     } catch (error) {
       console.error('Failed to init upload session:', error);
       return null;
@@ -277,33 +285,33 @@ export class ChunkedUploadService {
   /**
    * 更新localStorage中的completedChunks
    */
-  private static updateLocalStorageCompletedChunks(uploadId: string, chunkIndex: number, totalChunks: number): void {
+  private static updateLocalStorageCompletedChunks(taskId: string, chunkIndex: number, totalChunks: number): void {
     try {
-      const sessionData = localStorage.getItem(`upload_${uploadId}`);
+      const sessionData = localStorage.getItem(`upload_${taskId}`);
       if (sessionData) {
         const session = JSON.parse(sessionData);
-        
+
         // 确保completedChunks数组存在
         if (!session.completedChunks) {
           session.completedChunks = [];
         }
-        
+
         // 添加新的分片索引（避免重复）
         if (!session.completedChunks.includes(chunkIndex)) {
           session.completedChunks.push(chunkIndex);
           // 排序
           session.completedChunks.sort((a: number, b: number) => a - b);
         }
-        
+
         // 更新状态
         if (session.completedChunks.length === totalChunks) {
           session.status = 'completed';
         } else {
           session.status = 'uploading';
         }
-        
+
         // 保存回localStorage
-        localStorage.setItem(`upload_${uploadId}`, JSON.stringify(session));
+        localStorage.setItem(`upload_${taskId}`, JSON.stringify(session));
       }
     } catch (error) {
       console.warn('Failed to update localStorage completedChunks:', error);
@@ -315,7 +323,7 @@ export class ChunkedUploadService {
    */
   private static async uploadChunksConcurrently(
     file: File,
-    uploadId: string,
+    taskId: string,
     chunkIndices: number[],
     totalChunks: number,
     callbacks: UploadProgressCallback,
@@ -329,15 +337,15 @@ export class ChunkedUploadService {
     const batchSize = this.MAX_CONCURRENT_CHUNKS;
     for (let i = 0; i < chunkIndices.length; i += batchSize) {
       const batch = chunkIndices.slice(i, i + batchSize);
-      
+
       // 并发上传当前批次
       const batchPromises = batch.map(async (chunkIndex) => {
         try {
-          await this.uploadChunkWithRetry(file, uploadId, chunkIndex, totalChunks);
-          
+          await this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks);
+
           // 更新localStorage中的completedChunks
-          this.updateLocalStorageCompletedChunks(uploadId, chunkIndex, totalChunks);
-          
+          this.updateLocalStorageCompletedChunks(taskId, chunkIndex, totalChunks);
+
           return { success: true, chunkIndex };
         } catch (error) {
           console.error(`分片 ${chunkIndex} 上传最终失败:`, error);
@@ -346,10 +354,10 @@ export class ChunkedUploadService {
           return { success: false, chunkIndex };
         }
       });
-      
+
       // 等待当前批次完成
       const batchResults = await Promise.all(batchPromises);
-      
+
       // 处理批次结果
       for (const result of batchResults) {
         if (result.success) {
@@ -358,7 +366,7 @@ export class ChunkedUploadService {
           failedChunks.push(result.chunkIndex);
         }
       }
-      
+
       // 计算进度：包括之前已完成的分片和本次新完成的分片
       const allCompletedChunks = [...previouslyCompletedChunks, ...completedChunkIndices];
       // 去重并排序，确保分片索引不重复
@@ -368,7 +376,7 @@ export class ChunkedUploadService {
         const end = Math.min(start + this.CHUNK_SIZE, totalBytes);
         return total + (end - start);
       }, 0);
-      
+
       const progress = Math.round((uploadedBytes / totalBytes) * 100);
       callbacks.onProgress(progress);
       callbacks.onChunkComplete?.(-1, totalChunks, uniqueCompletedChunks.length);
@@ -405,14 +413,14 @@ export class ChunkedUploadService {
    */
   private static async uploadChunkWithRetry(
     file: File,
-    uploadId: string,
+    taskId: string,
     chunkIndex: number,
     totalChunks: number,
     retryCount = 0
   ): Promise<void> {
     try {
       const chunk = await this.getFileChunk(file, chunkIndex);
-      await this.uploadChunk(uploadId, chunkIndex, totalChunks, chunk);
+      await this.uploadChunk(taskId, chunkIndex, totalChunks, chunk);
       // 成功上传，如果之前有重试，说明重试成功了
       if (retryCount > 0) {
         console.log(`分片 ${chunkIndex} 重试成功`);
@@ -421,7 +429,7 @@ export class ChunkedUploadService {
       if (retryCount < this.MAX_RETRIES) {
         console.log(`分片 ${chunkIndex} 上传失败，第 ${retryCount + 1} 次重试`);
         await this.delay(1000 * Math.pow(2, retryCount)); // 指数退避
-        return this.uploadChunkWithRetry(file, uploadId, chunkIndex, totalChunks, retryCount + 1);
+        return this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks, retryCount + 1);
       } else {
         console.error(`分片 ${chunkIndex} 重试 ${this.MAX_RETRIES} 次后仍然失败`);
         throw new Error(`分片 ${chunkIndex} 上传失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -442,14 +450,14 @@ export class ChunkedUploadService {
    * 上传单个分片
    */
   private static async uploadChunk(
-    uploadId: string,
+    taskId: string,
     chunkIndex: number,
     totalChunks: number,
     chunkData: Blob
   ): Promise<void> {
     // 使用查询参数而不是FormData，因为后端使用getQuery获取参数
     const params = new URLSearchParams();
-    params.append('uploadId', uploadId);
+    params.append('taskId', taskId);
     params.append('chunkIndex', chunkIndex.toString());
     params.append('totalChunks', totalChunks.toString());
     params.append('filename', 'chunk.bin');
@@ -470,21 +478,11 @@ export class ChunkedUploadService {
    * 完成上传
    */
   private static async completeUpload(
-    uploadId: string,
-    fileHash: string,
-    metadata: UploadMetadata,
-    fileName: string
+    taskId: string
   ): Promise<UploadResult> {
     try {
-      const response = await apiClient.post('/api/archives/upload/complete', {
-        uploadId,
-        file_checksum: fileHash,
-        filename: fileName,
-        title: metadata.title || '',
-        tags: metadata.tags || '',
-        summary: metadata.summary || '',
-        category_id: metadata.categoryId || ''
-      });
+      // 使用GET请求，通过查询参数传递taskId
+      const response = await apiClient.get(`/api/archives/upload/complete?taskId=${taskId}`);
 
       return {
         success: response.data.success === 1,
@@ -499,39 +497,18 @@ export class ChunkedUploadService {
     }
   }
 
-  /**
-   * 取消上传
-   */
-  static async cancelUpload(uploadId: string): Promise<boolean> {
-    try {
-      const response = await apiClient.delete(`/api/archives/upload/${uploadId}`);
-      return response.data.success === 1;
-    } catch (error) {
-      console.error('Failed to cancel upload:', error);
-      return false;
-    }
-  }
-
-  /**
-   * 暂停上传
-   */
-  static pauseUpload(uploadId: string): boolean {
-    // 实现暂停逻辑（可能需要在前端维护上传状态）
-    console.log(`Upload ${uploadId} paused`);
-    return true;
-  }
-
+  
   /**
    * 恢复上传
    */
-  static async resumeUpload(uploadId: string, file: File, metadata: UploadMetadata, callbacks: UploadProgressCallback): Promise<UploadResult> {
+  static async resumeUpload(taskId: string, file: File, metadata: UploadMetadata, callbacks: UploadProgressCallback): Promise<UploadResult> {
     try {
       // 不再检查上传状态，直接从localStorage获取基本信息
-      const sessionData = localStorage.getItem(`upload_${uploadId}`);
+      const sessionData = localStorage.getItem(`upload_${taskId}`);
       if (!sessionData) {
         return { success: false, error: 'Upload session not found' };
       }
-      
+
       const session = JSON.parse(sessionData);
       const completedChunks = session.completedChunks || [];
       const totalChunks = session.totalChunks || 0;
@@ -544,7 +521,7 @@ export class ChunkedUploadService {
 
       // 继续上传剩余分片
       const remainingChunks = this.getRemainingChunks(totalChunks, completedChunks);
-      
+
       // 创建包装的回调，以正确计算总的已上传分片数
       const wrappedCallbacks: UploadProgressCallback = {
         onProgress: callbacks.onProgress,
@@ -557,10 +534,10 @@ export class ChunkedUploadService {
         },
         onError: callbacks.onError
       };
-      
+
       const uploadResult = await this.uploadChunksConcurrently(
         file,
-        uploadId,
+        taskId,
         remainingChunks,
         totalChunks,
         wrappedCallbacks
@@ -568,23 +545,23 @@ export class ChunkedUploadService {
 
       // 计算总的已上传分片数（包括之前已上传的）
       let totalCompletedChunks = completedChunks.length + uploadResult.successCount;
-      
+
       // 如果有失败的分片，进行重传
       if (uploadResult.failedChunks.length > 0) {
         console.log(`恢复上传发现 ${uploadResult.failedChunks.length} 个失败分片，开始重传:`, uploadResult.failedChunks);
-        
+
         // 重传失败的分片
         const retryResult = await this.uploadChunksConcurrently(
           file,
-          uploadId,
+          taskId,
           uploadResult.failedChunks,
           totalChunks,
           callbacks
         );
-        
+
         // 修正计算：减去之前失败的分片数，加上重传成功的分片数
         totalCompletedChunks = totalCompletedChunks - uploadResult.failedChunks.length + retryResult.successCount;
-        
+
         // 如果重传后仍有失败的分片，返回错误
         if (retryResult.failedChunks.length > 0) {
           console.log('恢复上传重传后仍有失败分片:', retryResult.failedChunks);
@@ -593,7 +570,7 @@ export class ChunkedUploadService {
             error: `恢复上传时分片上传失败: ${retryResult.failedChunks.length} 个分片重传后仍然失败`
           };
         }
-        
+
         console.log(`恢复上传所有分片上传成功: ${totalCompletedChunks}/${totalChunks}`);
       } else {
         console.log(`恢复上传所有分片上传成功: ${totalCompletedChunks}/${totalChunks}`);
@@ -609,7 +586,7 @@ export class ChunkedUploadService {
       }
 
       // 完成上传
-      return await this.completeUpload(uploadId, fileHash, metadata, fileName);
+      return await this.completeUpload(taskId);
 
     } catch (error) {
       return {

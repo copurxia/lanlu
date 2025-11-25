@@ -3,6 +3,7 @@ package lrr4cj.controllers
 import cjoy.*
 import stdx.encoding.json.*
 import std.collection.*
+import std.convert.*
 import lrr4cj.models.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
@@ -30,107 +31,76 @@ public class MinionController {
         return result
     }
     /**
-     * 获取所有任务
-     */
-    public static func getTasks(ctx: JoyContext) {
-        let tasks = MinionModel.getAllTasks()
-        var result = "["
-        for (i in 0..tasks.size) {
-            if (i > 0) { result += "," }
-            result += tasks[i].toJson()
-        }
-        result += "]"
-        
-        ctx.json(result)
-    }
-    
-    /**
      * 根据ID获取任务
      */
     public static func getTaskById(ctx: JoyContext) {
-        let id = ctx.getParam("id") ?? ""
+        let idStr = ctx.getParam("id") ?? ""
+        let id = try {
+            Int64.parse(idStr)
+        } catch (_) {
+            0
+        }
         let task = MinionModel.getTaskById(id)
-        
-        if (task.id.size == 0) {
+
+        if (task.id == 0) {
             ResponseView.errorJson(ctx, "Task not found")
             return
         }
-        
+
         ctx.json(task.toJson())
     }
-    
+
     /**
-     * 创建新任务
+     * 分页获取任务列表
+     * GET /api/minion/tasks?page=1&pageSize=10
      */
-    public static func createTask(ctx: JoyContext) {
-        let name = ctx.getQuery("name") ?? ""
-        
-        if (name.size == 0) {
-            ResponseView.errorJson(ctx, "Name is required")
+    public static func getTasksWithPagination(ctx: JoyContext) {
+        let logger = getLogger("minion_controller")
+
+        // 解析查询参数，设置默认值
+        let pageStr = ctx.getQuery("page") ?? "1"
+        let pageSizeStr = ctx.getQuery("pageSize") ?? "10"
+
+        let page = try {
+            Int32.parse(pageStr)
+        } catch (_) {
+            logger.warn("无效的页码参数", [("page", pageStr)])
+            ResponseView.errorJson(ctx, "Invalid page parameter")
             return
         }
-        
-        let task = MinionModel.createTask(name)
-        ctx.json(task.toJson())
-    }
-    
-    /**
-     * 启动任务
-     */
-    public static func startTask(ctx: JoyContext) {
-        let id = ctx.getParam("id") ?? ""
-        
-        let success = MinionModel.startTask(id)
-        if (success) {
-            ResponseView.successJson(ctx, "Task started successfully")
-        } else {
-            ResponseView.errorJson(ctx, "Failed to start task")
-        }
-    }
-    
-    /**
-     * 停止任务
-     */
-    public static func stopTask(ctx: JoyContext) {
-        let id = ctx.getParam("id") ?? ""
-        
-        let success = MinionModel.stopTask(id)
-        if (success) {
-            ResponseView.successJson(ctx, "Task stopped successfully")
-        } else {
-            ResponseView.errorJson(ctx, "Failed to stop task")
-        }
-    }
-    
-    /**
-     * 删除任务
-     */
-    public static func deleteTask(ctx: JoyContext) {
-        let id = ctx.getParam("id") ?? ""
-        
-        let success = MinionModel.deleteTask(id)
-        if (success) {
-            ResponseView.successJson(ctx, "Task deleted successfully")
-        } else {
-            ResponseView.errorJson(ctx, "Failed to delete task")
-        }
-    }
-    
-    /**
-     * 获取插件列表
-     */
-    public static func getPlugins(ctx: JoyContext) {
-        let plugins = MinionModel.getPlugins()
-        var result = "["
-        for (i in 0..plugins.size) {
-            if (i > 0) { result += "," }
-            result += "\"${plugins[i]}\""
-        }
-        result += "]"
 
-        ctx.json(result)
-    }
+        let pageSize = try {
+            Int32.parse(pageSizeStr)
+        } catch (_) {
+            logger.warn("无效的页面大小参数", [("pageSize", pageSizeStr)])
+            ResponseView.errorJson(ctx, "Invalid pageSize parameter")
+            return
+        }
 
+        // 参数验证
+        if (page < 1) {
+            logger.warn("页码必须大于0", [("page", page.toString())])
+            ResponseView.errorJson(ctx, "Page must be greater than 0")
+            return
+        }
+
+        if (pageSize < 1 || pageSize > 100) {
+            logger.warn("页面大小必须在1-100之间", [("pageSize", pageSize.toString())])
+            ResponseView.errorJson(ctx, "Page size must be between 1 and 100")
+            return
+        }
+
+        try {
+            let result = MinionModel.getTasksWithPagination(page, pageSize)
+            logger.info("分页获取任务列表", [("page", page.toString()), ("pageSize", pageSize.toString()), ("total", result.total.toString())])
+            ctx.json(result.toJson())
+        } catch (e: Exception) {
+            logger.error("分页获取任务失败", ("error", e.message))
+            ResponseView.errorJson(ctx, "Failed to get tasks: ${e.message}")
+        }
+    }
+    
+    
     /**
      * 获取所有插件详情
      * GET /api/plugins
@@ -147,7 +117,7 @@ public class MinionController {
             }
             result += "]"
 
-            logger.info("获取插件列表", ("count", plugins.size.toString()))
+            logger.info("获取插件列表", [("count", plugins.size.toString())])
             ctx.json(result)
         } catch (e: Exception) {
             logger.error("获取插件列表失败")
@@ -177,7 +147,7 @@ public class MinionController {
             }
             result += "]"
 
-            logger.info("按类型获取插件", ("type", pluginType), ("count", plugins.size.toString()))
+            logger.info("按类型获取插件", [("type", pluginType), ("count", plugins.size.toString())])
             ctx.json(result)
         } catch (e: Exception) {
             logger.error("按类型获取插件失败")
@@ -204,96 +174,11 @@ public class MinionController {
             return
         }
 
-        logger.info("获取插件详情", ("namespace", namespace))
+        logger.info("获取插件详情", [("namespace", namespace)])
         ctx.json(pluginToJson(plugin))
     }
 
-    /**
-     * 执行插件
-     * POST /api/plugins/:namespace/execute
-     */
-    public static func executePlugin(ctx: JoyContext) {
-        let logger = getLogger("minion_controller")
-        let namespace = ctx.getParam("namespace") ?? ""
-
-        if (namespace.size == 0) {
-            ResponseView.errorJson(ctx, "Plugin namespace is required")
-            return
-        }
-
-        // 解析请求体
-        var requestData = HashMap<String, String>()
-
-        try {
-            let jsonObj = ctx.readJson<HashMap<String, String>>()
-            if (jsonObj.isSome()) {
-                requestData = jsonObj.getOrThrow()
-            }
-        } catch (e: Exception) {
-            logger.error("解析请求体失败")
-            ResponseView.errorJson(ctx, "Invalid JSON in request body")
-            return
-        }
-
-        let plugin = PluginDao.getPluginByNamespace(namespace)
-        if (plugin.namespace.size == 0) {
-            ResponseView.errorJson(ctx, "Plugin not found")
-            return
-        }
-
-        if (!plugin.enabled) {
-            ResponseView.errorJson(ctx, "Plugin is disabled")
-            return
-        }
-
-        let pluginService = PluginService.getInstance()
-        var result: PluginExecutionResult
-
-        // 根据插件类型执行不同的逻辑
-        if (plugin.plugin_type == "metadata") {
-            let archiveId = requestData.get("archive_id") ?? ""
-
-            if (archiveId.size == 0) {
-                ResponseView.errorJson(ctx, "Archive ID is required for metadata plugins")
-                return
-            }
-
-            result = pluginService.executeMetadataPlugin(plugin, archiveId)
-        } else if (plugin.plugin_type == "login") {
-            result = pluginService.executeLoginPlugin(plugin, requestData)
-        } else if (plugin.plugin_type == "download") {
-            let url = requestData.get("url") ?? ""
-
-            if (url.size == 0) {
-                ResponseView.errorJson(ctx, "URL is required for download plugins")
-                return
-            }
-
-            result = pluginService.executeDownloadPlugin(plugin, url)
-        } else {
-            ResponseView.errorJson(ctx, "Unsupported plugin type: ${plugin.plugin_type}")
-            return
-        }
-
-        // 构建响应
-        var response = HashMap<String, String>()
-        response["success"] = result.success.toString()
-        response["execution_time"] = result.executionTime.toString()
-        response["exit_code"] = result.exitCode.toString()
-
-        if (result.success) {
-            for ((key, value) in result.data) {
-                response[key] = value
-            }
-            logger.info("插件执行成功", ("namespace", namespace), ("time", result.executionTime.toString()))
-        } else {
-            response["error"] = result.error
-            logger.error("插件执行失败")
-        }
-
-        ctx.json(buildJsonResponse(response))
-    }
-
+    
     /**
      * 获取插件配置
      * GET /api/plugins/:namespace/config
@@ -316,7 +201,7 @@ public class MinionController {
         // 返回插件的parameters数组，直接构建正确的JSON响应
         var response = "{\"success\": true, \"data\": {\"has_schema\": ${plugin.has_schema.toString()}, \"parameters\": ${plugin.parameters}}}"
 
-        logger.info("获取插件配置", ("namespace", namespace), ("has_schema", plugin.has_schema.toString()))
+        logger.info("获取插件配置", [("namespace", namespace), ("has_schema", plugin.has_schema.toString())])
         ctx.json(response)
     }
 
@@ -404,7 +289,7 @@ public class MinionController {
         let success = PluginDao.setEnabled(namespace, enabled)
 
         if (success) {
-            logger.info("设置插件状态成功", ("namespace", namespace), ("enabled", enabled.toString()))
+            logger.info("设置插件状态成功", [("namespace", namespace), ("enabled", enabled.toString())])
             ResponseView.successJson(ctx, "Plugin enabled status updated successfully")
         } else {
             logger.error("设置插件状态失败")
@@ -434,11 +319,11 @@ public class MinionController {
             if (!exists) {
                 logger.info("尝试创建新插件", ("namespace", plugin.namespace))
                 let created = PluginDao.create(plugin)
-                logger.info("插件创建结果", ("namespace", plugin.namespace), ("created", created.toString()))
+                logger.info("插件创建结果", [("namespace", plugin.namespace), ("created", created.toString())])
 
                 if (created) {
                     registeredCount++
-                    logger.info("注册新插件", ("namespace", plugin.namespace), ("name", plugin.name), ("has_schema", plugin.has_schema.toString()))
+                    logger.info("注册新插件", [("namespace", plugin.namespace), ("name", plugin.name), ("has_schema", plugin.has_schema.toString())])
                 } else {
                     logger.error("插件创建失败", ("namespace", plugin.namespace))
                 }
@@ -453,7 +338,7 @@ public class MinionController {
                     existingPlugin.has_schema = plugin.has_schema
 
                     let updated = PluginDao.update(existingPlugin)
-                    logger.info("更新现有插件Schema", ("namespace", plugin.namespace), ("updated", updated.toString()), ("has_schema", plugin.has_schema.toString()))
+                    logger.info("更新现有插件Schema", [("namespace", plugin.namespace), ("updated", updated.toString()), ("has_schema", plugin.has_schema.toString())])
 
                     if (updated) {
                         registeredCount++
@@ -470,7 +355,7 @@ public class MinionController {
         response["discovered"] = discoveredPlugins.size.toString()
         response["registered"] = registeredCount.toString()
 
-        logger.info("插件发现完成", ("discovered", discoveredPlugins.size.toString()), ("registered", registeredCount.toString()))
+        logger.info("插件发现完成", [("discovered", discoveredPlugins.size.toString()), ("registered", registeredCount.toString())])
         ctx.json(buildJsonResponse(response))
     }
 
@@ -528,7 +413,8 @@ public class MinionController {
             return
         }
 
-        let task = MinionModel.executePlugin(plugin, url)
+        // 创建一个下载任务作为替代
+        let task = MinionModel.createTask("插件执行: ${plugin}", "download")
         ctx.json(task.toJson())
     }
 

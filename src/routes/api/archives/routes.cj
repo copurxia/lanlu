@@ -81,11 +81,6 @@ public class ArchiveRoutes {
             ArchiveController.deleteArchive(ctx)
         })
 
-        // 上传归档
-        router.put("/api/archives/upload", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
-            ArchiveController.uploadArchive(ctx)
-        })
 
         // 分片上传 - 初始化上传会话
         router.post("/api/archives/upload/init", { ctx =>
@@ -102,17 +97,12 @@ public class ArchiveRoutes {
         
 
         // 分片上传 - 完成上传
-        router.post("/api/archives/upload/complete", { ctx =>
+        router.get("/api/archives/upload/complete", { ctx =>
             AuthMiddleware.requiredAuth(ctx)
             ChunkedUploadController.completeUpload(ctx)
         })
 
-        // 分片上传 - 取消上传
-        router.delete("/api/archives/upload/{uploadId}", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
-            ChunkedUploadController.cancelUpload(ctx)
-        })
-
+      
         // 从URL下载档案
         // router.post("/api/download_url", { ctx =>
         //     AuthMiddleware.requiredAuth(ctx)

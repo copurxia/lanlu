@@ -172,18 +172,12 @@ export class ArchiveService {
   }
 
 
-  /**
-   * 取消上传
-   */
-  static async cancelUpload(uploadId: string): Promise<boolean> {
-    return await ChunkedUploadService.cancelUpload(uploadId);
-  }
-
+  
   /**
    * 恢复上传
    */
   static async resumeUpload(
-    uploadId: string,
+    taskId: string,
     file: File,
     metadata?: UploadMetadata,
     callbacks?: UploadProgressCallback
@@ -195,7 +189,7 @@ export class ArchiveService {
     };
 
     return await ChunkedUploadService.resumeUpload(
-      uploadId,
+      taskId,
       file,
       metadata || {},
       callbacks || defaultCallbacks
