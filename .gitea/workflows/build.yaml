@@ -17,7 +17,7 @@ jobs:
           wget -O c.tar.gz "${{ vars.CANGJIE_URL }}"
           tar -xzvf c.tar.gz
           wget -O s.zip "${{ vars.STDX_URL }}"
-          unzip -j s.zip -d stdx
+          unzip -q -o -j s.zip -d stdx
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx"
