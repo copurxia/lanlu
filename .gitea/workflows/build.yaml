@@ -17,11 +17,12 @@ jobs:
           wget -O c.tar.gz "${{ vars.CANGJIE_URL }}"
           tar -xzvf c.tar.gz
           wget -O s.zip "${{ vars.STDX_URL }}"
-          unzip -q -o -j s.zip -d stdx
+          unzip -o -j s.zip -d stdx
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx"
           export CANGJIE_STDX="$PWD/linux_x86_64_llvm/dynamic/stdx"
+          ls -al $CANGJIE_STDX_PATH
           source cangjie/envsetup.sh
           cjc -v
           cjpm build -V
