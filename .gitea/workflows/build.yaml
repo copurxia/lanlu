@@ -21,7 +21,7 @@ jobs:
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx"
-          export CANGJIE_STDX="$PWD/linux_x86_64_llvm/dynamic/stdx"
+          export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
           source cangjie/envsetup.sh
           cjc -v
           cjpm build -V
