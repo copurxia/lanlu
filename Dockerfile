@@ -2,8 +2,7 @@ FROM docker.1ms.run/ubuntu
 
 WORKDIR /app
 
-RUN sed -i 's/archive.ubuntu.com/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/ubuntu.sources && \
-    apt-get update && \
+RUN apt-get update && \
     apt-get install -y libarchive-tools imagemagick tzdata && \
     rm -rf /var/lib/apt/lists/* 
 
