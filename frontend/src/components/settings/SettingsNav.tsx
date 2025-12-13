@@ -1,0 +1,55 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { LayoutGrid, Package, ListTodo } from 'lucide-react';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { cn } from '@/lib/utils';
+
+type SettingsSection = {
+  id: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  titleKey: string;
+  descriptionKey?: string;
+};
+
+const sections: SettingsSection[] = [
+  { id: 'overview', href: '/settings', icon: LayoutGrid, titleKey: 'settings.overview' },
+  { id: 'plugins', href: '/settings/plugins', icon: Package, titleKey: 'settings.plugins' },
+  { id: 'tasks', href: '/settings/tasks', icon: ListTodo, titleKey: 'settings.tasks' },
+];
+
+export function SettingsNav() {
+  const pathname = usePathname();
+  const { t } = useLanguage();
+
+  return (
+    <nav className="flex md:flex-col gap-2 md:gap-1">
+      {sections.map((item) => {
+        const Icon = item.icon;
+        const isActive =
+          item.href === '/settings'
+            ? pathname === '/settings'
+            : pathname === item.href || pathname.startsWith(`${item.href}/`);
+
+        return (
+          <Link
+            key={item.id}
+            href={item.href}
+            className={cn(
+              'flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+              isActive
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+            )}
+          >
+            <Icon className="h-4 w-4" />
+            <span>{t(item.titleKey)}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+

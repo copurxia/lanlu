@@ -289,8 +289,13 @@
   "settings": {
     "title": "Settings",
     "description": "Manage system settings and plugin configuration",
+    "overview": "Overview",
+    "overviewDescription": "Choose a section to manage",
+    "all": "All",
     "plugins": "Plugins",
     "pluginsDescription": "Manage plugin enable/disable and configuration",
+    "tasks": "Tasks",
+    "tasksDescription": "View and manage background tasks",
     "pluginName": "Plugin Name",
     "pluginVersion": "Version",
     "pluginType": "Type",

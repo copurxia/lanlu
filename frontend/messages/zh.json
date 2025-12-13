@@ -294,8 +294,13 @@
   "settings": {
     "title": "设置",
     "description": "管理系统设置和插件配置",
+    "overview": "概览",
+    "overviewDescription": "选择要管理的模块",
+    "all": "全部",
     "plugins": "插件管理",
     "pluginsDescription": "管理系统插件的启用、禁用和配置",
+    "tasks": "任务列表",
+    "tasksDescription": "查看并管理后台任务",
     "pluginName": "插件名称",
     "pluginVersion": "版本",
     "pluginType": "类型",
