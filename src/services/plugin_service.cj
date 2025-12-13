@@ -73,18 +73,24 @@ public class PluginService {
 
         // 基本参数
         denoArgs.add("run")
-        denoArgs.add(pluginFile)
 
         // 默认给予插件目录的读写权限
         let pluginDir = "./data/plugins/${plugin.namespace}"
         denoArgs.add("--allow-read=${pluginDir}")
         denoArgs.add("--allow-write=${pluginDir}")
+        // 允许读取共享插件基类，支持 '../base_plugin.ts' 相对引用
+        denoArgs.add("--allow-read=./data/plugins")
+        // 允许插件写入统一日志文件（仅该文件）
+        denoArgs.add("--allow-read=./data/logs/plugins.log")
+        denoArgs.add("--allow-write=./data/logs/plugins.log")
 
         // 解析插件声明的权限
         let permissions = plugin.permissions.split(",")
+        var allowNetAll = false
+        var netHosts = ArrayList<String>()
 
         for (permission in permissions) {
-            let perm = permission
+            let perm = normalizePermission(permission)
             if (perm.size == 0) {
                 continue
             }
@@ -93,17 +99,25 @@ public class PluginService {
             if (perm.contains("=")) {
                 let parts = perm.split("=", 2)
                 if (parts.size == 2) {
-                    let permType = parts[0]
-                    let permValue = parts[1]
+                    let permType = normalizePermission(parts[0])
+                    let permValue = normalizePermission(parts[1])
 
                     if (permType == "net") {
-                        denoArgs.add("--allow-net=${permValue}")
+                        if (permValue.size > 0) {
+                            netHosts.add(permValue)
+                        }
                     } else if (permType == "read") {
                         denoArgs.add("--allow-read=${permValue}")
                     } else if (permType == "write") {
                         denoArgs.add("--allow-write=${permValue}")
                     } else if (permType == "env") {
                         denoArgs.add("--allow-env=${permValue}")
+                    } else if (permType == "run") {
+                        if (permValue.size > 0) {
+                            denoArgs.add("--allow-run=${permValue}")
+                        } else {
+                            denoArgs.add("--allow-run")
+                        }
                     }
                 }
                 continue
@@ -111,7 +125,7 @@ public class PluginService {
 
             // 处理简单权限
             if (perm == "net") {
-                    denoArgs.add("--allow-net")
+                    allowNetAll = true
                 } else if (perm == "read") {
                     denoArgs.add("--allow-read")
                 } else if (perm == "write") {
@@ -127,7 +141,26 @@ public class PluginService {
                 }
         }
 
+        // 汇总网络权限，避免重复 --allow-net
+        if (allowNetAll) {
+            denoArgs.add("--allow-net")
+        } else if (netHosts.size > 0) {
+            let joinedHosts = String.join(netHosts.toArray(), delimiter: ",")
+            denoArgs.add("--allow-net=${joinedHosts}")
+        }
+
         return denoArgs
+    }
+
+    /**
+     * 规范化权限字符串，去除引号和空白
+     */
+    private static func normalizePermission(permission: String): String {
+        var perm = permission.trimAscii()
+        if (perm.startsWith("\"") && perm.endsWith("\"") && perm.size >= 2) {
+            perm = perm[1..perm.size - 1]
+        }
+        return perm
     }
 
     /**
@@ -145,7 +178,7 @@ public class PluginService {
                 // 对于其他情况，使用 shell 执行
                 var fullCmd = command
                 for (arg in args) {
-                    fullCmd += " " + arg
+                    fullCmd += " " + escapeShellArg(arg)
                 }
 
                 let process = launch("sh", "-c", fullCmd, stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
@@ -155,6 +188,14 @@ public class PluginService {
         } catch (_: Exception) {
             return (1, Array<UInt8>(), Array<UInt8>())
         }
+    }
+
+    private static func escapeShellArg(arg: String): String {
+        if (arg.size == 0) {
+            return "''"
+        }
+        let safe = arg.replace("'", "'\"'\"'")
+        return "'${safe}'"
     }
 
     /**
@@ -237,10 +278,10 @@ public class PluginService {
             // 为插件信息获取构建最小权限参数
             var denoArgs = ArrayList<String>()
             denoArgs.add("run")
-            denoArgs.add(pluginFile)
-            denoArgs.add("--action=plugin_info")
             // 获取插件信息只需要读取权限
             denoArgs.add("--allow-read=${pluginFile}")
+            denoArgs.add(pluginFile)
+            denoArgs.add("--action=plugin_info")
 
             // 执行Deno插件获取插件信息
             let startTime = DateTime.now().toUnixTimeStamp().toSeconds()
@@ -361,6 +402,7 @@ if (eval { defined(&\$full_method) }) {
      */
     private func parsePluginInfoFromJson(jsonStr: String, fileName: String, pluginType: String): PluginData {
         var pluginData = PluginData()
+        let logger = getLogger("plugin_service")
 
         try {
             // 检查JSON是否包含错误
@@ -386,6 +428,10 @@ if (eval { defined(&\$full_method) }) {
                     pluginData.description = getJsonString(jsonObj, "description")
                     pluginData.author = getJsonString(jsonObj, "author")
                     pluginData.icon = getJsonString(jsonObj, "icon")
+                    pluginData.url_regex = getJsonString(jsonObj, "url_regex")
+                    pluginData.login_from = getJsonString(jsonObj, "login_from")
+                    // 默认启用动态发现到的插件，便于直接匹配URL
+                    pluginData.enabled = true
 
                     // 获取所有字段
                     let fields = jsonObj.getFields()
@@ -393,47 +439,46 @@ if (eval { defined(&\$full_method) }) {
                     // 解析权限字段
                     if (fields.contains("permissions")) {
                         let perms = fields["permissions"]
-                        logger.info("开始解析插件权限", ("plugin", pluginData.name), ("permissions_raw", perms.toString()))
+                        logger.info("开始解析插件权限", [("plugin", pluginData.name), ("permissions_raw", perms.toString())])
                         match (perms) {
                             case array: JsonArray =>
                                 var permissionList = ArrayList<String>()
                                 let size = array.size()
-                                logger.info("权限数组大小", ("plugin", pluginData.name), ("array_size", size.toString()))
+                                logger.info("权限数组大小", [("plugin", pluginData.name), ("array_size", size.toString())])
                                 for (i in 0..size) {
                                     let itemOpt = array.get(i)
                                     match (itemOpt) {
                                         case Some(item) =>
-                                            let permValue = item
-                                            if (permValue is JsonString) {
-                                                let permission = permValue.toString()
-                                                permissionList.add(permission)
-                                                logger.info("添加权限", ("plugin", pluginData.name), ("permission", permission))
-                                            } else {
-                                                // 如果不是JsonString，尝试转换为字符串
-                                                let permission = permValue.toString()
-                                                permissionList.add(permission)
-                                                logger.info("添加权限(非JsonString)", ("plugin", pluginData.name), ("permission", permission))
+                                            match (item) {
+                                                case permStr: JsonString =>
+                                                    let permission = normalizePermission(permStr.getValue())
+                                                    permissionList.add(permission)
+                                                    logger.info("添加权限", [("plugin", pluginData.name), ("permission", permission)])
+                                                case _ =>
+                                                    let permission = normalizePermission(item.toString())
+                                                    permissionList.add(permission)
+                                                    logger.info("添加权限(非JsonString)", [("plugin", pluginData.name), ("permission", permission)])
                                             }
                                         case None =>
-                                            logger.info("数组元素为空", ("plugin", pluginData.name), ("index", i.toString()))
+                                            logger.info("数组元素为空", [("plugin", pluginData.name), ("index", i.toString())])
                                     }
                                 }
                                 if (permissionList.size > 0) {
                                     pluginData.permissions = String.join(permissionList.toArray(), delimiter: ",")
-                                    logger.info("权限解析完成", ("plugin", pluginData.name), ("permissions", pluginData.permissions))
+                                    logger.info("权限解析完成", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
                                 } else {
                                     pluginData.permissions = ""
-                                    logger.info("权限列表为空", ("plugin", pluginData.name))
+                                    logger.info("权限列表为空", [("plugin", pluginData.name)])
                                 }
                             case str: JsonString =>
-                                pluginData.permissions = str.getValue()
-                                logger.info("权限字符串解析", ("plugin", pluginData.name), ("permissions", pluginData.permissions))
+                                pluginData.permissions = normalizePermission(str.getValue())
+                                logger.info("权限字符串解析", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
                             case _ =>
-                                pluginData.permissions = perms.toString()
-                                logger.info("权限其他格式", ("plugin", pluginData.name), ("permissions", pluginData.permissions))
+                                pluginData.permissions = normalizePermission(perms.toString())
+                                logger.info("权限其他格式", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
                         }
                     } else {
-                        logger.info("插件没有权限字段", ("plugin", pluginData.name))
+                        logger.info("插件没有权限字段", [("plugin", pluginData.name)])
                     }
 
                     // 解析参数信息
@@ -458,6 +503,116 @@ if (eval { defined(&\$full_method) }) {
     }
 
     /**
+     * 运行时从下载插件脚本的 plugin_info 补全缺失元数据（兼容旧数据库记录缺字段的情况）
+     */
+    public func hydrateDownloadPluginRuntimeInfo(plugin: PluginData): Unit {
+        let pluginFile = "./data/plugins/${plugin.namespace}/Download.ts"
+        if (!exists(pluginFile)) {
+            return
+        }
+
+        try {
+            let denoPath = "/config/.deno/bin/deno"
+            var denoArgs = ArrayList<String>()
+            denoArgs.add("run")
+            denoArgs.add("--allow-read=${pluginFile}")
+            denoArgs.add("--allow-read=./data/plugins")
+            denoArgs.add(pluginFile)
+            denoArgs.add("--action=plugin_info")
+
+            let (exitCode, stdout, _) = executeWithOutput(denoPath, denoArgs.toArray())
+            if (exitCode != 0) {
+                return
+            }
+
+            let output = String.fromUtf8(stdout).trimAscii()
+            if (output.size == 0) {
+                return
+            }
+
+            let jsonVal = JsonValue.fromStr(output)
+            match (jsonVal) {
+                case jsonObj: JsonObject =>
+                    let loginFrom = getJsonString(jsonObj, "login_from").trimAscii()
+                    let urlRegex = getJsonString(jsonObj, "url_regex").trimAscii()
+
+                    // 解析 permissions: string[]
+                    var discoveredPerms: String = ""
+                    let fields = jsonObj.getFields()
+                    if (fields.contains("permissions")) {
+                        discoveredPerms = parsePermissions(fields["permissions"])
+                    }
+
+                    // 回填到传入对象（供本次请求使用）
+                    if (plugin.login_from.trimAscii().size == 0 && loginFrom.size > 0) {
+                        plugin.login_from = loginFrom
+                    }
+                    if (plugin.url_regex.trimAscii().size == 0 && urlRegex.size > 0) {
+                        plugin.url_regex = urlRegex
+                    }
+                    if (discoveredPerms.trimAscii().size > 0) {
+                        plugin.permissions = mergePermissionStrings(plugin.permissions, discoveredPerms)
+                    }
+
+                    // 回填到数据库（仅做缺省补全/合并，不覆盖用户配置）
+                    let existing = PluginDao.getPluginByNamespace(plugin.namespace)
+                    if (existing.namespace.size > 0) {
+                        var changed = false
+                        if (existing.login_from.trimAscii().size == 0 && loginFrom.size > 0) {
+                            existing.login_from = loginFrom
+                            changed = true
+                        }
+                        if (existing.url_regex.trimAscii().size == 0 && urlRegex.size > 0) {
+                            existing.url_regex = urlRegex
+                            changed = true
+                        }
+                        if (discoveredPerms.trimAscii().size > 0) {
+                            let merged = mergePermissionStrings(existing.permissions, discoveredPerms)
+                            if (merged != existing.permissions) {
+                                existing.permissions = merged
+                                changed = true
+                            }
+                        }
+                        if (changed) {
+                            PluginDao.update(existing)
+                        }
+                    }
+                case _ => return
+            }
+        } catch (_: Exception) {
+            return
+        }
+    }
+
+    private func mergePermissionStrings(existing: String, discovered: String): String {
+        let existingList = existing.split(",")
+        let discoveredList = discovered.split(",")
+        var set = HashSet<String>()
+        for (p in existingList) {
+            let t = normalizePermission(p).trimAscii()
+            if (t.size > 0) { set.add(t) }
+        }
+        for (p in discoveredList) {
+            let t = normalizePermission(p).trimAscii()
+            if (t.size > 0) { set.add(t) }
+        }
+        if (set.size == 0) {
+            return ""
+        }
+        // HashSet iteration order is undefined; keep original order first, then append new ones
+        var ordered = ArrayList<String>()
+        for (p in existingList) {
+            let t = normalizePermission(p).trimAscii()
+            if (t.size > 0 && set.contains(t) && !ordered.contains(t)) { ordered.add(t) }
+        }
+        for (p in discoveredList) {
+            let t = normalizePermission(p).trimAscii()
+            if (t.size > 0 && set.contains(t) && !ordered.contains(t)) { ordered.add(t) }
+        }
+        return String.join(ordered.toArray(), delimiter: ",")
+    }
+
+    /**
      * 从JsonObject获取字符串值
      */
     private func getJsonString(jsonObj: JsonObject, key: String): String {
@@ -470,6 +625,132 @@ if (eval { defined(&\$full_method) }) {
             }
         }
         return ""
+    }
+
+    private func appendParamsArg(args: ArrayList<String>, paramsJson: Option<String>) {
+        match (paramsJson) {
+            case Some(json) =>
+                let trimmed = json.trimAscii()
+                if (trimmed.size > 0) {
+                    args.add("--params=${trimmed}")
+                }
+            case None => ()
+        }
+    }
+
+    private func buildPluginParametersJson(plugin: PluginData): Option<String> {
+        if (plugin.parameters.trimAscii().size == 0) {
+            return Option.None
+        }
+
+        try {
+            let jsonVal = JsonValue.fromStr(plugin.parameters)
+            match (jsonVal) {
+                case array: JsonArray =>
+                    var mergedParams = JsonObject()
+                    let size = array.size()
+                    for (i in 0..size) {
+                        match (array.get(i)) {
+                            case Some(paramVal) =>
+                                match (paramVal) {
+                                    case paramObj: JsonObject =>
+                                        let name = getJsonString(paramObj, "name")
+                                        let key = if (name.size > 0) { name } else { "param${i}" }
+
+                                        // 优先使用value字段，如果没有则使用default_value
+                                        match (getParamValueOrDefault(paramObj)) {
+                                            case Some(value) =>
+                                                let paramFields = mergedParams.getFields()
+                                                paramFields[key] = value
+                                            case None => ()
+                                        }
+                                    case _ => ()
+                                }
+                            case None => ()
+                        }
+                    }
+                    if (mergedParams.getFields().size > 0) {
+                        return Option<String>.Some(mergedParams.toString())
+                    }
+                case obj: JsonObject =>
+                    if (obj.getFields().size > 0) {
+                        return Option<String>.Some(obj.toString())
+                    }
+                case _ => ()
+            }
+        } catch (e: Exception) {
+            let logger = getLogger("plugin_service")
+            logger.warn("解析插件参数失败", ("plugin", plugin.namespace), ("error", e.message), ("parameters", plugin.parameters))
+        }
+
+        return Option.None
+    }
+
+    private func getParamValueOrDefault(paramObj: JsonObject): Option<JsonValue> {
+        let fields = paramObj.getFields()
+        if (fields.contains("value")) {
+            return Option<JsonValue>.Some(fields["value"])
+        }
+        if (fields.contains("default_value")) {
+            return Option<JsonValue>.Some(fields["default_value"])
+        }
+        return Option.None
+    }
+
+    private func extractLoginCookiesJson(output: String): Option<String> {
+        if (output.trimAscii().size == 0) {
+            return Option.None
+        }
+
+        try {
+            let jsonVal = JsonValue.fromStr(output)
+            match (jsonVal) {
+                case jsonObj: JsonObject =>
+                    if (!getJsonBool(jsonObj, "success")) {
+                        return Option.None
+                    }
+
+                    let fields = jsonObj.getFields()
+                    if (fields.contains("data")) {
+                        match (fields["data"]) {
+                            case dataObj: JsonObject =>
+                                let dataFields = dataObj.getFields()
+                                if (dataFields.contains("cookies")) {
+                                    match (dataFields["cookies"]) {
+                                        case cookiesArr: JsonArray =>
+                                            return Option<String>.Some(cookiesArr.toString())
+                                        case _ => ()
+                                    }
+                                }
+                            case _ => ()
+                        }
+                    }
+                case _ => ()
+            }
+        } catch (_: Exception) {
+            return Option.None
+        }
+
+        return Option.None
+    }
+
+    private func getJsonBool(jsonObj: JsonObject, key: String): Bool {
+        let fields = jsonObj.getFields()
+        if (fields.contains(key)) {
+            let value = fields[key]
+            match (value) {
+                case jsonBool: JsonBool => return jsonBool.getValue()
+                case jsonStr: JsonString =>
+                    return matchesTrueString(jsonStr.getValue())
+                case _ =>
+                    return matchesTrueString(value.toString())
+            }
+        }
+        return false
+    }
+
+    private func matchesTrueString(value: String): Bool {
+        return value == "true" || value == "True" || value == "TRUE" || value == "1"
     }
 
     /**
@@ -528,7 +809,8 @@ if (eval { defined(&\$full_method) }) {
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
 
         // 添加插件执行参数
-        denoArgs.add("--action=execute")
+        denoArgs.add(pluginFile)
+        denoArgs.add("--action=run")
         denoArgs.add("--archive_id=${archiveId}")
 
         // 执行插件
@@ -558,7 +840,7 @@ if (eval { defined(&\$full_method) }) {
     /**
      * 执行登录插件
      */
-    public func executeLoginPlugin(plugin: PluginData, params: HashMap<String, String>): PluginExecutionResult {
+    public func executeLoginPlugin(plugin: PluginData, paramsJson: Option<String>): PluginExecutionResult {
         let logger = getLogger("plugin_service")
         let startTime = DateTime.now().toUnixTimeStamp().toSeconds()
 
@@ -576,14 +858,10 @@ if (eval { defined(&\$full_method) }) {
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
 
         // 添加插件执行参数
-        denoArgs.add("--action=execute")
+        denoArgs.add(pluginFile)
+        denoArgs.add("--action=run")
 
-        // 添加参数
-        for ((key, value) in params) {
-            if (value.size > 0) {
-                denoArgs.add("--${key}=${value}")
-            }
-        }
+        appendParamsArg(denoArgs, paramsJson)
 
         // 执行插件
         let (exitCode, stdout, stderr) = executeWithOutput(denoPath, denoArgs.toArray())
@@ -630,10 +908,57 @@ if (eval { defined(&\$full_method) }) {
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
 
         // 添加插件执行参数
-        denoArgs.add("--action=execute")
+        denoArgs.add(pluginFile)
+        denoArgs.add("--action=run")
         denoArgs.add("--url=${url}")
 
-        // 执行插件
+        let paramsJson = buildPluginParametersJson(plugin)
+        appendParamsArg(denoArgs, paramsJson)
+
+        var cookiesJsonOpt: Option<String> = Option.None
+
+        hydrateDownloadPluginRuntimeInfo(plugin)
+        let effectiveLoginFrom = plugin.login_from.trimAscii()
+        if (effectiveLoginFrom.size > 0) {
+            let loginPlugin = PluginDao.getPluginByNamespace(effectiveLoginFrom)
+            if (loginPlugin.namespace.size == 0) {
+                let failure = "Login plugin not found: ${effectiveLoginFrom}"
+                let elapsed = DateTime.now().toUnixTimeStamp().toSeconds() - startTime
+                logger.error(failure)
+                return PluginExecutionResult(false, failure, HashMap<String, String>(), elapsed, 1)
+            }
+
+            let loginPluginFile = "./data/plugins/${loginPlugin.namespace}/Login.ts"
+            if (!exists(loginPluginFile)) {
+                let failure = "Login plugin file missing: ${loginPluginFile}"
+                let elapsed = DateTime.now().toUnixTimeStamp().toSeconds() - startTime
+                logger.error(failure)
+                return PluginExecutionResult(false, failure, HashMap<String, String>(), elapsed, 1)
+            }
+
+            let loginParamsJson = buildPluginParametersJson(loginPlugin)
+            let loginResult = executeLoginPlugin(loginPlugin, loginParamsJson)
+            if (!loginResult.success) {
+                let failure = "Login plugin execution failed: ${loginResult.error}"
+                var resultData = HashMap<String, String>()
+                resultData["error"] = loginResult.error
+                let elapsed = DateTime.now().toUnixTimeStamp().toSeconds() - startTime
+                logger.error(failure)
+                return PluginExecutionResult(false, failure, resultData, elapsed, loginResult.exitCode)
+            }
+
+            let loginOutput = match (loginResult.data.get("output")) {
+                case Some(value) => value
+                case None => ""
+            }
+            cookiesJsonOpt = extractLoginCookiesJson(loginOutput)
+            if (cookiesJsonOpt.isSome()) {
+                denoArgs.add("--login_cookies=${cookiesJsonOpt.getOrThrow()}")
+            } else {
+                logger.warn("Login plugin ${loginPlugin.namespace} did not return cookies")
+            }
+        }
+
         let (exitCode, stdout, stderr) = executeWithOutput(denoPath, denoArgs.toArray())
         let executionTime = DateTime.now().toUnixTimeStamp().toSeconds() - startTime
 
@@ -644,6 +969,9 @@ if (eval { defined(&\$full_method) }) {
             // 解析输出结果
             var resultData = HashMap<String, String>()
             resultData["output"] = output
+            if (cookiesJsonOpt.isSome()) {
+                resultData["login_cookies"] = cookiesJsonOpt.getOrThrow()
+            }
 
             return PluginExecutionResult(true, output, resultData, executionTime, exitCode)
         } else {
@@ -652,6 +980,9 @@ if (eval { defined(&\$full_method) }) {
 
             var resultData = HashMap<String, String>()
             resultData["error"] = errorOutput
+            if (cookiesJsonOpt.isSome()) {
+                resultData["login_cookies"] = cookiesJsonOpt.getOrThrow()
+            }
 
             return PluginExecutionResult(false, errorOutput, resultData, executionTime, exitCode)
         }

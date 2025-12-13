@@ -1,11 +1,20 @@
 #!/usr/bin/env deno run --allow-net --allow-read
 
 import { BasePlugin, PluginInfo, PluginParameter, PluginResult } from '../base_plugin.ts';
+import contentDisposition from "https://esm.sh/content-disposition@0.5.4?bundle&deno";
 
 /**
  * E-Hentai下载插件
  * 处理E-Hentai画廊下载URL生成
  */
+
+interface LoginCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+}
+
 class EHentaiDownloadPlugin extends BasePlugin {
   getPluginInfo(): PluginInfo {
     return {
@@ -17,16 +26,17 @@ class EHentaiDownloadPlugin extends BasePlugin {
       version: "1.2",
       description: "Downloads the given e*hentai URL and adds it to LANraragi. This uses GP to call the archiver, so make sure you have enough!",
       parameters: [
-        { type: "bool", desc: "Force resampled archive download", default_value: "0" }
+        { name: "forceresampled", type: "bool", desc: "Force resampled archive download", default_value: "0" }
       ],
       url_regex: "https?://e(-|x)hentai.org/g/.*/.*",
-      permissions: ["net=e-hentai.org", "net=exhentai.org"]
+      permissions: ["net=e-hentai.org", "net=exhentai.org", "net=ehgt.org", "net=*.hath.network", "run=curl"]
     };
   }
 
   protected async runPlugin(args: string[]): Promise<void> {
     try {
       const params = this.parseParams(args);
+      const loginCookies = this.parseLoginCookies(args);
       const url = this.getUrlFromArgs(args);
 
       if (!url) {
@@ -36,7 +46,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
 
       const result = await this.provideUrl(url, {
         forceresampled: params.forceresampled || false
-      });
+      }, loginCookies);
 
       this.outputResult(result);
     } catch (error) {
@@ -56,7 +66,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
   /**
    * 处理下载URL生成
    */
-  private async provideUrl(url: string, params: { forceresampled: boolean }): Promise<PluginResult> {
+  private async provideUrl(url: string, params: { forceresampled: boolean }, loginCookies: LoginCookie[]): Promise<PluginResult> {
     try {
       // 验证URL格式
       const urlMatch = url.match(/https?:\/\/e(-|x)hentai\.org\/g\/([0-9]*)\/([0-z]*)\/*.*/);
@@ -71,21 +81,28 @@ class EHentaiDownloadPlugin extends BasePlugin {
       const archiverUrl = `${domain}/archiver.php?gid=${gID}&token=${gToken}`;
 
       // 检查archiver URL是否有效
-      const checkResult = await this.checkArchiverUrl(archiverUrl);
+      const targetHost = this.getHostname(archiverUrl);
+      const checkResult = await this.checkArchiverUrl(archiverUrl, targetHost, loginCookies);
       if (!checkResult.success) {
         return checkResult;
       }
 
       // 获取下载URL
-      const downloadResult = await this.getDownloadUrl(archiverUrl, params.forceresampled);
+      const downloadResult = await this.getDownloadUrl(archiverUrl, params.forceresampled, targetHost, loginCookies);
       if (!downloadResult.success) {
         return downloadResult;
+      }
+
+      const downloaded = await this.downloadArchive(downloadResult.data.finalUrl, targetHost, loginCookies, gID, gToken, params.forceresampled);
+      if (!downloaded.success) {
+        return downloaded;
       }
 
       return {
         success: true,
         data: {
-          download_url: downloadResult.data.finalUrl,
+          relative_path: downloaded.data.relativePath,
+          filename: downloaded.data.filename,
           archive_size: params.forceresampled ? 'resampled' : 'original'
         }
       };
@@ -95,15 +112,261 @@ class EHentaiDownloadPlugin extends BasePlugin {
     }
   }
 
+  private async downloadArchive(
+    finalUrl: string,
+    domain: string,
+    loginCookies: LoginCookie[],
+    gID: string,
+    gToken: string,
+    forceresampled: boolean
+  ): Promise<PluginResult> {
+    try {
+      const pluginDir = './data/plugins/ehdl';
+      await Deno.mkdir(pluginDir, { recursive: true });
+
+      const fallback = `ehdl_${gID}_${gToken}_${forceresampled ? 'res' : 'org'}_${Date.now()}.zip`;
+
+      const before = await this.listFiles(pluginDir);
+      const cookieHeader = this.buildCookieHeader(domain, loginCookies);
+
+      const userAgent =
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+
+      const args: string[] = ['-fL', '-sS', '-A', userAgent, '-e', `https://${domain}/`];
+      if (cookieHeader) {
+        args.push('-H', `Cookie: ${cookieHeader}`);
+      }
+      // Use Content-Disposition filename when available
+      args.push('-J', '-O', finalUrl);
+
+      const cmd = new Deno.Command('curl', { args, cwd: pluginDir, stdout: 'null', stderr: 'piped' });
+      const out = await cmd.output();
+      const stderr = new TextDecoder().decode(out.stderr);
+      await this.logInfo('curl finished', { code: out.code, stderr: stderr.slice(0, 2000) });
+
+      if (out.code !== 0) {
+        return { success: false, error: `Archive download failed: curl exit ${out.code}` };
+      }
+
+      const after = await this.listFiles(pluginDir);
+      const newFiles = after.filter((f) => !before.includes(f));
+      const downloaded = await this.pickDownloadedFile(pluginDir, newFiles);
+      if (!downloaded) {
+        return { success: false, error: 'Archive download failed: could not determine downloaded filename' };
+      }
+
+      const finalName = this.looksGarbledFilename(downloaded) ? fallback : downloaded;
+      const safeName = finalName.replace(/[\\/]/g, '_');
+      if (safeName !== downloaded) {
+        await Deno.rename(`${pluginDir}/${downloaded}`, `${pluginDir}/${safeName}`);
+      }
+
+      const relativePath = `plugins/ehdl/${safeName}`;
+      return { success: true, data: { relativePath, filename: safeName } };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { success: false, error: `Archive download failed: ${errorMessage}` };
+    }
+  }
+
+  private async listFiles(dir: string): Promise<string[]> {
+    const files: string[] = [];
+    for await (const entry of Deno.readDir(dir)) {
+      if (entry.isFile) files.push(entry.name);
+    }
+    files.sort();
+    return files;
+  }
+
+  private async pickDownloadedFile(dir: string, candidates: string[]): Promise<string> {
+    if (candidates.length === 1) return candidates[0];
+    if (candidates.length === 0) return '';
+
+    let best = candidates[0];
+    let bestMtime = 0;
+    for (const name of candidates) {
+      try {
+        const info = await Deno.stat(`${dir}/${name}`);
+        const mtime = info.mtime?.getTime?.() ?? 0;
+        if (mtime >= bestMtime) {
+          bestMtime = mtime;
+          best = name;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return best;
+  }
+
+  private deriveFilename(response: Response): string {
+    const contentDisposition = response.headers.get('content-disposition') || '';
+    const star = this.parseFilenameStar(contentDisposition);
+    if (star) return this.maybeFixMojibakeUtf8(star);
+
+    const basic = this.parseFilename(contentDisposition);
+    if (basic) return this.maybeFixMojibakeUtf8(basic);
+
+    try {
+      const url = new URL(response.url);
+      const parts = url.pathname.split('/').filter(Boolean);
+      return parts[parts.length - 1] || '';
+    } catch {
+      return '';
+    }
+  }
+
+  private looksGarbledFilename(name: string): boolean {
+    if (!name) return true;
+    if (name.includes('\uFFFD')) return true; // replacement character
+    // C0/C1 control chars
+    if (/[\x00-\x1F\x7F\u0080-\u009F]/.test(name)) return true;
+
+    // Common mojibake sequences when UTF-8 bytes are mis-decoded as Latin-1
+    if (name.includes('Ã') || name.includes('â') || name.includes('æ') || name.includes('¤')) return true;
+    return false;
+  }
+
+  private maybeFixMojibakeUtf8(name: string): string {
+    // If a server sends raw UTF-8 in filename= but it's interpreted as Latin-1,
+    // converting bytes back to UTF-8 usually restores CJK filenames.
+    if (!name) return name;
+    if (!this.looksGarbledFilename(name)) return name;
+
+    try {
+      const bytes = new Uint8Array(name.length);
+      for (let i = 0; i < name.length; i++) {
+        bytes[i] = name.charCodeAt(i) & 0xff;
+      }
+      const fixed = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+      if (fixed && !this.looksGarbledFilename(fixed)) {
+        return fixed;
+      }
+      return name;
+    } catch {
+      return name;
+    }
+  }
+
+  private parseFilenameStar(contentDisposition: string): string {
+    // RFC 5987: filename*=charset''percent-encoded
+    const match = contentDisposition.match(/filename\*\s*=\s*([^;]+)/i);
+    if (!match?.[1]) return '';
+
+    const value = match[1].trim();
+    const unquoted = value.replace(/^\"|\"$/g, '');
+    // format: charset'lang'%xx%yy
+    const partsMatch = unquoted.match(/^([^']*)'[^']*'(.*)$/);
+    if (!partsMatch) {
+      // Some servers send filename*=percent without charset/lang; try best-effort
+      return this.decodeUriComponentSafe(unquoted);
+    }
+
+    const charset = (partsMatch[1] || 'utf-8').trim().toLowerCase();
+    const encoded = partsMatch[2] || '';
+    try {
+      const bytes = this.percentDecodeToBytes(encoded);
+      const decoder = new TextDecoder(charset as any, { fatal: false });
+      return decoder.decode(bytes);
+    } catch {
+      return this.decodeUriComponentSafe(encoded);
+    }
+  }
+
+  private parseFilename(contentDisposition: string): string {
+    const match = contentDisposition.match(/filename\s*=\s*([^;]+)/i);
+    if (!match?.[1]) return '';
+    const value = match[1].trim().replace(/^\"|\"$/g, '');
+    const decoded = this.decodeMimeEncodedWord(value);
+    // Some servers percent-encode even in filename=
+    if (decoded.includes('%')) {
+      return this.decodeUriComponentSafe(decoded);
+    }
+    return decoded;
+  }
+
+  private decodeMimeEncodedWord(value: string): string {
+    // RFC 2047: =?charset?B?base64?= or =?charset?Q?quoted-printable?=
+    const m = value.match(/^=\\?([^?]+)\\?([bBqQ])\\?([^?]+)\\?=$/);
+    if (!m) return value;
+    const charset = m[1].trim().toLowerCase();
+    const encoding = m[2].toUpperCase();
+    const payload = m[3];
+    try {
+      let bytes: Uint8Array;
+      if (encoding === 'B') {
+        bytes = this.base64ToBytes(payload);
+      } else {
+        bytes = this.qpToBytes(payload);
+      }
+      const decoder = new TextDecoder(charset as any, { fatal: false });
+      return decoder.decode(bytes);
+    } catch {
+      return value;
+    }
+  }
+
+  private decodeUriComponentSafe(value: string): string {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+
+  private percentDecodeToBytes(value: string): Uint8Array {
+    const bytes: number[] = [];
+    for (let i = 0; i < value.length; i++) {
+      const ch = value[i];
+      if (ch === '%' && i + 2 < value.length) {
+        const hex = value.slice(i + 1, i + 3);
+        const byte = Number.parseInt(hex, 16);
+        if (!Number.isNaN(byte)) {
+          bytes.push(byte);
+          i += 2;
+          continue;
+        }
+      }
+      bytes.push(ch.charCodeAt(0) & 0xff);
+    }
+    return new Uint8Array(bytes);
+  }
+
+  private base64ToBytes(value: string): Uint8Array {
+    const bin = atob(value.replace(/\\s+/g, ''));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i) & 0xff;
+    return out;
+  }
+
+  private qpToBytes(value: string): Uint8Array {
+    // RFC 2047 Q-encoding: '_' means space, =HH hex
+    const normalized = value.replace(/_/g, ' ');
+    const bytes: number[] = [];
+    for (let i = 0; i < normalized.length; i++) {
+      const ch = normalized[i];
+      if (ch === '=' && i + 2 < normalized.length) {
+        const hex = normalized.slice(i + 1, i + 3);
+        const byte = Number.parseInt(hex, 16);
+        if (!Number.isNaN(byte)) {
+          bytes.push(byte);
+          i += 2;
+          continue;
+        }
+      }
+      bytes.push(ch.charCodeAt(0) & 0xff);
+    }
+    return new Uint8Array(bytes);
+  }
+
   /**
    * 检查archiver URL是否有效
    */
-  private async checkArchiverUrl(archiverUrl: string): Promise<PluginResult> {
+  private async checkArchiverUrl(archiverUrl: string, domain: string, loginCookies: LoginCookie[]): Promise<PluginResult> {
     try {
+      const headers = this.buildRequestHeaders(domain, loginCookies);
       const response = await fetch(archiverUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers
       });
 
       if (!response.ok) {
@@ -130,7 +393,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
   /**
    * 获取最终下载URL
    */
-  private async getDownloadUrl(archiverUrl: string, forceresampled: boolean): Promise<PluginResult> {
+  private async getDownloadUrl(archiverUrl: string, forceresampled: boolean, domain: string, loginCookies: LoginCookie[]): Promise<PluginResult> {
     try {
       const dltype = forceresampled ? 'res' : 'org';
       const dlcheck = forceresampled ? 'Download+Resample+Archive' : 'Download+Original+Archive';
@@ -139,12 +402,11 @@ class EHentaiDownloadPlugin extends BasePlugin {
       formData.append('dltype', dltype);
       formData.append('dlcheck', dlcheck);
 
+      const headers = this.buildRequestHeaders(domain, loginCookies);
       const response = await fetch(archiverUrl, {
         method: 'POST',
         body: formData,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+        headers
       });
 
       if (!response.ok) {
@@ -179,6 +441,73 @@ class EHentaiDownloadPlugin extends BasePlugin {
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, error: `Download URL generation failed: ${errorMessage}` };
+    }
+  }
+
+  private parseLoginCookies(args: string[]): LoginCookie[] {
+    const cookieArg = args.find(arg => arg.startsWith('--login_cookies='));
+    if (!cookieArg) {
+      return [];
+    }
+    const payload = cookieArg.substring('--login_cookies='.length);
+    try {
+      const parsed = JSON.parse(payload);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return parsed
+        .map(cookie => ({
+          name: cookie?.name || '',
+          value: cookie?.value || '',
+          domain: cookie?.domain || '',
+          path: cookie?.path || '/'
+        }))
+        .filter((cookie): cookie is LoginCookie => Boolean(cookie.name && cookie.value && cookie.domain));
+    } catch (error) {
+      console.warn('Failed to parse login cookies', error);
+      return [];
+    }
+  }
+
+  private buildRequestHeaders(domain: string, cookies: LoginCookie[]): Record<string, string> {
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    };
+    const cookieHeader = this.buildCookieHeader(domain, cookies);
+    if (cookieHeader) {
+      headers['Cookie'] = cookieHeader;
+    }
+    return headers;
+  }
+
+  private buildCookieHeader(domain: string, cookies: LoginCookie[]): string {
+    const normalizedDomain = domain.toLowerCase();
+    const matched = cookies.filter(cookie => this.domainMatches(cookie.domain, normalizedDomain));
+    if (matched.length === 0) {
+      return '';
+    }
+    return matched.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+  }
+
+  private domainMatches(cookieDomain: string, targetDomain: string): boolean {
+    if (!cookieDomain || !targetDomain) {
+      return false;
+    }
+    const normalizedCookie = cookieDomain.replace(/^\./, '').toLowerCase();
+    const normalizedTarget = targetDomain.replace(/^www\./, '').toLowerCase();
+    return (
+      normalizedTarget === normalizedCookie ||
+      normalizedTarget.endsWith(`.${normalizedCookie}`) ||
+      normalizedCookie.endsWith(`.${normalizedTarget}`)
+    );
+  }
+
+  private getHostname(targetUrl: string): string {
+    try {
+      return new URL(targetUrl).hostname;
+    } catch (_error) {
+      return '';
     }
   }
 }
