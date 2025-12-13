@@ -31,35 +31,54 @@ public class CategoryModel {
                 var categories: ArrayList<Category> = ArrayList<Category>()
                 try {
                     let stmt = conn.prepareStatement("SELECT catid, name, search, pinned FROM categories ORDER BY id")
-                    let rs = stmt.query()
-                    
-                    while (rs.next()) {
-                        let category = Category()
-                        category.id = rs.getOrNull<String>(1) ?? ""
-                        category.name = rs.getOrNull<String>(2) ?? ""
-                        category.search = rs.getOrNull<String>(3) ?? ""
-                        category.isPinned = rs.getOrNull<Bool>(4) ?? false
-                        
-                        // 获取分类下的档案
-                        let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
-                        archiveStmt.set(0, category.id)
-                        let archiveRs = archiveStmt.query()
-                        
-                        var archiveIds: ArrayList<String> = ArrayList<String>()
-                        while (archiveRs.next()) {
-                            archiveIds.add(archiveRs.getOrNull<String>(1) ?? "")
+                    try {
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let category = Category()
+                                category.id = rs.getOrNull<String>(0) ?? ""
+                                category.name = rs.getOrNull<String>(1) ?? ""
+                                category.search = rs.getOrNull<String>(2) ?? ""
+                                category.isPinned = rs.getOrNull<Bool>(3) ?? false
+                                categories.add(category)
+                            }
+                        } finally {
+                            rs.close()
                         }
-                        category.archives = archiveIds.toArray()
-                        
-                        categories.add(category)
+                    } finally {
+                        stmt.close()
                     }
-                    
-                    conn.close()
+
+                    // 单独查询分类下的档案，避免同一连接上嵌套ResultSet导致conn busy
+                    for (category in categories) {
+                        let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
+                        try {
+                            archiveStmt.set(0, category.id)
+                            let archiveRs = archiveStmt.query()
+                            try {
+                                var archiveIds: ArrayList<String> = ArrayList<String>()
+                                while (archiveRs.next()) {
+                                    archiveIds.add(archiveRs.getOrNull<String>(0) ?? "")
+                                }
+                                category.archives = archiveIds.toArray()
+                            } finally {
+                                archiveRs.close()
+                            }
+                        } finally {
+                            archiveStmt.close()
+                        }
+                    }
+
                     return categories.toArray()
                 } catch (e: Exception) {
                     println("查询分类失败: ${e}")
-                    conn.close()
                     return Array<Category>()
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeException: Exception) {
+                        // ignore
+                    }
                 }
             case None =>
                 println("无法连接到数据库")
@@ -76,35 +95,47 @@ public class CategoryModel {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("SELECT catid, name, search, pinned FROM categories WHERE catid = ?")
-                    stmt.set(0, id)
-                    let rs = stmt.query()
-                    
-                    if (rs.next()) {
-                        let category = Category()
-                        category.id = rs.getOrNull<String>(1) ?? ""
-                        category.name = rs.getOrNull<String>(2) ?? ""
-                        category.search = rs.getOrNull<String>(3) ?? ""
-                        category.isPinned = rs.getOrNull<Bool>(4) ?? false
-                        
-                        // 获取分类下的档案
-                        let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
-                        archiveStmt.set(0, category.id)
-                        let archiveRs = archiveStmt.query()
-                        
-                        var archiveIds: ArrayList<String> = ArrayList<String>()
-                        while (archiveRs.next()) {
-                            archiveIds.add(archiveRs.getOrNull<String>(1) ?? "")
+                    try {
+                        stmt.set(0, id)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                let category = Category()
+                                category.id = rs.getOrNull<String>(0) ?? ""
+                                category.name = rs.getOrNull<String>(1) ?? ""
+                                category.search = rs.getOrNull<String>(2) ?? ""
+                                category.isPinned = rs.getOrNull<Bool>(3) ?? false
+
+                                let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
+                                try {
+                                    archiveStmt.set(0, category.id)
+                                    let archiveRs = archiveStmt.query()
+                                    try {
+                                        var archiveIds: ArrayList<String> = ArrayList<String>()
+                                        while (archiveRs.next()) {
+                                            archiveIds.add(archiveRs.getOrNull<String>(0) ?? "")
+                                        }
+                                        category.archives = archiveIds.toArray()
+                                    } finally {
+                                        archiveRs.close()
+                                    }
+                                } finally {
+                                    archiveStmt.close()
+                                }
+
+                                return category
+                            }
+                        } finally {
+                            rs.close()
                         }
-                        category.archives = archiveIds.toArray()
-                        
-                        conn.close()
-                        return category
+                    } finally {
+                        stmt.close()
                     }
-                    
-                    conn.close()
                 } catch (e: Exception) {
                     println("查询分类失败: ${e}")
-                    conn.close()
+                }
+                finally {
+                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 println("无法连接到数据库")

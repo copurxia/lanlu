@@ -38,54 +38,69 @@ public class TagDao {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case None => false
-            case Some(conn) => try {
-                // 首先获取档案的内部ID
-                let getArchiveIdStmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
-                getArchiveIdStmt.set(0, archiveId)
-                let archiveIdResult = getArchiveIdStmt.query()
-                
-                if (!archiveIdResult.next()) {
-                    return false
-                }
-                
-                let archiveInternalId = archiveIdResult.getOrNull<Int64>(0) ?? 0
-                
-                // 删除现有的标签关联
-                let deleteStmt = conn.prepareStatement("DELETE FROM archive_tags WHERE archive_id = ?")
-                deleteStmt.set(0, archiveInternalId)
-                deleteStmt.update()
-                
-                // 如果标签字符串为空，直接返回
-                if (tagsString.size == 0 || tagsString == "") {
-                    conn.close()
-                    return true
-                }
-                
-                // 解析标签字符串
-                let tags = parseTagsString(tagsString)
-                
-                // 为每个标签创建或获取标签ID，并建立关联
-                for (tag in tags) {
-                    let tagId = getOrCreateTag(conn, tag)
-                    
-                    // 建立档案和标签的关联
-                    let insertRelationStmt = conn.prepareStatement("INSERT INTO archive_tags (archive_id, tag_id) VALUES (?, ?)")
-                    insertRelationStmt.set(0, archiveInternalId)
-                    insertRelationStmt.set(1, tagId)
-                    insertRelationStmt.update()
-                }
-                
-                conn.close()
-                true
-            } catch (e: Exception) {
-                getLogger("tag_dao").error("Error updating archive tags", ("error", e.message))
+            case Some(conn) =>
                 try {
-                    conn.close()
-                } catch (closeException: Exception) {
-                    getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
+                    // 首先获取档案的内部ID
+                    let getArchiveIdStmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
+                    var archiveInternalId: Int64 = 0
+                    try {
+                        getArchiveIdStmt.set(0, archiveId)
+                        let archiveIdResult = getArchiveIdStmt.query()
+                        try {
+                            if (!archiveIdResult.next()) {
+                                return false
+                            }
+                            archiveInternalId = archiveIdResult.getOrNull<Int64>(0) ?? 0
+                        } finally {
+                            archiveIdResult.close()
+                        }
+                    } finally {
+                        getArchiveIdStmt.close()
+                    }
+
+                    // 删除现有的标签关联
+                    let deleteStmt = conn.prepareStatement("DELETE FROM archive_tags WHERE archive_id = ?")
+                    try {
+                        deleteStmt.set(0, archiveInternalId)
+                        deleteStmt.update()
+                    } finally {
+                        deleteStmt.close()
+                    }
+
+                    // 如果标签字符串为空，直接返回
+                    if (tagsString.size == 0 || tagsString == "") {
+                        return true
+                    }
+
+                    // 解析标签字符串
+                    let tags = parseTagsString(tagsString)
+
+                    // 为每个标签创建或获取标签ID，并建立关联
+                    for (tag in tags) {
+                        let tagId = getOrCreateTag(conn, tag)
+
+                        // 建立档案和标签的关联
+                        let insertRelationStmt = conn.prepareStatement("INSERT INTO archive_tags (archive_id, tag_id) VALUES (?, ?)")
+                        try {
+                            insertRelationStmt.set(0, archiveInternalId)
+                            insertRelationStmt.set(1, tagId)
+                            insertRelationStmt.update()
+                        } finally {
+                            insertRelationStmt.close()
+                        }
+                    }
+
+                    true
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("Error updating archive tags", ("error", e.message))
+                    false
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeException: Exception) {
+                        getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
+                    }
                 }
-                false
-            }
         }
     }
     
@@ -117,23 +132,37 @@ public class TagDao {
     private static func getOrCreateTag(conn: Connection, tagName: String): Int64 {
         // 尝试查找现有标签
         let findStmt = conn.prepareStatement("SELECT id FROM tags WHERE name = ?")
-        findStmt.set(0, tagName)
-        let result = findStmt.query()
-        
-        if (result.next()) {
-            return result.getOrNull<Int64>(0) ?? 0
+        try {
+            findStmt.set(0, tagName)
+            let result = findStmt.query()
+            try {
+                if (result.next()) {
+                    return result.getOrNull<Int64>(0) ?? 0
+                }
+            } finally {
+                result.close()
+            }
+        } finally {
+            findStmt.close()
         }
-        
+
         // 创建新标签
         let insertStmt = conn.prepareStatement("INSERT INTO tags (name) VALUES (?) RETURNING id")
-        insertStmt.set(0, tagName)
-        let insertResult = insertStmt.query()
-        
-        if (insertResult.next()) {
-            return insertResult.getOrNull<Int64>(0) ?? 0
+        try {
+            insertStmt.set(0, tagName)
+            let insertResult = insertStmt.query()
+            try {
+                if (insertResult.next()) {
+                    return insertResult.getOrNull<Int64>(0) ?? 0
+                }
+            } finally {
+                insertResult.close()
+            }
+        } finally {
+            insertStmt.close()
         }
-        
-        return 0
+
+        0
     }
     
     /**
@@ -145,21 +174,34 @@ public class TagDao {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case None => ""
-            case Some(conn) => try {
-                // 使用archives_with_tags视图获取标签
-                let stmt = conn.prepareStatement("SELECT tags FROM archives_with_tags WHERE arcid = ?")
-                stmt.set(0, archiveId)
-                let result = stmt.query()
-                
-                if (result.next()) {
-                    return result.getOrNull<String>(0) ?? ""
+            case Some(conn) =>
+                try {
+                    // 使用archives_with_tags视图获取标签
+                    let stmt = conn.prepareStatement("SELECT tags FROM archives_with_tags WHERE arcid = ?")
+                    try {
+                        stmt.set(0, archiveId)
+                        let result = stmt.query()
+                        try {
+                            if (result.next()) {
+                                return result.getOrNull<String>(0) ?? ""
+                            }
+                            return ""
+                        } finally {
+                            result.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("Error getting archive tags", ("error", e.message))
+                    ""
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeException: Exception) {
+                        getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
+                    }
                 }
-
-                ""
-            } catch (e: Exception) {
-                getLogger("tag_dao").error("Error getting archive tags", ("error", e.message))
-                ""
-            }
         }
     }
 
@@ -169,31 +211,40 @@ public class TagDao {
     public static func getTagByName(name: String): TagData {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, value, weight, created_at, updated_at FROM tags WHERE name = ?")
-                stmt.set(0, name)
-                let rs = stmt.query()
-
-                if (rs.next()) {
-                    let tag = TagData()
-                    tag.id = rs.getOrNull<Int64>(0) ?? 0
-                    tag.name = rs.getOrNull<String>(1) ?? ""
-                    tag.namespace = rs.getOrNull<String>(2) ?? ""
-                    tag.value = rs.getOrNull<String>(3) ?? ""
-                    tag.weight = rs.getOrNull<Int32>(4) ?? 1
-                    tag.created_at = rs.getOrNull<String>(5) ?? ""
-                    tag.updated_at = rs.getOrNull<String>(6) ?? ""
-
-                    conn.close()
-                    return tag
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement(
+                        "SELECT id, name, namespace, value, weight, created_at, updated_at FROM tags WHERE name = ?")
+                    try {
+                        stmt.set(0, name)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                let tag = TagData()
+                                tag.id = rs.getOrNull<Int64>(0) ?? 0
+                                tag.name = rs.getOrNull<String>(1) ?? ""
+                                tag.namespace = rs.getOrNull<String>(2) ?? ""
+                                tag.value = rs.getOrNull<String>(3) ?? ""
+                                tag.weight = rs.getOrNull<Int32>(4) ?? 1
+                                tag.created_at = rs.getOrNull<String>(5) ?? ""
+                                tag.updated_at = rs.getOrNull<String>(6) ?? ""
+                                return tag
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("查询标签失败", ("error", e.message), ("name", name))
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeException: Exception) {
+                        getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
+                    }
                 }
-
-                conn.close()
-            } catch (e: Exception) {
-                getLogger("tag_dao").error("查询标签失败", ("error", e.message), ("name", name))
-                conn.close()
-            }
             case None => getLogger("tag_dao").error("无法连接到数据库")
         }
         return TagData()
@@ -205,23 +256,30 @@ public class TagDao {
     public static func create(tag: TagData): Bool {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
-            case Some(conn) => try {
-                let stmt = conn.prepareStatement(
-                    "INSERT INTO tags (name, namespace, value, weight) VALUES (?, ?, ?, ?)")
-
-                stmt.set(0, tag.name)
-                stmt.set(1, tag.namespace)
-                stmt.set(2, tag.value)
-                stmt.set(3, tag.weight)
-
-                let result = stmt.update()
-                conn.close()
-                return true
-            } catch (e: Exception) {
-                getLogger("tag_dao").error("创建标签失败", ("error", e.message), ("name", tag.name))
-                conn.close()
-                return false
-            }
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement(
+                        "INSERT INTO tags (name, namespace, value, weight) VALUES (?, ?, ?, ?)")
+                    try {
+                        stmt.set(0, tag.name)
+                        stmt.set(1, tag.namespace)
+                        stmt.set(2, tag.value)
+                        stmt.set(3, tag.weight)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("创建标签失败", ("error", e.message), ("name", tag.name))
+                    return false
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeException: Exception) {
+                        getLogger("tag_dao").warn("Error closing database connection", ("error", closeException.message))
+                    }
+                }
             case None =>
                 getLogger("tag_dao").error("无法连接到数据库")
                 return false
