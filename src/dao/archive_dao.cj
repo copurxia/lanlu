@@ -180,7 +180,7 @@ public class ArchiveDao {
                 var whereConditions: ArrayList<String> = ArrayList<String>()
                 
                 if (filter.size > 0) {
-                    whereConditions.add("(title LIKE ? OR filename LIKE ?)")
+                    whereConditions.add("(title LIKE ? OR filename LIKE ? OR tags LIKE ? OR summary LIKE ?)")
                 }
                 
                 // 添加新归档过滤条件
@@ -212,6 +212,8 @@ public class ArchiveDao {
                 if (filter.size > 0) {
                     countStmt.set<String>(0, "%${filter}%")
                     countStmt.set<String>(1, "%${filter}%")
+                    countStmt.set<String>(2, "%${filter}%")
+                    countStmt.set<String>(3, "%${filter}%")
                 }
                 
                 let countRs = countStmt.query()
@@ -280,6 +282,8 @@ public class ArchiveDao {
                 if (filter.size > 0) {
                     stmt.set<String>(0, "%${filter}%")
                     stmt.set<String>(1, "%${filter}%")
+                    stmt.set<String>(2, "%${filter}%")
+                    stmt.set<String>(3, "%${filter}%")
                 }
                 
                 let rs = stmt.query()
