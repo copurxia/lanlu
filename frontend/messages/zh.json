@@ -6,6 +6,7 @@
     "cancel": "取消",
     "save": "保存",
     "saving": "保存中...",
+    "creating": "创建中...",
     "delete": "删除",
     "edit": "编辑",
     "search": "搜索",
@@ -40,7 +41,8 @@
     "favorite": "收藏",
     "unfavorite": "取消收藏",
     "selectDate": "选择日期",
-    "required": "必填"
+    "required": "必填",
+    "accessDenied": "访问被拒绝，需要管理员权限"
   },
   "navigation": {
     "home": "首页",
@@ -258,7 +260,23 @@
     "noSessions": "暂无登录设备",
     "unnamedSession": "未知设备",
     "lastUsed": "最后活跃",
-    "revokeSession": "撤销登录"
+    "revokeSession": "撤销登录",
+    "admin": "管理员",
+    "user": "普通用户",
+    "createUser": "创建用户",
+    "createUserDescription": "创建新的系统用户",
+    "makeAdmin": "设为管理员",
+    "manageUsers": "管理用户",
+    "manageUsersDescription": "编辑用户角色、重置密码或删除用户",
+    "users": "用户列表",
+    "noUsers": "暂无用户",
+    "createdAt": "创建时间",
+    "resetPassword": "重置密码",
+    "resetPasswordFor": "为 {username} 重置密码",
+    "userCreatedSuccess": "用户创建成功",
+    "generatedPassword": "生成密码",
+    "autoGeneratePasswordNote": "系统将为新用户自动生成随机密码，创建成功后请及时告知用户",
+    "accessDenied": "访问被拒绝，需要管理员权限"
   },
   "upload": {
     "title": "上传档案",
@@ -369,6 +387,9 @@
     "auth": "账户安全",
     "authTitle": "账户安全",
     "authDescription": "管理您的账户信息、密码和登录设备",
+    "users": "用户管理",
+    "usersTitle": "用户管理",
+    "usersDescription": "管理系统用户、角色和权限",
     "pluginName": "插件名称",
     "pluginVersion": "版本",
     "pluginType": "类型",

@@ -65,5 +65,42 @@ public func registerAuthRoutes(router: JoyRouters) {
             case None => return
         }
     })
+
+    // ===== 用户管理接口（仅管理员可访问）=====
+
+    router.get("/api/auth/admin/users", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(userId) => AuthController.listUsers(ctx, userId)
+            case None => return
+        }
+    })
+
+    router.post("/api/auth/admin/users", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(userId) => AuthController.createUser(ctx, userId)
+            case None => return
+        }
+    })
+
+    router.put("/api/auth/admin/users/{id}/role", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(userId) => AuthController.updateUserRole(ctx, userId)
+            case None => return
+        }
+    })
+
+    router.delete("/api/auth/admin/users/{id}", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(userId) => AuthController.deleteUser(ctx, userId)
+            case None => return
+        }
+    })
+
+    router.post("/api/auth/admin/users/{id}/reset-password", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(userId) => AuthController.resetUserPassword(ctx, userId)
+            case None => return
+        }
+    })
 }
 

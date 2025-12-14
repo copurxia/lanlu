@@ -1,11 +1,48 @@
 'use client';
 
+import { useMemo } from 'react';
 import { TaskList } from '@/components/tasks/TaskList';
 import { ListTodo } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 
 export default function SettingsTasksPage() {
   const { t } = useLanguage();
+  const { user, isAuthenticated } = useAuth();
+
+  // Check if current user is admin
+  const isAdmin = useMemo(() => {
+    return isAuthenticated && user?.isAdmin === true;
+  }, [isAuthenticated, user?.isAdmin]);
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('settings.tasks')}</CardTitle>
+            <CardDescription>{t('auth.loginToManageTokens')}</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show access denied if not admin
+  if (!isAdmin) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('settings.tasks')}</CardTitle>
+            <CardDescription>{t('common.accessDenied')}</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

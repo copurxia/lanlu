@@ -1,26 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { PluginCard } from '@/components/settings/PluginCard';
 import { PluginConfigDialog } from '@/components/settings/PluginConfigDialog';
 import { PluginService, Plugin } from '@/lib/plugin-service';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Package, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 const TYPE_ORDER = ['metadata', 'download', 'login', 'script'];
 
 export default function SettingsPluginsPage() {
   const { t } = useLanguage();
+  const { user, isAuthenticated } = useAuth();
+
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeType, setActiveType] = useState('all');
+
+  // Check if current user is admin
+  const isAdmin = useMemo(() => {
+    return isAuthenticated && user?.isAdmin === true;
+  }, [isAuthenticated, user?.isAdmin]);
 
   const fetchPlugins = async () => {
     try {
@@ -119,6 +127,34 @@ export default function SettingsPluginsPage() {
         return type;
     }
   };
+
+  // Redirect to login if not authenticated
+  if (!isAuthenticated) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('settings.plugins')}</CardTitle>
+            <CardDescription>{t('auth.loginToManageTokens')}</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
+
+  // Show access denied if not admin
+  if (!isAdmin) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>{t('settings.plugins')}</CardTitle>
+            <CardDescription>{t('common.accessDenied')}</CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

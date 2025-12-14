@@ -69,7 +69,7 @@ public class AuthController {
                 return
             }
 
-            let userIdOpt = UserDao.createUser(username, password, AuthConfig.tokenPepper)
+            let userIdOpt = UserDao.createUser(username, password, AuthConfig.tokenPepper, false)
             match (userIdOpt) {
                 case Some(userId) =>
                     match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
@@ -153,8 +153,9 @@ public class AuthController {
     public static func me(ctx: JoyContext, userId: Int64): Unit {
         let row = UserDao.getById(userId)
         let username = if (row.id > 0) { row.username } else { "" }
+        let isAdmin = if (row.id > 0) { row.isAdmin } else { false }
         ctx.status(HttpStatusCode.STATUS_OK)
-        ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username)}\"}}}")
+        ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username)}\",\"isAdmin\":${isAdmin}}}}")
     }
 
     public static func listTokens(ctx: JoyContext, userId: Int64): Unit {
@@ -360,6 +361,222 @@ public class AuthController {
             }
         } catch (e: Exception) {
             logger.error("changeUsername 处理异常", ("error", e.message))
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
+        }
+    }
+
+    // ===== 用户管理相关接口（仅管理员可访问）=====
+
+    public static func listUsers(ctx: JoyContext, userId: Int64): Unit {
+        let users = UserDao.listAllUsers()
+        var json = "["
+        for (i in 0..users.size) {
+            if (i > 0) { json += "," }
+            let u = users[i]
+            json += "{"
+            json += "\"id\":${u.id},"
+            json += "\"username\":\"${escapeJsonString(u.username)}\","
+            json += "\"isAdmin\":${u.isAdmin},"
+            json += "\"createdAt\":\"${escapeJsonString(u.createdAt)}\""
+            json += "}"
+        }
+        json += "]"
+        ctx.status(HttpStatusCode.STATUS_OK)
+        ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"users\":${json}}}")
+    }
+
+    public static func createUser(ctx: JoyContext, userId: Int64): Unit {
+        let logger = getLogger("auth_controller")
+        try {
+            let requestBody = ctx.readString()
+            var username = ""
+            var isAdmin = false
+
+            if (requestBody.trimAscii().size > 0) {
+                try {
+                    let bodyJson = JsonValue.fromStr(requestBody)
+                    match (bodyJson) {
+                        case obj: JsonObject =>
+                            username = getJsonString(obj, "username")
+                            let adminStr = getJsonString(obj, "isAdmin")
+                            isAdmin = adminStr == "true" || adminStr == "1"
+                        case _ => ()
+                    }
+                } catch (e: Exception) {
+                    logger.warn("解析 createUser 请求JSON失败", ("error", e.message))
+                }
+            }
+
+            if (username.size == 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"username is required\",\"data\":null}")
+                return
+            }
+
+            // 生成随机密码
+            let generatedPassword = AuthUtils.generateTokenHex(bytesLen: 8) // 16位随机密码
+
+            match (UserDao.createUser(username, generatedPassword, AuthConfig.tokenPepper, isAdmin)) {
+                case Some(newUserId) =>
+                    ctx.status(HttpStatusCode.STATUS_CREATED)
+                    let userRow = UserDao.getById(newUserId)
+                    ctx.json("{\"code\":201,\"message\":\"created\",\"data\":{\"user\":{\"id\":${userRow.id},\"username\":\"${escapeJsonString(userRow.username)}\",\"isAdmin\":${userRow.isAdmin},\"createdAt\":\"${escapeJsonString(userRow.createdAt)}\"},\"generatedPassword\":\"${generatedPassword}\"}}")
+                case None =>
+                    // 可能是重复用户名
+                    let existing = UserDao.getByUsername(username)
+                    if (existing.id > 0) {
+                        ctx.status(409)
+                        ctx.json("{\"code\":409,\"message\":\"username already exists\",\"data\":null}")
+                    } else {
+                        ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                        ctx.json("{\"code\":400,\"message\":\"invalid username\",\"data\":null}")
+                    }
+            }
+        } catch (e: Exception) {
+            logger.error("createUser 处理异常", ("error", e.message))
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
+        }
+    }
+
+    public static func updateUserRole(ctx: JoyContext, userId: Int64): Unit {
+        let logger = getLogger("auth_controller")
+        try {
+            let idStr = ctx.getParam("id") ?? ""
+            if (idStr.size == 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"user id required\",\"data\":null}")
+                return
+            }
+            let targetUserId = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
+            if (targetUserId <= 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"invalid user id\",\"data\":null}")
+                return
+            }
+
+            let requestBody = ctx.readString()
+            var isAdmin = false
+
+            if (requestBody.trimAscii().size > 0) {
+                try {
+                    let bodyJson = JsonValue.fromStr(requestBody)
+                    match (bodyJson) {
+                        case obj: JsonObject =>
+                            let adminStr = getJsonString(obj, "isAdmin")
+                            isAdmin = adminStr == "true" || adminStr == "1"
+                        case _ => ()
+                    }
+                } catch (e: Exception) {
+                    logger.warn("解析 updateUserRole 请求JSON失败", ("error", e.message))
+                }
+            }
+
+            if (UserDao.updateUserRole(targetUserId, isAdmin)) {
+                ctx.status(HttpStatusCode.STATUS_OK)
+                ctx.json("{\"code\":200,\"message\":\"user role updated\",\"data\":null}")
+            } else {
+                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.json("{\"code\":404,\"message\":\"user not found\",\"data\":null}")
+            }
+        } catch (e: Exception) {
+            logger.error("updateUserRole 处理异常", ("error", e.message))
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
+        }
+    }
+
+    public static func deleteUser(ctx: JoyContext, userId: Int64): Unit {
+        let logger = getLogger("auth_controller")
+        try {
+            let idStr = ctx.getParam("id") ?? ""
+            if (idStr.size == 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"user id required\",\"data\":null}")
+                return
+            }
+            let targetUserId = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
+            if (targetUserId <= 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"invalid user id\",\"data\":null}")
+                return
+            }
+
+            // 不允许删除自己
+            if (targetUserId == userId) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"cannot delete your own account\",\"data\":null}")
+                return
+            }
+
+            if (UserDao.deleteUser(targetUserId)) {
+                ctx.status(HttpStatusCode.STATUS_OK)
+                ctx.json("{\"code\":200,\"message\":\"user deleted\",\"data\":null}")
+            } else {
+                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.json("{\"code\":404,\"message\":\"user not found\",\"data\":null}")
+            }
+        } catch (e: Exception) {
+            logger.error("deleteUser 处理异常", ("error", e.message))
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
+        }
+    }
+
+    public static func resetUserPassword(ctx: JoyContext, userId: Int64): Unit {
+        let logger = getLogger("auth_controller")
+        try {
+            let idStr = ctx.getParam("id") ?? ""
+            if (idStr.size == 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"user id required\",\"data\":null}")
+                return
+            }
+            let targetUserId = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
+            if (targetUserId <= 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"invalid user id\",\"data\":null}")
+                return
+            }
+
+            let requestBody = ctx.readString()
+            var newPassword = ""
+
+            if (requestBody.trimAscii().size > 0) {
+                try {
+                    let bodyJson = JsonValue.fromStr(requestBody)
+                    match (bodyJson) {
+                        case obj: JsonObject =>
+                            newPassword = getJsonString(obj, "newPassword")
+                        case _ => ()
+                    }
+                } catch (e: Exception) {
+                    logger.warn("解析 resetUserPassword 请求JSON失败", ("error", e.message))
+                }
+            }
+
+            if (newPassword.size == 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"newPassword is required\",\"data\":null}")
+                return
+            }
+
+            if (newPassword.size < 6 || newPassword.size > 256) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"password must be 6-256 characters\",\"data\":null}")
+                return
+            }
+
+            if (UserDao.resetUserPassword(targetUserId, newPassword, AuthConfig.tokenPepper)) {
+                ctx.status(HttpStatusCode.STATUS_OK)
+                ctx.json("{\"code\":200,\"message\":\"password reset\",\"data\":null}")
+            } else {
+                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.json("{\"code\":404,\"message\":\"user not found\",\"data\":null}")
+            }
+        } catch (e: Exception) {
+            logger.error("resetUserPassword 处理异常", ("error", e.message))
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
             ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
         }

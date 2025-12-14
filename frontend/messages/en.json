@@ -6,6 +6,7 @@
     "cancel": "Cancel",
     "save": "Save",
     "saving": "Saving...",
+    "creating": "Creating...",
     "delete": "Delete",
     "edit": "Edit",
     "search": "Search",
@@ -40,7 +41,8 @@
     "favorite": "Favorite",
     "unfavorite": "Unfavorite",
     "selectDate": "Select date",
-    "required": "Required"
+    "required": "Required",
+    "accessDenied": "Access denied, administrator privileges required"
   },
   "navigation": {
     "home": "Home",
@@ -253,7 +255,23 @@
     "noSessions": "No login devices",
     "unnamedSession": "Unknown Device",
     "lastUsed": "Last used",
-    "revokeSession": "Revoke"
+    "revokeSession": "Revoke",
+    "admin": "Administrator",
+    "user": "User",
+    "createUser": "Create User",
+    "createUserDescription": "Create a new system user",
+    "makeAdmin": "Make Admin",
+    "manageUsers": "Manage Users",
+    "manageUsersDescription": "Edit user roles, reset passwords or delete users",
+    "users": "Users",
+    "noUsers": "No users",
+    "createdAt": "Created",
+    "resetPassword": "Reset Password",
+    "resetPasswordFor": "Reset password for {username}",
+    "userCreatedSuccess": "User created successfully",
+    "generatedPassword": "Generated password",
+    "autoGeneratePasswordNote": "A random password will be automatically generated for the new user. Please inform the user after creation.",
+    "accessDenied": "Access denied, administrator privileges required"
   },
   "upload": {
     "title": "Upload Archive",
@@ -364,6 +382,9 @@
     "auth": "Account Security",
     "authTitle": "Account Security",
     "authDescription": "Manage your account, password and login devices",
+    "users": "User Management",
+    "usersTitle": "User Management",
+    "usersDescription": "Manage system users, roles and permissions",
     "pluginName": "Plugin Name",
     "pluginVersion": "Version",
     "pluginType": "Type",

@@ -26,7 +26,7 @@ public class UserModel {
             let defaultUsername = "admin"
             let defaultPassword = AuthUtils.generateTokenHex(bytesLen: 8) // 16位随机密码
 
-            match (UserDao.createUser(defaultUsername, defaultPassword, AuthConfig.tokenPepper)) {
+            match (UserDao.createUser(defaultUsername, defaultPassword, AuthConfig.tokenPepper, true)) {
                 case Some(userId) =>
                     logger.info("========================================")
                     logger.info("已创建默认管理员账户")

@@ -1,6 +1,14 @@
 export type AuthUser = {
   id: number;
   username: string;
+  isAdmin?: boolean;
+};
+
+export type AdminUser = {
+  id: number;
+  username: string;
+  isAdmin: boolean;
+  createdAt?: string;
 };
 
 export type AuthToken = {

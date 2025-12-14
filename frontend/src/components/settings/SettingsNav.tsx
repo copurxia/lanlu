@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutGrid, Package, ListTodo, KeyRound } from 'lucide-react';
+import { LayoutGrid, Package, ListTodo, KeyRound, Users } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 
 type SettingsSection = {
@@ -12,18 +13,32 @@ type SettingsSection = {
   icon: React.ComponentType<{ className?: string }>;
   titleKey: string;
   descriptionKey?: string;
+  requiresAdmin?: boolean;
 };
 
-const sections: SettingsSection[] = [
+const baseSections: SettingsSection[] = [
   { id: 'overview', href: '/settings', icon: LayoutGrid, titleKey: 'settings.overview' },
   { id: 'auth', href: '/settings/auth', icon: KeyRound, titleKey: 'settings.auth' },
-  { id: 'plugins', href: '/settings/plugins', icon: Package, titleKey: 'settings.plugins' },
-  { id: 'tasks', href: '/settings/tasks', icon: ListTodo, titleKey: 'settings.tasks' },
+  { id: 'users', href: '/settings/users', icon: Users, titleKey: 'settings.users', requiresAdmin: true },
+  { id: 'plugins', href: '/settings/plugins', icon: Package, titleKey: 'settings.plugins', requiresAdmin: true },
+  { id: 'tasks', href: '/settings/tasks', icon: ListTodo, titleKey: 'settings.tasks', requiresAdmin: true },
 ];
 
 export function SettingsNav() {
   const pathname = usePathname() ?? '';
   const { t } = useLanguage();
+  const { user, isAuthenticated } = useAuth();
+
+  // Check if current user is admin
+  const isAdmin = isAuthenticated && user?.isAdmin === true;
+
+  // Filter sections based on admin status
+  const sections = baseSections.filter(section => {
+    if (section.requiresAdmin && !isAdmin) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <nav className="flex md:flex-col gap-2 md:gap-1">

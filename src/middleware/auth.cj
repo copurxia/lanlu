@@ -105,6 +105,23 @@ public class AuthMiddleware {
         return None
     }
 
+    /**
+     * 需要管理员身份
+     */
+    public static func requireAdmin(ctx: JoyContext): Option<Int64> {
+        match (requireUser(ctx)) {
+            case Some(userId) =>
+                if (UserDao.isAdmin(userId)) {
+                    return Some(userId)
+                } else {
+                    ctx.status(HttpStatusCode.STATUS_FORBIDDEN)
+                    ResponseView.errorJson(ctx, "Administrator privileges required.", 403)
+                    return None
+                }
+            case None => return None
+        }
+    }
+
     private static func isValidApiKey(token: String): Bool {
         let expected = AuthConfig.apiKey.trimAscii()
         if (expected.size == 0) { return false }
