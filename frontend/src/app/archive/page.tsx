@@ -616,40 +616,6 @@ function ArchiveDetailContent() {
 	                          <Button variant="outline" className="w-full" onClick={cancelEdit} disabled={isSaving}>
 	                            {t('common.cancel')}
 	                          </Button>
-	                          <Button
-	                            variant="outline"
-	                            className="w-full"
-	                            onClick={() => {
-	                              const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
-	                              window.open(downloadUrl, '_blank');
-	                            }}
-	                            disabled={isSaving}
-	                          >
-	                            <Download className="w-4 h-4 mr-2" />
-	                            {t('archive.download')}
-	                          </Button>
-	                          {/* 已读/取消已读按钮 */}
-	                          {metadata.isnew === 'true' ? (
-	                            <Button
-	                              variant="outline"
-	                              className="w-full"
-	                              onClick={handleMarkAsRead}
-	                              disabled={isNewStatusLoading || isSaving}
-	                            >
-	                              <CheckCircle className="w-4 h-4 mr-2" />
-	                              {isNewStatusLoading ? t('common.loading') : t('archive.markAsRead')}
-	                            </Button>
-	                          ) : (
-	                            <Button
-	                              variant="outline"
-	                              className="w-full"
-	                              onClick={handleMarkAsNew}
-	                              disabled={isNewStatusLoading || isSaving}
-	                            >
-	                              <RotateCcw className="w-4 h-4 mr-2" />
-	                              {isNewStatusLoading ? t('common.loading') : t('archive.markAsNew')}
-	                            </Button>
-	                          )}
 	                        </>
 	                      ) : (
 	                        <>

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutGrid, Package, ListTodo } from 'lucide-react';
+import { LayoutGrid, Package, ListTodo, KeyRound } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,7 @@ type SettingsSection = {
 
 const sections: SettingsSection[] = [
   { id: 'overview', href: '/settings', icon: LayoutGrid, titleKey: 'settings.overview' },
+  { id: 'auth', href: '/settings/auth', icon: KeyRound, titleKey: 'settings.auth' },
   { id: 'plugins', href: '/settings/plugins', icon: Package, titleKey: 'settings.plugins' },
   { id: 'tasks', href: '/settings/tasks', icon: ListTodo, titleKey: 'settings.tasks' },
 ];

@@ -1,0 +1,28 @@
+export type AuthUser = {
+  id: number;
+  username: string;
+};
+
+export type AuthToken = {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt?: string;
+  lastUsedAt?: string;
+  token?: string; // only returned once on create/login/register
+};
+
+export type AuthSession = {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt?: string;
+  lastUsedAt?: string;
+};
+
+export type ApiEnvelope<T> = {
+  code: number;
+  message: string;
+  data: T;
+};
+

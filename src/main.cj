@@ -58,8 +58,18 @@ main(): Int64 {
         return 1
     }
 
+    // 初始化用户/Token表
+    logger.info("Application starting... step 9a: initializing auth tables")
+    let authTablesInitialized = UserModel.initialize()
+    if (authTablesInitialized) {
+        logger.info("Auth tables initialized successfully")
+    } else {
+        logger.error("Failed to initialize auth tables")
+        return 1
+    }
+
     // 初始化Minion任务表
-    logger.info("Application starting... step 9a: initializing minion task tables")
+    logger.info("Application starting... step 9b: initializing minion task tables")
     let minionTablesInitialized = MinionModel.initialize()
     if (minionTablesInitialized) {
         logger.info("Minion task tables initialized successfully")

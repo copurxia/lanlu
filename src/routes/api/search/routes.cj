@@ -15,25 +15,25 @@ public class SearchRoutes {
     public static func configure(router: JoyRouters) {
         // 搜索归档
         router.get("/api/search", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             SearchController.searchArchives(ctx)
         })
 
         // 随机获取归档
         router.get("/api/search/random", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             SearchController.getRandomArchives(ctx)
         })
 
         // 清除搜索缓存
         router.delete("/api/search/cache", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             SearchController.clearSearchCache(ctx)
         })
 
         // 获取搜索建议
         router.get("/api/search/suggestions", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             SearchController.getSearchSuggestions(ctx)
         })
     }

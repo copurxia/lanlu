@@ -10,19 +10,19 @@ import lrr4cj.middleware.*
 public func registerShinobuRoutes(router: JoyRouters) {
     // 获取Shinobu状态
     router.get("/api/shinobu", { ctx => 
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         ShinobuController.getShinobuStatus(ctx)
     })
     
     // 停止Shinobu
     router.post("/api/shinobu/stop", { ctx => 
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         ShinobuController.stopShinobu(ctx)
     })
     
     // 重启Shinobu
     router.post("/api/shinobu/restart", { ctx => 
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         ShinobuController.restartShinobu(ctx)
     })
 }

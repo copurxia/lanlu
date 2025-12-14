@@ -21,7 +21,7 @@ export function HomeArchiveCard({ archive }: HomeArchiveCardProps) {
     allTags.length > 0 ? `${t('archive.tags')}: ${allTags.join(', ')}` : '',
     archive.summary ? `${t('archive.summary')}: ${archive.summary}` : ''
   ].filter(Boolean);
-  
+
   // 检查收藏状态
   useEffect(() => {
     const checkFavoriteStatus = async () => {
@@ -32,7 +32,7 @@ export function HomeArchiveCard({ archive }: HomeArchiveCardProps) {
         console.error('检查收藏状态失败:', error);
       }
     };
-    
+
     checkFavoriteStatus();
   }, [archive.arcid]);
   

@@ -1947,8 +1947,6 @@ public class ShinobuService {
             }
             logger.info("Executing command with args: ${fullCmd}")
 
-            // 使用仓颉语言的 launch 函数执行命令
-            // 根据文档，我们需要正确传递参数
             if (args.size == 0) {
                 // 没有参数的情况
                 let process = launch(command, stdOut: stdOut, stdErr: stdErr)

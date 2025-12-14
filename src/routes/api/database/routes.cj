@@ -15,7 +15,7 @@ public class DatabaseRoutes {
     public static func configure(router: JoyRouters) {
         // 获取数据库统计信息
         router.get("/api/database/stats", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.getDatabaseStats(ctx)
         })
 
@@ -24,37 +24,37 @@ public class DatabaseRoutes {
 
         // 获取数据库配置信息
         router.get("/api/database/config", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.getDatabaseConfig(ctx)
         })
 
         // 获取数据库备份
         router.get("/api/database/backup", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.getDatabaseBackup(ctx)
         })
 
         // 清理数据库
         router.post("/api/database/clean", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.cleanDatabase(ctx)
         })
 
         // 恢复数据库备份
         router.post("/api/database/restore", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.restoreDatabaseBackup(ctx)
         })
 
         // 重建搜索索引
         router.post("/api/database/reindex", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.rebuildSearchIndex(ctx)
         })
 
         // 删除数据库
         router.post("/api/database/drop", { ctx =>
-            AuthMiddleware.requiredAuth(ctx)
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DatabaseController.dropDatabase(ctx)
         })
     }

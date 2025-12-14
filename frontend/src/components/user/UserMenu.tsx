@@ -19,7 +19,7 @@ import { appEvents, AppEvents } from "@/lib/events"
 
 export function UserMenu() {
   const { t } = useLanguage()
-  const { token, logout } = useAuth()
+  const { token, user, logout } = useAuth()
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [loginDialogOpen, setLoginDialogOpen] = useState(false)
 
@@ -53,7 +53,7 @@ export function UserMenu() {
             <>
               <div className="flex items-center justify-start gap-2 p-2">
                 <div className="flex flex-col space-y-1 leading-none">
-                  <p className="font-medium">{t("user.menu")}</p>
+                  <p className="font-medium">{user?.username || t("user.menu")}</p>
                   <p className="w-[200px] truncate text-sm text-muted-foreground">
                     {t("user.loggedIn")}
                   </p>

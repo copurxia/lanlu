@@ -12,13 +12,13 @@ public func registerMinionRoutes(router: JoyRouters) {
 
     // 分页获取任务列表
     router.get("/api/minion/tasks", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.getTasksWithPagination(ctx)
     })
 
     // 根据ID获取任务
     router.get("/api/minion/tasks/{id}", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.getTaskById(ctx)
     })
 
@@ -26,43 +26,43 @@ public func registerMinionRoutes(router: JoyRouters) {
 
     // 获取所有插件详情
     router.get("/api/plugins", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.getAllPlugins(ctx)
     })
 
     // 根据类型获取插件
     router.get("/api/plugins/{type}", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.getPluginsByType(ctx)
     })
 
     // 获取插件配置
     router.get("/api/plugins/{namespace}/config", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.getPluginConfig(ctx)
     })
 
     // 更新插件配置
     router.put("/api/plugins/{namespace}/config", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.updatePluginConfig(ctx)
     })
 
     // 启用或禁用插件
     router.put("/api/plugins/{namespace}/enabled", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.setPluginEnabled(ctx)
     })
 
     // 发现并注册插件
     router.post("/api/plugins/discover", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.discoverPlugins(ctx)
     })
 
     // 获取插件配置Schema
     router.get("/api/plugins/{namespace}/schema", { ctx =>
-        AuthMiddleware.requiredAuth(ctx)
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         MinionController.getPluginSchema(ctx)
     })
 }
