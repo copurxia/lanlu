@@ -58,5 +58,12 @@ public func registerAuthRoutes(router: JoyRouters) {
             case None => return
         }
     })
+
+    router.post("/api/auth/username", { ctx =>
+        match (AuthMiddleware.requireUser(ctx)) {
+            case Some(userId) => AuthController.changeUsername(ctx, userId)
+            case None => return
+        }
+    })
 }
 

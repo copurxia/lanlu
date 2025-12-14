@@ -52,10 +52,16 @@ export class AuthService {
     return res.data;
   }
 
-  static async changePassword(params: { oldPassword: string; newPassword: string }) {
+  static async changePassword(params: { newPassword: string }) {
     const res = await apiClient.post<ApiEnvelope<null>>('/api/auth/password', {
-      oldPassword: params.oldPassword,
       newPassword: params.newPassword,
+    });
+    return res.data;
+  }
+
+  static async changeUsername(newUsername: string) {
+    const res = await apiClient.post<ApiEnvelope<{ user: AuthUser }>>('/api/auth/username', {
+      newUsername,
     });
     return res.data;
   }

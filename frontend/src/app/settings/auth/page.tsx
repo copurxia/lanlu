@@ -29,14 +29,24 @@ export default function AuthSettingsPage() {
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
-  // 修改密码表单
-  const [oldPassword, setOldPassword] = useState('');
+  // 修改凭据表单
+  const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  const canChangeUsername = useMemo(
+    () => newUsername && newUsername.length >= 3 && newUsername !== user?.username,
+    [newUsername, user?.username]
+  );
+
   const canChangePassword = useMemo(
-    () => oldPassword && newPassword && newPassword.length >= 6 && newPassword === confirmPassword,
-    [oldPassword, newPassword, confirmPassword]
+    () => newPassword && newPassword.length >= 6 && newPassword === confirmPassword,
+    [newPassword, confirmPassword]
+  );
+
+  const canSave = useMemo(
+    () => canChangeUsername || canChangePassword,
+    [canChangeUsername, canChangePassword]
   );
 
   const loadTokens = async () => {
@@ -79,19 +89,28 @@ export default function AuthSettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  const handleChangePassword = async () => {
-    if (!canChangePassword) return;
+  const handleSave = async () => {
+    if (!canSave) return;
     setLoading(true);
     setError(null);
     setSuccessMsg(null);
+
     try {
-      await AuthService.changePassword({ oldPassword, newPassword });
-      setSuccessMsg(t('auth.passwordChanged'));
-      setOldPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+      if (canChangeUsername) {
+        await AuthService.changeUsername(newUsername);
+        setNewUsername('');
+      }
+
+      if (canChangePassword) {
+        await AuthService.changePassword({ newPassword });
+        setNewPassword('');
+        setConfirmPassword('');
+      }
+
+      await refreshMe();
+      setSuccessMsg(t('auth.credentialsUpdated'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to change password');
+      setError(e?.response?.data?.message || e?.message || 'Failed to update credentials');
     } finally {
       setLoading(false);
     }
@@ -180,21 +199,29 @@ export default function AuthSettingsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t('auth.changePassword')}</CardTitle>
-          <CardDescription>{t('auth.changePasswordDescription')}</CardDescription>
+          <CardTitle>{t('auth.changeCredentials')}</CardTitle>
+          <CardDescription>{t('auth.changeCredentialsDescription')}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           <div className="space-y-2">
-            <Label htmlFor="oldPassword">{t('auth.oldPassword')}</Label>
+            <Label htmlFor="newUsername">{t('auth.username')}</Label>
             <Input
-              id="oldPassword"
-              type="password"
-              value={oldPassword}
-              onChange={(e) => setOldPassword(e.target.value)}
-              placeholder={t('auth.oldPasswordPlaceholder')}
+              id="newUsername"
+              type="text"
+              value={newUsername}
+              onChange={(e) => setNewUsername(e.target.value)}
+              placeholder={user?.username || ''}
               disabled={loading}
+              maxLength={64}
             />
+            {newUsername && newUsername.length < 3 && (
+              <p className="text-sm text-destructive">{t('auth.usernameTooShort')}</p>
+            )}
+            {newUsername === user?.username && newUsername.length >= 3 && (
+              <p className="text-sm text-muted-foreground">{t('auth.usernameUnchanged')}</p>
+            )}
           </div>
+
           <div className="space-y-2">
             <Label htmlFor="newPassword">{t('auth.newPassword')}</Label>
             <Input
@@ -205,11 +232,7 @@ export default function AuthSettingsPage() {
               placeholder={t('auth.newPasswordPlaceholder')}
               disabled={loading}
             />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="confirmPassword">{t('auth.confirmPassword')}</Label>
             <Input
-              id="confirmPassword"
               type="password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
@@ -223,8 +246,9 @@ export default function AuthSettingsPage() {
               <p className="text-sm text-destructive">{t('auth.passwordTooShort')}</p>
             )}
           </div>
-          <Button onClick={handleChangePassword} disabled={loading || !canChangePassword}>
-            {loading ? t('common.loading') : t('auth.changePassword')}
+
+          <Button onClick={handleSave} disabled={loading || !canSave} className="w-full">
+            {loading ? t('common.saving') : t('common.save')}
           </Button>
         </CardContent>
       </Card>

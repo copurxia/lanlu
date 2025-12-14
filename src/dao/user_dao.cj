@@ -276,4 +276,57 @@ public class UserDao {
             case None => return false
         }
     }
+
+    /**
+     * 修改用户名
+     * 返回值为用户名是否可用（未被其他用户使用）
+     */
+    public static func changeUsername(userId: Int64, newUsername: String): Bool {
+        let logger = getLogger("user_dao")
+        let trimmed = newUsername.trimAscii()
+        if (trimmed.size < 3 || trimmed.size > 64) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 检查新用户名是否已被其他用户使用
+                    let checkStmt = conn.prepareStatement("SELECT id FROM users WHERE username = ? AND id <> ?")
+                    try {
+                        checkStmt.set(0, trimmed)
+                        checkStmt.set(1, userId)
+                        let rs = checkStmt.query()
+                        try {
+                            if (rs.next()) {
+                                // 用户名已被使用
+                                return false
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        checkStmt.close()
+                    }
+
+                    // 更新用户名
+                    let updateStmt = conn.prepareStatement("UPDATE users SET username = ? WHERE id = ?")
+                    try {
+                        updateStmt.set(0, trimmed)
+                        updateStmt.set(1, userId)
+                        let affected = updateStmt.update()
+                        return affected.rowCount > 0
+                    } finally {
+                        updateStmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.error("修改用户名失败", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
 }

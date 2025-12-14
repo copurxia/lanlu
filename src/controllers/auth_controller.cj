@@ -255,7 +255,6 @@ public class AuthController {
         let logger = getLogger("auth_controller")
         try {
             let requestBody = ctx.readString()
-            var oldPassword = ""
             var newPassword = ""
 
             if (requestBody.trimAscii().size > 0) {
@@ -263,7 +262,6 @@ public class AuthController {
                     let bodyJson = JsonValue.fromStr(requestBody)
                     match (bodyJson) {
                         case obj: JsonObject =>
-                            oldPassword = getJsonString(obj, "oldPassword")
                             newPassword = getJsonString(obj, "newPassword")
                         case _ => ()
                     }
@@ -272,9 +270,9 @@ public class AuthController {
                 }
             }
 
-            if (oldPassword.size == 0 || newPassword.size == 0) {
+            if (newPassword.size == 0) {
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json("{\"code\":400,\"message\":\"oldPassword and newPassword are required\",\"data\":null}")
+                ctx.json("{\"code\":400,\"message\":\"newPassword is required\",\"data\":null}")
                 return
             }
 
@@ -284,7 +282,7 @@ public class AuthController {
                 return
             }
 
-            // 验证旧密码
+            // 检查用户是否存在
             let user = UserDao.getById(userId)
             if (user.id <= 0) {
                 ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -292,21 +290,76 @@ public class AuthController {
                 return
             }
 
-            match (UserDao.verifyPassword(user.username, oldPassword, AuthConfig.tokenPepper)) {
-                case Some(_) =>
-                    if (UserDao.changePassword(userId, newPassword, AuthConfig.tokenPepper)) {
-                        ctx.status(HttpStatusCode.STATUS_OK)
-                        ctx.json("{\"code\":200,\"message\":\"password changed\",\"data\":null}")
-                    } else {
-                        ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ctx.json("{\"code\":500,\"message\":\"failed to change password\",\"data\":null}")
-                    }
-                case None =>
-                    ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
-                    ctx.json("{\"code\":401,\"message\":\"invalid old password\",\"data\":null}")
+            // 直接修改密码，不需要验证当前密码（已通过token认证）
+            if (UserDao.changePassword(userId, newPassword, AuthConfig.tokenPepper)) {
+                ctx.status(HttpStatusCode.STATUS_OK)
+                ctx.json("{\"code\":200,\"message\":\"password changed\",\"data\":null}")
+            } else {
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.json("{\"code\":500,\"message\":\"failed to change password\",\"data\":null}")
             }
         } catch (e: Exception) {
             logger.error("changePassword 处理异常", ("error", e.message))
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
+        }
+    }
+
+    public static func changeUsername(ctx: JoyContext, userId: Int64): Unit {
+        let logger = getLogger("auth_controller")
+        try {
+            let requestBody = ctx.readString()
+            var newUsername = ""
+
+            if (requestBody.trimAscii().size > 0) {
+                try {
+                    let bodyJson = JsonValue.fromStr(requestBody)
+                    match (bodyJson) {
+                        case obj: JsonObject =>
+                            newUsername = getJsonString(obj, "newUsername")
+                        case _ => ()
+                    }
+                } catch (e: Exception) {
+                    logger.warn("解析 changeUsername 请求JSON失败", ("error", e.message))
+                }
+            }
+
+            if (newUsername.size == 0) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"newUsername is required\",\"data\":null}")
+                return
+            }
+
+            if (newUsername.size < 3 || newUsername.size > 64) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json("{\"code\":400,\"message\":\"username must be 3-64 characters\",\"data\":null}")
+                return
+            }
+
+            // 检查用户是否存在
+            let user = UserDao.getById(userId)
+            if (user.id <= 0) {
+                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ctx.json("{\"code\":404,\"message\":\"user not found\",\"data\":null}")
+                return
+            }
+
+            if (UserDao.changeUsername(userId, newUsername)) {
+                ctx.status(HttpStatusCode.STATUS_OK)
+                ctx.json("{\"code\":200,\"message\":\"username changed\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(newUsername.trimAscii())}\"}}}")
+            } else {
+                // 可能是用户名已被使用
+                let existing = UserDao.getByUsername(newUsername)
+                if (existing.id > 0 && existing.id != userId) {
+                    ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                    ctx.json("{\"code\":409,\"message\":\"username already exists\",\"data\":null}")
+                } else {
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.json("{\"code\":400,\"message\":\"invalid username\",\"data\":null}")
+                }
+            }
+        } catch (e: Exception) {
+            logger.error("changeUsername 处理异常", ("error", e.message))
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
             ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
         }
