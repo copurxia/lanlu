@@ -101,12 +101,46 @@ public class TagI18nController {
     }
 
     /**
-     * GET /api/tags/i18n?lang=zh|en
+     * GET /api/tags/i18n?lang=zh|en[&arcid=...]
      * 返回: { lang, map: { "<tag>": "<text>" } }
+     * 如果提供 arcid，则只返回该档案相关的 tag 翻译
      */
     public static func getTagI18nMap(ctx: JoyContext): Unit {
         let lang = langFromQuery(ctx)
-        let rows = TagI18nDao.getByLang(lang)
+        let arcid = (ctx.getQuery("arcid") ?? "").trimAscii()
+
+        var rows = TagI18nDao.getByLang(lang)
+
+        // 如果指定了 arcid，则只返回该档案相关的 tag 翻译
+        if (arcid.size > 0) {
+            let archive = ArchiveDao.getArchiveMetadataById(arcid)
+            if (archive.id.size == 0) {
+                ResponseView.successJson(ctx, "{\"lang\":\"${escapeJsonString(lang)}\",\"map\":{}}", "获取tag i18n成功")
+                return
+            }
+
+            // 解析档案的 tags 字符串，构建 tag 集合
+            let tagSet = HashSet<String>()
+            let tagsStr = archive.tags.trimAscii()
+            if (tagsStr.size > 0) {
+                let tagParts = tagsStr.split(",")
+                for (part in tagParts) {
+                    let t = part.trimAscii()
+                    if (t.size > 0) {
+                        tagSet.add(t)
+                    }
+                }
+            }
+
+            // 过滤：只保留档案拥有的 tag
+            var filteredRows = ArrayList<TagI18nEntry>()
+            for (row in rows) {
+                if (tagSet.contains(row.tag)) {
+                    filteredRows.add(row)
+                }
+            }
+            rows = filteredRows.toArray()
+        }
 
         var mapJson = "{"
         var first = true

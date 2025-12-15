@@ -11,7 +11,6 @@ import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Search, Filter, Tag, Calendar as CalendarIcon, SortAsc, SortDesc } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useTagI18n } from '@/contexts/TagI18nContext';
 import { cn } from '@/lib/utils';
 
 interface SearchSidebarProps {
@@ -27,9 +26,14 @@ interface SearchSidebarProps {
   loading?: boolean;
 }
 
+// 去掉 namespace 前缀的简单显示函数
+function stripNamespace(tag: string): string {
+  const idx = tag.indexOf(':');
+  return idx > 0 ? tag.slice(idx + 1) : tag;
+}
+
 export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps) {
   const { t } = useLanguage();
-  const { displayTag, resolveToRawTag } = useTagI18n();
   const [query, setQuery] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
@@ -40,7 +44,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   const [dateTo, setDateTo] = useState<Date>();
 
   const handleAddTag = () => {
-    const raw = resolveToRawTag(tagInput);
+    const raw = tagInput.trim();
     if (raw && !tags.includes(raw)) {
       setTags([...tags, raw]);
       setTagInput('');
@@ -118,7 +122,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                       onClick={() => handleRemoveTag(tag)}
                       title={tag}
                     >
-                      {displayTag(tag)} ×
+                      {stripNamespace(tag)} ×
                     </Badge>
                   ))}
                 </div>

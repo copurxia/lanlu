@@ -18,14 +18,26 @@ import { BookOpen, Download, Calendar, FileText, Clock, HardDrive, Folder, Info,
 import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useTagI18n } from '@/contexts/TagI18nContext';
+import { TagI18nService } from '@/lib/tag-i18n-service';
 
 function ArchiveDetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams?.get('id') ?? null;
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { isAuthenticated } = useAuth();
-  const { displayTag } = useTagI18n();
+
+  // 档案专属的 tag i18n map
+  const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
+
+  const displayTag = useCallback((tag: string) => {
+    const key = String(tag || '').trim();
+    if (!key) return '';
+    const translated = tagI18nMap[key];
+    if (translated && String(translated).trim()) return String(translated);
+    // 如果没有翻译，去掉 namespace 前缀
+    const idx = key.indexOf(':');
+    return idx > 0 ? key.slice(idx + 1) : key;
+  }, [tagI18nMap]);
 
   // 提取 fetchMetadata 函数到顶层
   const fetchMetadata = useCallback(async (): Promise<ArchiveMetadata | null> => {
@@ -78,6 +90,30 @@ function ArchiveDetailContent() {
 
     fetchMetadata();
   }, [id, t]);
+
+  // 获取档案专属的 tag i18n
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const map = await TagI18nService.getMap(language, id);
+        if (!cancelled) {
+          setTagI18nMap(map || {});
+        }
+      } catch (e) {
+        console.error('Failed to fetch tag i18n:', e);
+        if (!cancelled) {
+          setTagI18nMap({});
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, language]);
 
   // 获取存档页面列表
   useEffect(() => {

@@ -10,8 +10,12 @@ export type TagI18nEntry = {
 };
 
 export class TagI18nService {
-  static async getMap(lang: string): Promise<Record<string, string>> {
-    const resp = await apiClient.get('/api/tags/i18n', { params: { lang } });
+  static async getMap(lang: string, arcid?: string): Promise<Record<string, string>> {
+    const params: { lang: string; arcid?: string } = { lang };
+    if (arcid) {
+      params.arcid = arcid;
+    }
+    const resp = await apiClient.get('/api/tags/i18n', { params });
     // ResponseView.successJson: { code, message, data }
     const data = resp.data?.data;
     return (data?.map ?? {}) as Record<string, string>;

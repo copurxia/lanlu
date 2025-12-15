@@ -6,28 +6,67 @@ import { Eye, Heart } from 'lucide-react';
 import Link from 'next/link';
 import { ArchiveService } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
+import { TagI18nService } from '@/lib/tag-i18n-service';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useTagI18n } from '@/contexts/TagI18nContext';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 interface ArchiveCardProps {
   archive: Archive;
   tagsDisplay?: 'inline' | 'hover' | 'none';
 }
 
+// 去掉 namespace 前缀的简单显示函数
+function stripNamespace(tag: string): string {
+  const idx = tag.indexOf(':');
+  return idx > 0 ? tag.slice(idx + 1) : tag;
+}
+
 export function ArchiveCard({ archive, tagsDisplay = 'inline' }: ArchiveCardProps) {
-  const { t } = useLanguage();
-  const { displayTag } = useTagI18n();
+  const { t, language } = useLanguage();
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const allTags = archive.tags ? archive.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
-  const displayAllTags = allTags.map(displayTag);
+  const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
+
+  const allTags = useMemo(() => {
+    return archive.tags ? archive.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
+  }, [archive.tags]);
+
+  const displayTag = useCallback((tag: string) => {
+    const key = String(tag || '').trim();
+    if (!key) return '';
+    const translated = tagI18nMap[key];
+    if (translated && String(translated).trim()) return String(translated);
+    return stripNamespace(key);
+  }, [tagI18nMap]);
+
+  const displayAllTags = useMemo(() => allTags.map(displayTag), [allTags, displayTag]);
   const inlineTags = allTags.slice(0, 3);
   const hoverTags = allTags.slice(0, 8);
   const hoverTitleParts = [
     displayAllTags.length > 0 ? `${t('archive.tags')}: ${displayAllTags.join(', ')}` : '',
     archive.summary ? `${t('archive.summary')}: ${archive.summary}` : ''
   ].filter(Boolean);
+
+  // 加载该档案的 tag i18n
+  useEffect(() => {
+    if (!archive.arcid || allTags.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const map = await TagI18nService.getMap(language, archive.arcid);
+        if (!cancelled) {
+          setTagI18nMap(map || {});
+        }
+      } catch (e) {
+        // 加载失败时静默处理，使用原始 tag
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [archive.arcid, language, allTags.length]);
 
   // 检查收藏状态
   useEffect(() => {
