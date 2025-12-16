@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { BookOpen, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ReadingHistoryService } from '@/lib/reading-history-service';
+import { groupArchivesByTime, TimeGroup } from '@/lib/time-group';
 import { Archive } from '@/types/archive';
 import { HomeArchiveCard } from '@/components/archive/HomeArchiveCard';
 
@@ -14,6 +15,7 @@ export default function ReadingHistoryPage() {
   const { t } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [archives, setArchives] = useState<Archive[]>([]);
+  const [groupedArchives, setGroupedArchives] = useState<TimeGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // 加载阅读记录
@@ -28,6 +30,9 @@ export default function ReadingHistoryPage() {
 
       if (response.success === 1) {
         setArchives(response.data);
+        // 按时间分组
+        const grouped = groupArchivesByTime(response.data);
+        setGroupedArchives(grouped);
       } else {
         setError(t('readingHistory.loadError'));
       }
@@ -85,25 +90,30 @@ export default function ReadingHistoryPage() {
                 </div>
               ))}
             </div>
-          ) : archives.length === 0 ? (
+          ) : groupedArchives.length === 0 ? (
             <div className="text-center py-12">
               <BookOpen className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
               <p className="text-lg text-muted-foreground">{t('readingHistory.noHistory')}</p>
               <p className="text-sm text-muted-foreground mt-2">{t('readingHistory.noHistoryHint')}</p>
             </div>
           ) : (
-            <div>
+            <div className="space-y-8">
               <div className="mb-4 text-sm text-muted-foreground">
                 {t('readingHistory.count').replace('{count}', String(archives.length))}
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                {archives.map((archive) => (
-                  <HomeArchiveCard
-                    key={archive.arcid}
-                    archive={archive}
-                  />
-                ))}
-              </div>
+              {groupedArchives.map((group) => (
+                <div key={group.label} className="space-y-3">
+                  <h3 className="text-lg font-semibold">{group.label}</h3>
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    {group.archives.map((archive) => (
+                      <HomeArchiveCard
+                        key={archive.arcid}
+                        archive={archive}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </CardContent>
