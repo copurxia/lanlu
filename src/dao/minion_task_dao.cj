@@ -91,8 +91,8 @@ public class MinionTaskDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        INSERT INTO minion_tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, created_at, started_at, completed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                        INSERT INTO minion_tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, started_at, completed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
                     """)
                     try {
                         stmt.set(0, data.name)
@@ -103,21 +103,17 @@ public class MinionTaskDao {
                         stmt.set(5, data.pluginNamespace)
                         stmt.set(6, data.parameters)
                         stmt.set(7, data.result)
-                        // created_at使用当前时间
-                        if (data.createdAt.size > 0) {
-                            stmt.set(8, data.createdAt)
+                        // started_at: 如果未提供则保持为NULL
+                        if (data.startedAt.size > 0) {
+                            stmt.set(8, data.startedAt)
                         } else {
                             stmt.setNull(8)
                         }
-                        if (data.startedAt.size > 0) {
-                            stmt.set(9, data.startedAt)
+                        // completed_at: 如果未提供则保持为NULL
+                        if (data.completedAt.size > 0) {
+                            stmt.set(9, data.completedAt)
                         } else {
                             stmt.setNull(9)
-                        }
-                        if (data.completedAt.size > 0) {
-                            stmt.set(10, data.completedAt)
-                        } else {
-                            stmt.setNull(10)
                         }
 
                         let rs = stmt.query()
@@ -289,11 +285,13 @@ public class MinionTaskDao {
                         stmt.set(5, data.pluginNamespace)
                         stmt.set(6, data.parameters)
                         stmt.set(7, data.result)
+                        // started_at: 如果为空则设置为 NULL
                         if (data.startedAt.size > 0) {
                             stmt.set(8, data.startedAt)
                         } else {
                             stmt.setNull(8)
                         }
+                        // completed_at: 如果为空则设置为 NULL（在completeTask/failTask中会设置值）
                         if (data.completedAt.size > 0) {
                             stmt.set(9, data.completedAt)
                         } else {
