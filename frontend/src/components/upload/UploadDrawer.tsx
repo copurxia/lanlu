@@ -3,7 +3,6 @@
 import { useState, useRef } from "react"
 import { useLanguage } from "@/contexts/LanguageContext"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
@@ -15,27 +14,17 @@ import { Upload, FileText, X, CheckCircle, AlertCircle, Plus, Download } from "l
 interface UploadFile {
   id: string
   file: File
-  title: string
-  tags: string
-  summary: string
-  categoryId: string
   progress: number
-  status: "idle" | "uploading" | "success" | "error"
+  status: "uploading" | "success" | "error"
   error?: string
-  collapsed?: boolean
 }
 
 interface DownloadTask {
   id: string
   url: string
-  title: string
-  tags: string
-  summary: string
-  categoryId: string
   progress: number
-  status: "idle" | "downloading" | "success" | "error"
+  status: "downloading" | "success" | "error"
   error?: string
-  collapsed?: boolean
 }
 
 interface UploadDrawerProps {
@@ -61,26 +50,57 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
   const handleFileSelect = (files: FileList | null) => {
     if (!files) return
 
-    const newFiles: UploadFile[] = []
-    
     Array.from(files).forEach(file => {
       const fileExtension = "." + file.name.split(".").pop()?.toLowerCase()
       if (supportedFormats.includes(fileExtension)) {
-        newFiles.push({
+        const uploadFile: UploadFile = {
           id: Math.random().toString(36).substr(2, 9),
           file,
-          title: file.name.replace(/\.[^/.]+$/, ""),
-          tags: "",
-          summary: "",
-          categoryId: "",
           progress: 0,
-          status: "idle"
-        })
+          status: "uploading"
+        }
+        setUploadFiles(prev => [...prev, uploadFile])
+        // 立即开始上传
+        startUpload(uploadFile)
       }
     })
+  }
 
-    if (newFiles.length > 0) {
-      setUploadFiles(prev => [...prev, ...newFiles])
+  const startUpload = async (uploadFile: UploadFile) => {
+    try {
+      const result = await ArchiveService.uploadArchiveWithChunks(uploadFile.file, {
+        title: uploadFile.file.name.replace(/\.[^/.]+$/, "")
+      }, {
+        onProgress: (progress) => {
+          setUploadFiles(prev => prev.map(f =>
+            f.id === uploadFile.id ? { ...f, progress } : f
+          ))
+        },
+        onChunkComplete: (chunkIndex, totalChunks) => {
+          console.log(`文件 ${uploadFile.id} 分片 ${chunkIndex + 1}/${totalChunks} 上传完成`)
+        },
+        onError: (error, chunkIndex) => {
+          console.error(`文件 ${uploadFile.id} 分片上传错误:`, error, chunkIndex)
+        }
+      })
+
+      setUploadFiles(prev => prev.map(f => {
+        if (f.id === uploadFile.id) {
+          if (result.success && result.id) {
+            setTimeout(() => {
+              onUploadComplete?.(result.id!)
+            }, 1500)
+            return { ...f, progress: 100, status: "success" }
+          } else {
+            return { ...f, status: "error", error: result.error || t("upload.uploadFailed") }
+          }
+        }
+        return f
+      }))
+    } catch {
+      setUploadFiles(prev => prev.map(f =>
+        f.id === uploadFile.id ? { ...f, status: "error", error: t("upload.uploadFailed") } : f
+      ))
     }
   }
 
@@ -111,155 +131,68 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
     handleFileSelect(event.dataTransfer.files)
   }
 
-  const updateFileData = (id: string, field: keyof UploadFile, value: any) => {
-    setUploadFiles(prev => prev.map(file => 
-      file.id === id ? { ...file, [field]: value } : file
-    ))
-  }
-
   const removeFile = (id: string) => {
     setUploadFiles(prev => prev.filter(file => file.id !== id))
-  }
-
-  // 下载任务相关函数
-  const updateDownloadTask = (id: string, field: keyof DownloadTask, value: any) => {
-    setDownloadTasks(prev => prev.map(task =>
-      task.id === id ? { ...task, [field]: value } : task
-    ))
   }
 
   const removeDownloadTask = (id: string) => {
     setDownloadTasks(prev => prev.filter(task => task.id !== id))
   }
 
-  const addDownloadUrls = (urls: string) => {
-    const urlLines = urls.split('\n').filter(url => url.trim()).map(url => url.trim())
-    const newTasks: DownloadTask[] = []
-
-    urlLines.forEach(url => {
-      newTasks.push({
-        id: Math.random().toString(36).substr(2, 9),
-        url,
-        title: "",
-        tags: "",
-        summary: "",
-        categoryId: "",
-        progress: 0,
-        status: "idle"
-      })
-    })
-
-    if (newTasks.length > 0) {
-      setDownloadTasks(prev => [...prev, ...newTasks])
+  const startDownload = async (url: string) => {
+    const task: DownloadTask = {
+      id: Math.random().toString(36).substr(2, 9),
+      url,
+      progress: 0,
+      status: "downloading"
     }
-  }
-
-  const downloadSingleTask = async (task: DownloadTask) => {
-    updateDownloadTask(task.id, "status", "downloading")
-    updateDownloadTask(task.id, "progress", 0)
-    updateDownloadTask(task.id, "error", undefined)
+    setDownloadTasks(prev => [...prev, task])
 
     try {
       const callbacks: DownloadProgressCallback = {
         onProgress: (progress) => {
-          updateDownloadTask(task.id, "progress", progress)
+          setDownloadTasks(prev => prev.map(t =>
+            t.id === task.id ? { ...t, progress } : t
+          ))
         },
         onComplete: (result) => {
           if (result.success) {
-            updateDownloadTask(task.id, "status", "success")
-            updateDownloadTask(task.id, "progress", 100)
+            setDownloadTasks(prev => prev.map(t =>
+              t.id === task.id ? { ...t, status: "success", progress: 100 } : t
+            ))
             if (result.id) {
               setTimeout(() => {
                 onUploadComplete?.(result.id!)
               }, 1500)
             }
           } else {
-            updateDownloadTask(task.id, "status", "error")
-            updateDownloadTask(task.id, "error", result.error || "下载失败")
+            setDownloadTasks(prev => prev.map(t =>
+              t.id === task.id ? { ...t, status: "error", error: result.error || "下载失败" } : t
+            ))
           }
         },
         onError: (error) => {
-          updateDownloadTask(task.id, "status", "error")
-          updateDownloadTask(task.id, "error", error)
+          setDownloadTasks(prev => prev.map(t =>
+            t.id === task.id ? { ...t, status: "error", error } : t
+          ))
         }
       }
 
-      // 使用模拟下载，等后端API实现后可以替换为真实下载
-      await ArchiveService.downloadFromUrl(task.url, {
-        title: task.title || undefined,
-        tags: task.tags || undefined,
-        summary: task.summary || undefined,
-        categoryId: task.categoryId || undefined
-      }, callbacks)
+      await ArchiveService.downloadFromUrl(url, {}, callbacks)
     } catch {
-      updateDownloadTask(task.id, "status", "error")
-      updateDownloadTask(task.id, "error", "下载失败")
+      setDownloadTasks(prev => prev.map(t =>
+        t.id === task.id ? { ...t, status: "error", error: "下载失败" } : t
+      ))
     }
   }
 
-  const downloadAllTasks = async () => {
-    const tasksToDownload = downloadTasks.filter(task => task.status === "idle")
-
-    for (const task of tasksToDownload) {
-      await downloadSingleTask(task)
-    }
+  const handleAddDownloadUrls = () => {
+    const urlLines = urlInput.split('\n').filter(url => url.trim()).map(url => url.trim())
+    urlLines.forEach(url => {
+      startDownload(url)
+    })
+    setUrlInput("")
   }
-
-  const uploadSingleFile = async (uploadFile: UploadFile) => {
-    updateFileData(uploadFile.id, "status", "uploading")
-    updateFileData(uploadFile.id, "progress", 0)
-    updateFileData(uploadFile.id, "error", undefined)
-
-    try {
-      const result = await ArchiveService.uploadArchiveWithChunks(uploadFile.file, {
-        title: uploadFile.title || undefined,
-        tags: uploadFile.tags || undefined,
-        summary: uploadFile.summary || undefined,
-        categoryId: uploadFile.categoryId || undefined
-      }, {
-        onProgress: (progress) => {
-          updateFileData(uploadFile.id, "progress", progress)
-        },
-        onChunkComplete: (chunkIndex, totalChunks) => {
-          console.log(`文件 ${uploadFile.id} 分片 ${chunkIndex + 1}/${totalChunks} 上传完成`)
-        },
-        onError: (error, chunkIndex) => {
-          console.error(`文件 ${uploadFile.id} 分片上传错误:`, error, chunkIndex)
-          updateFileData(uploadFile.id, "error", `分片 ${chunkIndex} 上传失败: ${error.message}`)
-        }
-      })
-      
-      setUploadFiles(prev => prev.map(file => {
-        if (file.id === uploadFile.id) {
-          if (result.success && result.id) {
-            setTimeout(() => {
-              onUploadComplete?.(result.id!)
-            }, 1500)
-            return { ...file, progress: 100, status: "success" }
-          } else {
-            return { ...file, status: "error", error: result.error || t("upload.uploadFailed") }
-          }
-        }
-        return file
-      }))
-    } catch {
-      updateFileData(uploadFile.id, "status", "error")
-      updateFileData(uploadFile.id, "error", t("upload.uploadFailed"))
-    }
-  }
-
-  const uploadAllFiles = async () => {
-    const filesToUpload = uploadFiles.filter(file => file.status === "idle")
-    
-    for (const file of filesToUpload) {
-      await uploadSingleFile(file)
-    }
-  }
-
-  // 清除已完成的上传文件（暂时未使用）
-  // const clearCompleted = () => {
-  //   setUploadFiles(prev => prev.filter(file => file.status !== "success"))
-  // }
 
   const clearAll = () => {
     setUploadFiles([])
@@ -373,26 +306,17 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
               {/* Upload List */}
               {uploadFiles.length > 0 && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-medium">{t("upload.fileList")}</h3>
-                    <Button
-                      onClick={uploadAllFiles}
-                      disabled={!uploadFiles.some(file => file.status === "idle")}
-                    >
-                      {t("upload.uploadAll")}
-                    </Button>
-                  </div>
+                  <h3 className="text-lg font-medium">{t("upload.fileList")}</h3>
 
-                  <div className="max-h-[60vh] overflow-y-auto pr-2">
-                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                      {uploadFiles.map((uploadFile) => (
-                        <div key={uploadFile.id} className="border rounded-lg p-4 space-y-3">
+                  <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-4">
+                    {uploadFiles.map((uploadFile) => (
+                      <div key={uploadFile.id} className="border rounded-lg p-4 space-y-3">
                         {/* File Header */}
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <FileText className="h-5 w-5 text-primary" />
-                            <span className="font-medium">{uploadFile.file.name}</span>
-                            <span className="text-sm text-gray-500">
+                          <div className="flex items-center space-x-2 flex-1 min-w-0">
+                            <FileText className="h-5 w-5 text-primary flex-shrink-0" />
+                            <span className="font-medium truncate">{uploadFile.file.name}</span>
+                            <span className="text-sm text-gray-500 flex-shrink-0">
                               ({(uploadFile.file.size / 1024 / 1024).toFixed(2)} MB)
                             </span>
                           </div>
@@ -406,17 +330,6 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                             <Button
                               variant="ghost"
                               size="sm"
-                              onClick={() => updateFileData(uploadFile.id, "collapsed", !uploadFile.collapsed)}
-                              className="h-8 w-8 p-0"
-                            >
-                              {uploadFile.collapsed ?
-                                <Plus className="h-4 w-4 rotate-45" /> :
-                                <Plus className="h-4 w-4" />
-                              }
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
                               onClick={() => removeFile(uploadFile.id)}
                               disabled={uploadFile.status === "uploading"}
                               className="h-8 w-8 p-0"
@@ -426,7 +339,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                           </div>
                         </div>
 
-                        {/* Progress Bar - Always visible when uploading */}
+                        {/* Progress Bar */}
                         {uploadFile.status === "uploading" && (
                           <div className="space-y-2">
                             <div className="flex justify-between text-sm">
@@ -437,73 +350,12 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                           </div>
                         )}
 
-                        {/* Collapsible Content */}
-                        {!uploadFile.collapsed && (
-                          <>
-                            {/* Metadata Fields */}
-                            <div className="grid grid-cols-1 gap-3">
-                              <div>
-                                <Label htmlFor={`title-${uploadFile.id}`}>{t("upload.title")}</Label>
-                                <Input
-                                  id={`title-${uploadFile.id}`}
-                                  value={uploadFile.title}
-                                  onChange={(e) => updateFileData(uploadFile.id, "title", e.target.value)}
-                                  placeholder={t("upload.titlePlaceholder")}
-                                  disabled={uploadFile.status !== "idle"}
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor={`tags-${uploadFile.id}`}>{t("upload.tags")}</Label>
-                                <Input
-                                  id={`tags-${uploadFile.id}`}
-                                  value={uploadFile.tags}
-                                  onChange={(e) => updateFileData(uploadFile.id, "tags", e.target.value)}
-                                  placeholder={t("upload.tagsPlaceholder")}
-                                  disabled={uploadFile.status !== "idle"}
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor={`summary-${uploadFile.id}`}>{t("upload.summary")}</Label>
-                                <Textarea
-                                  id={`summary-${uploadFile.id}`}
-                                  value={uploadFile.summary}
-                                  onChange={(e) => updateFileData(uploadFile.id, "summary", e.target.value)}
-                                  placeholder={t("upload.summaryPlaceholder")}
-                                  rows={2}
-                                  disabled={uploadFile.status !== "idle"}
-                                />
-                              </div>
-                              <div>
-                                <Label htmlFor={`category-${uploadFile.id}`}>{t("upload.category")}</Label>
-                                <Input
-                                  id={`category-${uploadFile.id}`}
-                                  value={uploadFile.categoryId}
-                                  onChange={(e) => updateFileData(uploadFile.id, "categoryId", e.target.value)}
-                                  placeholder={t("upload.categoryPlaceholder")}
-                                  disabled={uploadFile.status !== "idle"}
-                                />
-                              </div>
-                            </div>
-
-                            {/* Error Message */}
-                            {uploadFile.status === "error" && uploadFile.error && (
-                              <div className="text-sm text-red-600">{uploadFile.error}</div>
-                            )}
-
-                            {/* Upload Button */}
-                            {uploadFile.status === "idle" && (
-                              <Button
-                                onClick={() => uploadSingleFile(uploadFile)}
-                                className="w-full"
-                              >
-                                {t("upload.upload")}
-                              </Button>
-                            )}
-                          </>
+                        {/* Error Message */}
+                        {uploadFile.status === "error" && uploadFile.error && (
+                          <div className="text-sm text-red-600">{uploadFile.error}</div>
                         )}
-                        </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -525,8 +377,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                 </div>
                 <Button
                   onClick={() => {
-                    addDownloadUrls(urlInput)
-                    setUrlInput("")
+                    handleAddDownloadUrls()
                   }}
                   disabled={!urlInput.trim()}
                   className="w-full"
@@ -539,15 +390,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
               {/* Download List */}
               {downloadTasks.length > 0 && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-medium">{t("download.taskList") || "下载任务列表"}</h3>
-                    <Button
-                      onClick={downloadAllTasks}
-                      disabled={!downloadTasks.some(task => task.status === "idle")}
-                    >
-                      {t("download.downloadAll") || "开始下载"}
-                    </Button>
-                  </div>
+                  <h3 className="text-lg font-medium">{t("download.taskList") || "下载任务列表"}</h3>
 
                   <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-4">
                     {downloadTasks.map((task) => (
@@ -591,16 +434,6 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                         {/* Error Message */}
                         {task.status === "error" && task.error && (
                           <div className="text-sm text-red-600">{task.error}</div>
-                        )}
-
-                        {/* Download Button */}
-                        {task.status === "idle" && (
-                          <Button
-                            onClick={() => downloadSingleTask(task)}
-                            className="w-full"
-                          >
-                            {t("download.start") || "开始下载"}
-                          </Button>
                         )}
                       </div>
                     ))}
