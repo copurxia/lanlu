@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { LayoutGrid, Package, ListTodo, KeyRound, Users, Tag, Heart } from 'lucide-react';
+import { LayoutGrid, Package, ListTodo, KeyRound, Users, Tag, Heart, BookOpen } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
@@ -19,6 +19,7 @@ type SettingsSection = {
 const baseSections: SettingsSection[] = [
   { id: 'overview', href: '/settings', icon: LayoutGrid, titleKey: 'settings.overview' },
   { id: 'favorites', href: '/settings/favorites', icon: Heart, titleKey: 'settings.favorites' },
+  { id: 'reading-history', href: '/settings/reading-history', icon: BookOpen, titleKey: 'settings.readingHistory' },
   { id: 'auth', href: '/settings/auth', icon: KeyRound, titleKey: 'settings.auth' },
   { id: 'users', href: '/settings/users', icon: Users, titleKey: 'settings.users', requiresAdmin: true },
   { id: 'plugins', href: '/settings/plugins', icon: Package, titleKey: 'settings.plugins', requiresAdmin: true },

@@ -385,6 +385,14 @@
     "addedToFavorites": "Added to favorites",
     "removedFromFavorites": "Removed from favorites"
   },
+  "readingHistory": {
+    "title": "Reading History",
+    "description": "View your reading history",
+    "loadError": "Failed to load reading history",
+    "noHistory": "No reading history",
+    "noHistoryHint": "Start reading archives and your history will appear here",
+    "count": "{count} records"
+  },
   "settings": {
     "title": "Settings",
     "description": "Manage system settings and plugin configuration",
@@ -393,6 +401,8 @@
     "all": "All",
     "favorites": "My Favorites",
     "favoritesDescription": "View and manage your favorite archives",
+    "readingHistory": "Reading History",
+    "readingHistoryDescription": "View your reading history",
     "plugins": "Plugins",
     "pluginsDescription": "Manage plugin enable/disable and configuration",
     "tasks": "Tasks",

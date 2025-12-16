@@ -390,6 +390,14 @@
     "addedToFavorites": "已添加到收藏",
     "removedFromFavorites": "已取消收藏"
   },
+  "readingHistory": {
+    "title": "阅读记录",
+    "description": "查看您的阅读历史",
+    "loadError": "加载阅读记录失败",
+    "noHistory": "暂无阅读记录",
+    "noHistoryHint": "开始阅读档案后，记录将显示在这里",
+    "count": "共 {count} 条记录"
+  },
   "settings": {
     "title": "设置",
     "description": "管理系统设置和插件配置",
@@ -398,6 +406,8 @@
     "all": "全部",
     "favorites": "我的收藏",
     "favoritesDescription": "查看和管理您收藏的档案",
+    "readingHistory": "阅读记录",
+    "readingHistoryDescription": "查看您的阅读历史记录",
     "plugins": "插件管理",
     "pluginsDescription": "管理系统插件的启用、禁用和配置",
     "tasks": "任务列表",
