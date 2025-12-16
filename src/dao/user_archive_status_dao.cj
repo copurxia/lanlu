@@ -277,4 +277,89 @@ public class UserArchiveStatusDao {
             case None => return false
         }
     }
+
+    /**
+     * 获取用户已读的档案列表（带分页）
+     * 返回 is_new = false 的档案详情
+     */
+    public static func getUserReadArchives(userId: Int64, start: Int32, count: Int32): (Array<ArchiveData>, Int64) {
+        let result = ArrayList<ArchiveData>()
+        var totalCount: Int64 = 0
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 先获取总数
+                    let countStmt = conn.prepareStatement("""
+                        SELECT COUNT(*) FROM user_archive_status
+                        WHERE user_id = ? AND is_new = false
+                    """)
+                    try {
+                        countStmt.set(0, userId)
+                        let countRs = countStmt.query()
+                        try {
+                            if (countRs.next()) {
+                                totalCount = countRs.getOrNull<Int64>(0) ?? 0
+                            }
+                        } finally {
+                            countRs.close()
+                        }
+                    } finally {
+                        countStmt.close()
+                    }
+
+                    // 获取分页数据，使用子查询获取 arcid 列表，然后关联视图
+                    let stmt = conn.prepareStatement("""
+                        SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash,
+                               awt.created_at, awt.updated_at, awt.relative_path, awt.file_size,
+                               awt.pagecount, awt.last_read_time, awt.progress, awt.tags
+                        FROM archives_with_tags awt
+                        WHERE awt.arcid IN (
+                            SELECT a.arcid
+                            FROM user_archive_status uas
+                            INNER JOIN archives a ON uas.archive_id = a.id
+                            WHERE uas.user_id = ? AND uas.is_new = false
+                            ORDER BY uas.updated_at DESC
+                            LIMIT ? OFFSET ?
+                        )
+                    """)
+                    try {
+                        stmt.set(0, userId)
+                        stmt.set(1, count)
+                        stmt.set(2, start)
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let archive = ArchiveData()
+                                archive.id = rs.getOrNull<String>(0) ?? ""
+                                archive.filename = rs.getOrNull<String>(1) ?? ""
+                                archive.title = rs.getOrNull<String>(2) ?? ""
+                                archive.summary = rs.getOrNull<String>(3) ?? ""
+                                archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                                archive.created_at = rs.getOrNull<String>(5) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archive.last_read_time = rs.getOrNull<String>(10) ?? ""
+                                archive.progress = rs.getOrNull<Int32>(11) ?? 0
+                                archive.tags = rs.getOrNull<String>(12) ?? ""
+                                result.add(archive)
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("user_archive_status_dao").error("获取用户已读档案失败", ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("user_archive_status_dao").error("无法连接到数据库")
+        }
+        return (result.toArray(), totalCount)
+    }
 }

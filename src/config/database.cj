@@ -325,6 +325,35 @@ public class DatabaseConfig {
     private static func initializeArchiveSchema(conn: Connection): Bool {
         let logger = getLogger("database")
         try {
+            // 先确保 users 表存在（user_favorites 和 user_archive_status 依赖它）
+            if (!tableExists(conn, "users")) {
+                logger.info("users表不存在，创建新的users表")
+                execUpdate(conn, """
+                    CREATE TABLE users (
+                        id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                        username VARCHAR(64) NOT NULL UNIQUE,
+                        password_salt VARCHAR(64) NOT NULL,
+                        password_hash VARCHAR(64) NOT NULL,
+                        is_admin BOOLEAN DEFAULT false,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                logger.info("users表创建成功")
+            } else {
+                logger.info("users表已存在，检查并补全缺失列")
+                // 检查 password_salt 列是否存在
+                if (!columnExists(conn, "users", "password_salt")) {
+                    logger.info("users表缺少列 password_salt，添加中")
+                    execUpdate(conn, "ALTER TABLE users ADD COLUMN password_salt VARCHAR(64) NOT NULL DEFAULT ''")
+                }
+                // 检查 updated_at 列是否存在
+                if (!columnExists(conn, "users", "updated_at")) {
+                    logger.info("users表缺少列 updated_at，添加中")
+                    execUpdate(conn, "ALTER TABLE users ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                }
+            }
+
             // archives 表
             if (!tableExists(conn, "archives")) {
                 logger.info("archives表不存在，创建新的archives表")

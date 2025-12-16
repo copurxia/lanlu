@@ -2,7 +2,7 @@
 
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowRight, LayoutGrid, Package, ListTodo, Tag } from 'lucide-react';
+import { ArrowRight, LayoutGrid, Package, ListTodo, Tag, Heart } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
@@ -25,6 +25,24 @@ export default function SettingsPage() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
+        <Card className="h-full">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Heart className="w-5 h-5" />
+              {t('settings.favorites')}
+            </CardTitle>
+            <CardDescription>{t('settings.favoritesDescription')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild className="w-full justify-between">
+              <Link href="/settings/favorites">
+                <span>{t('common.open')}</span>
+                <ArrowRight className="w-4 h-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+
         <Card className="h-full">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">

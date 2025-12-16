@@ -377,12 +377,27 @@
     "selectField": "选择{field}",
     "fixFollowingErrors": "请修复以下错误"
   },
+  "favorites": {
+    "title": "我的收藏",
+    "description": "管理您收藏的档案",
+    "loadError": "加载收藏列表失败",
+    "noFavorites": "暂无收藏",
+    "noFavoritesHint": "点击档案卡片上的爱心图标即可收藏",
+    "count": "共 {count} 个收藏",
+    "clearAll": "清空收藏",
+    "clearAllConfirm": "确定要清空所有收藏吗？此操作不可恢复。",
+    "removeFavorite": "取消收藏",
+    "addedToFavorites": "已添加到收藏",
+    "removedFromFavorites": "已取消收藏"
+  },
   "settings": {
     "title": "设置",
     "description": "管理系统设置和插件配置",
     "overview": "概览",
     "overviewDescription": "选择要管理的模块",
     "all": "全部",
+    "favorites": "我的收藏",
+    "favoritesDescription": "查看和管理您收藏的档案",
     "plugins": "插件管理",
     "pluginsDescription": "管理系统插件的启用、禁用和配置",
     "tasks": "任务列表",

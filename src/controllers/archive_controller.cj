@@ -822,6 +822,7 @@ public class ArchiveController {
 
     /**
      * 获取用户的所有收藏（GET /api/favorites）
+     * 返回收藏的 arcid 列表（兼容旧接口）
      */
     public static func getFavorites(ctx: JoyContext): Unit {
         // 获取用户ID
@@ -841,6 +842,138 @@ public class ArchiveController {
                 arcidsJson += "]"
 
                 let result = "{\"operation\":\"get_favorites\",\"favorites\":${arcidsJson},\"success\":1}"
+                ctx.json(result)
+            case None => return  // requireUser 已经设置了错误响应
+        }
+    }
+
+    /**
+     * 获取用户收藏的档案详情列表（GET /api/favorites/archives）
+     * 支持分页，返回完整的档案信息
+     */
+    public static func getFavoriteArchives(ctx: JoyContext): Unit {
+        // 获取用户ID
+        match (AuthMiddleware.requireUser(ctx)) {
+            case Some(userId) =>
+                // 获取分页参数
+                let startParam = ctx.getQuery("start")
+                let countParam = ctx.getQuery("count")
+
+                let start = match (startParam) {
+                    case Some(s) => try { Int32.parse(s) } catch (_: Exception) { 0i32 }
+                    case None => 0i32
+                }
+
+                let count = match (countParam) {
+                    case Some(c) => try { Int32.parse(c) } catch (_: Exception) { 100i32 }
+                    case None => 100i32
+                }
+
+                // 获取收藏的档案详情
+                let (archives, totalCount) = UserFavoriteDao.getUserFavoriteArchives(userId, start, count)
+
+                // 构建JSON响应
+                var archivesJson = "["
+                for (i in 0..archives.size) {
+                    if (i > 0) {
+                        archivesJson += ","
+                    }
+                    let archive = archives[i]
+
+                    // 查询用户级别的 isNew 状态
+                    let archiveIdInt = getArchiveInternalId(archive.id)
+                    let isNew = if (archiveIdInt > 0) {
+                        UserArchiveStatusDao.isNew(userId, archiveIdInt)
+                    } else {
+                        true
+                    }
+
+                    archivesJson += "{"
+                    archivesJson += "\"arcid\":\"${archive.id}\","
+                    archivesJson += "\"title\":\"${archive.title}\","
+                    archivesJson += "\"filename\":\"${archive.filename}\","
+                    archivesJson += "\"summary\":\"${archive.summary}\","
+                    archivesJson += "\"thumbhash\":\"${archive.thumbhash}\","
+                    archivesJson += "\"tags\":\"${archive.tags}\","
+                    archivesJson += "\"isnew\":${isNew},"
+                    archivesJson += "\"isfavorite\":true,"
+                    archivesJson += "\"pagecount\":${archive.pagecount},"
+                    archivesJson += "\"progress\":${archive.progress},"
+                    archivesJson += "\"file_size\":${archive.file_size},"
+                    archivesJson += "\"created_at\":\"${archive.created_at}\","
+                    archivesJson += "\"updated_at\":\"${archive.updated_at}\","
+                    archivesJson += "\"last_read_time\":\"${archive.last_read_time}\""
+                    archivesJson += "}"
+                }
+                archivesJson += "]"
+
+                let result = "{\"operation\":\"get_favorite_archives\",\"data\":${archivesJson},\"recordsTotal\":${totalCount},\"recordsFiltered\":${totalCount},\"success\":1}"
+                ctx.json(result)
+            case None => return  // requireUser 已经设置了错误响应
+        }
+    }
+
+    /**
+     * 获取用户已读的档案列表（GET /api/read_archives）
+     * 支持分页，返回完整的档案信息
+     */
+    public static func getReadArchives(ctx: JoyContext): Unit {
+        // 获取用户ID
+        match (AuthMiddleware.requireUser(ctx)) {
+            case Some(userId) =>
+                // 获取分页参数
+                let startParam = ctx.getQuery("start")
+                let countParam = ctx.getQuery("count")
+
+                let start = match (startParam) {
+                    case Some(s) => try { Int32.parse(s) } catch (_: Exception) { 0i32 }
+                    case None => 0i32
+                }
+
+                let count = match (countParam) {
+                    case Some(c) => try { Int32.parse(c) } catch (_: Exception) { 100i32 }
+                    case None => 100i32
+                }
+
+                // 获取已读的档案详情
+                let (archives, totalCount) = UserArchiveStatusDao.getUserReadArchives(userId, start, count)
+
+                // 构建JSON响应
+                var archivesJson = "["
+                for (i in 0..archives.size) {
+                    if (i > 0) {
+                        archivesJson += ","
+                    }
+                    let archive = archives[i]
+
+                    // 查询收藏状态
+                    let archiveIdInt = getArchiveInternalId(archive.id)
+                    let isFavorite = if (archiveIdInt > 0) {
+                        UserFavoriteDao.isFavorite(userId, archiveIdInt)
+                    } else {
+                        false
+                    }
+
+                    archivesJson += "{"
+                    archivesJson += "\"arcid\":\"${archive.id}\","
+                    archivesJson += "\"title\":\"${archive.title}\","
+                    archivesJson += "\"filename\":\"${archive.filename}\","
+                    archivesJson += "\"summary\":\"${archive.summary}\","
+                    archivesJson += "\"thumbhash\":\"${archive.thumbhash}\","
+                    archivesJson += "\"tags\":\"${archive.tags}\","
+                    archivesJson += "\"isnew\":false,"
+                    archivesJson += "\"isfavorite\":${isFavorite},"
+                    archivesJson += "\"pagecount\":${archive.pagecount},"
+                    archivesJson += "\"progress\":${archive.progress},"
+                    archivesJson += "\"file_size\":${archive.file_size},"
+                    archivesJson += "\"created_at\":\"${archive.created_at}\","
+                    archivesJson += "\"updated_at\":\"${archive.updated_at}\","
+                    archivesJson += "\"last_read_time\":\"${archive.last_read_time}\""
+                    archivesJson += "}"
+                }
+                archivesJson += "]"
+
+                let result = "{\"operation\":\"get_read_archives\",\"data\":${archivesJson},\"recordsTotal\":${totalCount},\"recordsFiltered\":${totalCount},\"success\":1}"
                 ctx.json(result)
             case None => return  // requireUser 已经设置了错误响应
         }

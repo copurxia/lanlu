@@ -372,12 +372,27 @@
     "selectField": "Select {field}",
     "fixFollowingErrors": "Please fix the following errors"
   },
+  "favorites": {
+    "title": "My Favorites",
+    "description": "Manage your favorite archives",
+    "loadError": "Failed to load favorites",
+    "noFavorites": "No favorites yet",
+    "noFavoritesHint": "Click the heart icon on archive cards to add favorites",
+    "count": "{count} favorites",
+    "clearAll": "Clear All",
+    "clearAllConfirm": "Are you sure you want to clear all favorites? This action cannot be undone.",
+    "removeFavorite": "Remove from favorites",
+    "addedToFavorites": "Added to favorites",
+    "removedFromFavorites": "Removed from favorites"
+  },
   "settings": {
     "title": "Settings",
     "description": "Manage system settings and plugin configuration",
     "overview": "Overview",
     "overviewDescription": "Choose a section to manage",
     "all": "All",
+    "favorites": "My Favorites",
+    "favoritesDescription": "View and manage your favorite archives",
     "plugins": "Plugins",
     "pluginsDescription": "Manage plugin enable/disable and configuration",
     "tasks": "Tasks",

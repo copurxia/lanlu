@@ -7,7 +7,7 @@ import { ArchiveService } from '@/lib/archive-service';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageToggle';
 import { UserMenu } from '@/components/user/UserMenu';
-import { Menu, X, Home, Search, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
+import { Menu, X, Home, Heart, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -47,10 +47,10 @@ export function Header() {
     }
   };
 
-  
+
   const navigation = [
     { name: t('navigation.home'), href: '/', icon: Home },
-    { name: t('navigation.search'), href: '/search', icon: Search },
+    { name: t('settings.favorites'), href: '/settings/favorites', icon: Heart },
     { name: t('navigation.random'), href: '#', icon: Shuffle, action: handleRandomRead },
   ];
 

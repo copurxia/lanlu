@@ -5,8 +5,10 @@ import { ArchiveService } from '@/lib/archive-service';
 import { ServerInfo } from '@/types/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Server, Database, BookOpen, HardDrive, Clock } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Server, Database, BookOpen, HardDrive, Clock, Heart, Settings } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import Link from 'next/link';
 
 export function Sidebar() {
   const { t } = useLanguage();
@@ -51,6 +53,27 @@ export function Sidebar() {
   return (
     <div className="w-80 bg-background p-4">
       <div className="space-y-6">
+        {/* 快捷入口 */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">{t('common.actions')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Button asChild variant="outline" className="w-full justify-start">
+              <Link href="/settings/favorites">
+                <Heart className="w-4 h-4 mr-2" />
+                {t('settings.favorites')}
+              </Link>
+            </Button>
+            <Button asChild variant="outline" className="w-full justify-start">
+              <Link href="/settings">
+                <Settings className="w-4 h-4 mr-2" />
+                {t('navigation.settings')}
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+
         {/* 服务器基本信息 */}
         <Card>
           <CardHeader className="pb-3">

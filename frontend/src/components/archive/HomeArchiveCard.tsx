@@ -10,6 +10,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 
 interface HomeArchiveCardProps {
   archive: Archive;
+  onFavoriteChange?: () => void;
 }
 
 // 去掉 namespace 前缀的简单显示函数
@@ -18,7 +19,7 @@ function stripNamespace(tag: string): string {
   return idx > 0 ? tag.slice(idx + 1) : tag;
 }
 
-export function HomeArchiveCard({ archive }: HomeArchiveCardProps) {
+export function HomeArchiveCard({ archive, onFavoriteChange }: HomeArchiveCardProps) {
   const { t, language } = useLanguage();
   const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
@@ -74,6 +75,10 @@ export function HomeArchiveCard({ archive }: HomeArchiveCardProps) {
       const success = await FavoriteService.toggleFavorite(archive.arcid, isFavorite);
       if (success) {
         setIsFavorite(!isFavorite);
+        // 如果提供了回调函数，则调用它
+        if (onFavoriteChange) {
+          onFavoriteChange();
+        }
       }
     } catch (error) {
       console.error('收藏操作失败:', error);
