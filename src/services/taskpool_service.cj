@@ -63,6 +63,12 @@ public class TaskPoolService {
         let logger = getLogger("taskpool")
         logger.info("TaskPool starting", ("max_workers", maxWorkers.toString()))
 
+        // 服务启动时恢复孤儿任务（非终态任务）
+        let recoveredCount = MinionTaskDao.recoverOrphanedTasks()
+        if (recoveredCount > 0) {
+            logger.info("恢复孤儿任务", ("count", recoveredCount.toString()))
+        }
+
         // 启动时仅尝试领取已有 pending（不做轮询）
         dispatch()
         return true

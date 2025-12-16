@@ -652,6 +652,54 @@ public class MinionTaskDao {
     }
 
     /**
+     * 恢复非终态任务（服务重启时调用）
+     * 将running状态的任务标记为failed，因为进程已重启，这些任务未真正完成
+     */
+    public static func recoverOrphanedTasks(): Int64 {
+        let logger = getLogger("minion_task_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 更新所有非终态任务为失败状态
+                    let updateSql = """
+                        UPDATE minion_tasks
+                        SET status = 'failed',
+                            message = '服务端重启，任务未完成',
+                            progress = 0,
+                            completed_at = CURRENT_TIMESTAMP
+                        WHERE status NOT IN ('completed', 'failed', 'stopped')
+                    """
+                    let stmt = conn.prepareStatement(updateSql)
+                    try {
+                        let updateResult = stmt.update()
+                        let rowCount = updateResult.rowCount
+                        logger.info("恢复孤儿任务完成", [("count", rowCount.toString())])
+                        return rowCount
+                    } finally {
+                        try {
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            logger.warn("关闭PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("恢复孤儿任务失败", ("error", e.message))
+                    return 0
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return 0
+        }
+    }
+
+    /**
      * 领取一个待执行任务（原子地将pending置为running）
      */
     public static func claimNextPendingTask(): Option<MinionTaskData> {
