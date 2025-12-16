@@ -97,6 +97,13 @@ export class ArchiveService {
     await apiClient.delete(`/api/archives/${id}/isnew`);
   }
 
+  /**
+   * 删除档案（仅管理员可用）
+   */
+  static async deleteArchive(id: string): Promise<void> {
+    await apiClient.delete(`/api/archives/${id}`);
+  }
+
   static getThumbnailUrl(id: string, page: number = 1): string {
     // 使用相对路径，因为前端和后端部署在一起
     return `/api/archives/${id}/thumbnail?page=${page}`;

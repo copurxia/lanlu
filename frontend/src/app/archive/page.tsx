@@ -26,7 +26,8 @@ function ArchiveDetailContent() {
   const searchParams = useSearchParams();
   const id = searchParams?.get('id') ?? null;
   const { t, language } = useLanguage();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  const isAdmin = user?.isAdmin === true;
 
   // 档案专属的 tag i18n map
   const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
@@ -392,6 +393,36 @@ function ArchiveDetailContent() {
       alert(t('archive.markAsNewFailed'));
     } finally {
       setIsNewStatusLoading(false);
+    }
+  };
+
+  // 处理删除档案
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const handleDeleteArchive = async () => {
+    if (!metadata) return;
+    if (!isAdmin) {
+      alert('只有管理员才能删除档案');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `确定要删除档案 "${metadata.title}" 吗？\n\n此操作不可恢复，将删除：\n- 档案数据库记录\n- 用户收藏记录\n- 阅读状态记录\n- 标签关联`
+    );
+
+    if (!confirmed) return;
+
+    setDeleteLoading(true);
+    try {
+      await ArchiveService.deleteArchive(metadata.arcid);
+      alert('档案删除成功');
+      // 删除成功后跳转到首页
+      window.location.href = '/';
+    } catch (error: any) {
+      console.error('Failed to delete archive:', error);
+      const errorMessage = error.response?.data?.error || error.message || '删除失败';
+      alert(`删除失败: ${errorMessage}`);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -767,6 +798,18 @@ function ArchiveDetailContent() {
 	                            <Button variant="outline" className="w-full" disabled title="需要登录才能编辑">
 	                              <Edit className="w-4 h-4 mr-2" />
 	                              {t('common.edit')}
+	                            </Button>
+	                          )}
+	                          {/* 删除按钮：仅管理员可见 */}
+	                          {isAdmin && (
+	                            <Button
+	                              variant="destructive"
+	                              className="w-full"
+	                              onClick={handleDeleteArchive}
+	                              disabled={deleteLoading}
+	                            >
+	                              <X className="w-4 h-4 mr-2" />
+	                              {deleteLoading ? t('common.loading') : t('common.delete')}
 	                            </Button>
 	                          )}
 	                        </>

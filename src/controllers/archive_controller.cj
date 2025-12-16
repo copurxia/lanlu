@@ -423,9 +423,60 @@ public class ArchiveController {
 
     // DELETE /api/archives/{id}
     public static func deleteArchive(ctx: JoyContext): Unit {
-        // 简化实现，总是返回成功
-        let result = "{\"operation\":\"delete_archive\",\"success\":1}"
-        ctx.json(result)
+        // 检查管理员权限
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(userId) =>
+                let id = ctx.getParam("id").getOrThrow()
+
+                // 检查ID是否为空
+                if (id.size == 0) {
+                    let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.json(errorResponse)
+                    return
+                }
+
+                // 检查归档是否存在
+                let archive = ArchiveModel.getArchiveById(id)
+                if (archive.id.size == 0) {
+                    let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.json(errorResponse)
+                    return
+                }
+
+                // 获取归档的数据库内部ID
+                let archiveIdInt = getArchiveInternalId(id)
+                if (archiveIdInt <= 0) {
+                    let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.json(errorResponse)
+                    return
+                }
+
+                // 删除相关数据
+                // 1. 删除用户收藏
+                UserFavoriteDao.deleteByArchiveId(archiveIdInt)
+
+                // 2. 删除用户阅读状态
+                UserArchiveStatusDao.deleteByArchiveId(archiveIdInt)
+
+                // 3. 删除标签关联（通过更新空标签实现）
+                TagDao.updateArchiveTags(id, "")
+
+                // 4. 删除档案记录
+                let deleteSuccess = ArchiveDao.delete(id)
+
+                if (deleteSuccess) {
+                    let result = "{\"operation\":\"delete_archive\",\"success\":1}"
+                    ctx.json(result)
+                } else {
+                    let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Failed to delete archive\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.json(errorResponse)
+                }
+            case None => return  // requireAdmin 已经设置了错误响应
+        }
     }
 
     // GET /api/archives/{id}/download
