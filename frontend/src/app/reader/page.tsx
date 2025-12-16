@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams } from 'next/navigation';
-import { useState, useEffect, useCallback, Suspense, useRef } from 'react';
+import { useState, useEffect, useCallback, Suspense, useRef, memo } from 'react';
 import Image from 'next/image';
 import { ArchiveService } from '@/lib/archive-service';
 import { imageCacheService } from '@/lib/image-cache';
@@ -20,6 +20,18 @@ import {
 import Link from 'next/link';
 
 type ReadingMode = 'single-ltr' | 'single-rtl' | 'single-ttb' | 'webtoon';
+
+// Memo化的图片组件，减少不必要的重渲染
+const MemoizedImage = memo(Image, (prevProps, nextProps) => {
+  return (
+    prevProps.src === nextProps.src &&
+    prevProps.fill === nextProps.fill &&
+    prevProps.className === nextProps.className &&
+    prevProps.style === nextProps.style
+  );
+});
+
+MemoizedImage.displayName = 'MemoizedImage';
 
 function ReaderContent() {
   const searchParams = useSearchParams();
@@ -59,6 +71,7 @@ function ReaderContent() {
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 2 }); // 可见范围
   const [imageHeights, setImageHeights] = useState<number[]>([]); // 存储每张图片的高度
   const [containerHeight, setContainerHeight] = useState(0); // 容器高度
+  const imageLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 图片加载防抖引用
 
   useEffect(() => {
     async function fetchPages() {
@@ -70,10 +83,19 @@ function ReaderContent() {
 
       try {
         const data = await ArchiveService.getFiles(id);
+
+        // 计算初始页码
+        const initialPage = data.progress > 0 && data.progress < data.pages.length
+          ? data.progress
+          : 0;
+
+        // 原子性地设置状态，避免多次渲染
         setPages(data.pages);
-        // 恢复阅读进度
-        if (data.progress > 0 && data.progress < data.pages.length) {
-          setCurrentPage(data.progress);
+        setCurrentPage(initialPage);
+
+        // 如果有进度且需要预加载图片，添加到加载队列
+        if (initialPage > 0) {
+          setImagesLoading(new Set([initialPage]));
         }
       } catch (err) {
         console.error('Failed to fetch archive pages:', err);
@@ -111,12 +133,21 @@ function ReaderContent() {
   // 监听页码变化并更新进度
   useEffect(() => {
     if (pages.length > 0 && currentPage >= 0) {
+      // 清除之前的定时器
+      if (imageLoadTimeoutRef.current) {
+        clearTimeout(imageLoadTimeoutRef.current);
+      }
+
       // 防抖：延迟500ms更新，避免频繁调用
-      const timeoutId = setTimeout(() => {
+      imageLoadTimeoutRef.current = setTimeout(() => {
         updateReadingProgress(currentPage);
       }, 500);
 
-      return () => clearTimeout(timeoutId);
+      return () => {
+        if (imageLoadTimeoutRef.current) {
+          clearTimeout(imageLoadTimeoutRef.current);
+        }
+      };
     }
   }, [currentPage, pages.length, updateReadingProgress]);
 
@@ -496,89 +527,41 @@ function ReaderContent() {
     }
   }, [readingMode]);
 
-  // 条漫模式初始化 - 只在页面数据加载完成后执行一次
+  // 合并的图片加载逻辑 - 优化性能和减少重复执行
   useEffect(() => {
-    if (pages.length > 0) {
-      if (readingMode === 'webtoon') {
-        // 只标记可见范围内的页面为加载中
-        const initialLoad = new Set<number>();
+    if (pages.length === 0) return;
+
+    if (readingMode === 'webtoon') {
+      // 条漫模式：预加载当前页面前后的几页（如果还未加载）
+      const preloadRange = 2;
+      setImagesLoading(prev => {
+        const updated = new Set(prev);
+
+        // 添加当前页面及前后页面到加载队列
+        for (let i = Math.max(0, currentPage - preloadRange); i <= Math.min(pages.length - 1, currentPage + preloadRange); i++) {
+          if (!loadedImages.has(i)) {
+            updated.add(i);
+          }
+        }
+
+        // 确保可见范围内的页面在加载列表中
         for (let i = visibleRange.start; i <= visibleRange.end; i++) {
           if (i >= 0 && i < pages.length && !loadedImages.has(i)) {
-            initialLoad.add(i);
+            updated.add(i);
           }
         }
-        setImagesLoading(initialLoad);
+
+        return updated;
+      });
+    } else {
+      // 单页模式：只加载当前页
+      if (!loadedImages.has(currentPage)) {
+        setImagesLoading(new Set([currentPage]));
       } else {
-        // 非条漫模式，只加载当前页（如果还未加载）
-        if (!loadedImages.has(currentPage)) {
-          setImagesLoading(new Set([currentPage]));
-        } else {
-          setImagesLoading(new Set()); // 如果已加载，清空加载列表
-        }
+        setImagesLoading(new Set());
       }
     }
-  }, [pages.length, visibleRange.start, visibleRange.end, readingMode, currentPage, loadedImages]); // 添加所有依赖项
-  
-  // 阅读模式切换时的处理 - 保持已加载的图片状态
-  useEffect(() => {
-    if (pages.length > 0) {
-      if (readingMode === 'webtoon') {
-        // 切换到条漫模式：确保可见范围内的页面在加载列表中（如果还未加载）
-        setImagesLoading(prev => {
-          const updated = new Set(prev);
-          for (let i = visibleRange.start; i <= visibleRange.end; i++) {
-            if (i >= 0 && i < pages.length && !loadedImages.has(i)) {
-              updated.add(i);
-            }
-          }
-          return updated;
-        });
-      } else {
-        // 切换到单页模式：确保当前页在加载列表中（如果还未加载）
-        if (!loadedImages.has(currentPage)) {
-          setImagesLoading(prev => {
-            const updated = new Set(prev);
-            updated.add(currentPage);
-            return updated;
-          });
-        } else {
-          // 如果当前页已加载，清空加载列表
-          setImagesLoading(new Set());
-        }
-      }
-    }
-  }, [readingMode, pages.length, visibleRange.start, visibleRange.end, loadedImages, currentPage]); // 添加所有依赖项
-  
-  // 当前页面变化时的加载处理
-  useEffect(() => {
-    if (pages.length > 0) {
-      if (readingMode === 'webtoon') {
-        // 条漫模式：预加载当前页面前后的几页（如果还未加载）
-        const preloadRange = 2;
-        setImagesLoading(prev => {
-          const updated = new Set(prev);
-          for (let i = Math.max(0, currentPage - preloadRange); i <= Math.min(pages.length - 1, currentPage + preloadRange); i++) {
-            if (!loadedImages.has(i)) {
-              updated.add(i);
-            }
-          }
-          return updated;
-        });
-      } else {
-        // 单页模式：确保当前页在加载列表中（如果还未加载）
-        if (!loadedImages.has(currentPage)) {
-          setImagesLoading(prev => {
-            const updated = new Set(prev);
-            updated.add(currentPage);
-            return updated;
-          });
-        } else {
-          // 如果当前页已加载，清空加载列表
-          setImagesLoading(new Set());
-        }
-      }
-    }
-  }, [currentPage, readingMode, pages.length, loadedImages]); // 依赖项已经正确
+  }, [currentPage, readingMode, pages.length, loadedImages, visibleRange.start, visibleRange.end]);
 
   // 滚动事件防抖处理
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -807,7 +790,7 @@ function ReaderContent() {
                 }}
               >
                 <div className="relative w-full h-full">
-                  <Image
+                  <MemoizedImage
                     key={`page-${currentPage}`}
                     src={cachedPages[currentPage] || pages[currentPage]}
                     alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
@@ -925,7 +908,7 @@ function ReaderContent() {
                       }}
                     >
                       <div className="relative w-full h-full flex justify-center">
-                        <Image
+                        <MemoizedImage
                           key={`page-${actualIndex}`}
                           src={cachedPages[actualIndex] || page}
                           alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
