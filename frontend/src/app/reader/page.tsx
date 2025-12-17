@@ -21,7 +21,9 @@ import {
   Settings,
   Layout,
   Play,
-  Scissors
+  Scissors,
+  Maximize,
+  Minimize
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -114,6 +116,18 @@ function ReaderContent() {
         return saved === 'true';
       } catch (e) {
         console.warn('Failed to read split cover mode from localStorage:', e);
+      }
+    }
+    return false; // 默认关闭
+  });
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
+    // 从localStorage读取保存的全屏设置
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('reader-fullscreen-mode');
+        return saved === 'true';
+      } catch (e) {
+        console.warn('Failed to read fullscreen mode from localStorage:', e);
       }
     }
     return false; // 默认关闭
@@ -254,6 +268,46 @@ function ReaderContent() {
       // 可以显示错误提示，但静默失败更符合用户体验
     }
   }, [id, isFavorited]);
+
+  // 切换全屏模式
+  const toggleFullscreen = useCallback(async () => {
+    if (!document.fullscreenElement) {
+      try {
+        await document.documentElement.requestFullscreen();
+        setIsFullscreen(true);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('reader-fullscreen-mode', 'true');
+        }
+      } catch (err) {
+        console.error('Failed to enter fullscreen:', err);
+      }
+    } else {
+      try {
+        await document.exitFullscreen();
+        setIsFullscreen(false);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('reader-fullscreen-mode', 'false');
+        }
+      } catch (err) {
+        console.error('Failed to exit fullscreen:', err);
+      }
+    }
+  }, []);
+
+  // 监听全屏状态变化
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('reader-fullscreen-mode', document.fullscreenElement ? 'true' : 'false');
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   // 监听页码变化并更新进度
   useEffect(() => {
@@ -1015,7 +1069,7 @@ function ReaderContent() {
               </Button>
             </PopoverTrigger>
             <PopoverContent align="center" sideOffset={12} className="w-auto p-3">
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-4 gap-2">
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1055,7 +1109,13 @@ function ReaderContent() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setAutoPlayMode(!autoPlayMode)}
+                  onClick={() => {
+                    setAutoPlayMode(!autoPlayMode);
+                    // 当启用自动翻页模式时，同时启用全屏模式
+                    if (!autoPlayMode && !isFullscreen) {
+                      toggleFullscreen();
+                    }
+                  }}
                   className={`
                     flex flex-col items-center justify-center h-16 w-16
                     rounded-lg border transition-all duration-200
@@ -1068,6 +1128,23 @@ function ReaderContent() {
                 >
                   <Play className="w-5 h-5 mb-1" />
                   <span className="text-xs">自动</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={toggleFullscreen}
+                  className={`
+                    flex flex-col items-center justify-center h-16 w-16
+                    rounded-lg border transition-all duration-200
+                    ${isFullscreen
+                      ? 'border-primary bg-primary/10 text-primary hover:bg-primary/20'
+                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }
+                  `}
+                  title="全屏模式"
+                >
+                  {isFullscreen ? <Minimize className="w-5 h-5 mb-1" /> : <Maximize className="w-5 h-5 mb-1" />}
+                  <span className="text-xs">全屏</span>
                 </Button>
               </div>
             </PopoverContent>
