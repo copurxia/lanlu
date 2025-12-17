@@ -85,7 +85,6 @@ function ReaderContent() {
   const [imageHeights, setImageHeights] = useState<number[]>([]); // 存储每张图片的高度
   const [containerHeight, setContainerHeight] = useState(0); // 容器高度
   const imageLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 图片加载防抖引用
-  const lastTapRef = useRef<number>(0); // 用于跟踪最后一次点击时间
   const [doublePageMode, setDoublePageMode] = useState<boolean>(() => {
     // 从localStorage读取保存的双页拼合设置
     if (typeof window !== 'undefined') {

@@ -50,8 +50,9 @@ export function ReadingTrendChart({ data, loading = false }: ReadingTrendChartPr
   // 计算平均阅读量
   const avgReads = data.length > 0 ? Math.round(totalReads / data.length * 10) / 10 : 0;
 
-  // 自定义Tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
+  // 使用useMemo创建稳定的tooltip函数
+  const tooltipContent = (props: any) => {
+    const { active, payload, label } = props;
     if (active && payload && payload.length) {
       return (
         <div className="bg-background border border-border rounded-lg p-2 shadow-lg">
@@ -102,7 +103,7 @@ export function ReadingTrendChart({ data, loading = false }: ReadingTrendChartPr
                   className="text-xs"
                   tick={{ fill: 'hsl(var(--muted-foreground))' }}
                 />
-                <Tooltip content={<CustomTooltip />} />
+                <Tooltip content={tooltipContent} />
                 <Line
                   type="monotone"
                   dataKey="count"
