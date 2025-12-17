@@ -11,12 +11,17 @@ import { Slider } from '@/components/ui/slider';
 import { ThemeButton } from '@/components/theme/theme-toggle';
 import { ReaderLanguageToggle } from '@/components/language/ReaderLanguageToggle';
 import { ReaderLanguageProvider, useReaderLanguage } from '@/contexts/ReaderLanguageContext';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import {
   ArrowLeft,
   Book,
   ArrowRight,
   ArrowDown,
-  Heart
+  Heart,
+  Settings,
+  Layout,
+  Play,
+  Scissors
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -77,6 +82,45 @@ function ReaderContent() {
   const [imageHeights, setImageHeights] = useState<number[]>([]); // 存储每张图片的高度
   const [containerHeight, setContainerHeight] = useState(0); // 容器高度
   const imageLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 图片加载防抖引用
+  const [doublePageMode, setDoublePageMode] = useState<boolean>(() => {
+    // 从localStorage读取保存的双页拼合设置
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('reader-double-page-mode');
+        return saved === 'true';
+      } catch (e) {
+        console.warn('Failed to read double page mode from localStorage:', e);
+      }
+    }
+    return false; // 默认关闭
+  });
+  const [autoPlayMode, setAutoPlayMode] = useState<boolean>(() => {
+    // 从localStorage读取保存的自动翻页设置
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('reader-auto-play-mode');
+        return saved === 'true';
+      } catch (e) {
+        console.warn('Failed to read auto play mode from localStorage:', e);
+      }
+    }
+    return false; // 默认关闭
+  });
+  const [splitCoverMode, setSplitCoverMode] = useState<boolean>(() => {
+    // 从localStorage读取保存的拆分封面设置
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('reader-split-cover-mode');
+        return saved === 'true';
+      } catch (e) {
+        console.warn('Failed to read split cover mode from localStorage:', e);
+      }
+    }
+    return false; // 默认关闭
+  });
+  
+  // 用于跟踪拆分封面模式的变化，避免无限循环
+  const splitCoverModeRef = useRef(splitCoverMode);
 
   useEffect(() => {
     async function fetchPages() {
@@ -90,9 +134,37 @@ function ReaderContent() {
         const data = await ArchiveService.getFiles(id);
 
         // 计算初始页码
-        const initialPage = data.progress > 0 && data.progress < data.pages.length
-          ? data.progress
+        let initialPage = data.progress > 0 && data.progress < data.pages.length
+          ? data.progress - 1 // API使用1-based页码，转换为0-based
           : 0;
+        
+        // 检查是否启用了拆分封面模式
+        const doublePageModeFromStorage = typeof window !== 'undefined' 
+          ? localStorage.getItem('doublePageMode') === 'true' 
+          : false;
+        const splitCoverModeFromStorage = typeof window !== 'undefined' 
+          ? localStorage.getItem('splitCoverMode') === 'true' 
+          : false;
+          
+        // 在拆分封面模式下，需要调整恢复的页码
+        if (doublePageModeFromStorage && splitCoverModeFromStorage) {
+          if (initialPage === 0) {
+            // 第1页，在拆分封面模式下显示为封面
+            initialPage = 0;
+          } else if (initialPage === 1) {
+            // 第2页，在拆分封面模式下显示为第2页（与第3页一起）
+            initialPage = 1;
+          } else if (initialPage === 2) {
+            // 第3页，在拆分封面模式下显示为第2页（与第2页一起）
+            initialPage = 1;
+          } else if (initialPage % 2 === 1) {
+            // 奇数页（第5、7、9...页），在拆分封面模式下显示为第(currentPage-1)页（与前一页一起）
+            initialPage = initialPage - 2;
+          } else {
+            // 偶数页（第4、6、8...页），在拆分封面模式下显示为第(currentPage-2)页（与后一页一起）
+            initialPage = initialPage - 2;
+          }
+        }
 
         // 原子性地设置状态，避免多次渲染
         setPages(data.pages);
@@ -136,13 +208,30 @@ function ReaderContent() {
     if (!id) return;
 
     try {
+      // 在拆分封面模式下，需要计算实际的阅读进度
+      let actualPage = page;
+      if (doublePageMode && splitCoverMode) {
+        // 拆分封面模式：第0页显示第1页，第1页显示第2-3页，第3页显示第4-5页，以此类推
+        if (page === 0) {
+          // 封面页，实际是第1页
+          actualPage = 0;
+        } else if (page === 1) {
+          // 显示第2-3页，保存进度为第3页
+          actualPage = 2;
+        } else {
+          // 其他情况，currentPage显示的是第(currentPage+1)和第(currentPage+2)页
+          // 保存进度为第(currentPage+2)页
+          actualPage = page + 1;
+        }
+      }
+      
       // 调用新的进度更新API，自动标记为已读
-      await ArchiveService.updateProgress(id, page + 1); // API 使用1-based页码
+      await ArchiveService.updateProgress(id, actualPage + 1); // API 使用1-based页码
     } catch (err) {
       console.error('Failed to update reading progress:', err);
       // 静默失败，不影响阅读体验
     }
-  }, [id]);
+  }, [id, doublePageMode, splitCoverMode]);
 
   // 切换收藏状态
   const toggleFavorite = useCallback(async (e?: React.MouseEvent) => {
@@ -212,17 +301,62 @@ function ReaderContent() {
 
   const handlePrevPage = useCallback(() => {
     if (currentPage > 0) {
-      setCurrentPage(currentPage - 1);
+      if (doublePageMode && splitCoverMode) {
+        // 拆分封面模式：第1页单独显示，其他页面正常拼合
+        if (currentPage === 1) {
+          // 从第2页回到封面
+          setCurrentPage(0);
+        } else if (currentPage === 2) {
+          // 从第3页回到第2页
+          setCurrentPage(1);
+        } else if (currentPage > 2) {
+          // 其他情况：一次翻两页
+          // 注意：currentPage=2时显示的是第2页和第3页，所以前一个应该是第1页
+          // currentPage=3时显示的是第4页和第5页，所以前一个应该是第2页和第3页
+          setCurrentPage(currentPage - 2);
+        }
+      } else if (doublePageMode) {
+        // 普通双页模式，一次翻两页
+        setCurrentPage(Math.max(0, currentPage - 2));
+      } else {
+        // 单页模式，一次翻一页
+        setCurrentPage(currentPage - 1);
+      }
       resetTransform();
     }
-  }, [currentPage, resetTransform]);
+  }, [currentPage, resetTransform, doublePageMode, splitCoverMode]);
 
   const handleNextPage = useCallback(() => {
     if (currentPage < pages.length - 1) {
-      setCurrentPage(currentPage + 1);
+      if (doublePageMode && splitCoverMode) {
+        // 拆分封面模式：第1页单独显示，其他页面正常拼合
+        if (currentPage === 0) {
+          // 从封面跳到第2页（显示第2页和第3页）
+          setCurrentPage(1);
+        } else if (currentPage === 1) {
+          // 从第2页跳到第4页（显示第4页和第5页）
+          setCurrentPage(3);
+        } else {
+          // 其他情况：一次翻两页
+          // 注意：currentPage=1时显示的是第2页和第3页，所以下一个应该是第4页和第5页
+          // currentPage=3时显示的是第4页和第5页，所以下一个应该是第6页和第7页
+          const nextPage = currentPage + 2;
+          setCurrentPage(Math.min(nextPage, pages.length - 1));
+        }
+      } else if (doublePageMode) {
+        // 普通双页模式
+        if (currentPage + 2 < pages.length) {
+          setCurrentPage(currentPage + 2);
+        } else {
+          setCurrentPage(pages.length - 1);
+        }
+      } else {
+        // 单页模式，一次翻一页
+        setCurrentPage(currentPage + 1);
+      }
       resetTransform();
     }
-  }, [currentPage, pages.length, resetTransform]);
+  }, [currentPage, pages.length, resetTransform, doublePageMode, splitCoverMode]);
 
 
   const handleImageError = useCallback((pageIndex: number) => {
@@ -303,13 +437,14 @@ function ReaderContent() {
     let accumulatedHeight = 0;
     let startIndex = 0;
     let endIndex = pages.length - 1;
-    const bufferHeight = containerHeight * 2; // 增加缓冲区到2倍屏幕高度，确保平滑滚动
+    const bufferHeight = containerHeight * 3; // 增加缓冲区到3倍屏幕高度，确保快速滚动时不漏
 
-    // 找到开始索引
+    // 条漫模式：所有图片都参与计算
     for (let i = 0; i < imageHeights.length; i++) {
       const imageHeight = imageHeights[i] || containerHeight;
+
       if (accumulatedHeight + imageHeight > scrollTop - bufferHeight) {
-        startIndex = Math.max(0, i - 2); // 增加前置页面数量，确保平滑
+        startIndex = Math.max(0, i - 4); // 增加前置缓冲
         break;
       }
       accumulatedHeight += imageHeight;
@@ -319,9 +454,10 @@ function ReaderContent() {
     accumulatedHeight = 0;
     for (let i = 0; i < imageHeights.length; i++) {
       const imageHeight = imageHeights[i] || containerHeight;
+
       accumulatedHeight += imageHeight;
       if (accumulatedHeight > scrollTop + containerHeight + bufferHeight) {
-        endIndex = Math.min(imageHeights.length - 1, i + 2); // 增加后置页面数量，确保平滑
+        endIndex = Math.min(imageHeights.length - 1, i + 4); // 增加后置缓冲
         break;
       }
     }
@@ -329,7 +465,7 @@ function ReaderContent() {
     // 确保范围有效且合理
     startIndex = Math.max(0, startIndex);
     endIndex = Math.min(pages.length - 1, endIndex);
-    
+
     // 确保至少显示3页，除非总页数不足
     if (endIndex - startIndex < 2 && pages.length > 2) {
       const center = Math.floor((startIndex + endIndex) / 2);
@@ -554,6 +690,73 @@ function ReaderContent() {
     }
   }, [readingMode]);
 
+  // 保存双页拼合设置到localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('reader-double-page-mode', String(doublePageMode));
+    }
+  }, [doublePageMode]);
+
+  // 保存自动翻页设置到localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('reader-auto-play-mode', String(autoPlayMode));
+    }
+  }, [autoPlayMode]);
+
+  // 保存拆分封面设置到localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('reader-split-cover-mode', String(splitCoverMode));
+    }
+  }, [splitCoverMode]);
+
+  // 处理拆分封面模式切换时的页面调整
+  useEffect(() => {
+    if (doublePageMode && pages.length > 0) {
+      // 使用ref来避免无限循环
+      const prevSplitCoverMode = splitCoverModeRef.current;
+      splitCoverModeRef.current = splitCoverMode;
+      
+      // 只有当拆分封面模式发生变化时才调整页面
+      if (prevSplitCoverMode !== splitCoverMode && prevSplitCoverMode !== undefined) {
+        if (splitCoverMode) {
+          // 启用拆分封面模式时的页面调整
+          if (currentPage === 0) {
+            // 当前是封面页，保持不变
+            // 无需调整
+          } else if (currentPage === 1) {
+            // 当前显示第1-2页，调整为显示第2-3页
+            setCurrentPage(1);
+          } else if (currentPage === 2) {
+            // 特殊处理：当前显示第3-4页，在拆分封面模式下应显示第2-3页
+            setCurrentPage(1);
+          } else if (currentPage % 2 === 0) {
+            // 当前是偶数页，在拆分封面模式下需要调整
+            // 调整为显示前一页和当前页
+            setCurrentPage(currentPage - 1);
+          }
+          // 奇数页情况保持不变
+        } else {
+          // 禁用拆分封面模式时的页面调整
+          if (currentPage === 0) {
+            // 当前是封面页，保持不变
+            // 无需调整
+          } else if (currentPage === 1) {
+            // 当前显示第2-3页，在普通双页模式下应显示第1-2页
+            setCurrentPage(0);
+          } else {
+            // 其他情况，调整为显示当前页和下一页
+            if (currentPage % 2 === 1) {
+              setCurrentPage(currentPage + 1);
+            }
+            // 偶数页情况保持不变
+          }
+        }
+      }
+    }
+  }, [splitCoverMode, doublePageMode, currentPage, pages.length]);
+
   // 合并的图片加载逻辑 - 优化性能和减少重复执行
   useEffect(() => {
     if (pages.length === 0) return;
@@ -602,15 +805,15 @@ function ReaderContent() {
             if (entry.isIntersecting) {
               const imgElement = entry.target as HTMLImageElement;
               const index = parseInt(imgElement.dataset.index || '0');
-              
-              // 如果图片进入视窗且未加载，开始加载
+
+              // 观察所有图片
               if (!loadedImages.has(index) && !imagesLoading.has(index)) {
                 setImagesLoading(prev => {
                   const updated = new Set(prev);
                   updated.add(index);
                   return updated;
                 });
-                
+
                 // 预加载相邻图片
                 [index - 1, index + 1].forEach(adjacentIndex => {
                   if (adjacentIndex >= 0 && adjacentIndex < pages.length && !loadedImages.has(adjacentIndex) && !imagesLoading.has(adjacentIndex)) {
@@ -622,18 +825,18 @@ function ReaderContent() {
                   }
                 });
               }
-              
+
               // 加载后停止观察该元素
               observerRef.current?.unobserve(imgElement);
             }
           });
         },
         {
-          rootMargin: '1000px 0px 1000px 0px' // 增加预加载距离，优化快速滚动体验
+          rootMargin: '2000px 0px 2000px 0px' // 增加预加载距离到2000px，优化快速滚动体验
         }
       );
 
-      // 观察可见范围内的所有图片元素
+      // 观察可见范围内的图片元素
       imageRefs.current.forEach((img, index) => {
         if (img && index >= visibleRange.start && index <= visibleRange.end) {
           img.dataset.index = index.toString();
@@ -773,10 +976,13 @@ function ReaderContent() {
                 // 条漫模式下需要滚动到对应位置
                 if (readingMode === 'webtoon' && webtoonContainerRef.current) {
                   let accumulatedHeight = 0;
+
+                  // 按单个图片计算
                   for (let i = 0; i < newPage; i++) {
                     const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
                     accumulatedHeight += imageHeight;
                   }
+
                   webtoonContainerRef.current.scrollTop = accumulatedHeight;
                 }
               }}
@@ -787,6 +993,85 @@ function ReaderContent() {
             />
             <span className="text-sm whitespace-nowrap font-medium text-foreground">{currentPage + 1}/{pages.length}</span>
           </div>
+        </div>
+
+        {/* 设置按钮区域 */}
+        <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full p-0 shadow-lg">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className={`
+                  rounded-full p-0 h-12 w-12
+                  transition-all duration-200 ease-in-out
+                  hover:scale-110 active:scale-95
+                  text-muted-foreground hover:text-foreground hover:bg-accent
+                `}
+                style={{ padding: '3px' }}
+                title="设置"
+              >
+                <Settings className="w-4 h-4" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent align="center" sideOffset={12} className="w-auto p-3">
+              <div className="grid grid-cols-3 gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDoublePageMode(!doublePageMode)}
+                  className={`
+                    flex flex-col items-center justify-center h-16 w-16
+                    rounded-lg border transition-all duration-200
+                    ${doublePageMode
+                      ? 'border-primary bg-primary/10 text-primary hover:bg-primary/20'
+                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }
+                  `}
+                  title="双页拼合"
+                >
+                  <Layout className="w-5 h-5 mb-1" />
+                  <span className="text-xs">双页</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSplitCoverMode(!splitCoverMode)}
+                  disabled={!doublePageMode}
+                  className={`
+                    flex flex-col items-center justify-center h-16 w-16
+                    rounded-lg border transition-all duration-200
+                    ${splitCoverMode
+                      ? 'border-primary bg-primary/10 text-primary hover:bg-primary/20'
+                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }
+                    ${!doublePageMode ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}
+                  title={t('reader.splitCoverDescription')}
+                >
+                  <Scissors className="w-5 h-5 mb-1" />
+                  <span className="text-xs">{t('reader.splitCover')}</span>
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setAutoPlayMode(!autoPlayMode)}
+                  className={`
+                    flex flex-col items-center justify-center h-16 w-16
+                    rounded-lg border transition-all duration-200
+                    ${autoPlayMode
+                      ? 'border-primary bg-primary/10 text-primary hover:bg-primary/20'
+                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }
+                  `}
+                  title="自动翻页"
+                >
+                  <Play className="w-5 h-5 mb-1" />
+                  <span className="text-xs">自动</span>
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* 收藏按钮区域 - 仅在未收藏时显示 */}
@@ -820,10 +1105,14 @@ function ReaderContent() {
       >
         {/* 单页模式 */}
         {readingMode !== 'webtoon' && (
-          <div className="flex items-center justify-center w-full h-full p-4 relative">
+          <div className="flex items-center justify-center w-full h-full relative">
             {/* 图片显示区域 */}
             <div className="flex items-center justify-center w-full h-full relative max-w-7xl mx-auto" style={{ maxHeight: 'calc(100vh - 140px)' }}>
-              {imagesLoading.has(currentPage) && !loadedImages.has(currentPage) && (
+              {/* 双页模式下的加载提示 */}
+              {doublePageMode && (
+                (imagesLoading.has(currentPage) && !loadedImages.has(currentPage)) ||
+                (currentPage + 1 < pages.length && imagesLoading.has(currentPage + 1) && !loadedImages.has(currentPage + 1))
+              ) && !loadedImages.has(currentPage) && (
                 <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
                   <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
                     <Spinner size="lg" />
@@ -840,34 +1129,72 @@ function ReaderContent() {
                   maxHeight: '100%'
                 }}
               >
-                <div className="relative w-full h-full">
-                  <MemoizedImage
-                    key={`page-${currentPage}`}
-                    src={cachedPages[currentPage] || pages[currentPage]}
-                    alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
-                    fill
-                    className={`
-                      object-contain select-none touch-none
-                      max-w-full max-h-full w-full h-full
-                      transition-opacity duration-200 ease-in-out
-                    `}
-                    style={{
-                      maxHeight: '100%',
-                      height: '100%',
-                      opacity: loadedImages.has(currentPage) ? 1 : 0.3
-                    }}
-                    onLoadingComplete={() => {
-                      handleImageLoad(currentPage);
-                      // 图片加载完成后缓存它（优化：只在缓存中没有该图片时才缓存）
-                      if (!cachedPages[currentPage]) {
-                        cacheImage(pages[currentPage], currentPage);
-                      }
-                    }}
-                    onError={() => handleImageError(currentPage)}
-                    onDoubleClick={(e) => handleDoubleClick(e, 0)}
-                    onDragStart={handleImageDragStart}
-                    draggable={false}
-                  />
+                <div className="relative w-full h-full flex">
+                  {/* 当前页 */}
+                  <div className={`relative ${doublePageMode && !(splitCoverMode && currentPage === 0) ? 'flex-1' : 'w-full'} h-full min-w-0`}>
+                    <MemoizedImage
+                      key={`page-${currentPage}`}
+                      src={cachedPages[currentPage] || pages[currentPage]}
+                      alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
+                      fill
+                      className={`
+                        ${doublePageMode && !(splitCoverMode && currentPage === 0) ? 'object-cover' : 'object-contain'} select-none touch-none
+                        w-full h-full
+                        transition-opacity duration-200 ease-in-out
+                        ${doublePageMode ? 'max-h-[calc(100vh-180px)]' : ''}
+                      `}
+                      style={{
+                        maxHeight: '100%',
+                        height: '100%',
+                        opacity: loadedImages.has(currentPage) ? 1 : 0.3
+                      }}
+                      onLoadingComplete={() => {
+                        handleImageLoad(currentPage);
+                        // 图片加载完成后缓存它（优化：只在缓存中没有该图片时才缓存）
+                        if (!cachedPages[currentPage]) {
+                          cacheImage(pages[currentPage], currentPage);
+                        }
+                      }}
+                      onError={() => handleImageError(currentPage)}
+                      onDoubleClick={(e) => handleDoubleClick(e, 0)}
+                      onDragStart={handleImageDragStart}
+                      draggable={false}
+                    />
+                  </div>
+
+                  {/* 下一页（仅在双页模式下且不是拆分封面模式的封面时显示） */}
+                  {doublePageMode && !(splitCoverMode && currentPage === 0) && currentPage + 1 < pages.length && (
+                    <div className="relative flex-1 h-full min-w-0">
+                      <MemoizedImage
+                        key={`page-${currentPage + 1}`}
+                        src={cachedPages[currentPage + 1] || pages[currentPage + 1]}
+                        alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
+                        fill
+                        className={`
+                          object-cover select-none touch-none
+                          w-full h-full
+                          transition-opacity duration-200 ease-in-out
+                          max-h-[calc(100vh-180px)]
+                        `}
+                        style={{
+                          maxHeight: '100%',
+                          height: '100%',
+                          opacity: loadedImages.has(currentPage + 1) ? 1 : 0.3
+                        }}
+                        onLoadingComplete={() => {
+                          handleImageLoad(currentPage + 1);
+                          // 图片加载完成后缓存它
+                          if (!cachedPages[currentPage + 1]) {
+                            cacheImage(pages[currentPage + 1], currentPage + 1);
+                          }
+                        }}
+                        onError={() => handleImageError(currentPage + 1)}
+                        onDoubleClick={(e) => handleDoubleClick(e, 1)}
+                        onDragStart={handleImageDragStart}
+                        draggable={false}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -881,43 +1208,51 @@ function ReaderContent() {
             className="h-full overflow-y-auto overflow-x-hidden"
             onScroll={(e) => {
               const container = e.currentTarget;
-              
+
               // 防抖处理滚动事件
               if (scrollTimeoutRef.current) {
                 clearTimeout(scrollTimeoutRef.current);
               }
-              
+
               scrollTimeoutRef.current = setTimeout(() => {
                 // 更精确的页面索引计算
                 let accumulatedHeight = 0;
                 let newPageIndex = 0;
+
+                // 按单个图片计算滚动位置
                 for (let i = 0; i < imageHeights.length; i++) {
                   const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+
                   accumulatedHeight += imageHeight;
                   if (accumulatedHeight > container.scrollTop + container.clientHeight * 0.3) {
                     newPageIndex = i;
                     break;
                   }
                 }
-                
+
                 if (newPageIndex !== currentPage && newPageIndex >= 0 && newPageIndex < pages.length) {
                   setCurrentPage(newPageIndex);
                 }
-                
+
                 // 更新可见范围
                 const newVisibleRange = calculateVisibleRange(container.scrollTop, container.clientHeight);
                 setVisibleRange(newVisibleRange);
-                
+
                 // 更新容器高度
                 setContainerHeight(container.clientHeight);
-              }, 30); // 减少防抖延迟到30ms
+              }, 16); // 减少防抖延迟到16ms（约等于60fps的一帧时间）
             }}
           >
             <div
               className="flex flex-col items-center mx-auto relative"
               style={{
                 // 精确计算总高度，确保滚动条准确
-                height: `${imageHeights.length > 0 ? imageHeights.reduce((sum, height) => sum + (height || containerHeight || window.innerHeight * 0.7), 0) : pages.length * (containerHeight || window.innerHeight * 0.7)}px`,
+                height: `${imageHeights.length > 0
+                  ? imageHeights.reduce((sum, height) => {
+                      return sum + (height || containerHeight || window.innerHeight * 0.7);
+                    }, 0)
+                  : pages.length * (containerHeight || window.innerHeight * 0.7)
+                }px`,
                 // 根据设备类型动态设置最大宽度
                 maxWidth: window.innerWidth >= 1024 ? '800px' : '1200px',
                 width: '100%',
@@ -928,7 +1263,9 @@ function ReaderContent() {
               {visibleRange.start > 0 && (
                 <div
                   style={{
-                    height: `${Array.from({length: visibleRange.start}, (_, i) => imageHeights[i] || containerHeight || window.innerHeight * 0.7).reduce((sum, height) => sum + height, 0)}px`,
+                    height: `${Array.from({length: visibleRange.start}, (_, i) => {
+                      return imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+                    }).reduce((sum, height) => sum + height, 0)}px`,
                     minHeight: '1px'
                   }}
                   className="w-full"
@@ -936,70 +1273,76 @@ function ReaderContent() {
               )}
               
               {/* 渲染可见范围内的图片 */}
-              {pages.slice(visibleRange.start, visibleRange.end + 1).map((page, index) => {
-                const actualIndex = visibleRange.start + index;
-                const imageHeight = imageHeights[actualIndex] || containerHeight || window.innerHeight * 0.7;
-                
-                return (
-                  <div key={actualIndex} className="relative w-full">
-                    {imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) && (
-                      <div
-                        className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
-                        style={{
-                          height: `${imageHeight}px`,
-                          minHeight: '100px'
-                        }}
-                      >
-                        <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
-                          <Spinner size="lg" />
+              {(() => {
+                const elements = [];
+                let i = visibleRange.start;
+
+                while (i <= visibleRange.end) {
+                  const actualIndex = i;
+                  const page = pages[actualIndex];
+                  const imageHeight = imageHeights[actualIndex] || containerHeight || window.innerHeight * 0.7;
+
+                  if (page) {
+                    elements.push(
+                      <div key={actualIndex} className="relative w-full">
+                        {imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) && (
+                          <div
+                            className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
+                            style={{
+                              height: `${imageHeight}px`,
+                              minHeight: '100px'
+                            }}
+                          >
+                            <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
+                              <Spinner size="lg" />
+                            </div>
+                          </div>
+                        )}
+
+                        <div
+                          className="relative flex justify-center w-full"
+                          style={{
+                            height: `${imageHeight}px`,
+                            minHeight: '100px'
+                          }}
+                        >
+                          <div className="relative w-full h-full flex justify-center">
+                            <MemoizedImage
+                              key={`page-${actualIndex}`}
+                              src={cachedPages[actualIndex] || page}
+                              alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
+                              fill
+                              className="object-contain select-none"
+                              style={{
+                                maxWidth: '100%',
+                                maxHeight: '100%',
+                                width: 'auto',
+                                height: 'auto',
+                                display: 'block',
+                                margin: '0 auto',
+                                opacity: loadedImages.has(actualIndex) ? 1 : 0.3
+                              }}
+                              onLoadingComplete={() => {
+                                handleImageLoad(actualIndex);
+                                if (!cachedPages[actualIndex]) {
+                                  cacheImage(page, actualIndex);
+                                }
+                              }}
+                              onError={() => handleImageError(actualIndex)}
+                              onDoubleClick={(e) => handleDoubleClick(e, actualIndex)}
+                              onDragStart={handleImageDragStart}
+                              draggable={false}
+                            />
+                          </div>
                         </div>
                       </div>
-                    )}
-                    
-                    <div
-                      className="relative flex justify-center w-full"
-                      style={{
-                        height: `${imageHeight}px`,
-                        minHeight: '100px'
-                      }}
-                    >
-                      <div className="relative w-full h-full flex justify-center">
-                        <MemoizedImage
-                          key={`page-${actualIndex}`}
-                          src={cachedPages[actualIndex] || page}
-                          alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
-                          fill
-                          className={`
-                            object-contain select-none
-                            transition-opacity duration-200 ease-in-out
-                          `}
-                          style={{
-                            // 确保图片不会超出容器宽度
-                            maxWidth: '100%',
-                            maxHeight: '100%',
-                            width: 'auto',
-                            height: 'auto',
-                            display: 'block',
-                            margin: '0 auto',
-                            opacity: loadedImages.has(actualIndex) ? 1 : 0.3
-                          }}
-                          onLoadingComplete={() => {
-                            handleImageLoad(actualIndex);
-                            // 图片加载完成后缓存它（优化：只在缓存中没有该图片时才缓存）
-                            if (!cachedPages[actualIndex]) {
-                              cacheImage(page, actualIndex);
-                            }
-                          }}
-                          onError={() => handleImageError(actualIndex)}
-                          onDoubleClick={(e) => handleDoubleClick(e, actualIndex)}
-                          onDragStart={handleImageDragStart}
-                          draggable={false}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+                    );
+                  }
+                  i += 1;
+                }
+
+                return elements;
+              })()}
               
               {/* 下方占位符 */}
               {visibleRange.end < pages.length - 1 && (

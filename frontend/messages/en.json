@@ -208,7 +208,9 @@
     "settings": "Settings",
     "hideToolbar": "Hide Toolbar",
     "showToolbar": "Show Toolbar",
-    "autoHide": "Auto Hide"
+    "autoHide": "Auto Hide",
+    "splitCover": "Split Cover",
+    "splitCoverDescription": "Split cover (requires double page mode)"
   },
   "auth": {
     "login": "Login",
