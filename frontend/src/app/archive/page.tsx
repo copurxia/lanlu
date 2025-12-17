@@ -708,7 +708,7 @@ function ArchiveDetailContent() {
                           {tags.map((fullTag) => {
 	                            const label = displayTag(fullTag);
 	                            return (
-	                              <Link key={fullTag} href={`/search?q=${encodeURIComponent(fullTag)}`}>
+	                              <Link key={fullTag} href={`/?q=${encodeURIComponent(fullTag)}`}>
 	                                <Badge
 	                                  variant="secondary"
 	                                  className="px-2.5 py-1 text-sm cursor-pointer select-none transition-colors hover:bg-secondary/80"

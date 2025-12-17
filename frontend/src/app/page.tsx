@@ -11,12 +11,15 @@ import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { ArchiveService } from '@/lib/archive-service';
 import { appEvents, AppEvents } from '@/lib/events';
 import { RefreshCw } from 'lucide-react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useSearchParams, useRouter } from 'next/navigation';
 
-export default function HomePage() {
+function HomePageContent() {
   const { t } = useLanguage();
-  
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
   const [archives, setArchives] = useState<any[]>([]);
   const [randomArchives, setRandomArchives] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,6 +35,13 @@ export default function HomePage() {
   const [newonly, setNewonly] = useState(false);
   const [untaggedonly, setUntaggedonly] = useState(false);
   const pageSize = 20;
+
+  // 读取URL参数
+  const urlQuery = searchParams?.get('q') || '';
+  const urlSortBy = searchParams?.get('sortby') || 'date_added';
+  const urlSortOrder = searchParams?.get('order') || 'desc';
+  const urlNewonly = searchParams?.get('newonly') === 'true';
+  const urlUntaggedonly = searchParams?.get('untaggedonly') === 'true';
 
   const fetchArchives = useCallback(async (page: number = 0) => {
     try {
@@ -74,6 +84,29 @@ export default function HomePage() {
       setRandomLoading(false);
     }
   }, []);
+
+  // 设置初始状态（从URL参数）
+  useEffect(() => {
+    if (urlQuery) setSearchQuery(urlQuery);
+    if (urlSortBy) setSortBy(urlSortBy);
+    if (urlSortOrder) setSortOrder(urlSortOrder);
+    setNewonly(urlNewonly);
+    setUntaggedonly(urlUntaggedonly);
+  }, [urlQuery, urlSortBy, urlSortOrder, urlNewonly, urlUntaggedonly]);
+
+  // 同步状态到URL
+  useEffect(() => {
+    const params = new URLSearchParams();
+    if (searchQuery) params.set('q', searchQuery);
+    if (sortBy !== 'date_added') params.set('sortby', sortBy);
+    if (sortOrder !== 'desc') params.set('order', sortOrder);
+    if (newonly) params.set('newonly', 'true');
+    if (untaggedonly) params.set('untaggedonly', 'true');
+
+    const queryString = params.toString();
+    const newUrl = queryString ? `/?${queryString}` : '/';
+    router.replace(newUrl);
+  }, [searchQuery, sortBy, sortOrder, newonly, untaggedonly, router]);
 
   useEffect(() => {
     // 只在客户端执行数据获取，避免静态生成时的API调用
@@ -130,8 +163,10 @@ export default function HomePage() {
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
   };
-  
-  
+
+  // 搜索模式检测
+  const isSearchMode = searchQuery || searchTags.length > 0 || searchCategory;
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -141,10 +176,11 @@ export default function HomePage() {
         <div className="hidden lg:block flex-shrink-0 border-r border-border">
           <SearchSidebar onSearch={handleSearch} loading={loading} />
         </div>
-        
+
         {/* 主内容区 */}
         <main className="flex-1 min-w-0 px-4 py-8">
-          {/* 随机推荐 */}
+          {/* 随机推荐 - 搜索模式下隐藏 */}
+          {!isSearchMode && (
           <section className="mb-12">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-semibold">{t('home.randomRecommendations')}</h2>
@@ -161,7 +197,7 @@ export default function HomePage() {
                 </Button>
               </div>
             </div>
-            
+
             {randomLoading ? (
               <div className="text-center py-12">
                 <Spinner size="lg" />
@@ -181,7 +217,8 @@ export default function HomePage() {
               </div>
             )}
           </section>
-          
+          )}
+
           {/* 档案列表 */}
           <section>
             <div className="flex flex-col gap-4 mb-6">
@@ -190,12 +227,12 @@ export default function HomePage() {
                 <h2 className="text-2xl font-semibold">
                   {searchQuery || searchTags.length > 0 || searchCategory ? t('home.searchResults') : t('home.allArchives')}
                 </h2>
-                
+
                 <div className="flex flex-col sm:flex-row sm:items-center gap-4">
                   <div className="text-sm text-muted-foreground">
                     {t('home.archivesCount').replace('{count}', String(totalRecords)).replace('{page}', String(currentPage + 1)).replace('{totalPages}', String(totalPages))}
                   </div>
-                  
+
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground">{t('home.sortBy')}</span>
                     <Select value={sortBy} onValueChange={setSortBy}>
@@ -216,7 +253,7 @@ export default function HomePage() {
                         <SelectItem value="_default">{t('settings.smartFilterDefault')}</SelectItem>
                       </SelectContent>
                     </Select>
-                    
+
                     <Select value={sortOrder} onValueChange={setSortOrder}>
                       <SelectTrigger className="w-[100px] h-8">
                         <SelectValue>
@@ -233,7 +270,7 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-            
+
             {loading ? (
               <div className="text-center py-12">
                 <Spinner size="lg" />
@@ -242,7 +279,7 @@ export default function HomePage() {
             ) : archives.length > 0 ? (
               <>
                 <ArchiveGrid archives={archives} variant="home" />
-                
+
                 {totalPages > 1 && (
                   <div className="mt-8">
                     <Pagination
@@ -264,5 +301,17 @@ export default function HomePage() {
         </main>
       </div>
     </div>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Spinner size="lg" />
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
   );
 }
