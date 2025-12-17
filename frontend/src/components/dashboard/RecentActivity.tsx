@@ -54,7 +54,7 @@ function RecentActivitySection({ title, icon, archives, loading = false, emptyMe
             {archives.map((archive) => (
               <Link
                 key={archive.arcid}
-                href={`/archive/${archive.arcid}`}
+                href={`/archive?id=${archive.arcid}`}
                 className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors"
               >
                 <div className="relative w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-muted">
