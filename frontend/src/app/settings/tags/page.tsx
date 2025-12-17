@@ -8,6 +8,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tag, Plus, Search, Download, Upload, Edit2, Trash2, Save, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -61,7 +63,7 @@ export default function TagsSettingsPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedNamespace, setSelectedNamespace] = useState<string>('');
+  const [selectedNamespace, setSelectedNamespace] = useState<string>('all');
 
   // Namespaces
   const [namespaces, setNamespaces] = useState<string[]>([]);
@@ -77,7 +79,8 @@ export default function TagsSettingsPage() {
     links: '',
   });
 
-  // Edit form
+  // Edit dialog
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingTag, setEditingTag] = useState<TagItem | null>(null);
   const [editForm, setEditForm] = useState<EditTagForm>({
     id: 0,
@@ -105,7 +108,7 @@ export default function TagsSettingsPage() {
         pageSize,
       };
       if (searchQuery) params.query = searchQuery;
-      if (selectedNamespace) params.namespace = selectedNamespace;
+      if (selectedNamespace && selectedNamespace !== 'all') params.namespace = selectedNamespace;
 
       const response = await TagService.list(params);
       setTags(response.items || []);
@@ -204,6 +207,7 @@ export default function TagsSettingsPage() {
       enIntro: tag.translations.en?.intro || '',
       links: tag.links || '',
     });
+    setEditDialogOpen(true);
   };
 
   const handleUpdateTag = async () => {
@@ -237,6 +241,7 @@ export default function TagsSettingsPage() {
       });
 
       setSuccessMsg(t('settings.tagUpdatedSuccess'));
+      setEditDialogOpen(false);
       setEditingTag(null);
       await loadTags();
       await loadNamespaces();
@@ -396,113 +401,21 @@ export default function TagsSettingsPage() {
               </span>
             </Button>
           </label>
+          <TagDialog
+            open={false}
+            onOpenChange={() => {}}
+            mode="create"
+            form={createForm}
+            setForm={setCreateForm as any}
+            loading={loading}
+            onCreate={handleCreateTag}
+            t={t}
+          />
         </div>
       </div>
 
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       {successMsg ? <p className="text-sm text-green-600">{successMsg}</p> : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('settings.createNewTag')}</CardTitle>
-          <CardDescription>{t('settings.createNewTagDescription')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="namespace">{t('settings.tagNamespace')} *</Label>
-              <Input
-                id="namespace"
-                value={createForm.namespace}
-                onChange={(e) => setCreateForm({ ...createForm, namespace: e.target.value })}
-                placeholder={t('settings.tagNamespacePlaceholder')}
-                disabled={loading}
-                maxLength={64}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="name">{t('settings.tagName')} *</Label>
-              <Input
-                id="name"
-                value={createForm.name}
-                onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                placeholder={t('settings.tagNamePlaceholder')}
-                disabled={loading}
-                maxLength={255}
-              />
-            </div>
-          </div>
-
-          <Tabs defaultValue="zh" className="w-full">
-            <TabsList>
-              <TabsTrigger value="zh">中文</TabsTrigger>
-              <TabsTrigger value="en">English</TabsTrigger>
-            </TabsList>
-            <TabsContent value="zh" className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="zhText">{t('settings.tagZhName')}</Label>
-                <Input
-                  id="zhText"
-                  value={createForm.zhText}
-                  onChange={(e) => setCreateForm({ ...createForm, zhText: e.target.value })}
-                  placeholder={t('settings.tagZhNamePlaceholder')}
-                  disabled={loading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="zhIntro">{t('settings.tagZhIntro')}</Label>
-                <Textarea
-                  id="zhIntro"
-                  value={createForm.zhIntro}
-                  onChange={(e) => setCreateForm({ ...createForm, zhIntro: e.target.value })}
-                  placeholder={t('settings.tagZhIntroPlaceholder')}
-                  disabled={loading}
-                  rows={3}
-                />
-              </div>
-            </TabsContent>
-            <TabsContent value="en" className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="enText">{t('settings.tagEnName')}</Label>
-                <Input
-                  id="enText"
-                  value={createForm.enText}
-                  onChange={(e) => setCreateForm({ ...createForm, enText: e.target.value })}
-                  placeholder={t('settings.tagEnNamePlaceholder')}
-                  disabled={loading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="enIntro">{t('settings.tagEnIntro')}</Label>
-                <Textarea
-                  id="enIntro"
-                  value={createForm.enIntro}
-                  onChange={(e) => setCreateForm({ ...createForm, enIntro: e.target.value })}
-                  placeholder={t('settings.tagEnIntroPlaceholder')}
-                  disabled={loading}
-                  rows={3}
-                />
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          <div className="space-y-2">
-            <Label htmlFor="links">{t('settings.tagExternalLinks')}</Label>
-            <Input
-              id="links"
-              value={createForm.links}
-              onChange={(e) => setCreateForm({ ...createForm, links: e.target.value })}
-              placeholder={t('settings.tagExternalLinksPlaceholder')}
-              disabled={loading}
-            />
-          </div>
-
-          <Button onClick={handleCreateTag} disabled={loading || !createForm.namespace.trim() || !createForm.name.trim()}>
-            <Plus className="w-4 h-4 mr-2" />
-            {loading ? t('settings.tagCreating') : t('settings.tagCreate')}
-          </Button>
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
@@ -523,26 +436,27 @@ export default function TagsSettingsPage() {
                 className="pl-8"
               />
             </div>
-            <select
-              value={selectedNamespace}
-              onChange={(e) => {
-                setSelectedNamespace(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="px-3 py-2 rounded-md border bg-background"
-            >
-              <option value="">{t('settings.tagAllNamespaces')}</option>
-              {namespaces.map((ns) => (
-                <option key={ns} value={ns}>
-                  {ns}
-                </option>
-              ))}
-            </select>
+            <Select value={selectedNamespace} onValueChange={(value) => {
+              setSelectedNamespace(value);
+              setCurrentPage(1);
+            }}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder={t('settings.tagAllNamespaces')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('settings.tagAllNamespaces')}</SelectItem>
+                {namespaces.map((ns) => (
+                  <SelectItem key={ns} value={ns}>
+                    {ns}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button
               variant="outline"
               onClick={() => {
                 setSearchQuery('');
-                setSelectedNamespace('');
+                setSelectedNamespace('all');
                 setCurrentPage(1);
               }}
             >
@@ -631,53 +545,139 @@ export default function TagsSettingsPage() {
         </CardContent>
       </Card>
 
-      {editingTag && (
-        <Card className="border-dashed">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle className="text-base">{t('settings.tagEditTag')}</CardTitle>
-                <CardDescription>
-                  {editingTag.namespace}:{editingTag.name}
-                </CardDescription>
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setEditingTag(null);
-                  setEditForm({
-                    id: 0,
-                    namespace: '',
-                    name: '',
-                    zhText: '',
-                    zhIntro: '',
-                    enText: '',
-                    enIntro: '',
-                    links: '',
-                  });
-                }}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
+      {/* Tag Dialog - Create/Edit */}
+      <TagDialog
+        open={editDialogOpen}
+        onOpenChange={(open) => {
+          setEditDialogOpen(open);
+          if (!open) {
+            setEditingTag(null);
+            setEditForm({
+              id: 0,
+              namespace: '',
+              name: '',
+              zhText: '',
+              zhIntro: '',
+              enText: '',
+              enIntro: '',
+              links: '',
+            });
+          }
+        }}
+        mode="edit"
+        form={editForm}
+        setForm={setEditForm as any}
+        editingTag={editingTag}
+        loading={loading}
+        onSubmit={handleUpdateTag}
+        onCreate={handleCreateTag}
+        t={t}
+      />
+    </div>
+  );
+}
+
+// Unified Tag Dialog Component for both Create and Edit
+interface TagDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  mode: 'create' | 'edit';
+  form: CreateTagForm | EditTagForm;
+  setForm: React.Dispatch<React.SetStateAction<CreateTagForm | EditTagForm>>;
+  editingTag?: TagItem | null;
+  loading: boolean;
+  onSubmit?: () => Promise<void>;
+  onCreate?: () => Promise<void>;
+  t: (key: string) => string;
+}
+
+function TagDialog({ open, onOpenChange, mode, form, setForm, editingTag, loading, onSubmit, onCreate, t }: TagDialogProps) {
+  const handleSubmit = async () => {
+    if (mode === 'create') {
+      await onCreate?.();
+      if (!loading) {
+        setForm({
+          namespace: '',
+          name: '',
+          zhText: '',
+          zhIntro: '',
+          enText: '',
+          enIntro: '',
+          links: '',
+        });
+        onOpenChange(false);
+      }
+    } else {
+      await onSubmit?.();
+    }
+  };
+
+  const handleClose = () => {
+    if (!loading) {
+      onOpenChange(false);
+      if (mode === 'create') {
+        setForm({
+          namespace: '',
+          name: '',
+          zhText: '',
+          zhIntro: '',
+          enText: '',
+          enIntro: '',
+          links: '',
+        });
+      }
+    }
+  };
+
+  const isFormValid = form.namespace && form.name;
+
+  return (
+    <>
+      {mode === 'create' && (
+        <Button
+          onClick={() => onOpenChange(true)}
+          className="flex items-center gap-2"
+        >
+          <Plus className="w-4 h-4" />
+          {t('settings.createNewTag')}
+        </Button>
+      )}
+      <Dialog open={open} onOpenChange={handleClose}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {mode === 'create' ? t('settings.createNewTag') : t('settings.tagEditTag')}
+            </DialogTitle>
+            <DialogDescription>
+              {mode === 'create'
+                ? t('settings.createNewTagDescription')
+                : editingTag
+                ? `${editingTag.namespace}:${editingTag.name}`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label>{t('settings.tagNamespace')} *</Label>
+                <Label htmlFor="namespace">{t('settings.tagNamespace')} *</Label>
                 <Input
-                  value={editForm.namespace}
-                  disabled
-                  className="bg-muted"
+                  id="namespace"
+                  value={form.namespace}
+                  onChange={(e) => setForm({ ...form, namespace: e.target.value })}
+                  placeholder={t('settings.tagNamespacePlaceholder')}
+                  disabled={loading}
+                  maxLength={64}
                 />
               </div>
               <div className="space-y-2">
-                <Label>{t('settings.tagName')} *</Label>
+                <Label htmlFor="name">{t('settings.tagName')} *</Label>
                 <Input
-                  value={editForm.name}
-                  disabled
-                  className="bg-muted"
+                  id="name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder={t('settings.tagNamePlaceholder')}
+                  disabled={loading}
+                  maxLength={255}
                 />
               </div>
             </div>
@@ -689,21 +689,21 @@ export default function TagsSettingsPage() {
               </TabsList>
               <TabsContent value="zh" className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="editZhText">{t('settings.tagZhName')}</Label>
+                  <Label htmlFor="zhText">{t('settings.tagZhName')}</Label>
                   <Input
-                    id="editZhText"
-                    value={editForm.zhText}
-                    onChange={(e) => setEditForm({ ...editForm, zhText: e.target.value })}
+                    id="zhText"
+                    value={form.zhText}
+                    onChange={(e) => setForm({ ...form, zhText: e.target.value })}
                     placeholder={t('settings.tagZhNamePlaceholder')}
                     disabled={loading}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="editZhIntro">{t('settings.tagZhIntro')}</Label>
+                  <Label htmlFor="zhIntro">{t('settings.tagZhIntro')}</Label>
                   <Textarea
-                    id="editZhIntro"
-                    value={editForm.zhIntro}
-                    onChange={(e) => setEditForm({ ...editForm, zhIntro: e.target.value })}
+                    id="zhIntro"
+                    value={form.zhIntro}
+                    onChange={(e) => setForm({ ...form, zhIntro: e.target.value })}
                     placeholder={t('settings.tagZhIntroPlaceholder')}
                     disabled={loading}
                     rows={3}
@@ -712,21 +712,21 @@ export default function TagsSettingsPage() {
               </TabsContent>
               <TabsContent value="en" className="space-y-3">
                 <div className="space-y-2">
-                  <Label htmlFor="editEnText">{t('settings.tagEnName')}</Label>
+                  <Label htmlFor="enText">{t('settings.tagEnName')}</Label>
                   <Input
-                    id="editEnText"
-                    value={editForm.enText}
-                    onChange={(e) => setEditForm({ ...editForm, enText: e.target.value })}
+                    id="enText"
+                    value={form.enText}
+                    onChange={(e) => setForm({ ...form, enText: e.target.value })}
                     placeholder={t('settings.tagEnNamePlaceholder')}
                     disabled={loading}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="editEnIntro">{t('settings.tagEnIntro')}</Label>
+                  <Label htmlFor="enIntro">{t('settings.tagEnIntro')}</Label>
                   <Textarea
-                    id="editEnIntro"
-                    value={editForm.enIntro}
-                    onChange={(e) => setEditForm({ ...editForm, enIntro: e.target.value })}
+                    id="enIntro"
+                    value={form.enIntro}
+                    onChange={(e) => setForm({ ...form, enIntro: e.target.value })}
                     placeholder={t('settings.tagEnIntroPlaceholder')}
                     disabled={loading}
                     rows={3}
@@ -736,43 +736,35 @@ export default function TagsSettingsPage() {
             </Tabs>
 
             <div className="space-y-2">
-              <Label htmlFor="editLinks">{t('settings.tagExternalLinks')}</Label>
+              <Label htmlFor="links">{t('settings.tagExternalLinks')}</Label>
               <Input
-                id="editLinks"
-                value={editForm.links}
-                onChange={(e) => setEditForm({ ...editForm, links: e.target.value })}
+                id="links"
+                value={form.links}
+                onChange={(e) => setForm({ ...form, links: e.target.value })}
                 placeholder={t('settings.tagExternalLinksPlaceholder')}
                 disabled={loading}
               />
             </div>
-
-            <div className="flex gap-2">
-              <Button onClick={handleUpdateTag} disabled={loading}>
-                <Save className="w-4 h-4 mr-2" />
-                {loading ? t('settings.tagSaving') : t('settings.tagSaveChanges')}
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setEditingTag(null);
-                  setEditForm({
-                    id: 0,
-                    namespace: '',
-                    name: '',
-                    zhText: '',
-                    zhIntro: '',
-                    enText: '',
-                    enIntro: '',
-                    links: '',
-                  });
-                }}
-              >
-                {t('common.cancel')}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={handleClose}
+              disabled={loading}
+            >
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={loading || !isFormValid}
+            >
+              {mode === 'create'
+                ? (loading ? t('settings.tagCreating') : t('settings.tagCreate'))
+                : (loading ? t('settings.tagSaving') : t('settings.tagSaveChanges'))}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
