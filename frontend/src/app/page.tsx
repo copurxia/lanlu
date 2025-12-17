@@ -29,6 +29,8 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchTags, setSearchTags] = useState<string[]>([]);
   const [searchCategory, setSearchCategory] = useState('');
+  const [newonly, setNewonly] = useState(false);
+  const [untaggedonly, setUntaggedonly] = useState(false);
   const pageSize = 20;
 
   const fetchArchives = useCallback(async (page: number = 0) => {
@@ -40,13 +42,15 @@ export default function HomePage() {
         sortby: sortBy,
         order: sortOrder
       };
-      
+
       if (searchQuery) params.filter = searchQuery;
       if (searchTags.length > 0) params.tag = searchTags.join(',');
       if (searchCategory) params.category = searchCategory;
-      
+      if (newonly) params.newonly = true;
+      if (untaggedonly) params.untaggedonly = true;
+
       const result = await ArchiveService.search(params);
-      
+
       setArchives(result.data);
       setTotalRecords(result.recordsTotal);
       setTotalPages(Math.ceil(result.recordsTotal / pageSize));
@@ -56,7 +60,7 @@ export default function HomePage() {
     } finally {
       setLoading(false);
     }
-  }, [pageSize, sortBy, sortOrder, searchQuery, searchTags, searchCategory]);
+  }, [pageSize, sortBy, sortOrder, searchQuery, searchTags, searchCategory, newonly, untaggedonly]);
 
   const fetchRandomArchives = useCallback(async () => {
     try {
@@ -77,7 +81,7 @@ export default function HomePage() {
       fetchArchives(currentPage);
       fetchRandomArchives();
     }
-  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder]);
+  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder, newonly, untaggedonly]);
 
   // 监听上传完成事件，刷新首页数据
   useEffect(() => {
@@ -110,12 +114,16 @@ export default function HomePage() {
     sortOrder?: string;
     dateFrom?: string;
     dateTo?: string;
+    newonly?: boolean;
+    untaggedonly?: boolean;
   }) => {
     setSearchQuery(params.query || '');
     setSearchTags(params.tags || []);
     setSearchCategory(params.category || '');
     if (params.sortBy) setSortBy(params.sortBy);
     if (params.sortOrder) setSortOrder(params.sortOrder);
+    if (typeof params.newonly === 'boolean') setNewonly(params.newonly);
+    if (typeof params.untaggedonly === 'boolean') setUntaggedonly(params.untaggedonly);
     setCurrentPage(0);
   };
 
