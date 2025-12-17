@@ -1,4 +1,5 @@
 import { Archive } from '@/types/archive';
+import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Heart } from 'lucide-react';
 import Link from 'next/link';
@@ -87,17 +88,15 @@ export function HomeArchiveCard({ archive, onFavoriteChange }: HomeArchiveCardPr
       setFavoriteLoading(false);
     }
   };
-  
+
   return (
-    <div className="w-full">
-      {/* 单个档案卡片 */}
-      <div
-        className="group bg-card rounded-lg border shadow-sm overflow-hidden hover:shadow-md transition-shadow cursor-pointer w-full"
-        title={hoverTitleParts.length > 0 ? `${archive.title}\n${hoverTitleParts.join('\n')}` : archive.title}
-        onClick={() => {
-          window.location.href = `/reader?id=${archive.arcid}`;
-        }}
-      >
+    <Card
+      className="group overflow-hidden hover:shadow-lg transition-shadow cursor-pointer w-[180px] flex-shrink-0"
+      title={hoverTitleParts.length > 0 ? `${archive.title}\n${hoverTitleParts.join('\n')}` : archive.title}
+      onClick={() => {
+        window.location.href = `/reader?id=${archive.arcid}`;
+      }}
+    >
         <div className="aspect-[3/4] bg-muted relative">
           <div className="relative w-full h-full">
             <Image
@@ -154,39 +153,39 @@ export function HomeArchiveCard({ archive, onFavoriteChange }: HomeArchiveCardPr
             </div>
           )}
         </div>
-        <div className="p-3">
-          <h3 className="font-medium text-sm line-clamp-2 mb-2 min-h-[2.5rem]">
+        <CardContent className="p-4">
+          <h3 className="font-semibold text-sm line-clamp-2 mb-2">
             {archive.title}
           </h3>
-          <div className="text-xs text-muted-foreground mb-3">
+          <div className="text-xs text-muted-foreground">
             {archive.pagecount} {t('home.pages')}
           </div>
-          <div className="flex gap-1">
-            <Button
-              asChild
-              size="sm"
-              className="flex-1 text-xs h-7"
-              onClick={(e) => {
-                e.stopPropagation();
-              }}
-            >
-              <Link href={`/archive?id=${archive.arcid}`}>
-                {t('common.details')}
-              </Link>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className={`px-2 h-7 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-              title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-              disabled={favoriteLoading}
-              onClick={handleFavoriteClick}
-            >
-              <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-            </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+        </CardContent>
+
+        <CardFooter className="p-4 pt-0 flex gap-2">
+          <Button
+            asChild
+            size="sm"
+            className="flex-1"
+            onClick={(e) => {
+              e.stopPropagation();
+            }}
+          >
+            <Link href={`/archive?id=${archive.arcid}`}>
+              {t('common.details')}
+            </Link>
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className={`px-3 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+            title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+            disabled={favoriteLoading}
+            onClick={handleFavoriteClick}
+          >
+            <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+          </Button>
+        </CardFooter>
+      </Card>
   );
 }
