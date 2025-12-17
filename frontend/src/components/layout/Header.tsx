@@ -182,13 +182,6 @@ export function Header() {
             {/* 搜索栏 */}
             <SearchBar />
 
-            {/* 在settings页面时显示SettingsNav */}
-            {isSettingsPage && (
-              <div className="pb-3 border-b border-border">
-                <SettingsNav onNavigate={() => setMobileMenuOpen(false)} />
-              </div>
-            )}
-
             {/* 通用导航 */}
             <nav className="flex flex-col gap-1">
               {mobileNavigation.map((item) => {
@@ -244,6 +237,13 @@ export function Header() {
                 </Button>
               )}
             </nav>
+
+            {/* 在settings页面时显示SettingsNav */}
+            {isSettingsPage && (
+              <div className="pb-3 border-t border-border pt-3">
+                <SettingsNav onNavigate={() => setMobileMenuOpen(false)} />
+              </div>
+            )}
 
             {/* 底部工具栏 */}
             <div className="flex items-center gap-2 pt-3 border-t border-border">
