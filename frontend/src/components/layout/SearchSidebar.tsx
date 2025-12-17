@@ -269,9 +269,11 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="lastreadtime">{t('home.lastRead')}</SelectItem>
+                  <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
                   <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+                  <SelectItem value="title">{t('home.title')}</SelectItem>
                   <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
+                  <SelectItem value="_default">{t('settings.smartFilterDefault')}</SelectItem>
                 </SelectContent>
               </Select>
 

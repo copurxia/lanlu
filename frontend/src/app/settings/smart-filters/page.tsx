@@ -41,7 +41,7 @@ const ICON_OPTIONS = [
 const SORT_BY_OPTIONS = [
   { value: '_default', label: 'default' },
   { value: 'date_added', label: 'dateAdded' },
-  { value: 'lastreadtime', label: 'lastRead' },
+  { value: 'lastread', label: 'lastRead' },
   { value: 'title', label: 'title' },
   { value: 'pagecount', label: 'pageCount' },
 ];
@@ -303,7 +303,7 @@ export default function SmartFiltersPage() {
     if (!sortBy) return t('settings.smartFilterDefault');
     switch (sortBy) {
       case 'date_added': return t('home.dateAdded');
-      case 'lastreadtime': return t('home.lastRead');
+      case 'lastread': return t('home.lastRead');
       case 'title': return t('home.title');
       case 'pagecount': return t('home.pageCount');
       default: return sortBy;

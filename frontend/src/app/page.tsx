@@ -201,15 +201,19 @@ export default function HomePage() {
                     <Select value={sortBy} onValueChange={setSortBy}>
                       <SelectTrigger className="w-[140px] h-8">
                         <SelectValue>
-                          {sortBy === 'lastreadtime' && t('home.lastRead')}
+                          {sortBy === 'lastread' && t('home.lastRead')}
                           {sortBy === 'date_added' && t('home.dateAdded')}
+                          {sortBy === 'title' && t('home.title')}
                           {sortBy === 'pagecount' && t('home.pageCount')}
+                          {sortBy === '_default' && t('settings.smartFilterDefault')}
                         </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="lastreadtime">{t('home.lastRead')}</SelectItem>
+                        <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
                         <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+                        <SelectItem value="title">{t('home.title')}</SelectItem>
                         <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
+                        <SelectItem value="_default">{t('settings.smartFilterDefault')}</SelectItem>
                       </SelectContent>
                     </Select>
                     
