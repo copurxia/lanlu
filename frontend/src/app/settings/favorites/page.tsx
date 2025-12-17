@@ -86,9 +86,8 @@ export default function FavoritesPage() {
   };
 
   return (
-    <>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold flex items-center gap-2">
             <Heart className="w-5 h-5" />
@@ -98,31 +97,30 @@ export default function FavoritesPage() {
         </div>
         <div className="flex gap-2">
           <Button
-                variant="outline"
-                size="sm"
-                onClick={() => loadFavorites()}
-                disabled={loading}
-              >
-                <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                {t('common.refresh')}
-              </Button>
-              {archives.length > 0 && (
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={handleClearAll}
-                  disabled={loading}
-                >
-                  <Trash2 className="w-4 h-4 mr-2" />
-                  {t('favorites.clearAll')}
-                </Button>
-              )}
-            </div>
-          </div>
+            variant="outline"
+            size="sm"
+            onClick={() => loadFavorites()}
+            disabled={loading}
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            {t('common.refresh')}
+          </Button>
+          {archives.length > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleClearAll}
+              disabled={loading}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {t('favorites.clearAll')}
+            </Button>
+          )}
         </div>
+      </div>
 
-    <Card>
-      <CardContent className="pt-6 space-y-4">
+      <Card>
+        <CardContent className="pt-6 space-y-4">
           {error && (
             <div className="text-red-500 mb-4">{error}</div>
           )}
@@ -166,6 +164,6 @@ export default function FavoritesPage() {
           )}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 }
