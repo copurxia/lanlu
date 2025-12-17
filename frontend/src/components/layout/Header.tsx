@@ -9,7 +9,7 @@ import { LanguageButton } from '@/components/language/LanguageToggle';
 import { UserMenu } from '@/components/user/UserMenu';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Menu, X, Home, Heart, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
+import { Menu, Home, Heart, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -31,10 +31,6 @@ export function Header() {
       return;
     }
     router.push('/');
-  };
-
-  const toggleMobileMenu = () => {
-    setMobileMenuOpen(!mobileMenuOpen);
   };
 
   const handleRandomRead = async () => {
