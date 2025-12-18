@@ -3,9 +3,9 @@ package lrr4cj.services
 import std.convert.*
 import stdx.encoding.json.*
 import std.fs.*
+import std.sync.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
-import dotenv.Dotenv
 
 /**
  * 目录扫描任务：发现归档文件并创建 scan_archive 子任务
@@ -13,33 +13,40 @@ import dotenv.Dotenv
  */
 public class ScanDirectoryTaskRunner {
     // 配置 - 使用静态变量存储配置
-    private static var archivePath: Path
-    private static var cachePath: Path
-    private static var thumbnailPath: Path
-    private static var bsdtarPath: String
+    private static var archivePath: Path = Path("")
+    private static var cachePath: Path = Path("")
+    private static var thumbnailPath: Path = Path("")
+    private static var initialized: Bool = false
+    private static let initMutex: Mutex = Mutex()
 
-    // 静态初始化器
-    static init() {
-        let config = Dotenv.createConfig()
+    // 私有初始化方法（懒加载）
+    private static func ensureInitialized(): Unit {
+        initMutex.lock()
+        if (!initialized) {
+            // 从数据库读取配置
+            let archivePathStr = SystemSettingsService.getPath("ARCHIVE_PATH")
+            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
+            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
-        // 读取配置
-        let archivePathStr = config.read("ARCHIVE_PATH", "./data/archive")
-        let cachePathStr = config.read("CACHE_PATH", "./data/cache")
-        let thumbnailPathStr = config.read("THUMBNAIL_PATH", "./data/thumb")
-        bsdtarPath = config.read("BSDTAR_PATH", "bsdtar")
+            // 转换为 Path 类型并规范化
+            archivePath = canonicalize(archivePathStr)
+            cachePath = canonicalize(cachePathStr)
+            thumbnailPath = canonicalize(thumbnailPathStr)
 
-        // 转换为 Path 类型并规范化
-        archivePath = canonicalize(archivePathStr)
-        cachePath = canonicalize(cachePathStr)
-        thumbnailPath = canonicalize(thumbnailPathStr)
+            // 确保必要的目录存在
+            FileUtils.ensureDirectoryExists(archivePath)
+            FileUtils.ensureDirectoryExists(cachePath)
+            FileUtils.ensureDirectoryExists(thumbnailPath)
 
-        // 确保必要的目录存在
-        FileUtils.ensureDirectoryExists(archivePath)
-        FileUtils.ensureDirectoryExists(cachePath)
-        FileUtils.ensureDirectoryExists(thumbnailPath)
+            initialized = true
+        }
+        initMutex.unlock()
     }
 
     public static func run(taskId: Int64, parameters: String): Unit {
+        // 确保配置已初始化
+        ensureInitialized()
+
         TaskIO.appendLog(taskId, "scan_directory task started")
 
         let (scanPathParam, triggerSourceParam, childPriorityParam) = parseParameters(parameters)
@@ -85,7 +92,7 @@ public class ScanDirectoryTaskRunner {
         let cachePathStr = cachePath.toString()
         let thumbnailPathStr = thumbnailPath.toString()
 
-        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_base_path\":\"${escapeJson(archiveBasePath)}\",\"cache_path\":\"${escapeJson(cachePathStr)}\",\"thumbnail_path\":\"${escapeJson(thumbnailPathStr)}\",\"bsdtar_path\":\"${escapeJson(bsdtarPath)}\"}"
+        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_base_path\":\"${escapeJson(archiveBasePath)}\",\"cache_path\":\"${escapeJson(cachePathStr)}\",\"thumbnail_path\":\"${escapeJson(thumbnailPathStr)}\"}"
         let childTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, priority, groupId, triggerSource)
         if (childTask.id > 0) {
             TaskPoolService.getInstance().notifyTaskAvailable()

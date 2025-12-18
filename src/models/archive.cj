@@ -6,7 +6,6 @@ import lrr4cj.config.*
 import std.collection.*
 import std.fs.*
 import lrr4cj.dao.*
-import dotenv.Dotenv
 
 /**
  * 归档数据模型
@@ -217,8 +216,7 @@ public class ArchiveModel {
      * 获取归档缩略图的文件系统路径
      */
     public static func getThumbnailFilePath(id: String, _: Int32): String {
-        let config = Dotenv.createConfig()
-        let thumbnailDir = config.read("THUMBNAIL_PATH", "./data/thumb")
+        let thumbnailDir = DatabaseConfig.getThumbnailPath()
 
         // 优先使用数据库记录的 thumbhash（LANraragi 兼容：data/thumb/<thumbhash>.jpg）
         let thumbhash = ArchiveDao.getThumbnailHash(id)
@@ -257,7 +255,7 @@ public class ArchiveModel {
         } catch (e: Exception) {
             println("Error checking archiveId file: ${e}")
         }
-        
+
         println("Thumbnail not found for archive: ${id}")
         return ""
     }
@@ -272,9 +270,8 @@ public class ArchiveModel {
             println("No thumbhash found for archive: ${id}")
             return false
         }
-        
-        let config = Dotenv.createConfig()
-        let thumbnailDir = config.read("THUMBNAIL_PATH", "./data/thumb")
+
+        let thumbnailDir = DatabaseConfig.getThumbnailPath()
 
         // 优先检查 data/thumb/<thumbhash>.<ext>
         let exts = ["jpg", "jpeg", "png", "webp"]

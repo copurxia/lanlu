@@ -9,7 +9,6 @@ import cjoy.json.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
-import dotenv.Dotenv
 
 let logger = getLogger("shinobu")
 
@@ -29,23 +28,22 @@ public class ShinobuService {
     private var mutex: Mutex  = Mutex()
     
     // 配置 - 使用静态变量存储配置
-    private static var archivePath: Path
-    private static var thumbnailPath: Path
-    private static var cachePath: Path
-    private static var pluginPath: Path
-    private static var bsdtarPath: String
-    
+    private static var archivePath: Path = Path("")
+    private static var thumbnailPath: Path = Path("")
+    private static var cachePath: Path = Path("")
+    private static var pluginPath: Path = Path("")
+
     // 扫描和缩略图配置 - 使用静态变量存储配置
-    private static var enableAutoScan: Bool
-    private static var enableInitialScan: Bool
-    private static var scanIntervalCron: String
-    private static var enableAutoThumbnail: Bool
-    private static var thumbnailIntervalCron: String
-    private static var scanFallbackIntervalMs: Int64
-    private static var enableFileWatcher: Bool
-    private static var enableDbCheck: Bool
-    private static var dbCheckIntervalCron: String
-    private static var enableInitialDbCheck: Bool
+    private static var enableAutoScan: Bool = false
+    private static var enableInitialScan: Bool = false
+    private static var scanIntervalCron: String = ""
+    private static var enableAutoThumbnail: Bool = false
+    private static var thumbnailIntervalCron: String = ""
+    private static var scanFallbackIntervalMs: Int64 = 0
+    private static var enableFileWatcher: Bool = true
+    private static var enableDbCheck: Bool = false
+    private static var dbCheckIntervalCron: String = ""
+    private static var enableInitialDbCheck: Bool = false
 
     // 定时任务线程 - 使用字符串标识线程
     private var scanThread: Option<String> = Option<String>.None
@@ -58,61 +56,47 @@ public class ShinobuService {
     private let runningMutex: Mutex = Mutex()
     
 
-    
-    // 静态初始化器 - 用于初始化静态成员和读取环境变量
-    static init() {
-        // 使用新的dotenv API获取配置
-        let config = Dotenv.createConfig()
-        
-        // 读取配置
-        let archivePathStr = config.read("ARCHIVE_PATH", "./data/archive")
-        let thumbnailPathStr = config.read("THUMBNAIL_PATH", "./data/thumb")
-        let cachePathStr = config.read("CACHE_PATH", "./data/cache")
-        let pluginPathStr = config.read("PLUGIN_PATH", "./plugins")
-        bsdtarPath = config.read("BSDTAR_PATH", "bsdtar")
+
+    /**
+     * 初始化静态配置
+     * 必须在获取实例之前调用，且在SystemSettingsService初始化之后
+     */
+    public static func initializeConfig(): Unit {
+        // 从系统设置服务读取配置
+        let archivePathStr = SystemSettingsService.getPath("ARCHIVE_PATH")
+        let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
+        let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
+        let pluginPathStr = "./plugins" // 插件路径保留在代码中或可扩展为配置
 
         // 转换为 Path 类型并规范化
         archivePath = canonicalize(archivePathStr)
         thumbnailPath = canonicalize(thumbnailPathStr)
         cachePath = canonicalize(cachePathStr)
         pluginPath = canonicalize(pluginPathStr)
-        
+
         // 确保必要的目录存在
         FileUtils.ensureDirectoryExists(archivePath)
         FileUtils.ensureDirectoryExists(thumbnailPath)
         FileUtils.ensureDirectoryExists(cachePath)
         FileUtils.ensureDirectoryExists(pluginPath)
-        
+
         // 创建上传缓存目录
         let uploadsPath = cachePath.join("uploads")
         FileUtils.ensureDirectoryExists(uploadsPath)
 
         // 读取扫描和缩略图配置
-        let autoScanStr = config.read("ENABLE_AUTO_SCAN", "true")
-        enableAutoScan = autoScanStr == "true"
-        
-        let initialScanStr = config.read("ENABLE_INITIAL_SCAN", "false")
-        enableInitialScan = initialScanStr == "true"
-        
-        scanIntervalCron = config.read("SCAN_INTERVAL_CRON", "0 0 * * *")
-        
-        let autoThumbnailStr = config.read("ENABLE_AUTO_THUMBNAIL", "true")
-        enableAutoThumbnail = autoThumbnailStr == "true"
-        
-        thumbnailIntervalCron = config.read("THUMBNAIL_INTERVAL_CRON", "0 0 * * *")
+        enableAutoScan = SystemSettingsService.getBoolean("ENABLE_AUTO_SCAN")
+        enableInitialScan = SystemSettingsService.getBoolean("ENABLE_INITIAL_SCAN")
+        scanIntervalCron = SystemSettingsService.getString("SCAN_INTERVAL_CRON")
+        enableAutoThumbnail = SystemSettingsService.getBoolean("ENABLE_AUTO_THUMBNAIL")
+        thumbnailIntervalCron = SystemSettingsService.getString("THUMBNAIL_INTERVAL_CRON")
+        scanFallbackIntervalMs = SystemSettingsService.getLong("SCAN_FALLBACK_INTERVAL_MS")
 
-        let fallbackIntervalStr = config.read("SCAN_FALLBACK_INTERVAL_MS", "300000")
-        scanFallbackIntervalMs = Int64.parse(fallbackIntervalStr)
-        
-        // 数据库检查配置
-        let dbCheckStr = config.read("ENABLE_DB_CHECK", "true")
-        enableDbCheck = dbCheckStr == "true"
-        
-        dbCheckIntervalCron = config.read("DB_CHECK_INTERVAL_CRON", "0 2 * * *")  // 默认每天凌晨2点
-        
-        let initialDbCheckStr = config.read("ENABLE_INITIAL_DB_CHECK", "true")
-        enableInitialDbCheck = initialDbCheckStr == "true"
-        
+        // 数据库检查配置（从数据库读取）
+        enableDbCheck = SystemSettingsService.getBoolean("ENABLE_DB_CHECK")
+        dbCheckIntervalCron = SystemSettingsService.getString("DB_CHECK_INTERVAL_CRON")
+        enableInitialDbCheck = SystemSettingsService.getBoolean("ENABLE_INITIAL_DB_CHECK")
+
         enableFileWatcher = true
     }
 
@@ -152,13 +136,6 @@ public class ShinobuService {
     }
 
     /**
-     * 获取 bsdtar 路径
-     */
-    public static func getBsdtarPath(): String {
-        return bsdtarPath
-    }
-
-    /**
      * 启动 Shinobu 服务
      */
     public func start(): Bool {
@@ -183,7 +160,6 @@ public class ShinobuService {
             ("archive_path", archivePath.toString()),
             ("thumbnail_path", thumbnailPath.toString()),
             ("cache_path", cachePath.toString()),
-            ("bsdtar_path", bsdtarPath),
             ("enable_auto_scan", enableAutoScan.toString()),
             ("enable_initial_scan", enableInitialScan.toString()),
             ("scan_interval_cron", scanIntervalCron),

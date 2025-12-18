@@ -6,39 +6,46 @@ import std.fs.*
 import std.process.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
+import std.sync.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
-import dotenv.Dotenv
 
 /**
  * 缩略图生成任务：为单个档案生成缩略图
  */
 public class GenerateThumbnailTaskRunner {
     // 配置 - 使用静态变量存储配置
-    private static var cachePath: Path
-    private static var thumbnailPath: Path
-    private static var bsdtarPath: String
+    private static var cachePath: Path = Path("")
+    private static var thumbnailPath: Path = Path("")
+    private static var initialized: Bool = false
+    private static let initMutex: Mutex = Mutex()
 
-    // 静态初始化器
-    static init() {
-        let config = Dotenv.createConfig()
+    // 私有初始化方法（懒加载）
+    private static func ensureInitialized(): Unit {
+        initMutex.lock()
+        if (!initialized) {
+            // 从数据库读取配置
+            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
+            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
-        // 读取配置
-        let cachePathStr = config.read("CACHE_PATH", "./data/cache")
-        let thumbnailPathStr = config.read("THUMBNAIL_PATH", "./data/thumb")
-        bsdtarPath = config.read("BSDTAR_PATH", "bsdtar")
+            // 转换为 Path 类型并规范化
+            cachePath = canonicalize(cachePathStr)
+            thumbnailPath = canonicalize(thumbnailPathStr)
 
-        // 转换为 Path 类型并规范化
-        cachePath = canonicalize(cachePathStr)
-        thumbnailPath = canonicalize(thumbnailPathStr)
+            // 确保必要的目录存在
+            FileUtils.ensureDirectoryExists(cachePath)
+            FileUtils.ensureDirectoryExists(thumbnailPath)
 
-        // 确保必要的目录存在
-        FileUtils.ensureDirectoryExists(cachePath)
-        FileUtils.ensureDirectoryExists(thumbnailPath)
+            initialized = true
+        }
+        initMutex.unlock()
     }
 
     public static func run(taskId: Int64, parameters: String): Unit {
+        // 确保配置已初始化
+        ensureInitialized()
+
         let logger = getLogger("generate_thumbnail_task")
         TaskIO.appendLog(taskId, "generate_thumbnail task started")
 
@@ -78,7 +85,7 @@ public class GenerateThumbnailTaskRunner {
 
         TaskIO.appendLog(taskId, "Listing archive entries...")
         logger.info("Listing archive entries...")
-        let entries = ArchiveUtils.listArchiveEntries(actualArchivePath, bsdtarPath)
+        let entries = ArchiveUtils.listArchiveEntries(actualArchivePath)
         TaskIO.appendLog(taskId, "Found ${entries.size} entries in archive")
         logger.info("Found ${entries.size} entries in archive")
 

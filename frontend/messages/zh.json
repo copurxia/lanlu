@@ -444,6 +444,18 @@
     "tagI18nImportEnqueued": "文件已上传完成，导入任务（Job #{job}）正在后台处理",
     "tagI18nImportCompleted": "文件上传成功：{filename} ({size}) - 任务（Job #{job}）正在后台处理",
     "tagI18nExportLargeConfirm": "本次导出预计需要拉取约 {pages} 页数据，是否继续？",
+    "system": {
+      "title": "系统设置",
+      "description": "管理系统的核心配置参数",
+      "storage": "存储设置",
+      "task": "任务设置",
+      "performance": "性能设置",
+      "loadError": "加载设置失败",
+      "saveSuccess": "设置保存成功",
+      "saveError": "保存设置失败",
+      "longHint": "单位：毫秒",
+      "pathPlaceholder": "输入目录路径，例如：/path/to/directory"
+    },
     "auth": "账户安全",
     "authTitle": "账户安全",
     "authDescription": "管理您的账户信息、密码和登录设备",

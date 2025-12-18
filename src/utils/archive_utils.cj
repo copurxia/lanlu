@@ -34,13 +34,11 @@ public class ArchiveConfig {
     public var archivePath: String
     public var cachePath: String
     public var thumbnailPath: String
-    public var bsdtarPath: String
 
-    public init(archivePath: String, cachePath: String, thumbnailPath: String, bsdtarPath: String) {
+    public init(archivePath: String, cachePath: String, thumbnailPath: String) {
         this.archivePath = archivePath
         this.cachePath = cachePath
         this.thumbnailPath = thumbnailPath
-        this.bsdtarPath = bsdtarPath
     }
 }
 
@@ -274,7 +272,7 @@ public class ArchiveUtils {
     /**
      * 列出归档文件中的条目
      */
-    public static func listArchiveEntries(archivePath: String, _: String): Array<String> {
+    public static func listArchiveEntries(archivePath: String): Array<String> {
         try {
             if (!fileExists(archivePath)) {
                 logger.error("Archive file does not exist: ${archivePath}")

@@ -438,6 +438,18 @@
     "tagI18nImported": "Imported {imported}/{received} entries",
     "tagI18nImportEnqueued": "Import task enqueued (Job #{job}). Check Tasks for progress.",
     "tagI18nExportLargeConfirm": "This export will fetch about {pages} pages. Continue?",
+    "system": {
+      "title": "System Settings",
+      "description": "Manage system core configuration parameters",
+      "storage": "Storage Settings",
+      "task": "Task Settings",
+      "performance": "Performance Settings",
+      "loadError": "Failed to load settings",
+      "saveSuccess": "Settings saved successfully",
+      "saveError": "Failed to save settings",
+      "longHint": "Unit: milliseconds",
+      "pathPlaceholder": "Enter directory path, e.g.: /path/to/directory"
+    },
     "auth": "Account Security",
     "authTitle": "Account Security",
     "authDescription": "Manage your account, password and login devices",

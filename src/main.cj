@@ -77,6 +77,20 @@ main(): Int64 {
         return 1
     }
 
+    // 初始化系统设置
+    logger.info("Application starting... step 9c: initializing system settings")
+    let settingsInitialized = SystemSettingsService.initializeFromEnv()
+    if (settingsInitialized) {
+        logger.info("System settings initialized successfully")
+    } else {
+        logger.error("Failed to initialize system settings")
+        return 1
+    }
+
+    // 初始化Shinobu服务配置
+    logger.info("Application starting... step 9d: initializing shinobu service configuration")
+    ShinobuService.initializeConfig()
+
     // 启动 Shinobu 后台服务
     logger.info("Application starting... step 10: starting shinobu service")
     let shinobuService = ShinobuService.getInstance()

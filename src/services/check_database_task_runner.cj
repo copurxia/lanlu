@@ -2,27 +2,38 @@ package lrr4cj.services
 
 import stdx.log.*
 import std.fs.*
+import std.sync.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
-import dotenv.Dotenv
 
 /**
  * 数据库一致性检查任务：检查数据库记录与实际文件的匹配情况，清理孤儿记录
  */
 public class CheckDatabaseTaskRunner {
     // 归档路径配置
-    private static var archivePath: Path
+    private static var archivePath: Path = Path("")
+    private static var initialized: Bool = false
+    private static let initMutex: Mutex = Mutex()
 
-    // 静态初始化器
-    static init() {
-        let config = Dotenv.createConfig()
-        let archivePathStr = config.read("ARCHIVE_PATH", "./data/archive")
-        archivePath = canonicalize(archivePathStr)
-        FileUtils.ensureDirectoryExists(archivePath)
+    // 私有初始化方法（懒加载）
+    private static func ensureInitialized(): Unit {
+        initMutex.lock()
+        if (!initialized) {
+            // 从数据库读取配置
+            let archivePathStr = SystemSettingsService.getPath("ARCHIVE_PATH")
+            archivePath = canonicalize(archivePathStr)
+            FileUtils.ensureDirectoryExists(archivePath)
+
+            initialized = true
+        }
+        initMutex.unlock()
     }
 
     public static func run(taskId: Int64, _: String): Unit {
+        // 确保配置已初始化
+        ensureInitialized()
+
         let logger = getLogger("check_database_task")
         TaskIO.appendLog(taskId, "check_database task started")
 

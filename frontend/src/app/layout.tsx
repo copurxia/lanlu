@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/components/theme/theme-provider';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { StaticGenerationProvider } from '@/contexts/StaticGenerationContext';
+import { Toaster } from '@/components/ui/toaster';
 
 // 使用系统字体而不是 Google Fonts 以避免构建时的网络依赖
 // const inter = Inter({ subsets: ['latin'] });

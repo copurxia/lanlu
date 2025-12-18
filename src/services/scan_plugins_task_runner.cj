@@ -10,24 +10,35 @@ import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
 import cjoy.json.*
-import dotenv.Dotenv
+import std.sync.*
 
 /**
- * 插件扫描任务：扫描并注册插件文件（Metadata、Login、Download 插件）
+ * 插件扫描任务：扫描并注册TypeScript/Deno插件文件（Metadata、Login、Download 插件）
  */
 public class ScanPluginsTaskRunner {
     // 插件路径配置
-    private static var pluginPath: Path
+    private static var pluginPath: Path = Path("")
+    private static var initialized: Bool = false
+    private static let initMutex: Mutex = Mutex()
 
-    // 静态初始化器
-    static init() {
-        let config = Dotenv.createConfig()
-        let pluginPathStr = config.read("PLUGIN_PATH", "./plugins")
-        pluginPath = canonicalize(pluginPathStr)
-        FileUtils.ensureDirectoryExists(pluginPath)
+    // 私有初始化方法（懒加载）
+    private static func ensureInitialized(): Unit {
+        initMutex.lock()
+        if (!initialized) {
+            // 从数据库读取配置
+            let pluginPathStr = SystemSettingsService.getPath("PLUGIN_PATH")
+            pluginPath = canonicalize(pluginPathStr)
+            FileUtils.ensureDirectoryExists(pluginPath)
+
+            initialized = true
+        }
+        initMutex.unlock()
     }
 
     public static func run(taskId: Int64, _: String): Unit {
+        // 确保配置已初始化
+        ensureInitialized()
+
         let logger = getLogger("scan_plugins_task")
         TaskIO.appendLog(taskId, "scan_plugins task started")
 
@@ -160,10 +171,11 @@ public class ScanPluginsTaskRunner {
             for (entry in entries) {
                 let fullPath = joinPath(typeDirPath, entry)
 
-                if (fileExists(fullPath) && entry.endsWith(".pm") && entry.contains("EHentai")) {
+                // 只扫描 TypeScript 插件文件
+                if (fileExists(fullPath) && entry.endsWith(".ts")) {
                     result = addFile(result, fullPath)
                     let logger = getLogger("scan_plugins")
-                    logger.debug("Found EHentai plugin", ("file", fullPath))
+                    logger.debug("Found TypeScript plugin", ("file", fullPath))
                 }
             }
         } catch (e: Exception) {
@@ -187,8 +199,8 @@ public class ScanPluginsTaskRunner {
             let logger = getLogger("scan_plugins")
             logger.debug("Processing plugin file", ("file", fileName), ("type", pluginType), ("path", filePath))
 
-            // 使用Perl解析插件元数据
-            let pluginMetadata = parsePluginMetadataWithPerl(filePath, pluginType)
+            // 使用Deno解析插件元数据
+            let pluginMetadata = parsePluginMetadataWithDeno(filePath, pluginType)
 
             // 检查插件是否已存在（通过namespace检查）
             if (PluginDao.exists(pluginMetadata.namespace)) {
@@ -214,7 +226,6 @@ public class ScanPluginsTaskRunner {
             pluginData.permissions = pluginMetadata.permissions
             pluginData.enabled = true
             pluginData.installed = true
-            // config字段已移除，现在配置存储在parameters中
             pluginData.created_at = DateTime.now().toUnixTimeStamp().toSeconds().toString()
             pluginData.updated_at = pluginData.created_at
 
@@ -231,47 +242,27 @@ public class ScanPluginsTaskRunner {
     }
 
     /**
-     * 使用Perl解析插件元数据
+     * 使用Deno解析TypeScript插件元数据
      */
-    private static func parsePluginMetadataWithPerl(filePath: String, pluginType: String): PluginMetadata {
+    private static func parsePluginMetadataWithDeno(filePath: String, pluginType: String): PluginMetadata {
         var metadata = PluginMetadata()
 
         try {
-            let perlScript = """
-            use strict;
-            use warnings;
-            use JSON;
-
-            my \$plugin_file = '${escapeJson(filePath)}';
-            my \$plugin_class = '';
-
-            # 从文件路径推断类名
-            \$plugin_file =~ s.*/([^/]+)\\.pm.\\$1.;
-            my \$full_class = "LANraragi::Plugin::${escapeJson(pluginType)}::\$plugin_file";
-
-            eval {
-                require \$plugin_file;
-                import \$full_class;
-                if (\$full_class->can('plugin_info')) {
-                    my %info = \$full_class->plugin_info();
-                    print encode_json(\\%info);
+            // 使用 Deno 执行脚本获取插件信息
+            let denoScript = """
+                import plugin from '${escapeJson(filePath)}';
+                if (plugin && plugin.plugin_info) {
+                    const info = typeof plugin.plugin_info === 'function' ? plugin.plugin_info() : plugin.plugin_info;
+                    console.log(JSON.stringify(info));
                 } else {
-                    # 如果没有plugin_info方法，使用文件名作为默认信息
-                    print '{"name":"' . \$plugin_file . '","namespace":"lanraragi.ehentai.' . lc(\$plugin_file) . '","version":"1.0","description":"EHentai plugin","author":"Unknown","tags":"","permissions":""}';
+                    console.log(JSON.stringify({name: '', namespace: '', version: '1.0', description: '', author: '', tags: '', permissions: ''}));
                 }
-            };
-
-            if (\$@) {
-                print STDERR "Error loading plugin: \$@";
-                # 即使出错也返回基本信息
-                print '{"name":"' . \$plugin_file . '","namespace":"lanraragi.ehentai.' . lc(\$plugin_file) . '","version":"1.0","description":"EHentai plugin","author":"Unknown","tags":"","permissions":""}';
-            }
             """
 
-            let (exitCode, stdout, stderr) = executeWithOutput("perl", ["-e", perlScript])
+            let (exitCode, stdout, stderr) = executeWithOutput("deno", ["eval", "--quiet", denoScript])
 
             if (exitCode == 0 && stdout.size > 0) {
-                let jsonStr = String.fromUtf8(stdout)
+                let jsonStr = String.fromUtf8(stdout).trimAscii()
                 let json = JsonValue.fromStr(jsonStr)
                 match (json) {
                     case jsonObj: JsonObject =>
@@ -285,20 +276,20 @@ public class ScanPluginsTaskRunner {
                         metadata.permissions = getJsonString(jsonObj, "permissions")
                     case _ =>
                         // 解析失败，使用文件名作为默认信息
-                        let fileName = Path(filePath).fileName.toString()
-                        metadata.name = fileName
-                        metadata.namespace = "lanraragi.ehentai." + fileName
+                        let fileNameOnly = Path(filePath).fileName.toString()
+                        metadata.name = fileNameOnly
+                        metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
                         metadata.version = "1.0"
-                        metadata.description = "EHentai plugin"
+                        metadata.description = "${pluginType} plugin"
                         metadata.author = "Unknown"
                 }
             } else {
                 // 执行失败，使用文件名作为默认信息
-                let fileName = Path(filePath).fileName.toString()
-                metadata.name = fileName
-                metadata.namespace = "lanraragi.ehentai." + fileName
+                let fileNameOnly = Path(filePath).fileName.toString()
+                metadata.name = fileNameOnly
+                metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
                 metadata.version = "1.0"
-                metadata.description = "EHentai plugin"
+                metadata.description = "${pluginType} plugin"
                 metadata.author = "Unknown"
                 let logger = getLogger("scan_plugins")
                 logger.warn("Failed to execute plugin metadata parsing", ("file", filePath), ("stderr", String.fromUtf8(stderr)))
@@ -307,11 +298,11 @@ public class ScanPluginsTaskRunner {
             let logger = getLogger("scan_plugins")
             logger.error("Error parsing plugin metadata", ("file", filePath), ("error", e.message))
             // 异常情况下，使用文件名作为默认信息
-            let fileName = Path(filePath).fileName.toString()
-            metadata.name = fileName
-            metadata.namespace = "lanraragi.ehentai." + fileName
+            let fileNameOnly = Path(filePath).fileName.toString()
+            metadata.name = fileNameOnly
+            metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
             metadata.version = "1.0"
-            metadata.description = "EHentai plugin"
+            metadata.description = "${pluginType} plugin"
             metadata.author = "Unknown"
         }
 

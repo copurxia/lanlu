@@ -828,4 +828,60 @@ public class DatabaseConfig {
             return false
         }
     }
+
+    /**
+     * 读取配置值（优先从系统设置读取，回退到环境变量）
+     * 注意：此方法主要用于向后兼容，新代码应直接使用 SystemSettingsService
+     */
+    public static func readConfig(key: String): String {
+        // 尝试从系统设置读取（如果可用）
+        try {
+            // 这里不能直接导入 SystemSettingsService，避免循环依赖
+            // 暂时直接使用环境变量
+            let config = Dotenv.createConfig()
+            return config.read(key, "")
+        } catch (_: Exception) {
+            return ""
+        }
+    }
+
+    /**
+     * 读取配置值（带默认值）
+     */
+    public static func readConfigWithDefault(key: String, defaultValue: String): String {
+        try {
+            let config = Dotenv.createConfig()
+            return config.read(key, defaultValue)
+        } catch (_: Exception) {
+            return defaultValue
+        }
+    }
+
+    /**
+     * 读取缩略图路径
+     */
+    public static func getThumbnailPath(): String {
+        return readConfigWithDefault("THUMBNAIL_PATH", "./data/thumb")
+    }
+
+    /**
+     * 读取归档路径
+     */
+    public static func getArchivePath(): String {
+        return readConfigWithDefault("ARCHIVE_PATH", "./data/archive")
+    }
+
+    /**
+     * 读取缓存路径
+     */
+    public static func getCachePath(): String {
+        return readConfigWithDefault("CACHE_PATH", "./data/cache")
+    }
+
+    /**
+     * 读取插件路径
+     */
+    public static func getPluginPath(): String {
+        return readConfigWithDefault("PLUGIN_PATH", "./plugins")
+    }
 }

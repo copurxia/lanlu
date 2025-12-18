@@ -386,7 +386,7 @@ public class ArchiveController {
         let actualPath = FileUtils.resolvePath(fullArchivePath)
 
         // 获取归档中的文件列表
-        let entries = ArchiveUtils.listArchiveEntries(actualPath, ShinobuService.getBsdtarPath())
+        let entries = ArchiveUtils.listArchiveEntries(actualPath)
 
         // 过滤图片文件
         var pageFiles = ArrayList<String>()

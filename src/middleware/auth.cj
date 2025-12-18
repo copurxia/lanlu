@@ -64,35 +64,28 @@ public class AuthMiddleware {
     }
     
     /**
-     * 任何有效凭据即可（用户token 或 API_KEY）
+     * 需要用户身份认证
      */
     public static func requiredAuth(ctx: JoyContext): Bool {
-        // 1) Bearer token：优先按用户 token 校验
+        // Bearer token：按用户 token 校验
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
                 if (isValidUserToken(tokenRaw)) {
                     return true
                 }
-                // 2) 兼容 LANraragi 文档：Bearer base64(api_key)
+                // 兼容 LANraragi 文档：Bearer base64(token)
                 match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                     case Some(decoded) =>
                         if (isValidUserToken(decoded)) {
                             return true
                         }
-                        if (isValidApiKey(decoded)) {
-                            return true
-                        }
                     case None => ()
-                }
-                // 3) 回退：检查 API_KEY
-                if (isValidApiKey(tokenRaw)) {
-                    return true
                 }
             case None => ()
         }
 
         ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
-        ResponseView.errorJson(ctx, "This API is protected and requires login or an API Key.", 401)
+        ResponseView.errorJson(ctx, "This API is protected and requires login.", 401)
         return false
     }
 
@@ -137,12 +130,6 @@ public class AuthMiddleware {
                 }
             case None => return None
         }
-    }
-
-    private static func isValidApiKey(token: String): Bool {
-        let expected = AuthConfig.apiKey.trimAscii()
-        if (expected.size == 0) { return false }
-        return token.trimAscii() == expected
     }
 
     private static func isValidUserToken(token: String): Bool {

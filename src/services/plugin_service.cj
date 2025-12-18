@@ -9,7 +9,7 @@ import stdx.encoding.json.*
 import lrr4cj.dao.*
 import lrr4cj.utils.*
 import stdx.log.*
-import dotenv.Dotenv
+import std.sync.*
 
 /**
  * 插件执行结果
@@ -32,20 +32,29 @@ public class PluginExecutionResult {
 
 /**
  * 插件服务类
- * 负责通过std.process调用Perl插件，处理参数转换和结果解析
+ * 负责通过std.process调用Deno插件，处理参数转换和结果解析
  */
 public class PluginService {
     private static var instance: Option<PluginService> = Option.None
-    private var pluginPath: String = ""
-    private var perlPath: String = "perl"
+    private var pluginPath: String = "./plugins"
     private var defaultTimeout: Int64 = 30000 // 30秒超时
+    private var initialized: Bool = false
+    private let initMutex: Mutex = Mutex()
 
     private init() {
-        let config = Dotenv.createConfig()
-        pluginPath = config.read("PLUGIN_PATH", "./plugins")
-        perlPath = config.read("PERL_PATH", "perl")
+        // 延迟初始化，在第一次使用时从数据库读取配置
+    }
 
-        getLogger("plugin_service").info("插件服务初始化", ("plugin_path", pluginPath), ("perl_path", perlPath))
+    // 私有初始化方法（懒加载）
+    private func ensureInitialized(): Unit {
+        initMutex.lock()
+        if (!initialized) {
+            pluginPath = SystemSettingsService.getPath("PLUGIN_PATH")
+
+            getLogger("plugin_service").info("插件服务初始化", ("plugin_path", pluginPath))
+            initialized = true
+        }
+        initMutex.unlock()
     }
 
     /**
@@ -53,9 +62,12 @@ public class PluginService {
      */
     public static func getInstance(): PluginService {
         match (instance) {
-            case Some(service) => return service
+            case Some(service) =>
+                service.ensureInitialized()
+                return service
             case None =>
                 let service = PluginService()
+                service.ensureInitialized()
                 instance = Some(service)
                 return service
         }
@@ -201,7 +213,7 @@ public class PluginService {
     }
 
     /**
-     * 扫描并发现插件 - 从真实Perl文件获取信息，包含所有7个参数
+     * 扫描并发现插件 - 从TypeScript/Deno插件文件获取信息
      */
     public func discoverPlugins(): Array<PluginData> {
         var discoveredPlugins: Array<PluginData> = []
@@ -235,8 +247,8 @@ public class PluginService {
                     let entries = FsUtils.listDirectory(typePath)
 
                     for (entry in entries) {
-                        // 支持.ts (TypeScript/Deno) 和.pm (Perl) 插件文件
-                        if (entry.endsWith(".ts") || entry.endsWith(".pm")) {
+                        // 只支持.ts (TypeScript/Deno) 插件文件
+                        if (entry.endsWith(".ts")) {
                             let pluginFile = pathJoin(typePath, entry)
 
                             logger.info("发现TypeScript插件文件: ${entry}, full_path: ${pluginFile}")

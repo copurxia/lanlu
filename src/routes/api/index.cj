@@ -52,11 +52,49 @@ public func registerApiRoutes(router: JoyRouters) {
     // 注册智能分类路由
     registerSmartFilterRoutes(router)
 
+    // 注册系统设置路由
+    registerSystemSettingsRoutes(router)
+
     // 注册用户统计路由
     UserRoutes.configure(router)
 
     // 注册服务器信息路由
     router.get("/api/info", { ctx =>
         InfoController.getServerInfo(ctx)
+    })
+}
+
+/**
+ * 注册系统设置路由
+ */
+private func registerSystemSettingsRoutes(router: JoyRouters) {
+    // 获取所有设置
+    router.get("/api/system/settings", { ctx =>
+        SystemSettingsController.getAllSettings(ctx)
+    })
+
+    // 按分类获取设置
+    router.get("/api/system/settings/category/{category}", { ctx =>
+        SystemSettingsController.getSettingsByCategory(ctx)
+    })
+
+    // 更新单个设置
+    router.put("/api/system/settings", { ctx =>
+        SystemSettingsController.updateSetting(ctx)
+    })
+
+    // 批量更新设置
+    router.put("/api/system/settings/batch", { ctx =>
+        SystemSettingsController.updateSettings(ctx)
+    })
+
+    // 获取设置分类
+    router.get("/api/system/settings/categories", { ctx =>
+        SystemSettingsController.getCategories(ctx)
+    })
+
+    // 重新加载设置缓存
+    router.post("/api/system/settings/reload", { ctx =>
+        SystemSettingsController.reloadCache(ctx)
     })
 }

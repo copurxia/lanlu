@@ -3,10 +3,10 @@ package lrr4cj.services
 import std.fs.*
 import stdx.encoding.json.*
 import stdx.log.*
+import std.sync.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
-import dotenv.Dotenv
 
 /**
  * 单个档案扫描任务：处理归档文件并入库
@@ -14,24 +14,35 @@ import dotenv.Dotenv
 public class ScanArchiveTaskRunner {
     private static var logger = getLogger("scan_archive_task")
 
-    // 静态初始化器 - 确保必要的目录存在
-    static init() {
-        let config = Dotenv.createConfig()
+    // 配置
+    private static var initialized: Bool = false
+    private static let initMutex: Mutex = Mutex()
 
-        // 读取配置
-        let cachePathStr = config.read("CACHE_PATH", "./data/cache")
-        let thumbnailPathStr = config.read("THUMBNAIL_PATH", "./data/thumb")
+    // 私有初始化方法（懒加载）
+    private static func ensureInitialized(): Unit {
+        initMutex.lock()
+        if (!initialized) {
+            // 从数据库读取配置
+            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
+            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
-        // 转换为 Path 类型并规范化
-        let cachePath = canonicalize(cachePathStr)
-        let thumbnailPath = canonicalize(thumbnailPathStr)
+            // 转换为 Path 类型并规范化
+            let cachePath = canonicalize(cachePathStr)
+            let thumbnailPath = canonicalize(thumbnailPathStr)
 
-        // 确保必要的目录存在
-        FileUtils.ensureDirectoryExists(cachePath)
-        FileUtils.ensureDirectoryExists(thumbnailPath)
+            // 确保必要的目录存在
+            FileUtils.ensureDirectoryExists(cachePath)
+            FileUtils.ensureDirectoryExists(thumbnailPath)
+
+            initialized = true
+        }
+        initMutex.unlock()
     }
 
     public static func run(taskId: Int64, parameters: String): Unit {
+        // 确保配置已初始化
+        ensureInitialized()
+
         TaskIO.appendLog(taskId, "scan_archive task started")
 
         println("ScanArchiveTaskRunner.run: Task ${taskId} started with parameters: ${parameters}")
@@ -69,10 +80,9 @@ public class ScanArchiveTaskRunner {
         var archivePath = ""
         var cachePath = ""
         var thumbnailPath = ""
-        var bsdtarPath = "bsdtar"
 
         if (trimmed.size == 0) {
-            return ArchiveConfig(archivePath, cachePath, thumbnailPath, bsdtarPath)
+            return ArchiveConfig(archivePath, cachePath, thumbnailPath)
         }
 
         try {
@@ -102,18 +112,11 @@ public class ScanArchiveTaskRunner {
                             case _ => throw Exception("thumbnail_path must be a string")
                         }
                     }
-                    if (fields.contains("bsdtar_path")) {
-                        let value = fields["bsdtar_path"]
-                        match (value) {
-                            case s: JsonString => bsdtarPath = s.getValue().trimAscii()
-                            case _ => throw Exception("bsdtar_path must be a string")
-                        }
-                    }
                 case _ => ()
             }
         } catch (_: Exception) {}
 
-        return ArchiveConfig(archivePath, cachePath, thumbnailPath, bsdtarPath)
+        return ArchiveConfig(archivePath, cachePath, thumbnailPath)
     }
 
     private static func processArchiveInternal(filePath: String, config: ArchiveConfig): ProcessResultData {
@@ -160,7 +163,7 @@ public class ScanArchiveTaskRunner {
                     logger.debug("Archive not found in database, processing new file: ${filePath}")
             }
 
-            let entries = ArchiveUtils.listArchiveEntries(filePath, config.bsdtarPath)
+            let entries = ArchiveUtils.listArchiveEntries(filePath)
             var pageCount: Int32 = 0
             for (entry in entries) {
                 if (ArchiveUtils.isImageFile(entry)) {

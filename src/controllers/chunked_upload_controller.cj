@@ -298,9 +298,8 @@ public class ChunkedUploadController {
             let archiveBasePath = ShinobuService.getArchivePath().toString()
             let cachePath = ShinobuService.getCachePath().toString()
             let thumbnailPath = ShinobuService.getThumbnailPath().toString()
-            let bsdtarPath = ShinobuService.getBsdtarPath()
 
-            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"archive_base_path\":\"${escapeJsonString(archiveBasePath)}\",\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\",\"bsdtar_path\":\"${escapeJsonString(bsdtarPath)}\"}"
+            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"archive_base_path\":\"${escapeJsonString(archiveBasePath)}\",\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\"}"
             let scanTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "chunked_upload:${taskId}", "upload")
             if (scanTask.id > 0) {
                 TaskPoolService.getInstance().notifyTaskAvailable()

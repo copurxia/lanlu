@@ -3,7 +3,6 @@ package lrr4cj.services
 import std.sync.*
 import std.convert.*
 import stdx.log.*
-import dotenv.Dotenv
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -25,12 +24,16 @@ public class TaskPoolService {
     private let dispatchMutex: Mutex = Mutex()
 
     private init() {
-        let config = Dotenv.createConfig()
-        let workersStr = config.read("TASKPOOL_WORKERS", "2")
-        maxWorkers = try {
-            Int32.parse(workersStr)
-        } catch (_) {
-            2
+        loadMaxWorkersConfig()
+    }
+
+    private func loadMaxWorkersConfig(): Unit {
+        // 从数据库读取最大并发任务数设置
+        let workersInt = SystemSettingsService.getInt("MAX_CONCURRENT_JOBS")
+        maxWorkers = if (workersInt > 0) {
+            workersInt
+        } else {
+            2  // 默认值
         }
         if (maxWorkers < 1) {
             maxWorkers = 1
@@ -83,6 +86,17 @@ public class TaskPoolService {
      */
     public func notifyTaskAvailable(): Unit {
         dispatch()
+    }
+
+    /**
+     * 重新加载最大并发任务数配置
+     * 在系统设置更新后调用此方法以应用新配置
+     */
+    public func reloadMaxWorkersConfig(): Unit {
+        let logger = getLogger("taskpool")
+        let oldMaxWorkers = maxWorkers
+        loadMaxWorkersConfig()
+        logger.info("TaskPool max workers config reloaded", ("old_max_workers", oldMaxWorkers.toString()), ("new_max_workers", maxWorkers.toString()))
     }
 
     /**
