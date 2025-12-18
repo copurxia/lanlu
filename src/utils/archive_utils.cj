@@ -142,7 +142,6 @@ public class ArchiveUtils {
             let actualPath = FileUtils.resolvePath(filePath)
             let path = Path(actualPath)
             let file = File(path, Read)
-            let fileInfo = file.info
             file.close()
 
             return getTimeMillis()
@@ -275,7 +274,7 @@ public class ArchiveUtils {
     /**
      * 列出归档文件中的条目
      */
-    public static func listArchiveEntries(archivePath: String, bsdtarPath: String): Array<String> {
+    public static func listArchiveEntries(archivePath: String, _: String): Array<String> {
         try {
             if (!fileExists(archivePath)) {
                 logger.error("Archive file does not exist: ${archivePath}")

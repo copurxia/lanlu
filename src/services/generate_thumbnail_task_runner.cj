@@ -142,12 +142,12 @@ public class GenerateThumbnailTaskRunner {
         // 如果文件已存在，先删除（避免重复）
         if (fileExists(thumbnailFilePath)) {
             TaskIO.appendLog(taskId, "Existing thumbnail found, removing: ${thumbnailFilePath}")
-            let (rmExitCode, _, _) = executeWithOutput(
-                "rm",
-                ["-f", thumbnailFilePath],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
+            let rmExitCode = try {
+                let process = launch("rm", ["-f", thumbnailFilePath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+                process.wait()
+            } catch (e: Exception) {
+                1
+            }
             if (rmExitCode != 0) {
                 let warnMsg = "Failed to delete existing thumbnail: ${thumbnailFilePath}"
                 TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
@@ -161,12 +161,12 @@ public class GenerateThumbnailTaskRunner {
         // 清理临时文件和目录
         try {
             if (fileExists(tempImagePath)) {
-                let (exitCode, _, _) = executeWithOutput(
-                    "rm",
-                    ["-f", tempImagePath],
-                    stdOut: ProcessRedirect.Pipe,
-                    stdErr: ProcessRedirect.Pipe
-                )
+                let exitCode = try {
+                    let process = launch("rm", ["-f", tempImagePath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+                    process.wait()
+                } catch (e: Exception) {
+                    1
+                }
                 if (exitCode != 0) {
                     let warnMsg = "Failed to delete temp file: ${tempImagePath}"
                     TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
@@ -176,12 +176,12 @@ public class GenerateThumbnailTaskRunner {
                 }
             }
             // 尝试删除空的临时目录
-            let (rmDirExitCode, _, _) = executeWithOutput(
-                "rmdir",
-                [taskTempDir],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
+            let rmDirExitCode = try {
+                let process = launch("rmdir", [taskTempDir], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+                process.wait()
+            } catch (e: Exception) {
+                1
+            }
             if (rmDirExitCode != 0) {
                 let debugMsg = "Task temp directory not empty or cannot be removed: ${taskTempDir}"
                 TaskIO.appendLog(taskId, "DEBUG: ${debugMsg}")
@@ -308,18 +308,5 @@ public class GenerateThumbnailTaskRunner {
         }
     }
 
-    /**
-     * 执行命令
-     */
-    private static func executeWithOutput(command: String, args: Array<String>, stdOut: ProcessRedirect, stdErr: ProcessRedirect): (Int32, Array<UInt8>, Array<UInt8>) {
-        try {
-            let process = launch(command, args[0], args[1], stdOut: stdOut, stdErr: stdErr)
-            let exitCode = process.wait()
-            return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
-        } catch (e: Exception) {
-            let logger = getLogger("generate_thumbnail")
-            logger.error("Error executing command '${command}': ${e.message}")
-            return (1, Array<UInt8>(), Array<UInt8>())
-        }
-    }
+
 }

@@ -67,7 +67,6 @@ public class ScanArchiveTaskRunner {
     private static func parseConfig(parameters: String): ArchiveConfig {
         let trimmed = parameters.trimAscii()
         var archivePath = ""
-        var archiveBasePath = ""
         var cachePath = ""
         var thumbnailPath = ""
         var bsdtarPath = "bsdtar"
@@ -88,13 +87,7 @@ public class ScanArchiveTaskRunner {
                             case _ => throw Exception("archive_path must be a string")
                         }
                     }
-                    if (fields.contains("archive_base_path")) {
-                        let value = fields["archive_base_path"]
-                        match (value) {
-                            case s: JsonString => archiveBasePath = s.getValue().trimAscii()
-                            case _ => throw Exception("archive_base_path must be a string")
-                        }
-                    }
+
                     if (fields.contains("cache_path")) {
                         let value = fields["cache_path"]
                         match (value) {

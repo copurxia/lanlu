@@ -1,12 +1,9 @@
 package lrr4cj.services
 
 import std.fs.*
-import std.process.*
 import std.time.*
 import std.sync.*
 import std.convert.*
-import stdx.crypto.digest.*
-import stdx.encoding.hex.*
 import stdx.log.*
 import cjoy.json.*
 import lrr4cj.dao.*
@@ -60,10 +57,7 @@ public class ShinobuService {
     private var isTaskRunning: Bool = false
     private let runningMutex: Mutex = Mutex()
     
-    // 支持的图片格式
-    private static let SUPPORTED_IMAGE_EXTENSIONS: Array<String> = [
-        "jpg", "jpeg", "png", "gif", "bmp", "webp"
-    ]
+
     
     // 静态初始化器 - 用于初始化静态成员和读取环境变量
     static init() {
@@ -417,426 +411,26 @@ public class ShinobuService {
     }
 
 
-    /**
-     * 生成文件的hash值
-     */
-    private func generateFileHash(filePath: String): String {
-        try {
-            // 获取文件大小和修改时间
-            let fileSize = getArchiveFileSize(filePath)
-            let fileModTime = getArchiveFileModTime(filePath)
-            
-            // 组合内容：filePath + mtime + size
-            let content = filePath + fileModTime.toString() + fileSize.toString()
-            
-            // 使用 SHA1 算法生成哈希
-            var sha1Instance = SHA1()
-            sha1Instance.write(content.toArray())
-            let hash: Array<Byte> = sha1Instance.finish()
-            
-            // 转换为十六进制字符串
-            let result = toHexString(hash)
-            
-            logger.debug("Generated file hash: ${result} for file: ${filePath}")
-            return result
-        } catch (e: Exception) {
-            logger.error("Error calculating file hash: ${e.message}")
-            // 简单哈希：使用文件路径
-            return "${filePath.hashCode()}"
-        }
-    }
-    
-    /**
-     * 从压缩包中提取单个文件
-     */
-    private func extractArchiveEntry(archivePath: String, entryName: String, outputPath: String): ProcessResultData {
-        try {
-            logger.debug("Attempting to extract entry: ${entryName} from archive: ${archivePath}")
-
-            // 对于文件操作，需要解析软链接到实际路径
-            let actualArchivePath = FileUtils.resolvePath(archivePath)
-            logger.debug("Using actual archive path for extraction: ${actualArchivePath}")
-
-            // 使用 bsdtar 的 -xO 选项直接输出到标准输出
-            // 这样可以避免使用 -C 选项导致的问题
-            let (exitCode, stdout, stderr) = executeWithOutput(
-                bsdtarPath,
-                ["-xO", "-f", actualArchivePath, entryName],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
-            
-            if (exitCode == 0) {
-                // 将标准输出的内容写入目标文件
-                try {
-                    // 使用传入的 outputPath，而不是硬编码目录
-                    let outputDir = FileUtils.getParentDirectory(outputPath)
-                    if (!directoryExists(outputDir)) {
-                        Directory.create(outputDir, recursive: true)
-                    }
-                    
-                    // 直接使用传入的 outputPath，而不是生成 MD5 文件名
-                    let finalOutputPath = outputPath
-                    
-                    // 使用仓颉语言的文件写入方式
-                    let filePath = Path(finalOutputPath)
-                    var file = File(filePath, Write)
-                    file.write(stdout)
-                    file.close()
-                    
-                    logger.info("Successfully extracted ${entryName} to ${finalOutputPath}")
-                    return ProcessResultData(true, finalOutputPath, "")
-                } catch (e: Exception) {
-                    let error = "Failed to write extracted data to file: ${e.message}"
-                    logger.error(error)
-                    return ProcessResultData(false, "", error)
-                }
-            } else {
-                let error = String.fromUtf8(stderr)
-                logger.error("Failed to extract archive entry: ${error}")
-                return ProcessResultData(false, "", error)
-            }
-        } catch (e: Exception) {
-            let error = "Exception extracting archive entry: ${e.message}"
-            logger.error(error)
-            return ProcessResultData(false, "", error)
-        }
-    }
-
-    /**
-     * 检查文件是否为图片文件
-     */
-    private func isImageFile(filename: String): Bool {
-        return filename.endsWith(".jpg") ||
-               filename.endsWith(".jpeg") ||
-               filename.endsWith(".png") ||
-               filename.endsWith(".gif") ||
-               filename.endsWith(".bmp") ||
-               filename.endsWith(".webp") ||
-               filename.endsWith(".JPG") ||
-               filename.endsWith(".JPEG") ||
-               filename.endsWith(".PNG") ||
-               filename.endsWith(".GIF") ||
-               filename.endsWith(".BMP") ||
-               filename.endsWith(".WEBP")
-    }
-    
-    /**
-     * 获取文件扩展名（小写）
-     */
-    private func getFileExtension(filePath: String): String {
-        // 先提取文件名（去除路径）
-        let pathParts = filePath.split("/")
-        let fileName = if (pathParts.size > 0) { pathParts[pathParts.size - 1] } else { filePath }
-
-        // 再从文件名中提取扩展名
-        let nameParts = fileName.split(".")
-        if (nameParts.size > 1) {
-            let ext = nameParts[nameParts.size - 1]
-            // 转换为小写
-            return ext.toAsciiLower()
-        }
-        return "tmp"  // 默认扩展名
-    }
 
     
-    /**
-     * 生成归档ID
-     */
-    private func generateArchiveId(filePath: String): String {
-        try {
-            // 获取文件大小和修改时间
-            let fileSize = getArchiveFileSize(filePath)
-            let fileModTime = getArchiveFileModTime(filePath)
-            
-            // 组合内容：filePath + mtime + size
-            let content = filePath + fileModTime.toString() + fileSize.toString()
-            
-            // 使用 SHA1 算法生成哈希
-            var sha1Instance = SHA1()
-            sha1Instance.write(content.toArray())
-            let hash: Array<Byte> = sha1Instance.finish()
-            
-            // 转换为十六进制字符串
-            let result = toHexString(hash)
-            
-            logger.debug("Generated archive ID: ${result} for file: ${filePath}")
-            return result
-        } catch (e: Exception) {
-            logger.error("Failed to generate archive ID: ${e.message}")
-            // 如果生成失败，返回一个基于文件名的备用 ID
-            let fileName = getFileName(filePath)
-            return "fallback_${fileName}"
-        }
-    }
+
+
+
     
-    /**
-     * 获取文件修改时间
-     */
-    private func getArchiveFileModTime(filePath: String): Int64 {
-        try {
-            logger.debug("Getting file modification time for: ${filePath}")
-            // 对于文件信息获取，需要解析软链接到实际路径
-            let actualPath = FileUtils.resolvePath(filePath)
-            let path = Path(actualPath)
-            let file = File(path, Read)
-            let fileInfo = file.info
-            file.close()
-            
-            // 获取最后修改时间并转换为毫秒时间戳
-            let modTime = fileInfo.lastModificationTime
-            logger.debug("File modification time: ${modTime}")
-            // 这里需要将 DateTime 转换为毫秒时间戳
-            // 简化实现：返回一个基于当前时间的模拟值
-            return getTimeMillis()
-        } catch (e: Exception) {
-            logger.error("Failed to get file modification time for '${filePath}': ${e.message}")
-            return getTimeMillis()
-        }
-    }
+
+
     
-    /**
-     * 获取文件大小
-     */
-    private func getArchiveFileSize(filePath: String): Int64 {
-        try {
-            logger.debug("Getting file size for: ${filePath}")
-            // 对于文件信息获取，需要解析软链接到实际路径
-            let actualPath = FileUtils.resolvePath(filePath)
-            let path = Path(actualPath)
-            let file = File(path, Read)
-            let fileInfo = file.info
-            file.close()
-            
-            // 获取文件大小
-            let size = fileInfo.size
-            logger.debug("File size: ${size}")
-            return size
-        } catch (e: Exception) {
-            logger.error("Failed to get file size for '${filePath}': ${e.message}")
-            return 0
-        }
-    }
+
     
-    /**
-     * 获取当前时间戳（毫秒）
-     */
-    private func getTimeMillis(): Int64 {
-        return DateTime.now().toUnixTimeStamp().toSeconds() * 1000
-    }
+
     
-    /**
-     * 获取文件名（不含扩展名）
-     */
-    private func getFileName(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 0) {
-            let fileName = parts[parts.size - 1]
-            let nameParts = fileName.split(".")
-            if (nameParts.size > 0) {
-                return nameParts[0]
-            }
-            return fileName
-        }
-        return filePath
-    }
+
     
-    /**
-     * 计算相对于 archivePath 的相对路径（不包含文件名）
-     * 注意：此函数保留软链接路径，不解析软链接到实际目标
-     */
-    private func calculateRelativePath(fullPath: String): String {
-        try {
-            // 重要修改：不使用 FileUtils.resolvePath 解析软链接
-            // 直接使用原始路径进行计算，以保留软链接目录结构
-            let parentDir = getParentDirectory(fullPath)
 
-            // 获取archivePath，使用静态成员以确保一致性
-            let archiveBasePath = ShinobuService.archivePath.toString()
-            let resolvedArchiveBasePath = FileUtils.resolvePath(archiveBasePath)
-
-            logger.debug("Original full path: ${fullPath}")
-            logger.debug("Archive base path: ${archiveBasePath}")
-            logger.debug("Resolved archive base path: ${resolvedArchiveBasePath}")
-            logger.debug("Parent directory: ${parentDir}")
-
-            // 确保parentDir也是绝对路径进行比较
-            let resolvedParentDir = FileUtils.resolvePath(parentDir)
-            logger.debug("Resolved parent directory: ${resolvedParentDir}")
-
-            // 首先尝试使用解析后的archivePath与解析后的父目录比较
-            if (resolvedParentDir.startsWith(resolvedArchiveBasePath)) {
-                // 移除基础路径前缀，获取相对路径
-                let relativePath = resolvedParentDir.replace(resolvedArchiveBasePath, "")
-
-                // 移除可能的前导斜杠
-                if (relativePath.startsWith("/")) {
-                    let parts = relativePath.split("/")
-                    var result = ""
-                    var firstNonEmpty = true
-                    for (i in 1..parts.size) {
-                        if (parts[i].size > 0) {
-                            if (!firstNonEmpty) {
-                                result += "/"
-                            }
-                            result += parts[i]
-                            firstNonEmpty = false
-                        }
-                    }
-                    logger.debug("Calculated relative path for ${fullPath}: ${result}")
-                    return result
-                } else if (relativePath.size > 0) {
-                    logger.debug("Calculated relative path for ${fullPath}: ${relativePath}")
-                    return relativePath
-                } else {
-                    logger.debug("Empty relative path for ${fullPath}")
-                    return ""
-                }
-            } else {
-                // 如果解析后的路径不匹配，尝试使用原始archivePath
-                logger.debug("Trying with original archive path: ${archiveBasePath}")
-
-                if (parentDir.startsWith(archiveBasePath)) {
-                    // 移除 archivePath 前缀，获取相对路径
-                    let relativePath = parentDir.replace(archiveBasePath, "")
-
-                    // 移除可能的前导斜杠
-                    if (relativePath.startsWith("/")) {
-                        let parts = relativePath.split("/")
-                        var result = ""
-                        var firstNonEmpty = true
-                        for (i in 1..parts.size) {
-                            if (parts[i].size > 0) {
-                                if (!firstNonEmpty) {
-                                    result += "/"
-                                }
-                                result += parts[i]
-                                firstNonEmpty = false
-                            }
-                        }
-                        logger.debug("Calculated relative path (original) for ${fullPath}: ${result}")
-                        return result
-                    } else if (relativePath.size > 0) {
-                        logger.debug("Calculated relative path (original) for ${fullPath}: ${relativePath}")
-                        return relativePath
-                    } else {
-                        logger.debug("Empty relative path (original) for ${fullPath}")
-                        return ""
-                    }
-                } else {
-                    // 如果路径不在任何路径下，尝试查找可能的父目录匹配
-                    logger.error("Path ${resolvedParentDir} is not under archive path ${resolvedArchiveBasePath} or ${archiveBasePath}")
-                    logger.debug("Attempting to find relative path by directory traversal...")
-
-                    // 尝试逐级向上查找匹配的目录
-                    var currentPath = resolvedParentDir
-                    while (currentPath.size > resolvedArchiveBasePath.size) {
-                        if (currentPath.startsWith(resolvedArchiveBasePath)) {
-                            let relativePath = currentPath.replace(resolvedArchiveBasePath, "")
-                            if (relativePath.startsWith("/")) {
-                                let parts = relativePath.split("/")
-                                var result = ""
-                                var firstNonEmpty = true
-                                for (i in 1..parts.size) {
-                                    if (parts[i].size > 0) {
-                                        if (!firstNonEmpty) {
-                                            result += "/"
-                                        }
-                                        result += parts[i]
-                                        firstNonEmpty = false
-                                    }
-                                }
-                                logger.debug("Found relative path by traversal: ${result}")
-                                return result
-                            } else if (relativePath.size > 0) {
-                                logger.debug("Found relative path by traversal: ${relativePath}")
-                                return relativePath
-                            }
-                        }
-                        // 向上移动一级目录
-                        let parts = currentPath.split("/")
-                        if (parts.size > 1) {
-                            var newPath = ""
-                            for (i in 0..parts.size - 1) {
-                                if (i > 0) {
-                                    newPath += "/"
-                                }
-                                newPath += parts[i]
-                            }
-                            currentPath = newPath
-                        } else {
-                            break
-                        }
-                    }
-
-                    logger.error("Could not find relative path for ${resolvedParentDir}")
-                    return ""
-                }
-            }
-        } catch (e: Exception) {
-            logger.error("Failed to calculate relative path for ${fullPath}: ${e.message}")
-            return ""
-        }
-    }
     
-    /**
-     * 获取完整文件名（包含后缀）
-     */
-    private func getFullFileName(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 0) {
-            return parts[parts.size - 1]
-        }
-        return filePath
-    }
-    
-    /**
-     * 生成默认标题（去除文件后缀名）
-     */
-    private func generateDefaultTitle(filePath: String): String {
-        let fileName = getFullFileName(filePath)
-        let parts = fileName.split(".")
-        if (parts.size > 1) {
-            // 去除最后一个后缀
-            var title = ""
-            for (i in 0..(parts.size - 1)) {
-                if (i > 0) {
-                    title += "."
-                }
-                title += parts[i]
-            }
-            return title
-        }
-        return fileName
-    }
-    
-    /**
-     * 获取父目录
-     */
-    private func getParentDirectory(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 1) {
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                // 特殊处理：如果是第一个部分且为空（绝对路径），添加根目录斜杠
-                if (i == 0 && parts[i].size == 0) {
-                    result += "/"
-                } else {
-                    if (result.size > 0 && result != "/") {
-                        result += "/"
-                    }
-                    result += parts[i]
-                }
-            }
-            return result
-        } else if (parts.size == 1) {
-            // 如果只有一个部分，且是根路径，返回根路径
-            if (parts[0].size == 0) {
-                return "/"
-            }
-        }
-        return ""
-    }
+
+
+
     
     /**
      * 获取当前进程ID
@@ -846,13 +440,7 @@ public class ShinobuService {
         return 12345
     }
     
-    /**
-     * 获取当前时间（毫秒）
-     */
-    private func getCurrentTimeMillis(): Int64 {
-        // 获取当前时间的毫秒数
-        return getTimeMillis()
-    }
+
 
     /**
      * 检查目录是否存在（支持软链接）- 保持向后兼容性
@@ -882,83 +470,11 @@ public class ShinobuService {
         return DirectoryScanner.joinPath(base, part)
     }
 
-    /**
-     * 使用ImageMagick将图片转换为JPG格式并进行分辨率转换
-     */
-    private func convertImageToJpg(inputPath: String, outputPath: String): ProcessResultData {
-        try {
-            logger.debug("Converting image to JPG: ${inputPath} -> ${outputPath}")
 
-            // 确保输出目录存在
-            let outputDir = FileUtils.getParentDirectory(outputPath)
-            if (!directoryExists(outputDir)) {
-                Directory.create(outputDir, recursive: true)
-            }
 
-            // 使用ImageMagick的convert工具进行转换
-            // 由于executeWithOutput函数限制参数数量，我们分两步执行
-            // 第一步：调整大小 - 宽500px，最大高1000px（保持比例）
-            let resizedPath = joinPath(cachePath.toString(), "temp_resized.jpg")
-            let (resizeExitCode, _, resizeStderr) = executeWithOutput(
-                "convert",
-                [inputPath, "-resize", "500x1000>", resizedPath],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
 
-            if (resizeExitCode != 0) {
-                let error = String.fromUtf8(resizeStderr)
-                logger.error("Failed to resize image: ${error}")
-                return ProcessResultData(false, "", error)
-            }
 
-            // 第二步：设置质量并输出到最终路径
-            let (qualityExitCode, _, qualityStderr) = executeWithOutput(
-                "convert",
-                [resizedPath, "-quality", "85", outputPath],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
 
-            // 清理临时文件
-            try {
-                if (fileExists(resizedPath)) {
-                    let (rmExitCode, _, _) = executeWithOutput(
-                        "rm",
-                        ["-f", resizedPath],
-                        stdOut: ProcessRedirect.Pipe,
-                        stdErr: ProcessRedirect.Pipe
-                    )
-                    if (rmExitCode != 0) {
-                        logger.warn("Failed to delete temp resized file: ${resizedPath}")
-                    }
-                }
-            } catch (e: Exception) {
-                logger.warn("Failed to delete temp resized file: ${resizedPath}, error: ${e.message}")
-            }
-
-            if (qualityExitCode == 0) {
-                logger.info("Successfully converted image to JPG: ${outputPath}")
-                return ProcessResultData(true, outputPath, "")
-            } else {
-                let error = String.fromUtf8(qualityStderr)
-                logger.error("Failed to convert image to JPG: ${error}")
-                return ProcessResultData(false, "", error)
-            }
-        } catch (e: Exception) {
-            let error = "Exception converting image to JPG: ${e.message}"
-            logger.error(error)
-            return ProcessResultData(false, "", error)
-        }
-    }
-
-    private func combineArrays(arr1: Array<String>, arr2: Array<String>): Array<String> {
-        return DirectoryScanner.combineArrays(arr1, arr2)
-    }
-
-    private func addFile(arr: Array<String>, file: String): Array<String> {
-        return DirectoryScanner.addFileToArray(arr, file)
-    }
     
 
 
