@@ -50,12 +50,6 @@ public class ArchiveRoutes {
             ArchiveController.getFiles(ctx)
         })
 
-        // 获取归档文件
-        router.get("/api/archives/{id}/files/{fileIndex}", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getFile(ctx)
-        })
-
         // 下载归档
         router.get("/api/archives/{id}/download", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
@@ -65,12 +59,6 @@ public class ArchiveRoutes {
         // 获取归档页面（无需认证）
         router.get("/api/archives/{id}/page", { ctx =>
             ArchiveController.getPage(ctx)
-        })
-
-        // 提取归档
-        router.post("/api/archives/{id}/extract", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.extractArchive(ctx)
         })
 
         // 删除归档
@@ -159,11 +147,6 @@ public class ArchiveRoutes {
 
         // 执行元数据插件（进入TaskPool，返回job id）
         router.post("/api/metadata_plugin", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            MetadataPluginController.runMetadataPlugin(ctx)
-        })
-        // 兼容：带尾斜杠
-        router.post("/api/metadata_plugin/", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
             MetadataPluginController.runMetadataPlugin(ctx)
         })

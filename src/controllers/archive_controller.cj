@@ -439,25 +439,6 @@ public class ArchiveController {
         ctx.json(responseJson)
     }
 
-    // GET /api/archives/{id}/files/{fileIndex}
-    public static func getFile(ctx: JoyContext): Unit {
-        let id = ctx.getParam("id").getOrThrow()
-        let fileIndex = ctx.getParam("fileIndex").getOrThrow()
-        let filePath = ArchiveModel.getArchiveFile(id)
-
-        let result = "{\"file\":\"${filePath}\",\"index\":\"${fileIndex}\"}"
-        ctx.json(result)
-    }
-
-    // POST /api/archives/{id}/extract
-    public static func extractArchive(ctx: JoyContext): Unit {
-        let id = ctx.getParam("id").getOrThrow()
-        // 简化实现，返回一个任务ID
-        let taskId = "task_${id}_${Int64(1234567890)}"
-        let result = "{\"operation\":\"extract_archive\",\"data\":{\"task_id\":\"${taskId}\"},\"success\":1}"
-        ctx.json(result)
-    }
-
     // DELETE /api/archives/{id}
     public static func deleteArchive(ctx: JoyContext): Unit {
         // 检查管理员权限
