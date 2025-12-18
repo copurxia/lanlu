@@ -11,6 +11,8 @@ import lrr4cj.utils.*
 
 /**
  * Minion控制器
+ * 注意：任务相关的端点已迁移到 TaskPoolController
+ * 此控制器现在仅负责插件管理功能
  */
 public class MinionController {
     /**
@@ -29,77 +31,7 @@ public class MinionController {
         result += "}"
         return result
     }
-    /**
-     * 根据ID获取任务
-     */
-    public static func getTaskById(ctx: JoyContext) {
-        let idStr = ctx.getParam("id") ?? ""
-        let id = try {
-            Int64.parse(idStr)
-        } catch (_) {
-            0
-        }
-        let task = MinionModel.getTaskById(id)
 
-        if (task.id == 0) {
-            ResponseView.errorJson(ctx, "Task not found")
-            return
-        }
-
-        ctx.json(task.toJson())
-    }
-
-    /**
-     * 分页获取任务列表
-     * GET /api/minion/tasks?page=1&pageSize=10
-     */
-    public static func getTasksWithPagination(ctx: JoyContext) {
-        let logger = getLogger("minion_controller")
-
-        // 解析查询参数，设置默认值
-        let pageStr = ctx.getQuery("page") ?? "1"
-        let pageSizeStr = ctx.getQuery("pageSize") ?? "10"
-
-        let page = try {
-            Int32.parse(pageStr)
-        } catch (_) {
-            logger.warn("无效的页码参数", [("page", pageStr)])
-            ResponseView.errorJson(ctx, "Invalid page parameter")
-            return
-        }
-
-        let pageSize = try {
-            Int32.parse(pageSizeStr)
-        } catch (_) {
-            logger.warn("无效的页面大小参数", [("pageSize", pageSizeStr)])
-            ResponseView.errorJson(ctx, "Invalid pageSize parameter")
-            return
-        }
-
-        // 参数验证
-        if (page < 1) {
-            logger.warn("页码必须大于0", [("page", page.toString())])
-            ResponseView.errorJson(ctx, "Page must be greater than 0")
-            return
-        }
-
-        if (pageSize < 1 || pageSize > 100) {
-            logger.warn("页面大小必须在1-100之间", [("pageSize", pageSize.toString())])
-            ResponseView.errorJson(ctx, "Page size must be between 1 and 100")
-            return
-        }
-
-        try {
-            let result = MinionModel.getTasksWithPagination(page, pageSize)
-            logger.info("分页获取任务列表", [("page", page.toString()), ("pageSize", pageSize.toString()), ("total", result.total.toString())])
-            ctx.json(result.toJson())
-        } catch (e: Exception) {
-            logger.error("分页获取任务失败", ("error", e.message))
-            ResponseView.errorJson(ctx, "Failed to get tasks: ${e.message}")
-        }
-    }
-    
-    
     /**
      * 获取所有插件详情
      * GET /api/plugins

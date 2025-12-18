@@ -147,13 +147,11 @@ public class TagI18nImportTaskRunner {
                                         break
                                     }
 
-                                    var foundTags = false
                                     while (reader.peek() != EndObject && !parsedAny) {
                                         let name = reader.readName()
                                         match (name) {
                                             case "tags" =>
                                                 // New simplified format: {"tags": [...]}
-                                                foundTags = true
                                                 match (reader.peek()) {
                                                     case Some(BeginArray) =>
                                                         parseTagsArray(reader)

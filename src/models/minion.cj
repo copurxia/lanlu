@@ -3,6 +3,7 @@ package lrr4cj.models
 import lrr4cj.dao.*
 import lrr4cj.utils.*
 import lrr4cj.config.*
+import std.database.sql.*
 import std.collection.*
 import std.time.*
 
@@ -24,11 +25,16 @@ public class MinionTask {
     public var createdAt: String
     public var startedAt: String
     public var completedAt: String
+    public var priority: Int32
+    public var groupId: String
+    public var timeoutAt: String
+    public var triggerSource: String
 
     public init(id: Int64, name: String, status: String, progress: Int32, message: String,
                 taskType!: String = "", pluginNamespace!: String = "", parameters!: String = "",
                 result!: String = "", createdAt!: String = "", startedAt!: String = "",
-                completedAt!: String = "") {
+                completedAt!: String = "", priority!: Int32 = 50, groupId!: String = "",
+                timeoutAt!: String = "", triggerSource!: String = "") {
         this.id = id
         this.name = name
         this.status = status
@@ -41,6 +47,10 @@ public class MinionTask {
         this.createdAt = createdAt
         this.startedAt = startedAt
         this.completedAt = completedAt
+        this.priority = priority
+        this.groupId = groupId
+        this.timeoutAt = timeoutAt
+        this.triggerSource = triggerSource
     }
 
     /**
@@ -67,7 +77,11 @@ public class MinionTask {
         json += "\"result\":\"${escapeJsonString(result)}\","
         json += "\"createdAt\":\"${escapeJsonString(createdAt)}\","
         json += "\"startedAt\":\"${escapeJsonString(startedAt)}\","
-        json += "\"completedAt\":\"${escapeJsonString(completedAt)}\""
+        json += "\"completedAt\":\"${escapeJsonString(completedAt)}\"," 
+        json += "\"priority\":${priority},"
+        json += "\"groupId\":\"${escapeJsonString(groupId)}\"," 
+        json += "\"timeoutAt\":\"${escapeJsonString(timeoutAt)}\"," 
+        json += "\"triggerSource\":\"${escapeJsonString(triggerSource)}\""
         json += "}"
         return json
     }
@@ -163,29 +177,11 @@ public class MinionModel {
         match (connOpt) {
             case Some(conn) =>
                 try {
-                    // 检查message列是否存在
-                    let checkMessageColumn = conn.prepareStatement("SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = 'minion_tasks' AND column_name = 'message')")
-                    let messageRs = checkMessageColumn.query()
-                    var messageColumnExists = false
-                    try {
-                        if (messageRs.next()) {
-                            messageColumnExists = messageRs.getOrNull<Bool>(0) ?? false
-                        }
-                    } finally {
-                        messageRs.close()
-                        checkMessageColumn.close()
-                    }
-
-                    if (!messageColumnExists) {
-                        logger.info("添加缺失的message列")
-                        let addMessageSql = "ALTER TABLE minion_tasks ADD COLUMN message TEXT"
-                        let addStmt = conn.prepareStatement(addMessageSql)
-                        addStmt.update()
-                        addStmt.close()
-                        logger.info("message列添加成功")
-                    } else {
-                        logger.info("message列已存在，表结构正确")
-                    }
+                    ensureColumnExists(conn, "message", "ALTER TABLE minion_tasks ADD COLUMN message TEXT")
+                    ensureColumnExists(conn, "priority", "ALTER TABLE minion_tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 50")
+                    ensureColumnExists(conn, "group_id", "ALTER TABLE minion_tasks ADD COLUMN group_id VARCHAR(255)")
+                    ensureColumnExists(conn, "timeout_at", "ALTER TABLE minion_tasks ADD COLUMN timeout_at TIMESTAMP")
+                    ensureColumnExists(conn, "trigger_source", "ALTER TABLE minion_tasks ADD COLUMN trigger_source VARCHAR(50)")
 
                     return true
                 } catch (e: Exception) {
@@ -201,6 +197,32 @@ public class MinionModel {
             case None =>
                 logger.error("无法获取数据库连接")
                 return false
+        }
+    }
+
+    private static func ensureColumnExists(conn: Connection, columnName: String, alterSql: String): Unit {
+        let logger = getLogger("minion_model")
+        let checkStmt = conn.prepareStatement("SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = 'minion_tasks' AND column_name = ?)")
+        checkStmt.set(0, columnName)
+        let rs = checkStmt.query()
+        var columnExists = false
+        try {
+            if (rs.next()) {
+                columnExists = rs.getOrNull<Bool>(0) ?? false
+            }
+        } finally {
+            rs.close()
+            checkStmt.close()
+        }
+
+        if (!columnExists) {
+            logger.info("添加缺失的${columnName}列")
+            let stmt = conn.prepareStatement(alterSql)
+            stmt.update()
+            stmt.close()
+            logger.info("${columnName}列添加成功")
+        } else {
+            logger.info("${columnName}列已存在")
         }
     }
 
@@ -277,7 +299,8 @@ public class MinionModel {
         let task = MinionTask(
             0, name, "pending", 0, "任务已创建",
             taskType: taskType, pluginNamespace: "", parameters: "",
-            result: "", createdAt: currentTime, startedAt: "", completedAt: ""
+            result: "", createdAt: currentTime, startedAt: "", completedAt: "",
+            priority: 50, groupId: "", timeoutAt: "", triggerSource: "manual"
         )
 
         let data = convertToMinionTaskData(task)
@@ -290,6 +313,43 @@ public class MinionModel {
         }
 
         return task
+    }
+
+    /**
+     * 创建带参数的任务
+     */
+    public static func createTaskWithOptions(name: String, taskType: String, parameters: String, priority: Int32,
+                                             groupId: String, triggerSource: String, timeoutSeconds!: Int32 = 0): MinionTask {
+        let logger = getLogger("minion_model")
+        let currentTime = getCurrentTimeString()
+
+        let timeoutAt = calculateTimeoutAt(timeoutSeconds)
+
+        let task = MinionTask(
+            0, name, "pending", 0, "任务已创建",
+            taskType: taskType, pluginNamespace: "", parameters: parameters,
+            result: "", createdAt: currentTime, startedAt: "", completedAt: "",
+            priority: priority, groupId: groupId, timeoutAt: timeoutAt, triggerSource: triggerSource
+        )
+
+        let data = convertToMinionTaskData(task)
+        let success = MinionTaskDao.createTaskData(data)
+        if (success) {
+            task.id = data.id
+            logger.info("创建任务成功", [("id", data.id.toString()), ("name", name), ("task_type", taskType)])
+        } else {
+            logger.error("创建任务失败", ("name", name), ("task_type", taskType))
+        }
+
+        return task
+    }
+
+    private static func calculateTimeoutAt(timeoutSeconds: Int32): String {
+        if (timeoutSeconds <= 0) {
+            return ""
+        }
+        // TODO: 根据需要实现时间推算，这里暂返回空字符串以保持兼容
+        return ""
     }
 
     /**
@@ -406,7 +466,8 @@ public class MinionModel {
             data.id, data.name, data.status, data.progress, data.message,
             taskType: data.taskType, pluginNamespace: data.pluginNamespace,
             parameters: data.parameters, result: data.result,
-            createdAt: data.createdAt, startedAt: data.startedAt, completedAt: data.completedAt
+            createdAt: data.createdAt, startedAt: data.startedAt, completedAt: data.completedAt,
+            priority: data.priority, groupId: data.groupId, timeoutAt: data.timeoutAt, triggerSource: data.triggerSource
         )
     }
 
@@ -427,6 +488,10 @@ public class MinionModel {
         data.createdAt = task.createdAt
         data.startedAt = task.startedAt
         data.completedAt = task.completedAt
+        data.priority = task.priority
+        data.groupId = task.groupId
+        data.timeoutAt = task.timeoutAt
+        data.triggerSource = task.triggerSource
         return data
     }
 

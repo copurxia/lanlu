@@ -294,26 +294,31 @@ public class ChunkedUploadController {
                 return
             }
 
-            // 同步模式：调用Shinobu服务处理归档文件（入库和缩略图生成）
-            let shinobuService = ShinobuService.getInstance()
-            let processResult = shinobuService.processUploadedArchiveFile(absoluteArchivePath)
+            // 异步模式：创建 scan_archive 任务处理归档文件
+            let archiveBasePath = ShinobuService.getArchivePath().toString()
+            let cachePath = ShinobuService.getCachePath().toString()
+            let thumbnailPath = ShinobuService.getThumbnailPath().toString()
+            let bsdtarPath = ShinobuService.getBsdtarPath()
 
-            if (processResult.success) {
-                getLogger("chunked_upload").info("File processing completed successfully", ("archiveId", processResult.archiveId))
+            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"archive_base_path\":\"${escapeJsonString(archiveBasePath)}\",\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\",\"bsdtar_path\":\"${escapeJsonString(bsdtarPath)}\"}"
+            let scanTask = MinionModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "chunked_upload:${taskId}", "upload")
+            if (scanTask.id > 0) {
+                TaskPoolService.getInstance().notifyTaskAvailable()
+                getLogger("chunked_upload").info("File processing task created", ("taskId", scanTask.id.toString()))
 
                 // 更新任务状态为完成
-                let taskResult = "文件上传处理完成\n归档ID: ${processResult.archiveId}\n文件名: ${originalFileName}\n相对路径: ${finalArchivePath.toString()}"
+                let taskResult = "文件上传处理完成\n任务ID: ${scanTask.id}\n文件名: ${originalFileName}\n相对路径: ${finalArchivePath.toString()}"
                 MinionModel.completeTask(taskId, taskResult)
 
                 // 清理上传目录
                 cleanupUploadDir(chunkDir)
 
-                let response = "{\"success\":1,\"id\":\"${processResult.archiveId}\"}"
+                let response = "{\"success\":1,\"taskId\":${scanTask.id}}"
                 ctx.json(response)
             } else {
                 // 处理失败，标记任务失败
-                getLogger("chunked_upload").error("File processing failed", ("error", processResult.error))
-                MinionModel.failTask(taskId, "文件处理失败: ${processResult.error}")
+                getLogger("chunked_upload").error("Failed to create file processing task")
+                MinionModel.failTask(taskId, "文件处理任务创建失败")
 
                 // 如果处理失败，删除已移动的文件
                 try {
@@ -321,7 +326,7 @@ public class ChunkedUploadController {
                 } catch (_) {
                     // 忽略删除错误
                 }
-                let errorResponse = "{\"success\":0,\"error\":\"${processResult.error}\"}"
+                let errorResponse = "{\"success\":0,\"error\":\"Failed to create processing task\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                 ctx.json(errorResponse)
             }

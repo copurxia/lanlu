@@ -7,6 +7,7 @@ import lrr4cj.utils.*
 
 /**
  * upload_process 任务执行器：对已落盘的archive文件进行入库/缩略图处理
+ * 重构后：创建 scan_archive 子任务，由 TaskPool 异步处理
  */
 public class UploadProcessTaskRunner {
     public static func run(taskId: Int64, parameters: String): Unit {
@@ -23,22 +24,33 @@ public class UploadProcessTaskRunner {
         }
 
         try {
-            MinionModel.updateTaskProgress(taskId, 80, "Shinobu处理中")
-            let shinobu = ShinobuService.getInstance()
-            let processResult = shinobu.processUploadedArchiveFile(archivePath)
-            if (!processResult.success) {
-                let errorJson = "{\"success\":0,\"error\":\"${escapeJson(processResult.error)}\"}"
-                MinionModel.failTask(taskId, processResult.error)
-                TaskIO.writeOutput(taskId, errorJson)
-                return
-            }
+            MinionModel.updateTaskProgress(taskId, 50, "创建档案扫描任务")
 
-            let okJson =
-                "{\"success\":1,\"id\":\"${processResult.archiveId}\",\"relative_path\":\"${escapeJson(relativePath)}\",\"filename\":\"${escapeJson(fileName)}\"}"
-            MinionModel.updateTaskProgress(taskId, 100, "处理完成")
-            MinionModel.completeTask(taskId, "upload_process completed")
-            TaskIO.writeOutput(taskId, okJson)
-            TaskIO.appendLog(taskId, "upload_process task completed: archiveId=${processResult.archiveId}")
+            // 创建 scan_archive 子任务（优先级 20，高于定时扫描）
+            let scanParams = "{\"archive_path\":\"${escapeJson(archivePath)}\"}"
+            let groupId = "upload:${taskId}"
+            let scanTask = MinionModel.createTaskWithOptions(
+                "扫描上传档案",
+                "scan_archive",
+                scanParams,
+                20, // 上传任务优先级为 20
+                groupId,
+                "upload"
+            )
+
+            if (scanTask.id > 0) {
+                TaskPoolService.getInstance().notifyTaskAvailable()
+                logger.info("Created scan_archive task for upload", ("scan_task_id", scanTask.id.toString()), ("archive_path", archivePath))
+
+                let okJson =
+                    "{\"success\":1,\"scan_task_id\":${scanTask.id},\"relative_path\":\"${escapeJson(relativePath)}\",\"filename\":\"${escapeJson(fileName)}\",\"message\":\"Archive scan task created\"}"
+                MinionModel.updateTaskProgress(taskId, 100, "档案扫描任务已创建")
+                MinionModel.completeTask(taskId, "upload_process completed, scan_archive task created")
+                TaskIO.writeOutput(taskId, okJson)
+                TaskIO.appendLog(taskId, "upload_process task completed: scan_task_id=${scanTask.id}")
+            } else {
+                fail(taskId, "Failed to create scan_archive task")
+            }
         } catch (e: Exception) {
             logger.error("upload_process exception", ("error", e.message))
             fail(taskId, e.message)

@@ -1,0 +1,325 @@
+package lrr4cj.services
+
+import stdx.encoding.json.*
+import stdx.log.*
+import std.fs.*
+import std.process.*
+import stdx.crypto.digest.*
+import stdx.encoding.hex.*
+import lrr4cj.models.*
+import lrr4cj.utils.*
+import lrr4cj.dao.*
+import dotenv.Dotenv
+
+/**
+ * 缩略图生成任务：为单个档案生成缩略图
+ */
+public class GenerateThumbnailTaskRunner {
+    // 配置 - 使用静态变量存储配置
+    private static var cachePath: Path
+    private static var thumbnailPath: Path
+    private static var bsdtarPath: String
+
+    // 静态初始化器
+    static init() {
+        let config = Dotenv.createConfig()
+
+        // 读取配置
+        let cachePathStr = config.read("CACHE_PATH", "./data/cache")
+        let thumbnailPathStr = config.read("THUMBNAIL_PATH", "./data/thumb")
+        bsdtarPath = config.read("BSDTAR_PATH", "bsdtar")
+
+        // 转换为 Path 类型并规范化
+        cachePath = canonicalize(cachePathStr)
+        thumbnailPath = canonicalize(thumbnailPathStr)
+
+        // 确保必要的目录存在
+        FileUtils.ensureDirectoryExists(cachePath)
+        FileUtils.ensureDirectoryExists(thumbnailPath)
+    }
+
+    public static func run(taskId: Int64, parameters: String): Unit {
+        let logger = getLogger("generate_thumbnail_task")
+        TaskIO.appendLog(taskId, "generate_thumbnail task started")
+
+        let (archiveId, archivePath) = parseParameters(parameters)
+        if (archiveId.size == 0 || archivePath.size == 0) {
+            fail(taskId, "archive_id and archive_path are required")
+            return
+        }
+
+        MinionModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId}")
+
+        let result = generateThumbnail(taskId, archivePath, archiveId)
+        if (!result.success) {
+            logger.error("generate_thumbnail failed", ("archive_id", archiveId), ("error", result.error))
+            fail(taskId, result.error)
+            return
+        }
+
+        let successJson = "{\"success\":1,\"archive_id\":\"${archiveId}\"}"
+        MinionModel.updateTaskProgress(taskId, 100, "Thumbnail generated successfully")
+        MinionModel.completeTask(taskId, successJson)
+        TaskIO.writeOutput(taskId, successJson)
+        TaskIO.appendLog(taskId, "generate_thumbnail completed for archive: ${archiveId}")
+    }
+
+    /**
+     * 生成缩略图
+     */
+    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String): ProcessResultData {
+        let logger = getLogger("generate_thumbnail")
+        TaskIO.appendLog(taskId, "Starting thumbnail generation for archive: ${archivePath}")
+        logger.info("Starting thumbnail generation for archive: ${archivePath}")
+
+        let actualArchivePath = FileUtils.resolvePath(archivePath)
+        TaskIO.appendLog(taskId, "Resolved archive path: ${actualArchivePath}")
+        logger.info("Resolved archive path: ${actualArchivePath}")
+
+        TaskIO.appendLog(taskId, "Listing archive entries...")
+        logger.info("Listing archive entries...")
+        let entries = ArchiveUtils.listArchiveEntries(actualArchivePath, bsdtarPath)
+        TaskIO.appendLog(taskId, "Found ${entries.size} entries in archive")
+        logger.info("Found ${entries.size} entries in archive")
+
+        if (entries.size == 0) {
+            let errorMsg = "Archive is empty or contains no entries: ${actualArchivePath}"
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            logger.error(errorMsg)
+            return ProcessResultData(false, "", "No entries found in archive")
+        }
+
+        var firstImageEntry: String = ""
+        for (entry in entries) {
+            let ext = ArchiveUtils.getFileExtension(entry)
+            var isImageFile = false
+            for (imgExt in ArchiveUtils.SUPPORTED_IMAGE_EXTENSIONS) {
+                if (ext == imgExt) {
+                    isImageFile = true
+                    break
+                }
+            }
+            if (isImageFile) {
+                firstImageEntry = entry
+                break
+            }
+        }
+
+        if (firstImageEntry.size == 0) {
+            let errorMsg = "No image files found in archive"
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            return ProcessResultData(false, "", errorMsg)
+        }
+
+        TaskIO.appendLog(taskId, "First image entry: ${firstImageEntry}")
+
+        // 使用任务ID创建独立的临时目录
+        let taskTempDir = FileUtils.joinPath(cachePath.toString(), "task/${taskId}")
+        let taskTempPath = Path(taskTempDir)
+        FileUtils.ensureDirectoryExists(taskTempPath)
+        TaskIO.appendLog(taskId, "Created task temp directory: ${taskTempDir}")
+
+        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${ArchiveUtils.getFileExtension(firstImageEntry)}")
+        TaskIO.appendLog(taskId, "Extracting image to: ${tempImagePath}")
+        let extractSuccess = ArchiveUtils.extractArchiveEntry(actualArchivePath, firstImageEntry, tempImagePath)
+        if (!extractSuccess) {
+            let errorMsg = "Failed to extract image from archive"
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            return ProcessResultData(false, "", errorMsg)
+        }
+
+        // 计算thumbhash（基于第一张图片的内容）
+        TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
+        logger.info("Calculating thumbhash for archive: ${archiveId}")
+        let thumbHash = calculateThumbHash(tempImagePath)
+        TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
+        logger.info("Calculated thumbhash: ${thumbHash}")
+
+        // 使用thumbhash作为缩略图文件名
+        let thumbnailFilePath = FileUtils.joinPath(thumbnailPath.toString(), "${thumbHash}.jpg")
+        TaskIO.appendLog(taskId, "Thumbnail file path: ${thumbnailFilePath}")
+
+        // 如果文件已存在，先删除（避免重复）
+        if (fileExists(thumbnailFilePath)) {
+            TaskIO.appendLog(taskId, "Existing thumbnail found, removing: ${thumbnailFilePath}")
+            let (rmExitCode, _, _) = executeWithOutput(
+                "rm",
+                ["-f", thumbnailFilePath],
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            if (rmExitCode != 0) {
+                let warnMsg = "Failed to delete existing thumbnail: ${thumbnailFilePath}"
+                TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
+                logger.warn(warnMsg)
+            }
+        }
+
+        TaskIO.appendLog(taskId, "Converting image to JPG format...")
+        let convertResult = ArchiveUtils.convertImageToJpg(tempImagePath, thumbnailFilePath, taskTempDir)
+
+        // 清理临时文件和目录
+        try {
+            if (fileExists(tempImagePath)) {
+                let (exitCode, _, _) = executeWithOutput(
+                    "rm",
+                    ["-f", tempImagePath],
+                    stdOut: ProcessRedirect.Pipe,
+                    stdErr: ProcessRedirect.Pipe
+                )
+                if (exitCode != 0) {
+                    let warnMsg = "Failed to delete temp file: ${tempImagePath}"
+                    TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
+                    logger.warn(warnMsg)
+                } else {
+                    TaskIO.appendLog(taskId, "Deleted temp file: ${tempImagePath}")
+                }
+            }
+            // 尝试删除空的临时目录
+            let (rmDirExitCode, _, _) = executeWithOutput(
+                "rmdir",
+                [taskTempDir],
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            if (rmDirExitCode != 0) {
+                let debugMsg = "Task temp directory not empty or cannot be removed: ${taskTempDir}"
+                TaskIO.appendLog(taskId, "DEBUG: ${debugMsg}")
+                logger.debug(debugMsg)
+            } else {
+                TaskIO.appendLog(taskId, "Removed task temp directory: ${taskTempDir}")
+            }
+        } catch (e: Exception) {
+            let warnMsg = "Failed to cleanup temp files for task: ${taskId}, error: ${e.message}"
+            TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
+            logger.warn(warnMsg)
+        }
+
+        if (!convertResult.success) {
+            let errorMsg = "Image conversion failed: ${convertResult.error}"
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            return ProcessResultData(false, "", errorMsg)
+        }
+
+        TaskIO.appendLog(taskId, "Image conversion successful")
+
+        // 将thumbhash存储到数据库
+        TaskIO.appendLog(taskId, "Saving thumbhash to database for archive: ${archiveId}")
+        logger.info("Saving thumbhash to database for archive: ${archiveId}")
+        let dbSuccess = ArchiveDao.updateThumbHash(archiveId, thumbHash)
+        if (!dbSuccess) {
+            let errorMsg = "Failed to save thumbhash to database for archive: ${archiveId}"
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            logger.error(errorMsg)
+            return ProcessResultData(false, "", "Failed to save thumbhash to database")
+        }
+
+        TaskIO.appendLog(taskId, "Thumbhash saved to database successfully")
+        logger.info("Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
+        TaskIO.appendLog(taskId, "Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
+        return ProcessResultData(true, thumbnailFilePath, thumbHash)
+    }
+
+    private static func parseParameters(parameters: String): (String, String) {
+        let trimmed = parameters.trimAscii()
+        if (trimmed.size == 0) {
+            return ("", "")
+        }
+        var archiveId = ""
+        var archivePath = ""
+        try {
+            let jsonVal = JsonValue.fromStr(trimmed)
+            match (jsonVal) {
+                case obj: JsonObject =>
+                    let fields = obj.getFields()
+                    if (fields.contains("archive_id")) {
+                        let value = fields["archive_id"]
+                        match (value) {
+                            case s: JsonString => archiveId = s.getValue().trimAscii()
+                            case _ => throw Exception("archive_id must be a string")
+                        }
+                    }
+                    if (fields.contains("archive_path")) {
+                        let value = fields["archive_path"]
+                        match (value) {
+                            case s: JsonString => archivePath = s.getValue().trimAscii()
+                            case _ => throw Exception("archive_path must be a string")
+                        }
+                    }
+                case _ => ()
+            }
+        } catch (_: Exception) {}
+        return (archiveId, archivePath)
+    }
+
+    private static func fail(taskId: Int64, message: String): Unit {
+        let msg = if (message.size == 0) { "Unknown error" } else { message }
+        TaskIO.appendLog(taskId, "FAILED: ${msg}")
+        MinionModel.failTask(taskId, msg)
+        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+    }
+
+    private static func escapeJson(s: String): String {
+        var escaped = s
+        escaped = escaped.replace("\\", "\\\\")
+        escaped = escaped.replace("\"", "\\\"")
+        escaped = escaped.replace("\b", "\\b")
+        escaped = escaped.replace("\f", "\\f")
+        escaped = escaped.replace("\n", "\\n")
+        escaped = escaped.replace("\r", "\\r")
+        escaped = escaped.replace("\t", "\\t")
+        return escaped
+    }
+
+    /**
+     * 检查文件是否存在（支持软链接）
+     */
+    private static func fileExists(path: String): Bool {
+        return DirectoryScanner.fileExists(path)
+    }
+
+    /**
+     * 计算图片的thumbhash（基于SHA1）
+     */
+    private static func calculateThumbHash(imagePath: String): String {
+        try {
+            // 获取文件信息
+            let filePath = Path(imagePath)
+            let file = File(filePath, Read)
+            let fileInfo = file.info
+            file.close()
+
+            // 组合内容：文件路径 + 大小（简单哈希，避免读取大文件）
+            let content = imagePath + fileInfo.size.toString()
+
+            // 使用 SHA1 算法生成哈希
+            var sha1Instance = SHA1()
+            sha1Instance.write(content.toArray())
+            let hash: Array<Byte> = sha1Instance.finish()
+
+            let result = toHexString(hash)
+            return result
+        } catch (e: Exception) {
+            let logger = getLogger("generate_thumbnail")
+            let errorMsg = "Error calculating thumbhash for ${imagePath}: ${e.message}"
+            logger.error(errorMsg)
+            // 失败时使用文件路径作为备选
+            return "fallback_${ArchiveUtils.generateFileHash(imagePath)}"
+        }
+    }
+
+    /**
+     * 执行命令
+     */
+    private static func executeWithOutput(command: String, args: Array<String>, stdOut: ProcessRedirect, stdErr: ProcessRedirect): (Int32, Array<UInt8>, Array<UInt8>) {
+        try {
+            let process = launch(command, args[0], args[1], stdOut: stdOut, stdErr: stdErr)
+            let exitCode = process.wait()
+            return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
+        } catch (e: Exception) {
+            let logger = getLogger("generate_thumbnail")
+            logger.error("Error executing command '${command}': ${e.message}")
+            return (1, Array<UInt8>(), Array<UInt8>())
+        }
+    }
+}

@@ -538,7 +538,7 @@ public class PluginService {
             let value = fields[key]
             match (value) {
                 case jsonStr: JsonString => return jsonStr.getValue()
-                case _ => return value.toString()
+                case _ => throw Exception("${key} must be a string")
             }
         }
         return ""

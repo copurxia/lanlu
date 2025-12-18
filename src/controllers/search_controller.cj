@@ -14,6 +14,21 @@ import std.collection.*
  * 搜索控制器
  */
 public class SearchController {
+
+    /**
+     * JSON字符串转义函数
+     */
+    private static func escapeJson(s: String): String {
+        var escaped = s
+        escaped = escaped.replace("\\", "\\\\")
+        escaped = escaped.replace("\"", "\\\"")
+        escaped = escaped.replace("\b", "\\b")
+        escaped = escaped.replace("\f", "\\f")
+        escaped = escaped.replace("\n", "\\n")
+        escaped = escaped.replace("\r", "\\r")
+        escaped = escaped.replace("\t", "\\t")
+        return escaped
+    }
     /**
      * 根据 arcid 获取归档的数据库内部ID
      */
@@ -129,18 +144,18 @@ public class SearchController {
             }
 
             archivesJson += "{"
-            archivesJson = archivesJson + "\"arcid\":\"${archive.id}\","
-            archivesJson = archivesJson + "\"extension\":\"${archive.extension()}\","
-            archivesJson = archivesJson + "\"filename\":\"${archive.filename}\","
+            archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
+            archivesJson = archivesJson + "\"extension\":\"${escapeJson(archive.extension())}\","
+            archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
             archivesJson = archivesJson + "\"isnew\":${isNew},"
             archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
             archivesJson = archivesJson + "\"lastreadtime\":0,"  // lastreadtime 现在从 user_archive_status 获取，暂时返回 0
             archivesJson = archivesJson + "\"pagecount\":${archive.pagecount},"
             archivesJson = archivesJson + "\"progress\":0,"  // progress 现在从 user_archive_status 获取，暂时返回 0
             archivesJson = archivesJson + "\"size\":${archive.size()},"
-            archivesJson = archivesJson + "\"summary\":\"${archive.summary}\","
-            archivesJson = archivesJson + "\"tags\":\"${archive.tags}\","
-            archivesJson = archivesJson + "\"title\":\"${archive.title}\""
+            archivesJson = archivesJson + "\"summary\":\"${escapeJson(archive.summary)}\","
+            archivesJson = archivesJson + "\"tags\":\"${escapeJson(archive.tags)}\","
+            archivesJson = archivesJson + "\"title\":\"${escapeJson(archive.title)}\""
             archivesJson += "}"
         }
         archivesJson += "]"
@@ -219,18 +234,18 @@ public class SearchController {
             }
 
             archivesJson += "{"
-            archivesJson = archivesJson + "\"arcid\":\"${archive.id}\","
-            archivesJson = archivesJson + "\"extension\":\"${archive.extension()}\","
-            archivesJson = archivesJson + "\"filename\":\"${archive.filename}\","
+            archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
+            archivesJson = archivesJson + "\"extension\":\"${escapeJson(archive.extension())}\","
+            archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
             archivesJson = archivesJson + "\"isnew\":${isNew},"
             archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
             archivesJson = archivesJson + "\"lastreadtime\":0,"  // lastreadtime 现在从 user_archive_status 获取，暂时返回 0
             archivesJson = archivesJson + "\"pagecount\":${archive.pagecount},"
             archivesJson = archivesJson + "\"progress\":0,"  // progress 现在从 user_archive_status 获取，暂时返回 0
             archivesJson = archivesJson + "\"size\":${archive.size()},"
-            archivesJson = archivesJson + "\"summary\":\"${archive.summary}\","
-            archivesJson = archivesJson + "\"tags\":\"${archive.tags}\","
-            archivesJson = archivesJson + "\"title\":\"${archive.title}\""
+            archivesJson = archivesJson + "\"summary\":\"${escapeJson(archive.summary)}\","
+            archivesJson = archivesJson + "\"tags\":\"${escapeJson(archive.tags)}\","
+            archivesJson = archivesJson + "\"title\":\"${escapeJson(archive.title)}\""
             archivesJson += "}"
         }
         archivesJson += "]"

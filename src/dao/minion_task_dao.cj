@@ -22,6 +22,10 @@ public class MinionTaskData {
     public var createdAt: String = ""
     public var startedAt: String = ""
     public var completedAt: String = ""
+    public var priority: Int32 = 50
+    public var groupId: String = ""
+    public var timeoutAt: String = ""
+    public var triggerSource: String = ""
 
     public init() {}
 }
@@ -56,7 +60,7 @@ public class MinionTaskDao {
 
                     if (!tableExists) {
                         logger.info("minion_tasks表不存在，创建新的minion_tasks表")
-                        let createTableSql = "CREATE TABLE minion_tasks (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, task_type VARCHAR(50) NOT NULL DEFAULT 'generic', status VARCHAR(50) NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, message TEXT, plugin_namespace VARCHAR(255), parameters TEXT, result TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, started_at TIMESTAMP, completed_at TIMESTAMP)"
+                        let createTableSql = "CREATE TABLE minion_tasks (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, task_type VARCHAR(50) NOT NULL DEFAULT 'generic', status VARCHAR(50) NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, message TEXT, plugin_namespace VARCHAR(255), parameters TEXT, result TEXT, priority INTEGER NOT NULL DEFAULT 50, group_id VARCHAR(255), timeout_at TIMESTAMP, trigger_source VARCHAR(50), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, started_at TIMESTAMP, completed_at TIMESTAMP)"
 
                         let stmt = conn.prepareStatement(createTableSql)
                         stmt.update()
@@ -83,7 +87,7 @@ public class MinionTaskDao {
     }
 
     /**
-     * 创建任务
+     * 创建任务（含扩展字段）
      */
     public static func createTaskData(data: MinionTaskData): Bool {
         let connOpt = DatabaseConfig.createConnection()
@@ -91,8 +95,8 @@ public class MinionTaskDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        INSERT INTO minion_tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, started_at, completed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                        INSERT INTO minion_tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
                     """)
                     try {
                         stmt.set(0, data.name)
@@ -103,17 +107,31 @@ public class MinionTaskDao {
                         stmt.set(5, data.pluginNamespace)
                         stmt.set(6, data.parameters)
                         stmt.set(7, data.result)
-                        // started_at: 如果未提供则保持为NULL
-                        if (data.startedAt.size > 0) {
-                            stmt.set(8, data.startedAt)
-                        } else {
-                            stmt.setNull(8)
-                        }
-                        // completed_at: 如果未提供则保持为NULL
-                        if (data.completedAt.size > 0) {
-                            stmt.set(9, data.completedAt)
+                        stmt.set(8, data.priority)
+                        if (data.groupId.size > 0) {
+                            stmt.set(9, data.groupId)
                         } else {
                             stmt.setNull(9)
+                        }
+                        if (data.timeoutAt.size > 0) {
+                            stmt.set(10, data.timeoutAt)
+                        } else {
+                            stmt.setNull(10)
+                        }
+                        if (data.triggerSource.size > 0) {
+                            stmt.set(11, data.triggerSource)
+                        } else {
+                            stmt.setNull(11)
+                        }
+                        if (data.startedAt.size > 0) {
+                            stmt.set(12, data.startedAt)
+                        } else {
+                            stmt.setNull(12)
+                        }
+                        if (data.completedAt.size > 0) {
+                            stmt.set(13, data.completedAt)
+                        } else {
+                            stmt.setNull(13)
                         }
 
                         let rs = stmt.query()
@@ -153,6 +171,28 @@ public class MinionTaskDao {
     }
 
     /**
+     * 创建基础任务（用于兼容旧流程）
+     */
+    public static func createBasicTask(name: String, taskType: String): Option<Int64> {
+        let data = MinionTaskData()
+        data.name = name
+        data.taskType = taskType
+        data.status = "pending"
+        data.progress = 0
+        data.message = "任务已创建"
+        data.parameters = ""
+        data.priority = 50
+        data.groupId = ""
+        data.timeoutAt = ""
+        data.triggerSource = "manual"
+        let success = createTaskData(data)
+        if (success && data.id > 0) {
+            return Option.Some(data.id)
+        }
+        return Option.None
+    }
+
+    /**
      * 根据ID获取任务
      */
     public static func getTaskDataById(id: Int64): MinionTaskData {
@@ -161,7 +201,9 @@ public class MinionTaskDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, created_at, started_at, completed_at
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                               priority, group_id, timeout_at, trigger_source,
+                               created_at, started_at, completed_at
                         FROM minion_tasks WHERE id = ?
                     """)
                     try {
@@ -180,9 +222,13 @@ public class MinionTaskDao {
                                 data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
                                 data.parameters = rs.getOrNull<String>(7) ?? ""
                                 data.result = rs.getOrNull<String>(8) ?? ""
-                                data.createdAt = rs.getOrNull<String>(9) ?? ""
-                                data.startedAt = rs.getOrNull<String>(10) ?? ""
-                                data.completedAt = rs.getOrNull<String>(11) ?? ""
+                                data.priority = rs.getOrNull<Int32>(9) ?? 50
+                                data.groupId = rs.getOrNull<String>(10) ?? ""
+                                data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                                data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                                data.createdAt = rs.getOrNull<String>(13) ?? ""
+                                data.startedAt = rs.getOrNull<String>(14) ?? ""
+                                data.completedAt = rs.getOrNull<String>(15) ?? ""
                                 return data
                             } else {
                                 return MinionTaskData()
@@ -272,8 +318,8 @@ public class MinionTaskDao {
                     let stmt = conn.prepareStatement("""
                         UPDATE minion_tasks SET
                             name = ?, task_type = ?, status = ?, progress = ?, message = ?,
-                            plugin_namespace = ?, parameters = ?, result = ?,
-                            started_at = ?, completed_at = ?
+                            plugin_namespace = ?, parameters = ?, result = ?, priority = ?, group_id = ?,
+                            timeout_at = ?, trigger_source = ?, started_at = ?, completed_at = ?
                         WHERE id = ?
                     """)
                     try {
@@ -285,19 +331,33 @@ public class MinionTaskDao {
                         stmt.set(5, data.pluginNamespace)
                         stmt.set(6, data.parameters)
                         stmt.set(7, data.result)
-                        // started_at: 如果为空则设置为 NULL
-                        if (data.startedAt.size > 0) {
-                            stmt.set(8, data.startedAt)
-                        } else {
-                            stmt.setNull(8)
-                        }
-                        // completed_at: 如果为空则设置为 NULL（在completeTask/failTask中会设置值）
-                        if (data.completedAt.size > 0) {
-                            stmt.set(9, data.completedAt)
+                        stmt.set(8, data.priority)
+                        if (data.groupId.size > 0) {
+                            stmt.set(9, data.groupId)
                         } else {
                             stmt.setNull(9)
                         }
-                        stmt.set(10, data.id)
+                        if (data.timeoutAt.size > 0) {
+                            stmt.set(10, data.timeoutAt)
+                        } else {
+                            stmt.setNull(10)
+                        }
+                        if (data.triggerSource.size > 0) {
+                            stmt.set(11, data.triggerSource)
+                        } else {
+                            stmt.setNull(11)
+                        }
+                        if (data.startedAt.size > 0) {
+                            stmt.set(12, data.startedAt)
+                        } else {
+                            stmt.setNull(12)
+                        }
+                        if (data.completedAt.size > 0) {
+                            stmt.set(13, data.completedAt)
+                        } else {
+                            stmt.setNull(13)
+                        }
+                        stmt.set(14, data.id)
 
                         stmt.update()
                         getLogger("minion_task_dao").info("更新任务", ("id", data.id))
@@ -465,7 +525,7 @@ public class MinionTaskDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, created_at, started_at, completed_at
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at
                         FROM minion_tasks
                         ORDER BY id DESC
                         LIMIT ? OFFSET ?
@@ -489,9 +549,13 @@ public class MinionTaskDao {
                             data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
                             data.parameters = rs.getOrNull<String>(7) ?? ""
                             data.result = rs.getOrNull<String>(8) ?? ""
-                            data.createdAt = rs.getOrNull<String>(9) ?? ""
-                            data.startedAt = rs.getOrNull<String>(10) ?? ""
-                            data.completedAt = rs.getOrNull<String>(11) ?? ""
+                            data.priority = rs.getOrNull<Int32>(9) ?? 50
+                            data.groupId = rs.getOrNull<String>(10) ?? ""
+                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                            data.createdAt = rs.getOrNull<String>(13) ?? ""
+                            data.startedAt = rs.getOrNull<String>(14) ?? ""
+                            data.completedAt = rs.getOrNull<String>(15) ?? ""
 
                             taskList.add(data)
                         }
@@ -700,6 +764,280 @@ public class MinionTaskDao {
     }
 
     /**
+     * 检查最近时间内是否存在指定类型和触发源的任务（防重复）
+     */
+    public static func hasRecentTask(taskType: String, triggerSource: String, withinSeconds: Int32): Bool {
+        let logger = getLogger("minion_task_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let sql = """
+                        SELECT COUNT(*) FROM minion_tasks
+                        WHERE task_type = ?
+                        AND trigger_source = ?
+                        AND created_at >= NOW() - INTERVAL '${withinSeconds} seconds'
+                    """
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        stmt.set(0, taskType)
+                        stmt.set(1, triggerSource)
+                        let rs = stmt.query()
+
+                        try {
+                            if (rs.next()) {
+                                let count = rs.getOrNull<Int32>(0) ?? 0
+                                return count > 0
+                            } else {
+                                return false
+                            }
+                        } finally {
+                            try {
+                                rs.close()
+                            } catch (closeError: Exception) {
+                                logger.warn("关闭ResultSet失败: ${closeError.message}")
+                            }
+                        }
+                    } finally {
+                        try {
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            logger.warn("关闭PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("检查最近任务失败", ("error", e.message))
+                    return false
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 按 trigger_source 查询任务
+     */
+    public static func getTasksByTriggerSource(triggerSource: String, limit: Int32): Array<MinionTaskData> {
+        let logger = getLogger("minion_task_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                               priority, group_id, timeout_at, trigger_source,
+                               created_at, started_at, completed_at
+                        FROM minion_tasks
+                        WHERE trigger_source = ?
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """)
+                    try {
+                        stmt.set(0, triggerSource)
+                        stmt.set(1, limit)
+                        let rs = stmt.query()
+
+                        var taskList = ArrayList<MinionTaskData>()
+                        try {
+                            while (rs.next()) {
+                                let data = MinionTaskData()
+                                data.id = rs.getOrNull<Int64>(0) ?? 0
+                                data.name = rs.getOrNull<String>(1) ?? ""
+                                data.taskType = rs.getOrNull<String>(2) ?? ""
+                                data.status = rs.getOrNull<String>(3) ?? ""
+                                data.progress = rs.getOrNull<Int32>(4) ?? 0
+                                data.message = rs.getOrNull<String>(5) ?? ""
+                                data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
+                                data.parameters = rs.getOrNull<String>(7) ?? ""
+                                data.result = rs.getOrNull<String>(8) ?? ""
+                                data.priority = rs.getOrNull<Int32>(9) ?? 50
+                                data.groupId = rs.getOrNull<String>(10) ?? ""
+                                data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                                data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                                data.createdAt = rs.getOrNull<String>(13) ?? ""
+                                data.startedAt = rs.getOrNull<String>(14) ?? ""
+                                data.completedAt = rs.getOrNull<String>(15) ?? ""
+
+                                taskList.add(data)
+                            }
+                            let size = taskList.size
+                            if (size > 0) {
+                                var result = Array<MinionTaskData>(size, { _ => MinionTaskData() })
+                                for (i in 0..size) {
+                                    result[i] = taskList[i]
+                                }
+                                return result
+                            } else {
+                                return Array<MinionTaskData>()
+                            }
+                        } finally {
+                            try {
+                                rs.close()
+                            } catch (closeError: Exception) {
+                                logger.warn("关闭ResultSet失败: ${closeError.message}")
+                            }
+                        }
+                    } finally {
+                        try {
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            logger.warn("关闭PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("按触发源查询任务失败", ("error", e.message))
+                    return Array<MinionTaskData>()
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return Array<MinionTaskData>()
+        }
+    }
+
+    /**
+     * 按 group_id 查询任务
+     */
+    public static func getTasksByGroupId(groupId: String): Array<MinionTaskData> {
+        let logger = getLogger("minion_task_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                               priority, group_id, timeout_at, trigger_source,
+                               created_at, started_at, completed_at
+                        FROM minion_tasks
+                        WHERE group_id = ?
+                        ORDER BY created_at ASC
+                    """)
+                    try {
+                        stmt.set(0, groupId)
+                        let rs = stmt.query()
+
+                        var taskList = ArrayList<MinionTaskData>()
+                        try {
+                            while (rs.next()) {
+                                let data = MinionTaskData()
+                                data.id = rs.getOrNull<Int64>(0) ?? 0
+                                data.name = rs.getOrNull<String>(1) ?? ""
+                                data.taskType = rs.getOrNull<String>(2) ?? ""
+                                data.status = rs.getOrNull<String>(3) ?? ""
+                                data.progress = rs.getOrNull<Int32>(4) ?? 0
+                                data.message = rs.getOrNull<String>(5) ?? ""
+                                data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
+                                data.parameters = rs.getOrNull<String>(7) ?? ""
+                                data.result = rs.getOrNull<String>(8) ?? ""
+                                data.priority = rs.getOrNull<Int32>(9) ?? 50
+                                data.groupId = rs.getOrNull<String>(10) ?? ""
+                                data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                                data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                                data.createdAt = rs.getOrNull<String>(13) ?? ""
+                                data.startedAt = rs.getOrNull<String>(14) ?? ""
+                                data.completedAt = rs.getOrNull<String>(15) ?? ""
+
+                                taskList.add(data)
+                            }
+                            let size = taskList.size
+                            if (size > 0) {
+                                var result = Array<MinionTaskData>(size, { _ => MinionTaskData() })
+                                for (i in 0..size) {
+                                    result[i] = taskList[i]
+                                }
+                                return result
+                            } else {
+                                return Array<MinionTaskData>()
+                            }
+                        } finally {
+                            try {
+                                rs.close()
+                            } catch (closeError: Exception) {
+                                logger.warn("关闭ResultSet失败: ${closeError.message}")
+                            }
+                        }
+                    } finally {
+                        try {
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            logger.warn("关闭PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("按分组ID查询任务失败", ("error", e.message))
+                    return Array<MinionTaskData>()
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return Array<MinionTaskData>()
+        }
+    }
+
+    /**
+     * 批量更新任务状态（用于批量取消）
+     */
+    public static func updateTaskStatusByGroupId(groupId: String, status: String, message: String): Int64 {
+        let logger = getLogger("minion_task_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE minion_tasks
+                        SET status = ?, message = ?, completed_at = CURRENT_TIMESTAMP
+                        WHERE group_id = ? AND status IN ('pending', 'running')
+                    """)
+                    try {
+                        stmt.set(0, status)
+                        stmt.set(1, message)
+                        stmt.set(2, groupId)
+
+                        let updateResult = stmt.update()
+                        let rowCount = updateResult.rowCount
+                        logger.info("批量更新任务状态", ("group_id", groupId), ("count", rowCount.toString()))
+                        return rowCount
+                    } finally {
+                        try {
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            logger.warn("关闭PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    logger.error("批量更新任务状态失败", ("error", e.message))
+                    return 0
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return 0
+        }
+    }
+
+    /**
      * 领取一个待执行任务（原子地将pending置为running）
      */
     public static func claimNextPendingTask(): Option<MinionTaskData> {
@@ -718,11 +1056,12 @@ public class MinionTaskDao {
                         WHERE id = (
                             SELECT id FROM minion_tasks
                             WHERE status = 'pending'
-                            ORDER BY id
+                            ORDER BY priority ASC, created_at ASC, id ASC
                             LIMIT 1
                         )
                         AND status = 'pending'
                         RETURNING id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                                  priority, group_id, timeout_at, trigger_source,
                                   created_at, started_at, completed_at
                     """)
 
@@ -739,9 +1078,13 @@ public class MinionTaskDao {
                             data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
                             data.parameters = rs.getOrNull<String>(7) ?? ""
                             data.result = rs.getOrNull<String>(8) ?? ""
-                            data.createdAt = rs.getOrNull<String>(9) ?? ""
-                            data.startedAt = rs.getOrNull<String>(10) ?? ""
-                            data.completedAt = rs.getOrNull<String>(11) ?? ""
+                            data.priority = rs.getOrNull<Int32>(9) ?? 50
+                            data.groupId = rs.getOrNull<String>(10) ?? ""
+                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                            data.createdAt = rs.getOrNull<String>(13) ?? ""
+                            data.startedAt = rs.getOrNull<String>(14) ?? ""
+                            data.completedAt = rs.getOrNull<String>(15) ?? ""
                             return Option<MinionTaskData>.Some(data)
                         }
                         return Option<MinionTaskData>.None

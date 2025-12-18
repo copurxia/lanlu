@@ -7,10 +7,10 @@ import std.sync.*
 import std.convert.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
-import stdx.encoding.json.*
 import stdx.log.*
 import cjoy.json.*
 import lrr4cj.dao.*
+import lrr4cj.models.*
 import lrr4cj.utils.*
 import dotenv.Dotenv
 
@@ -44,17 +44,12 @@ public class ShinobuService {
     private static var scanIntervalCron: String
     private static var enableAutoThumbnail: Bool
     private static var thumbnailIntervalCron: String
-    private static var maxConcurrentJobs: Int32
     private static var scanFallbackIntervalMs: Int64
     private static var enableFileWatcher: Bool
     private static var enableDbCheck: Bool
     private static var dbCheckIntervalCron: String
     private static var enableInitialDbCheck: Bool
-    
-    // 任务管理
-    private var currentJobs: Int32 = 0
-    private var jobMutex: Mutex = Mutex()
-    
+
     // 定时任务线程 - 使用字符串标识线程
     private var scanThread: Option<String> = Option<String>.None
     private var thumbnailThread: Option<String> = Option<String>.None
@@ -64,11 +59,6 @@ public class ShinobuService {
     // 任务控制标志
     private var isTaskRunning: Bool = false
     private let runningMutex: Mutex = Mutex()
-    
-    // 支持的压缩包格式
-    private static let SUPPORTED_ARCHIVE_EXTENSIONS: Array<String> = [
-        "zip", "rar", "7z", "tar", "cbz", "cbr", "cb7", "cbt", "tar.gz", "tgz"
-    ]
     
     // 支持的图片格式
     private static let SUPPORTED_IMAGE_EXTENSIONS: Array<String> = [
@@ -116,10 +106,7 @@ public class ShinobuService {
         enableAutoThumbnail = autoThumbnailStr == "true"
         
         thumbnailIntervalCron = config.read("THUMBNAIL_INTERVAL_CRON", "0 0 * * *")
-        
-        let maxJobsStr = config.read("MAX_CONCURRENT_JOBS", "8")
-        maxConcurrentJobs = Int32.parse(maxJobsStr)
-        
+
         let fallbackIntervalStr = config.read("SCAN_FALLBACK_INTERVAL_MS", "300000")
         scanFallbackIntervalMs = Int64.parse(fallbackIntervalStr)
         
@@ -169,7 +156,14 @@ public class ShinobuService {
     public static func getCachePath(): Path {
         return cachePath
     }
-    
+
+    /**
+     * 获取 bsdtar 路径
+     */
+    public static func getBsdtarPath(): String {
+        return bsdtarPath
+    }
+
     /**
      * 启动 Shinobu 服务
      */
@@ -201,25 +195,19 @@ public class ShinobuService {
             ("scan_interval_cron", scanIntervalCron),
             ("enable_auto_thumbnail", enableAutoThumbnail.toString()),
             ("thumbnail_interval_cron", thumbnailIntervalCron),
-            ("max_concurrent_jobs", maxConcurrentJobs.toString()),
             ("scan_fallback_interval_ms", scanFallbackIntervalMs.toString()),
             ("enable_file_watcher", enableFileWatcher.toString()),
             ("enable_initial_db_check", enableInitialDbCheck.toString()),
             ("enable_db_check", enableDbCheck.toString()),
             ("db_check_interval_cron", dbCheckIntervalCron))
-        
-        // 如果启用初始扫描，启动时进行一次扫描
-        if (enableInitialScan) {
-            logger.debug("Starting initial archive scan...")
-            spawnScanThread()
 
-            // 同时进行插件扫描
-            logger.debug("Starting initial plugin scan...")
-            let pluginResult = scanPlugins()
-            logger.info("Initial plugin scan completed",
-                ("processed", pluginResult.processedCount.toString()),
-                ("total_found", pluginResult.totalFound.toString()),
-                ("errors", pluginResult.errorCount.toString()))
+        // 触发启动任务（带防重复检查）
+        triggerStartupTasks()
+
+        // 如果启用初始扫描，启动时进行一次扫描（已废弃，改用任务触发）
+        // 保留旧的 spawnScanThread 逻辑以防万一，但优先使用任务触发
+        if (enableInitialScan) {
+            logger.info("Initial scan will be triggered via task system")
         } else {
             logger.info("Initial scan is disabled")
         }
@@ -246,7 +234,7 @@ public class ShinobuService {
         // 如果启用初始数据库检查，启动时进行一次检查
         if (enableInitialDbCheck) {
             logger.info("Starting initial database check...")
-            checkDatabaseFiles()
+            triggerDatabaseCheck(priority: 50, triggerSource: "startup")
         } else {
             logger.info("Initial database check is disabled")
         }
@@ -278,15 +266,14 @@ public class ShinobuService {
         if (!isRunning) {
             return true
         }
-        
+
         isRunning = false
-        
+
         // 停止所有定时任务
         stopScheduledTasks()
-        
-        // 等待所有任务完成
-        waitForAllJobs()
-        
+
+        // 注意：任务现在由 TaskPool 管理，不需要在这里等待
+
         return true
     }
     
@@ -310,820 +297,126 @@ public class ShinobuService {
     }
     
     /**
-     * 扫描压缩包文件
+     * 触发压缩包文件扫描任务
      */
     public func scanArchives(): ScanResultData {
-        let startTime = getCurrentTimeMillis()
-        var processedCount: Int64 = 0
-        var errorCount: Int64 = 0
-        var errors: Array<String> = Array<String>()
-
-        logger.debug("Starting archive scan")
-        logger.debug("Archive path", ("path", ShinobuService.archivePath.toString()))
-
-        // 检查目录是否存在
-        logger.debug("Checking if directory exists")
-        let dirExists = directoryExists(ShinobuService.archivePath.toString())
-        logger.debug("Directory exists", ("exists", dirExists.toString()))
-
+        let scanPath = ShinobuService.archivePath.toString()
+        let dirExists = directoryExists(scanPath)
         if (!dirExists) {
-            logger.error("Archive directory does not exist", ("path", ShinobuService.archivePath.toString()))
-            return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${ShinobuService.archivePath.toString()}"])
+            logger.error("Archive directory does not exist", ("path", scanPath))
+            return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${scanPath}"])
         }
 
-        logger.debug("Directory exists, starting file scan")
-        // 递归扫描目录
-        let archiveFiles = findArchiveFiles(ShinobuService.archivePath.toString())
-        logger.debug("Archive scan completed")
-        logger.info("Found archive files to process", ("count", archiveFiles.size.toString()))
-
-        // 统计软链接目录下的文件数量
-        var symlinkFileCount = 0
-        var regularFileCount = 0
-        for (filePath in archiveFiles) {
-            if (filePath.contains("/archive ori/")) {
-                symlinkFileCount += 1
-            } else {
-                regularFileCount += 1
-            }
-        }
-
-        logger.info("Archive files summary",
-            ("regular_files", regularFileCount.toString()),
-            ("symlink_files", symlinkFileCount.toString()))
-        let displayCount = if (archiveFiles.size > 10) { 10 } else { archiveFiles.size }
-        for (i in 0..displayCount) {
-            let fileTag = if (archiveFiles[i].contains("/archive ori/")) { "[SYMLINK]" } else { "[REGULAR]" }
-            logger.debug("Found archive file", ("index", (i+1).toString()), ("tag", fileTag), ("file", archiveFiles[i]))
-        }
-        if (archiveFiles.size > 10) {
-            logger.debug("Additional files not shown", ("count", (archiveFiles.size - 10).toString()))
-        }
-        
-        logger.info("Starting to process archives", ("count", archiveFiles.size.toString()))
-
-        for (i in 0..archiveFiles.size) {
-            let filePath = archiveFiles[i]
-
-            if (!isRunning) {
-                logger.warn("Scan interrupted: service stopped")
-                break // 服务已停止
-            }
-
-            // 等待可用的任务槽位
-            while (!canAddJob() && isRunning) {
-                sleep(Duration.second * 1) // 等待1秒后重试
-            }
-
-            if (!isRunning) {
-                logger.warn("Scan interrupted: service stopped")
-                break // 服务已停止
-            }
-
-            // 对于大量文件，每处理100个输出进度
-            if (archiveFiles.size > 100 && (i + 1) % 100 == 0) {
-                logger.debug("Archive processing progress", ("current", (i + 1).toString()), ("total", archiveFiles.size.toString()), ("success", processedCount.toString()), ("failed", errorCount.toString()))
-            }
-
-            logger.debug("Processing archive", ("index", (i + 1).toString()), ("total", archiveFiles.size.toString()), ("file", filePath))
-
-            // 检查文件是否仍然存在（防止扫描期间文件被删除）
-            if (!fileExists(filePath)) {
-                logger.warn("File no longer exists, skipping", ("file", filePath))
-                errorCount++
-                let errorMsg = "File no longer exists"
-                errors = addError(errors, "${filePath}: ${errorMsg}")
-                continue
-            }
-
-            // 处理单个文件
-            let result = processArchiveFile(filePath)
-            if (result.success) {
-                processedCount++
-                logger.info("Successfully processed archive", ("file", filePath), ("archive_id", result.archiveId))
-            } else {
-                errorCount++
-                logger.error("Failed to process archive", ("file", filePath), ("error", result.error))
-                if (result.error.size > 0) {
-                    errors = addError(errors, result.error)
-                } else {
-                    errors = addError(errors, "Unknown error")
-                }
-            }
-
-            // 对于非常大的文件集合，添加短暂延迟以避免系统过载
-            if (archiveFiles.size > 1000 && (i + 1) % 50 == 0) {
-                logger.debug("Taking brief pause to prevent system overload")
-                sleep(Duration.millisecond * 100)
-            }
-        }
-        
-        let duration = getCurrentTimeMillis() - startTime
-        logger.info("Archive scan completed", ("processed", processedCount.toString()), ("errors", errorCount.toString()), ("duration_ms", duration.toString()))
-        return ScanResultData(processedCount, archiveFiles.size, errorCount, errors)
+        let taskId = triggerDirectoryScan(scanPath: scanPath, priority: 30, triggerSource: "manual")
+        logger.info("Enqueued scan_directory task", ("task_id", taskId.toString()), ("path", scanPath))
+        return ScanResultData(0, 0, 0, Array<String>(), taskId: taskId)
     }
-    
-    /**
-     * 递归查找压缩包文件
-     */
 
-    private func findArchiveFiles(dirPath: String): Array<String> {
-        var result: Array<String> = Array<String>()
-
-        try {
-            if (!directoryExists(dirPath)) {
-                return result
-            }
-
-            let entries = listDirectory(dirPath)
-            logger.debug("Scanning directory", ("directory", dirPath), ("entries", entries.size.toString()))
-
-            // 如果是软链接目录且有大量文件，添加警告
-            if (dirPath.contains("archive ori") && entries.size > 500) {
-                logger.warn("Large symlink directory detected", ("entries", entries.size.toString()))
-                logger.warn("Large symlink directory found: ${dirPath} with ${entries.size} entries")
-            }
-
-            for (entry in entries) {
-                let fullPath = joinPath(dirPath, entry)
-
-                // 减少详细日志输出以提高性能
-                if (result.size % 100 == 0 || dirPath.contains("archive ori")) {
-                    logger.debug("Processing directory entry", ("entry", entry), ("archives_found", result.size.toString()))
-                }
-
-                // 检查是否为软链接目录
-                let actualPath = FileUtils.resolvePath(fullPath)
-
-                if (directoryExists(fullPath)) {
-                    // 递归处理子目录（包括软链接目录）
-                    // 重要修复：始终使用软链接路径进行递归，以保持路径一致性
-                    // 这样可以确保 calculateRelativePath 函数能正确计算相对路径
-                    let subFiles = findArchiveFiles(fullPath)
-                    result = combineArrays(result, subFiles)
-
-                    // 递归完成后输出进度
-                    if (subFiles.size > 0) {
-                        logger.debug("Completed scanning entry", ("entry", entry), ("sub_archives", subFiles.size.toString()), ("total_archives", result.size.toString()))
-                    }
-                } else if (fileExists(fullPath)) {
-                    // 检查文件扩展名（使用实际路径的扩展名，但记录软链接路径）
-                    let ext = getFileExtension(actualPath)
-
-                    // 检查扩展名是否匹配
-                    var isSupported = false
-                    for (supportedExt in SUPPORTED_ARCHIVE_EXTENSIONS) {
-                        if (ext == supportedExt) {
-                            isSupported = true
-                            break
-                        }
-                    }
-
-                    if (isSupported) {
-                        // 使用原始路径（软链接路径）而不是实际路径，以便用户可以通过软链接访问文件
-                        result = addFile(result, fullPath)
-
-                        // 对于软链接目录下的文件，每100个输出一次进度
-                        if (fullPath.contains("archive ori") && result.size % 100 == 0) {
-                            logger.debug("Symlink directory scan progress", ("archives_found", result.size.toString()))
-                        }
-                    }
-                }
-            }
-
-            logger.debug("Completed scanning directory", ("directory", dirPath), ("total_archives", result.size.toString()))
-        } catch (e: Exception) {
-            // 记录错误但继续处理其他文件
-            logger.error("Error scanning directory", ("directory", dirPath), ("error", e.message))
-            logger.error("Error scanning directory ${dirPath}: ${e.message}")
-        }
-
-        return result
+    public func triggerDirectoryScan(scanPath!: String = "", priority!: Int32 = 30, triggerSource!: String = "manual"): Int64 {
+        let targetPath = if (scanPath.size > 0) { scanPath } else { ShinobuService.archivePath.toString() }
+        let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
+        let params =
+            "{\"scan_path\":\"${escapeJson(targetPath)}\",\"trigger_source\":\"${escapeJson(source)}\",\"child_priority\":${priority}}"
+        let task = MinionModel.createTaskWithOptions("目录扫描", "scan_directory", params, priority, "", source)
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        return task.id
     }
 
     /**
-     * 扫描插件文件
+     * 触发数据库一致性检查任务
      */
-    public func scanPlugins(): ScanResultData {
-        let startTime = getCurrentTimeMillis()
-        var processedCount: Int64 = 0
-        var errorCount: Int64 = 0
-        var errors: Array<String> = Array<String>()
-
-        logger.debug("Starting plugin scan")
-        logger.debug("Plugin path", ("path", ShinobuService.pluginPath.toString()))
-
-        // 检查目录是否存在
-        if (!directoryExists(ShinobuService.pluginPath.toString())) {
-            logger.error("Plugin directory does not exist", ("path", ShinobuService.pluginPath.toString()))
-            return ScanResultData(0, 0, 1, ["Plugin directory does not exist: ${ShinobuService.pluginPath.toString()}"])
-        }
-
-        // 扫描插件文件
-        let pluginFiles = findPluginFiles(ShinobuService.pluginPath.toString())
-        logger.info("Found plugin files to process", ("count", pluginFiles.size.toString()))
-
-        // 处理每个插件文件
-        for (pluginFile in pluginFiles) {
-            try {
-                logger.debug("Processing plugin", ("file", pluginFile))
-                let result = processPluginFile(pluginFile)
-
-                if (result.success) {
-                    processedCount++
-                    logger.debug("Successfully processed plugin", ("file", pluginFile), ("archive_id", result.archiveId))
-                } else {
-                    errorCount++
-                    let errorMsg = "Failed to process plugin ${pluginFile}: ${result.error}"
-                    errors = addError(errors, errorMsg)
-                    logger.error(errorMsg)
-                }
-            } catch (e: Exception) {
-                errorCount++
-                let errorMsg = "Error processing plugin ${pluginFile}: ${e.message}"
-                errors = addError(errors, errorMsg)
-                logger.error(errorMsg)
-            }
-        }
-
-        let endTime = getCurrentTimeMillis()
-        let duration = endTime - startTime
-
-        logger.info("Plugin scan completed",
-            ("processed", processedCount.toString()),
-            ("errors", errorCount.toString()),
-            ("duration_ms", duration.toString()))
-
-        return ScanResultData(processedCount, pluginFiles.size, 0, errors)
+    public func triggerDatabaseCheck(priority!: Int32 = 50, triggerSource!: String = "manual"): Int64 {
+        let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
+        let params = "{}"
+        let task = MinionModel.createTaskWithOptions("数据库检查", "check_database", params, priority, "", source)
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        logger.info("Enqueued check_database task", ("task_id", task.id.toString()))
+        return task.id
     }
 
     /**
-     * 查找插件文件
+     * 触发插件扫描任务
      */
-    private func findPluginFiles(dirPath: String): Array<String> {
-        var result: Array<String> = Array<String>()
+    public func triggerPluginScan(priority!: Int32 = 50, triggerSource!: String = "manual"): Int64 {
+        let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
+        let params = "{}"
+        let task = MinionModel.createTaskWithOptions("插件扫描", "scan_plugins", params, priority, "", source)
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        logger.info("Enqueued scan_plugins task", ("task_id", task.id.toString()))
+        return task.id
+    }
 
-        try {
-            if (!directoryExists(dirPath)) {
-                return result
-            }
+    /**
+     * 触发缩略图生成任务
+     */
+    public func triggerThumbnailGeneration(archiveId: String, archivePath: String, priority!: Int32 = 40, triggerSource!: String = "manual"): Int64 {
+        let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
+        let params = "{\"archive_id\":\"${escapeJson(archiveId)}\",\"archive_path\":\"${escapeJson(archivePath)}\"}"
+        let task = MinionModel.createTaskWithOptions("生成缩略图", "generate_thumbnail", params, priority, "", source)
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        logger.info("Enqueued generate_thumbnail task", ("task_id", task.id.toString()), ("archive_id", archiveId))
+        return task.id
+    }
 
-            let entries = listDirectory(dirPath)
-            logger.debug("Scanning plugin directory", ("directory", dirPath), ("entries", entries.size.toString()))
-
-            // 扫描EHentai相关的插件类型目录
-            let pluginTypes = ["Metadata", "Login", "Download"]
-
-            for (entry in entries) {
-                let fullPath = joinPath(dirPath, entry)
-
-                if (directoryExists(fullPath)) {
-                    // 检查是否是插件类型目录
-                    for (pluginType in pluginTypes) {
-                        if (entry == pluginType) {
-                            let pluginFiles = findPluginFilesInType(fullPath)
-                            result = combineArrays(result, pluginFiles)
-                            break
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            logger.error("Error scanning plugin directory", ("directory", dirPath), ("error", e.message))
+    /**
+     * 触发启动任务（每次启动都执行）
+     */
+    private func triggerStartupTasks(): Unit {
+        // 在创建启动任务之前，先清理孤儿任务
+        // 这确保了：
+        // 1. 应用启动时，之前的任务被正确清理
+        // 2. ShinobuService 单独重启时，之前的任务被正确清理
+        // 3. 新创建的启动任务不会被错误标记为失败
+        logger.info("Cleaning up orphaned tasks before creating startup tasks")
+        let recoveredCount = MinionTaskDao.recoverOrphanedTasks()
+        if (recoveredCount > 0) {
+            logger.info("Recovered orphaned tasks", ("count", recoveredCount.toString()))
         }
 
-        return result
-    }
-
-    /**
-     * 在指定类型目录中查找插件文件
-     */
-    private func findPluginFilesInType(typeDirPath: String): Array<String> {
-        var result: Array<String> = Array<String>()
-
-        try {
-            let entries = listDirectory(typeDirPath)
-
-            for (entry in entries) {
-                let fullPath = joinPath(typeDirPath, entry)
-
-                if (fileExists(fullPath) && entry.endsWith(".pm") && entry.contains("EHentai")) {
-                    result = addFile(result, fullPath)
-                    logger.debug("Found EHentai plugin", ("file", fullPath))
-                }
-            }
-        } catch (e: Exception) {
-            logger.error("Error scanning plugin type directory", ("directory", typeDirPath), ("error", e.message))
+        // 1. 触发目录扫描任务（如果启用初始扫描）
+        if (enableInitialScan) {
+            let taskId = triggerDirectoryScan(priority: 30, triggerSource: "startup")
+            logger.info("Triggered startup scan_directory task", ("task_id", taskId.toString()))
         }
 
-        return result
-    }
-
-    /**
-     * 处理插件文件
-     */
-    private func processPluginFile(filePath: String): ProcessResultData {
-        try {
-            // 解析插件路径获取类型和文件名
-            let pathParts = filePath.split("/")
-            let fileName = pathParts[pathParts.size - 1]
-            let pluginType = if (pathParts.size >= 2) { pathParts[pathParts.size - 2] } else { "Unknown" }
-
-            logger.debug("Processing plugin file", ("file", fileName), ("type", pluginType), ("path", filePath))
-
-            // 使用Perl解析插件元数据
-            let pluginMetadata = parsePluginMetadataWithPerl(filePath, pluginType)
-
-            // 检查插件是否已存在（通过namespace检查）
-            if (PluginDao.exists(pluginMetadata.namespace)) {
-                logger.debug("Plugin already exists", ("namespace", pluginMetadata.namespace))
-                return ProcessResultData(true, pluginMetadata.namespace, "")
-            }
-
-            if (pluginMetadata.name.size == 0) {
-                return ProcessResultData(false, "", "Failed to parse plugin metadata")
-            }
-
-            // 创建插件数据记录
-            var pluginData = PluginData()
-            // id会由数据库自动生成
-            pluginData.name = pluginMetadata.name
-            pluginData.namespace = pluginMetadata.namespace
-            pluginData.version = pluginMetadata.version
-            pluginData.description = pluginMetadata.description
-            pluginData.author = pluginMetadata.author
-            pluginData.entry = fileName
-            pluginData.plugin_type = pluginType
-            pluginData.tags = pluginMetadata.tags
-            pluginData.permissions = pluginMetadata.permissions
-            pluginData.enabled = true
-            pluginData.installed = true
-            // config字段已移除，现在配置存储在parameters中
-            pluginData.created_at = DateTime.now().toUnixTimeStamp().toSeconds().toString()
-            pluginData.updated_at = pluginData.created_at
-
-            // 保存到数据库
-            if (PluginDao.create(pluginData)) {
-                logger.info("Successfully registered plugin",
-                    ("namespace", pluginData.namespace),
-                    ("name", pluginData.name),
-                    ("type", pluginData.plugin_type))
-                return ProcessResultData(true, pluginData.namespace, "")
-            } else {
-                return ProcessResultData(false, "", "Failed to save plugin to database")
-            }
-        } catch (e: Exception) {
-            return ProcessResultData(false, "", "Error processing plugin file: ${e.message}")
-        }
-    }
-
-    
-    /**
-     * 使用Perl解析插件元数据
-     */
-    private func parsePluginMetadataWithPerl(filePath: String, pluginType: String): PluginMetadata {
-        var metadata = PluginMetadata()
-
-        try {
-            let perlScript = """
-            use strict;
-            use warnings;
-            use JSON;
-
-            my \$plugin_file = '${filePath}';
-            my \$plugin_class = '';
-
-            # 从文件路径推断类名
-            \$plugin_file =~ s.*/([^/]+)\\.pm.\\$1.;
-            my \$full_class = "LANraragi::Plugin::${pluginType}::\$plugin_file";
-
-            eval {
-                require \$plugin_file;
-                import \$full_class;
-                if (\$full_class->can('plugin_info')) {
-                    my %info = \$full_class->plugin_info();
-                    print encode_json(\\%info);
-                } else {
-                    # 如果没有plugin_info方法，使用文件名作为默认信息
-                    print '{"name":"' . \$plugin_file . '","namespace":"lanraragi.ehentai.' . lc(\$plugin_file) . '","version":"1.0","description":"EHentai plugin","author":"Unknown","tags":"","permissions":""}';
-                }
-            };
-
-            if (\$@) {
-                print STDERR "Error loading plugin: \$@";
-                # 即使出错也返回基本信息
-                print '{"name":"' . \$plugin_file . '","namespace":"lanraragi.ehentai.' . lc(\$plugin_file) . '","version":"1.0","description":"EHentai plugin","author":"Unknown","tags":"","permissions":""}';
-            }
-            """
-
-            let (exitCode, stdout, stderr) = executeWithOutput("perl", ["-e", perlScript], ProcessRedirect.Pipe, ProcessRedirect.Pipe)
-
-            if (exitCode == 0 && stdout.size > 0) {
-                let jsonStr = String.fromUtf8(stdout)
-                let json = JsonValue.fromStr(jsonStr)
-                match (json) {
-                    case jsonObj: JsonObject =>
-                        let nameValue = getJsonString(jsonObj, "name")
-                        metadata.name = if (nameValue.size > 0) { nameValue } else { Path(filePath).fileName.toString() }
-                        metadata.namespace = getJsonString(jsonObj, "namespace")
-                        metadata.version = getJsonString(jsonObj, "version")
-                        metadata.description = getJsonString(jsonObj, "description")
-                        metadata.author = getJsonString(jsonObj, "author")
-                        metadata.tags = getJsonString(jsonObj, "tags")
-                        metadata.permissions = getJsonString(jsonObj, "permissions")
-                    case _ =>
-                        // 解析失败，使用文件名作为默认信息
-                        let fileName = Path(filePath).fileName.toString()
-                        metadata.name = fileName
-                        metadata.namespace = "lanraragi.ehentai." + fileName
-                        metadata.version = "1.0"
-                        metadata.description = "EHentai plugin"
-                        metadata.author = "Unknown"
-                }
-            } else {
-                // 执行失败，使用文件名作为默认信息
-                let fileName = Path(filePath).fileName.toString()
-                metadata.name = fileName
-                metadata.namespace = "lanraragi.ehentai." + fileName
-                metadata.version = "1.0"
-                metadata.description = "EHentai plugin"
-                metadata.author = "Unknown"
-                logger.warn("Failed to execute plugin metadata parsing", ("file", filePath), ("stderr", String.fromUtf8(stderr)))
-            }
-        } catch (e: Exception) {
-            logger.error("Error parsing plugin metadata", ("file", filePath), ("error", e.message))
-            // 异常情况下，使用文件名作为默认信息
-            let fileName = Path(filePath).fileName.toString()
-            metadata.name = fileName
-            metadata.namespace = "lanraragi.ehentai." + fileName
-            metadata.version = "1.0"
-            metadata.description = "EHentai plugin"
-            metadata.author = "Unknown"
+        // 2. 触发数据库检查任务（如果启用初始数据库检查）
+        if (enableInitialDbCheck) {
+            let taskId = triggerDatabaseCheck(priority: 50, triggerSource: "startup")
+            logger.info("Triggered startup check_database task", ("task_id", taskId.toString()))
         }
 
-        return metadata
+        // 3. 触发插件扫描任务（总是在启动时执行）
+        let taskId = triggerPluginScan(priority: 50, triggerSource: "startup")
+        logger.info("Triggered startup scan_plugins task", ("task_id", taskId.toString()))
     }
 
-    /**
-     * 添加错误信息到数组
-     */
-    private func addError(errors: Array<String>, error: String): Array<String> {
-        let result = Array<String>(errors.size + 1, { i =>
-            if (i < errors.size) {
-                errors[i]
-            } else {
-                error
-            }
-        })
-        return result
-    }
-
-    /**
-     * 从JsonObject获取字符串值的辅助函数
-     */
-    private func getJsonString(jsonObj: JsonObject, key: String): String {
-        let fields = jsonObj.getFields()
-        if (fields.contains(key)) {
-            let value = fields[key]
-            match (value) {
-                case jsonStr: JsonString =>
-                    return jsonStr.getValue()
-                case _ =>
-                    return value.toString()
-            }
-        }
-        return ""
-    }
-
-    /**
-     * 处理单个压缩包文件（公共方法，用于上传功能）
-     */
-    public func processUploadedArchiveFile(filePath: String): ProcessResultData {
-        return processArchiveFile(filePath)
-    }
-    
     /**
      * 检查文件是否存在（公共方法）
      */
     public func checkFileExists(path: String): Bool {
         return fileExists(path)
     }
-    
+
+    private func escapeJson(value: String): String {
+        var escaped = value
+        escaped = escaped.replace("\\", "\\\\")
+        escaped = escaped.replace("\"", "\\\"")
+        escaped = escaped.replace("\b", "\\b")
+        escaped = escaped.replace("\f", "\\f")
+        escaped = escaped.replace("\n", "\\n")
+        escaped = escaped.replace("\r", "\\r")
+        escaped = escaped.replace("\t", "\\t")
+        return escaped
+    }
+
     /**
      * 生成文件哈希（公共方法）
      */
     public func generateFileHashForUpload(filePath: String): String {
-        return generateFileHash(filePath)
+        return ArchiveUtils.generateFileHash(filePath)
     }
-    
-    /**
-     * 处理单个压缩包文件
-     */
-    private func processArchiveFile(filePath: String): ProcessResultData {
-        // 检查是否可以添加新任务
-        if (!canAddJob()) {
-            return ProcessResultData(false, "", "Maximum concurrent jobs reached")
-        }
-        
-        // 增加任务计数
-        incrementJobCount()
-        
-        try {
-            // 0. 检查文件是否已经存在于数据库中，并获取其信息
-            // 使用原始路径计算相对路径，保留软链接
-            let relativePath = calculateRelativePath(filePath)
-            let fileName = getFullFileName(filePath)
-            let existingArchive = ArchiveDao.getByPathAndFilename(relativePath, fileName)
-            
-            match (existingArchive) {
-                case Some(archive) =>
-                    logger.info("Archive already exists in database: ${filePath}")
 
-                    // 检查是否需要更新相对路径（针对现有空的relative_path记录）
-                    var shouldUpdateRelativePath = false
-                    if (archive.relative_path.size == 0) {
-                        shouldUpdateRelativePath = true
-                        logger.info("Archive has empty relative_path, updating: ${archive.id}")
-                    }
 
-                    // 检查是否需要生成缩略图
-                    if (archive.thumbhash.size == 0) {
-                        logger.info("Thumbnail hash is empty, generating thumbnail for existing archive: ${archive.id}")
-
-                        // 生成缩略图
-                        let thumbnailResult = generateThumbnail(filePath, archive.id)
-                        if (!thumbnailResult.success) {
-                            decrementJobCount()
-                            return thumbnailResult
-                        }
-
-                        // 生成缩略图的hash并更新到数据库
-                        if (thumbnailResult.success && thumbnailResult.archiveId.size > 0) {
-                            let thumbHash = generateFileHash(thumbnailResult.archiveId)
-                            let hashUpdateResult = ArchiveDao.updateThumbHash(archive.id, thumbHash)
-                            if (!hashUpdateResult) {
-                                logger.error("Failed to update thumbnail hash for archive: ${archive.id}")
-                            } else {
-                                logger.info("Updated thumbnail hash for existing archive: ${archive.id}")
-                            }
-                        }
-
-                        decrementJobCount()
-                        return ProcessResultData(true, archive.id, "")
-                    } else {
-                        // 如果只需要更新相对路径，就在这里更新
-                        if (shouldUpdateRelativePath) {
-                            // 使用专门的updateArchiveRelativePath方法来更新相对路径
-                            let updateResult = ArchiveDao.updateArchiveRelativePath(archive.id, relativePath)
-                            if (!updateResult) {
-                                logger.error("Failed to update relative path for archive: ${archive.id}")
-                            } else {
-                                logger.info("Updated relative path for existing archive: ${archive.id} -> ${relativePath}")
-                            }
-                        }
-
-                        decrementJobCount()
-                        logger.info("Archive already has thumbnail: ${filePath}")
-                        return ProcessResultData(false, "", "Archive already exists with thumbnail")
-                    }
-                case None =>
-                    // 文件不存在，继续正常处理流程
-                    logger.debug("Archive not found in database, processing new file: ${filePath}")
-            }
-            
-            // 1. 计算归档中的图片数量
-            let pageCount = countImagesInArchive(filePath)
-            logger.info("Archive ${filePath} contains ${pageCount} images")
-            
-            // 2. 将文件信息添加到数据库
-            let dbResult = addArchiveToDatabase(filePath)
-            if (!dbResult.success) {
-                decrementJobCount()
-                return dbResult
-            }
-            
-            // 3. 更新页数到数据库
-            let pageUpdateResult = ArchiveDao.updatePageCount(dbResult.archiveId, pageCount)
-            if (!pageUpdateResult) {
-                logger.error("Failed to update page count for archive: ${dbResult.archiveId}")
-            }
-            
-            // 4. 生成缩略图
-            let thumbnailResult = generateThumbnail(filePath, dbResult.archiveId)
-            if (!thumbnailResult.success) {
-                decrementJobCount()
-                return thumbnailResult
-            }
-            
-            // 5. 生成缩略图的hash并更新到数据库
-            if (thumbnailResult.success && thumbnailResult.archiveId.size > 0) {
-                let thumbHash = generateFileHash(thumbnailResult.archiveId)
-                let hashUpdateResult = ArchiveDao.updateThumbHash(dbResult.archiveId, thumbHash)
-                if (!hashUpdateResult) {
-                    logger.error("Failed to update thumbnail hash for archive: ${dbResult.archiveId}")
-                } else {
-                    logger.info("Updated thumbnail hash for archive: ${dbResult.archiveId}")
-                }
-            }
-            
-            // 任务完成，减少计数
-            decrementJobCount()
-            return ProcessResultData(true, dbResult.archiveId, "")
-        } catch (e: Exception) {
-            // 发生错误，减少计数
-            decrementJobCount()
-            return ProcessResultData(false, "", "Error processing file: ${e.message}")
-        }
-    }
-    
-    /**
-     * 将压缩包信息添加到数据库
-     */
-    private func addArchiveToDatabase(filePath: String): ProcessResultData {
-        try {
-            // 生成基于 SHA1 的 archive ID
-            let archiveId = generateArchiveId(filePath)
-            
-            // 获取文件信息
-            let fileName = getFullFileName(filePath)  // 使用完整文件名
-            let defaultTitle = generateDefaultTitle(filePath)  // 生成不带后缀的标题
-            let fileSize = getArchiveFileSize(filePath)
-            let fileModTime = getArchiveFileModTime(filePath)
-            
-            // 计算相对于 archivePath 的相对路径（不包含文件名）
-            let relativePath = calculateRelativePath(filePath)
-            
-            // 使用 DAO 层执行数据库插入操作
-            let success = ArchiveDao.insertArchive(archiveId, defaultTitle, fileName, fileSize, fileModTime, relativePath)
-            if (!success) {
-                return ProcessResultData(false, "", "Failed to create archive record in database")
-            }
-            
-            // 生成缩略图
-            let thumbnailResult = generateThumbnail(filePath, archiveId)
-            if (!thumbnailResult.success) {
-                logger.error("Failed to generate thumbnail for archive: ${archiveId}")
-                // 缩略图生成失败不应该阻止归档添加，只记录错误
-            }
-            
-            return ProcessResultData(true, archiveId, "")
-        } catch (e: Exception) {
-            let error = "Exception adding archive to database: ${e.message}"
-            logger.error(error)
-            return ProcessResultData(false, "", error)
-        }
-    }
-    
-    
-    /**
-     * 生成缩略图
-     */
-    private func generateThumbnail(archivePath: String, archiveId: String): ProcessResultData {
-        // 对于文件操作，需要解析软链接到实际路径
-        let actualArchivePath = FileUtils.resolvePath(archivePath)
-        
-        // 1. 列出压缩包内容
-        let entries = listArchiveEntries(actualArchivePath)
-        if (entries.size == 0) {
-            return ProcessResultData(false, "", "No entries found in archive")
-        }
-        
-        // 2. 找到第一个图片文件
-        var firstImageEntry: String = ""
-        for (entry in entries) {
-            let ext = getFileExtension(entry)
-            // 检查扩展名是否匹配
-            var isImageFile = false
-            for (imgExt in SUPPORTED_IMAGE_EXTENSIONS) {
-                if (ext == imgExt) {
-                    isImageFile = true
-                    break
-                }
-            }
-            if (isImageFile) {
-                firstImageEntry = entry
-                break
-            }
-        }
-        
-        if (firstImageEntry.size == 0) {
-            return ProcessResultData(false, "", "No image files found in archive")
-        }
-        
-        // 3. 提取图片文件到临时目录
-        let tempImagePath = joinPath(cachePath.toString(), "${archiveId}_temp.${getFileExtension(firstImageEntry)}")
-        let extractResult = extractArchiveEntry(actualArchivePath, firstImageEntry, tempImagePath)
-        if (!extractResult.success) {
-            return extractResult
-        }
-        
-        // 4. 使用ImageMagick进行分辨率转换和格式转换为JPG
-        let thumbnailFilePath = joinPath(thumbnailPath.toString(), "${archiveId}.jpg")
-        let convertResult = convertImageToJpg(tempImagePath, thumbnailFilePath)
-        
-        // 5. 清理临时文件
-        try {
-            if (fileExists(tempImagePath)) {
-                // 使用系统命令删除文件
-                let (exitCode, _, _) = executeWithOutput(
-                    "rm",
-                    ["-f", tempImagePath],
-                    stdOut: ProcessRedirect.Pipe,
-                    stdErr: ProcessRedirect.Pipe
-                )
-                if (exitCode != 0) {
-                    logger.warn("Failed to delete temp file: ${tempImagePath}")
-                }
-            }
-        } catch (e: Exception) {
-            logger.warn("Failed to delete temp file: ${tempImagePath}, error: ${e.message}")
-        }
-        
-        if (!convertResult.success) {
-            return convertResult
-        }
-        
-        logger.info("Successfully generated thumbnail for archive: ${archiveId}")
-        return ProcessResultData(true, thumbnailFilePath, "")
-    }
-    
-    /**
-     * 列出压缩包中的文件
-     */
-    private func listArchiveEntries(archivePath: String): Array<String> {
-        try {
-            // 检查文件是否存在
-            if (!fileExists(archivePath)) {
-                logger.error("Archive file does not exist: ${archivePath}")
-                return Array<String>()
-            }
-            
-            logger.debug("Attempting to list archive entries: ${archivePath}")
-            
-            // 使用 bsdtar 的 -tf 选项列出文件
-            let (exitCode, stdout, stderr) = executeWithOutput(
-                bsdtarPath,
-                ["-tf", archivePath],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
-            
-            if (exitCode == 0) {
-                // 将字节数组转换为字符串
-                let output = String.fromUtf8(stdout)
-                // 将输出按行分割，去除空行
-                let lines = output.split('\n')
-                var entries = Array<String>()
-                
-                for (line in lines) {
-                    // 简单处理：直接使用原字符串，如果非空则添加
-                    if (line.size > 0) {
-                        let newEntry = line
-                        entries = combineArrays(entries, Array<String>(1, { _ => newEntry }))
-                    }
-                }
-                
-                logger.debug("Found ${entries.size} entries in archive (UTF-8)")
-                return entries
-            } else {
-                let error = String.fromUtf8(stderr)
-                logger.error("Failed to list archive entries: ${error}")
-                return Array<String>()
-            }
-        } catch (e: Exception) {
-            logger.error("Exception listing archive entries: ${e.message}")
-            return Array<String>()
-        }
-    }
-    
-    /**
-     * 计算归档文件中的图片数量
-     */
-    private func countImagesInArchive(archivePath: String): Int32 {
-        // 对于文件操作，需要解析软链接到实际路径
-        let actualArchivePath = FileUtils.resolvePath(archivePath)
-        let entries = listArchiveEntries(actualArchivePath)
-        var imageCount: Int32 = 0
-
-        for (entry in entries) {
-            let ext = getFileExtension(entry)
-            // 检查扩展名是否匹配
-            var isImageFile = false
-            for (imgExt in SUPPORTED_IMAGE_EXTENSIONS) {
-                if (ext == imgExt) {
-                    isImageFile = true
-                    break
-                }
-            }
-            if (isImageFile) {
-                imageCount++
-            }
-        }
-
-        logger.debug("Found ${imageCount} images in archive: ${archivePath} (actual: ${actualArchivePath})")
-        return imageCount
-    }
-    
     /**
      * 生成文件的hash值
      */
@@ -1177,7 +470,7 @@ public class ShinobuService {
                 // 将标准输出的内容写入目标文件
                 try {
                     // 使用传入的 outputPath，而不是硬编码目录
-                    let outputDir = getParentDirectory(outputPath)
+                    let outputDir = FileUtils.getParentDirectory(outputPath)
                     if (!directoryExists(outputDir)) {
                         Directory.create(outputDir, recursive: true)
                     }
@@ -1209,105 +502,7 @@ public class ShinobuService {
             return ProcessResultData(false, "", error)
         }
     }
-    
-    /**
-     * 获取归档中的文件列表（不解压）
-     */
-    public func getArchiveFileList(archiveId: String): Array<String> {
-        logger.info("Getting file list for archive: ${archiveId}")
 
-        // 检查归档是否存在
-        let archive = ArchiveDao.getArchiveById(archiveId)
-        if (archive.id.size == 0) {
-            logger.error("Archive not found: ${archiveId}")
-            return []
-        }
-
-        let archivePath = joinPath(joinPath(ShinobuService.getArchivePath().toString(), archive.relative_path), archive.filename)
-        logger.info("Archive path: ${archivePath}")
-
-        // 检查归档文件是否存在（支持软链接）
-        if (!fileExists(archivePath)) {
-            logger.error("Archive file not found: ${archivePath}")
-            return []
-        }
-
-        // 对于文件操作，需要解析软链接到实际路径
-        let actualArchivePath = FileUtils.resolvePath(archivePath)
-        logger.info("Actual archive path for operations: ${actualArchivePath}")
-
-        // 使用 bsdtar 列出归档内容
-        try {
-            logger.info("Executing bsdtar -tf ${actualArchivePath}")
-            let (exitCode, stdout, stderr) = executeWithOutput(
-                bsdtarPath,
-                ["-tf", actualArchivePath],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
-
-            logger.info("bsdtar exit code: ${exitCode}")
-
-            if (exitCode == 0) {
-                // 解析输出，获取文件列表
-                let output = String.fromUtf8(stdout)
-                logger.info("Archive content output: ${output}")
-                let lines = output.split("\n")
-                var fileList: ArrayList<String> = ArrayList<String>()
-
-                for (line in lines) {
-                    if (line.size > 0 && isImageFile(line)) {
-                        fileList.add(line)
-                        logger.info("Found image file: ${line}")
-                    }
-                }
-
-                logger.info("Total image files found: ${fileList.size}")
-                return fileList.toArray()
-            } else {
-                let error = String.fromUtf8(stderr)
-                logger.error("Failed to list archive contents: ${error}")
-                return []
-            }
-        } catch (e: Exception) {
-            logger.error("Exception listing archive contents: ${e.message}")
-            return []
-        }
-    }
-    
-    /**
-     * 从压缩包中提取单个文件到内存流
-     */
-    public func extractArchiveEntryToStream(archivePath: String, entryName: String): (Int32, Array<UInt8>, Array<UInt8>) {
-        try {
-            logger.debug("Attempting to extract entry: ${entryName} from archive: ${archivePath}")
-
-            // 对于文件操作，需要解析软链接到实际路径
-            let actualArchivePath = FileUtils.resolvePath(archivePath)
-            logger.debug("Using actual archive path for extraction: ${actualArchivePath}")
-
-            // 使用 bsdtar 的 -xO 选项直接输出到标准输出
-            let (exitCode, stdout, stderr) = executeWithOutput(
-                bsdtarPath,
-                ["-xO", "-f", actualArchivePath, entryName],
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
-
-            if (exitCode == 0) {
-                logger.info("Successfully extracted ${entryName} to stream")
-                return (Int32(exitCode), stdout, stderr)
-            } else {
-                let error = String.fromUtf8(stderr)
-                logger.error("Failed to extract archive entry: ${error}")
-                return (Int32(exitCode), Array<UInt8>(), stderr)
-            }
-        } catch (e: Exception) {
-            logger.error("Exception extracting archive entry: ${e.message}")
-            return (1, Array<UInt8>(), Array<UInt8>())
-        }
-    }
-    
     /**
      * 检查文件是否为图片文件
      */
@@ -1327,12 +522,19 @@ public class ShinobuService {
     }
     
     /**
-     * 获取文件扩展名
+     * 获取文件扩展名（小写）
      */
     private func getFileExtension(filePath: String): String {
-        let parts = filePath.split(".")
-        if (parts.size > 1) {
-            return parts[parts.size - 1]
+        // 先提取文件名（去除路径）
+        let pathParts = filePath.split("/")
+        let fileName = if (pathParts.size > 0) { pathParts[pathParts.size - 1] } else { filePath }
+
+        // 再从文件名中提取扩展名
+        let nameParts = fileName.split(".")
+        if (nameParts.size > 1) {
+            let ext = nameParts[nameParts.size - 1]
+            // 转换为小写
+            return ext.toAsciiLower()
         }
         return "tmp"  // 默认扩展名
     }
@@ -1651,298 +853,35 @@ public class ShinobuService {
         // 获取当前时间的毫秒数
         return getTimeMillis()
     }
-    
-    
-    private func directoryExists(path: String): Bool {
-        try {
-            // 检查路径是否包含有效的 Unicode 字符
-            try {
-                let dirPath = Path(path)
-                if (exists(dirPath)) {
-                    let fileInfo = FileInfo(dirPath)
-                    
-                    // 如果是软链接，获取其目标并检查目标目录
-                    if (fileInfo.isSymbolicLink()) {
-                        try {
-                            // 读取软链接的目标路径
-                            let targetPath = SymbolicLink.readFrom(path, recursive: false)
-                            logger.info("Path ${path} is a symbolic link pointing to ${targetPath.toString()}")
-                            
-                            // 检查目标路径是否存在
-                            if (exists(targetPath)) {
-                                let targetFileInfo = FileInfo(targetPath)
-                                return targetFileInfo.isDirectory()
-                            }
-                            return false
-                        } catch (e: FSException) {
-                            logger.error("Failed to read symbolic link ${path}: ${e.message}")
-                            return false
-                        }
-                    }
-                    
-                    // 如果不是软链接，直接检查是否是目录
-                    return fileInfo.isDirectory()
-                }
-                return false
-            } catch (unicodeError: Exception) {
-                logger.error("Unicode error in directory path '${path}': ${unicodeError.message}")
-                return false
-            }
-        } catch (e: Exception) {
-            logger.error("Exception checking directory existence: ${e.message}")
-            return false
-        }
-    }
-    
-    private func fileExists(path: String): Bool {
-        try {
-            try {
-                let filePath = Path(path)
-                if (exists(filePath)) {
-                    let fileInfo = FileInfo(filePath)
-                    
-                    // 如果是软链接，获取其目标并检查目标文件
-                    if (fileInfo.isSymbolicLink()) {
-                        try {
-                            // 读取软链接的目标路径
-                            let targetPath = SymbolicLink.readFrom(path, recursive: false)
-                            logger.info("Path ${path} is a symbolic link pointing to ${targetPath.toString()}")
-                            
-                            // 检查目标路径是否存在
-                            if (exists(targetPath)) {
-                                let targetFileInfo = FileInfo(targetPath)
-                                return targetFileInfo.isRegular()
-                            }
-                            return false
-                        } catch (e: FSException) {
-                            logger.error("Failed to read symbolic link ${path}: ${e.message}")
-                            return false
-                        }
-                    }
-                    
-                    // 如果不是软链接，直接检查是否是常规文件
-                    return fileInfo.isRegular()
-                }
-                return false
-            } catch (unicodeError: Exception) {
-                logger.error("Unicode error in file path '${path}': ${unicodeError.message}")
-                return false
-            }
-        } catch (e: Exception) {
-            logger.error("Exception checking file existence: ${e.message}")
-            return false
-        }
-    }
-    
-    private func listDirectory(path: String): Array<String> {
-        try {
-            logger.debug("Starting directory listing", ("path", path))
 
-            // 检查路径是否包含有效的 Unicode 字符
-            try {
-                let dirPath = Path(path)
-                var files = Array<String>()
-
-                // 检查路径是否存在
-                logger.debug("Checking if path exists", ("path", path))
-                let pathExists = exists(dirPath)
-                logger.debug("Path exists", ("exists", pathExists.toString()))
-
-                if (pathExists) {
-                    let fileInfo = FileInfo(dirPath)
-                    logger.debug("File info retrieved, checking type")
-
-                    var isDirectory = false
-                    var isSymlink = false
-
-                    // 检查是否为目录（包括软链接目录）
-                    if (fileInfo.isDirectory()) {
-                        isDirectory = true
-                        logger.debug("Path is a regular directory", ("path", path))
-                    } else if (fileInfo.isSymbolicLink()) {
-                        isSymlink = true
-                        logger.debug("Path is a symbolic link, checking target", ("path", path))
-
-                        // 如果是软链接，检查其目标是否是目录
-                        try {
-                            let targetPath = SymbolicLink.readFrom(path, recursive: false)
-                            logger.debug("Symlink target", ("target", targetPath.toString()))
-
-                            if (exists(targetPath)) {
-                                let targetFileInfo = FileInfo(targetPath)
-                                isDirectory = targetFileInfo.isDirectory()
-                                logger.debug("Symlink target exists and is directory", ("target", targetPath.toString()))
-
-                                if (isDirectory) {
-                                    logger.info("Path ${path} is a symbolic link to directory: ${targetPath.toString()}")
-                                    logger.debug("Symlink points to directory", ("target", targetPath.toString()))
-                                } else {
-                                    logger.warn("Symlink target is not a directory", ("target", targetPath.toString()))
-                                }
-                            } else {
-                                logger.warn("Symlink target does not exist", ("target", targetPath.toString()))
-                            }
-                        } catch (e: FSException) {
-                            logger.error("Failed to read symbolic link ${path}: ${e.message}")
-                            logger.warn("Failed to read symlink", ("error", e.message))
-                        }
-                    } else {
-                        logger.debug("Path is neither directory nor symlink", ("path", path))
-                    }
-
-                    if (isDirectory) {
-                        logger.debug("Directory confirmed, listing entries", ("path", path))
-
-                        // 对于软链接目录，使用实际目标路径进行读取
-                        let targetPath: String
-                        if (isSymlink) {
-                            targetPath = SymbolicLink.readFrom(path, recursive: false).toString()
-                            logger.info("Using symlink target path for directory listing: ${targetPath}")
-                        } else {
-                            targetPath = path
-                        }
-
-                        // 使用 Directory.readFrom 获取目录中的文件和子目录
-                        let entries = Directory.readFrom(Path(targetPath))
-                        logger.debug("Directory entries returned", ("count", entries.size.toString()))
-
-                        for (entry in entries) {
-                            // 添加文件、子目录和软链接，以便 findArchiveFiles 函数能正确处理所有类型
-                            if (entry.isRegular() || entry.isDirectory() || entry.isSymbolicLink()) {
-                                // 处理可能的 Unicode 问题
-                                try {
-                                    let fileName = entry.name.toString()
-                                    var entryType = ""
-                                    if (entry.isRegular()) {
-                                        entryType = "file"
-                                    } else if (entry.isDirectory()) {
-                                        entryType = "directory"
-                                    } else if (entry.isSymbolicLink()) {
-                                        entryType = "symlink"
-                                    }
-                                    logger.debug("Found directory entry", ("type", entryType), ("file", fileName))
-                                    files = addFile(files, fileName)
-
-                                    // 特别记录软链接目录，以便调试
-                                    if (entry.isSymbolicLink()) {
-                                        logger.info("Found symlink entry: ${fileName} in directory ${path}")
-                                    }
-                                } catch (unicodeError: Exception) {
-                                    logger.info("Skipping entry with invalid Unicode name: ${unicodeError.message}")
-                                    logger.debug("Skipping entry with invalid Unicode name")
-                                }
-                            } else {
-                                let fileName = entry.name.toString()
-                                logger.debug("Skipping entry (other type)", ("file", fileName))
-                            }
-                        }
-
-                        logger.debug("Directory listing completed", ("path", path), ("entries", files.size.toString()))
-                        return files
-                    } else {
-                        logger.warn("Path is not a directory", ("path", path))
-                        logger.error("Path is not a directory: ${path}")
-                        return Array<String>()
-                    }
-                } else {
-                    logger.warn("Directory does not exist", ("path", path))
-                    logger.error("Directory does not exist: ${path}")
-                    return Array<String>()
-                }
-            } catch (unicodeError: Exception) {
-                logger.warn("Unicode error in directory path", ("path", path), ("error", unicodeError.message))
-                logger.error("Unicode error in directory path '${path}': ${unicodeError.message}")
-                return Array<String>()
-            }
-        } catch (e: Exception) {
-            logger.error("Exception listing directory", ("error", e.message), ("path", path))
-            logger.error("Exception listing directory: ${e.message}")
-            return Array<String>()
-        }
-    }
-    
-    private func joinPath(base: String, part: String): String {
-        // 移除base末尾的斜杠和part开头的斜杠，避免双斜杠
-        let cleanBase = if (base.endsWith("/")) {
-            let parts = base.split("")
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                result += parts[i]
-            }
-            result
-        } else {
-            base
-        }
-        let cleanPart = if (part.startsWith("/")) {
-            let parts = part.split("")
-            var result = ""
-            for (i in 1..parts.size) {
-                result += parts[i]
-            }
-            result
-        } else {
-            part
-        }
-
-        if (cleanPart.size > 0) {
-            return "${cleanBase}/${cleanPart}"
-        } else {
-            return cleanBase
-        }
-    }
-    
     /**
-     * 执行命令
+     * 检查目录是否存在（支持软链接）- 保持向后兼容性
      */
-    private func executeWithOutput(command: String, args: Array<String>, stdOut: ProcessRedirect, stdErr: ProcessRedirect): (Int32, Array<UInt8>, Array<UInt8>) {
-        try {
-            // 构建完整的命令字符串用于日志，对包含空格的参数加引号
-            var fullCmd = command
-            for (arg in args) {
-                if (arg.contains(" ") || arg.contains("\t") || arg.contains("\"") || arg.contains("'")) {
-                    fullCmd += " \"" + arg.replace("\"", "\\\"") + "\""
-                } else {
-                    fullCmd += " " + arg
-                }
-            }
-            logger.info("Executing command with args: ${fullCmd}")
-
-            if (args.size == 0) {
-                // 没有参数的情况
-                let process = launch(command, stdOut: stdOut, stdErr: stdErr)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
-            } else if (args.size == 1) {
-                // 一个参数的情况
-                let process = launch(command, args[0], stdOut: stdOut, stdErr: stdErr)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
-            } else if (args.size == 2) {
-                // 两个参数的情况
-                let process = launch(command, args[0], args[1], stdOut: stdOut, stdErr: stdErr)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
-            } else if (args.size == 3) {
-                // 三个参数的情况
-                let process = launch(command, args[0], args[1], args[2], stdOut: stdOut, stdErr: stdErr)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
-            } else if (args.size == 4) {
-                // 四个参数的情况（bsdtar -xf archivepath entryname -C outputdir）
-                let process = launch(command, args[0], args[1], args[2], args[3], stdOut: stdOut, stdErr: stdErr)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
-            } else {
-                // 更多参数的情况，暂时返回错误
-                logger.error("Too many arguments for command: ${fullCmd}")
-                return (1, Array<UInt8>(), Array<UInt8>())
-            }
-        } catch (e: Exception) {
-            logger.error("Error executing command '${command}': ${e.message}")
-            return (1, Array<UInt8>(), Array<UInt8>())
-        }
+    private func directoryExists(path: String): Bool {
+        return DirectoryScanner.directoryExists(path)
     }
-    
+
+    /**
+     * 检查文件是否存在（支持软链接）- 保持向后兼容性
+     */
+    private func fileExists(path: String): Bool {
+        return DirectoryScanner.fileExists(path)
+    }
+
+    /**
+     * 列出目录内容（支持软链接）- 保持向后兼容性
+     */
+    private func listDirectory(path: String): Array<String> {
+        return DirectoryScanner.listDirectory(path)
+    }
+
+    /**
+     * 拼接路径 - 保持向后兼容性
+     */
+    private func joinPath(base: String, part: String): String {
+        return DirectoryScanner.joinPath(base, part)
+    }
+
     /**
      * 使用ImageMagick将图片转换为JPG格式并进行分辨率转换
      */
@@ -1951,7 +890,7 @@ public class ShinobuService {
             logger.debug("Converting image to JPG: ${inputPath} -> ${outputPath}")
 
             // 确保输出目录存在
-            let outputDir = getParentDirectory(outputPath)
+            let outputDir = FileUtils.getParentDirectory(outputPath)
             if (!directoryExists(outputDir)) {
                 Directory.create(outputDir, recursive: true)
             }
@@ -2014,50 +953,17 @@ public class ShinobuService {
     }
 
     private func combineArrays(arr1: Array<String>, arr2: Array<String>): Array<String> {
-        // 合并两个数组
-        let result = Array<String>(arr1.size + arr2.size, { i =>
-            if (i < arr1.size) {
-                arr1[i]
-            } else {
-                arr2[i - arr1.size]
-            }
-        })
-        return result
+        return DirectoryScanner.combineArrays(arr1, arr2)
     }
-    
+
     private func addFile(arr: Array<String>, file: String): Array<String> {
-        // 添加文件到数组
-        let result = Array<String>(arr.size + 1, { i =>
-            if (i < arr.size) {
-                arr[i]
-            } else {
-                file
-            }
-        })
-        return result
+        return DirectoryScanner.addFileToArray(arr, file)
     }
     
 
-    
 
-    
-    /**
-     * 启动扫描线程
-     */
-    private func spawnScanThread() {
-        if (enableInitialScan) {
-            // 生成线程ID
-            let threadId = "scan-${DateTime.nowUTC().toUnixTimeStamp()}"
-            scanThread = Option<String>.Some(threadId)
-            
-            spawn {
-                logger.debug("Starting initial archive scan...")
-                scanArchives()
-                logger.debug("Initial archive scan completed")
-            }
-        }
-    }
-    
+
+
     /**
      * 启动定时扫描任务
      */
@@ -2089,8 +995,8 @@ public class ShinobuService {
                         break
                     }
                     
-                    logger.debug("Executing scheduled scan")
-                    scanArchives()
+                    logger.debug("Executing scheduled scan enqueue")
+                    triggerDirectoryScan(scanPath: ShinobuService.archivePath.toString(), priority: 30, triggerSource: "scheduled")
                 }
                 
                 logger.info("Scheduled scan thread stopped")
@@ -2128,9 +1034,10 @@ public class ShinobuService {
                     if (!stillRunning) {
                         break
                     }
-                    
+
                     logger.info("Executing scheduled thumbnail generation")
-                    generateAllThumbnails()
+                    // TODO: 为所有没有缩略图的归档创建 generate_thumbnail 任务
+                    // generateAllThumbnails() 方法已移动到 GenerateThumbnailTaskRunner
                 }
                 
                 logger.info("Scheduled thumbnail generation thread stopped")
@@ -2164,66 +1071,20 @@ public class ShinobuService {
                     runningMutex.lock()
                     let stillRunning = isTaskRunning
                     runningMutex.unlock()
-                    
+
                     if (!stillRunning) {
                         break
                     }
-                    
+
                     logger.info("Executing scheduled database check")
-                    checkDatabaseFiles()
+                    triggerDatabaseCheck(priority: 50, triggerSource: "scheduled")
                 }
                 
                 logger.info("Scheduled database check thread stopped")
             }
         }
     }
-    
-    /**
-     * 检查数据库中的文件是否仍然存在
-     */
-    private func checkDatabaseFiles() {
-        let archives = ArchiveDao.getAllArchives()
-        var deletedCount: Int64 = 0
 
-        logger.info("Starting database file check", ("count", archives.size.toString()))
-
-        for (archive in archives) {
-            // 正确构建完整路径：archivePath + relativePath + filename
-            let archiveBasePath = ShinobuService.getArchivePath().toString()
-            let fullFilePath: String
-
-            if (archive.relative_path.size > 0 && archive.relative_path != "") {
-                // 如果有相对路径，构建：archivePath/relativePath/filename
-                let dirPath = joinPath(archiveBasePath, archive.relative_path)
-                fullFilePath = joinPath(dirPath, archive.filename)
-            } else {
-                // 如果没有相对路径，构建：archivePath/filename
-                fullFilePath = joinPath(archiveBasePath, archive.filename)
-            }
-
-            logger.debug("Checking file", ("file", fullFilePath))
-
-            // 检查文件是否存在（支持软链接）
-            if (!fileExists(fullFilePath)) {
-                logger.warn("File not found, deleting from database", ("file", fullFilePath))
-                if (ArchiveDao.delete(archive.id)) {
-                    deletedCount++
-                    logger.info("Deleted database record", ("id", archive.id.toString()), ("title", archive.title))
-                } else {
-                    logger.error("Failed to delete database record", ("id", archive.id.toString()), ("title", archive.title))
-                }
-            } else {
-                logger.debug("File exists", ("file", fullFilePath))
-            }
-        }
-
-        if (deletedCount > 0) {
-            logger.info("Database check completed with deletions", ("deleted_count", deletedCount.toString()))
-        } else {
-            logger.info("Database check completed, all files exist")
-        }
-    }
-    
     /**
      * 启动文件监视器
      */
@@ -2261,7 +1122,7 @@ public class ShinobuService {
                     let currentFileCount = countFilesInDirectory(archivePath.toString())
                     if (currentFileCount != lastFileCount) {
                         logger.debug("File change detected, triggering scan", ("previous_count", lastFileCount.toString()), ("current_count", currentFileCount.toString()))
-                        scanArchives()
+                        triggerDirectoryScan(scanPath: ShinobuService.archivePath.toString(), priority: 30, triggerSource: "watcher")
                         lastFileCount = currentFileCount
                     } else {
                         logger.debug("File watcher check: no changes detected", ("count", currentFileCount.toString()))
@@ -2341,7 +1202,7 @@ public class ShinobuService {
      */
     private func countFilesInDirectory(dirPath: String): Int64 {
         var count: Int64 = 0
-        
+
         try {
             let entries = listDirectory(dirPath)
             for (entry in entries) {
@@ -2353,138 +1214,10 @@ public class ShinobuService {
         } catch (e: Exception) {
             logger.error("Error counting files in directory", ("directory", dirPath))
         }
-        
-        return count
-    }
-    
-    /**
-     * 生成所有缺失的缩略图
-     */
-    private func generateAllThumbnails() {
-        logger.info("Starting thumbnail generation for archives without thumbnails")
-        var processedCount: Int64 = 0
-        var skippedCount: Int64 = 0
-        var errorCount: Int64 = 0
-        
-        try {
-            // 获取所有没有缩略图的归档记录
-            let archives = ArchiveDao.getArchivesWithoutThumbnails()
-            logger.info("Found archives without thumbnails", ("count", archives.size.toString()))
-            
-            for (archive in archives) {
-                // 组装完整路径：archivePath + relative_path + filename
-                let dirPath = if (archive.relative_path.size > 0) {
-                    joinPath(archivePath.toString(), archive.relative_path)
-                } else {
-                    archivePath.toString()
-                }
-                let archiveFilePath = joinPath(dirPath, archive.filename)
 
-                if (fileExists(archiveFilePath)) {
-                    logger.info("Generating thumbnail", ("file", archive.filename), ("id", archive.id))
-                    // generateThumbnail 函数内部已经处理了软链接解析
-                    let result = generateThumbnail(archiveFilePath, archive.id)
-                    
-                    if (result.success) {
-                        // 更新数据库中的缩略图hash
-                        if (ArchiveDao.updateThumbHash(archive.id, archive.id)) {
-                            processedCount++
-                            logger.info("Thumbnail generated and database updated", ("file", archive.filename))
-                        } else {
-                            errorCount++
-                            logger.error("Failed to update database", ("file", archive.filename))
-                        }
-                    } else {
-                        errorCount++
-                        logger.error("Failed to generate thumbnail", ("file", archive.filename), ("error", result.error))
-                    }
-                } else {
-                    skippedCount++
-                    logger.warn("Archive file not found, skipping", ("file", archive.relative_path))
-                }
-            }
-            
-            logger.info("Thumbnail generation completed", ("generated", processedCount.toString()), ("skipped", skippedCount.toString()), ("errors", errorCount.toString()))
-        } catch (e: Exception) {
-            logger.error("Error generating thumbnails", ("error", e.toString()))
-        }
-    }
-    
-    /**
-     * 检查是否可以添加新任务
-     */
-    private func canAddJob(): Bool {
-        jobMutex.lock()
-        let result = currentJobs < maxConcurrentJobs
-        jobMutex.unlock()
-        return result
-    }
-    
-    /**
-     * 增加任务计数
-     */
-    private func incrementJobCount() {
-        jobMutex.lock()
-        currentJobs++
-        jobMutex.unlock()
-    }
-    
-    /**
-     * 减少任务计数
-     */
-    private func decrementJobCount() {
-        jobMutex.lock()
-        if (currentJobs > 0) {
-            currentJobs--
-        }
-        jobMutex.unlock()
-    }
-    
-    /**
-     * 获取当前任务数量
-     */
-    public func getCurrentJobCount(): Int32 {
-        jobMutex.lock()
-        let count = currentJobs
-        jobMutex.unlock()
         return count
     }
-    
-    /**
-     * 获取最大并发任务数
-     */
-    public func getMaxConcurrentJobs(): Int32 {
-        return maxConcurrentJobs
-    }
-    
-    /**
-     * 等待所有任务完成
-     */
-    public func waitForAllJobs(): Bool {
-        let maxWaitTime = Duration.second * 300 // 最多等待5分钟
-        let startTime = DateTime.nowUTC()
-        
-        while (getCurrentJobCount() > 0) {
-            if (DateTime.nowUTC() - startTime > maxWaitTime) {
-                return false // 超时
-            }
-            sleep(Duration.second * 1)
-        }
-        
-        return true
-    }
-    
-    /**
-     * 强制停止所有任务
-     */
-    public func forceStopAllJobs(): Int32 {
-        jobMutex.lock()
-        let stoppedJobs = currentJobs
-        currentJobs = 0
-        jobMutex.unlock()
-        return stoppedJobs
-    }
-    
+
     /**
      * 获取配置信息
      */
@@ -2495,7 +1228,6 @@ public class ShinobuService {
             ShinobuService.scanIntervalCron,
             ShinobuService.enableAutoThumbnail,
             ShinobuService.thumbnailIntervalCron,
-            ShinobuService.maxConcurrentJobs,
             ShinobuService.scanFallbackIntervalMs
         )
     }
@@ -2591,16 +1323,14 @@ public class ShinobuConfiguration {
     public var scanIntervalCron: String
     public var enableAutoThumbnail: Bool
     public var thumbnailIntervalCron: String
-    public var maxConcurrentJobs: Int32
     public var scanFallbackIntervalMs: Int64
-    
+
     public init(
         enableAutoScan: Bool,
         enableInitialScan: Bool,
         scanIntervalCron: String,
         enableAutoThumbnail: Bool,
         thumbnailIntervalCron: String,
-        maxConcurrentJobs: Int32,
         scanFallbackIntervalMs: Int64
     ) {
         this.enableAutoScan = enableAutoScan
@@ -2608,10 +1338,9 @@ public class ShinobuConfiguration {
         this.scanIntervalCron = scanIntervalCron
         this.enableAutoThumbnail = enableAutoThumbnail
         this.thumbnailIntervalCron = thumbnailIntervalCron
-        this.maxConcurrentJobs = maxConcurrentJobs
         this.scanFallbackIntervalMs = scanFallbackIntervalMs
     }
-    
+
     /**
      * 转换为JSON字符串
      */
@@ -2623,7 +1352,6 @@ public class ShinobuConfiguration {
             \"scanIntervalCron\":\"${scanIntervalCron}\",
             \"enableAutoThumbnail\":${enableAutoThumbnail},
             \"thumbnailIntervalCron\":\"${thumbnailIntervalCron}\",
-            \"maxConcurrentJobs\":${maxConcurrentJobs},
             \"scanFallbackIntervalMs\":${scanFallbackIntervalMs}
             }"""
     }
@@ -2643,21 +1371,6 @@ public class ShinobuStatusData {
         this.isAlive = isAlive
         this.operation = operation
         this.pid = pid
-    }
-}
-
-/**
- * 处理结果数据
- */
-public class ProcessResultData {
-    public var success: Bool
-    public var archiveId: String
-    public var error: String
-    
-    public init(success: Bool, archiveId: String, error: String) {
-        this.success = success
-        this.archiveId = archiveId
-        this.error = error
     }
 }
 
@@ -2721,12 +1434,27 @@ public class ScanResultData {
     public var totalFound: Int64
     public var errorCount: Int64
     public var errors: Array<String>
+    public var taskId: Int64
 
-    public init(processedCount: Int64, totalFound: Int64, errorCount: Int64, errors: Array<String>) {
+    public init(processedCount: Int64, totalFound: Int64, errorCount: Int64, errors: Array<String>, taskId!: Int64 = 0) {
         this.processedCount = processedCount
         this.totalFound = totalFound
         this.errorCount = errorCount
         this.errors = errors
+        this.taskId = taskId
     }
 }
 
+public class CheckResultData {
+    public var success: Bool
+    public var deletedCount: Int64
+    public var checkedCount: Int64
+    public var error: String
+
+    public init(success: Bool, deletedCount: Int64, checkedCount: Int64, error: String) {
+        this.success = success
+        this.deletedCount = deletedCount
+        this.checkedCount = checkedCount
+        this.error = error
+    }
+}

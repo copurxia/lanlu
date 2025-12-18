@@ -8,25 +8,8 @@ import lrr4cj.middleware.*
  * Minion API路由
  */
 public func registerMinionRoutes(router: JoyRouters) {
-    // ========== Minion任务API ==========
-
-    // 分页获取任务列表
-    router.get("/api/minion/tasks", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(_) => MinionController.getTasksWithPagination(ctx)
-            case None => return
-        }
-    })
-
-    // 根据ID获取任务
-    router.get("/api/minion/tasks/{id}", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(_) => MinionController.getTaskById(ctx)
-            case None => return
-        }
-    })
-
     // ========== 插件管理API ==========
+    // 注意：任务相关的API已迁移到 TaskPoolController
 
     // 获取所有插件详情
     router.get("/api/plugins", { ctx =>

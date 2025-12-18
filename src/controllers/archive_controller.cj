@@ -12,6 +12,7 @@ import lrr4cj.middleware.*
 import std.time.*
 import std.fs.*
 import std.convert.*
+import std.collection.*
 import std.database.sql.*
 
 public class ArchiveController {
@@ -373,12 +374,31 @@ public class ArchiveController {
             return
         }
 
-        // 获取ShinobuService实例
-        let shinobu = ShinobuService.getInstance()
+        // 构建归档文件完整路径
+        let archivePath = ShinobuService.getArchivePath().toString()
+        let fullArchivePath = if (archive.relative_path.size > 0) {
+            "${archivePath}/${archive.relative_path}/${archive.filename}"
+        } else {
+            "${archivePath}/${archive.filename}"
+        }
 
+        // 对于文件访问，需要解析软链接到实际路径
+        let actualPath = FileUtils.resolvePath(fullArchivePath)
 
         // 获取归档中的文件列表
-        let pageFiles = shinobu.getArchiveFileList(id)
+        let entries = ArchiveUtils.listArchiveEntries(actualPath, ShinobuService.getBsdtarPath())
+
+        // 过滤图片文件
+        var pageFiles = ArrayList<String>()
+        var totalEntries = 0
+        var imageEntries = 0
+        for (entry in entries) {
+            totalEntries += 1
+            if (ArchiveUtils.isImageFile(entry)) {
+                pageFiles.add(entry)
+                imageEntries += 1
+            }
+        }
 
         // 如果不需要只返回图片文件，获取所有文件
         if (!imagesOnly) {
@@ -583,10 +603,7 @@ public class ArchiveController {
                     ctx.json(errorResponse)
                     return
                 }
-                
-                // 获取ShinobuService实例
-                let shinobu = ShinobuService.getInstance()
-                
+
                 // 构建归档文件完整路径
                 let archivePath = ShinobuService.getArchivePath().toString()
                 let fullArchivePath = if (archive.relative_path.size > 0) {
@@ -594,13 +611,13 @@ public class ArchiveController {
                 } else {
                     "${archivePath}/${archive.filename}"
                 }
-                
+
                 // 使用bsdtar直接提取文件到内存，不写入文件
                 try {
                     // 对于文件访问，需要解析软链接到实际路径
                     let actualPath = FileUtils.resolvePath(fullArchivePath)
                     // 使用 bsdtar 的 -xO 选项直接输出到标准输出
-                    let (exitCode, stdout, stderr) = shinobu.extractArchiveEntryToStream(actualPath, path)
+                    let (exitCode, stdout, stderr) = ArchiveUtils.extractArchiveEntryToStream(actualPath, path)
                     
                     if (exitCode == 0) {
                         // 根据文件扩展名设置Content-Type

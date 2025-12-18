@@ -11,11 +11,38 @@ import stdx.log.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import dotenv.Dotenv
 
 /**
  * download_url 任务执行器（运行在TaskPool中）
  */
 public class DownloadUrlTaskRunner {
+    // 配置 - 使用静态变量存储配置
+    private static var archivePath: Path
+    private static var cachePath: Path
+    private static var thumbnailPath: Path
+    private static var bsdtarPath: String
+
+    // 静态初始化器
+    static init() {
+        let config = Dotenv.createConfig()
+
+        // 读取配置
+        let archivePathStr = config.read("ARCHIVE_PATH", "./data/archive")
+        let cachePathStr = config.read("CACHE_PATH", "./data/cache")
+        let thumbnailPathStr = config.read("THUMBNAIL_PATH", "./data/thumb")
+        bsdtarPath = config.read("BSDTAR_PATH", "bsdtar")
+
+        // 转换为 Path 类型并规范化
+        archivePath = canonicalize(archivePathStr)
+        cachePath = canonicalize(cachePathStr)
+        thumbnailPath = canonicalize(thumbnailPathStr)
+
+        // 确保必要的目录存在
+        FileUtils.ensureDirectoryExists(archivePath)
+        FileUtils.ensureDirectoryExists(cachePath)
+        FileUtils.ensureDirectoryExists(thumbnailPath)
+    }
 
     public static func run(taskId: Int64, parameters: String): Unit {
         let _ = getLogger("download_url_task")
@@ -149,24 +176,29 @@ public class DownloadUrlTaskRunner {
                 return
             }
 
-            MinionModel.updateTaskProgress(taskId, 80, "Shinobu处理中")
+            MinionModel.updateTaskProgress(taskId, 80, "创建扫描任务")
 
-            let shinobu = ShinobuService.getInstance()
-            let processResult = shinobu.processUploadedArchiveFile(finalArchivePathStr)
+            // 获取配置
+            let archiveBasePath = archivePath.toString()
+            let cachePathStr = cachePath.toString()
+            let thumbnailPathStr = thumbnailPath.toString()
 
-            if (!processResult.success) {
-                let errorJson = "{\"success\":0,\"relative_path\":\"${relativePath}\",\"error\":\"${escapeJson(processResult.error)}\"}"
-                MinionModel.failTask(taskId, processResult.error)
+            // 创建 scan_archive 任务
+            let params = "{\"archive_path\":\"${escapeJson(finalArchivePathStr)}\",\"archive_base_path\":\"${escapeJson(archiveBasePath)}\",\"cache_path\":\"${escapeJson(cachePathStr)}\",\"thumbnail_path\":\"${escapeJson(thumbnailPathStr)}\",\"bsdtar_path\":\"${escapeJson(bsdtarPath)}\"}"
+            let task = MinionModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "download_url:${taskId}", "upload")
+            if (task.id <= 0) {
+                let errorJson = "{\"success\":0,\"relative_path\":\"${relativePath}\",\"error\":\"Failed to create scan_archive task\"}"
+                MinionModel.failTask(taskId, "Failed to create scan_archive task")
                 TaskIO.writeOutput(taskId, errorJson)
                 return
             }
 
-            let resultJson = "{\"success\":1,\"relative_path\":\"${relativePath}\",\"plugin_relative_path\":\"${pluginRelativePath}\",\"id\":\"${processResult.archiveId}\",\"filename\":\"${escapeJson(fileName)}\"}"
+            let resultJson = "{\"success\":1,\"relative_path\":\"${relativePath}\",\"plugin_relative_path\":\"${pluginRelativePath}\",\"task_id\":\"${task.id}\",\"filename\":\"${escapeJson(fileName)}\"}"
 
             MinionModel.updateTaskProgress(taskId, 100, "下载完成")
             MinionModel.completeTask(taskId, "download_url completed")
             TaskIO.writeOutput(taskId, resultJson)
-            TaskIO.appendLog(taskId, "download_url task completed: archiveId=${processResult.archiveId}")
+            TaskIO.appendLog(taskId, "download_url task completed: scan_task_id=${task.id}")
         } catch (e: Exception) {
             fail(taskId, e.message)
         }

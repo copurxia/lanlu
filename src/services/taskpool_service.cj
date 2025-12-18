@@ -63,11 +63,8 @@ public class TaskPoolService {
         let logger = getLogger("taskpool")
         logger.info("TaskPool starting", ("max_workers", maxWorkers.toString()))
 
-        // 服务启动时恢复孤儿任务（非终态任务）
-        let recoveredCount = MinionTaskDao.recoverOrphanedTasks()
-        if (recoveredCount > 0) {
-            logger.info("恢复孤儿任务", ("count", recoveredCount.toString()))
-        }
+        // 注意：孤儿任务清理现在由 ShinobuService 在创建启动任务之前处理
+        // 这里不需要重复清理，避免时序问题
 
         // 启动时仅尝试领取已有 pending（不做轮询）
         dispatch()
@@ -154,6 +151,16 @@ public class TaskPoolService {
                 MetadataPluginTaskRunner.run(task.id, task.parameters)
             case "tag_import" =>
                 TagI18nImportTaskRunner.run(task.id, task.parameters)
+            case "scan_directory" =>
+                ScanDirectoryTaskRunner.run(task.id, task.parameters)
+            case "scan_archive" =>
+                ScanArchiveTaskRunner.run(task.id, task.parameters)
+            case "generate_thumbnail" =>
+                GenerateThumbnailTaskRunner.run(task.id, task.parameters)
+            case "check_database" =>
+                CheckDatabaseTaskRunner.run(task.id, task.parameters)
+            case "scan_plugins" =>
+                ScanPluginsTaskRunner.run(task.id, task.parameters)
             case _ =>
                 TaskIO.appendLog(task.id, "Unknown task type: ${task.taskType}")
                 MinionModel.failTask(task.id, "Unknown task type: ${task.taskType}")

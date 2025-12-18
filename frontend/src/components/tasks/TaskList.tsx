@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { MinionTask, MinionTaskPageResult } from '@/types/minion';
-import { MinionService } from '@/lib/minion-service';
+import { TaskPoolService } from '@/lib/taskpool-service';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,8 +47,8 @@ export function TaskList({ className }: TaskListProps) {
     console.log('fetchTasks called, page:', page, 'activeFilter:', activeFilter);
     try {
       setError(null);
-      console.log('Calling MinionService.getTasks...');
-      const result: MinionTaskPageResult = await MinionService.getTasks(page, pageSize);
+      console.log('Calling TaskPoolService.getTasks...');
+      const result: MinionTaskPageResult = await TaskPoolService.getTasks(page, pageSize);
       console.log('API response:', result);
 
       // 确保 result.tasks 是数组
@@ -103,44 +103,31 @@ export function TaskList({ className }: TaskListProps) {
     await fetchTasks(currentPage);
   };
 
-  const handleStartTask = async (taskId: number) => {
+  const handleCancelTask = async (taskId: number) => {
+    if (!confirm('确定要取消这个任务吗？')) return;
+
     try {
-      const success = await MinionService.startTask(taskId);
+      const success = await TaskPoolService.cancelTask(taskId);
       if (success) {
         await handleRefresh();
       } else {
-        setError('Failed to start task');
+        setError('Failed to cancel task');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start task');
+      setError(err instanceof Error ? err.message : 'Failed to cancel task');
     }
   };
 
-  const handleStopTask = async (taskId: number) => {
+  const handleRetryTask = async (taskId: number) => {
     try {
-      const success = await MinionService.stopTask(taskId);
-      if (success) {
+      const result = await TaskPoolService.retryTask(taskId);
+      if (result.success) {
         await handleRefresh();
       } else {
-        setError('Failed to stop task');
+        setError('Failed to retry task');
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop task');
-    }
-  };
-
-  const handleDeleteTask = async (taskId: number) => {
-    if (!confirm('确定要删除这个任务吗？')) return;
-
-    try {
-      const success = await MinionService.deleteTask(taskId);
-      if (success) {
-        await handleRefresh();
-      } else {
-        setError('Failed to delete task');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete task');
+      setError(err instanceof Error ? err.message : 'Failed to retry task');
     }
   };
 
@@ -169,20 +156,11 @@ export function TaskList({ className }: TaskListProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handleStartTask(task.id)}
-              className="flex items-center space-x-1"
-            >
-              <Play className="w-3 h-3" />
-              <span>启动</span>
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleDeleteTask(task.id)}
+              onClick={() => handleCancelTask(task.id)}
               className="flex items-center space-x-1 text-red-600 hover:text-red-700"
             >
-              <Trash2 className="w-3 h-3" />
-              <span>删除</span>
+              <Square className="w-3 h-3" />
+              <span>取消</span>
             </Button>
           </div>
         );
@@ -192,15 +170,14 @@ export function TaskList({ className }: TaskListProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handleStopTask(task.id)}
-              className="flex items-center space-x-1"
+              onClick={() => handleCancelTask(task.id)}
+              className="flex items-center space-x-1 text-red-600 hover:text-red-700"
             >
               <Square className="w-3 h-3" />
-              <span>停止</span>
+              <span>取消</span>
             </Button>
           </div>
         );
-      case 'completed':
       case 'failed':
       case 'stopped':
         return (
@@ -208,14 +185,16 @@ export function TaskList({ className }: TaskListProps) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => handleDeleteTask(task.id)}
-              className="flex items-center space-x-1 text-red-600 hover:text-red-700"
+              onClick={() => handleRetryTask(task.id)}
+              className="flex items-center space-x-1 text-blue-600 hover:text-blue-700"
             >
-              <Trash2 className="w-3 h-3" />
-              <span>删除</span>
+              <Play className="w-3 h-3" />
+              <span>重试</span>
             </Button>
           </div>
         );
+      case 'completed':
+        return null;
       default:
         return null;
     }
@@ -275,12 +254,12 @@ export function TaskList({ className }: TaskListProps) {
                   <div className="flex items-center space-x-3">
                     <CardTitle className="text-base">{task.name}</CardTitle>
                     <Badge
-                      className={MinionService.getStatusColor(task.status)}
+                      className={TaskPoolService.getStatusColor(task.status)}
                       variant="secondary"
                     >
                       <div className="flex items-center space-x-1">
                         {getStatusIcon(task.status)}
-                        <span>{MinionService.getStatusLabel(task.status)}</span>
+                        <span>{TaskPoolService.getStatusLabel(task.status)}</span>
                       </div>
                     </Badge>
                   </div>
@@ -289,10 +268,10 @@ export function TaskList({ className }: TaskListProps) {
                       Job #{task.id}
                     </Badge>
                     <Badge
-                      className={MinionService.getTaskTypeColor(task.taskType)}
+                      className={TaskPoolService.getTaskTypeColor(task.taskType)}
                       variant="secondary"
                     >
-                      {MinionService.getTaskTypeLabel(task.taskType)}
+                      {TaskPoolService.getTaskTypeLabel(task.taskType)}
                     </Badge>
                     {getStatusActionButtons(task)}
                   </div>
@@ -374,7 +353,7 @@ export function TaskList({ className }: TaskListProps) {
                   <div className="text-sm border-t pt-3">
                     <strong>任务详情:</strong>
                     {(() => {
-                      const params = MinionService.parseTaskParameters(task.parameters);
+                      const params = TaskPoolService.parseTaskParameters(task.parameters);
                       return (
                         <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
                           {params.url && (
@@ -389,7 +368,7 @@ export function TaskList({ className }: TaskListProps) {
                           )}
                           {params.filesize && (
                             <div>
-                              <strong>文件大小:</strong> {MinionService.formatFileSize(params.filesize)}
+                              <strong>文件大小:</strong> {TaskPoolService.formatFileSize(params.filesize)}
                             </div>
                           )}
                           {params.total_chunks && (
@@ -399,7 +378,7 @@ export function TaskList({ className }: TaskListProps) {
                           )}
                           {params.chunk_size && (
                             <div>
-                              <strong>分片大小:</strong> {MinionService.formatFileSize(params.chunk_size)}
+                              <strong>分片大小:</strong> {TaskPoolService.formatFileSize(params.chunk_size)}
                             </div>
                           )}
                           {params.title && params.title !== params.filename && (

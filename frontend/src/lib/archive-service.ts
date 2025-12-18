@@ -2,7 +2,7 @@ import { apiClient } from './api';
 import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } from '@/types/archive';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
-import { MinionService } from './minion-service';
+import { TaskPoolService } from './taskpool-service';
 import type { MinionTask } from '@/types/minion';
 
 // 下载相关接口定义
@@ -385,7 +385,7 @@ export class ArchiveService {
     const start = Date.now();
 
     while (true) {
-      const task = await MinionService.getTaskById(jobId);
+      const task = await TaskPoolService.getTaskById(jobId);
       onUpdate?.(task);
 
       if (task.status === 'completed' || task.status === 'failed' || task.status === 'stopped') {

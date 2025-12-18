@@ -6,6 +6,7 @@ import lrr4cj.routes.api.database.*
 import lrr4cj.routes.api.search.*
 import lrr4cj.routes.api.categories.*
 import lrr4cj.routes.api.minion.*
+import lrr4cj.routes.api.taskpool.*
 import lrr4cj.routes.api.tankoubons.*
 import lrr4cj.routes.api.shinobu.*
 import lrr4cj.routes.api.auth.*
@@ -30,8 +31,11 @@ public func registerApiRoutes(router: JoyRouters) {
     // 注册分类相关路由
     registerCategoryRoutes(router)
 
-    // 注册Minion相关路由
+    // 注册Minion相关路由（插件管理）
     registerMinionRoutes(router)
+
+    // 注册TaskPool相关路由（任务管理）
+    registerTaskPoolRoutes(router)
 
     // 注册单行本相关路由
     registerTankoubonRoutes(router)
