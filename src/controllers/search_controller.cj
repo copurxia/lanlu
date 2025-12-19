@@ -77,8 +77,10 @@ public class SearchController {
         // 处理过滤参数
         let newOnlyStr = ctx.getQuery("newonly") ?? "false"
         let untaggedOnlyStr = ctx.getQuery("untaggedonly") ?? "false"
+        let groupByTanksStr = ctx.getQuery("groupby_tanks") ?? "true"  // 默认为true
         let newOnly = newOnlyStr == "true" || newOnlyStr == "1"
         let untaggedOnly = untaggedOnlyStr == "true" || untaggedOnlyStr == "1"
+        let groupByTanks = groupByTanksStr == "true" || groupByTanksStr == "1"
 
         // 解析分页参数
         let start = try {
@@ -101,6 +103,37 @@ public class SearchController {
 
         let (archives, totalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count), sortby, order, newOnly, untaggedOnly, userId)
 
+        // 如果启用了Tankoubon分组，获取归档到Tankoubon的映射
+        var tankoubonMapping: HashMap<String, String> = HashMap<String, String>()
+        var processedTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
+        var tankoubonDataCache: HashMap<String, TankoubonAggregatedData> = HashMap<String, TankoubonAggregatedData>()
+
+        if (groupByTanks) {
+            // 收集所有归档的arcid
+            var arcids: ArrayList<String> = ArrayList<String>()
+            for (archive in archives) {
+                arcids.add(archive.id)
+            }
+
+            // 获取归档到Tankoubon的映射
+            tankoubonMapping = ArchiveDao.getArchiveTankoubonMapping(arcids.toArray())
+
+            // 预加载所有需要的Tankoubon聚合数据
+            for ((_, tankoubonId) in tankoubonMapping) {
+                match (processedTankoubons.get(tankoubonId)) {
+                    case Some(_) => ()  // 已处理，跳过
+                    case None =>
+                        let aggDataOpt = TankoubonDao.getAggregatedMetadata(tankoubonId, userId)
+                        match (aggDataOpt) {
+                            case Some(aggData) =>
+                                tankoubonDataCache[tankoubonId] = aggData
+                            case None => ()
+                        }
+                        processedTankoubons[tankoubonId] = true
+                }
+            }
+        }
+
         // 批量获取用户的 isNew 状态和收藏状态
         var isNewMap = HashMap<Int64, Bool>()
         var isFavoriteMap = HashMap<Int64, Bool>()
@@ -122,7 +155,85 @@ public class SearchController {
         // 手动构建JSON数组，按照API文档要求的格式
         var archivesJson = "["
         var isFirst = true
+        var alreadyAddedTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
+
         for (archive in archives) {
+            // 检查此归档是否属于某个Tankoubon
+            var belongsToTankoubon = false
+            var tankoubonId = ""
+
+            if (groupByTanks) {
+                match (tankoubonMapping.get(archive.id)) {
+                    case Some(tid) =>
+                        tankoubonId = tid
+                        belongsToTankoubon = true
+                    case None => ()
+                }
+            }
+
+            // 如果归档属于Tankoubon且该Tankoubon尚未添加，则添加Tankoubon
+            var tankoubonAlreadyAdded = false
+            if (belongsToTankoubon) {
+                match (alreadyAddedTankoubons.get(tankoubonId)) {
+                    case Some(_) => tankoubonAlreadyAdded = true
+                    case None => ()
+                }
+            }
+
+            if (belongsToTankoubon && !tankoubonAlreadyAdded) {
+                var tankoubonInserted = false
+                match (tankoubonDataCache.get(tankoubonId)) {
+                    case Some(tankoubon) =>
+                        if (!isFirst) {
+                            archivesJson += ","
+                        }
+                        isFirst = false
+
+                        // 获取合集的archives列表
+                        let tankoubonArchives = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+                        var tankoubonArchivesJson = "["
+                        var isFirstArchive = true
+                        for (archiveId in tankoubonArchives) {
+                            if (!isFirstArchive) {
+                                tankoubonArchivesJson += ","
+                            }
+                            tankoubonArchivesJson += "\"${archiveId}\""
+                            isFirstArchive = false
+                        }
+                        tankoubonArchivesJson += "]"
+
+                        // 添加Tankoubon条目
+                        archivesJson += "{"
+                        archivesJson = archivesJson + "\"type\":\"tankoubon\","
+                        archivesJson = archivesJson + "\"tankoubon_id\":\"${escapeJson(tankoubon.tankoubon_id)}\","
+                        archivesJson = archivesJson + "\"name\":\"${escapeJson(tankoubon.name)}\","
+                        archivesJson = archivesJson + "\"summary\":\"${escapeJson(tankoubon.summary)}\","
+                        archivesJson = archivesJson + "\"tags\":\"${escapeJson(tankoubon.tags)}\","
+                        archivesJson = archivesJson + "\"archives\":${tankoubonArchivesJson},"
+                        archivesJson = archivesJson + "\"pagecount\":${tankoubon.pagecount},"
+                        archivesJson = archivesJson + "\"progress\":${tankoubon.progress},"
+                        archivesJson = archivesJson + "\"lastreadtime\":\"${escapeJson(tankoubon.last_read_time)}\","
+                        archivesJson = archivesJson + "\"isnew\":${tankoubon.isnew},"
+                        archivesJson = archivesJson + "\"archive_count\":${tankoubon.archive_count},"
+                        archivesJson = archivesJson + "\"thumbhash\":\"${escapeJson(tankoubon.thumbhash)}\""
+                        archivesJson += "}"
+
+                        alreadyAddedTankoubons[tankoubonId] = true
+                        tankoubonInserted = true
+                    case None => ()
+                }
+                // 只有当成功插入Tankoubon条目时才跳过当前归档；否则回退为普通归档展示
+                if (tankoubonInserted) {
+                    continue
+                }
+            }
+
+            // 如果归档属于已添加的Tankoubon，跳过
+            if (belongsToTankoubon && tankoubonAlreadyAdded) {
+                continue
+            }
+
+            // 添加普通归档条目
             if (!isFirst) {
                 archivesJson += ","
             }
@@ -144,6 +255,7 @@ public class SearchController {
             }
 
             archivesJson += "{"
+            archivesJson = archivesJson + "\"type\":\"archive\","
             archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
             archivesJson = archivesJson + "\"extension\":\"${escapeJson(archive.extension())}\","
             archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","

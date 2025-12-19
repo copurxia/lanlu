@@ -1,5 +1,8 @@
 package lrr4cj.models
 
+import lrr4cj.dao.*
+import std.collection.*
+
 /**
  * 单行本数据模型
  */
@@ -9,7 +12,15 @@ public class Tankoubon {
     public var summary: String
     public var tags: String
     public var archives: Array<String>
-    
+
+    // 聚合字段（用于搜索结果显示）
+    public var pagecount: Int32 = 0
+    public var progress: Int32 = 0
+    public var last_read_time: String = ""
+    public var isnew: Bool = false
+    public var archive_count: Int32 = 0
+    public var thumbhash: String = ""
+
     public init(id: String, name: String, summary: String, tags: String, archives: Array<String>) {
         this.id = id
         this.name = name
@@ -17,12 +28,30 @@ public class Tankoubon {
         this.tags = tags
         this.archives = archives
     }
-    
+
     /**
      * 转换为JSON字符串
      */
     public func toJson(): String {
-        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\"}"
+        var archivesJson = "["
+        var isFirst = true
+        for (archive in archives) {
+            if (!isFirst) {
+                archivesJson += ","
+            }
+            archivesJson += "\"${archive}\""
+            isFirst = false
+        }
+        archivesJson += "]"
+
+        return "{\"tankoubon_id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"archives\":${archivesJson},\"archive_count\":${archive_count},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"thumbhash\":\"${thumbhash}\"}"
+    }
+
+    /**
+     * 转换为带聚合数据的JSON字符串（用于搜索结果）
+     */
+    public func toAggregatedJson(): String {
+        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"archive_count\":${archive_count},\"thumbhash\":\"${thumbhash}\"}"
     }
 }
 
@@ -34,69 +63,87 @@ public class TankoubonModel {
      * 获取所有单行本
      */
     public static func getAllTankoubons(): Array<Tankoubon> {
-        // 模拟数据
-        return [
-            Tankoubon("TANK_1688616437", "Test 1", "", "", [
-                "28697b96f0ac5858be2614ed10ca47742c9522fd",
-                "4857fd2e7c00db8b0af0337b94055d8445118630",
-                "fa74bc15e7dd2b6ec0dc2e10cc7cd4942867318a"
-            ]),
-            Tankoubon("TANK_1688693913", "Test 2", "", "", [
-                "fa74bc15e7dd2b6ec0dc2e10cc7cd4942867318a"
-            ])
-        ]
+        let daoData = TankoubonDao.getAllTankoubons()
+        var tankoubons: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
+
+        for (data in daoData) {
+            tankoubons.add(Tankoubon(data.tankoubon_id, data.name, data.summary, data.tags, data.archives))
+        }
+
+        return tankoubons.toArray()
     }
-    
+
     /**
      * 根据ID获取单行本
      */
     public static func getTankoubonById(id: String): Tankoubon {
-        let tankoubons = getAllTankoubons()
-        for (tankoubon in tankoubons) {
-            if (tankoubon.id == id) {
+        let dataOpt = TankoubonDao.getTankoubonById(id)
+        match (dataOpt) {
+            case Some(data) =>
+                let tankoubon = Tankoubon(data.tankoubon_id, data.name, data.summary, data.tags, data.archives)
+                tankoubon.archive_count = data.archives.size.toInt32()
                 return tankoubon
-            }
+            case None =>
+                return Tankoubon("", "", "", "", [])
         }
-        return Tankoubon("", "", "", "", [])
     }
-    
+
+    /**
+     * 获取带聚合元数据的单行本（用于搜索结果）
+     */
+    public static func getTankoubonWithAggregatedMetadata(id: String, userId: Int64): Tankoubon {
+        let aggDataOpt = TankoubonDao.getAggregatedMetadata(id, userId)
+        match (aggDataOpt) {
+            case Some(aggData) =>
+                let tankoubon = Tankoubon(aggData.tankoubon_id, aggData.name, aggData.summary, aggData.tags, [])
+                tankoubon.pagecount = aggData.pagecount
+                tankoubon.progress = aggData.progress
+                tankoubon.last_read_time = aggData.last_read_time
+                tankoubon.isnew = aggData.isnew
+                tankoubon.archive_count = aggData.archive_count
+                tankoubon.thumbhash = aggData.thumbhash
+                return tankoubon
+            case None =>
+                return Tankoubon("", "", "", "", [])
+        }
+    }
+
     /**
      * 创建新单行本
      */
     public static func createTankoubon(name: String): Tankoubon {
-        let newId = "TANK_${(getAllTankoubons().size + 1).toString()}"
-        return Tankoubon(newId, name, "", "", [])
+        let newId = TankoubonDao.createTankoubon(name)
+        if (newId != "") {
+            return Tankoubon(newId, name, "", "", [])
+        }
+        return Tankoubon("", "", "", "", [])
     }
-    
+
     /**
      * 更新单行本
      */
-    public static func updateTankoubon(_: String, _: String, _: String, _: String, _: Array<String>): Bool {
-        // 在实际应用中，这里会更新数据库
-        return true
+    public static func updateTankoubon(id: String, name: String, summary: String, tags: String, _: Array<String>): Bool {
+        return TankoubonDao.updateTankoubon(id, name, summary, tags)
     }
-    
+
     /**
      * 删除单行本
      */
-    public static func deleteTankoubon(_: String): Bool {
-        // 在实际应用中，这里会从数据库删除
-        return true
+    public static func deleteTankoubon(id: String): Bool {
+        return TankoubonDao.deleteTankoubon(id)
     }
-    
+
     /**
      * 向单行本添加档案
      */
-    public static func addArchiveToTankoubon(_: String, _: String): Bool {
-        // 在实际应用中，这里会更新数据库关系
-        return true
+    public static func addArchiveToTankoubon(tankoubonId: String, archiveId: String): Bool {
+        return TankoubonDao.addArchiveToTankoubon(tankoubonId, archiveId, 0)
     }
-    
+
     /**
      * 从单行本移除档案
      */
-    public static func removeArchiveFromTankoubon(_: String, _: String): Bool {
-        // 在实际应用中，这里会更新数据库关系
-        return true
+    public static func removeArchiveFromTankoubon(tankoubonId: String, archiveId: String): Bool {
+        return TankoubonDao.removeArchiveFromTankoubon(tankoubonId, archiveId)
     }
 }

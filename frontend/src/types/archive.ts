@@ -29,6 +29,7 @@ export interface SearchParams {
   order?: string;
   newonly?: boolean;
   untaggedonly?: boolean;
+  groupby_tanks?: boolean;
 }
 
 export interface RandomParams {

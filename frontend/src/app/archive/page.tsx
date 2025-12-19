@@ -14,13 +14,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Header } from '@/components/layout/Header';
-import { Sidebar } from '@/components/layout/Sidebar';
 import { BookOpen, Download, Info, X, Eye, Edit, CheckCircle, RotateCcw, Play, Heart } from 'lucide-react';
 import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { TagService } from '@/lib/tag-service';
 import { FavoriteService } from '@/lib/favorite-service';
+import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
 
 function ArchiveDetailContent() {
   const searchParams = useSearchParams();
@@ -28,6 +28,9 @@ function ArchiveDetailContent() {
   const { t, language } = useLanguage();
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.isAdmin === true;
+
+  // 添加 mounted 状态以避免水合错误
+  const [mounted, setMounted] = useState(false);
 
   // 档案专属的 tag i18n map
   const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
@@ -45,7 +48,7 @@ function ArchiveDetailContent() {
   // 提取 fetchMetadata 函数到顶层
   const fetchMetadata = useCallback(async (): Promise<ArchiveMetadata | null> => {
     if (!id) return null;
-    
+
     try {
       const data = await ArchiveService.getMetadata(id);
       setMetadata(data);
@@ -55,10 +58,15 @@ function ArchiveDetailContent() {
       return null;
     }
   }, [id]);
-  
+
   const [metadata, setMetadata] = useState<ArchiveMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 设置 mounted 状态
+  useEffect(() => {
+    setMounted(true);
+  }, []);
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [isNewStatusLoading, setIsNewStatusLoading] = useState(false);
@@ -426,21 +434,13 @@ function ArchiveDetailContent() {
     }
   };
 
-
-  if (loading) {
+  // 在组件挂载之前显示加载状态，避免水合错误
+  if (!mounted || loading) {
     return (
-      <div className="flex min-h-screen">
-        {/* 侧边栏 - 在大屏幕显示 */}
-        <div className="hidden lg:block lg:flex-shrink-0">
-          <Sidebar />
-        </div>
-        
-        {/* 主内容区域 */}
-        <div className="flex-1 min-w-0">
-          <div className="container mx-auto px-4 py-8">
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">{t('common.loading')}</p>
-            </div>
+      <div className="min-h-screen">
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">{t('common.loading')}</p>
           </div>
         </div>
       </div>
@@ -449,23 +449,15 @@ function ArchiveDetailContent() {
 
   if (error || !metadata) {
     return (
-      <div className="flex min-h-screen">
-        {/* 侧边栏 - 在大屏幕显示 */}
-        <div className="hidden lg:block lg:flex-shrink-0">
-          <Sidebar />
-        </div>
-        
-        {/* 主内容区域 */}
-        <div className="flex-1 min-w-0">
-          <div className="container mx-auto px-4 py-8">
-            <div className="text-center py-12">
-              <p className="text-red-500 mb-4">{error || t('archive.notFound')}</p>
-              <Link href="/">
-                <Button variant="outline">
-                  {t('archive.backToHome')}
-                </Button>
-              </Link>
-            </div>
+      <div className="min-h-screen">
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center py-12">
+            <p className="text-red-500 mb-4">{error || t('archive.notFound')}</p>
+            <Link href="/">
+              <Button variant="outline">
+                {t('archive.backToHome')}
+              </Button>
+            </Link>
           </div>
         </div>
       </div>
@@ -789,6 +781,15 @@ function ArchiveDetailContent() {
 	                              {isNewStatusLoading ? t('common.loading') : t('archive.markAsNew')}
 	                            </Button>
 	                          )}
+	                          {/* 添加到合集按钮 */}
+	                          <AddToTankoubonDialog
+	                            archiveId={metadata.arcid}
+	                            archiveTitle={metadata.title}
+	                            fullWidth
+	                            onAdded={() => {
+	                              console.log('Archive added to tankoubon');
+	                            }}
+	                          />
 	                          {isAuthenticated ? (
 	                            <Button variant="outline" className="w-full" onClick={startEdit}>
 	                              <Edit className="w-4 h-4 mr-2" />

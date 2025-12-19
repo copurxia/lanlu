@@ -73,29 +73,35 @@ public class ArchiveModel {
                 try {
                     let stmt = conn.prepareStatement(
                         "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives ORDER BY id")
-                    let rs = stmt.query()
-
-                    while (rs.next()) {
-                        let archive = Archive()
-                        archive.id = rs.getOrNull<String>(0) ?? ""
-                        archive.title = rs.getOrNull<String>(1) ?? ""
-                        archive.filename = rs.getOrNull<String>(2) ?? ""
-                        archive.summary = rs.getOrNull<String>(3) ?? ""
-                        archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                        archive.created_at = rs.getOrNull<String>(5) ?? ""
-                        archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                        archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                        archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                        archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                        archives.add(archive)
+                    try {
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let archive = Archive()
+                                archive.id = rs.getOrNull<String>(0) ?? ""
+                                archive.title = rs.getOrNull<String>(1) ?? ""
+                                archive.filename = rs.getOrNull<String>(2) ?? ""
+                                archive.summary = rs.getOrNull<String>(3) ?? ""
+                                archive.thumbhash = rs.getOrNull<String>(4) ?? ""
+                                archive.created_at = rs.getOrNull<String>(5) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archives.add(archive)
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
                     }
-
-                    conn.close()
                     return archives.toArray()
                 } catch (e: Exception) {
                     println("查询归档失败: ${e}")
-                    conn.close()
                     return Array<Archive>()
+                } finally {
+                    try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
                 println("无法连接到数据库")

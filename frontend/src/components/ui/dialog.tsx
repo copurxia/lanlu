@@ -9,21 +9,24 @@ interface DialogProps {
   children: React.ReactNode
 }
 
-const Dialog: React.FC<DialogProps> = ({ open, onOpenChange, children }) => {
+type DialogContextValue = {
+  open: boolean
+  onOpenChange?: (open: boolean) => void
+}
+
+const DialogContext = React.createContext<DialogContextValue | null>(null)
+
+function useDialogContext() {
+  const ctx = React.useContext(DialogContext)
+  if (!ctx) throw new Error("Dialog components must be used within <Dialog />")
+  return ctx
+}
+
+const Dialog: React.FC<DialogProps> = ({ open = false, onOpenChange, children }) => {
   return (
-    <>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-black/50"
-            onClick={() => onOpenChange?.(false)}
-          />
-          <div className="relative z-50 w-full max-w-lg max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden">
-            {children}
-          </div>
-        </div>
-      )}
-    </>
+    <DialogContext.Provider value={{ open: !!open, onOpenChange }}>
+      {children}
+    </DialogContext.Provider>
   )
 }
 
@@ -54,23 +57,77 @@ const DialogDescription: React.FC<{ className?: string; children: React.ReactNod
   </p>
 )
 
-const DialogContent: React.FC<{ className?: string; children: React.ReactNode }> = ({ 
-  className, 
-  children 
-}) => (
-  <div className={cn("grid gap-4 py-4 px-6", className)}>
-    {children}
-  </div>
-)
+const DialogContent: React.FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children,
+}) => {
+  const { open, onOpenChange } = useDialogContext()
 
-const DialogFooter: React.FC<{ className?: string; children: React.ReactNode }> = ({ 
-  className, 
-  children 
+  React.useEffect(() => {
+    if (!open) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onOpenChange?.(false)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [open, onOpenChange])
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="fixed inset-0 bg-black/50"
+        onClick={() => onOpenChange?.(false)}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={cn(
+          "relative z-50 w-full max-w-lg max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden",
+          className
+        )}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>
+  )
+}
+
+const DialogFooter: React.FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children
 }) => (
   <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 px-6 pb-6", className)}>
     {children}
   </div>
 )
+
+const DialogTrigger: React.FC<{
+  className?: string
+  children: React.ReactNode
+  asChild?: boolean
+}> = ({ className, children, asChild }) => {
+  const { onOpenChange } = useDialogContext()
+
+  if (asChild && React.isValidElement(children)) {
+    const child = children as React.ReactElement<any>
+    return React.cloneElement(child, {
+      className: cn(child.props.className, className),
+      onClick: (e: any) => {
+        child.props.onClick?.(e)
+        if (!e?.defaultPrevented) onOpenChange?.(true)
+      },
+    })
+  }
+
+  return (
+    <button type="button" className={cn(className)} onClick={() => onOpenChange?.(true)}>
+      {children}
+    </button>
+  )
+}
 
 export {
   Dialog,
@@ -79,4 +136,5 @@ export {
   DialogDescription,
   DialogContent,
   DialogFooter,
+  DialogTrigger,
 }

@@ -443,6 +443,71 @@ public class ArchiveDao {
     }
 
     /**
+     * 获取归档所属的Tankoubon映射
+     * 返回 HashMap<arcid, tankoubon_id>
+     */
+    public static func getArchiveTankoubonMapping(arcids: Array<String>): HashMap<String, String> {
+        var mapping: HashMap<String, String> = HashMap<String, String>()
+        if (arcids.size == 0) {
+            return mapping
+        }
+
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 构建 IN 子句的占位符
+                    var placeholders = ""
+                    for (i in 0..arcids.size) {
+                        if (i > 0) {
+                            placeholders += ","
+                        }
+                        placeholders += "?"
+                    }
+
+                    let sql = """
+                        SELECT a.arcid, t.tankoubon_id
+                        FROM tankoubon_archives ta
+                        JOIN tankoubons t ON t.id = ta.tankoubon_id
+                        JOIN archives a ON a.id = ta.archive_id
+                        WHERE a.arcid IN (${placeholders})
+                    """
+
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        // 绑定参数
+                        for (i in 0..arcids.size) {
+                            stmt.set(i, arcids[i])
+                        }
+
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let arcid = rs.getOrNull<String>(0) ?? ""
+                                let tankoubonId = rs.getOrNull<String>(1) ?? ""
+                                if (arcid != "" && tankoubonId != "") {
+                                    mapping[arcid] = tankoubonId
+                                }
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("获取归档Tankoubon映射失败", ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (closeException: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+        }
+
+        return mapping
+    }
+
+    /**
      * 创建归档记录
      */
     public static func create(archive: ArchiveData): Bool {

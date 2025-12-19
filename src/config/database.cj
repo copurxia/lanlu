@@ -1,11 +1,11 @@
 package lrr4cj.config
 
 import std.database.sql.*
-import opengauss.driver.*
 import std.convert.*
 import stdx.log.*
 import dotenv.Dotenv
 import lrr4cj.utils.*
+import opengauss.driver.*
 
 /**
  * 数据库配置类
@@ -778,6 +778,147 @@ public class DatabaseConfig {
                     let createSql = "CREATE INDEX idx_archive_tags_tag_id ON archive_tags (tag_id)"
                     try {
                         if (!indexExists(conn, "idx_archive_tags_tag_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // tankoubons 表
+            if (!tableExists(conn, "tankoubons")) {
+                logger.info("tankoubons表不存在，创建新的tankoubons表")
+                execUpdate(conn, """
+                    CREATE TABLE tankoubons (
+                        id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                        tankoubon_id VARCHAR(255) NOT NULL UNIQUE,
+                        name VARCHAR(1024) NOT NULL,
+                        summary TEXT DEFAULT '',
+                        tags TEXT DEFAULT '',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                // 创建索引
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubons_tankoubon_id ON tankoubons (tankoubon_id)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubons_tankoubon_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubons_name ON tankoubons (name)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubons_name")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                logger.info("tankoubons表创建成功")
+            } else {
+                logger.info("tankoubons表已存在，检查并补全索引")
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubons_tankoubon_id ON tankoubons (tankoubon_id)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubons_tankoubon_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubons_name ON tankoubons (name)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubons_name")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+            }
+
+            // tankoubon_archives 表（junction table）
+            if (!tableExists(conn, "tankoubon_archives")) {
+                logger.info("tankoubon_archives表不存在，创建新的tankoubon_archives表")
+                execUpdate(conn, """
+                    CREATE TABLE tankoubon_archives (
+                        id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                        tankoubon_id INTEGER NOT NULL,
+                        archive_id INTEGER NOT NULL,
+                        sort_order INTEGER DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE (tankoubon_id, archive_id),
+                        FOREIGN KEY (tankoubon_id) REFERENCES tankoubons(id) ON DELETE CASCADE,
+                        FOREIGN KEY (archive_id) REFERENCES archives(id) ON DELETE CASCADE
+                    )
+                """)
+                // 创建索引
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubon_archives_tankoubon_id ON tankoubon_archives (tankoubon_id)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubon_archives_tankoubon_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubon_archives_archive_id ON tankoubon_archives (archive_id)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubon_archives_archive_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubon_archives_sort_order ON tankoubon_archives (sort_order)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubon_archives_sort_order")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                logger.info("tankoubon_archives表创建成功")
+            } else {
+                logger.info("tankoubon_archives表已存在，检查并补全索引")
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubon_archives_tankoubon_id ON tankoubon_archives (tankoubon_id)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubon_archives_tankoubon_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubon_archives_archive_id ON tankoubon_archives (archive_id)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubon_archives_archive_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_tankoubon_archives_sort_order ON tankoubon_archives (sort_order)"
+                    try {
+                        if (!indexExists(conn, "idx_tankoubon_archives_sort_order")) {
                             execUpdate(conn, createSql)
                         }
                     } catch (_: Exception) {

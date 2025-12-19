@@ -1,15 +1,22 @@
 import { Archive } from '@/types/archive';
+import { Tankoubon } from '@/types/tankoubon';
 import { ArchiveCard } from './ArchiveCard';
+import { TankoubonCard } from '../tankoubon/TankoubonCard';
 import { useLanguage } from '@/contexts/LanguageContext';
 
+// Type guard to check if an item is a Tankoubon
+function isTankoubon(item: any): item is Tankoubon {
+  return 'tankoubon_id' in item && 'archive_count' in item;
+}
+
 interface ArchiveGridProps {
-  archives: Archive[];
+  archives: (Archive | Tankoubon)[];
   variant?: 'default' | 'home' | 'random';
 }
 
 export function ArchiveGrid({ archives, variant = 'default' }: ArchiveGridProps) {
   const { t } = useLanguage();
-  
+
   if (archives.length === 0) {
     return (
       <div className="text-center py-12">
@@ -27,9 +34,25 @@ export function ArchiveGrid({ archives, variant = 'default' }: ArchiveGridProps)
 
   return (
     <div className={gridClasses}>
-      {archives.map((archive) => (
-        <ArchiveCard key={archive.arcid} archive={archive} tagsDisplay={tagsDisplay} />
-      ))}
+      {archives.map((item) => {
+        if (isTankoubon(item)) {
+          return (
+            <TankoubonCard
+              key={item.tankoubon_id}
+              tankoubon={item}
+              tagsDisplay={tagsDisplay}
+            />
+          );
+        } else {
+          return (
+            <ArchiveCard
+              key={item.arcid}
+              archive={item}
+              tagsDisplay={tagsDisplay}
+            />
+          );
+        }
+      })}
     </div>
   );
 }

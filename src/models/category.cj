@@ -94,36 +94,21 @@ public class CategoryModel {
         match (connOpt) {
             case Some(conn) =>
                 try {
+                    var category = Category()
+                    var found = false
+
+                    // 先读取分类信息，避免同一连接上嵌套ResultSet导致conn busy
                     let stmt = conn.prepareStatement("SELECT catid, name, search, pinned FROM categories WHERE catid = ?")
                     try {
                         stmt.set(0, id)
                         let rs = stmt.query()
                         try {
                             if (rs.next()) {
-                                let category = Category()
                                 category.id = rs.getOrNull<String>(0) ?? ""
                                 category.name = rs.getOrNull<String>(1) ?? ""
                                 category.search = rs.getOrNull<String>(2) ?? ""
                                 category.isPinned = rs.getOrNull<Bool>(3) ?? false
-
-                                let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
-                                try {
-                                    archiveStmt.set(0, category.id)
-                                    let archiveRs = archiveStmt.query()
-                                    try {
-                                        var archiveIds: ArrayList<String> = ArrayList<String>()
-                                        while (archiveRs.next()) {
-                                            archiveIds.add(archiveRs.getOrNull<String>(0) ?? "")
-                                        }
-                                        category.archives = archiveIds.toArray()
-                                    } finally {
-                                        archiveRs.close()
-                                    }
-                                } finally {
-                                    archiveStmt.close()
-                                }
-
-                                return category
+                                found = true
                             }
                         } finally {
                             rs.close()
@@ -131,6 +116,30 @@ public class CategoryModel {
                     } finally {
                         stmt.close()
                     }
+
+                    if (!found) {
+                        return Category()
+                    }
+
+                    // 再读取分类下的档案
+                    let archiveStmt = conn.prepareStatement("SELECT arcid FROM archive_categories WHERE category_id = ?")
+                    try {
+                        archiveStmt.set(0, category.id)
+                        let archiveRs = archiveStmt.query()
+                        try {
+                            var archiveIds: ArrayList<String> = ArrayList<String>()
+                            while (archiveRs.next()) {
+                                archiveIds.add(archiveRs.getOrNull<String>(0) ?? "")
+                            }
+                            category.archives = archiveIds.toArray()
+                        } finally {
+                            archiveRs.close()
+                        }
+                    } finally {
+                        archiveStmt.close()
+                    }
+
+                    return category
                 } catch (e: Exception) {
                     println("查询分类失败: ${e}")
                 }

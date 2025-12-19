@@ -195,8 +195,24 @@ public class ShinobuService {
         }
 
         // 触发插件扫描任务（总是在启动时执行）
-        let taskId = triggerPluginScan(priority: 50, triggerSource: "startup")
-        logger.info("Triggered startup scan_plugins task", ("task_id", taskId.toString()))
+        let pluginTaskId = triggerPluginScan(priority: 50, triggerSource: "startup")
+        logger.info("Triggered startup scan_plugins task", ("task_id", pluginTaskId.toString()))
+
+        // 检查是否启用初始扫描
+        let enableInitialScan = SystemSettingsService.getBoolean("ENABLE_INITIAL_SCAN")
+        if (enableInitialScan) {
+            logger.info("ENABLE_INITIAL_SCAN is enabled, triggering directory scan")
+            let scanPath = SystemSettingsService.getPath("ARCHIVE_PATH")
+            let dirExists = DirectoryScanner.directoryExists(scanPath)
+            if (dirExists) {
+                let scanTaskId = triggerDirectoryScan(scanPath: scanPath, priority: 30, triggerSource: "startup")
+                logger.info("Triggered startup scan_directory task", ("task_id", scanTaskId.toString()), ("path", scanPath))
+            } else {
+                logger.warn("Archive directory does not exist, skipping initial scan", ("path", scanPath))
+            }
+        } else {
+            logger.info("ENABLE_INITIAL_SCAN is disabled, skipping initial directory scan")
+        }
     }
 
     /**

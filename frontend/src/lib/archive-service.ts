@@ -83,7 +83,7 @@ export class ArchiveService {
 
   static async getArchive(id: string): Promise<any> {
     const response = await apiClient.get(`/api/archives/${id}`);
-    return response.data;
+    return response.data.data;
   }
 
   /**
