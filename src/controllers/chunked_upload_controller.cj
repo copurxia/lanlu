@@ -295,15 +295,15 @@ public class ChunkedUploadController {
             }
 
             // 异步模式：创建 scan_archive 任务处理归档文件
-            let archiveBasePath = ShinobuService.getArchivePath().toString()
-            let cachePath = ShinobuService.getCachePath().toString()
-            let thumbnailPath = ShinobuService.getThumbnailPath().toString()
+            let archiveBasePath = SystemSettingsService.getPath("ARCHIVE_PATH")
+            let cachePath = SystemSettingsService.getPath("CACHE_PATH")
+            let thumbnailPath = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
             let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"archive_base_path\":\"${escapeJsonString(archiveBasePath)}\",\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\"}"
             let scanTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "chunked_upload:${taskId}", "upload")
             if (scanTask.id > 0) {
                 TaskPoolService.getInstance().notifyTaskAvailable()
-                getLogger("chunked_upload").info("File processing task created", ("taskId", scanTask.id.toString()))
+                getLogger("chunked_upload").info("File processing task created", ("taskId", scanTask.id.toString()), ("taskType", "scan_archive"))
 
                 // 更新任务状态为完成
                 let taskResult = "文件上传处理完成\n任务ID: ${scanTask.id}\n文件名: ${originalFileName}\n相对路径: ${finalArchivePath.toString()}"

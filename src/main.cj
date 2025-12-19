@@ -86,9 +86,8 @@ main(): Int64 {
         return 1
     }
 
-    // 初始化Shinobu服务配置
-    logger.info("Application starting... step 9d: initializing shinobu service configuration")
-    ShinobuService.initializeConfig()
+    // Shinobu服务配置现在由SystemSettingsService管理，不需要单独初始化
+    logger.info("Application starting... step 9d: shinobu service configuration is managed by SystemSettingsService")
 
     // 启动 Shinobu 后台服务
     logger.info("Application starting... step 10: starting shinobu service")

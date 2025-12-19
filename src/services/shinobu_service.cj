@@ -1,11 +1,8 @@
 package lrr4cj.services
 
-import std.fs.*
-import std.time.*
 import std.sync.*
 import std.convert.*
 import stdx.log.*
-import cjoy.json.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -27,78 +24,9 @@ public class ShinobuService {
     private var currentPid: Int64 = 0
     private var mutex: Mutex  = Mutex()
     
-    // 配置 - 使用静态变量存储配置
-    private static var archivePath: Path = Path("")
-    private static var thumbnailPath: Path = Path("")
-    private static var cachePath: Path = Path("")
-    private static var pluginPath: Path = Path("")
-
-    // 扫描和缩略图配置 - 使用静态变量存储配置
-    private static var enableAutoScan: Bool = false
-    private static var enableInitialScan: Bool = false
-    private static var scanIntervalCron: String = ""
-    private static var enableAutoThumbnail: Bool = false
-    private static var thumbnailIntervalCron: String = ""
-    private static var scanFallbackIntervalMs: Int64 = 0
-    private static var enableFileWatcher: Bool = true
-    private static var enableDbCheck: Bool = false
-    private static var dbCheckIntervalCron: String = ""
-    private static var enableInitialDbCheck: Bool = false
-
-    // 定时任务线程 - 使用字符串标识线程
-    private var scanThread: Option<String> = Option<String>.None
-    private var thumbnailThread: Option<String> = Option<String>.None
-    private var fileWatcherThread: Option<String> = Option<String>.None
-    private var dbCheckThread: Option<String> = Option<String>.None
-    
-    // 任务控制标志
-    private var isTaskRunning: Bool = false
-    private let runningMutex: Mutex = Mutex()
-    
 
 
-    /**
-     * 初始化静态配置
-     * 必须在获取实例之前调用，且在SystemSettingsService初始化之后
-     */
-    public static func initializeConfig(): Unit {
-        // 从系统设置服务读取配置
-        let archivePathStr = SystemSettingsService.getPath("ARCHIVE_PATH")
-        let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
-        let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-        let pluginPathStr = "./plugins" // 插件路径保留在代码中或可扩展为配置
 
-        // 转换为 Path 类型并规范化
-        archivePath = canonicalize(archivePathStr)
-        thumbnailPath = canonicalize(thumbnailPathStr)
-        cachePath = canonicalize(cachePathStr)
-        pluginPath = canonicalize(pluginPathStr)
-
-        // 确保必要的目录存在
-        FileUtils.ensureDirectoryExists(archivePath)
-        FileUtils.ensureDirectoryExists(thumbnailPath)
-        FileUtils.ensureDirectoryExists(cachePath)
-        FileUtils.ensureDirectoryExists(pluginPath)
-
-        // 创建上传缓存目录
-        let uploadsPath = cachePath.join("uploads")
-        FileUtils.ensureDirectoryExists(uploadsPath)
-
-        // 读取扫描和缩略图配置
-        enableAutoScan = SystemSettingsService.getBoolean("ENABLE_AUTO_SCAN")
-        enableInitialScan = SystemSettingsService.getBoolean("ENABLE_INITIAL_SCAN")
-        scanIntervalCron = SystemSettingsService.getString("SCAN_INTERVAL_CRON")
-        enableAutoThumbnail = SystemSettingsService.getBoolean("ENABLE_AUTO_THUMBNAIL")
-        thumbnailIntervalCron = SystemSettingsService.getString("THUMBNAIL_INTERVAL_CRON")
-        scanFallbackIntervalMs = SystemSettingsService.getLong("SCAN_FALLBACK_INTERVAL_MS")
-
-        // 数据库检查配置（从数据库读取）
-        enableDbCheck = SystemSettingsService.getBoolean("ENABLE_DB_CHECK")
-        dbCheckIntervalCron = SystemSettingsService.getString("DB_CHECK_INTERVAL_CRON")
-        enableInitialDbCheck = SystemSettingsService.getBoolean("ENABLE_INITIAL_DB_CHECK")
-
-        enableFileWatcher = true
-    }
 
     
     /**
@@ -114,26 +42,7 @@ public class ShinobuService {
         return result
     }
     
-    /**
-     * 获取归档路径
-     */
-    public static func getArchivePath(): Path {
-        return archivePath
-    }
-    
-    /**
-     * 获取缩略图路径
-     */
-    public static func getThumbnailPath(): Path {
-        return thumbnailPath
-    }
-    
-    /**
-     * 获取缓存路径
-     */
-    public static func getCachePath(): Path {
-        return cachePath
-    }
+
 
     /**
      * 启动 Shinobu 服务
@@ -154,61 +63,12 @@ public class ShinobuService {
         }
         
         isRunning = true
-        currentPid = getCurrentProcessId()
-        
-        logger.info("Shinobu service starting with configuration",
-            ("archive_path", archivePath.toString()),
-            ("thumbnail_path", thumbnailPath.toString()),
-            ("cache_path", cachePath.toString()),
-            ("enable_auto_scan", enableAutoScan.toString()),
-            ("enable_initial_scan", enableInitialScan.toString()),
-            ("scan_interval_cron", scanIntervalCron),
-            ("enable_auto_thumbnail", enableAutoThumbnail.toString()),
-            ("thumbnail_interval_cron", thumbnailIntervalCron),
-            ("scan_fallback_interval_ms", scanFallbackIntervalMs.toString()),
-            ("enable_file_watcher", enableFileWatcher.toString()),
-            ("enable_initial_db_check", enableInitialDbCheck.toString()),
-            ("enable_db_check", enableDbCheck.toString()),
-            ("db_check_interval_cron", dbCheckIntervalCron))
-
         // 触发启动任务（带防重复检查）
         triggerStartupTasks()
 
-        // 初始扫描现在通过任务系统触发，而不是直接启动时执行
+        // 注意：所有定时任务和文件监视现在由专门的执行器管理，ShinobuService只负责任务触发
         
-        // 如果启用自动扫描，启动定时任务
-        if (enableAutoScan) {
-            startScheduledScan()
-        } else {
-            logger.info("Auto scan is disabled")
-        }
-        
-        // 如果启用自动缩略图生成，启动定时任务
-        if (enableAutoThumbnail) {
-            startScheduledThumbnail()
-        } else {
-            logger.info("Auto thumbnail generation is disabled")
-        }
-        
-        // 启动文件监视器（如果启用）
-        if (enableFileWatcher) {
-            startFileWatcher()
-        }
-        
-        // 如果启用初始数据库检查，启动时进行一次检查
-        if (enableInitialDbCheck) {
-            logger.info("Starting initial database check...")
-            triggerDatabaseCheck(priority: 50, triggerSource: "startup")
-        } else {
-            logger.info("Initial database check is disabled")
-        }
-        
-        // 启动数据库检查（如果启用）
-        if (enableDbCheck) {
-            startScheduledDbCheck()
-        } else {
-            logger.info("Database check is disabled")
-        }
+        logger.info("Shinobu service started successfully")
         
         return true
     }
@@ -233,11 +93,8 @@ public class ShinobuService {
 
         isRunning = false
 
-        // 停止所有定时任务
-        stopScheduledTasks()
-
-        // 注意：任务现在由 TaskPool 管理，不需要在这里等待
-
+        // 注意：任务现在由 TaskPool 和专门的执行器管理，不需要在这里停止
+        
         return true
     }
     
@@ -264,8 +121,8 @@ public class ShinobuService {
      * 触发压缩包文件扫描任务
      */
     public func scanArchives(): ScanResultData {
-        let scanPath = ShinobuService.archivePath.toString()
-        let dirExists = directoryExists(scanPath)
+        let scanPath = SystemSettingsService.getPath("ARCHIVE_PATH")
+        let dirExists = DirectoryScanner.directoryExists(scanPath)
         if (!dirExists) {
             logger.error("Archive directory does not exist", ("path", scanPath))
             return ScanResultData(0, 0, 1, ["Archive directory does not exist: ${scanPath}"])
@@ -277,7 +134,7 @@ public class ShinobuService {
     }
 
     public func triggerDirectoryScan(scanPath!: String = "", priority!: Int32 = 30, triggerSource!: String = "manual"): Int64 {
-        let targetPath = if (scanPath.size > 0) { scanPath } else { ShinobuService.archivePath.toString() }
+        let targetPath = if (scanPath.size > 0) { scanPath } else { SystemSettingsService.getPath("ARCHIVE_PATH") }
         let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
         let params =
             "{\"scan_path\":\"${escapeJson(targetPath)}\",\"trigger_source\":\"${escapeJson(source)}\",\"child_priority\":${priority}}"
@@ -337,19 +194,7 @@ public class ShinobuService {
             logger.info("Recovered orphaned tasks", ("count", recoveredCount.toString()))
         }
 
-        // 1. 触发目录扫描任务（如果启用初始扫描）
-        if (enableInitialScan) {
-            let taskId = triggerDirectoryScan(priority: 30, triggerSource: "startup")
-            logger.info("Triggered startup scan_directory task", ("task_id", taskId.toString()))
-        }
-
-        // 2. 触发数据库检查任务（如果启用初始数据库检查）
-        if (enableInitialDbCheck) {
-            let taskId = triggerDatabaseCheck(priority: 50, triggerSource: "startup")
-            logger.info("Triggered startup check_database task", ("task_id", taskId.toString()))
-        }
-
-        // 3. 触发插件扫描任务（总是在启动时执行）
+        // 触发插件扫描任务（总是在启动时执行）
         let taskId = triggerPluginScan(priority: 50, triggerSource: "startup")
         logger.info("Triggered startup scan_plugins task", ("task_id", taskId.toString()))
     }
@@ -358,7 +203,7 @@ public class ShinobuService {
      * 检查文件是否存在（公共方法）
      */
     public func checkFileExists(path: String): Bool {
-        return fileExists(path)
+        return DirectoryScanner.fileExists(path)
     }
 
     private func escapeJson(value: String): String {
@@ -372,73 +217,9 @@ public class ShinobuService {
         escaped = escaped.replace("\t", "\\t")
         return escaped
     }
-
-    /**
-     * 生成文件哈希（公共方法）
-     */
-    public func generateFileHashForUpload(filePath: String): String {
-        return ArchiveUtils.generateFileHash(filePath)
-    }
-
-
-
     
 
 
-
-    
-
-
-    
-
-    
-
-    
-
-    
-
-    
-
-
-
-    
-    /**
-     * 获取当前进程ID
-     */
-    private func getCurrentProcessId(): Int64 {
-        // 简单实现，实际应该使用系统API
-        return 12345
-    }
-    
-
-
-    /**
-     * 检查目录是否存在（支持软链接）- 保持向后兼容性
-     */
-    private func directoryExists(path: String): Bool {
-        return DirectoryScanner.directoryExists(path)
-    }
-
-    /**
-     * 检查文件是否存在（支持软链接）- 保持向后兼容性
-     */
-    private func fileExists(path: String): Bool {
-        return DirectoryScanner.fileExists(path)
-    }
-
-    /**
-     * 列出目录内容（支持软链接）- 保持向后兼容性
-     */
-    private func listDirectory(path: String): Array<String> {
-        return DirectoryScanner.listDirectory(path)
-    }
-
-    /**
-     * 拼接路径 - 保持向后兼容性
-     */
-    private func joinPath(base: String, part: String): String {
-        return DirectoryScanner.joinPath(base, part)
-    }
 
 
 
@@ -450,354 +231,27 @@ public class ShinobuService {
 
 
 
-    /**
-     * 启动定时扫描任务
-     */
-    private func startScheduledScan() {
-        if (enableAutoScan) {
-            // 生成线程ID
-            let threadId = "scheduled-scan-${DateTime.nowUTC().toUnixTimeStamp()}"
-            scanThread = Option<String>.Some(threadId)
-            
-            spawn {
-                logger.info("Starting scheduled scan", ("cron", scanIntervalCron))
-                
-                // 简单的定时实现：每隔一定时间执行一次
-                // 实际应该解析 cron 表达式并精确调度
-                let intervalSeconds = parseCronToSeconds(scanIntervalCron)
-                
-                runningMutex.lock()
-                let running = isTaskRunning
-                runningMutex.unlock()
-                
-                while (running) {
-                    sleep(Duration.second * intervalSeconds)
-                    
-                    runningMutex.lock()
-                    let stillRunning = isTaskRunning
-                    runningMutex.unlock()
-                    
-                    if (!stillRunning) {
-                        break
-                    }
-                    
-                    logger.debug("Executing scheduled scan enqueue")
-                    triggerDirectoryScan(scanPath: ShinobuService.archivePath.toString(), priority: 30, triggerSource: "scheduled")
-                }
-                
-                logger.info("Scheduled scan thread stopped")
-            }
-        }
-    }
+
+
+
     
-    /**
-     * 启动定时缩略图任务
-     */
-    private func startScheduledThumbnail() {
-        if (enableAutoThumbnail) {
-            // 生成线程ID
-            let threadId = "thumbnail-${DateTime.nowUTC().toUnixTimeStamp()}"
-            thumbnailThread = Option<String>.Some(threadId)
-            
-            spawn {
-                logger.info("Starting scheduled thumbnail generation", ("cron", thumbnailIntervalCron))
-                
-                // 简单的定时实现：每隔一定时间执行一次
-                // 实际应该解析 cron 表达式并精确调度
-                let intervalSeconds = parseCronToSeconds(thumbnailIntervalCron)
-                
-                runningMutex.lock()
-                let running = isTaskRunning
-                runningMutex.unlock()
-                
-                while (running) {
-                    sleep(Duration.second * intervalSeconds)
-                    
-                    runningMutex.lock()
-                    let stillRunning = isTaskRunning
-                    runningMutex.unlock()
-                    
-                    if (!stillRunning) {
-                        break
-                    }
 
-                    logger.info("Executing scheduled thumbnail generation")
-                    // TODO: 为所有没有缩略图的归档创建 generate_thumbnail 任务
-                    // generateAllThumbnails() 方法已移动到 GenerateThumbnailTaskRunner
-                }
-                
-                logger.info("Scheduled thumbnail generation thread stopped")
-            }
-        }
-    }
-    
-    /**
-     * 启动定时数据库检查任务
-     */
-    private func startScheduledDbCheck() {
-        if (enableDbCheck) {
-            // 生成线程ID
-            let threadId = "db-check-${DateTime.nowUTC().toUnixTimeStamp()}"
-            dbCheckThread = Option<String>.Some(threadId)
-            
-            spawn {
-                logger.info("Starting scheduled database check", ("cron", dbCheckIntervalCron))
-                
-                // 简单的定时实现：每隔一定时间执行一次
-                // 实际应该解析 cron 表达式并精确调度
-                let intervalSeconds = parseCronToSeconds(dbCheckIntervalCron)
-                
-                runningMutex.lock()
-                let running = isTaskRunning
-                runningMutex.unlock()
-                
-                while (running) {
-                    sleep(Duration.second * intervalSeconds)
-                    
-                    runningMutex.lock()
-                    let stillRunning = isTaskRunning
-                    runningMutex.unlock()
-
-                    if (!stillRunning) {
-                        break
-                    }
-
-                    logger.info("Executing scheduled database check")
-                    triggerDatabaseCheck(priority: 50, triggerSource: "scheduled")
-                }
-                
-                logger.info("Scheduled database check thread stopped")
-            }
-        }
-    }
-
-    /**
-     * 启动文件监视器
-     */
-    private func startFileWatcher() {
-        if (enableAutoScan) {
-            // 生成线程ID
-            let threadId = "file-watcher-${DateTime.nowUTC().toUnixTimeStamp()}"
-            fileWatcherThread = Option<String>.Some(threadId)
-            
-            spawn {
-                logger.debug("Starting file watcher", ("directory", archivePath.toString()))
-                logger.debug("File watcher polling interval", ("interval_ms", scanFallbackIntervalMs.toString()))
-                
-                // 简单的轮询实现：每隔一定时间检查目录变化
-                // 实际应该使用文件系统监视 API
-                var lastFileCount = countFilesInDirectory(archivePath.toString())
-                logger.debug("Initial file count in archive directory", ("count", lastFileCount.toString()))
-                
-                runningMutex.lock()
-                let running = isTaskRunning
-                runningMutex.unlock()
-                
-                while (running) {
-                    sleep(Duration.second * (scanFallbackIntervalMs / 1000))
-                    
-                    runningMutex.lock()
-                    let stillRunning = isTaskRunning
-                    runningMutex.unlock()
-                    
-                    if (!stillRunning) {
-                        break
-                    }
-                    
-                    // 检查目录中的文件数量是否变化
-                    let currentFileCount = countFilesInDirectory(archivePath.toString())
-                    if (currentFileCount != lastFileCount) {
-                        logger.debug("File change detected, triggering scan", ("previous_count", lastFileCount.toString()), ("current_count", currentFileCount.toString()))
-                        triggerDirectoryScan(scanPath: ShinobuService.archivePath.toString(), priority: 30, triggerSource: "watcher")
-                        lastFileCount = currentFileCount
-                    } else {
-                        logger.debug("File watcher check: no changes detected", ("count", currentFileCount.toString()))
-                    }
-                }
-                
-                logger.info("File watcher thread stopped")
-            }
-        } else {
-            logger.info("File watcher is disabled")
-        }
-    }
-    
-    /**
-     * 停止所有定时任务
-     */
-    private func stopScheduledTasks() {
-        runningMutex.lock()
-        isTaskRunning = false
-        runningMutex.unlock()
-        
-        // 等待所有线程结束 - 仓颉中无法直接join线程，线程会在isTaskRunning=false时自动退出
-        match (scanThread) {
-            case Option<String>.Some(_) =>
-                // 线程会在 isTaskRunning = false 时自动退出
-                ()
-            case Option<String>.None => ()
-        }
-        
-        match (thumbnailThread) {
-            case Option<String>.Some(_) =>
-                // 线程会在 isTaskRunning = false 时自动退出
-                ()
-            case Option<String>.None => ()
-        }
-        
-        match (fileWatcherThread) {
-            case Option<String>.Some(_) =>
-                // 线程会在 isTaskRunning = false 时自动退出
-                ()
-            case Option<String>.None => ()
-        }
-        
-        match (dbCheckThread) {
-            case Option<String>.Some(_) =>
-                // 线程会在 isTaskRunning = false 时自动退出
-                ()
-            case Option<String>.None => ()
-        }
-        
-        scanThread = Option<String>.None
-        thumbnailThread = Option<String>.None
-        fileWatcherThread = Option<String>.None
-        dbCheckThread = Option<String>.None
-        
-        logger.info("All scheduled tasks stopped")
-    }
-    
-    /**
-     * 简单解析 cron 表达式为秒数
-     * 这是一个简化实现，实际应该使用完整的 cron 解析库
-     */
-    private func parseCronToSeconds(cronExpression: String): Int64 {
-        // 简单实现：只处理数字格式（表示秒数）
-        // 实际应该解析完整的 cron 表达式
-        try {
-            let seconds = Int64.parse(cronExpression)
-            return seconds
-        } catch (e: Exception) {
-            // 默认 1 小时
-            return 3600
-        }
-    }
-    
-    /**
-     * 计算目录中的文件数量
-     */
-    private func countFilesInDirectory(dirPath: String): Int64 {
-        var count: Int64 = 0
-
-        try {
-            let entries = listDirectory(dirPath)
-            for (entry in entries) {
-                let entryPath = joinPath(dirPath, entry)
-                if (fileExists(entryPath)) {
-                    count += 1
-                }
-            }
-        } catch (e: Exception) {
-            logger.error("Error counting files in directory", ("directory", dirPath))
-        }
-
-        return count
-    }
 
     /**
      * 获取配置信息
      */
     public func getConfiguration(): ShinobuConfiguration {
         return ShinobuConfiguration(
-            ShinobuService.enableAutoScan,
-            ShinobuService.enableInitialScan,
-            ShinobuService.scanIntervalCron,
-            ShinobuService.enableAutoThumbnail,
-            ShinobuService.thumbnailIntervalCron,
-            ShinobuService.scanFallbackIntervalMs
+            SystemSettingsService.getBoolean("ENABLE_AUTO_SCAN"),
+            SystemSettingsService.getBoolean("ENABLE_INITIAL_SCAN"),
+            SystemSettingsService.getString("SCAN_INTERVAL_CRON"),
+            SystemSettingsService.getBoolean("ENABLE_AUTO_THUMBNAIL"),
+            SystemSettingsService.getString("THUMBNAIL_INTERVAL_CRON"),
+            SystemSettingsService.getLong("SCAN_FALLBACK_INTERVAL_MS")
         )
     }
     
-    /**
-     * 获取文件监视器状态
-     */
-    public func getFileWatcherStatus(): FileWatcherStatusData {
-        // 检查文件监视器是否活跃
-        let isActive = isFileWatcherActive()
-        
-        // 获取监视器数量（简化实现）
-        let watcherCount: Int32 = if (isActive) { 1 } else { 0 }
-        
-        // 获取最后事件时间（简化实现）
-        let lastEventTime = if (isActive) {
-            DateTime.nowUTC().toString()
-        } else {
-            "Never"
-        }
-        
-        // 获取总事件数（简化实现）
-        let totalEvents: Int64 = 0 // 实际应该跟踪事件数量
-        
-        // 获取错误数（简化实现）
-        let errorCount: Int64 = 0 // 实际应该跟踪错误数量
-        
-        // 获取最后错误（简化实现）
-        let lastError = "" // 实际应该记录最后错误
-        
-        return FileWatcherStatusData(
-            isActive,
-            watcherCount,
-            lastEventTime,
-            totalEvents,
-            errorCount,
-            lastError
-        )
-    }
-    
-    /**
-     * 检查文件监视器是否活跃
-     */
-    private func isFileWatcherActive(): Bool {
-        match (fileWatcherThread) {
-            case Option<String>.Some(_) =>
-                return isRunning && ShinobuService.enableFileWatcher
-            case Option<String>.None =>
-                return false
-        }
-    }
-    
-    /**
-     * 重启文件监视器
-     */
-    public func restartFileWatcher(): Bool {
-        // 停止现有的文件监视器
-        stopFileWatcher()
-        
-        // 等待一段时间
-        sleep(Duration.second * 2)
-        
-        // 重新启动文件监视器
-        if (enableFileWatcher && isRunning) {
-            startFileWatcher()
-            return true
-        }
-        
-        return false
-    }
-    
-    /**
-     * 停止文件监视器
-     */
-    private func stopFileWatcher() {
-        match (fileWatcherThread) {
-            case Option<String>.Some(_) =>
-                // 线程会在 isTaskRunning = false 时自动退出
-                fileWatcherThread = Option<String>.None
-                logger.info("File watcher stopped")
-            case Option<String>.None =>
-                ()
-        }
-    }
+
 }
 
 /**
@@ -860,42 +314,7 @@ public class ShinobuStatusData {
     }
 }
 
-/**
- * 文件监视器状态数据
- */
-public class FileWatcherStatusData {
-    public var isActive: Bool
-    public var watcherCount: Int32
-    public var lastEventTime: String
-    public var totalEvents: Int64
-    public var errorCount: Int64
-    public var lastError: String
-    
-    public init(isActive: Bool, watcherCount: Int32, lastEventTime: String,
-                totalEvents: Int64, errorCount: Int64, lastError: String) {
-        this.isActive = isActive
-        this.watcherCount = watcherCount
-        this.lastEventTime = lastEventTime
-        this.totalEvents = totalEvents
-        this.errorCount = errorCount
-        this.lastError = lastError
-    }
-    
-    /**
-     * 转换为JSON字符串
-     */
-    public func toJson(): String {
-        return """
-            {
-            \"isActive\":${isActive},
-            \"watcherCount\":${watcherCount},
-            \"lastEventTime\":\"${lastEventTime}\",
-            \"totalEvents\":${totalEvents},
-            \"errorCount\":${errorCount},
-            \"lastError\":\"${lastError}\"
-            }"""
-    }
-}
+
 
 /**
  * 插件元数据

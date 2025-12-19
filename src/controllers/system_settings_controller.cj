@@ -3,6 +3,7 @@ package lrr4cj.controllers
 import cjoy.*
 import std.collection.*
 import stdx.log.*
+import stdx.encoding.json.*
 import lrr4cj.services.*
 import lrr4cj.dao.*
 import lrr4cj.utils.*
@@ -110,7 +111,7 @@ public class SystemSettingsController {
             }
 
             // 解析JSON（简化实现）
-            let settingsJson = extractJsonValue(body, "settings")
+            let settingsJson = extractJsonObject(body, "settings")
             if (settingsJson.size == 0) {
                 ctx.status(400)
                 ctx.json("{\"success\":false,\"message\":\"设置数据不能为空\"}")
@@ -118,9 +119,12 @@ public class SystemSettingsController {
             }
 
             // 解析设置键值对
-            var settingsMap = HashMap<String, String>()
-            // TODO: 解析JSON字符串，这里需要更完整的JSON解析
-            // 简化实现：假设格式为 {"settings": {"key1": "value1", "key2": "value2"}}
+            var settingsMap = parseSettingsObject(settingsJson)
+            if (settingsMap.size == 0) {
+                ctx.status(400)
+                ctx.json("{\"success\":false,\"message\":\"设置数据格式不正确\"}")
+                return
+            }
 
             let success = SystemSettingsService.updateSettings(settingsMap)
             if (success) {
@@ -223,13 +227,85 @@ public class SystemSettingsController {
     }
 
     /**
-     * 辅助方法：从JSON字符串提取值（简化实现）
+     * 辅助方法：从JSON字符串提取值
      */
     private static func extractJsonValue(json: String, key: String): String {
-        // 这是一个简化实现，实际应该使用完整的JSON解析器
-        // 例如：{"key": "value"} 中提取 key 的值
-        let pattern = "\"${key}\"\\s*:\\s*\"([^\"]+)\""
-        // TODO: 使用正则表达式或JSON解析器
+        if (json.size == 0) {
+            return ""
+        }
+        
+        try {
+            let jsonVal = JsonValue.fromStr(json)
+            match (jsonVal) {
+                case obj: JsonObject =>
+                    let fields = obj.getFields()
+                    if (fields.contains(key)) {
+                        match (fields[key]) {
+                            case s: JsonString => return s.getValue()
+                            case _ => return fields[key].toString()
+                        }
+                    }
+                case _ => return ""
+            }
+        } catch (e: Exception) {
+            return ""
+        }
+        
         return ""
+    }
+    
+    /**
+     * 辅助方法：从JSON字符串中提取对象
+     */
+    private static func extractJsonObject(json: String, key: String): String {
+        if (json.size == 0) {
+            return ""
+        }
+        
+        try {
+            let jsonVal = JsonValue.fromStr(json)
+            match (jsonVal) {
+                case obj: JsonObject =>
+                    let fields = obj.getFields()
+                    if (fields.contains(key)) {
+                        return fields[key].toString()
+                    }
+                case _ => return ""
+            }
+        } catch (e: Exception) {
+            return ""
+        }
+        
+        return ""
+    }
+    
+    /**
+     * 辅助方法：解析设置对象为键值对
+     */
+    private static func parseSettingsObject(settingsJson: String): HashMap<String, String> {
+        var settingsMap = HashMap<String, String>()
+        
+        if (settingsJson.size == 0) {
+            return settingsMap
+        }
+        
+        try {
+            let jsonVal = JsonValue.fromStr(settingsJson)
+            match (jsonVal) {
+                case obj: JsonObject =>
+                    let fields = obj.getFields()
+                    for ((key, value) in fields) {
+                        match (value) {
+                            case s: JsonString => settingsMap[key] = s.getValue()
+                            case _ => settingsMap[key] = value.toString()
+                        }
+                    }
+                case _ => return settingsMap
+            }
+        } catch (e: Exception) {
+            return settingsMap
+        }
+        
+        return settingsMap
     }
 }

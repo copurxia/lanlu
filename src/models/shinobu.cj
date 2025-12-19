@@ -46,38 +46,4 @@ public class ShinobuResult {
     }
 }
 
-/**
- * 文件监视器状态数据模型
- */
-public class FileWatcherStatus {
-    public var isActive: Bool
-    public var watcherCount: Int32
-    public var lastEventTime: String
-    public var totalEvents: Int64
-    public var errorCount: Int64
-    public var lastError: String
-    
-    public init(isActive: Bool, watcherCount: Int32, lastEventTime: String,
-                totalEvents: Int64, errorCount: Int64, lastError: String) {
-        this.isActive = isActive
-        this.watcherCount = watcherCount
-        this.lastEventTime = lastEventTime
-        this.totalEvents = totalEvents
-        this.errorCount = errorCount
-        this.lastError = lastError
-    }
-    
-    /**
-     * 转换为JSON字符串
-     */
-    public func toJson(): String {
-        return "{" +
-            "\"isActive\":${isActive}," +
-            "\"watcherCount\":${watcherCount}," +
-            "\"lastEventTime\":\"${lastEventTime}\"," +
-            "\"totalEvents\":${totalEvents}," +
-            "\"errorCount\":${errorCount}," +
-            "\"lastError\":\"${lastError}\"" +
-            "}"
-    }
-}
+

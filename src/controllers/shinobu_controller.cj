@@ -81,39 +81,6 @@ public class ShinobuController {
     }
 
     /**
-     * 获取文件监视器状态
-     */
-    public static func getFileWatcherStatus(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
-        let statusData = service.getFileWatcherStatus()
-        let status = FileWatcherStatus(
-            statusData.isActive,
-            statusData.watcherCount,
-            statusData.lastEventTime,
-            statusData.totalEvents,
-            statusData.errorCount,
-            statusData.lastError
-        )
-        ctx.json(status.toJson())
-    }
-    
-    /**
-     * 重启文件监视器
-     */
-    public static func restartFileWatcher(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
-        let success = service.restartFileWatcher()
-
-        if (success) {
-            let response = "{\"operation\":\"file_watcher_restart\",\"success\":1}"
-            ctx.json(response)
-        } else {
-            let response = "{\"operation\":\"file_watcher_restart\",\"success\":0}"
-            ctx.json(response)
-        }
-    }
-
-    /**
      * 获取启动任务历史
      */
     public static func getStartupTasks(ctx: JoyContext) {

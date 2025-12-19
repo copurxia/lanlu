@@ -375,7 +375,7 @@ public class ArchiveController {
         }
 
         // 构建归档文件完整路径
-        let archivePath = ShinobuService.getArchivePath().toString()
+        let archivePath = SystemSettingsService.getPath("ARCHIVE_PATH")
         let fullArchivePath = if (archive.relative_path.size > 0) {
             "${archivePath}/${archive.relative_path}/${archive.filename}"
         } else {
@@ -519,7 +519,7 @@ public class ArchiveController {
         }
         
         // 构建归档文件完整路径
-        let archivePath = ShinobuService.getArchivePath().toString()
+        let archivePath = SystemSettingsService.getPath("ARCHIVE_PATH")
         let fullArchivePath = if (archive.relative_path.size > 0) {
             "${archivePath}/${archive.relative_path}/${archive.filename}"
         } else {
@@ -586,7 +586,7 @@ public class ArchiveController {
                 }
 
                 // 构建归档文件完整路径
-                let archivePath = ShinobuService.getArchivePath().toString()
+                let archivePath = SystemSettingsService.getPath("ARCHIVE_PATH")
                 let fullArchivePath = if (archive.relative_path.size > 0) {
                     "${archivePath}/${archive.relative_path}/${archive.filename}"
                 } else {
@@ -605,8 +605,10 @@ public class ArchiveController {
                         let contentType = getContentTypeFromPath(path)
                         ctx.header("Content-Type", contentType)
                         ctx.status(HttpStatusCode.STATUS_OK)
+                        // 将UInt8数组转换为Byte数组
+                        let byteData = Array<Byte>(stdout.size, { i => stdout[i] })
                         // 直接返回二进制数据
-                        ctx.data(stdout)
+                        ctx.data(byteData)
                     } else {
                         let error = String.fromUtf8(stderr)
                         let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Failed to extract file: ${error}\",\"success\":0}"
