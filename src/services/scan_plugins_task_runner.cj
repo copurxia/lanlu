@@ -1,6 +1,5 @@
 package lrr4cj.services
 
-import stdx.log.*
 import std.fs.*
 import std.process.*
 import std.time.*
@@ -39,15 +38,13 @@ public class ScanPluginsTaskRunner {
         // 确保配置已初始化
         ensureInitialized()
 
-        let logger = getLogger("scan_plugins_task")
         TaskIO.appendLog(taskId, "scan_plugins task started")
 
         TaskModel.updateTaskProgress(taskId, 10, "Starting plugin scan")
 
-        let result = scanPlugins()
+        let result = scanPlugins(taskId)
 
         if (result.errorCount > 0) {
-            logger.warn("scan_plugins completed with errors", ("error_count", result.errorCount.toString()))
             let errorJson = "{\"success\":1,\"processed_count\":${result.processedCount},\"total_found\":${result.totalFound},\"error_count\":${result.errorCount}}"
             TaskModel.updateTaskProgress(taskId, 100, "Plugin scan completed with ${result.errorCount} errors")
             TaskModel.completeTask(taskId, errorJson)
@@ -65,56 +62,54 @@ public class ScanPluginsTaskRunner {
     /**
      * 扫描插件文件
      */
-    private static func scanPlugins(): ScanResultData {
+    private static func scanPlugins(taskId: Int64): ScanResultData {
         let startTime = getCurrentTimeMillis()
         var processedCount: Int64 = 0
         var errorCount: Int64 = 0
         var errors: Array<String> = Array<String>()
 
-        let logger = getLogger("scan_plugins")
-        logger.debug("Starting plugin scan")
-        logger.debug("Plugin path", ("path", pluginPath.toString()))
+        TaskIO.appendLog(taskId, "Starting plugin scan")
+        TaskIO.appendLog(taskId, "Plugin path: ${pluginPath.toString()}")
 
         // 检查目录是否存在
         if (!directoryExists(pluginPath.toString())) {
-            logger.error("Plugin directory does not exist", ("path", pluginPath.toString()))
-            return ScanResultData(0, 0, 1, ["Plugin directory does not exist: ${pluginPath.toString()}"])
+            let error = "Plugin directory does not exist: ${pluginPath.toString()}"
+            TaskIO.appendLog(taskId, "ERROR: ${error}")
+            return ScanResultData(0, 0, 1, [error])
         }
 
         // 扫描插件文件
-        let pluginFiles = findPluginFiles(pluginPath.toString())
-        logger.info("Found plugin files to process", ("count", pluginFiles.size.toString()))
+        let pluginFiles = findPluginFiles(taskId, pluginPath.toString())
+        TaskIO.appendLog(taskId, "Found ${pluginFiles.size} plugin files to process")
 
         // 处理每个插件文件
         for (pluginFile in pluginFiles) {
             try {
-                logger.debug("Processing plugin", ("file", pluginFile))
-                let result = processPluginFile(pluginFile)
+                TaskIO.appendLog(taskId, "Processing plugin: ${pluginFile}")
+
+                let result = processPluginFile(taskId, pluginFile)
 
                 if (result.success) {
                     processedCount++
-                    logger.debug("Successfully processed plugin", ("file", pluginFile), ("archive_id", result.archiveId))
+                    TaskIO.appendLog(taskId, "Successfully processed plugin: ${pluginFile} (namespace: ${result.archiveId})")
                 } else {
                     errorCount++
                     let errorMsg = "Failed to process plugin ${pluginFile}: ${result.error}"
                     errors = addError(errors, errorMsg)
-                    logger.error(errorMsg)
+                    TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                 }
             } catch (e: Exception) {
                 errorCount++
-                let errorMsg = "Error processing plugin ${pluginFile}: ${e.message}"
+                let errorMsg = "Exception while processing plugin ${pluginFile}: ${e.message}"
                 errors = addError(errors, errorMsg)
-                logger.error(errorMsg)
+                TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             }
         }
 
         let endTime = getCurrentTimeMillis()
         let duration = endTime - startTime
 
-        logger.info("Plugin scan completed",
-            ("processed", processedCount.toString()),
-            ("errors", errorCount.toString()),
-            ("duration_ms", duration.toString()))
+        TaskIO.appendLog(taskId, "Plugin scan completed: processed=${processedCount}, errors=${errorCount}, duration=${duration}ms")
 
         return ScanResultData(processedCount, pluginFiles.size, 0, errors)
     }
@@ -122,8 +117,8 @@ public class ScanPluginsTaskRunner {
     /**
      * 查找插件文件
      */
-    private static func findPluginFiles(dirPath: String): Array<String> {
-        var result: Array<String> = Array<String>()
+    private static func findPluginFiles(taskId: Int64, dirPath: String): ArrayList<String> {
+        var result: ArrayList<String> = ArrayList<String>()
 
         try {
             if (!directoryExists(dirPath)) {
@@ -131,8 +126,7 @@ public class ScanPluginsTaskRunner {
             }
 
             let entries = listDirectory(dirPath)
-            let logger = getLogger("scan_plugins")
-            logger.debug("Scanning plugin directory", ("directory", dirPath), ("entries", entries.size.toString()))
+            TaskIO.appendLog(taskId, "Scanning plugin directory: ${dirPath} (${entries.size} entries)")
 
             // 扫描EHentai相关的插件类型目录
             let pluginTypes = ["Metadata", "Login", "Download"]
@@ -144,16 +138,15 @@ public class ScanPluginsTaskRunner {
                     // 检查是否是插件类型目录
                     for (pluginType in pluginTypes) {
                         if (entry == pluginType) {
-                            let pluginFiles = findPluginFilesInType(fullPath)
-                            result = combineArrays(result, pluginFiles)
+                            let pluginFiles = findPluginFilesInType(taskId, fullPath)
+                            result.add(all: pluginFiles)
                             break
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            let logger = getLogger("scan_plugins")
-            logger.error("Error scanning plugin directory", ("directory", dirPath), ("error", e.message))
+            TaskIO.appendLog(taskId, "ERROR: Error scanning plugin directory ${dirPath}: ${e.message}")
         }
 
         return result
@@ -162,8 +155,8 @@ public class ScanPluginsTaskRunner {
     /**
      * 在指定类型目录中查找插件文件
      */
-    private static func findPluginFilesInType(typeDirPath: String): Array<String> {
-        var result: Array<String> = Array<String>()
+    private static func findPluginFilesInType(taskId: Int64, typeDirPath: String): ArrayList<String> {
+        var result: ArrayList<String> = ArrayList<String>()
 
         try {
             let entries = listDirectory(typeDirPath)
@@ -173,14 +166,12 @@ public class ScanPluginsTaskRunner {
 
                 // 只扫描 TypeScript 插件文件
                 if (fileExists(fullPath) && entry.endsWith(".ts")) {
-                    result = addFile(result, fullPath)
-                    let logger = getLogger("scan_plugins")
-                    logger.debug("Found TypeScript plugin", ("file", fullPath))
+                    result.add(fullPath)
+                    TaskIO.appendLog(taskId, "Found TypeScript plugin: ${fullPath}")
                 }
             }
         } catch (e: Exception) {
-            let logger = getLogger("scan_plugins")
-            logger.error("Error scanning plugin type directory", ("directory", typeDirPath), ("error", e.message))
+            TaskIO.appendLog(taskId, "ERROR: Error scanning plugin type directory ${typeDirPath}: ${e.message}")
         }
 
         return result
@@ -189,22 +180,21 @@ public class ScanPluginsTaskRunner {
     /**
      * 处理插件文件
      */
-    private static func processPluginFile(filePath: String): ProcessResultData {
+    private static func processPluginFile(taskId: Int64, filePath: String): ProcessResultData {
         try {
             // 解析插件路径获取类型和文件名
             let pathParts = filePath.split("/")
             let fileName = pathParts[pathParts.size - 1]
             let pluginType = if (pathParts.size >= 2) { pathParts[pathParts.size - 2] } else { "Unknown" }
 
-            let logger = getLogger("scan_plugins")
-            logger.debug("Processing plugin file", ("file", fileName), ("type", pluginType), ("path", filePath))
+            TaskIO.appendLog(taskId, "Processing plugin file: ${fileName} (type: ${pluginType})")
 
             // 使用Deno解析插件元数据
-            let pluginMetadata = parsePluginMetadataWithDeno(filePath, pluginType)
+            let pluginMetadata = parsePluginMetadataWithDeno(taskId, filePath, pluginType)
 
             // 检查插件是否已存在（通过namespace检查）
             if (PluginDao.exists(pluginMetadata.namespace)) {
-                logger.debug("Plugin already exists", ("namespace", pluginMetadata.namespace))
+                TaskIO.appendLog(taskId, "Plugin already exists: ${pluginMetadata.namespace}")
                 return ProcessResultData(true, pluginMetadata.namespace, "")
             }
 
@@ -224,6 +214,11 @@ public class ScanPluginsTaskRunner {
             pluginData.plugin_type = pluginType
             pluginData.tags = pluginMetadata.tags
             pluginData.permissions = pluginMetadata.permissions
+            pluginData.parameters = pluginMetadata.parameters
+            pluginData.has_schema = pluginMetadata.has_schema
+            pluginData.url_regex = pluginMetadata.url_regex
+            pluginData.login_from = pluginMetadata.login_from
+            pluginData.icon = pluginMetadata.icon
             pluginData.enabled = true
             pluginData.installed = true
             pluginData.created_at = DateTime.now().toUnixTimeStamp().toSeconds().toString()
@@ -231,9 +226,10 @@ public class ScanPluginsTaskRunner {
 
             // 保存到数据库
             if (PluginDao.create(pluginData)) {
-                logger.info("Successfully registered plugin: ${pluginData.namespace} (${pluginData.name})")
+                TaskIO.appendLog(taskId, "Successfully registered plugin: ${pluginData.namespace} (${pluginData.name})")
                 return ProcessResultData(true, pluginData.namespace, "")
             } else {
+                TaskIO.appendLog(taskId, "ERROR: Failed to save plugin to database")
                 return ProcessResultData(false, "", "Failed to save plugin to database")
             }
         } catch (e: Exception) {
@@ -244,25 +240,19 @@ public class ScanPluginsTaskRunner {
     /**
      * 使用Deno解析TypeScript插件元数据
      */
-    private static func parsePluginMetadataWithDeno(filePath: String, pluginType: String): PluginMetadata {
+    private static func parsePluginMetadataWithDeno(taskId: Int64, filePath: String, pluginType: String): PluginMetadata {
         var metadata = PluginMetadata()
 
         try {
-            // 使用 Deno 执行脚本获取插件信息
-            let denoScript = """
-                import plugin from '${escapeJson(filePath)}';
-                if (plugin && plugin.plugin_info) {
-                    const info = typeof plugin.plugin_info === 'function' ? plugin.plugin_info() : plugin.plugin_info;
-                    console.log(JSON.stringify(info));
-                } else {
-                    console.log(JSON.stringify({name: '', namespace: '', version: '1.0', description: '', author: '', tags: '', permissions: ''}));
-                }
-            """
+            TaskIO.appendLog(taskId, "Parsing plugin metadata: ${filePath}")
 
-            let (exitCode, stdout, stderr) = executeWithOutput("deno", ["eval", "--quiet", denoScript])
+            // 使用 Deno 运行插件并传入 --action=plugin_info 参数
+            let (exitCode, stdout, stderr) = executeWithOutput(taskId, "deno", ["run", "--quiet", filePath, "--action=plugin_info"])
 
             if (exitCode == 0 && stdout.size > 0) {
                 let jsonStr = String.fromUtf8(stdout).trimAscii()
+                TaskIO.appendLog(taskId, "Plugin metadata raw output: ${jsonStr}")
+
                 let json = JsonValue.fromStr(jsonStr)
                 match (json) {
                     case jsonObj: JsonObject =>
@@ -274,6 +264,26 @@ public class ScanPluginsTaskRunner {
                         metadata.author = getJsonString(jsonObj, "author")
                         metadata.tags = getJsonString(jsonObj, "tags")
                         metadata.permissions = getJsonString(jsonObj, "permissions")
+
+                        // 解析parameters字段
+                        if (jsonObj.getFields().contains("parameters")) {
+                            let paramsValue = jsonObj.getFields()["parameters"]
+                            match (paramsValue) {
+                                case paramsArray: JsonArray =>
+                                    metadata.parameters = paramsArray.toString()
+                                    metadata.has_schema = paramsArray.size() > 0
+                                case _ =>
+                                    metadata.parameters = "[]"
+                                    metadata.has_schema = false
+                            }
+                        }
+
+                        // 解析其他可选字段
+                        metadata.url_regex = getJsonString(jsonObj, "url_regex")
+                        metadata.login_from = getJsonString(jsonObj, "login_from")
+                        metadata.icon = getJsonString(jsonObj, "icon")
+
+                        TaskIO.appendLog(taskId, "Successfully parsed plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, has_schema=${metadata.has_schema}")
                     case _ =>
                         // 解析失败，使用文件名作为默认信息
                         let fileNameOnly = Path(filePath).fileName.toString()
@@ -282,21 +292,22 @@ public class ScanPluginsTaskRunner {
                         metadata.version = "1.0"
                         metadata.description = "${pluginType} plugin"
                         metadata.author = "Unknown"
+                        TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON, using defaults for ${filePath}")
                 }
             } else {
                 // 执行失败，使用文件名作为默认信息
+                let stderrStr = String.fromUtf8(stderr)
                 let fileNameOnly = Path(filePath).fileName.toString()
                 metadata.name = fileNameOnly
                 metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
                 metadata.version = "1.0"
                 metadata.description = "${pluginType} plugin"
                 metadata.author = "Unknown"
-                let logger = getLogger("scan_plugins")
-                logger.warn("Failed to execute plugin metadata parsing", ("file", filePath), ("stderr", String.fromUtf8(stderr)))
+
+                TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stderr=${stderrStr}")
             }
         } catch (e: Exception) {
-            let logger = getLogger("scan_plugins")
-            logger.error("Error parsing plugin metadata", ("file", filePath), ("error", e.message))
+            TaskIO.appendLog(taskId, "ERROR: Error parsing plugin metadata for ${filePath}: ${e.message}")
             // 异常情况下，使用文件名作为默认信息
             let fileNameOnly = Path(filePath).fileName.toString()
             metadata.name = fileNameOnly
@@ -340,18 +351,6 @@ public class ScanPluginsTaskRunner {
         return ""
     }
 
-    private static func escapeJson(value: String): String {
-        var escaped = value
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     /**
      * 检查目录是否存在（支持软链接）
      */
@@ -383,7 +382,7 @@ public class ScanPluginsTaskRunner {
     /**
      * 执行命令
      */
-    private static func executeWithOutput(command: String, args: Array<String>): (Int32, Array<UInt8>, Array<UInt8>) {
+    private static func executeWithOutput(taskId: Int64, command: String, args: Array<String>): (Int32, Array<UInt8>, Array<UInt8>) {
         try {
             // 构建完整的命令字符串用于日志，对包含空格的参数加引号
             var fullCmd = command
@@ -394,49 +393,42 @@ public class ScanPluginsTaskRunner {
                     fullCmd += " " + arg
                 }
             }
-            let logger = getLogger("scan_plugins")
-            logger.info("Executing command with args: ${fullCmd}")
+            TaskIO.appendLog(taskId, "Executing command: ${fullCmd}")
 
             if (args.size == 0) {
                 // 没有参数的情况
                 let process = launch(command, stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
+                let (exitCode, stdout, stderr) = process.waitOutput()
+                return (Int32(exitCode), stdout, stderr)
             } else if (args.size == 1) {
                 // 一个参数的情况
                 let process = launch(command, args[0], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
+                let (exitCode, stdout, stderr) = process.waitOutput()
+                return (Int32(exitCode), stdout, stderr)
             } else if (args.size == 2) {
                 // 两个参数的情况
                 let process = launch(command, args[0], args[1], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
+                let (exitCode, stdout, stderr) = process.waitOutput()
+                return (Int32(exitCode), stdout, stderr)
             } else if (args.size == 3) {
                 // 三个参数的情况
                 let process = launch(command, args[0], args[1], args[2], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
+                let (exitCode, stdout, stderr) = process.waitOutput()
+                return (Int32(exitCode), stdout, stderr)
             } else if (args.size == 4) {
                 // 四个参数的情况
                 let process = launch(command, args[0], args[1], args[2], args[3], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                let exitCode = process.wait()
-                return (Int32(exitCode), Array<UInt8>(), Array<UInt8>())
+                let (exitCode, stdout, stderr) = process.waitOutput()
+                return (Int32(exitCode), stdout, stderr)
             } else {
                 // 更多参数的情况，暂时返回错误
-                let logger = getLogger("scan_plugins")
-                logger.error("Too many arguments for command: ${fullCmd}")
+                TaskIO.appendLog(taskId, "ERROR: Too many arguments for command: ${fullCmd}")
                 return (1, Array<UInt8>(), Array<UInt8>())
             }
         } catch (e: Exception) {
-            let logger = getLogger("scan_plugins")
-            logger.error("Error executing command '${command}': ${e.message}")
+            TaskIO.appendLog(taskId, "ERROR: Error executing command '${command}': ${e.message}")
             return (1, Array<UInt8>(), Array<UInt8>())
         }
-    }
-
-    private static func combineArrays(arr1: Array<String>, arr2: Array<String>): Array<String> {
-        return DirectoryScanner.combineArrays(arr1, arr2)
     }
 
     private static func addFile(arr: Array<String>, file: String): Array<String> {

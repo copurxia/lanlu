@@ -343,6 +343,11 @@ public class PluginMetadata {
     public var author: String = ""
     public var tags: String = ""
     public var permissions: String = ""
+    public var parameters: String = "[]"
+    public var url_regex: String = ""
+    public var login_from: String = ""
+    public var icon: String = ""
+    public var has_schema: Bool = false
 
     public init() {}
 }

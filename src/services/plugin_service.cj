@@ -92,12 +92,33 @@ public class PluginService {
         denoArgs.add("--allow-read=./data/logs/plugins.log")
         denoArgs.add("--allow-write=./data/logs/plugins.log")
 
-        // 解析插件声明的权限
-        let permissions = plugin.permissions.split(",")
+        // 解析插件声明的权限（JSON数组格式）
+        var permissionsList = ArrayList<String>()
+        let permissionsStr = plugin.permissions.trimAscii()
+
+        if (permissionsStr.size > 0 && permissionsStr.startsWith("[") && permissionsStr.endsWith("]")) {
+            // JSON数组格式
+            try {
+                let jsonVal = JsonValue.fromStr(permissionsStr)
+                match (jsonVal) {
+                    case arr: JsonArray =>
+                        for (i in 0..arr.size()) {
+                            match (arr[i]) {
+                                case s: JsonString => permissionsList.add(s.getValue())
+                                case _ => permissionsList.add(arr[i].toString())
+                            }
+                        }
+                    case _ => ()
+                }
+            } catch (_: Exception) {
+                // 解析失败，忽略权限
+            }
+        }
+
         var allowNetAll = false
         var netHosts = ArrayList<String>()
 
-        for (permission in permissions) {
+        for (permission in permissionsList) {
             let perm = normalizePermission(permission)
             if (perm.size == 0) {
                 continue
