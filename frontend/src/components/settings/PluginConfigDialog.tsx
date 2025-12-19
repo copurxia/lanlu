@@ -145,8 +145,8 @@ export function PluginConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl w-[95vw] md:w-full">
-        <DialogHeader className="pb-4">
+      <DialogContent className="max-w-xl w-[95vw] md:w-full p-6">
+        <DialogHeader className="pb-6">
           <DialogTitle className="flex items-center space-x-2">
             <Package className="w-5 h-5" />
             <span>{t('settings.configDialogTitle').replace('{name}', plugin.name)}</span>

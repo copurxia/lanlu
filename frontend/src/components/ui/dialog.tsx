@@ -84,7 +84,7 @@ const DialogContent: React.FC<{ className?: string; children: React.ReactNode }>
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-50 w-full max-w-lg max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden",
+          "relative z-50 w-full max-w-lg max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden px-6 py-4",
           className
         )}
         onClick={(e) => e.stopPropagation()}

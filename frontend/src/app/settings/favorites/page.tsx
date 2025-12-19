@@ -10,9 +10,13 @@ import { FavoriteService } from '@/lib/favorite-service';
 import { groupArchivesByTime, TimeGroup } from '@/lib/time-group';
 import { Archive } from '@/types/archive';
 import { HomeArchiveCard } from '@/components/archive/HomeArchiveCard';
+import { useToast } from '@/hooks/use-toast';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 
 export default function FavoritesPage() {
   const { t } = useLanguage();
+  const { success } = useToast();
+  const { confirm } = useConfirmContext();
   const [loading, setLoading] = useState(true);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [groupedArchives, setGroupedArchives] = useState<TimeGroup[]>([]);
@@ -66,9 +70,15 @@ export default function FavoritesPage() {
 
   // 处理清空所有收藏
   const handleClearAll = async () => {
-    if (!confirm(t('favorites.clearAllConfirm'))) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: '确认清空所有收藏',
+      description: t('favorites.clearAllConfirm'),
+      confirmText: '清空',
+      cancelText: '取消',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
 
     try {
       setLoading(true);
@@ -78,6 +88,7 @@ export default function FavoritesPage() {
 
       // 刷新列表
       await loadFavorites(true);
+      success('已清空所有收藏');
     } catch (error) {
       console.error('清空收藏失败:', error);
     } finally {

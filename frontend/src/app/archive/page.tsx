@@ -21,6 +21,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { TagService } from '@/lib/tag-service';
 import { FavoriteService } from '@/lib/favorite-service';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
+import { useToast } from '@/hooks/use-toast';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 
 function ArchiveDetailContent() {
   const searchParams = useSearchParams();
@@ -28,6 +30,8 @@ function ArchiveDetailContent() {
   const { t, language } = useLanguage();
   const { isAuthenticated, user } = useAuth();
   const isAdmin = user?.isAdmin === true;
+  const { success, error: showError, info } = useToast();
+  const { confirm } = useConfirmContext();
 
   // 添加 mounted 状态以避免水合错误
   const [mounted, setMounted] = useState(false);
@@ -311,7 +315,7 @@ function ArchiveDetailContent() {
       }
     } catch (error) {
       console.error('Failed to update metadata:', error);
-      alert(t('archive.updateFailed'));
+      showError(t('archive.updateFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -321,7 +325,7 @@ function ArchiveDetailContent() {
     if (!metadata) return;
     if (!isAuthenticated) return;
     if (!selectedMetadataPlugin) {
-      alert(t('archive.metadataPluginSelectRequired'));
+      showError(t('archive.metadataPluginSelectRequired'));
       return;
     }
 
@@ -344,7 +348,7 @@ function ArchiveDetailContent() {
 
       if (finalTask.status !== 'completed') {
         const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
-        alert(err);
+        showError(err);
         return;
       }
 
@@ -368,7 +372,7 @@ function ArchiveDetailContent() {
       setMetadataPluginProgress(100);
     } catch (e: any) {
       console.error('Failed to run metadata plugin:', e);
-      alert(e?.message || t('archive.metadataPluginFailed'));
+      showError(e?.message || t('archive.metadataPluginFailed'));
     } finally {
       setIsMetadataPluginRunning(false);
     }
@@ -383,7 +387,7 @@ function ArchiveDetailContent() {
       await fetchMetadata(); // 重新获取元数据以更新UI
     } catch (error) {
       console.error('Failed to mark as read:', error);
-      alert(t('archive.markAsReadFailed'));
+      showError(t('archive.markAsReadFailed'));
     } finally {
       setIsNewStatusLoading(false);
     }
@@ -398,7 +402,7 @@ function ArchiveDetailContent() {
       await fetchMetadata(); // 重新获取元数据以更新UI
     } catch (error) {
       console.error('Failed to mark as new:', error);
-      alert(t('archive.markAsNewFailed'));
+      showError(t('archive.markAsNewFailed'));
     } finally {
       setIsNewStatusLoading(false);
     }
@@ -409,26 +413,30 @@ function ArchiveDetailContent() {
   const handleDeleteArchive = async () => {
     if (!metadata) return;
     if (!isAdmin) {
-      alert('只有管理员才能删除档案');
+      showError('只有管理员才能删除档案');
       return;
     }
 
-    const confirmed = window.confirm(
-      `确定要删除档案 "${metadata.title}" 吗？\n\n此操作不可恢复，将删除：\n- 档案数据库记录\n- 用户收藏记录\n- 阅读状态记录\n- 标签关联`
-    );
+    const confirmed = await confirm({
+      title: '确认删除',
+      description: `确定要删除档案 "${metadata.title}" 吗？\n\n此操作不可恢复，将删除：\n- 档案数据库记录\n- 用户收藏记录\n- 阅读状态记录\n- 标签关联`,
+      confirmText: '删除',
+      cancelText: '取消',
+      variant: 'destructive',
+    });
 
     if (!confirmed) return;
 
     setDeleteLoading(true);
     try {
       await ArchiveService.deleteArchive(metadata.arcid);
-      alert('档案删除成功');
+      success('档案删除成功');
       // 删除成功后跳转到首页
       window.location.href = '/';
     } catch (error: any) {
       console.error('Failed to delete archive:', error);
       const errorMessage = error.response?.data?.error || error.message || '删除失败';
-      alert(`删除失败: ${errorMessage}`);
+      showError(`删除失败: ${errorMessage}`);
     } finally {
       setDeleteLoading(false);
     }

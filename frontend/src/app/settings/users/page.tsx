@@ -12,6 +12,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { apiClient } from '@/lib/api';
 import type { ApiEnvelope, AdminUser } from '@/types/auth';
+import { useToast } from '@/hooks/use-toast';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 
 interface CreateUserForm {
   username: string;
@@ -26,6 +28,8 @@ interface ResetPasswordForm {
 export default function UsersSettingsPage() {
   const { t } = useLanguage();
   const { user, isAuthenticated } = useAuth();
+  const { success, error: showError } = useToast();
+  const { confirm } = useConfirmContext();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +79,7 @@ export default function UsersSettingsPage() {
 
   const handleCreateUser = async () => {
     if (!createForm.username.trim()) {
-      setError('Username is required');
+      showError('Username is required');
       return;
     }
 
@@ -122,9 +126,15 @@ export default function UsersSettingsPage() {
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: '确认删除用户',
+      description: 'Are you sure you want to delete this user? This action cannot be undone.',
+      confirmText: '删除',
+      cancelText: '取消',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
 
     setLoading(true);
     setError(null);

@@ -18,6 +18,7 @@ import { ArchiveMetadata } from '@/types/archive';
 import { ArchiveService } from '@/lib/archive-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useToast } from '@/hooks/use-toast';
 
 interface EditMetadataDialogProps {
   open: boolean;
@@ -34,6 +35,7 @@ export function EditMetadataDialog({
 }: EditMetadataDialogProps) {
   const { t } = useLanguage();
   const { token } = useAuth();
+  const { error: showError } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     title: '',
@@ -81,8 +83,7 @@ export function EditMetadataDialog({
       onMetadataUpdated();
     } catch (error) {
       console.error('Failed to update metadata:', error);
-      // 可以添加错误提示
-      alert(t('archive.updateFailed'));
+      showError(t('archive.updateFailed'));
     } finally {
       setIsLoading(false);
     }

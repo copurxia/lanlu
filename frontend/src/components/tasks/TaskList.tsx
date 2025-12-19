@@ -21,6 +21,8 @@ import {
   ListTodo
 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
+import { useToast } from '@/hooks/use-toast';
 
 interface TaskListProps {
   className?: string;
@@ -28,6 +30,8 @@ interface TaskListProps {
 
 export function TaskList({ className }: TaskListProps) {
   const { t } = useLanguage();
+  const { confirm } = useConfirmContext();
+  const { success: showSuccess, error: showError } = useToast();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -103,12 +107,21 @@ export function TaskList({ className }: TaskListProps) {
   };
 
   const handleCancelTask = async (taskId: number) => {
-    if (!confirm(t('settings.taskManagement.confirmCancel'))) return;
+    const confirmed = await confirm({
+      title: t('settings.taskManagement.confirmCancel'),
+      description: '',
+      confirmText: t('common.yes'),
+      cancelText: t('common.no'),
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
 
     try {
       const success = await TaskPoolService.cancelTask(taskId);
       if (success) {
         await handleRefresh();
+        showSuccess(t('settings.taskManagement.canceled'));
       } else {
         setError(t('settings.taskManagement.failedToCancel'));
       }

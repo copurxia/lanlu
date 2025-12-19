@@ -104,7 +104,7 @@ export function TankoubonManagementDialog({
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4">
           <div>
             <label className="text-sm font-medium">
               {t('tankoubon.name')} <span className="text-destructive">*</span>

@@ -39,7 +39,7 @@ const getLocalizedDescription = (description: Record<string, string> | string, c
 export default function SystemSettingsPage() {
   const { t, language } = useLanguage();
   const { isAuthenticated } = useAuth();
-  const { toast } = useToast();
+  const { error: showError, success: showSuccess } = useToast();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -62,23 +62,15 @@ export default function SystemSettingsPage() {
         const grouped = groupSettingsByCategory(data.data);
         setSettings(grouped);
       } else {
-        toast({
-          title: t('common.error'),
-          description: data.message || t('settings.system.loadError'),
-          variant: 'destructive',
-        });
+        showError(data.message || t('settings.system.loadError'));
       }
     } catch (error) {
       console.error(t('settings.system.loadError'), ':', error as Error);
-      toast({
-        title: t('common.error'),
-        description: t('settings.system.loadError'),
-        variant: 'destructive',
-      });
+      showError(t('settings.system.loadError'));
     } finally {
       setLoading(false);
     }
-  }, [t, toast]);
+  }, [t, showError]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && isAuthenticated) {
@@ -131,24 +123,13 @@ export default function SystemSettingsPage() {
       const data = await response.json();
 
       if (data.success) {
-        toast({
-          title: t('common.success'),
-          description: t('settings.system.saveSuccess'),
-        });
+        showSuccess(t('settings.system.saveSuccess'));
       } else {
-        toast({
-          title: t('common.error'),
-          description: data.message || t('settings.system.saveError'),
-          variant: 'destructive',
-        });
+        showError(data.message || t('settings.system.saveError'));
       }
     } catch (error) {
       console.error(t('settings.system.saveError'), ':', error);
-      toast({
-        title: t('common.error'),
-        description: t('settings.system.saveError'),
-        variant: 'destructive',
-      });
+      showError(t('settings.system.saveError'));
     } finally {
       setSaving(false);
     }

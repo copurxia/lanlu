@@ -14,6 +14,8 @@ import { Tag, Plus, Search, Download, Upload, Edit2, Trash2 } from 'lucide-react
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { TagService } from '@/lib/tag-service';
+import { useToast } from '@/hooks/use-toast';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 
 interface TagItem {
   id: number;
@@ -49,6 +51,8 @@ interface EditTagForm {
 export default function TagsSettingsPage() {
   const { t } = useLanguage();
   const { user, isAuthenticated } = useAuth();
+  const { success, error: showError } = useToast();
+  const { confirm } = useConfirmContext();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -249,9 +253,15 @@ export default function TagsSettingsPage() {
   };
 
   const handleDeleteTag = async (tagId: number) => {
-    if (!confirm(t('settings.tagDeleteConfirm'))) {
-      return;
-    }
+    const confirmed = await confirm({
+      title: '确认删除标签',
+      description: t('settings.tagDeleteConfirm'),
+      confirmText: '删除',
+      cancelText: '取消',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
 
     setLoading(true);
     setError(null);
@@ -259,6 +269,7 @@ export default function TagsSettingsPage() {
       await TagService.adminDelete(tagId);
       setSuccessMsg(t('settings.tagDeletedSuccess'));
       await loadTags();
+      success('标签删除成功');
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || t('settings.tagDeleteFailed'));
     } finally {
@@ -288,7 +299,15 @@ export default function TagsSettingsPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!confirm(t('settings.tagImportConfirm'))) {
+    const confirmed = await confirm({
+      title: '确认导入标签',
+      description: t('settings.tagImportConfirm'),
+      confirmText: '导入',
+      cancelText: '取消',
+    });
+
+    if (!confirmed) {
+      event.target.value = '';
       return;
     }
 
@@ -305,6 +324,7 @@ export default function TagsSettingsPage() {
       setSuccessMsg(t('settings.tagImportStarted', { job }));
       await loadTags();
       await loadNamespaces();
+      success('标签导入成功');
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || t('settings.tagImportFailed'));
     } finally {
@@ -703,7 +723,7 @@ function TagDialog({ open, onOpenChange, mode, form, setForm, editingTag, loadin
                 : ''}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="namespace">{t('settings.tagNamespace')} *</Label>

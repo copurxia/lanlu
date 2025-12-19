@@ -375,7 +375,7 @@ function TankoubonDetailContent() {
             <DialogHeader>
               <DialogTitle>{t('tankoubon.editTankoubon')}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 px-6 py-4">
+            <div className="space-y-4">
               <div>
                 <label className="text-sm font-medium">{t('tankoubon.name')}</label>
                 <Input
@@ -446,7 +446,7 @@ function TankoubonDetailContent() {
             <DialogHeader>
               <DialogTitle>{t('tankoubon.addArchive')}</DialogTitle>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-4">
               <div className="flex gap-2">
                 <Input
                   value={searchQuery}

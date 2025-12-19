@@ -5,6 +5,8 @@ import { ThemeProvider } from '@/components/theme/theme-provider';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { StaticGenerationProvider } from '@/contexts/StaticGenerationContext';
+import { ConfirmProvider } from '@/contexts/ConfirmProvider';
+import { Toaster } from 'sonner';
 
 // 使用系统字体而不是 Google Fonts 以避免构建时的网络依赖
 // const inter = Inter({ subsets: ['latin'] });
@@ -25,11 +27,14 @@ export default function RootLayout({
         <StaticGenerationProvider>
           <LanguageProvider>
             <AuthProvider>
-              <ThemeProvider
-                defaultTheme="system"
-              >
-                {children}
-              </ThemeProvider>
+              <ConfirmProvider>
+                <ThemeProvider
+                  defaultTheme="system"
+                >
+                  {children}
+                  <Toaster position="top-center" richColors />
+                </ThemeProvider>
+              </ConfirmProvider>
             </AuthProvider>
           </LanguageProvider>
         </StaticGenerationProvider>

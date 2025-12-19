@@ -11,6 +11,8 @@ import { Filter, Plus, Pencil, Trash2, GripVertical, ChevronUp, ChevronDown, Boo
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { getApiUrl } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 
 interface SmartFilter {
   id: number;
@@ -49,6 +51,8 @@ const SORT_BY_OPTIONS = [
 export default function SmartFiltersPage() {
   const { t, language } = useLanguage();
   const { token } = useAuth();
+  const { success } = useToast();
+  const { confirm } = useConfirmContext();
   const [filters, setFilters] = useState<SmartFilter[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -164,7 +168,15 @@ export default function SmartFiltersPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm(t('common.confirm') + '?')) return;
+    const confirmed = await confirm({
+      title: '确认删除',
+      description: t('common.confirm') + '?',
+      confirmText: '删除',
+      cancelText: '取消',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
 
     try {
       const response = await fetch(getApiUrl(`/api/admin/smart_filters/${id}`), {
@@ -176,6 +188,7 @@ export default function SmartFiltersPage() {
 
       if (response.ok) {
         loadFilters();
+        success('删除成功');
       }
     } catch (error) {
       console.error('Failed to delete smart filter:', error);
