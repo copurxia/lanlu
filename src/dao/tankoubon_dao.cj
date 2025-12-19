@@ -135,6 +135,48 @@ public class TankoubonDao {
     }
 
     /**
+     * 获取Tankoubon的档案数量和总页数
+     */
+    public static func getTankoubonArchiveStats(tankoubonId: String): (Int32, Int32) {
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT COUNT(a.id) as archive_count, COALESCE(SUM(a.pagecount), 0) as total_pages
+                        FROM tankoubon_archives ta
+                        JOIN tankoubons t ON t.id = ta.tankoubon_id
+                        JOIN archives a ON a.id = ta.archive_id
+                        WHERE t.tankoubon_id = ?
+                        GROUP BY t.id
+                    """)
+                    try {
+                        stmt.set(0, tankoubonId)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                let archiveCount = rs.getOrNull<Int32>(0) ?? 0
+                                let totalPages = rs.getOrNull<Int32>(1) ?? 0
+                                return (archiveCount, totalPages)
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tankoubon_dao").error("获取Tankoubon档案统计失败", ("tankoubonId", tankoubonId), ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (closeException: Exception) {}
+                }
+            case None =>
+                getLogger("tankoubon_dao").error("无法连接到数据库")
+        }
+        return (0, 0)
+    }
+
+    /**
      * 创建新的Tankoubon
      * 返回生成的tankoubon_id
      */

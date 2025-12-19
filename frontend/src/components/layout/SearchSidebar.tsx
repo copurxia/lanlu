@@ -34,6 +34,7 @@ interface SearchSidebarProps {
     dateTo?: string;
     newonly?: boolean;
     untaggedonly?: boolean;
+    groupby_tanks?: boolean;
   }) => void;
   loading?: boolean;
 }
@@ -57,6 +58,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   const [dateTo, setDateTo] = useState('');
   const [newonly, setNewonly] = useState(false);
   const [untaggedonly, setUntaggedonly] = useState(false);
+  const [groupbyTanks, setGroupbyTanks] = useState(true);
   const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
 
   // Load smart filters from API
@@ -83,7 +85,8 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
       dateFrom,
       dateTo,
       newonly,
-      untaggedonly
+      untaggedonly,
+      groupby_tanks: groupbyTanks
     });
   };
 
@@ -95,12 +98,14 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
     setDateTo('');
     setNewonly(false);
     setUntaggedonly(false);
+    setGroupbyTanks(true);
     onSearch({
       query: '',
       sortBy: 'date_added',
       sortOrder: 'desc',
       newonly: false,
-      untaggedonly: false
+      untaggedonly: false,
+      groupby_tanks: true
     });
   };
 
@@ -135,6 +140,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
     setDateTo(calculatedDateTo);
     setNewonly(filter.newonly);
     setUntaggedonly(filter.untaggedonly);
+    setGroupbyTanks(true); // 智能筛选默认启用合集分组
 
     // Trigger search
     onSearch({
@@ -145,6 +151,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
       dateTo: calculatedDateTo || undefined,
       newonly: filter.newonly || undefined,
       untaggedonly: filter.untaggedonly || undefined,
+      groupby_tanks: true,
     });
   }, [onSearch]);
 
@@ -328,6 +335,18 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                   id="untaggedonly"
                   checked={untaggedonly}
                   onCheckedChange={setUntaggedonly}
+                />
+              </div>
+
+              {/* 按合集分组 */}
+              <div className="flex items-center justify-between">
+                <label htmlFor="groupbyTanks" className="text-sm">
+                  {t('search.groupByTanks')}
+                </label>
+                <Switch
+                  id="groupbyTanks"
+                  checked={groupbyTanks}
+                  onCheckedChange={setGroupbyTanks}
                 />
               </div>
             </div>

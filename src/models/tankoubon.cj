@@ -81,7 +81,12 @@ public class TankoubonModel {
         match (dataOpt) {
             case Some(data) =>
                 let tankoubon = Tankoubon(data.tankoubon_id, data.name, data.summary, data.tags, data.archives)
-                tankoubon.archive_count = data.archives.size.toInt32()
+
+                // 获取档案数量和总页数
+                let (archiveCount, totalPages) = TankoubonDao.getTankoubonArchiveStats(id)
+                tankoubon.archive_count = archiveCount
+                tankoubon.pagecount = totalPages
+
                 return tankoubon
             case None =>
                 return Tankoubon("", "", "", "", [])

@@ -157,12 +157,14 @@ function HomePageContent() {
     dateTo?: string;
     newonly?: boolean;
     untaggedonly?: boolean;
+    groupby_tanks?: boolean;
   }) => {
     setSearchQuery(params.query || '');
     if (params.sortBy) setSortBy(params.sortBy);
     if (params.sortOrder) setSortOrder(params.sortOrder);
     if (typeof params.newonly === 'boolean') setNewonly(params.newonly);
     if (typeof params.untaggedonly === 'boolean') setUntaggedonly(params.untaggedonly);
+    if (typeof params.groupby_tanks === 'boolean') setGroupByTanks(params.groupby_tanks);
     setCurrentPage(0);
     // 移动端：应用筛选后自动关闭对话框
     setFilterDialogOpen(false);
