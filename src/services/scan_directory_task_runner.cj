@@ -6,6 +6,7 @@ import std.fs.*
 import std.sync.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import lrr4cj.dao.*
 
 /**
  * 目录扫描任务：发现归档文件并创建 scan_archive 子任务
@@ -87,6 +88,26 @@ public class ScanDirectoryTaskRunner {
     }
 
     private static func enqueueScanArchiveTask(filePath: String, groupId: String, triggerSource: String, priority: Int32): Bool {
+        // 计算相对路径和文件名，用于检查档案是否已存在
+        let relativePath = ArchiveUtils.calculateRelativePath(filePath, archivePath.toString())
+        let fileName = ArchiveUtils.getFullFileName(filePath)
+
+        // 检查档案是否已存在于数据库中
+        let existingArchive = ArchiveDao.getByPathAndFilename(relativePath, fileName)
+        match (existingArchive) {
+            case Some(archive) =>
+                if (archive.thumbhash.size > 0) {
+                    // 档案已存在且已生成thumbhash，跳过
+                    getLogger("scan_directory").debug("Archive already exists with thumbnail, skipping: ${filePath}")
+                    return false
+                } else {
+                    // 档案存在但没有thumbhash，仍需处理
+                    getLogger("scan_directory").debug("Archive exists but no thumbnail, will process: ${filePath}")
+                }
+            case None =>
+                getLogger("scan_directory").debug("Archive not found in database, will process: ${filePath}")
+        }
+
         // 获取配置
         let archiveBasePath = archivePath.toString()
         let cachePathStr = cachePath.toString()

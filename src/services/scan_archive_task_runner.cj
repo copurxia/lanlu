@@ -147,17 +147,9 @@ public class ScanArchiveTaskRunner {
                         // 直接返回成功，不等待缩略图生成完成
                         return ProcessResultData(true, archive.id, "")
                     } else {
-                        if (shouldUpdateRelativePath) {
-                            let updateResult = ArchiveDao.updateArchiveRelativePath(archive.id, relativePath)
-                            if (!updateResult) {
-                                logger.error("Failed to update relative path for archive: ${archive.id}")
-                            } else {
-                                logger.info("Updated relative path for existing archive: ${archive.id} -> ${relativePath}")
-                            }
-                        }
-
-                        logger.info("Archive already has thumbnail: ${filePath}")
-                        return ProcessResultData(false, "", "Archive already exists with thumbnail")
+                        // Archive存在且已生成thumbhash - 跳过所有处理，直接返回成功
+                        logger.info("Archive already processed with thumbnail: ${filePath}")
+                        return ProcessResultData(true, archive.id, "")
                     }
                 case None =>
                     logger.debug("Archive not found in database, processing new file: ${filePath}")
