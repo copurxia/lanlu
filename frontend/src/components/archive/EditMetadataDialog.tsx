@@ -9,10 +9,7 @@ import { TagInput } from '@/components/ui/tag-input';
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog';
 import { ArchiveMetadata } from '@/types/archive';
 import { ArchiveService } from '@/lib/archive-service';
@@ -92,13 +89,7 @@ export function EditMetadataDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{t('archive.editMetadata')}</DialogTitle>
-          <DialogDescription>
-            {t('archive.editMetadataDescription')}
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
+        <div className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="title">{t('archive.title')}</Label>
             <Input

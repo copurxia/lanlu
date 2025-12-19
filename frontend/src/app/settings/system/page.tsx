@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -43,8 +43,11 @@ export default function SystemSettingsPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settings, setSettings] = useState<SettingsByCategory>({});
+  const [settings, setSettings] = useState<SettingsByCategory>({} as SettingsByCategory);
   const [activeTab, setActiveTab] = useState('storage');
+  
+  // 添加防抖计时器引用
+  const loadSettingsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const categories = [
     { id: 'storage', name: t('settings.system.storage'), icon: '📁' },
@@ -52,46 +55,62 @@ export default function SystemSettingsPage() {
     { id: 'performance', name: t('settings.system.performance'), icon: '⚡' },
   ];
 
-  const loadSettings = useCallback(async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/system/settings');
-      const data = await response.json();
-
-      if (data.success) {
-        const grouped = groupSettingsByCategory(data.data);
-        setSettings(grouped);
-      } else {
-        showError(data.message || t('settings.system.loadError'));
-      }
-    } catch (error) {
-      console.error(t('settings.system.loadError'), ':', error as Error);
-      showError(t('settings.system.loadError'));
-    } finally {
-      setLoading(false);
+  const loadSettings = useCallback(() => {
+    // 清除之前的定时器
+    if (loadSettingsTimeoutRef.current) {
+      clearTimeout(loadSettingsTimeoutRef.current);
     }
+    
+    // 设置新的定时器（防抖）
+    loadSettingsTimeoutRef.current = setTimeout(async () => {
+      try {
+        setLoading(true);
+        const response = await fetch('/api/system/settings');
+        const data = await response.json();
+
+        if (data.success) {
+          const grouped = groupSettingsByCategory(data.data);
+          setSettings(grouped);
+        } else {
+          showError(data.message || t('settings.system.loadError'));
+        }
+      } catch (error) {
+        console.error(t('settings.system.loadError'), ':', error as Error);
+        showError(t('settings.system.loadError'));
+      } finally {
+        setLoading(false);
+      }
+    }, 300); // 300ms 防抖延迟
   }, [t, showError]);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && isAuthenticated) {
       loadSettings();
     }
-  }, [isAuthenticated, loadSettings]);
+    
+    // 清理函数：在组件卸载时清除定时器
+    return () => {
+      if (loadSettingsTimeoutRef.current) {
+        clearTimeout(loadSettingsTimeoutRef.current);
+      }
+    };
+  }, [isAuthenticated]); // 移除了 loadSettings 依赖项，避免因 useCallback 依赖变化导致的重复调用
 
   const groupSettingsByCategory = (settings: SystemSetting[]): SettingsByCategory => {
-    return settings.reduce((acc, setting) => {
-      if (!acc[setting.category]) {
-        acc[setting.category] = [];
+    const grouped: SettingsByCategory = {};
+    settings.forEach(setting => {
+      if (!grouped[setting.category]) {
+        grouped[setting.category] = [];
       }
-      acc[setting.category].push(setting);
-      return acc;
-    }, {} as SettingsByCategory);
+      grouped[setting.category].push(setting);
+    });
+    return grouped;
   };
 
   const handleValueChange = (category: string, key: string, value: string) => {
     setSettings(prev => ({
       ...prev,
-      [category]: prev[category].map(setting =>
+      [category]: (prev[category] || []).map(setting =>
         setting.key === key ? { ...setting, value } : setting
       ),
     }));

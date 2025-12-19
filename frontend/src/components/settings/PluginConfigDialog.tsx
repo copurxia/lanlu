@@ -3,14 +3,14 @@
 import { useState, useEffect } from 'react';
 import { Plugin } from '@/lib/plugin-service';
 import { PluginSchemaService, PluginParameter } from '@/lib/plugin-schema-service';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Save, X, Package, FormInput, AlertCircle } from 'lucide-react';
+import { Package, FormInput, AlertCircle } from 'lucide-react';
 
 interface PluginConfigDialogProps {
   open: boolean;
@@ -145,21 +145,19 @@ export function PluginConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl w-[95vw] md:w-full p-6">
-        <DialogHeader className="pb-6">
-          <DialogTitle className="flex items-center space-x-2">
+      <DialogContent className="max-w-xl w-[95vw] md:w-full">
+        {parameters.length > 0 && (
+          <div className="flex items-center gap-2 px-6 pt-4">
             <Package className="w-5 h-5" />
-            <span>{t('settings.configDialogTitle').replace('{name}', plugin.name)}</span>
-            {parameters.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                <FormInput className="w-3 h-3 mr-1" />
-                {t('settings.smartForm')}
-              </Badge>
-            )}
-          </DialogTitle>
-        </DialogHeader>
+            <span className="text-sm font-medium">{t('settings.configDialogTitle').replace('{name}', plugin.name)}</span>
+            <Badge variant="secondary" className="ml-2">
+              <FormInput className="w-3 h-3 mr-1" />
+              {t('settings.smartForm')}
+            </Badge>
+          </div>
+        )}
 
-        <div className="py-2">
+        <div className="px-6">
           {/* 错误提示 */}
           {schemaError && (
             <Alert variant="destructive" className="mb-4">
@@ -265,19 +263,14 @@ export function PluginConfigDialog({
           )}
         </div>
 
-        <div className="flex justify-end space-x-2 pt-4 border-t">
-          <Button variant="outline" onClick={handleCancel}>
-            <X className="w-4 h-4 mr-2" />
+        <DialogFooter>
+          <Button variant="outline" onClick={handleCancel} disabled={saving}>
             {t('common.cancel')}
           </Button>
-          <Button
-            onClick={handleSave}
-            disabled={saving || parameters.length === 0}
-          >
-            <Save className="w-4 h-4 mr-2" />
-            {saving ? t('common.saving') : t('settings.saveConfiguration')}
+          <Button onClick={handleSave} disabled={saving || parameters.length === 0}>
+            {saving ? t('common.saving') : t('common.save')}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -8,8 +8,6 @@ import { Spinner } from '@/components/ui/spinner';
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
-  DialogTitle,
   DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
@@ -97,13 +95,6 @@ export function TankoubonManagementDialog({
         )}
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <BookOpen className="w-5 h-5" />
-            {t('tankoubon.createNew')}
-          </DialogTitle>
-        </DialogHeader>
-
         <div className="space-y-4">
           <div>
             <label className="text-sm font-medium">
