@@ -6,7 +6,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 // Type guard to check if an item is a Tankoubon
 function isTankoubon(item: any): item is Tankoubon {
-  return 'tankoubon_id' in item && 'archive_count' in item;
+  return item && 'tankoubon_id' in item;
 }
 
 interface ArchiveGridProps {

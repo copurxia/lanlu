@@ -214,8 +214,7 @@ public class SearchController {
                         archivesJson = archivesJson + "\"progress\":${tankoubon.progress},"
                         archivesJson = archivesJson + "\"lastreadtime\":\"${escapeJson(tankoubon.last_read_time)}\","
                         archivesJson = archivesJson + "\"isnew\":${tankoubon.isnew},"
-                        archivesJson = archivesJson + "\"archive_count\":${tankoubon.archive_count},"
-                        archivesJson = archivesJson + "\"thumbhash\":\"${escapeJson(tankoubon.thumbhash)}\""
+                        archivesJson = archivesJson + "\"archive_count\":${tankoubon.archive_count}"
                         archivesJson += "}"
 
                         alreadyAddedTankoubons[tankoubonId] = true

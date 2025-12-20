@@ -11,7 +11,6 @@ export interface Tankoubon {
   lastreadtime?: string;
   isnew?: boolean;
   archive_count?: number;
-  thumbhash?: string;
 }
 
 export interface TankoubonDetail extends Tankoubon {

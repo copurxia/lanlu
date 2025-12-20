@@ -10,6 +10,9 @@ import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/
 import { Header } from '@/components/layout/Header';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { ArchiveService } from '@/lib/archive-service';
+import { TankoubonService } from '@/lib/tankoubon-service';
+import { Archive } from '@/types/archive';
+import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/events';
 import { RefreshCw, Filter } from 'lucide-react';
 import { useState, useEffect, useCallback, Suspense } from 'react';
@@ -62,10 +65,42 @@ function HomePageContent() {
       params.groupby_tanks = groupByTanks; // 添加Tankoubon分组参数
 
       const result = await ArchiveService.search(params);
+      let data: (Archive | Tankoubon)[] = [...result.data];
+      let totalRecordsAdjusted = result.recordsTotal;
 
-      setArchives(result.data);
-      setTotalRecords(result.recordsTotal);
-      setTotalPages(Math.ceil(result.recordsTotal / pageSize));
+      // 如果是搜索模式且启用了合集分组，手动搜索匹配的合集
+      if (searchQuery && groupByTanks) {
+        try {
+          // 获取所有合集并过滤
+          const allTanks = await TankoubonService.getAllTankoubons();
+          const queryLower = searchQuery.toLowerCase();
+          const matchingTanks = allTanks.filter(tank => 
+            tank.name.toLowerCase().includes(queryLower) || 
+            (tank.tags && tank.tags.toLowerCase().includes(queryLower))
+          );
+
+          // 过滤掉已经在结果中的合集（避免重复）
+          const existingTankIds = new Set(
+            data.filter(item => 'tankoubon_id' in item).map(item => (item as any).tankoubon_id)
+          );
+          
+          const newTanks = matchingTanks.filter(tank => !existingTankIds.has(tank.tankoubon_id));
+          
+          // 调整总数
+          totalRecordsAdjusted += newTanks.length;
+
+          // 仅在第一页将匹配的合集插入到结果前面
+          if (page === 0) {
+            data = [...newTanks, ...data];
+          }
+        } catch (err) {
+          console.error('Failed to fetch matching tankoubons:', err);
+        }
+      }
+
+      setArchives(data);
+      setTotalRecords(totalRecordsAdjusted);
+      setTotalPages(Math.ceil(totalRecordsAdjusted / pageSize));
     } catch (error) {
       console.error('Failed to fetch archives:', error);
       setArchives([]);

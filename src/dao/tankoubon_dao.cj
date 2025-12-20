@@ -35,7 +35,6 @@ public class TankoubonAggregatedData {
     public var last_read_time: String = ""  // 最新的阅读时间
     public var isnew: Bool = true  // 如果任何归档是新的，则为true
     public var archive_count: Int32 = 0  // 归档数量
-    public var thumbhash: String = ""  // 第一个归档的缩略图
 }
 
 /**
@@ -471,8 +470,7 @@ public class TankoubonDao {
                             COUNT(a.id)::INT as archive_count,
                             COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
                             COALESCE(AVG(uas.progress), 0)::INT as avg_progress,
-                            COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives,
-                            (SELECT thumbhash FROM archives WHERE id = MIN(ta.archive_id)) as thumbhash
+                            COALESCE(BOOL_OR(uas.is_new), true) as has_new_archives
                         FROM tankoubons t
                         JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id
                         JOIN archives a ON a.id = ta.archive_id
@@ -499,7 +497,6 @@ public class TankoubonDao {
                                 data.last_read_time = rs.getOrNull<String>(6) ?? ""
                                 data.progress = rs.getOrNull<Int32>(7) ?? 0
                                 data.isnew = rs.getOrNull<Bool>(8) ?? true
-                                data.thumbhash = rs.getOrNull<String>(9) ?? ""
                                 dataOpt = Some(data)
                             }
                         } finally {

@@ -28,6 +28,7 @@ export function TankoubonCard({ tankoubon, tagsDisplay = 'inline' }: TankoubonCa
   const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
   const [firstArchive, setFirstArchive] = useState<Archive | null>(null);
   const [loadingFirstArchive, setLoadingFirstArchive] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   const allTags = useMemo(() => {
     return tankoubon.tags ? tankoubon.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
@@ -72,9 +73,9 @@ export function TankoubonCard({ tankoubon, tagsDisplay = 'inline' }: TankoubonCa
     };
   }, [tankoubon.tankoubon_id, language, allTags.length]);
 
-  // 获取第一本归档的信息（用于显示封面和跳转）
+  // 获取第一本归档的信息（用于显示封面和跳转阅读器）
   useEffect(() => {
-    if (!tankoubon.tankoubon_id || loadingFirstArchive) return;
+    if (!tankoubon.tankoubon_id) return;
 
     let cancelled = false;
 
@@ -114,8 +115,7 @@ export function TankoubonCard({ tankoubon, tagsDisplay = 'inline' }: TankoubonCa
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tankoubon.tankoubon_id, tankoubon.archives]);
+  }, [tankoubon.tankoubon_id, tankoubon.archives?.length, tankoubon.archives?.[0]]);
 
   return (
     <Card
@@ -133,26 +133,23 @@ export function TankoubonCard({ tankoubon, tagsDisplay = 'inline' }: TankoubonCa
             }
           }}
         >
-          <Image
-            src={firstArchive ? ArchiveService.getThumbnailUrl(firstArchive.arcid) : TankoubonService.getThumbnailUrl(tankoubon.tankoubon_id, tankoubon.thumbhash)}
-            alt={tankoubon.name}
-            fill
-            className="object-cover"
-            onError={() => {
-              // Hide the image and show the placeholder
-              const imgElement = document.querySelector(`img[alt="${tankoubon.name}"]`) as HTMLElement;
-              if (imgElement) {
-                imgElement.style.display = 'none';
-                const placeholder = imgElement.closest('.relative')?.nextElementSibling;
-                if (placeholder) {
-                  placeholder.classList.remove('hidden');
-                }
-              }
-            }}
-          />
-        </div>
-        <div className="hidden w-full h-full bg-muted flex items-center justify-center">
-          <span className="text-muted-foreground">{t('archive.noCover')}</span>
+          {firstArchive && !imageError ? (
+            <Image
+              src={ArchiveService.getThumbnailUrl(firstArchive.arcid)}
+              alt={tankoubon.name}
+              fill
+              className="object-cover"
+              onError={() => setImageError(true)}
+            />
+          ) : loadingFirstArchive ? (
+            <div className="w-full h-full bg-muted flex items-center justify-center">
+              <span className="text-muted-foreground animate-pulse">...</span>
+            </div>
+          ) : (
+            <div className="w-full h-full bg-muted flex items-center justify-center">
+              <span className="text-muted-foreground">{t('archive.noCover')}</span>
+            </div>
+          )}
         </div>
 
         {/* Tankoubon badge */}

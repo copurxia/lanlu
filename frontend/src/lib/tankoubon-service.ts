@@ -80,11 +80,9 @@ export class TankoubonService {
 
   /**
    * Get thumbnail URL for tankoubon (uses first archive's thumbnail)
+   * @deprecated This method is no longer used. TankoubonCard now fetches firstArchive directly.
    */
-  static getThumbnailUrl(tankoubonId: string, thumbhash?: string): string {
-    if (thumbhash) {
-      return `/api/archives/${thumbhash}/thumbnail`;
-    }
+  static getThumbnailUrl(tankoubonId: string): string {
     return '/placeholder-thumbnail.png';
   }
 }
