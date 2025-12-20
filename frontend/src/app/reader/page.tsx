@@ -1081,10 +1081,8 @@ function ReaderContent() {
                 variant="outline"
                 size="sm"
                 className="border-border bg-background hover:bg-accent hover:text-accent-foreground pointer-events-auto relative z-50"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  window.location.href = `/archive?id=${id}`;
+                onClick={() => {
+                  window.history.back();
                 }}
               >
                 <ArrowLeft className="w-4 h-4 mr-2" />
