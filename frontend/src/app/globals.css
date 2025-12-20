@@ -47,6 +47,32 @@
     --input: 217.2 32.6% 12%;
     --ring: 212.7 26.8% 83.9%;
   }
+
+  /* Modal Design Tokens - 统一弹窗样式 */
+  :root {
+    /* Spacing Scale - 基于4px网格系统 */
+    --modal-space-1: 0.25rem; /* 4px */
+    --modal-space-2: 0.5rem;  /* 8px */
+    --modal-space-3: 0.75rem; /* 12px */
+    --modal-space-4: 1rem;    /* 16px */
+    --modal-space-6: 1.5rem;  /* 24px */
+
+    /* Modal Layout - 统一内边距 */
+    --modal-padding-x: var(--modal-space-6);
+    --modal-padding-y: var(--modal-space-4);
+
+    /* Modal Sizes - 标准弹窗尺寸 */
+    --modal-size-sm: 24rem;  /* 384px */
+    --modal-size-md: 28rem;  /* 448px */
+    --modal-size-lg: 32rem;  /* 512px */
+    --modal-size-xl: 36rem;  /* 576px */
+
+    /* Modal Z-Index Stack - 层级管理 */
+    --z-modal-overlay: 50;
+    --z-modal-content: 51;
+    --z-toast: 100;
+    --z-tooltip: 110;
+  }
 }
 
 @layer base {

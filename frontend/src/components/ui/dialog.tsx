@@ -9,6 +9,8 @@ interface DialogProps {
   children: React.ReactNode
 }
 
+type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'fluid'
+
 type DialogContextValue = {
   open: boolean
   onOpenChange?: (open: boolean) => void
@@ -30,11 +32,11 @@ const Dialog: React.FC<DialogProps> = ({ open = false, onOpenChange, children })
   )
 }
 
-const DialogHeader: React.FC<{ className?: string; children: React.ReactNode }> = ({ 
-  className, 
-  children 
+const DialogHeader: React.FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children
 }) => (
-  <div className={cn("flex flex-col space-y-1.5 text-center sm:text-left px-6 pt-6", className)}>
+  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left px-6 pt-6 pb-4", className)}>
     {children}
   </div>
 )
@@ -57,10 +59,11 @@ const DialogDescription: React.FC<{ className?: string; children: React.ReactNod
   </p>
 )
 
-const DialogContent: React.FC<{ className?: string; children: React.ReactNode }> = ({
-  className,
-  children,
-}) => {
+const DialogContent: React.FC<{
+  className?: string
+  children: React.ReactNode
+  size?: DialogSize
+}> = ({ className, children, size = 'md' }) => {
   const { open, onOpenChange } = useDialogContext()
 
   React.useEffect(() => {
@@ -74,8 +77,17 @@ const DialogContent: React.FC<{ className?: string; children: React.ReactNode }>
 
   if (!open) return null
 
+  // 尺寸映射
+  const sizeClasses = {
+    sm: 'max-w-modal-sm',
+    md: 'max-w-modal-md',
+    lg: 'max-w-modal-lg',
+    xl: 'max-w-modal-xl',
+    fluid: 'w-[92vw] max-w-modal-xl'
+  }
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-modal-overlay flex items-center justify-center p-4">
       <div
         className="fixed inset-0 bg-black/50"
         onClick={() => onOpenChange?.(false)}
@@ -84,7 +96,8 @@ const DialogContent: React.FC<{ className?: string; children: React.ReactNode }>
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-50 w-full max-w-lg max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden px-6 py-4",
+          "relative z-modal-content w-full max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden flex flex-col",
+          sizeClasses[size],
           className
         )}
         onClick={(e) => e.stopPropagation()}
@@ -95,11 +108,23 @@ const DialogContent: React.FC<{ className?: string; children: React.ReactNode }>
   )
 }
 
+const DialogBody: React.FC<{ className?: string; children: React.ReactNode }> = ({
+  className,
+  children
+}) => (
+  <div className={cn("flex-1 overflow-y-auto px-6 py-5", className)}>
+    {children}
+  </div>
+)
+
 const DialogFooter: React.FC<{ className?: string; children: React.ReactNode }> = ({
   className,
   children
 }) => (
-  <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 px-6 pb-6", className)}>
+  <div className={cn(
+    "mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-6 pt-4 pb-6 border-t",
+    className
+  )}>
     {children}
   </div>
 )
@@ -135,6 +160,7 @@ export {
   DialogTitle,
   DialogDescription,
   DialogContent,
+  DialogBody,
   DialogFooter,
   DialogTrigger,
 }

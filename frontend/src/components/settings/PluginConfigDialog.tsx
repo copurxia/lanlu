@@ -3,14 +3,15 @@
 import { useState, useEffect } from 'react';
 import { Plugin } from '@/lib/plugin-service';
 import { PluginSchemaService, PluginParameter } from '@/lib/plugin-schema-service';
-import { Dialog, DialogContent, DialogFooter } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Switch } from '@/components/ui/switch';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Package, FormInput, AlertCircle } from 'lucide-react';
+import { AlertCircle } from 'lucide-react';
 
 interface PluginConfigDialogProps {
   open: boolean;
@@ -145,22 +146,11 @@ export function PluginConfigDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl w-[95vw] md:w-full">
-        {parameters.length > 0 && (
-          <div className="flex items-center gap-2 px-6 pt-4">
-            <Package className="w-5 h-5" />
-            <span className="text-sm font-medium">{t('settings.configDialogTitle').replace('{name}', plugin.name)}</span>
-            <Badge variant="secondary" className="ml-2">
-              <FormInput className="w-3 h-3 mr-1" />
-              {t('settings.smartForm')}
-            </Badge>
-          </div>
-        )}
-
-        <div className="px-6">
+      <DialogContent size="xl">
+        <DialogBody className="space-y-4">
           {/* 错误提示 */}
           {schemaError && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{schemaError}</AlertDescription>
             </Alert>
@@ -172,96 +162,90 @@ export function PluginConfigDialog({
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
           ) : parameters.length > 0 ? (
-            <div className="max-h-[60vh] overflow-y-auto pr-2">
-              <div className="space-y-4">
-                {parameters.map((param, index) => {
-                  const paramName = `param${index}`;
-                  const value = formValues[paramName];
+            <div className="space-y-4">
+              {parameters.map((param, index) => {
+                const paramName = `param${index}`;
+                const value = formValues[paramName];
 
-                  return (
-                    <div key={paramName} className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <label className="text-sm font-medium">
-                          {param.desc}
-                        </label>
-                        <Badge variant="secondary" className="text-xs px-1 py-0">
-                          {param.type}
-                        </Badge>
-                      </div>
-                      <div>
-                        {(() => {
-                          switch (param.type) {
-                            case 'string':
-                              if (param.desc.includes('description') || param.desc.includes('comment')) {
-                                return (
-                                  <Textarea
-                                    value={value || ''}
-                                    onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                    rows={2}
-                                    className="resize-none"
-                                    placeholder={param.default_value || ''}
-                                  />
-                                );
-                              } else {
-                                return (
-                                  <input
-                                    type="text"
-                                    value={value || ''}
-                                    onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    placeholder={param.default_value || ''}
-                                  />
-                                );
-                              }
-
-                            case 'int':
-                              return (
-                                <input
-                                  type="number"
-                                  value={value || ''}
-                                  onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  placeholder={param.default_value || ''}
-                                />
-                              );
-
-                            case 'bool':
-                              return (
-                                <div className="flex items-center space-x-2">
-                                  <Switch
-                                    checked={Boolean(value)}
-                                    onCheckedChange={(checked) => handleFieldChange(paramName, checked)}
-                                  />
-                                  <span className="text-sm text-muted-foreground">
-                                    {value ? t('settings.enabled') : t('settings.disabled')}
-                                  </span>
-                                </div>
-                              );
-
-                            default:
-                              return (
-                                <input
-                                  type="text"
-                                  value={value || ''}
-                                  onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                  placeholder={param.default_value || ''}
-                                />
-                              );
-                          }
-                        })()}
-                      </div>
+                return (
+                  <div key={paramName} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <label className="text-sm font-medium">
+                        {param.desc}
+                      </label>
+                      <Badge variant="secondary" className="text-xs px-1 py-0">
+                        {param.type}
+                      </Badge>
                     </div>
-                  );
-                })}
-              </div>
+                    <div>
+                      {(() => {
+                        switch (param.type) {
+                          case 'string':
+                            if (param.desc.includes('description') || param.desc.includes('comment')) {
+                              return (
+                                <Textarea
+                                  value={value || ''}
+                                  onChange={(e) => handleFieldChange(paramName, e.target.value)}
+                                  rows={2}
+                                  className="resize-none"
+                                  placeholder={param.default_value || ''}
+                                />
+                              );
+                            }
+                            return (
+                              <Input
+                                type="text"
+                                value={value || ''}
+                                onChange={(e) => handleFieldChange(paramName, e.target.value)}
+                                placeholder={param.default_value || ''}
+                              />
+                            );
+
+                          case 'int':
+                            return (
+                              <Input
+                                type="number"
+                                value={value ?? ''}
+                                onChange={(e) => handleFieldChange(paramName, e.target.value)}
+                                placeholder={param.default_value || ''}
+                              />
+                            );
+
+                          case 'bool':
+                            return (
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={Boolean(value)}
+                                  onCheckedChange={(checked) => handleFieldChange(paramName, checked)}
+                                />
+                                <span className="text-sm text-muted-foreground">
+                                  {value ? t('settings.enabled') : t('settings.disabled')}
+                                </span>
+                              </div>
+                            );
+
+                          default:
+                            return (
+                              <Input
+                                type="text"
+                                value={value || ''}
+                                onChange={(e) => handleFieldChange(paramName, e.target.value)}
+                                placeholder={param.default_value || ''}
+                              />
+                            );
+                        }
+                      })()}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="text-center py-8 text-muted-foreground">
               {t('settings.noConfigurationRequired')}
             </div>
           )}
-        </div>
+        </DialogBody>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleCancel} disabled={saving}>

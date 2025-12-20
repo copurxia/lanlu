@@ -5,13 +5,14 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	import {
+	  Dialog,
+	  DialogBody,
+	  DialogContent,
+	  DialogDescription,
+	  DialogFooter,
+	  DialogHeader,
+	  DialogTitle,
 } from '@/components/ui/dialog';
 import { LogIn } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -99,66 +100,67 @@ export function LoginDialog({ open: externalOpen, onOpenChange: externalOnOpenCh
           <span className="hidden sm:inline">{t('auth.login')}</span>
         </Button>
       )}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t('auth.loginTitle')}</DialogTitle>
-            <DialogDescription>{t('auth.loginDescription')}</DialogDescription>
-          </DialogHeader>
+	      <Dialog open={open} onOpenChange={setOpen}>
+	        <DialogContent size="sm">
+	          <DialogHeader>
+	            <DialogTitle>{t('auth.loginTitle')}</DialogTitle>
+	            <DialogDescription>{t('auth.loginDescription')}</DialogDescription>
+	          </DialogHeader>
+	          <DialogBody className="pt-0">
+	            <Tabs value={mode} onValueChange={(v) => setMode(v as any)}>
+	              <TabsList className="grid w-full grid-cols-2">
+	                <TabsTrigger value="account">{t('auth.accountLogin')}</TabsTrigger>
+	                <TabsTrigger value="token">{t('auth.tokenLogin')}</TabsTrigger>
+	              </TabsList>
 
-          <Tabs value={mode} onValueChange={(v) => setMode(v as any)}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="account">{t('auth.accountLogin')}</TabsTrigger>
-              <TabsTrigger value="token">{t('auth.tokenLogin')}</TabsTrigger>
-            </TabsList>
+	              <TabsContent value="account" className="mt-4 space-y-3">
+	                <div className="space-y-2">
+	                  <Label htmlFor="username">{t('auth.username')}</Label>
+	                  <Input
+	                    id="username"
+	                    value={username}
+	                    onChange={(e) => setUsername(e.target.value)}
+	                    onKeyDown={handleKeyPress}
+	                    placeholder={t('auth.usernamePlaceholder')}
+	                    disabled={isLoading}
+	                  />
+	                </div>
+	                <div className="space-y-2">
+	                  <Label htmlFor="password">{t('auth.password')}</Label>
+	                  <Input
+	                    id="password"
+	                    type="password"
+	                    value={password}
+	                    onChange={(e) => setPassword(e.target.value)}
+	                    onKeyDown={handleKeyPress}
+	                    placeholder={t('auth.passwordPlaceholder')}
+	                    disabled={isLoading}
+	                  />
+	                </div>
+	              </TabsContent>
 
-            <TabsContent value="account" className="mt-4 space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="username">{t('auth.username')}</Label>
-                <Input
-                  id="username"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder={t('auth.usernamePlaceholder')}
-                  disabled={isLoading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">{t('auth.password')}</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder={t('auth.passwordPlaceholder')}
-                  disabled={isLoading}
-                />
-              </div>
-            </TabsContent>
+	              <TabsContent value="token" className="mt-4 space-y-3">
+	                <div className="space-y-2">
+	                  <Label htmlFor="token">{t('auth.token')}</Label>
+	                  <Input
+	                    id="token"
+	                    type="password"
+	                    placeholder={t('auth.tokenPlaceholder')}
+	                    value={tokenInput}
+	                    onChange={(e) => setTokenInput(e.target.value)}
+	                    onKeyDown={handleKeyPress}
+	                    disabled={isLoading}
+	                  />
+	                </div>
+	              </TabsContent>
+	            </Tabs>
 
-            <TabsContent value="token" className="mt-4 space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="token">{t('auth.token')}</Label>
-                <Input
-                  id="token"
-                  type="password"
-                  placeholder={t('auth.tokenPlaceholder')}
-                  value={tokenInput}
-                  onChange={(e) => setTokenInput(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  disabled={isLoading}
-                />
-              </div>
-            </TabsContent>
-          </Tabs>
-
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
-          <DialogFooter className="sm:justify-start">
-            <Button
-              type="button"
+	            {error ? <p className="text-sm text-destructive mt-3">{error}</p> : null}
+	          </DialogBody>
+	
+	          <DialogFooter>
+	            <Button
+	              type="button"
               onClick={mode === 'account' ? handleAccountLogin : handleTokenLogin}
               disabled={
                 isLoading ||
@@ -175,4 +177,3 @@ export function LoginDialog({ open: externalOpen, onOpenChange: externalOnOpenCh
     </>
   );
 }
-

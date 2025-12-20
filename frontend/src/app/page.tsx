@@ -6,7 +6,7 @@ import { Pagination } from '@/components/ui/pagination';
 import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Header } from '@/components/layout/Header';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { ArchiveService } from '@/lib/archive-service';
@@ -295,13 +295,13 @@ function HomePageContent() {
 
             {/* 筛选对话框 */}
             <Dialog open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
-              <DialogContent className="max-w-[90vw] w-full max-h-[90vh] overflow-y-auto p-0">
+              <DialogContent className="max-w-[90vw] w-full">
                 <DialogHeader className="px-4 py-3 border-b">
                   <DialogTitle>高级筛选</DialogTitle>
                 </DialogHeader>
-                <div className="w-full">
+                <DialogBody className="px-0 py-0">
                   <SearchSidebar onSearch={handleSearch} loading={loading} />
-                </div>
+                </DialogBody>
               </DialogContent>
             </Dialog>
 

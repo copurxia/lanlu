@@ -55,6 +55,21 @@ module.exports = {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      spacing: {
+        // Modal尺寸 - 基于CSS变量
+        'modal-xs': '20rem',
+        'modal-sm': 'var(--modal-size-sm)',
+        'modal-md': 'var(--modal-size-md)',
+        'modal-lg': 'var(--modal-size-lg)',
+        'modal-xl': 'var(--modal-size-xl)',
+      },
+      zIndex: {
+        // Modal层级管理
+        'modal-overlay': 'var(--z-modal-overlay)',
+        'modal-content': 'var(--z-modal-content)',
+        'toast': 'var(--z-toast)',
+        'tooltip': 'var(--z-tooltip)',
+      },
       keyframes: {
         "accordion-down": {
           from: { height: "0" },

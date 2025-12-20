@@ -7,6 +7,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
   DialogTrigger,
@@ -119,130 +120,132 @@ export function AddToTankoubonDialog({
           </Button>
         )}
       </DialogTrigger>
-      <DialogContent className="w-[92vw] max-w-xl">
-        <div className="space-y-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t('tankoubon.searchCollectionsPlaceholder')}
-              className="pl-9"
-            />
-          </div>
-
-          <div className="rounded-lg border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">{t('tankoubon.createNew')}</p>
-                <p className="text-xs text-muted-foreground mt-1">{t('tankoubon.createNewAndAddHint')}</p>
-              </div>
-              <Button
-                type="button"
-                variant={showCreateForm ? 'secondary' : 'outline'}
-                onClick={() => {
-                  const next = !showCreateForm;
-                  setShowCreateForm(next);
-                  if (!next) setNewTankoubonName('');
-                }}
-                className="shrink-0"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                {t('tankoubon.createNewCollection')}
-              </Button>
+      <DialogContent size="fluid">
+        <DialogBody>
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t('tankoubon.searchCollectionsPlaceholder')}
+                className="pl-9"
+              />
             </div>
 
-            {showCreateForm ? (
-              <div className="mt-4 space-y-3">
-                <Input
-                  value={newTankoubonName}
-                  onChange={(e) => setNewTankoubonName(e.target.value)}
-                  placeholder={t('tankoubon.namePlaceholder')}
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateAndAdd()}
-                  disabled={creating}
-                />
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setShowCreateForm(false);
-                      setNewTankoubonName('');
-                    }}
-                    disabled={creating}
-                  >
-                    {t('common.cancel')}
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleCreateAndAdd}
-                    disabled={creating || !newTankoubonName.trim()}
-                  >
-                    {creating ? <Spinner size="sm" className="mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
-                    {creating ? t('common.creating') : t('tankoubon.create')}
-                  </Button>
+            <div className="rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{t('tankoubon.createNew')}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{t('tankoubon.createNewAndAddHint')}</p>
                 </div>
+                <Button
+                  type="button"
+                  variant={showCreateForm ? 'secondary' : 'outline'}
+                  onClick={() => {
+                    const next = !showCreateForm;
+                    setShowCreateForm(next);
+                    if (!next) setNewTankoubonName('');
+                  }}
+                  className="shrink-0"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  {t('tankoubon.createNewCollection')}
+                </Button>
               </div>
-            ) : null}
-          </div>
 
-          <div className="rounded-lg border overflow-hidden">
-            <div className="flex items-center justify-between gap-2 px-4 py-3 bg-muted/30 border-b">
-              <p className="text-sm font-medium">{t('tankoubon.existingCollections')}</p>
-              <p className="text-xs text-muted-foreground tabular-nums">
-                {filteredTankoubons.length}/{tankoubons.length}
-              </p>
+              {showCreateForm ? (
+                <div className="mt-4 space-y-3">
+                  <Input
+                    value={newTankoubonName}
+                    onChange={(e) => setNewTankoubonName(e.target.value)}
+                    placeholder={t('tankoubon.namePlaceholder')}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateAndAdd()}
+                    disabled={creating}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setShowCreateForm(false);
+                        setNewTankoubonName('');
+                      }}
+                      disabled={creating}
+                    >
+                      {t('common.cancel')}
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleCreateAndAdd}
+                      disabled={creating || !newTankoubonName.trim()}
+                    >
+                      {creating ? <Spinner size="sm" className="mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                      {creating ? t('common.creating') : t('tankoubon.create')}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
-            {loading ? (
-              <div className="flex items-center justify-center py-14">
-                <Spinner />
+            <div className="rounded-lg border overflow-hidden">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 bg-muted/30 border-b">
+                <p className="text-sm font-medium">{t('tankoubon.existingCollections')}</p>
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  {filteredTankoubons.length}/{tankoubons.length}
+                </p>
               </div>
-            ) : filteredTankoubons.length === 0 ? (
-              <div className="py-14 text-center text-sm text-muted-foreground">
-                {tankoubons.length === 0 ? t('tankoubon.noCollectionsYet') : t('tankoubon.noCollectionsFound')}
-              </div>
-            ) : (
-              <div className="max-h-[42vh] overflow-y-auto divide-y">
-                {filteredTankoubons.map((tankoubon) => {
-                  const isInTankoubon = tankoubon.archives?.includes(archiveId);
-                  const count = tankoubon.archive_count || tankoubon.archives?.length || 0;
 
-                  return (
-                    <div
-                      key={tankoubon.tankoubon_id}
-                      className="flex items-center justify-between gap-3 px-4 py-3"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium truncate">{tankoubon.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {count} {t('tankoubon.archives')}
-                        </p>
+              {loading ? (
+                <div className="flex items-center justify-center py-14">
+                  <Spinner />
+                </div>
+              ) : filteredTankoubons.length === 0 ? (
+                <div className="py-14 text-center text-sm text-muted-foreground">
+                  {tankoubons.length === 0 ? t('tankoubon.noCollectionsYet') : t('tankoubon.noCollectionsFound')}
+                </div>
+              ) : (
+                <div className="max-h-[42vh] overflow-y-auto divide-y">
+                  {filteredTankoubons.map((tankoubon) => {
+                    const isInTankoubon = tankoubon.archives?.includes(archiveId);
+                    const count = tankoubon.archive_count || tankoubon.archives?.length || 0;
+
+                    return (
+                      <div
+                        key={tankoubon.tankoubon_id}
+                        className="flex items-center justify-between gap-3 px-4 py-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium truncate">{tankoubon.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {count} {t('tankoubon.archives')}
+                          </p>
+                        </div>
+
+                        {isInTankoubon ? (
+                          <Badge variant="secondary" className="shrink-0">
+                            <Check className="w-3 h-3 mr-1" />
+                            {t('tankoubon.alreadyAdded')}
+                          </Badge>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={() => handleAddToTankoubon(tankoubon.tankoubon_id)}
+                            disabled={adding === tankoubon.tankoubon_id}
+                            className="shrink-0"
+                          >
+                            {adding === tankoubon.tankoubon_id ? <Spinner size="sm" /> : t('common.add')}
+                          </Button>
+                        )}
                       </div>
-
-                      {isInTankoubon ? (
-                        <Badge variant="secondary" className="shrink-0">
-                          <Check className="w-3 h-3 mr-1" />
-                          {t('tankoubon.alreadyAdded')}
-                        </Badge>
-                      ) : (
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => handleAddToTankoubon(tankoubon.tankoubon_id)}
-                          disabled={adding === tankoubon.tankoubon_id}
-                          className="shrink-0"
-                        >
-                          {adding === tankoubon.tankoubon_id ? <Spinner size="sm" /> : t('common.add')}
-                        </Button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </DialogBody>
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>

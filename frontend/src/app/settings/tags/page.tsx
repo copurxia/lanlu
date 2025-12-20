@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogBody, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tag, Plus, Search, Download, Upload, Edit2, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -711,19 +711,13 @@ function TagDialog({ open, onOpenChange, mode, form, setForm, editingTag, loadin
       )}
       <Dialog open={open} onOpenChange={handleClose}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {mode === 'create' ? t('settings.createNewTag') : t('settings.tagEditTag')}
-            </DialogTitle>
-            <DialogDescription>
-              {mode === 'create'
-                ? t('settings.createNewTagDescription')
-                : editingTag
-                ? `${editingTag.namespace}:${editingTag.name}`
-                : ''}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+          <DialogBody className="space-y-4">
+            {mode === 'create' ? (
+              <p className="text-sm text-muted-foreground">{t('settings.createNewTagDescription')}</p>
+            ) : editingTag ? (
+              <p className="text-sm text-muted-foreground">{editingTag.namespace}:{editingTag.name}</p>
+            ) : null}
+
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="namespace">{t('settings.tagNamespace')} *</Label>
@@ -812,7 +806,7 @@ function TagDialog({ open, onOpenChange, mode, form, setForm, editingTag, loadin
                 disabled={loading}
               />
             </div>
-          </div>
+          </DialogBody>
           <DialogFooter>
             <Button
               variant="outline"

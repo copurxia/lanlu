@@ -9,13 +9,14 @@ import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from '@/components/ui/dialog';
+	import {
+	  Dialog,
+	  DialogBody,
+	  DialogContent,
+	  DialogHeader,
+	  DialogTitle,
+	  DialogFooter,
+	} from '@/components/ui/dialog';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -370,45 +371,47 @@ function TankoubonDetailContent() {
         )}
 
         {/* Edit Dialog */}
-        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t('tankoubon.editTankoubon')}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">{t('tankoubon.name')}</label>
-                <Input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder={t('tankoubon.namePlaceholder')}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
-                <Textarea
-                  value={editSummary}
-                  onChange={(e) => setEditSummary(e.target.value)}
-                  placeholder={t('tankoubon.summaryPlaceholder')}
-                  rows={3}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
-                <Input
-                  value={editTags}
-                  onChange={(e) => setEditTags(e.target.value)}
-                  placeholder={t('tankoubon.tagsPlaceholder')}
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {t('tankoubon.tagsHint')}
-                </p>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-                {t('common.cancel')}
-              </Button>
+	        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+	          <DialogContent>
+	            <DialogHeader>
+	              <DialogTitle>{t('tankoubon.editTankoubon')}</DialogTitle>
+	            </DialogHeader>
+	            <DialogBody className="pt-0">
+	              <div className="space-y-4">
+	                <div>
+	                  <label className="text-sm font-medium">{t('tankoubon.name')}</label>
+	                  <Input
+	                    value={editName}
+	                    onChange={(e) => setEditName(e.target.value)}
+	                    placeholder={t('tankoubon.namePlaceholder')}
+	                  />
+	                </div>
+	                <div>
+	                  <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
+	                  <Textarea
+	                    value={editSummary}
+	                    onChange={(e) => setEditSummary(e.target.value)}
+	                    placeholder={t('tankoubon.summaryPlaceholder')}
+	                    rows={3}
+	                  />
+	                </div>
+	                <div>
+	                  <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
+	                  <Input
+	                    value={editTags}
+	                    onChange={(e) => setEditTags(e.target.value)}
+	                    placeholder={t('tankoubon.tagsPlaceholder')}
+	                  />
+	                  <p className="text-xs text-muted-foreground mt-1">
+	                    {t('tankoubon.tagsHint')}
+	                  </p>
+	                </div>
+	              </div>
+	            </DialogBody>
+	            <DialogFooter>
+	              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+	                {t('common.cancel')}
+	              </Button>
               <Button onClick={handleEdit} disabled={saving || !editName.trim()}>
                 {saving ? <Spinner size="sm" className="mr-2" /> : null}
                 {t('common.save')}
@@ -441,60 +444,60 @@ function TankoubonDetailContent() {
         </AlertDialog>
 
         {/* Add Archive Dialog */}
-        <Dialog open={addArchiveDialogOpen} onOpenChange={setAddArchiveDialogOpen}>
-          <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>{t('tankoubon.addArchive')}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div className="flex gap-2">
-                <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder={t('tankoubon.searchArchivesPlaceholder')}
-                  onKeyDown={(e) => e.key === 'Enter' && searchArchives()}
-                />
-                <Button onClick={searchArchives} disabled={searchLoading}>
-                  {searchLoading ? <Spinner size="sm" /> : t('common.search')}
-                </Button>
-              </div>
+	        <Dialog open={addArchiveDialogOpen} onOpenChange={setAddArchiveDialogOpen}>
+	          <DialogContent className="max-w-3xl max-h-[80vh]">
+	            <DialogHeader>
+	              <DialogTitle>{t('tankoubon.addArchive')}</DialogTitle>
+	            </DialogHeader>
+	            <DialogBody className="pt-0 space-y-4">
+	              <div className="flex gap-2">
+	                <Input
+	                  value={searchQuery}
+	                  onChange={(e) => setSearchQuery(e.target.value)}
+	                  placeholder={t('tankoubon.searchArchivesPlaceholder')}
+	                  onKeyDown={(e) => e.key === 'Enter' && searchArchives()}
+	                />
+	                <Button onClick={searchArchives} disabled={searchLoading}>
+	                  {searchLoading ? <Spinner size="sm" /> : t('common.search')}
+	                </Button>
+	              </div>
 
-              {availableArchives.length > 0 && (
-                <div className="border rounded-lg p-4">
-                  <p className="text-sm text-muted-foreground mb-3">
-                    {t('tankoubon.selectArchives')} ({selectedArchives.size} {t('common.selected')})
-                  </p>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
-                    {availableArchives.map((archive) => (
-                      <div
-                        key={archive.arcid}
-                        className={`p-3 border rounded-lg cursor-pointer transition-colors ${
-                          selectedArchives.has(archive.arcid)
-                            ? 'border-primary bg-primary/10'
-                            : 'hover:border-muted-foreground'
-                        }`}
-                        onClick={() => toggleArchiveSelection(archive.arcid)}
-                      >
-                        <p className="text-sm font-medium line-clamp-2">{archive.title}</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {archive.pagecount} {t('archive.pages').replace('{count}', '')}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+	              {availableArchives.length > 0 && (
+	                <div className="border rounded-lg p-4">
+	                  <p className="text-sm text-muted-foreground mb-3">
+	                    {t('tankoubon.selectArchives')} ({selectedArchives.size} {t('common.selected')})
+	                  </p>
+	                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
+	                    {availableArchives.map((archive) => (
+	                      <div
+	                        key={archive.arcid}
+	                        className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+	                          selectedArchives.has(archive.arcid)
+	                            ? 'border-primary bg-primary/10'
+	                            : 'hover:border-muted-foreground'
+	                        }`}
+	                        onClick={() => toggleArchiveSelection(archive.arcid)}
+	                      >
+	                        <p className="text-sm font-medium line-clamp-2">{archive.title}</p>
+	                        <p className="text-xs text-muted-foreground mt-1">
+	                          {archive.pagecount} {t('archive.pages').replace('{count}', '')}
+	                        </p>
+	                      </div>
+	                    ))}
+	                  </div>
+	                </div>
+	              )}
 
-              {availableArchives.length === 0 && searchQuery && !searchLoading && (
-                <p className="text-center text-muted-foreground py-8">
-                  {t('tankoubon.noArchivesFound')}
-                </p>
-              )}
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setAddArchiveDialogOpen(false)}>
-                {t('common.cancel')}
-              </Button>
+	              {availableArchives.length === 0 && searchQuery && !searchLoading && (
+	                <p className="text-center text-muted-foreground py-8">
+	                  {t('tankoubon.noArchivesFound')}
+	                </p>
+	              )}
+	            </DialogBody>
+	            <DialogFooter>
+	              <Button variant="outline" onClick={() => setAddArchiveDialogOpen(false)}>
+	                {t('common.cancel')}
+	              </Button>
               <Button
                 onClick={handleAddArchives}
                 disabled={addingArchives || selectedArchives.size === 0}

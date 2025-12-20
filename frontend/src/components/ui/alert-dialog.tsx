@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import { cn } from "@/lib/utils"
+import { Dialog, DialogContent } from "./dialog"
 
 interface AlertDialogProps {
   open?: boolean
@@ -11,19 +12,9 @@ interface AlertDialogProps {
 
 const AlertDialog: React.FC<AlertDialogProps> = ({ open, onOpenChange, children }) => {
   return (
-    <>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div
-            className="fixed inset-0 bg-black/50"
-            onClick={() => onOpenChange?.(false)}
-          />
-          <div className="relative z-50 w-full max-w-lg rounded-lg border bg-background shadow-lg">
-            {children}
-          </div>
-        </div>
-      )}
-    </>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {children}
+    </Dialog>
   )
 }
 
@@ -31,7 +22,7 @@ const AlertDialogHeader: React.FC<{ className?: string; children: React.ReactNod
   className,
   children
 }) => (
-  <div className={cn("flex flex-col space-y-2 text-center sm:text-left px-6 pt-6", className)}>
+  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left px-6 pt-6 pb-4", className)}>
     {children}
   </div>
 )
@@ -54,20 +45,32 @@ const AlertDialogDescription: React.FC<{ className?: string; children: React.Rea
   </p>
 )
 
-const AlertDialogContent: React.FC<{ className?: string; children: React.ReactNode }> = ({
+interface AlertDialogContentProps {
+  className?: string
+  children: React.ReactNode
+  size?: 'sm' | 'md' | 'lg' | 'xl' | 'fluid'
+}
+
+const AlertDialogContent: React.FC<AlertDialogContentProps> = ({
   className,
-  children
-}) => (
-  <div className={cn("px-6 py-4", className)}>
-    {children}
-  </div>
-)
+  children,
+  size = 'md'
+}) => {
+  return (
+    <DialogContent size={size} className={className}>
+      {children}
+    </DialogContent>
+  )
+}
 
 const AlertDialogFooter: React.FC<{ className?: string; children: React.ReactNode }> = ({
   className,
   children
 }) => (
-  <div className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2 px-6 pb-6", className)}>
+  <div className={cn(
+    "mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-6 pt-4 pb-6 border-t",
+    className
+  )}>
     {children}
   </div>
 )
@@ -77,13 +80,19 @@ const AlertDialogAction: React.FC<{
   children: React.ReactNode
   onClick?: () => void
   disabled?: boolean
-}> = ({ className, children, onClick, disabled }) => (
+  variant?: 'default' | 'destructive'
+}> = ({ className, children, onClick, disabled, variant = 'default' }) => (
   <button
     type="button"
     onClick={onClick}
     disabled={disabled}
     className={cn(
-      "inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground ring-offset-background transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      "inline-flex h-10 items-center justify-center rounded-md px-4 py-2 text-sm font-semibold ring-offset-background transition-colors",
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+      "disabled:pointer-events-none disabled:opacity-50",
+      variant === 'destructive'
+        ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+        : "bg-primary text-primary-foreground hover:bg-primary/90",
       className
     )}
   >

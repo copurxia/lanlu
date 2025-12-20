@@ -5,12 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Spinner } from '@/components/ui/spinner';
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogTrigger,
-} from '@/components/ui/dialog';
+	import {
+	  Dialog,
+	  DialogBody,
+	  DialogContent,
+	  DialogFooter,
+	  DialogTrigger,
+	} from '@/components/ui/dialog';
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Plus } from 'lucide-react';
@@ -93,56 +94,58 @@ export function TankoubonManagementDialog({
             {t('tankoubon.createNew')}
           </Button>
         )}
-      </DialogTrigger>
-      <DialogContent>
-        <div className="space-y-4">
-          <div>
-            <label className="text-sm font-medium">
-              {t('tankoubon.name')} <span className="text-destructive">*</span>
-            </label>
-            <Input
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setError('');
-              }}
-              placeholder={t('tankoubon.namePlaceholder')}
-              className="mt-1"
-            />
-          </div>
+	      </DialogTrigger>
+	      <DialogContent size="lg">
+	        <DialogBody>
+	          <div className="space-y-4">
+	            <div>
+	              <label className="text-sm font-medium">
+	                {t('tankoubon.name')} <span className="text-destructive">*</span>
+	              </label>
+	              <Input
+	                value={name}
+	                onChange={(e) => {
+	                  setName(e.target.value);
+	                  setError('');
+	                }}
+	                placeholder={t('tankoubon.namePlaceholder')}
+	                className="mt-1"
+	              />
+	            </div>
 
-          <div>
-            <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
-            <Textarea
-              value={summary}
-              onChange={(e) => setSummary(e.target.value)}
-              placeholder={t('tankoubon.summaryPlaceholder')}
-              rows={3}
-              className="mt-1"
-            />
-          </div>
+	            <div>
+	              <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
+	              <Textarea
+	                value={summary}
+	                onChange={(e) => setSummary(e.target.value)}
+	                placeholder={t('tankoubon.summaryPlaceholder')}
+	                rows={3}
+	                className="mt-1"
+	              />
+	            </div>
 
-          <div>
-            <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
-            <Input
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-              placeholder={t('tankoubon.tagsPlaceholder')}
-              className="mt-1"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              {t('tankoubon.tagsHint')}
-            </p>
-          </div>
+	            <div>
+	              <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
+	              <Input
+	                value={tags}
+	                onChange={(e) => setTags(e.target.value)}
+	                placeholder={t('tankoubon.tagsPlaceholder')}
+	                className="mt-1"
+	              />
+	              <p className="text-xs text-muted-foreground mt-1">
+	                {t('tankoubon.tagsHint')}
+	              </p>
+	            </div>
 
-          {error && (
-            <p className="text-sm text-destructive">{error}</p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => setOpen(false)} disabled={creating}>
-            {t('common.cancel')}
+	            {error && (
+	              <p className="text-sm text-destructive">{error}</p>
+	            )}
+	          </div>
+	        </DialogBody>
+	
+	        <DialogFooter>
+	          <Button variant="outline" onClick={() => setOpen(false)} disabled={creating}>
+	            {t('common.cancel')}
           </Button>
           <Button onClick={handleCreate} disabled={creating || !name.trim()}>
             {creating ? <Spinner size="sm" className="mr-2" /> : null}

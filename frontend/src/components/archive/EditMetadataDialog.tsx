@@ -8,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { TagInput } from '@/components/ui/tag-input';
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogFooter,
 } from '@/components/ui/dialog';
@@ -88,38 +89,40 @@ export function EditMetadataDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="title">{t('archive.title')}</Label>
-            <Input
-              id="title"
-              value={formData.title}
-              onChange={(e) => handleInputChange('title', e.target.value)}
-              disabled={isLoading}
-            />
+      <DialogContent size="sm">
+        <DialogBody>
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="title">{t('archive.title')}</Label>
+              <Input
+                id="title"
+                value={formData.title}
+                onChange={(e) => handleInputChange('title', e.target.value)}
+                disabled={isLoading}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="tags">{t('archive.tags')}</Label>
+              <TagInput
+                id="tags"
+                value={formData.tags}
+                onChange={handleTagsChange}
+                disabled={isLoading}
+                placeholder={t('archive.tagsPlaceholder')}
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="summary">{t('archive.summary')}</Label>
+              <Textarea
+                id="summary"
+                value={formData.summary}
+                onChange={(e) => handleInputChange('summary', e.target.value)}
+                disabled={isLoading}
+                placeholder={t('archive.summaryPlaceholder')}
+              />
+            </div>
           </div>
-          <div className="grid gap-2">
-            <Label htmlFor="tags">{t('archive.tags')}</Label>
-            <TagInput
-              id="tags"
-              value={formData.tags}
-              onChange={handleTagsChange}
-              disabled={isLoading}
-              placeholder={t('archive.tagsPlaceholder')}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="summary">{t('archive.summary')}</Label>
-            <Textarea
-              id="summary"
-              value={formData.summary}
-              onChange={(e) => handleInputChange('summary', e.target.value)}
-              disabled={isLoading}
-              placeholder={t('archive.summaryPlaceholder')}
-            />
-          </div>
-        </div>
+        </DialogBody>
         <DialogFooter>
           <Button
             type="button"
