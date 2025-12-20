@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Slider } from '@/components/ui/slider';
 import { ThemeButton } from '@/components/theme/theme-toggle';
-import { LanguageToggle } from '@/components/language-toggle';
+import { LanguageToggle } from '@/components/language/LanguageToggle';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import {

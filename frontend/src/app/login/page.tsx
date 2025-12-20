@@ -11,7 +11,7 @@ import { LogIn, Library, ShieldCheck, Key } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { AuthService } from '@/lib/auth-service';
-import { LanguageToggle } from '@/components/language-toggle';
+import { LanguageToggle } from '@/components/language/LanguageToggle';
 import { ThemeButton } from '@/components/theme/theme-toggle';
 
 function LoginForm() {
