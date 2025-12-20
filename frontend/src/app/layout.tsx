@@ -14,6 +14,9 @@ import { Toaster } from 'sonner';
 export const metadata: Metadata = {
   title: 'Lanraragi4CJ',
   description: '漫画归档管理系统',
+  icons: {
+    icon: '/logo.svg',
+  },
 };
 
 export default function RootLayout({

@@ -89,9 +89,7 @@ export function Header() {
             )}
             
             <Link href="/" className="flex items-center space-x-2">
-              <div className="w-8 h-8 bg-primary rounded-md flex items-center justify-center">
-                <span className="text-primary-foreground font-bold text-sm">L4C</span>
-              </div>
+              <img src="/logo.svg" alt="Lanraragi4CJ Logo" className="w-8 h-8" />
               <span className="font-semibold text-lg hidden sm:inline-block">
                 Lanraragi4CJ
               </span>
