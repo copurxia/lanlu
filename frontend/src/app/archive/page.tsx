@@ -56,6 +56,8 @@ function ArchiveDetailContent() {
     try {
       const data = await ArchiveService.getMetadata(id);
       setMetadata(data);
+      // 从元数据中获取收藏状态
+      setIsFavorite(data.isfavorite || false);
       return data;
     } catch (error) {
       console.error('Failed to fetch metadata:', error);
@@ -87,7 +89,7 @@ function ArchiveDetailContent() {
   const pageSize = 10;
 
   useEffect(() => {
-    async function fetchMetadata() {
+    async function loadMetadata() {
       if (!id) {
         setError(t('archive.missingId'));
         setLoading(false);
@@ -95,10 +97,7 @@ function ArchiveDetailContent() {
       }
 
       try {
-        const data = await ArchiveService.getMetadata(id);
-        setMetadata(data);
-        // 从元数据中获取收藏状态
-        setIsFavorite(data.isfavorite || false);
+        await fetchMetadata();
       } catch (err) {
         console.error('Failed to fetch archive metadata:', err);
         setError(t('archive.fetchError'));
@@ -107,8 +106,8 @@ function ArchiveDetailContent() {
       }
     }
 
-    fetchMetadata();
-  }, [id, t]);
+    loadMetadata();
+  }, [id, t, fetchMetadata]);
 
   // 处理收藏点击
   const handleFavoriteClick = async () => {
@@ -217,6 +216,18 @@ function ArchiveDetailContent() {
       newSet.delete(pageIndex);
       return newSet;
     });
+  }, []);
+
+  // 处理图片加载失败（隐藏图片，显示占位符）
+  const handleImageLoadError = useCallback((title: string) => {
+    const imgElement = document.querySelector(`img[alt="${title}"]`) as HTMLElement;
+    if (imgElement) {
+      imgElement.style.display = 'none';
+      const placeholder = imgElement.closest('.relative')?.nextElementSibling;
+      if (placeholder) {
+        placeholder.classList.remove('hidden');
+      }
+    }
   }, []);
 
   const tags = useMemo(() => {
@@ -510,17 +521,7 @@ function ArchiveDetailContent() {
                           fill
                           className="object-cover rounded-md cursor-pointer transition-all duration-300 hover:scale-105 hover:shadow-xl active:scale-95"
                           onClick={() => setImageModalOpen(true)}
-                          onError={() => {
-                            // Hide the image and show the placeholder
-                            const imgElement = document.querySelector(`img[alt="${metadata.title}"]`) as HTMLElement;
-                            if (imgElement) {
-                              imgElement.style.display = 'none';
-                              const placeholder = imgElement.closest('.relative')?.nextElementSibling;
-                              if (placeholder) {
-                                placeholder.classList.remove('hidden');
-                              }
-                            }
-                          }}
+                          onError={() => handleImageLoadError(metadata.title)}
                         />
                       </div>
                       {/* 无封面占位符 */}
@@ -551,17 +552,7 @@ function ArchiveDetailContent() {
                               alt={metadata.title}
                               fill
                               className="max-w-full max-h-full object-contain rounded-lg"
-                              onError={() => {
-                                // Hide the image and show the placeholder
-                                const imgElement = document.querySelector(`img[alt="${metadata.title}"]`) as HTMLElement;
-                                if (imgElement) {
-                                  imgElement.style.display = 'none';
-                                  const placeholder = imgElement.closest('.relative')?.nextElementSibling;
-                                  if (placeholder) {
-                                    placeholder.classList.remove('hidden');
-                                  }
-                                }
-                              }}
+                              onError={() => handleImageLoadError(metadata.title)}
                             />
                           </div>
                           {/* 模态框无封面占位符 */}

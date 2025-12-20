@@ -52,21 +52,6 @@ function ReaderContent() {
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [readingMode, setReadingMode] = useState<ReadingMode>(() => {
-    // 从localStorage读取保存的阅读模式
-    if (typeof window !== 'undefined') {
-      try {
-        const savedMode = localStorage.getItem('reader-reading-mode');
-        if (savedMode && ['single-ltr', 'single-rtl', 'single-ttb', 'webtoon'].includes(savedMode)) {
-          return savedMode as ReadingMode;
-        }
-      } catch (e) {
-        // 忽略localStorage访问错误
-        console.warn('Failed to read reading mode from localStorage:', e);
-      }
-    }
-    return 'single-ltr'; // 默认阅读模式
-  });
   const [touchStart, setTouchStart] = useState<{ x: number; y: number } | null>(null);
   const [touchEnd, setTouchEnd] = useState<{ x: number; y: number } | null>(null);
   const [imagesLoading, setImagesLoading] = useState<Set<number>>(new Set());
@@ -85,78 +70,96 @@ function ReaderContent() {
   const [imageHeights, setImageHeights] = useState<number[]>([]); // 存储每张图片的高度
   const [containerHeight, setContainerHeight] = useState(0); // 容器高度
   const imageLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 图片加载防抖引用
-  const [doublePageMode, setDoublePageMode] = useState<boolean>(() => {
-    // 从localStorage读取保存的双页拼合设置
+
+  // 提取设备检测和宽度计算的通用函数
+  const getDeviceInfo = useCallback(() => {
+    const isPC = window.innerWidth >= 1024;
+    const containerWidth = isPC
+      ? Math.min(800, window.innerWidth * 0.8)
+      : Math.min(window.innerWidth * 0.95, window.innerWidth);
+    return { isPC, containerWidth };
+  }, []);
+
+  const getImageHeight = useCallback((naturalWidth: number, naturalHeight: number) => {
+    const { isPC, containerWidth } = getDeviceInfo();
+    const aspectRatio = naturalHeight / naturalWidth;
+    return containerWidth * aspectRatio;
+  }, [getDeviceInfo]);
+  // 提取localStorage读取逻辑为自定义Hook
+  const useLocalStorageBoolean = (key: string, defaultValue: boolean): [boolean, (value: boolean) => void] => {
+    const [value, setValue] = useState<boolean>(() => {
+      if (typeof window !== 'undefined') {
+        try {
+          const saved = localStorage.getItem(key);
+          return saved === 'true';
+        } catch (e) {
+          console.warn(`Failed to read ${key} from localStorage:`, e);
+        }
+      }
+      return defaultValue;
+    });
+
+    const setStoredValue = (newValue: boolean) => {
+      setValue(newValue);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(key, String(newValue));
+        } catch (e) {
+          console.warn(`Failed to save ${key} to localStorage:`, e);
+        }
+      }
+    };
+
+    return [value, setStoredValue];
+  };
+
+  const useLocalStorageNumber = (key: string, defaultValue: number): [number, (value: number) => void] => {
+    const [value, setValue] = useState<number>(() => {
+      if (typeof window !== 'undefined') {
+        try {
+          const saved = localStorage.getItem(key);
+          return saved ? parseInt(saved, 10) : defaultValue;
+        } catch (e) {
+          console.warn(`Failed to read ${key} from localStorage:`, e);
+        }
+      }
+      return defaultValue;
+    });
+
+    const setStoredValue = (newValue: number) => {
+      setValue(newValue);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(key, String(newValue));
+        } catch (e) {
+          console.warn(`Failed to save ${key} to localStorage:`, e);
+        }
+      }
+    };
+
+    return [value, setStoredValue];
+  };
+
+  const [readingMode, setReadingMode] = useState<ReadingMode>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const saved = localStorage.getItem('reader-double-page-mode');
-        return saved === 'true';
+        const savedMode = localStorage.getItem('reader-reading-mode');
+        if (savedMode && ['single-ltr', 'single-rtl', 'single-ttb', 'webtoon'].includes(savedMode)) {
+          return savedMode as ReadingMode;
+        }
       } catch (e) {
-        console.warn('Failed to read double page mode from localStorage:', e);
+        console.warn('Failed to read reading mode from localStorage:', e);
       }
     }
-    return false; // 默认关闭
+    return 'single-ltr';
   });
-  const [autoPlayMode, setAutoPlayMode] = useState<boolean>(() => {
-    // 从localStorage读取保存的自动翻页设置
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('reader-auto-play-mode');
-        return saved === 'true';
-      } catch (e) {
-        console.warn('Failed to read auto play mode from localStorage:', e);
-      }
-    }
-    return false; // 默认关闭
-  });
-  const [autoPlayInterval, setAutoPlayInterval] = useState<number>(() => {
-    // 从localStorage读取保存的自动翻页间隔时间（秒）
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('reader-auto-play-interval');
-        return saved ? parseInt(saved, 10) : 3; // 默认3秒
-      } catch (e) {
-        console.warn('Failed to read auto play interval from localStorage:', e);
-      }
-    }
-    return 3; // 默认3秒
-  });
-  const [splitCoverMode, setSplitCoverMode] = useState<boolean>(() => {
-    // 从localStorage读取保存的拆分封面设置
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('reader-split-cover-mode');
-        return saved === 'true';
-      } catch (e) {
-        console.warn('Failed to read split cover mode from localStorage:', e);
-      }
-    }
-    return false; // 默认关闭
-  });
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(() => {
-    // 从localStorage读取保存的全屏设置
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('reader-fullscreen-mode');
-        return saved === 'true';
-      } catch (e) {
-        console.warn('Failed to read fullscreen mode from localStorage:', e);
-      }
-    }
-    return false; // 默认关闭
-  });
-  const [doubleTapZoom, setDoubleTapZoom] = useState<boolean>(() => {
-    // 从localStorage读取保存的双击放大设置
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('reader-double-tap-zoom');
-        return saved === 'true';
-      } catch (e) {
-        console.warn('Failed to read double tap zoom from localStorage:', e);
-      }
-    }
-    return false; // 默认关闭
-  });
+
+  const [doublePageMode, setDoublePageMode] = useLocalStorageBoolean('reader-double-page-mode', false);
+  const [autoPlayMode, setAutoPlayMode] = useLocalStorageBoolean('reader-auto-play-mode', false);
+  const [autoPlayInterval, setAutoPlayInterval] = useLocalStorageNumber('reader-auto-play-interval', 3);
+  const [splitCoverMode, setSplitCoverMode] = useLocalStorageBoolean('reader-split-cover-mode', false);
+  const [isFullscreen, setIsFullscreen] = useLocalStorageBoolean('reader-fullscreen-mode', false);
+  const [doubleTapZoom, setDoubleTapZoom] = useLocalStorageBoolean('reader-double-tap-zoom', false);
   
   // 用于跟踪拆分封面模式的变化，避免无限循环
   const splitCoverModeRef = useRef(splitCoverMode);
@@ -525,14 +528,7 @@ function ReaderContent() {
 
     // 如果是条漫模式且提供了图片元素，记录图片高度
     if (readingMode === 'webtoon' && imgElement) {
-      // 优化PC端显示：为PC端设置更合适的宽度限制
-      const isPC = window.innerWidth >= 1024; // PC屏幕判断
-      const maxContainerWidth = isPC
-        ? Math.min(800, window.innerWidth * 0.8) // PC端最大800px，或屏幕宽度的80%
-        : Math.min(window.innerWidth * 0.95, 1200); // 移动端保持原逻辑
-
-      const aspectRatio = imgElement.naturalHeight / imgElement.naturalWidth;
-      const imageHeight = maxContainerWidth * aspectRatio;
+      const imageHeight = getImageHeight(imgElement.naturalWidth, imgElement.naturalHeight);
 
       setImageHeights(prev => {
         const newHeights = [...prev];
@@ -784,11 +780,8 @@ function ReaderContent() {
   useEffect(() => {
     if (pages.length > 0 && imageHeights.length !== pages.length) {
       // 使用更合理的默认高度初始化数组
-      const isPC = window.innerWidth >= 1024; // PC屏幕判断
-      const containerWidth = isPC
-        ? Math.min(800, window.innerWidth * 0.8) // PC端最大800px，或屏幕宽度的80%
-        : Math.min(window.innerWidth * 0.95, window.innerWidth);
-      const defaultHeight = Math.min(window.innerHeight * 0.7, containerWidth * 1.5); // PC端降低默认高度
+      const { containerWidth } = getDeviceInfo();
+      const defaultHeight = Math.min(window.innerHeight * 0.7, containerWidth * 1.5);
       setImageHeights(new Array(pages.length).fill(defaultHeight));
       
       // 设置初始容器高度
@@ -799,48 +792,6 @@ function ReaderContent() {
       setVisibleRange({ start: 0, end: Math.min(3, pages.length - 1) }); // 增加初始渲染范围
     }
   }, [pages.length, imageHeights.length]);
-
-  // 保存阅读模式到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('reader-reading-mode', readingMode);
-    }
-  }, [readingMode]);
-
-  // 保存双页拼合设置到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('reader-double-page-mode', String(doublePageMode));
-    }
-  }, [doublePageMode]);
-
-  // 保存自动翻页设置到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('reader-auto-play-mode', String(autoPlayMode));
-    }
-  }, [autoPlayMode]);
-
-  // 保存自动翻页间隔时间到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('reader-auto-play-interval', String(autoPlayInterval));
-    }
-  }, [autoPlayInterval]);
-
-  // 保存拆分封面设置到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('reader-split-cover-mode', String(splitCoverMode));
-    }
-  }, [splitCoverMode]);
-
-  // 保存双击放大设置到localStorage
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('reader-double-tap-zoom', String(doubleTapZoom));
-    }
-  }, [doubleTapZoom]);
 
   // 自动翻页定时器
   useEffect(() => {
@@ -1071,12 +1022,7 @@ function ReaderContent() {
       imageRefs.current.forEach((img, index) => {
         if (img && img.complete && img.naturalHeight > 0 && !imageHeights[index]) {
           // 如果图片已经加载完成但还没有记录高度，计算高度
-          const isPC = window.innerWidth >= 1024; // PC屏幕判断
-          const maxContainerWidth = isPC
-            ? Math.min(800, window.innerWidth * 0.8) // PC端最大800px，或屏幕宽度的80%
-            : Math.min(window.innerWidth * 0.95, 1200); // 移动端保持原逻辑
-          const aspectRatio = img.naturalHeight / img.naturalWidth;
-          const imageHeight = maxContainerWidth * aspectRatio;
+          const imageHeight = getImageHeight(img.naturalWidth, img.naturalHeight);
           
           setImageHeights(prev => {
             const newHeights = [...prev];

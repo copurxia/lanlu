@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,29 +11,31 @@ import { Settings, Save, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDebounceCallback } from '@/hooks/use-debounce';
 import { SystemSetting } from '@/lib/system-settings-api';
 
 interface SettingsByCategory {
   [category: string]: SystemSetting[];
 }
 
-// 解析description对象并根据当前语言返回合适文本
+// 提取通用本地化函数到独立文件
 const getLocalizedDescription = (description: Record<string, string> | string, currentLang: string): string => {
-  try {
-    // 如果description已经是对象，直接使用
-    if (typeof description === 'object' && description !== null) {
-      // 优先使用当前语言，如果没有则使用中文，最后使用英文
-      return description[currentLang] || description['zh'] || description['en'] || '';
-    }
-
-    // 如果description是字符串，尝试解析JSON
-    const descObj = JSON.parse(description);
-    return descObj[currentLang] || descObj['zh'] || descObj['en'] || description;
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  } catch (_error) {
-    // 如果解析失败，返回原始字符串或空字符串
-    return typeof description === 'string' ? description : '';
+  // 如果已经是对象，直接查找
+  if (typeof description === 'object' && description !== null) {
+    return description[currentLang] || description['zh'] || description['en'] || '';
   }
+
+  // 如果是字符串，尝试解析
+  if (typeof description === 'string') {
+    try {
+      const descObj = JSON.parse(description);
+      return descObj[currentLang] || descObj['zh'] || descObj['en'] || description;
+    } catch {
+      return description;
+    }
+  }
+
+  return '';
 };
 
 export default function SystemSettingsPage() {
@@ -45,9 +47,6 @@ export default function SystemSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [settings, setSettings] = useState<SettingsByCategory>({} as SettingsByCategory);
   const [activeTab, setActiveTab] = useState('storage');
-  
-  // 添加防抖计时器引用
-  const loadSettingsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const categories = [
     { id: 'storage', name: t('settings.system.storage'), icon: '📁' },
@@ -55,46 +54,45 @@ export default function SystemSettingsPage() {
     { id: 'performance', name: t('settings.system.performance'), icon: '⚡' },
   ];
 
-  const loadSettings = useCallback(() => {
-    // 清除之前的定时器
-    if (loadSettingsTimeoutRef.current) {
-      clearTimeout(loadSettingsTimeoutRef.current);
-    }
-    
-    // 设置新的定时器（防抖）
-    loadSettingsTimeoutRef.current = setTimeout(async () => {
-      try {
-        setLoading(true);
-        const response = await fetch('/api/system/settings');
-        const data = await response.json();
-
-        if (data.success) {
-          const grouped = groupSettingsByCategory(data.data);
-          setSettings(grouped);
-        } else {
-          showError(data.message || t('settings.system.loadError'));
-        }
-      } catch (error) {
-        console.error(t('settings.system.loadError'), ':', error as Error);
-        showError(t('settings.system.loadError'));
-      } finally {
-        setLoading(false);
-      }
-    }, 300); // 300ms 防抖延迟
-  }, [t, showError]);
+  // 使用 useRef 稳定函数引用，避免 useEffect 无限循环
+  const tRef = useRef(t);
+  const showErrorRef = useRef(showError);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && isAuthenticated) {
-      loadSettings();
-    }
-    
-    // 清理函数：在组件卸载时清除定时器
-    return () => {
-      if (loadSettingsTimeoutRef.current) {
-        clearTimeout(loadSettingsTimeoutRef.current);
+    tRef.current = t;
+    showErrorRef.current = showError;
+  }, [t, showError]);
+
+  const loadSettings = useCallback(async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/system/settings');
+      const data = await response.json();
+
+      if (data.success) {
+        const grouped = groupSettingsByCategory(data.data);
+        setSettings(grouped);
+      } else {
+        showErrorRef.current?.(data.message || tRef.current('settings.system.loadError'));
       }
-    };
-  }, [isAuthenticated]); // eslint-disable-line react-hooks/exhaustive-deps
+    } catch (error) {
+      console.error(tRef.current('settings.system.loadError'), ':', error as Error);
+      showErrorRef.current?.(tRef.current('settings.system.loadError'));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // 使用防抖避免频繁调用
+  const debouncedLoadSettings = useDebounceCallback(loadSettings, 300);
+
+  // 初始加载 - 只在 isAuthenticated 变化时执行一次
+  useEffect(() => {
+    if (typeof window !== 'undefined' && isAuthenticated) {
+      debouncedLoadSettings();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated]);
 
   const groupSettingsByCategory = (settings: SystemSetting[]): SettingsByCategory => {
     const grouped: SettingsByCategory = {};

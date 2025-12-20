@@ -1,22 +1,21 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { PluginCard } from '@/components/settings/PluginCard';
 import { PluginConfigDialog } from '@/components/settings/PluginConfigDialog';
+import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 import { PluginService, Plugin } from '@/lib/plugin-service';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Package, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useAuth } from '@/contexts/AuthContext';
 
 const TYPE_ORDER = ['metadata', 'download', 'login', 'script'];
 
 export default function SettingsPluginsPage() {
   const { t } = useLanguage();
-  const { user, isAuthenticated } = useAuth();
 
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,11 +23,6 @@ export default function SettingsPluginsPage() {
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeType, setActiveType] = useState('all');
-
-  // Check if current user is admin
-  const isAdmin = useMemo(() => {
-    return isAuthenticated && user?.isAdmin === true;
-  }, [isAuthenticated, user?.isAdmin]);
 
   const fetchPlugins = useCallback(async () => {
     try {
@@ -128,56 +122,26 @@ export default function SettingsPluginsPage() {
     }
   };
 
-  // Redirect to login if not authenticated
-  if (!isAuthenticated) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('settings.plugins')}</CardTitle>
-            <CardDescription>{t('auth.loginToManageTokens')}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  // Show access denied if not admin
-  if (!isAdmin) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('settings.plugins')}</CardTitle>
-            <CardDescription>{t('common.accessDenied')}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
+  const refreshButton = (
+    <Button
+      variant="outline"
+      onClick={handleRefresh}
+      disabled={refreshing}
+      className="flex items-center space-x-2"
+    >
+      <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+      <span>{t('common.refresh')}</span>
+    </Button>
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <Package className="w-5 h-5" />
-            {t('settings.plugins')}
-          </h2>
-          <p className="text-sm text-muted-foreground">{t('settings.pluginsDescription')}</p>
-        </div>
-
-        <Button
-          variant="outline"
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center space-x-2"
-        >
-          <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-          <span>{t('common.refresh')}</span>
-        </Button>
-      </div>
-
+    <SettingsPageWrapper
+      title={t('settings.plugins')}
+      description={t('settings.pluginsDescription')}
+      icon={<Package className="w-5 h-5" />}
+      requireAdmin
+      actions={refreshButton}
+    >
       <Card>
         <CardHeader>
           <Tabs value={activeType} onValueChange={setActiveType}>
@@ -225,6 +189,6 @@ export default function SettingsPluginsPage() {
         plugin={selectedPlugin}
         onConfigSaved={handleConfigSaved}
       />
-    </div>
+    </SettingsPageWrapper>
   );
 }
