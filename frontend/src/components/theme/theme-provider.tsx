@@ -37,6 +37,9 @@ export function ThemeProvider({
 
     root.classList.remove('light', 'dark');
 
+    // 声明支持 light 和 dark 两种颜色方案
+    root.style.colorScheme = 'light dark';
+
     if (theme === 'system') {
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
         ? 'dark'
