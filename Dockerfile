@@ -3,7 +3,7 @@ FROM docker.1ms.run/ubuntu
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y libarchive-tools imagemagick tzdata libssl-dev curl && \
+    apt-get install -y libarchive-tools imagemagick tzdata libssl-dev curl unzip && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Deno
