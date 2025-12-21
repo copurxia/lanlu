@@ -414,10 +414,14 @@
   },
   "favorites": {
     "title": "我的收藏",
-    "description": "管理您收藏的档案",
+    "description": "管理您收藏的内容",
     "loadError": "加载收藏列表失败",
     "noFavorites": "暂无收藏",
-    "noFavoritesHint": "点击档案卡片上的爱心图标即可收藏",
+    "noFavoritesHint": "点击档案或合集卡片上的爱心图标即可收藏",
+    "tabs": {
+      "archives": "归档",
+      "tankoubons": "合集"
+    },
     "count": "共 {count} 个收藏",
     "clearAll": "清空收藏",
     "clearAllConfirm": "确定要清空所有收藏吗？此操作不可恢复。",
@@ -440,7 +444,7 @@
     "overviewDescription": "选择要管理的模块",
     "all": "全部",
     "favorites": "我的收藏",
-    "favoritesDescription": "查看和管理您收藏的档案",
+    "favoritesDescription": "查看和管理您收藏的内容",
     "readingHistory": "阅读记录",
     "readingHistoryDescription": "查看您的阅读历史记录",
     "plugins": "插件管理",

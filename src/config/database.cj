@@ -689,6 +689,85 @@ public class DatabaseConfig {
                 } catch (_: Exception) {}
             }
 
+            // user_tankoubon_favorites 表（用户收藏的合集）
+            if (!tableExists(conn, "user_tankoubon_favorites")) {
+                logger.info("user_tankoubon_favorites表不存在，创建新的user_tankoubon_favorites表")
+                execUpdate(conn, """
+                    CREATE TABLE user_tankoubon_favorites (
+                        id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                        user_id INTEGER NOT NULL,
+                        tankoubon_id INTEGER NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE (user_id, tankoubon_id),
+                        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+                        FOREIGN KEY (tankoubon_id) REFERENCES tankoubons(id) ON DELETE CASCADE
+                    )
+                """)
+                try {
+                    let createSql = "CREATE INDEX idx_user_tankoubon_favorites_user_id ON user_tankoubon_favorites (user_id)"
+                    try {
+                        if (!indexExists(conn, "idx_user_tankoubon_favorites_user_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_user_tankoubon_favorites_tankoubon_id ON user_tankoubon_favorites (tankoubon_id)"
+                    try {
+                        if (!indexExists(conn, "idx_user_tankoubon_favorites_tankoubon_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_user_tankoubon_favorites_created_at ON user_tankoubon_favorites (created_at)"
+                    try {
+                        if (!indexExists(conn, "idx_user_tankoubon_favorites_created_at")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                logger.info("user_tankoubon_favorites表创建成功")
+            } else {
+                logger.info("user_tankoubon_favorites表已存在，检查并补全索引")
+                try {
+                    let createSql = "CREATE INDEX idx_user_tankoubon_favorites_user_id ON user_tankoubon_favorites (user_id)"
+                    try {
+                        if (!indexExists(conn, "idx_user_tankoubon_favorites_user_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_user_tankoubon_favorites_tankoubon_id ON user_tankoubon_favorites (tankoubon_id)"
+                    try {
+                        if (!indexExists(conn, "idx_user_tankoubon_favorites_tankoubon_id")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+                try {
+                    let createSql = "CREATE INDEX idx_user_tankoubon_favorites_created_at ON user_tankoubon_favorites (created_at)"
+                    try {
+                        if (!indexExists(conn, "idx_user_tankoubon_favorites_created_at")) {
+                            execUpdate(conn, createSql)
+                        }
+                    } catch (_: Exception) {
+                        execUpdate(conn, createSql)
+                    }
+                } catch (_: Exception) {}
+            }
+
             // smart_filters 表（智能分类/快速筛选）
             if (!tableExists(conn, "smart_filters")) {
                 logger.info("smart_filters表不存在，创建新的smart_filters表")

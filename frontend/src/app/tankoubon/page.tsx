@@ -29,9 +29,10 @@ import {
 } from '@/components/ui/alert-dialog';
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { ArchiveService } from '@/lib/archive-service';
+import { FavoriteService } from '@/lib/favorite-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/logger';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 
@@ -45,6 +46,8 @@ function TankoubonDetailContent() {
   const [archives, setArchives] = useState<Archive[]>([]);
   const [loading, setLoading] = useState(true);
   const [archivesLoading, setArchivesLoading] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -73,6 +76,7 @@ function TankoubonDetailContent() {
       setLoading(true);
       const data = await TankoubonService.getTankoubonById(tankoubonId);
       setTankoubon(data);
+      setIsFavorite(data.isfavorite || false);
 
       // Set edit form values
       setEditName(data.name);
@@ -122,6 +126,22 @@ function TankoubonDetailContent() {
       fetchArchives();
     }
   }, [tankoubon, fetchArchives]);
+
+  const handleFavoriteClick = async () => {
+    if (!tankoubon || favoriteLoading) return;
+    setFavoriteLoading(true);
+    try {
+      const success = await FavoriteService.toggleTankoubonFavorite(tankoubon.tankoubon_id, isFavorite);
+      if (success) {
+        setIsFavorite(!isFavorite);
+        setTankoubon({ ...tankoubon, isfavorite: !isFavorite });
+      }
+    } catch (error) {
+      logger.operationFailed('toggle tankoubon favorite', error);
+    } finally {
+      setFavoriteLoading(false);
+    }
+  };
 
   // Handle edit
   const handleEdit = async () => {
@@ -309,6 +329,16 @@ function TankoubonDetailContent() {
             </div>
 
             <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className={`px-3 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                disabled={favoriteLoading}
+                onClick={handleFavoriteClick}
+              >
+                <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+              </Button>
               <Button variant="outline" size="sm" onClick={() => setEditDialogOpen(true)}>
                 <Edit className="w-4 h-4 mr-2" />
                 {t('common.edit')}

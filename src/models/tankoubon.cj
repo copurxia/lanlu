@@ -19,6 +19,7 @@ public class Tankoubon {
     public var last_read_time: String = ""
     public var isnew: Bool = false
     public var archive_count: Int32 = 0
+    public var isfavorite: Bool = false
 
     public init(id: String, name: String, summary: String, tags: String, archives: Array<String>) {
         this.id = id
@@ -43,14 +44,14 @@ public class Tankoubon {
         }
         archivesJson += "]"
 
-        return "{\"tankoubon_id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"archives\":${archivesJson},\"archive_count\":${archive_count},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew}}"
+        return "{\"tankoubon_id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"archives\":${archivesJson},\"archive_count\":${archive_count},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"isfavorite\":${isfavorite}}"
     }
 
     /**
      * 转换为带聚合数据的JSON字符串（用于搜索结果）
      */
     public func toAggregatedJson(): String {
-        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"archive_count\":${archive_count}}"
+        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"archive_count\":${archive_count},\"isfavorite\":${isfavorite}}"
     }
 }
 

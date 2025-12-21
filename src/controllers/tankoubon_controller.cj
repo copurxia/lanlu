@@ -2,11 +2,30 @@ package lrr4cj.controllers
 
 import cjoy.*
 import lrr4cj.models.*
+import lrr4cj.dao.*
+import lrr4cj.middleware.*
+import stdx.net.http.HttpStatusCode
+import std.convert.*
 
 /**
  * 单行本控制器
  */
 public class TankoubonController {
+    /**
+     * JSON字符串转义函数
+     */
+    private static func escapeJson(s: String): String {
+        var escaped = s
+        escaped = escaped.replace("\\", "\\\\")
+        escaped = escaped.replace("\"", "\\\"")
+        escaped = escaped.replace("\b", "\\b")
+        escaped = escaped.replace("\f", "\\f")
+        escaped = escaped.replace("\n", "\\n")
+        escaped = escaped.replace("\r", "\\r")
+        escaped = escaped.replace("\t", "\\t")
+        return escaped
+    }
+
     /**
      * 获取所有单行本
      */
@@ -33,6 +52,12 @@ public class TankoubonController {
             let errorResponse = "{\"error\":\"The given tankoubon does not exist.\",\"operation\":\"get_tankoubon\",\"success\":0}"
             ctx.json(errorResponse)
             return
+        }
+
+        // 查询收藏状态（登录用户）
+        match (AuthMiddleware.optionalUser(ctx)) {
+            case Some(userId) => tankoubon.isfavorite = UserTankoubonFavoriteDao.isFavorite(userId, id)
+            case None => tankoubon.isfavorite = false
         }
         
         var result = "{\"filtered\":${tankoubon.archives.size},\"result\":${tankoubon.toJson()},\"total\":${tankoubon.archives.size}}"
@@ -122,6 +147,133 @@ public class TankoubonController {
         } else {
             let errorResponse = "{\"error\":\"Tankoubon doesn't exist in the database!\",\"operation\":\"remove_from_tankoubon\",\"success\":0}"
             ctx.json(errorResponse)
+        }
+    }
+
+    /**
+     * 添加收藏（PUT /api/tankoubons/{id}/favorite）
+     */
+    public static func addFavorite(ctx: JoyContext): Unit {
+        match (AuthMiddleware.requireUser(ctx)) {
+            case Some(userId) =>
+                let id = ctx.getParam("id") ?? ""
+                if (id.size == 0) {
+                    let errorResponse = "{\"operation\":\"add_tankoubon_favorite\",\"error\":\"No tankoubon ID specified.\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.json(errorResponse)
+                    return
+                }
+
+                let tank = TankoubonModel.getTankoubonById(id)
+                if (tank.id.size == 0) {
+                    let errorResponse = "{\"operation\":\"add_tankoubon_favorite\",\"error\":\"Tankoubon not found\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                    ctx.json(errorResponse)
+                    return
+                }
+
+                let addSuccess = UserTankoubonFavoriteDao.addFavorite(userId, id)
+                if (addSuccess) {
+                    let result = "{\"operation\":\"add_tankoubon_favorite\",\"success\":1}"
+                    ctx.json(result)
+                } else {
+                    let errorResponse = "{\"operation\":\"add_tankoubon_favorite\",\"error\":\"Failed to add favorite\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.json(errorResponse)
+                }
+            case None => return
+        }
+    }
+
+    /**
+     * 取消收藏（DELETE /api/tankoubons/{id}/favorite）
+     */
+    public static func removeFavorite(ctx: JoyContext): Unit {
+        match (AuthMiddleware.requireUser(ctx)) {
+            case Some(userId) =>
+                let id = ctx.getParam("id") ?? ""
+                if (id.size == 0) {
+                    let errorResponse = "{\"operation\":\"remove_tankoubon_favorite\",\"error\":\"No tankoubon ID specified.\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.json(errorResponse)
+                    return
+                }
+
+                let removeSuccess = UserTankoubonFavoriteDao.removeFavorite(userId, id)
+                if (removeSuccess) {
+                    let result = "{\"operation\":\"remove_tankoubon_favorite\",\"success\":1}"
+                    ctx.json(result)
+                } else {
+                    let errorResponse = "{\"operation\":\"remove_tankoubon_favorite\",\"error\":\"Failed to remove favorite\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ctx.json(errorResponse)
+                }
+            case None => return
+        }
+    }
+
+    /**
+     * 获取用户收藏的合集详情列表（GET /api/favorites/tankoubons）
+     */
+    public static func getFavoriteTankoubons(ctx: JoyContext): Unit {
+        match (AuthMiddleware.requireUser(ctx)) {
+            case Some(userId) =>
+                let startParam = ctx.getQuery("start")
+                let countParam = ctx.getQuery("count")
+
+                let start = match (startParam) {
+                    case Some(s) => try { Int32.parse(s) } catch (_: Exception) { 0i32 }
+                    case None => 0i32
+                }
+
+                let count = match (countParam) {
+                    case Some(c) => try { Int32.parse(c) } catch (_: Exception) { 100i32 }
+                    case None => 100i32
+                }
+
+                let (ids, totalCount) = UserTankoubonFavoriteDao.getUserFavoriteTankoubonIdsPaged(userId, start, count)
+
+                var tanksJson = "["
+                for (i in 0..ids.size) {
+                    if (i >= ids.size) { break }
+                    if (i > 0) { tanksJson += "," }
+
+                    let tid = ids[i]
+                    match (TankoubonDao.getAggregatedMetadata(tid, userId)) {
+                        case Some(agg) =>
+                            let archives = TankoubonDao.getArchivesInTankoubon(tid)
+                            var archivesJson = "["
+                            for (j in 0..archives.size) {
+                                if (j >= archives.size) { break }
+                                if (j > 0) { archivesJson += "," }
+                                archivesJson += "\"${escapeJson(archives[j])}\""
+                            }
+                            archivesJson += "]"
+
+                            tanksJson += "{"
+                            tanksJson += "\"tankoubon_id\":\"${escapeJson(agg.tankoubon_id)}\","
+                            tanksJson += "\"name\":\"${escapeJson(agg.name)}\","
+                            tanksJson += "\"summary\":\"${escapeJson(agg.summary)}\","
+                            tanksJson += "\"tags\":\"${escapeJson(agg.tags)}\","
+                            tanksJson += "\"archives\":${archivesJson},"
+                            tanksJson += "\"pagecount\":${agg.pagecount},"
+                            tanksJson += "\"progress\":${agg.progress},"
+                            tanksJson += "\"lastreadtime\":\"${escapeJson(agg.last_read_time)}\","
+                            tanksJson += "\"isnew\":${agg.isnew},"
+                            tanksJson += "\"archive_count\":${agg.archive_count},"
+                            tanksJson += "\"isfavorite\":true"
+                            tanksJson += "}"
+                        case None =>
+                            let tank = TankoubonModel.getTankoubonById(tid)
+                            tank.isfavorite = true
+                            tanksJson += tank.toJson()
+                    }
+                }
+                tanksJson += "]"
+
+                let result = "{\"operation\":\"get_favorite_tankoubons\",\"data\":${tanksJson},\"recordsTotal\":${totalCount},\"recordsFiltered\":${totalCount},\"success\":1}"
+                ctx.json(result)
+            case None => return
         }
     }
 }

@@ -11,25 +11,32 @@ import { FavoriteService } from '@/lib/favorite-service';
 import { groupArchivesByTime, TimeGroup } from '@/lib/time-group';
 import { Archive } from '@/types/archive';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
+import type { Tankoubon } from '@/types/tankoubon';
+import { TankoubonCard } from '@/components/tankoubon/TankoubonCard';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function FavoritesPage() {
   const { t } = useLanguage();
   const { success } = useToast();
   const { confirm } = useConfirmContext();
-  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'archives' | 'tankoubons'>('archives');
+  const [archiveLoading, setArchiveLoading] = useState(true);
+  const [tankoubonLoading, setTankoubonLoading] = useState(true);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [groupedArchives, setGroupedArchives] = useState<TimeGroup[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
+  const [groupedTankoubons, setGroupedTankoubons] = useState<TimeGroup[]>([]);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [tankoubonError, setTankoubonError] = useState<string | null>(null);
 
-  // 加载收藏列表
-  const loadFavorites = useCallback(async (silent = false) => {
+  const loadArchiveFavorites = useCallback(async (silent = false) => {
     try {
       if (!silent) {
-        setLoading(true);
+        setArchiveLoading(true);
       }
-      setError(null);
+      setArchiveError(null);
 
       // 使用新的 API 直接获取收藏档案详情
       const response = await FavoriteService.getFavoriteArchives(0, 1000);
@@ -40,25 +47,55 @@ export default function FavoritesPage() {
         const grouped = groupArchivesByTime(response.data, 'last_read_time', t);
         setGroupedArchives(grouped);
       } else {
-        setError(t('favorites.loadError'));
+        setArchiveError(t('favorites.loadError'));
       }
     } catch (err) {
       logger.apiError('加载收藏列表失败:', err);
-      setError(t('favorites.loadError'));
+      setArchiveError(t('favorites.loadError'));
     } finally {
       if (!silent) {
-        setLoading(false);
+        setArchiveLoading(false);
+      }
+    }
+  }, [t]);
+
+  const loadTankoubonFavorites = useCallback(async (silent = false) => {
+    try {
+      if (!silent) {
+        setTankoubonLoading(true);
+      }
+      setTankoubonError(null);
+
+      const response = await FavoriteService.getFavoriteTankoubons(0, 1000);
+      if (response.success === 1) {
+        setTankoubons(response.data);
+        const grouped = groupArchivesByTime(response.data, 'lastreadtime', t);
+        setGroupedTankoubons(grouped);
+      } else {
+        setTankoubonError(t('favorites.loadError'));
+      }
+    } catch (err) {
+      logger.apiError('加载收藏合集失败:', err);
+      setTankoubonError(t('favorites.loadError'));
+    } finally {
+      if (!silent) {
+        setTankoubonLoading(false);
       }
     }
   }, [t]);
 
   useEffect(() => {
-    loadFavorites();
-  }, [loadFavorites]);
+    loadArchiveFavorites();
+    loadTankoubonFavorites();
+  }, [loadArchiveFavorites, loadTankoubonFavorites]);
 
 
   // 处理清空所有收藏
   const handleClearAll = async () => {
+    const isArchives = activeTab === 'archives';
+    const count = isArchives ? archives.length : tankoubons.length;
+    if (count === 0) return;
+
     const confirmed = await confirm({
       title: '确认清空所有收藏',
       description: t('favorites.clearAllConfirm'),
@@ -70,20 +107,40 @@ export default function FavoritesPage() {
     if (!confirmed) return;
 
     try {
-      setLoading(true);
-      // 逐个取消收藏
-      const promises = archives.map(archive => FavoriteService.removeFavorite(archive.arcid));
-      await Promise.all(promises);
-
-      // 刷新列表
-      await loadFavorites(true);
+      if (isArchives) {
+        setArchiveLoading(true);
+        const promises = archives.map((archive) => FavoriteService.removeFavorite(archive.arcid));
+        await Promise.all(promises);
+        await loadArchiveFavorites(true);
+      } else {
+        setTankoubonLoading(true);
+        const promises = tankoubons.map((tank) => FavoriteService.removeTankoubonFavorite(tank.tankoubon_id));
+        await Promise.all(promises);
+        await loadTankoubonFavorites(true);
+      }
       success('已清空所有收藏');
     } catch (error) {
       logger.apiError('清空收藏失败:', error);
     } finally {
-      setLoading(false);
+      if (isArchives) {
+        setArchiveLoading(false);
+      } else {
+        setTankoubonLoading(false);
+      }
     }
   };
+
+  const handleRefresh = async () => {
+    if (activeTab === 'archives') {
+      await loadArchiveFavorites();
+    } else {
+      await loadTankoubonFavorites();
+    }
+  };
+
+  const isLoading = activeTab === 'archives' ? archiveLoading : tankoubonLoading;
+  const activeError = activeTab === 'archives' ? archiveError : tankoubonError;
+  const activeCount = activeTab === 'archives' ? archives.length : tankoubons.length;
 
   return (
     <div className="space-y-6">
@@ -99,18 +156,18 @@ export default function FavoritesPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => loadFavorites()}
-            disabled={loading}
+            onClick={handleRefresh}
+            disabled={isLoading}
           >
-            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
             {t('common.refresh')}
           </Button>
-          {archives.length > 0 && (
+          {activeCount > 0 && (
             <Button
               variant="destructive"
               size="sm"
               onClick={handleClearAll}
-              disabled={loading}
+              disabled={isLoading}
             >
               <Trash2 className="w-4 h-4 mr-2" />
               {t('favorites.clearAll')}
@@ -121,46 +178,86 @@ export default function FavoritesPage() {
 
       <Card>
         <CardContent className="pt-6 space-y-4">
-          {error && (
-            <div className="text-red-500 mb-4">{error}</div>
-          )}
+          {activeError && <div className="text-red-500 mb-4">{activeError}</div>}
 
-          {loading ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="space-y-2">
-                  <Skeleton className="aspect-[3/4] w-full" />
-                  <Skeleton className="h-4 w-full" />
-                  <Skeleton className="h-4 w-2/3" />
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
+            <TabsList className="grid w-full grid-cols-2 mb-6">
+              <TabsTrigger value="archives">{t('favorites.tabs.archives')}</TabsTrigger>
+              <TabsTrigger value="tankoubons">{t('favorites.tabs.tankoubons')}</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="archives">
+              {archiveLoading ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="aspect-[3/4] w-full" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : groupedArchives.length === 0 ? (
-            <div className="text-center py-12">
-              <Heart className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-lg text-muted-foreground">{t('favorites.noFavorites')}</p>
-              <p className="text-sm text-muted-foreground mt-2">{t('favorites.noFavoritesHint')}</p>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              <div className="mb-4 text-sm text-muted-foreground">
-                {t('favorites.count').replace('{count}', String(archives.length))}
-              </div>
-              {groupedArchives.map((group) => (
-                <div key={group.label} className="space-y-3">
-                  <h3 className="text-lg font-semibold">{group.label}</h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                    {group.archives.map((archive) => (
-                      <ArchiveCard
-                        key={archive.arcid}
-                        archive={archive}
-                      />
-                    ))}
+              ) : groupedArchives.length === 0 ? (
+                <div className="text-center py-12">
+                  <Heart className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-lg text-muted-foreground">{t('favorites.noFavorites')}</p>
+                  <p className="text-sm text-muted-foreground mt-2">{t('favorites.noFavoritesHint')}</p>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  <div className="mb-4 text-sm text-muted-foreground">
+                    {t('favorites.count').replace('{count}', String(archives.length))}
                   </div>
+                  {groupedArchives.map((group) => (
+                    <div key={group.label} className="space-y-3">
+                      <h3 className="text-lg font-semibold">{group.label}</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                        {group.archives.map((archive) => (
+                          <ArchiveCard key={archive.arcid} archive={archive} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
+            </TabsContent>
+
+            <TabsContent value="tankoubons">
+              {tankoubonLoading ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="aspect-[3/4] w-full" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  ))}
+                </div>
+              ) : groupedTankoubons.length === 0 ? (
+                <div className="text-center py-12">
+                  <Heart className="w-16 h-16 mx-auto mb-4 text-muted-foreground" />
+                  <p className="text-lg text-muted-foreground">{t('favorites.noFavorites')}</p>
+                  <p className="text-sm text-muted-foreground mt-2">{t('favorites.noFavoritesHint')}</p>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  <div className="mb-4 text-sm text-muted-foreground">
+                    {t('favorites.count').replace('{count}', String(tankoubons.length))}
+                  </div>
+                  {groupedTankoubons.map((group) => (
+                    <div key={group.label} className="space-y-3">
+                      <h3 className="text-lg font-semibold">{group.label}</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                        {group.archives.map((tank) => (
+                          <TankoubonCard key={tank.tankoubon_id} tankoubon={tank} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
         </CardContent>
       </Card>
     </div>

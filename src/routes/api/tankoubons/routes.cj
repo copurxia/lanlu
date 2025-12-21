@@ -49,4 +49,22 @@ public func registerTankoubonRoutes(router: JoyRouters) {
         if (!AuthMiddleware.requiredAuth(ctx)) { return }
         TankoubonController.removeArchiveFromTankoubon(ctx)
     })
+
+    // 添加收藏
+    router.put("/api/tankoubons/{id}/favorite", { ctx =>
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
+        TankoubonController.addFavorite(ctx)
+    })
+
+    // 取消收藏
+    router.delete("/api/tankoubons/{id}/favorite", { ctx =>
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
+        TankoubonController.removeFavorite(ctx)
+    })
+
+    // 获取用户收藏的合集详情列表（带分页）
+    router.get("/api/favorites/tankoubons", { ctx =>
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
+        TankoubonController.getFavoriteTankoubons(ctx)
+    })
 }

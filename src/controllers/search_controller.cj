@@ -107,6 +107,7 @@ public class SearchController {
         var tankoubonMapping: HashMap<String, String> = HashMap<String, String>()
         var processedTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
         var tankoubonDataCache: HashMap<String, TankoubonAggregatedData> = HashMap<String, TankoubonAggregatedData>()
+        var tankoubonIdsList: ArrayList<String> = ArrayList<String>()
 
         if (groupByTanks) {
             // 收集所有归档的arcid
@@ -130,9 +131,13 @@ public class SearchController {
                             case None => ()
                         }
                         processedTankoubons[tankoubonId] = true
+                        tankoubonIdsList.add(tankoubonId)
                 }
             }
         }
+
+        // 批量获取Tankoubon收藏状态
+        let tankFavoriteMap = UserTankoubonFavoriteDao.getBatchFavoriteStatus(userId, tankoubonIdsList.toArray())
 
         // 批量获取用户的 isNew 状态和收藏状态
         var isNewMap = HashMap<Int64, Bool>()
@@ -214,7 +219,13 @@ public class SearchController {
                         archivesJson = archivesJson + "\"progress\":${tankoubon.progress},"
                         archivesJson = archivesJson + "\"lastreadtime\":\"${escapeJson(tankoubon.last_read_time)}\","
                         archivesJson = archivesJson + "\"isnew\":${tankoubon.isnew},"
-                        archivesJson = archivesJson + "\"archive_count\":${tankoubon.archive_count}"
+                        archivesJson = archivesJson + "\"archive_count\":${tankoubon.archive_count},"
+                        var isTankFavorite = false
+                        match (tankFavoriteMap.get(tankoubonId)) {
+                            case Some(status) => isTankFavorite = status
+                            case None => isTankFavorite = false
+                        }
+                        archivesJson = archivesJson + "\"isfavorite\":${isTankFavorite}"
                         archivesJson += "}"
 
                         alreadyAddedTankoubons[tankoubonId] = true

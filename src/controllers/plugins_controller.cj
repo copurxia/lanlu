@@ -3,7 +3,6 @@ package lrr4cj.controllers
 import cjoy.*
 import std.collection.*
 import std.convert.*
-import lrr4cj.models.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
 import lrr4cj.services.*

@@ -2,11 +2,12 @@ import { Tankoubon } from '@/types/tankoubon';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Eye, BookOpen } from 'lucide-react';
+import { Eye, BookOpen, Heart } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { ArchiveService } from '@/lib/archive-service';
+import { FavoriteService } from '@/lib/favorite-service';
 import { TagService } from '@/lib/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -24,6 +25,8 @@ function stripNamespace(tag: string): string {
 
 export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
   const { t, language } = useLanguage();
+  const [isFavorite, setIsFavorite] = useState(tankoubon.isfavorite || false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
   const [firstArchive, setFirstArchive] = useState<Archive | null>(null);
   const [loadingFirstArchive, setLoadingFirstArchive] = useState(false);
@@ -113,6 +116,24 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
       cancelled = true;
     };
   }, [tankoubon.tankoubon_id, tankoubon.archives]);
+
+  // 处理收藏点击
+  const handleFavoriteClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (favoriteLoading) return;
+
+    setFavoriteLoading(true);
+    try {
+      const success = await FavoriteService.toggleTankoubonFavorite(tankoubon.tankoubon_id, isFavorite);
+      if (success) {
+        setIsFavorite(!isFavorite);
+      }
+    } catch (error) {
+      console.error('合集收藏操作失败:', error);
+    } finally {
+      setFavoriteLoading(false);
+    }
+  };
 
   return (
     <Card
@@ -209,11 +230,11 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
         </div>
       </CardContent>
 
-      <CardFooter className="p-4 pt-0">
+      <CardFooter className="p-4 pt-0 flex gap-2">
         <Button
           asChild
           size="sm"
-          className="w-full"
+          className="flex-1"
           onClick={() => {
             // 点击详情按钮进入合集详情页
             window.location.href = `/tankoubon?id=${tankoubon.tankoubon_id}`;
@@ -223,6 +244,17 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
             <Eye className="w-4 h-4 mr-2" />
             {t('common.details')}
           </Link>
+        </Button>
+
+        <Button
+          size="sm"
+          variant="outline"
+          className={`px-3 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+          title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+          disabled={favoriteLoading}
+          onClick={handleFavoriteClick}
+        >
+          <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
         </Button>
       </CardFooter>
     </Card>

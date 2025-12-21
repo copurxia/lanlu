@@ -410,10 +410,14 @@
   },
   "favorites": {
     "title": "My Favorites",
-    "description": "Manage your favorite archives",
+    "description": "Manage your favorites",
     "loadError": "Failed to load favorites",
     "noFavorites": "No favorites yet",
-    "noFavoritesHint": "Click the heart icon on archive cards to add favorites",
+    "noFavoritesHint": "Click the heart icon on archive or collection cards to add favorites",
+    "tabs": {
+      "archives": "Archives",
+      "tankoubons": "Collections"
+    },
     "count": "{count} favorites",
     "clearAll": "Clear All",
     "clearAllConfirm": "Are you sure you want to clear all favorites? This action cannot be undone.",
@@ -436,7 +440,7 @@
     "overviewDescription": "Choose a section to manage",
     "all": "All",
     "favorites": "My Favorites",
-    "favoritesDescription": "View and manage your favorite archives",
+    "favoritesDescription": "View and manage your favorites",
     "readingHistory": "Reading History",
     "readingHistoryDescription": "View your reading history",
     "plugins": "Plugins",
