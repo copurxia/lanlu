@@ -36,6 +36,10 @@ jobs:
           cd frontend
           pnpm install
           pnpm run build
+      - name: Add useful lib
+        run: |
+          mv cangjie/runtime/lib/linux_x86_64_llvm/libcangjie-runtime.so target/release/bin/
+          mv cangjie/runtime/lib/linux_x86_64_llvm/libsecurec.so target/release/bin/
       - name: Prepare release artifacts
         run: |
           mkdir -p app
