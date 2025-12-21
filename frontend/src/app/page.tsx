@@ -17,6 +17,7 @@ import { appEvents, AppEvents } from '@/lib/events';
 import { RefreshCw, Filter } from 'lucide-react';
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useGridColumnCount } from '@/hooks/common-hooks';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/logger';
 
@@ -24,6 +25,7 @@ function HomePageContent() {
   const { t } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const gridColumnCount = useGridColumnCount();
 
   const [archives, setArchives] = useState<any[]>([]);
   const [randomArchives, setRandomArchives] = useState<any[]>([]);
@@ -113,7 +115,7 @@ function HomePageContent() {
   const fetchRandomArchives = useCallback(async () => {
     try {
       setRandomLoading(true);
-      const archives = await ArchiveService.getRandom({ count: 16 });
+      const archives = await ArchiveService.getRandom({ count: gridColumnCount });
       setRandomArchives(archives);
     } catch (error) {
       logger.apiError('fetch random archives', error);
@@ -121,7 +123,7 @@ function HomePageContent() {
     } finally {
       setRandomLoading(false);
     }
-  }, []);
+  }, [gridColumnCount]);
 
   // 设置初始状态（从URL参数）
   useEffect(() => {
