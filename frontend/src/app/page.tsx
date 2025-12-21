@@ -248,15 +248,7 @@ function HomePageContent() {
                 <p className="text-muted-foreground mt-4">{t('common.loading')}</p>
               </div>
             ) : randomArchives.length > 0 ? (
-              <div className="overflow-x-auto pb-4">
-                <div className="flex gap-4 min-w-max">
-                  {randomArchives.map((archive) => (
-                    <div key={archive.arcid} className="w-[180px] flex-shrink-0">
-                      <ArchiveCard archive={archive} />
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <ArchiveGrid archives={randomArchives} variant="random" />
             ) : (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">{t('home.noRecommendations')}</p>
