@@ -42,7 +42,6 @@ jobs:
           mkdir -p app/frontend
           cp target/release/opengauss/lib* app/
           cp target/release/bin/main app/
-          cp target/release/bin/lib* app/
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
