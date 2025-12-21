@@ -40,8 +40,8 @@ jobs:
           cd frontend
           pnpm install
           pnpm run build
-      - name: Install Deno via npm
-        run: npm install -g deno
+      - name: Install Deno
+        run: curl -fsSL https://deno.land/install.sh | sh
       - name: Prepare release artifacts
         run: |
           mkdir -p app
@@ -50,7 +50,7 @@ jobs:
           cp target/release/bin/main app/
           cp -r plugins app/plugins
           cp -r frontend/out app/frontend/out
-          cp $(which deno) app/bin/deno
+          cp ~/.deno/bin/deno app/bin/deno
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
         with:
