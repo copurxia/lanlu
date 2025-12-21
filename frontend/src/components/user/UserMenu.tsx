@@ -26,6 +26,7 @@ export function UserMenu() {
     console.log('Upload completed with archive ID:', archiveId);
 
     // 触发首页数据刷新事件
+    // 支持上传和在线下载两种场景的刷新
     appEvents.emit(AppEvents.UPLOAD_COMPLETED, archiveId);
 
     // 不再自动关闭抽屉，让用户可以继续上传更多文件

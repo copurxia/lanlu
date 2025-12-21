@@ -160,11 +160,11 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
             setDownloadTasks(prev => prev.map(t =>
               t.id === task.id ? { ...t, status: "success", progress: 100 } : t
             ))
-            if (result.id) {
-              setTimeout(() => {
-                onUploadComplete?.(result.id!)
-              }, 1500)
-            }
+            // 下载成功，无论是否有 id 都触发刷新
+            // 如果有 id，传递具体 ID；否则传递空字符串表示需要刷新所有
+            setTimeout(() => {
+              onUploadComplete?.(result.id || "")
+            }, 1500)
           } else {
             setDownloadTasks(prev => prev.map(t =>
               t.id === task.id ? { ...t, status: "error", error: result.error || "下载失败" } : t
