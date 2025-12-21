@@ -42,12 +42,13 @@ jobs:
           pnpm run build
       - name: Add useful lib
         run: |
-          mv cangjie/runtime/lib/linux_x86_64_llvm/libcangjie-std-random.so target/release/bin/
+          mv cangjie/runtime/lib/linux_x86_64_llvm/lib* target/release/bin/
       - name: Prepare release artifacts
         run: |
           mkdir -p app
           mkdir -p app/frontend
           cp target/release/opengauss/lib* app/
+          cp target/release/bin/lib* app/
           cp target/release/bin/main app/
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
