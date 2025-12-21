@@ -213,6 +213,16 @@ public class ShinobuService {
         } else {
             logger.info("ENABLE_INITIAL_SCAN is disabled, skipping initial directory scan")
         }
+
+        // 检查是否启用初始数据库检查
+        let enableInitialDbCheck = SystemSettingsService.getBoolean("ENABLE_INITIAL_DB_CHECK")
+        if (enableInitialDbCheck) {
+            logger.info("ENABLE_INITIAL_DB_CHECK is enabled, triggering database check")
+            let dbCheckTaskId = triggerDatabaseCheck(priority: 50, triggerSource: "startup")
+            logger.info("Triggered startup check_database task", ("task_id", dbCheckTaskId.toString()))
+        } else {
+            logger.info("ENABLE_INITIAL_DB_CHECK is disabled, skipping initial database check")
+        }
     }
 
     /**
