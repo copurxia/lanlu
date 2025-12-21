@@ -40,10 +40,8 @@ jobs:
           cd frontend
           pnpm install
           pnpm run build
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: lts
+      - name: Install Deno via npm
+        run: npm install -g deno
       - name: Prepare release artifacts
         run: |
           mkdir -p app
