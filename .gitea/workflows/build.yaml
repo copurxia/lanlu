@@ -40,13 +40,20 @@ jobs:
           cd frontend
           pnpm install
           pnpm run build
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: lts
       - name: Prepare release artifacts
         run: |
           mkdir -p app
           mkdir -p app/frontend
+          mkdir -p app/bin
           cp target/release/bin/main app/
           cp -r plugins app/plugins
           cp -r frontend/out app/frontend/out
+          cp $(which deno) app/bin/deno
+          chmod +x app/bin/deno
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
         with:
@@ -56,6 +63,7 @@ jobs:
             app/lib*
             app/frontend
             app/plugins
+            app/bin
   package:
     needs: build
     runs-on: ubuntu-latest
