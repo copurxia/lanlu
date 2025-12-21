@@ -24,67 +24,98 @@ public class ScanDirectoryTaskRunner {
     private static func ensureInitialized(): Unit {
         initMutex.lock()
         if (!initialized) {
-            // 从数据库读取配置
-            let archivePathStr = SystemSettingsService.getPath("ARCHIVE_PATH")
-            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
+            try {
+                // 从数据库读取配置
+                let archivePathStr = SystemSettingsService.getPath("ARCHIVE_PATH")
+                let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
+                let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
-            // 转换为 Path 类型并规范化
-            archivePath = canonicalize(archivePathStr)
-            cachePath = canonicalize(cachePathStr)
-            thumbnailPath = canonicalize(thumbnailPathStr)
+                // 先确保目录存在，然后规范化路径
+                // 注意：canonicalize() 要求路径存在，否则会失败
+                let archivePathTemp = Path(archivePathStr)
+                let cachePathTemp = Path(cachePathStr)
+                let thumbnailPathTemp = Path(thumbnailPathStr)
+                FileUtils.ensureDirectoryExists(archivePathTemp)
+                FileUtils.ensureDirectoryExists(cachePathTemp)
+                FileUtils.ensureDirectoryExists(thumbnailPathTemp)
 
-            // 确保必要的目录存在
-            FileUtils.ensureDirectoryExists(archivePath)
-            FileUtils.ensureDirectoryExists(cachePath)
-            FileUtils.ensureDirectoryExists(thumbnailPath)
+                // 转换为 Path 类型并规范化
+                archivePath = canonicalize(archivePathStr)
+                cachePath = canonicalize(cachePathStr)
+                thumbnailPath = canonicalize(thumbnailPathStr)
 
-            initialized = true
+                initialized = true
+            } catch (e: Exception) {
+                // 即使初始化失败，也设置为 true 避免死锁
+                initialized = true
+                throw e
+            }
         }
         initMutex.unlock()
     }
 
     public static func run(taskId: Int64, parameters: String): Unit {
-        // 确保配置已初始化
-        ensureInitialized()
-
+        let logger = getLogger("scan_directory_task")
         TaskIO.appendLog(taskId, "scan_directory task started")
+        TaskIO.appendLog(taskId, "Task parameters: ${parameters}")
 
-        let (scanPathParam, triggerSourceParam, childPriorityParam) = parseParameters(parameters)
-        let scanPath = if (scanPathParam.size > 0) { scanPathParam } else { archivePath.toString() }
-        let triggerSource = if (triggerSourceParam.size > 0) { triggerSourceParam } else { "manual" }
-        let childPriority = if (childPriorityParam > 0) { childPriorityParam } else { 30i32 }
+        try {
+            // 确保配置已初始化
+            TaskIO.appendLog(taskId, "Initializing configuration...")
+            ensureInitialized()
+            TaskIO.appendLog(taskId, "Configuration initialized successfully")
+            TaskIO.appendLog(taskId, "Archive path: ${archivePath.toString()}")
+            TaskIO.appendLog(taskId, "Cache path: ${cachePath.toString()}")
+            TaskIO.appendLog(taskId, "Thumbnail path: ${thumbnailPath.toString()}")
 
-        TaskModel.updateTaskProgress(taskId, 5, "Scanning directory ${scanPath}")
+            let (scanPathParam, triggerSourceParam, childPriorityParam) = parseParameters(parameters)
+            let scanPath = if (scanPathParam.size > 0) { scanPathParam } else { archivePath.toString() }
+            let triggerSource = if (triggerSourceParam.size > 0) { triggerSourceParam } else { "manual" }
+            let childPriority = if (childPriorityParam > 0) { childPriorityParam } else { 30i32 }
 
-        // 使用 DirectoryScanner 进行文件扫描（与 scan_plugins 使用相同的文件系统操作方法）
-        let archiveFiles = DirectoryScanner.findArchiveFiles(scanPath)
-        let total = archiveFiles.size
-        TaskIO.appendLog(taskId, "Found ${total} archive candidates in ${scanPath}")
+            TaskIO.appendLog(taskId, "Parsed parameters: scanPath=${scanPath}, triggerSource=${triggerSource}, childPriority=${childPriority}")
+            TaskModel.updateTaskProgress(taskId, 5, "Scanning directory ${scanPath}")
 
-        if (total == 0) {
-            let summary = "{\"success\":1,\"created\":0,\"total\":0}"
-            TaskModel.updateTaskProgress(taskId, 100, "No archives found")
+            TaskIO.appendLog(taskId, "Starting directory scan...")
+            // 使用 DirectoryScanner 进行文件扫描（与 scan_plugins 使用相同的文件系统操作方法）
+            let archiveFiles = DirectoryScanner.findArchiveFiles(scanPath)
+            let total = archiveFiles.size
+            TaskIO.appendLog(taskId, "Found ${total} archive candidates in ${scanPath}")
+
+            if (total == 0) {
+                let summary = "{\"success\":1,\"created\":0,\"total\":0}"
+                TaskIO.appendLog(taskId, "No archives found, completing task")
+                TaskModel.updateTaskProgress(taskId, 100, "No archives found")
+                TaskModel.completeTask(taskId, summary)
+                TaskIO.writeOutput(taskId, summary)
+                TaskIO.appendLog(taskId, "scan_directory task completed with no files")
+                return
+            }
+
+            var created: Int64 = 0
+            let groupId = "scan_directory:${taskId}"
+            TaskIO.appendLog(taskId, "Creating scan_archive tasks for ${total} files...")
+
+            for (filePath in archiveFiles) {
+                if (enqueueScanArchiveTask(filePath, groupId, triggerSource, childPriority)) {
+                    created++
+                }
+            }
+
+            let summary = "{\"success\":1,\"created\":${created},\"total\":${total}}"
+            TaskIO.appendLog(taskId, "Task creation completed: created=${created}, total=${total}")
+            TaskModel.updateTaskProgress(taskId, 100, "Created ${created} scan_archive tasks")
             TaskModel.completeTask(taskId, summary)
             TaskIO.writeOutput(taskId, summary)
-            TaskIO.appendLog(taskId, "scan_directory task completed with no files")
-            return
+            TaskIO.appendLog(taskId, "scan_directory task completed: created=${created}, total=${total}")
+        } catch (e: Exception) {
+            let errorMsg = "Unexpected error: ${e.message}"
+            logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
+            TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
+            TaskIO.appendLog(taskId, "Stack trace: ${e.toString()}")
+            TaskModel.failTask(taskId, errorMsg)
+            TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
         }
-
-        var created: Int64 = 0
-        let groupId = "scan_directory:${taskId}"
-
-        for (filePath in archiveFiles) {
-            if (enqueueScanArchiveTask(filePath, groupId, triggerSource, childPriority)) {
-                created++
-            }
-        }
-
-        let summary = "{\"success\":1,\"created\":${created},\"total\":${total}}"
-        TaskModel.updateTaskProgress(taskId, 100, "Created ${created} scan_archive tasks")
-        TaskModel.completeTask(taskId, summary)
-        TaskIO.writeOutput(taskId, summary)
-        TaskIO.appendLog(taskId, "scan_directory task completed: created=${created}, total=${total}")
     }
 
     private static func enqueueScanArchiveTask(filePath: String, groupId: String, triggerSource: String, priority: Int32): Bool {

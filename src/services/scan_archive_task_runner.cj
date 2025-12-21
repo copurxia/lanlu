@@ -22,57 +22,80 @@ public class ScanArchiveTaskRunner {
     private static func ensureInitialized(): Unit {
         initMutex.lock()
         if (!initialized) {
-            // 从数据库读取配置
-            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
+            try {
+                // 从数据库读取配置
+                let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
+                let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
-            // 转换为 Path 类型并规范化
-            let cachePath = canonicalize(cachePathStr)
-            let thumbnailPath = canonicalize(thumbnailPathStr)
+                // 先确保目录存在，然后规范化路径
+                // 注意：canonicalize() 要求路径存在，否则会失败
+                let cachePath = Path(cachePathStr)
+                let thumbnailPath = Path(thumbnailPathStr)
+                FileUtils.ensureDirectoryExists(cachePath)
+                FileUtils.ensureDirectoryExists(thumbnailPath)
 
-            // 确保必要的目录存在
-            FileUtils.ensureDirectoryExists(cachePath)
-            FileUtils.ensureDirectoryExists(thumbnailPath)
+                // 转换为 Path 类型并规范化
+                let cachePathCanonical = canonicalize(cachePathStr)
+                let thumbnailPathCanonical = canonicalize(thumbnailPathStr)
 
-            initialized = true
+                initialized = true
+            } catch (e: Exception) {
+                // 即使初始化失败，也设置为 true 避免死锁
+                initialized = true
+                throw e
+            }
         }
         initMutex.unlock()
     }
 
     public static func run(taskId: Int64, parameters: String): Unit {
-        // 确保配置已初始化
-        ensureInitialized()
-
+        let logger = getLogger("scan_archive_task")
         TaskIO.appendLog(taskId, "scan_archive task started")
+        TaskIO.appendLog(taskId, "Task parameters: ${parameters}")
 
-        println("ScanArchiveTaskRunner.run: Task ${taskId} started with parameters: ${parameters}")
+        try {
+            // 确保配置已初始化
+            TaskIO.appendLog(taskId, "Initializing configuration...")
+            ensureInitialized()
+            TaskIO.appendLog(taskId, "Configuration initialized successfully")
 
-        let config = parseConfig(parameters)
-        println("ScanArchiveTaskRunner.run: Parsed config: archivePath=${config.archivePath}")
+            TaskIO.appendLog(taskId, "Parsing configuration...")
+            let config = parseConfig(parameters)
+            TaskIO.appendLog(taskId, "Parsed config: archivePath=${config.archivePath}, cachePath=${config.cachePath}, thumbnailPath=${config.thumbnailPath}")
 
-        if (config.archivePath.size == 0) {
-            println("ScanArchiveTaskRunner.run: No archive path found in parameters")
-            fail(taskId, "archive_path is required")
-            return
+            if (config.archivePath.size == 0) {
+                TaskIO.appendLog(taskId, "ERROR: No archive path found in parameters")
+                fail(taskId, "archive_path is required")
+                return
+            }
+
+            TaskIO.appendLog(taskId, "Starting archive processing for: ${config.archivePath}")
+            TaskModel.updateTaskProgress(taskId, 10, "Processing ${config.archivePath}")
+
+            let result = processArchiveInternal(config.archivePath, config)
+            TaskIO.appendLog(taskId, "processArchiveInternal returned: success=${result.success}, archiveId=${result.archiveId}, error=${result.error}")
+
+            if (!result.success) {
+                let errorMsg = "scan_archive failed: ${config.archivePath}, error: ${result.error}"
+                logger.error(errorMsg)
+                TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                fail(taskId, result.error)
+                return
+            }
+
+            let successJson = "{\"success\":1,\"archive_id\":\"${result.archiveId}\",\"path\":\"${escapeJson(config.archivePath)}\"}"
+            TaskIO.appendLog(taskId, "Archive processed successfully, archiveId=${result.archiveId}")
+            TaskModel.updateTaskProgress(taskId, 100, "Archive processed")
+            TaskModel.completeTask(taskId, successJson)
+            TaskIO.writeOutput(taskId, successJson)
+            TaskIO.appendLog(taskId, "scan_archive completed for ${config.archivePath}")
+        } catch (e: Exception) {
+            let errorMsg = "Unexpected error: ${e.message}"
+            logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
+            TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
+            TaskIO.appendLog(taskId, "Stack trace: ${e.toString()}")
+            fail(taskId, errorMsg)
         }
-
-        TaskModel.updateTaskProgress(taskId, 10, "Processing ${config.archivePath}")
-
-        println("ScanArchiveTaskRunner.run: Processing archive with config")
-        let result = processArchiveInternal(config.archivePath, config)
-        println("ScanArchiveTaskRunner.run: processArchiveInternal returned success=${result.success}, error=${result.error}")
-
-        if (!result.success) {
-            logger.error("scan_archive failed: ${config.archivePath}, error: ${result.error}")
-            fail(taskId, result.error)
-            return
-        }
-
-        let successJson = "{\"success\":1,\"archive_id\":\"${result.archiveId}\",\"path\":\"${escapeJson(config.archivePath)}\"}"
-        TaskModel.updateTaskProgress(taskId, 100, "Archive processed")
-        TaskModel.completeTask(taskId, successJson)
-        TaskIO.writeOutput(taskId, successJson)
-        TaskIO.appendLog(taskId, "scan_archive completed for ${config.archivePath}")
     }
 
     private static func parseConfig(parameters: String): ArchiveConfig {
