@@ -25,10 +25,6 @@ jobs:
           source cangjie/envsetup.sh
           cjc -v
           cjpm build -V
-      - name: Add useful lib
-        run: |
-          mv cangjie/runtime/lib/linux_x86_64_llvm/libcangjie-runtime.so target/release/bin/
-          mv cangjie/runtime/lib/linux_x86_64_llvm/libsecurec.so target/release/bin/
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
