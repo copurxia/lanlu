@@ -18,6 +18,10 @@ jobs:
           tar -xzvf c.tar.gz
           wget -O s.zip "${{ vars.STDX_URL }}"
           unzip s.zip -d stdx
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y build-essential
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx"
@@ -36,10 +40,6 @@ jobs:
           cd frontend
           pnpm install
           pnpm run build
-      - name: Add useful lib
-        run: |
-          mv cangjie/runtime/lib/linux_x86_64_llvm/libcangjie-runtime.so target/release/bin/
-          mv cangjie/runtime/lib/linux_x86_64_llvm/libsecurec.so target/release/bin/
       - name: Prepare release artifacts
         run: |
           mkdir -p app
