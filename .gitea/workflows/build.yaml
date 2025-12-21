@@ -40,14 +40,20 @@ jobs:
           cd frontend
           pnpm install
           pnpm run build
+      - name: Prepare release artifacts
+        run: |
+          mkdir -p app
+          cp target/release/bin/main app/
+          cp target/release/bin/lib* app/
+          cp -r frontend/out app/frontend
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
         with:
           name: release
           path: |
-            target/release/bin/main
-            target/release/bin/lib*
-            frontend/out/
+            app/main
+            app/lib*
+            app/frontend/
   package:
     needs: build
     runs-on: ubuntu-latest
