@@ -1,165 +1,177 @@
-# 基于 CJoy 的 MVC 架构示例
+# LRR4CJ
 
-这是一个基于 CJoy 框架实现的真正 MVC（Model-View-Controller）架构示例项目，严格按照分层设计原则实现。
+LANraragi for Cangjie - 基于仓颉语言的漫画归档管理系统
+
+## 简介
+
+LRR4CJ 是一个全栈 Web 应用，用于管理和阅读数字漫画归档。项目使用仓颉语言重新实现了 [LANraragi](https://github.com/Difegue/LANraragi) 的核心功能，并配备了现代化的前端界面。
+
+## 功能特性
+
+- **归档管理** - 浏览、搜索、组织漫画归档文件
+- **在线阅读** - 内置阅读器，支持翻页导航
+- **合集支持** - 将多个归档组织为合集（Tankoubon）
+- **智能搜索** - 高级搜索和过滤功能
+- **插件系统** - 可扩展的元数据和下载插件架构
+- **任务管理** - 后台任务处理（扫描、下载、缩略图生成）
+- **用户管理** - 多用户支持与身份认证
+- **标签系统** - 完善的标签管理，支持多语言
+- **系统设置** - 可配置的存储路径、扫描间隔、性能参数
+- **双语界面** - 支持中文和英文
+
+## 技术栈
+
+### 后端
+
+| 技术 | 说明 |
+|------|------|
+| 仓颉 (Cangjie) | 华为开发的现代编程语言 |
+| CJoy | 仓颉 Web 框架 |
+| PostgreSQL | 数据库（兼容 OpenGauss） |
+| CJPM | 仓颉包管理器 |
+
+### 前端
+
+| 技术 | 说明 |
+|------|------|
+| Next.js 16 | React 框架 |
+| TypeScript | 类型安全 |
+| Tailwind CSS | 样式框架 |
+| Radix UI | 组件库 |
+| Axios | HTTP 客户端 |
 
 ## 项目结构
 
 ```
-src/
-├── main.cj              # 主程序入口，仅负责路由配置和启动
-├── models/
-│   └── user.cj          # 用户数据模型（Model 层）
-├── views/
-│   └── response.cj      # 响应视图（View 层）
-└── controllers/
-    └── user_controller.cj  # 用户控制器（Controller 层）
+lrr4cj/
+├── src/                    # 仓颉后端源码
+│   ├── main.cj            # 应用入口
+│   ├── controllers/       # 控制器
+│   ├── services/          # 业务逻辑
+│   ├── dao/               # 数据访问层
+│   ├── models/            # 数据模型
+│   ├── routes/            # 路由定义
+│   └── utils/             # 工具函数
+├── frontend/              # Next.js 前端
+│   ├── src/
+│   │   ├── app/          # 页面路由
+│   │   ├── components/   # React 组件
+│   │   ├── lib/          # 服务和工具
+│   │   ├── contexts/     # React Context
+│   │   └── types/        # TypeScript 类型
+│   └── messages/         # 国际化文件
+├── plugins/               # 插件目录
+│   ├── Download/         # 下载插件
+│   ├── Login/            # 登录插件
+│   └── Metadata/         # 元数据插件
+├── data/                  # 运行时数据
+│   ├── archive/          # 归档存储
+│   ├── thumb/            # 缩略图缓存
+│   └── logs/             # 日志文件
+├── cjpm.toml             # 仓颉包配置
+├── .env.example          # 环境变量模板
+└── Dockerfile            # Docker 配置
 ```
 
-## MVC 架构说明
+## 快速开始
 
-### Model 层（数据模型）
-- **位置**: [`src/models/user.cj`](src/models/user.cj)
-- **职责**: 
-  - 定义数据结构（`User` 类）
-  - 提供数据访问方法（`UserModel` 类）
-  - 处理数据的增删改查操作
-  - **特点**: 纯数据层，不依赖任何其他层
+### 环境要求
 
-### View 层（视图）
-- **位置**: [`src/views/response.cj`](src/views/response.cj)
-- **职责**:
-  - 处理 HTTP 响应格式
-  - 提供统一的响应方法（成功、错误、JSON）
-  - **特点**: 纯视图层，只负责响应格式化
+- 仓颉 SDK (LTS 版本)
+- Node.js 18+
+- PostgreSQL 12+
+- Docker (可选)
 
-### Controller 层（控制器）
-- **位置**: [`src/controllers/user_controller.cj`](src/controllers/user_controller.cj)
-- **职责**:
-  - 处理 HTTP 请求参数解析
-  - 调用 Model 层进行数据操作
-  - 调用 View 层进行响应处理
-  - **特点**: 业务逻辑层，协调 Model 和 View
+### 配置环境变量
 
-### 主程序（路由配置）
-- **位置**: [`src/main.cj`](src/main.cj)
-- **职责**:
-  - 配置 URL 路由规则
-  - 将请求映射到相应的 Controller 方法
-  - **特点**: 仅负责路由，不包含业务逻辑
-
-## 分层调用流程
-
-```
-HTTP 请求 → main.cj (路由) → UserController (业务逻辑) → UserModel (数据操作)
-                                    ↓
-                              ResponseView (响应格式化) → HTTP 响应
-```
-
-## API 端点
-
-| 方法 | 路径 | 描述 | Controller 方法 |
-|------|------|------|----------------|
-| GET | `/` | 欢迎页面和 API 说明 | - |
-| GET | `/users` | 获取所有用户 | `UserController.getAllUsers()` |
-| GET | `/users/{id}` | 获取指定 ID 的用户 | `UserController.getUserById()` |
-| POST | `/users?name=姓名&email=邮箱` | 创建新用户 | `UserController.createUser()` |
-| PUT | `/users/{id}?name=姓名&email=邮箱` | 更新指定用户 | `UserController.updateUser()` |
-| DELETE | `/users/{id}` | 删除指定用户 | `UserController.deleteUser()` |
-
-## 运行项目
-
-1. 编译项目：
 ```bash
-cjpm build
+cp .env.example .env
 ```
 
-2. 运行项目：
+编辑 `.env` 文件：
+
+```env
+# 服务器配置
+PORT=8082
+HOST=0.0.0.0
+
+# 数据库配置
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=lgr
+DB_USER=lgr
+DB_PASSWORD=lgr
+
+# 认证配置
+API_KEY=your_api_key
+JWT_SECRET=your_jwt_secret
+```
+
+### 构建后端
+
 ```bash
-cjpm run
+# 设置仓颉环境
+source cangjie/envsetup.sh
+
+# 构建
+cjpm build -V
 ```
 
-3. 访问应用：
-打开浏览器或使用 API 工具访问 `http://127.0.0.1:8080`
+### 构建前端
 
-## 示例用法
-
-### 获取所有用户
 ```bash
-curl http://127.0.0.1:8080/users
+cd frontend
+npm install
+npm run build
 ```
 
-### 获取指定用户
+### 运行
+
 ```bash
-curl http://127.0.0.1:8080/users/1
+./target/release/bin/main
 ```
 
-### 创建用户
+访问 `http://localhost:8082`
+
+## Docker 部署
+
 ```bash
-curl -X POST "http://127.0.0.1:8080/users?name=测试用户&email=test@example.com"
+# 构建镜像
+docker build -t lrr4cj:latest .
+
+# 运行容器
+docker run -d \
+  -p 8082:8082 \
+  -e DB_HOST=postgres \
+  -e DB_NAME=lgr \
+  -e DB_USER=lgr \
+  -e DB_PASSWORD=lgr \
+  -v /path/to/archives:/app/data/archive \
+  lrr4cj:latest
 ```
 
-### 更新用户
-```bash
-curl -X PUT "http://127.0.0.1:8080/users/1?name=更新姓名&email=update@example.com"
-```
+## API 文档
 
-### 删除用户
-```bash
-curl -X DELETE http://127.0.0.1:8080/users/1
-```
+主要 API 端点：
 
-## 架构特点
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/info` | GET | 服务器信息 |
+| `/api/archives` | GET | 归档列表 |
+| `/api/archives/:id` | GET | 归档详情 |
+| `/api/archives/:id/files` | GET | 归档文件列表 |
+| `/api/archives/:id/thumbnail` | GET | 归档缩略图 |
+| `/api/search` | GET | 搜索归档 |
+| `/api/tags` | GET | 标签列表 |
+| `/api/tankoubons` | GET | 合集列表 |
+| `/api/plugins` | GET | 插件列表 |
 
-### 1. 严格的分层设计
-- **Model 层**: 只负责数据定义和访问，不依赖其他层
-- **View 层**: 只负责响应格式化，不包含业务逻辑
-- **Controller 层**: 协调 Model 和 View，处理业务逻辑
-- **主程序**: 只负责路由配置，不包含业务逻辑
+## 致谢
 
-### 2. 清晰的职责分离
-- 每一层都有明确的职责边界
-- 层与层之间通过明确的接口调用
-- 避免了循环依赖和职责混乱
+- [LANraragi](https://github.com/Difegue/LANraragi) - 原始项目
+- [CJoy](https://gitcode.com/Cangjie-SIG/cjoy) - 仓颉 Web 框架
+- [Radix UI](https://www.radix-ui.com/) - React 组件库
 
-### 3. 易于维护和扩展
-- 新增功能只需在对应层添加代码
-- 修改某一层不会影响其他层
-- 便于单元测试和集成测试
+## 许可证
 
-### 4. RESTful API 设计
-- 遵循 REST 设计原则
-- 统一的响应格式
-- 完整的 CRUD 操作
-
-## 技术实现细节
-
-### 包导入结构
-```cangjie
-// main.cj
-import lrr4cj.controllers.*
-
-// controllers/user_controller.cj
-import lrr4cj.models.*
-import lrr4cj.views.*
-```
-
-### 响应格式
-- 成功响应: `{"code": 200, "message": "操作成功", "data": {...}}`
-- 错误响应: `{"code": 400, "message": "错误信息", "data": null}`
-
-## 注意事项
-
-1. 数据存储在内存中，程序重启后数据会丢失
-2. 字符串解析功能进行了简化，目前只支持数字 1-5 的解析
-3. 为了简化实现，省略了错误处理和数据验证的细节
-
-## 扩展建议
-
-1. **数据持久化**: 添加文件或数据库存储
-2. **中间件**: 实现认证、日志、错误处理中间件
-3. **数据验证**: 添加输入参数验证
-4. **更多模型**: 实现其他业务模型和控制器
-5. **配置管理**: 添加配置文件支持
-6. **单元测试**: 为各层添加单元测试
-
-这个实现展示了如何在 CJoy 框架中构建真正的分层架构，为后续开发提供了良好的基础。
+MIT License

@@ -13,7 +13,7 @@ import { Toaster } from 'sonner';
 // const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Lanraragi4CJ',
+  title: '兰鹿',
   description: '漫画归档管理系统',
   icons: {
     icon: '/logo.svg',
