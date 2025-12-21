@@ -1,5 +1,5 @@
 version = 0
 
 [requires]
-  cjoy = {git = "https://gitcode.com/Cangjie-SIG/cjoy.git", commitId = "c15ee11f15b0c9ac86d32fe68ce0df80bd05acc1", branch = "main"}
-  opengauss = {git = "https://gitcode.com/Cangjie-TPC/opengauss-driver.git", commitId = "0b85ce4c98af61d7b3bf557f8e2030461e9a861c", branch = "master"}
+  cjoy = {git = "https://gitcode.com/Cangjie-SIG/cjoy.git", commitId = "b066d00f7f425829abb1d307c921a750fcaf0a48", branch = "main"}
+  opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", commitId = "62a5f245dfa3073638dd47cce47cb76b49545f26", branch = "master", output-type = "static"}
