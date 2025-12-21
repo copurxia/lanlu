@@ -15,6 +15,7 @@ import { Toaster } from 'sonner';
 export const metadata: Metadata = {
   title: '兰鹿',
   description: '漫画归档管理系统',
+  colorScheme: 'light',
   icons: {
     icon: '/logo.svg',
   },
