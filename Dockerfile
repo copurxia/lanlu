@@ -3,9 +3,10 @@ FROM docker.1ms.run/ubuntu
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y libarchive-tools imagemagick tzdata libssl3 && \
+    apt-get install -y libarchive-tools imagemagick tzdata libssl-dev && \
     rm -rf /var/lib/apt/lists/*
 
+ENV LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LIBRARY_PATH
 ENV LD_LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
 
 ENV TZ=Asia/Shanghai
