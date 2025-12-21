@@ -58,12 +58,12 @@ public class Routes {
      */
     private static func registerFrontendRoutes(router: JoyRouters) {
         // 处理所有前端请求（首页、页面路由、静态文件等）
-        router.get("/*", { ctx =>
+        router.get("*", { ctx =>
             FrontendController.servePath(ctx)
         })
 
         // 处理所有前端HEAD请求（用于Next.js静态导出预检）
-        router.head("/*", { ctx =>
+        router.head("*", { ctx =>
             FrontendController.servePathHead(ctx)
         })
     }

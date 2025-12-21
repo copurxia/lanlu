@@ -44,6 +44,7 @@ jobs:
         run: |
           mkdir -p app
           mkdir -p app/frontend
+          cp plugins app/plugins
           cp target/release/bin/main app/
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
@@ -53,7 +54,8 @@ jobs:
           path: |
             app/main
             app/lib*
-            app/frontend/
+            app/frontend
+            app/plugins
   package:
     needs: build
     runs-on: ubuntu-latest
