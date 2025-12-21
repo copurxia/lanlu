@@ -43,6 +43,7 @@ jobs:
       - name: Prepare release artifacts
         run: |
           mkdir -p app
+          mkdir -p app/frontend
           cp target/release/bin/main app/
           cp target/release/bin/lib* app/
           cp -r frontend/out app/frontend/out
