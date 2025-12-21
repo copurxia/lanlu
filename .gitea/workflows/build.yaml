@@ -44,7 +44,6 @@ jobs:
         run: |
           mkdir -p app
           mkdir -p app/frontend
-          cp target/release/opengauss/lib* app/
           cp target/release/bin/main app/
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
