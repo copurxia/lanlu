@@ -547,11 +547,14 @@ function ArchiveDetailContent() {
                         onClick={() => setImageModalOpen(false)}
                       >
                         <div className="relative max-w-4xl max-h-full">
-                          <img
+                          <Image
                             src={ArchiveService.getThumbnailUrl(metadata.arcid)}
                             alt={metadata.title}
-                            className="max-w-full max-h-[90vh] object-contain rounded-lg"
+                            width={800}
+                            height={1066}
+                            className="max-w-full max-h-[90vh] w-auto h-auto object-contain rounded-lg"
                             onError={() => handleImageLoadError(metadata.title)}
+                            unoptimized
                           />
                           <button
                             className="absolute top-2 right-2 bg-white bg-opacity-20 hover:bg-opacity-30 text-white rounded-full p-2"
