@@ -65,7 +65,7 @@ private func getLogFormat(): String {
 }
 
 private func getLogOutput(): OutputStream {
-    let logFile = getVariable("LOG_FILE") ?? ""
+    let logFile = getVariable("LOG_FILE") ?? "./data/logs/system.log"
     if (logFile.size > 0) {
         try {
             let file = File(logFile, OpenMode.Append)
