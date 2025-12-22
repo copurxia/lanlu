@@ -60,6 +60,7 @@ function ReaderContent() {
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set()); // 跟踪已加载的图片
   const [showToolbar, setShowToolbar] = useState(true);
   const [isFavorited, setIsFavorited] = useState(false); // 收藏状态
+  const [archiveTitle, setArchiveTitle] = useState<string>(''); // 归档标题
   const [scale, setScale] = useState(1);
   const [translateX, setTranslateX] = useState(0);
   const [translateY, setTranslateY] = useState(0);
@@ -234,10 +235,13 @@ function ReaderContent() {
           setImagesLoading(new Set([initialPage]));
         }
 
-        // 获取收藏状态
+        // 获取metadata（包含收藏状态和标题）
         try {
           const metadata = await ArchiveService.getMetadata(id);
           setIsFavorited(metadata.isfavorite);
+          if (metadata.title && metadata.title.trim()) {
+            setArchiveTitle(metadata.title);
+          }
         } catch (favErr) {
           logger.apiError('fetch favorite status', favErr);
           // 收藏状态失败不影响阅读体验，静默处理
@@ -1109,6 +1113,15 @@ function ReaderContent() {
               {/* 语言切换按钮 */}
               <LanguageButton />
             </div>
+
+            {/* 中间：标题显示（仅PC端且有标题时显示） */}
+            {archiveTitle && (
+              <div className="hidden lg:flex items-center justify-center flex-1 px-4">
+                <h1 className="text-sm font-medium text-foreground truncate max-w-md text-center" title={archiveTitle}>
+                  {archiveTitle}
+                </h1>
+              </div>
+            )}
 
             {/* 右侧：阅读模式切换 */}
             <Button
