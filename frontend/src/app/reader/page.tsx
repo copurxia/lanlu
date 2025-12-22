@@ -219,8 +219,8 @@ function ReaderContent() {
 
         // 获取收藏状态
         try {
-          const favorites = await FavoriteService.getFavorites();
-          setIsFavorited(favorites.includes(id));
+          const metadata = await ArchiveService.getMetadata(id);
+          setIsFavorited(metadata.isfavorite);
         } catch (favErr) {
           logger.apiError('fetch favorite status', favErr);
           // 收藏状态失败不影响阅读体验，静默处理

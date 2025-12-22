@@ -28,6 +28,8 @@ public class ArchiveData {
     // 这些字段仅用于 API 响应，由 UserArchiveStatusDao 填充
     public var last_read_time: String = ""
     public var progress: Int32 = 0
+    // favorite_time 存储用户收藏该档案的时间，从 user_favorites 表获取
+    public var favorite_time: String = ""
     
     /**
      * 获取文件扩展名
@@ -183,15 +185,19 @@ public class ArchiveDao {
      * 搜索归档
      */
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String): (Array<ArchiveData>, Int64) {
-        return searchArchives(filter, category, start, count, sortby, order, false, false)
+        return searchArchives(filter, category, start, count, sortby, order, false, false, false, "", "", 0)
     }
-    
+
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool): (Array<ArchiveData>, Int64) {
         // 调用带 userId 的版本，userId=0 表示不进行用户级别的 newOnly 过滤
-        return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, 0)
+        return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, false, "", "", 0)
     }
 
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, userId: Int64): (Array<ArchiveData>, Int64) {
+        return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, false, "", "", userId)
+    }
+
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, favoriteOnly: Bool, dateFrom: String, dateTo: String, userId: Int64): (Array<ArchiveData>, Int64) {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
@@ -303,6 +309,22 @@ public class ArchiveDao {
                 // 添加无标签过滤条件
                 if (untaggedOnly) {
                     whereConditions.add("(tags IS NULL OR tags = '')")
+                }
+
+                // favoriteOnly 过滤 - 只显示用户收藏的档案
+                // 当 favoriteOnly=true 且 userId > 0 时，只返回用户收藏的归档
+                if (favoriteOnly && userId > 0) {
+                    whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archives_with_tags.arcid AND uf.user_id = ${userId})")
+                }
+
+                // 日期范围过滤
+                if (dateFrom.size > 0) {
+                    whereConditions.add("created_at >= ?")
+                    filterParams.add(dateFrom)
+                }
+                if (dateTo.size > 0) {
+                    whereConditions.add("created_at <= ?")
+                    filterParams.add(dateTo + " 23:59:59")
                 }
                 
                 // 组合 WHERE 条件

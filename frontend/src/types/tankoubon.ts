@@ -12,6 +12,7 @@ export interface Tankoubon {
   isnew?: boolean;
   archive_count?: number;
   isfavorite?: boolean;
+  favoritetime?: string;  // 收藏时间（可选）
 }
 
 export interface TankoubonDetail extends Tankoubon {

@@ -111,6 +111,7 @@
     "newOnly": "仅显示新档案",
     "untaggedOnly": "仅显示无标签档案",
     "groupByTanks": "按合集分组",
+    "favoriteOnly": "仅显示收藏档案",
     "unreadArchives": "未读档案",
     "untaggedArchives": "无标签档案",
     "lastWeek": "最近一周",

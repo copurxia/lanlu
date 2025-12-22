@@ -6,7 +6,7 @@ import { ServerInfo } from '@/types/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Server, Database, HardDrive, Clock, Heart, Settings } from 'lucide-react';
+import { Server, Database, HardDrive, Clock, Settings } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import Link from 'next/link';
 
@@ -59,12 +59,6 @@ export function Sidebar() {
             <CardTitle className="text-lg">{t('common.actions')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Button asChild variant="outline" className="w-full justify-start">
-              <Link href="/settings/favorites">
-                <Heart className="w-4 h-4 mr-2" />
-                {t('settings.favorites')}
-              </Link>
-            </Button>
             <Button asChild variant="outline" className="w-full justify-start">
               <Link href="/settings">
                 <Settings className="w-4 h-4 mr-2" />

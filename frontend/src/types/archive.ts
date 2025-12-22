@@ -8,6 +8,7 @@ export interface Archive {
   progress: number;
   isnew: boolean;  // 改为布尔值类型
   isfavorite?: boolean;  // 用户收藏状态（可选，仅在需要时提供）
+  favoritetime?: string;  // 收藏时间（可选）
   extension: string;
   lastreadtime: number;
   size: number;
@@ -29,6 +30,10 @@ export interface SearchParams {
   order?: string;
   newonly?: boolean;
   untaggedonly?: boolean;
+  favoriteonly?: boolean;
+  favorite_tankoubons_only?: boolean;
+  date_from?: string;
+  date_to?: string;
   groupby_tanks?: boolean;
 }
 

@@ -79,21 +79,40 @@ public class ArchiveController {
             return
         }
 
+        // 获取归档的内部数据库ID用于查询用户状态
+        let archiveIdInt = getArchiveInternalId(id)
+
+        // 查询用户级别的 isNew 状态和收藏状态
+        var isNew = true  // 默认为新
+        var isFavorite = false  // 默认未收藏
+        match (AuthMiddleware.optionalUser(ctx)) {
+            case Some(userId) =>
+                if (archiveIdInt > 0) {
+                    isNew = UserArchiveStatusDao.isNew(userId, archiveIdInt)
+                    isFavorite = UserFavoriteDao.isFavorite(userId, archiveIdInt)
+                }
+            case None =>
+                // 未登录用户，默认为新且未收藏
+                isNew = true
+                isFavorite = false
+        }
+
         // 手动构建JSON对象
         var archiveJson = "{"
         archiveJson += "\"arcid\":\"${archive.id}\","
-        archiveJson += "\"title\":\"${archive.title}\","
-        archiveJson += "\"filename\":\"${archive.filename}\","
-        archiveJson += "\"summary\":\"${archive.summary}\","
+        archiveJson += "\"title\":\"${escapeJson(archive.title)}\","
+        archiveJson += "\"filename\":\"${escapeJson(archive.filename)}\","
+        archiveJson += "\"summary\":\"${escapeJson(archive.summary)}\","
         archiveJson += "\"thumbhash\":\"${archive.thumbhash}\","
         archiveJson += "\"created_at\":\"${archive.created_at}\","
         archiveJson += "\"updated_at\":\"${archive.updated_at}\","
-        archiveJson += "\"relative_path\":\"${archive.relative_path}\","
+        archiveJson += "\"relative_path\":\"${escapeJson(archive.relative_path)}\","
         archiveJson += "\"file_size\":${archive.file_size},"
-        archiveJson += "\"isnew\":${archive.isNew},"
+        archiveJson += "\"isnew\":${isNew},"
+        archiveJson += "\"isfavorite\":${isFavorite},"
         archiveJson += "\"pagecount\":${archive.pagecount}"
         archiveJson += "}"
-        
+
         let result = "{\"operation\":\"get_archive\",\"data\":" + archiveJson + ",\"success\":1}"
         ctx.json(result)
     }

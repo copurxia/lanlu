@@ -287,6 +287,70 @@ public class UserFavoriteDao {
     }
 
     /**
+     * 批量获取收藏时间
+     * 返回 Map<archiveId, favoriteTime>
+     */
+    public static func getBatchFavoriteTime(userId: Int64, archiveIds: Array<Int64>): HashMap<Int64, String> {
+        let result = HashMap<Int64, String>()
+
+        if (archiveIds.size == 0 || userId <= 0) {
+            return result
+        }
+
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 构建 IN 子句的占位符
+                    var inClause = ""
+                    for (i in 0..archiveIds.size) {
+                        if (i > 0) {
+                            inClause += ","
+                        }
+                        inClause += "?"
+                    }
+
+                    let sql = """
+                        SELECT archive_id, created_at FROM user_favorites
+                        WHERE user_id = ? AND archive_id IN (${inClause})
+                    """
+
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        stmt.set(0, userId)
+                        var idx = 1
+                        for (archiveId in archiveIds) {
+                            stmt.set(idx, archiveId)
+                            idx = idx + 1
+                        }
+
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let archiveId = rs.getOrNull<Int64>(0) ?? 0
+                                let createdAt = rs.getOrNull<String>(1) ?? ""
+                                if (archiveId > 0) {
+                                    result[archiveId] = createdAt
+                                }
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    // 出错时返回空结果
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => ()
+        }
+
+        return result
+    }
+
+    /**
      * 删除用户的所有收藏记录
      */
     public static func deleteByUserId(userId: Int64): Bool {

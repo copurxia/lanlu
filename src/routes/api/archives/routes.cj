@@ -97,24 +97,6 @@ public class ArchiveRoutes {
             ArchiveController.removeFavorite(ctx)
         })
 
-        // 获取用户的所有收藏（arcid 列表）
-        router.get("/api/favorites", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getFavorites(ctx)
-        })
-
-        // 获取用户收藏的档案详情列表（带分页）
-        router.get("/api/favorites/archives", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getFavoriteArchives(ctx)
-        })
-
-        // 获取用户已读的档案列表（带分页）
-        router.get("/api/read_archives", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getReadArchives(ctx)
-        })
-
         // 分片上传 - 初始化上传会话
         router.post("/api/archives/upload/init", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }

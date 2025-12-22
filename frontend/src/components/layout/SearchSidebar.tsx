@@ -34,6 +34,7 @@ interface SearchSidebarProps {
     dateTo?: string;
     newonly?: boolean;
     untaggedonly?: boolean;
+    favoriteonly?: boolean;
     groupby_tanks?: boolean;
   }) => void;
   loading?: boolean;
@@ -58,6 +59,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   const [dateTo, setDateTo] = useState('');
   const [newonly, setNewonly] = useState(false);
   const [untaggedonly, setUntaggedonly] = useState(false);
+  const [favoriteonly, setFavoriteonly] = useState(false);
   const [groupbyTanks, setGroupbyTanks] = useState(true);
   const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
 
@@ -86,6 +88,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
       dateTo,
       newonly,
       untaggedonly,
+      favoriteonly,
       groupby_tanks: groupbyTanks
     });
   };
@@ -98,6 +101,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
     setDateTo('');
     setNewonly(false);
     setUntaggedonly(false);
+    setFavoriteonly(false);
     setGroupbyTanks(true);
     onSearch({
       query: '',
@@ -105,6 +109,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
       sortOrder: 'desc',
       newonly: false,
       untaggedonly: false,
+      favoriteonly: false,
       groupby_tanks: true
     });
   };
@@ -333,6 +338,18 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                   id="untaggedonly"
                   checked={untaggedonly}
                   onCheckedChange={setUntaggedonly}
+                />
+              </div>
+
+              {/* 仅显示收藏档案 */}
+              <div className="flex items-center justify-between">
+                <label htmlFor="favoriteonly" className="text-sm">
+                  {t('search.favoriteOnly')}
+                </label>
+                <Switch
+                  id="favoriteonly"
+                  checked={favoriteonly}
+                  onCheckedChange={setFavoriteonly}
                 />
               </div>
 

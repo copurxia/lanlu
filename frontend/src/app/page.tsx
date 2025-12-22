@@ -38,6 +38,9 @@ function HomePageContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [newonly, setNewonly] = useState(false);
   const [untaggedonly, setUntaggedonly] = useState(false);
+  const [favoriteonly, setFavoriteonly] = useState(false);
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [groupByTanks, setGroupByTanks] = useState(true); // 默认启用Tankoubon分组
   const [isInitialized, setIsInitialized] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
@@ -49,6 +52,9 @@ function HomePageContent() {
   const urlSortOrder = searchParams?.get('order') || 'desc';
   const urlNewonly = searchParams?.get('newonly') === 'true';
   const urlUntaggedonly = searchParams?.get('untaggedonly') === 'true';
+  const urlFavoriteonly = searchParams?.get('favoriteonly') === 'true';
+  const urlDateFrom = searchParams?.get('date_from') || '';
+  const urlDateTo = searchParams?.get('date_to') || '';
   const urlGroupByTanks = searchParams?.get('groupby_tanks') !== 'false'; // 默认为true
 
   const fetchArchives = useCallback(async (page: number = 0) => {
@@ -64,6 +70,9 @@ function HomePageContent() {
       if (searchQuery) params.filter = searchQuery;
       if (newonly) params.newonly = true;
       if (untaggedonly) params.untaggedonly = true;
+      if (favoriteonly) params.favoriteonly = true;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
       params.groupby_tanks = groupByTanks; // 添加Tankoubon分组参数
 
       const result = await ArchiveService.search(params);
@@ -109,7 +118,7 @@ function HomePageContent() {
     } finally {
       setLoading(false);
     }
-  }, [pageSize, sortBy, sortOrder, searchQuery, newonly, untaggedonly, groupByTanks]);
+  }, [pageSize, sortBy, sortOrder, searchQuery, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks]);
 
   const fetchRandomArchives = useCallback(async () => {
     try {
@@ -131,11 +140,14 @@ function HomePageContent() {
     if (urlSortOrder) setSortOrder(urlSortOrder);
     setNewonly(urlNewonly);
     setUntaggedonly(urlUntaggedonly);
+    setFavoriteonly(urlFavoriteonly);
+    setDateFrom(urlDateFrom);
+    setDateTo(urlDateTo);
     setGroupByTanks(urlGroupByTanks);
 
     // 标记为已初始化，避免在初始化期间同步URL
     setIsInitialized(true);
-  }, [urlQuery, urlSortBy, urlSortOrder, urlNewonly, urlUntaggedonly, urlGroupByTanks]);
+  }, [urlQuery, urlSortBy, urlSortOrder, urlNewonly, urlUntaggedonly, urlFavoriteonly, urlDateFrom, urlDateTo, urlGroupByTanks]);
 
   // 同步状态到URL（仅在初始化完成后执行）
   useEffect(() => {
@@ -147,12 +159,15 @@ function HomePageContent() {
     if (sortOrder !== 'desc') params.set('order', sortOrder);
     if (newonly) params.set('newonly', 'true');
     if (untaggedonly) params.set('untaggedonly', 'true');
+    if (favoriteonly) params.set('favoriteonly', 'true');
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
     if (!groupByTanks) params.set('groupby_tanks', 'false'); // 只在禁用时添加参数
 
     const queryString = params.toString();
     const newUrl = queryString ? `/?${queryString}` : '/';
     router.replace(newUrl);
-  }, [searchQuery, sortBy, sortOrder, newonly, untaggedonly, groupByTanks, router, isInitialized]);
+  }, [searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, router, isInitialized]);
 
   useEffect(() => {
     // 只在客户端执行数据获取，避免静态生成时的API调用
@@ -161,7 +176,7 @@ function HomePageContent() {
       fetchArchives(currentPage);
       fetchRandomArchives();
     }
-  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder, newonly, untaggedonly, groupByTanks, isInitialized]);
+  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, isInitialized]);
 
   // 监听上传完成事件，刷新首页数据
   useEffect(() => {
@@ -182,6 +197,9 @@ function HomePageContent() {
       setSortOrder('desc');
       setNewonly(false);
       setUntaggedonly(false);
+      setFavoriteonly(false);
+      setDateFrom('');
+      setDateTo('');
       setGroupByTanks(true);
       setCurrentPage(0);
     };
@@ -205,13 +223,17 @@ function HomePageContent() {
     dateTo?: string;
     newonly?: boolean;
     untaggedonly?: boolean;
+    favoriteonly?: boolean;
     groupby_tanks?: boolean;
   }) => {
     setSearchQuery(params.query || '');
     if (params.sortBy) setSortBy(params.sortBy);
     if (params.sortOrder) setSortOrder(params.sortOrder);
+    if (typeof params.dateFrom === 'string') setDateFrom(params.dateFrom);
+    if (typeof params.dateTo === 'string') setDateTo(params.dateTo);
     if (typeof params.newonly === 'boolean') setNewonly(params.newonly);
     if (typeof params.untaggedonly === 'boolean') setUntaggedonly(params.untaggedonly);
+    if (typeof params.favoriteonly === 'boolean') setFavoriteonly(params.favoriteonly);
     if (typeof params.groupby_tanks === 'boolean') setGroupByTanks(params.groupby_tanks);
     setCurrentPage(0);
     // 移动端：应用筛选后自动关闭对话框

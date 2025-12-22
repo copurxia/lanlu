@@ -77,10 +77,18 @@ public class SearchController {
         // 处理过滤参数
         let newOnlyStr = ctx.getQuery("newonly") ?? "false"
         let untaggedOnlyStr = ctx.getQuery("untaggedonly") ?? "false"
-        let groupByTanksStr = ctx.getQuery("groupby_tanks") ?? "true"  // 默认为true
+        let groupByTanksStr = ctx.getQuery("groupby_tanks") ?? "false"  // 默认为false
+        let favoriteOnlyStr = ctx.getQuery("favoriteonly") ?? "false"
+        let favoriteTankoubonsOnlyStr = ctx.getQuery("favorite_tankoubons_only") ?? "false"
         let newOnly = newOnlyStr == "true" || newOnlyStr == "1"
         let untaggedOnly = untaggedOnlyStr == "true" || untaggedOnlyStr == "1"
         let groupByTanks = groupByTanksStr == "true" || groupByTanksStr == "1"
+        let favoriteOnly = favoriteOnlyStr == "true" || favoriteOnlyStr == "1"
+        let favoriteTankoubonsOnly = favoriteTankoubonsOnlyStr == "true" || favoriteTankoubonsOnlyStr == "1"
+
+        // 处理日期范围参数
+        let dateFrom = ctx.getQuery("date_from") ?? ""
+        let dateTo = ctx.getQuery("date_to") ?? ""
 
         // 解析分页参数
         let start = try {
@@ -101,7 +109,67 @@ public class SearchController {
             case None => 0
         }
 
-        let (archives, totalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count), sortby, order, newOnly, untaggedOnly, userId)
+        // 如果启用了 favoriteTankoubonsOnly，直接返回用户收藏的合集列表
+        if (favoriteTankoubonsOnly && userId > 0) {
+            let (tankoubonIds, totalTankCount) = UserTankoubonFavoriteDao.getUserFavoriteTankoubonIdsPaged(userId, start, count)
+
+            // 批量获取收藏时间
+            let tankFavoriteTimeMap = UserTankoubonFavoriteDao.getBatchFavoriteTime(userId, tankoubonIds)
+
+            var tanksJson = "["
+            var isFirstTank = true
+            for (tid in tankoubonIds) {
+                match (TankoubonDao.getAggregatedMetadata(tid, userId)) {
+                    case Some(agg) =>
+                        if (!isFirstTank) {
+                            tanksJson += ","
+                        }
+                        isFirstTank = false
+
+                        let archives = TankoubonDao.getArchivesInTankoubon(tid)
+                        var archivesJson = "["
+                        var isFirstArchive = true
+                        for (archiveId in archives) {
+                            if (!isFirstArchive) {
+                                archivesJson += ","
+                            }
+                            archivesJson += "\"${escapeJson(archiveId)}\""
+                            isFirstArchive = false
+                        }
+                        archivesJson += "]"
+
+                        var tankFavoriteTime = ""
+                        match (tankFavoriteTimeMap.get(tid)) {
+                            case Some(time) => tankFavoriteTime = time
+                            case None => tankFavoriteTime = ""
+                        }
+
+                        tanksJson += "{"
+                        tanksJson += "\"type\":\"tankoubon\","
+                        tanksJson += "\"tankoubon_id\":\"${escapeJson(agg.tankoubon_id)}\","
+                        tanksJson += "\"name\":\"${escapeJson(agg.name)}\","
+                        tanksJson += "\"summary\":\"${escapeJson(agg.summary)}\","
+                        tanksJson += "\"tags\":\"${escapeJson(agg.tags)}\","
+                        tanksJson += "\"archives\":${archivesJson},"
+                        tanksJson += "\"pagecount\":${agg.pagecount},"
+                        tanksJson += "\"progress\":${agg.progress},"
+                        tanksJson += "\"lastreadtime\":\"${escapeJson(agg.last_read_time)}\","
+                        tanksJson += "\"isnew\":${agg.isnew},"
+                        tanksJson += "\"archive_count\":${agg.archive_count},"
+                        tanksJson += "\"isfavorite\":true,"
+                        tanksJson += "\"favoritetime\":\"${escapeJson(tankFavoriteTime)}\""
+                        tanksJson += "}"
+                    case None => ()
+                }
+            }
+            tanksJson += "]"
+
+            let result = "{\"data\":${tanksJson},\"draw\":0,\"recordsFiltered\":${totalTankCount},\"recordsTotal\":${totalTankCount}}"
+            ctx.json(result)
+            return
+        }
+
+        let (archives, totalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count), sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId)
 
         // 如果启用了Tankoubon分组，获取归档到Tankoubon的映射
         var tankoubonMapping: HashMap<String, String> = HashMap<String, String>()
@@ -136,12 +204,14 @@ public class SearchController {
             }
         }
 
-        // 批量获取Tankoubon收藏状态
+        // 批量获取Tankoubon收藏状态和收藏时间
         let tankFavoriteMap = UserTankoubonFavoriteDao.getBatchFavoriteStatus(userId, tankoubonIdsList.toArray())
+        let tankFavoriteTimeMap = UserTankoubonFavoriteDao.getBatchFavoriteTime(userId, tankoubonIdsList.toArray())
 
-        // 批量获取用户的 isNew 状态和收藏状态
+        // 批量获取用户的 isNew 状态、收藏状态和收藏时间
         var isNewMap = HashMap<Int64, Bool>()
         var isFavoriteMap = HashMap<Int64, Bool>()
+        var favoriteTimeMap = HashMap<Int64, String>()
         if (userId > 0) {
             // 收集所有归档的内部ID
             var archiveIds = ArrayList<Int64>()
@@ -154,6 +224,7 @@ public class SearchController {
             if (archiveIds.size > 0) {
                 isNewMap = UserArchiveStatusDao.getBatchStatus(userId, archiveIds.toArray())
                 isFavoriteMap = UserFavoriteDao.getBatchFavoriteStatus(userId, archiveIds.toArray())
+                favoriteTimeMap = UserFavoriteDao.getBatchFavoriteTime(userId, archiveIds.toArray())
             }
         }
 
@@ -225,7 +296,13 @@ public class SearchController {
                             case Some(status) => isTankFavorite = status
                             case None => isTankFavorite = false
                         }
-                        archivesJson = archivesJson + "\"isfavorite\":${isTankFavorite}"
+                        var tankFavoriteTime = ""
+                        match (tankFavoriteTimeMap.get(tankoubonId)) {
+                            case Some(time) => tankFavoriteTime = time
+                            case None => tankFavoriteTime = ""
+                        }
+                        archivesJson = archivesJson + "\"isfavorite\":${isTankFavorite},"
+                        archivesJson = archivesJson + "\"favoritetime\":\"${escapeJson(tankFavoriteTime)}\""
                         archivesJson += "}"
 
                         alreadyAddedTankoubons[tankoubonId] = true
@@ -249,10 +326,11 @@ public class SearchController {
             }
             isFirst = false
 
-            // 获取用户级别的 isNew 状态和收藏状态
+            // 获取用户级别的 isNew 状态、收藏状态和收藏时间
             let internalId = getArchiveInternalId(archive.id)
             var isNew = true  // 默认为新
             var isFavorite = false  // 默认未收藏
+            var favoriteTime = ""  // 收藏时间，默认为空
             if (internalId > 0) {
                 match (isNewMap.get(internalId)) {
                     case Some(status) => isNew = status
@@ -261,6 +339,10 @@ public class SearchController {
                 match (isFavoriteMap.get(internalId)) {
                     case Some(status) => isFavorite = status
                     case None => isFavorite = false  // 没有记录，默认未收藏
+                }
+                match (favoriteTimeMap.get(internalId)) {
+                    case Some(time) => favoriteTime = time
+                    case None => favoriteTime = ""
                 }
             }
 
@@ -271,6 +353,7 @@ public class SearchController {
             archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
             archivesJson = archivesJson + "\"isnew\":${isNew},"
             archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
+            archivesJson = archivesJson + "\"favoritetime\":\"${escapeJson(favoriteTime)}\","
             archivesJson = archivesJson + "\"lastreadtime\":0,"  // lastreadtime 现在从 user_archive_status 获取，暂时返回 0
             archivesJson = archivesJson + "\"pagecount\":${archive.pagecount},"
             archivesJson = archivesJson + "\"progress\":0,"  // progress 现在从 user_archive_status 获取，暂时返回 0

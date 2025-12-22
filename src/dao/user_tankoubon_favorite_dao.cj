@@ -319,4 +319,63 @@ public class UserTankoubonFavoriteDao {
 
         return result
     }
+
+    /**
+     * 批量获取 Tankoubon 收藏时间
+     * 返回 Map<tankoubon_id, favoriteTime>
+     */
+    public static func getBatchFavoriteTime(userId: Int64, tankoubonIds: Array<String>): HashMap<String, String> {
+        let result = HashMap<String, String>()
+        if (userId <= 0 || tankoubonIds.size == 0) {
+            return result
+        }
+
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    var inClause = ""
+                    for (i in 0..tankoubonIds.size) {
+                        if (i > 0) {
+                            inClause += ","
+                        }
+                        inClause += "?"
+                    }
+
+                    let stmt = conn.prepareStatement("""
+                        SELECT t.tankoubon_id, utf.created_at
+                        FROM user_tankoubon_favorites utf
+                        JOIN tankoubons t ON t.id = utf.tankoubon_id
+                        WHERE utf.user_id = ? AND t.tankoubon_id IN (${inClause})
+                    """)
+                    try {
+                        stmt.set(0, userId)
+                        for (i in 0..tankoubonIds.size) {
+                            stmt.set(i + 1, tankoubonIds[i])
+                        }
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let tid = rs.getOrNull<String>(0) ?? ""
+                                let createdAt = rs.getOrNull<String>(1) ?? ""
+                                if (tid.size > 0) {
+                                    result[tid] = createdAt
+                                }
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    // ignore
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => ()
+        }
+
+        return result
+    }
 }

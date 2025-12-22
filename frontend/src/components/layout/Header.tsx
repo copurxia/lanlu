@@ -9,7 +9,7 @@ import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Menu, Home, Heart, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
+import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -55,7 +55,6 @@ export function Header() {
 
   const navigation = [
     { name: t('navigation.home'), href: '/', icon: Home },
-    { name: t('settings.favorites'), href: '/settings/favorites', icon: Heart },
     { name: t('navigation.random'), href: '#', icon: Shuffle, action: handleRandomRead },
   ];
 

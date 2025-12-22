@@ -8,6 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Heart, Trash2, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { FavoriteService } from '@/lib/favorite-service';
+import { ArchiveService } from '@/lib/archive-service';
 import { groupArchivesByTime, TimeGroup } from '@/lib/time-group';
 import { Archive } from '@/types/archive';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
@@ -38,17 +39,21 @@ export default function FavoritesPage() {
       }
       setArchiveError(null);
 
-      // 使用新的 API 直接获取收藏档案详情
-      const response = await FavoriteService.getFavoriteArchives(0, 1000);
+      // 使用搜索接口获取收藏档案
+      const response = await ArchiveService.search({
+        favoriteonly: true,
+        groupby_tanks: false,
+        sortby: 'date_added',
+        order: 'desc',
+        start: 0,
+        count: 1000
+      });
 
-      if (response.success === 1) {
-        setArchives(response.data);
-        // 按时间分组，传入翻译函数
-        const grouped = groupArchivesByTime(response.data, 'last_read_time', t);
-        setGroupedArchives(grouped);
-      } else {
-        setArchiveError(t('favorites.loadError'));
-      }
+      const archiveData = response.data as Archive[];
+      setArchives(archiveData);
+      // 按收藏时间分组，传入翻译函数
+      const grouped = groupArchivesByTime(archiveData, 'favoritetime', t);
+      setGroupedArchives(grouped);
     } catch (err) {
       logger.apiError('加载收藏列表失败:', err);
       setArchiveError(t('favorites.loadError'));
@@ -66,14 +71,18 @@ export default function FavoritesPage() {
       }
       setTankoubonError(null);
 
-      const response = await FavoriteService.getFavoriteTankoubons(0, 1000);
-      if (response.success === 1) {
-        setTankoubons(response.data);
-        const grouped = groupArchivesByTime(response.data, 'lastreadtime', t);
-        setGroupedTankoubons(grouped);
-      } else {
-        setTankoubonError(t('favorites.loadError'));
-      }
+      // 使用搜索接口获取收藏合集
+      const response = await ArchiveService.search({
+        favorite_tankoubons_only: true,
+        start: 0,
+        count: 1000
+      });
+
+      const tankoubonData = response.data as unknown as Tankoubon[];
+      setTankoubons(tankoubonData);
+      // 合集也使用收藏时间分组
+      const grouped = groupArchivesByTime(tankoubonData, 'favoritetime', t);
+      setGroupedTankoubons(grouped);
     } catch (err) {
       logger.apiError('加载收藏合集失败:', err);
       setTankoubonError(t('favorites.loadError'));

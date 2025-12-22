@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BookOpen, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { ReadingHistoryService } from '@/lib/reading-history-service';
+import { ArchiveService } from '@/lib/archive-service';
 import { groupArchivesByTime, TimeGroup } from '@/lib/time-group';
 import { Archive } from '@/types/archive';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
@@ -27,16 +27,19 @@ export default function ReadingHistoryPage() {
       }
       setError(null);
 
-      const response = await ReadingHistoryService.getReadArchives(0, 1000);
+      // 使用搜索接口获取阅读历史（按最后阅读时间排序会自动过滤出已读档案）
+      const response = await ArchiveService.search({
+        sortby: 'lastread',
+        order: 'desc',
+        start: 0,
+        count: 1000
+      });
 
-      if (response.success === 1) {
-        setArchives(response.data);
-        // 按时间分组，传入翻译函数
-        const grouped = groupArchivesByTime(response.data, 'last_read_time', t);
-        setGroupedArchives(grouped);
-      } else {
-        setError(t('readingHistory.loadError'));
-      }
+      const archiveData = response.data as Archive[];
+      setArchives(archiveData);
+      // 按时间分组，传入翻译函数
+      const grouped = groupArchivesByTime(archiveData, 'lastreadtime', t);
+      setGroupedArchives(grouped);
     } catch (err) {
       logger.apiError('readingHistory.loadError', err);
       setError(t('readingHistory.loadError'));

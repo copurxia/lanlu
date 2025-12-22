@@ -171,17 +171,24 @@ public class ArchiveModel {
      */
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool): (Array<Archive>, Int64) {
         // 调用带 userId 的版本，userId=0 表示不进行用户级别的 newOnly 过滤
-        return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, 0)
+        return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, false, "", "", 0)
     }
 
     /**
      * 搜索归档（带过滤条件和用户ID，支持用户级别的 newOnly 过滤）
      */
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, userId: Int64): (Array<Archive>, Int64) {
-        println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}', newOnly=${newOnly}, untaggedOnly=${untaggedOnly}, userId=${userId}")
+        return searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, false, "", "", userId)
+    }
+
+    /**
+     * 搜索归档（完整参数版本，支持收藏筛选和日期范围筛选）
+     */
+    public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, favoriteOnly: Bool, dateFrom: String, dateTo: String, userId: Int64): (Array<Archive>, Int64) {
+        println("开始搜索归档，参数: filter='${filter}', category='${category}', start=${start}, count=${count}, sortby='${sortby}', order='${order}', newOnly=${newOnly}, untaggedOnly=${untaggedOnly}, favoriteOnly=${favoriteOnly}, dateFrom='${dateFrom}', dateTo='${dateTo}', userId=${userId}")
 
         // 使用DAO层获取数据
-        let (archiveDataArray, totalCount) = ArchiveDao.searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, userId)
+        let (archiveDataArray, totalCount) = ArchiveDao.searchArchives(filter, category, start, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId)
 
         var archives: ArrayList<Archive> = ArrayList<Archive>()
         for (data in archiveDataArray) {
