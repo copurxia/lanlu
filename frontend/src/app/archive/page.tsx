@@ -1,6 +1,6 @@
 'use client';
 
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import Image from 'next/image';
 import { ArchiveService } from '@/lib/archive-service';
@@ -26,6 +26,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { logger } from '@/lib/logger';
 
 function ArchiveDetailContent() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams?.get('id') ?? null;
   const { t, language } = useLanguage();
@@ -444,7 +445,7 @@ function ArchiveDetailContent() {
       await ArchiveService.deleteArchive(metadata.arcid);
       success('档案删除成功');
       // 删除成功后跳转到首页
-      window.location.href = '/';
+      router.push('/');
     } catch (error: any) {
       logger.operationFailed('delete archive', error);
       const errorMessage = error.response?.data?.error || error.message || '删除失败';

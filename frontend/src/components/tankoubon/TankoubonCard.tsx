@@ -1,3 +1,4 @@
+import { useRouter } from 'next/navigation';
 import { Tankoubon } from '@/types/tankoubon';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -24,6 +25,7 @@ function stripNamespace(tag: string): string {
 }
 
 export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
+  const router = useRouter();
   const { t, language } = useLanguage();
   const [isFavorite, setIsFavorite] = useState(tankoubon.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
@@ -147,7 +149,7 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
             e.stopPropagation(); // 阻止事件冒泡到卡片的点击事件
             // 点击封面进入第一本归档的阅读器
             if (firstArchive) {
-              window.location.href = `/reader?id=${firstArchive.arcid}`;
+              router.push(`/reader?id=${firstArchive.arcid}`);
             }
           }}
         >
@@ -237,7 +239,7 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
           className="flex-1"
           onClick={() => {
             // 点击详情按钮进入合集详情页
-            window.location.href = `/tankoubon?id=${tankoubon.tankoubon_id}`;
+            router.push(`/tankoubon?id=${tankoubon.tankoubon_id}`);
           }}
         >
           <Link href={`/tankoubon?id=${tankoubon.tankoubon_id}`}>

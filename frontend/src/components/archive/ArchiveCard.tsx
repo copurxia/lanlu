@@ -1,3 +1,4 @@
+import { useRouter } from 'next/navigation';
 import { Archive } from '@/types/archive';
 import { Card, CardContent, CardFooter } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,7 @@ function stripNamespace(tag: string): string {
 }
 
 export function ArchiveCard({ archive, index = 0 }: ArchiveCardProps) {
+  const router = useRouter();
   const { t, language } = useLanguage();
   const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
@@ -97,7 +99,7 @@ export function ArchiveCard({ archive, index = 0 }: ArchiveCardProps) {
       title={hoverTitleParts.length > 0 ? `${archive.title}\n${hoverTitleParts.join('\n')}` : archive.title}
       onClick={() => {
         // 点击卡片其他区域进入阅读器
-        window.location.href = `/reader?id=${archive.arcid}`;
+        router.push(`/reader?id=${archive.arcid}`);
       }}
     >
       <div className="aspect-[3/4] bg-muted relative">

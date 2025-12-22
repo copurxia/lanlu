@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { useLanguage } from "@/contexts/LanguageContext"
 import { Button } from "@/components/ui/button"
 import {
@@ -18,6 +19,7 @@ import { appEvents, AppEvents } from "@/lib/events"
 
 export function UserMenu() {
   const { t } = useLanguage()
+  const router = useRouter()
   const { token, user, logout } = useAuth()
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
 
@@ -65,7 +67,7 @@ export function UserMenu() {
             <Upload className="mr-2 h-4 w-4" />
             <span>{t("upload.title")}</span>
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => window.location.href = '/settings'}>
+          <DropdownMenuItem onClick={() => router.push('/settings')}>
             <Settings className="mr-2 h-4 w-4" />
             <span>{t("user.settings")}</span>
           </DropdownMenuItem>
