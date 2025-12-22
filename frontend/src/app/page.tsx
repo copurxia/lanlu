@@ -251,14 +251,16 @@ function HomePageContent() {
     <div className="min-h-screen bg-background">
       <Header />
 
-      <div className="flex min-h-screen">
+      {/* 固定高度容器，减去Header高度（约64px） */}
+      <div className="flex h-[calc(100vh-4rem)]">
         {/* 侧栏 - 桌面端显示 */}
-        <div className="hidden lg:block flex-shrink-0 border-r border-border">
+        <div className="hidden lg:block flex-shrink-0 border-r border-border w-80">
           <SearchSidebar onSearch={handleSearch} loading={loading} />
         </div>
 
-        {/* 主内容区 */}
-        <main className="flex-1 min-w-0 px-4 py-8">
+        {/* 主内容区 - 独立滚动 */}
+        <main className="flex-1 min-w-0 overflow-y-auto">
+          <div className="px-4 py-8">
           {/* 随机推荐 - 搜索模式下隐藏 */}
           {!isSearchMode && (
           <section className="mb-12">
@@ -386,6 +388,7 @@ function HomePageContent() {
               </div>
             ) : null}
           </section>
+          </div>
         </main>
       </div>
     </div>

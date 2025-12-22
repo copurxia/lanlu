@@ -173,7 +173,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   };
 
   return (
-    <div className="w-full md:w-80 bg-background p-4 overflow-y-auto max-h-none">
+    <div className="w-full h-full bg-background p-4 overflow-y-auto">
       <div className="space-y-6">
         {/* 智能分类 */}
         <Card>
