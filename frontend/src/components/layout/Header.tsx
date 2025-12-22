@@ -91,12 +91,15 @@ export function Header() {
               </Button>
             )}
 
-            <Link href="/" className="flex items-center gap-2">
+            <button
+              onClick={() => router.push('/')}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+            >
               <Logo alt={`${serverName} Logo`} width={32} height={32} />
               <span className="font-semibold text-lg hidden sm:inline-block">
                 {serverName}
               </span>
-            </Link>
+            </button>
             {serverInfo?.motd && (
               <span className="text-sm text-muted-foreground hidden md:inline-block max-w-[250px] truncate" title={serverInfo.motd}>
                 · {serverInfo.motd}
