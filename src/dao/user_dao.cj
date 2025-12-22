@@ -50,6 +50,7 @@ public class UserDao {
                         let stmt = conn.prepareStatement(sql)
                         stmt.update()
                         stmt.close()
+                        logger.info("users表创建成功")
                     } else {
                         logger.info("users表已存在，检查并添加缺失的列")
                         // 检查 is_admin 列是否存在
@@ -68,8 +69,12 @@ public class UserDao {
                             let alterStmt = conn.prepareStatement("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE")
                             alterStmt.update()
                             alterStmt.close()
+                            logger.info("is_admin 列添加成功")
+                        } else {
+                            logger.info("is_admin 列已存在，无需添加")
                         }
                     }
+                    logger.info("users表结构检查完成")
                     return true
                 } catch (e: Exception) {
                     logger.error("创建 users 表失败", ("error", e.message))
@@ -222,31 +227,46 @@ public class UserDao {
      * 检查用户表是否为空（用于判断是否允许公开注册第一个用户）
      */
     public static func isEmpty(): Bool {
+        let logger = getLogger("user_dao")
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
-            case Some(conn) =>
+            case Some(conn) => checkUserTableIsEmpty(conn, logger)
+            case None => handleNoConnection(logger)
+        }
+    }
+
+    private static func handleNoConnection(logger: Logger): Bool {
+        logger.error("无法创建数据库连接进行空表检查")
+        return true
+    }
+
+    private static func checkUserTableIsEmpty(conn: Connection, logger: Logger): Bool {
+        try {
+            logger.info("开始查询用户表记录数量")
+            let stmt = conn.prepareStatement("SELECT COUNT(*) FROM users")
+            try {
+                let rs = stmt.query()
                 try {
-                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM users")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let count = rs.getOrNull<Int64>(0) ?? 0
-                                return count == 0
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
+                    if (rs.next()) {
+                        let count = rs.getOrNull<Int64>(0) ?? 0
+                        logger.info("用户表记录数量: ${count}")
+                        return count == 0
+                    } else {
+                        logger.warn("查询用户表记录数量失败，无法获取结果")
+                        return true
                     }
-                    return true
-                } catch (_: Exception) {
-                    return true
                 } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    rs.close()
                 }
-            case None => return true
+            } finally {
+                stmt.close()
+            }
+        } catch (e: Exception) {
+            logger.error("查询用户表记录数量时发生异常", ("error", e.message))
+            logger.error("异常类型: ${e.toString()}")
+            return true
+        } finally {
+            try { conn.close() } catch (_: Exception) {}
         }
     }
 
