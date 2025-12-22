@@ -290,7 +290,23 @@ public class ArchiveController {
             let thumbnailPath = ArchiveModel.getThumbnailFilePath(id, page)
             println("Thumbnail exists, reading from: ${thumbnailPath}")
             try {
+                // 生成 ETag（优先使用 thumbhash，否则基于 id+page 生成）
+                let etag = if (archive.thumbhash.size > 0) {
+                    "\"${archive.thumbhash}\""
+                } else {
+                    CacheUtils.generateETag("${id}-${page}")
+                }
+
+                // 检查条件请求 - If-None-Match
+                if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+                    CacheUtils.sendNotModified(ctx, etag)
+                    return
+                }
+
                 let imageData = File.readFrom(Path(thumbnailPath))
+
+                // 设置缓存头
+                CacheUtils.setStaticCacheHeaders(ctx, etag)
                 ctx.header("Content-Type", "image/jpeg")
                 ctx.status(HttpStatusCode.STATUS_OK)
                 // 直接返回二进制数据
@@ -301,7 +317,7 @@ public class ArchiveController {
                 println("Failed to read thumbnail file: ${e}")
             }
         }
-        
+
         // 缩略图不存在
         if (noFallback) {
             // 不使用fallback，返回任务ID
@@ -310,8 +326,9 @@ public class ArchiveController {
             ctx.status(HttpStatusCode.STATUS_ACCEPTED)
             ctx.json(response)
         } else {
-            // 使用fallback，返回占位符图像
+            // 使用fallback，返回占位符图像（不缓存临时内容）
             let placeholderImage = getPlaceholderThumbnail()
+            CacheUtils.setNoCacheHeaders(ctx)
             ctx.header("Content-Type", "image/jpeg")
             ctx.status(HttpStatusCode.STATUS_OK)
             // 直接返回二进制数据
@@ -633,12 +650,25 @@ public class ArchiveController {
                     let (exitCode, stdout, stderr) = ArchiveUtils.extractArchiveEntryToStream(actualPath, path)
                     
                     if (exitCode == 0) {
+                        // 生成 ETag（基于归档ID、路径和内容大小）
+                        let contentSize = stdout.size
+                        let etag = CacheUtils.generateETag("${id}-${path}-${contentSize}")
+
+                        // 检查条件请求 - If-None-Match
+                        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+                            CacheUtils.sendNotModifiedDynamic(ctx, etag)
+                            return
+                        }
+
+                        // 设置缓存头
+                        CacheUtils.setDynamicCacheHeaders(ctx, etag)
+
                         // 根据文件扩展名设置Content-Type
                         let contentType = getContentTypeFromPath(path)
                         ctx.header("Content-Type", contentType)
                         ctx.status(HttpStatusCode.STATUS_OK)
                         // 将UInt8数组转换为Byte数组
-                        let byteData = Array<Byte>(stdout.size, { i => stdout[i] })
+                        let byteData = Array<Byte>(contentSize, { i => stdout[i] })
                         // 直接返回二进制数据
                         ctx.data(byteData)
                     } else {
