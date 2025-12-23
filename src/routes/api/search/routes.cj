@@ -25,12 +25,6 @@ public class SearchRoutes {
             SearchController.getRandomArchives(ctx)
         })
 
-        // 清除搜索缓存
-        router.delete("/api/search/cache", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            SearchController.clearSearchCache(ctx)
-        })
-
         // 获取搜索建议
         router.get("/api/search/suggestions", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }

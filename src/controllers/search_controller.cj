@@ -498,14 +498,6 @@ public class SearchController {
     }
 
     /**
-     * 清除搜索缓存
-     */
-    public static func clearSearchCache(ctx: JoyContext) {
-        let result = "{\"operation\":\"clear_cache\",\"success\":1}"
-        ResponseView.successJson(ctx, result, "清除搜索缓存成功")
-    }
-
-    /**
      * 获取搜索建议
      */
     public static func getSearchSuggestions(ctx: JoyContext) {
