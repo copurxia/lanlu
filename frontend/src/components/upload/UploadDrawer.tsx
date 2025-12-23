@@ -214,7 +214,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
       {trigger && <SheetTrigger asChild>{trigger}</SheetTrigger>}
       <SheetContent
         side="right"
-        className="w-full sm:w-[600px] md:w-[700px] lg:w-[900px] xl:w-[1200px] overflow-y-auto"
+        className="w-full sm:w-[600px] md:w-[700px] lg:w-[900px] xl:w-[1200px] overflow-y-auto flex flex-col"
         onInteractOutside={(e) => {
           const uploadingFiles = uploadFiles.filter(file => file.status === "uploading")
           const downloadingTasks = downloadTasks.filter(task => task.status === "downloading")
@@ -224,39 +224,11 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
         }}
       >
         <SheetHeader>
-          <SheetTitle className="flex items-center justify-between">
-            {t("upload.title")}
-            <div className="flex space-x-2">
-              {(uploadFiles.some(file => file.status === "success") || downloadTasks.some(task => task.status === "success")) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setUploadFiles(prev => prev.filter(file => file.status !== "success"))
-                    setDownloadTasks(prev => prev.filter(task => task.status !== "success"))
-                  }}
-                >
-                  {t("upload.clearCompleted")}
-                </Button>
-              )}
-              {(uploadFiles.length > 0 || downloadTasks.length > 0) && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    clearAll()
-                    setDownloadTasks([])
-                  }}
-                >
-                  {t("upload.clearAll")}
-                </Button>
-              )}
-            </div>
-          </SheetTitle>
+          <SheetTitle>{t("upload.title")}</SheetTitle>
         </SheetHeader>
 
-        <div className="mt-6">
-          <Tabs defaultValue="upload" className="w-full">
+        <div className="flex-1 mt-6 min-h-0">
+          <Tabs defaultValue="upload" className="w-full h-full flex flex-col">
             <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="upload" className="flex items-center space-x-2">
                 <Upload className="h-4 w-4" />
@@ -269,7 +241,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
             </TabsList>
 
             {/* 上传档案标签页 */}
-            <TabsContent value="upload" className="space-y-6 mt-6">
+            <TabsContent value="upload" className="flex-1 overflow-y-auto mt-6 space-y-6">
               {/* File Upload Area */}
               <div
                 className={`border-2 border-dashed rounded-lg p-6 text-center transition-colors ${
@@ -362,7 +334,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
             </TabsContent>
 
             {/* 在线下载标签页 */}
-            <TabsContent value="download" className="space-y-6 mt-6">
+            <TabsContent value="download" className="flex-1 overflow-y-auto mt-6 space-y-6">
               <div className="space-y-4">
                 <div>
                   <Label htmlFor="url-input">{t("download.urlInput") || "下载链接（每行一个）"}</Label>
@@ -442,10 +414,38 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
               )}
             </TabsContent>
           </Tabs>
+        </div>
 
-          {/* Close Button */}
-          <div className="flex justify-end pt-4">
-            <Button variant="outline" onClick={handleClose}>
+        {/* Bottom Action Bar */}
+        <div className="border-t pt-4 mt-4 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex gap-2">
+              {(uploadFiles.some(file => file.status === "success") || downloadTasks.some(task => task.status === "success")) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUploadFiles(prev => prev.filter(file => file.status !== "success"))
+                    setDownloadTasks(prev => prev.filter(task => task.status !== "success"))
+                  }}
+                >
+                  {t("upload.clearCompleted")}
+                </Button>
+              )}
+              {(uploadFiles.length > 0 || downloadTasks.length > 0) && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    clearAll()
+                    setDownloadTasks([])
+                  }}
+                >
+                  {t("upload.clearAll")}
+                </Button>
+              )}
+            </div>
+            <Button onClick={handleClose}>
               {t("upload.close")}
             </Button>
           </div>
