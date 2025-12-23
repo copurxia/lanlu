@@ -30,7 +30,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { CronService, ScheduledTask, ScheduledTaskInput, CronValidationResult } from '@/lib/cron-service';
+import { CronService, ScheduledTaskInput, CronValidationResult } from '@/lib/cron-service';
 import { useToast } from '@/hooks/use-toast';
 
 interface ScheduledTaskDialogProps {

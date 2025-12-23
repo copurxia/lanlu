@@ -98,7 +98,7 @@ export function Header() {
               }}
               className="flex items-center gap-2 hover:opacity-80 transition-opacity"
             >
-              <Logo alt={`${serverName} Logo`} width={32} height={32} />
+              <Logo width={32} height={32} />
               <span className="font-semibold text-lg hidden sm:inline-block">
                 {serverName}
               </span>

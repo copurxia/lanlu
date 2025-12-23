@@ -20,7 +20,6 @@ export default function SettingsCronPage() {
   const { success, error: toastError } = useToast();
   const [refreshKey, setRefreshKey] = useState(0);
   const [status, setStatus] = useState<CronServiceStatus | null>(null);
-  const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
 
@@ -28,20 +27,11 @@ export default function SettingsCronPage() {
     return isAuthenticated && user?.isAdmin === true;
   }, [isAuthenticated, user?.isAdmin]);
 
-  const fetchStatus = async () => {
-    try {
-      const s = await CronService.getStatus();
-      setStatus(s);
-    } catch (e) {
-      console.error('Failed to fetch cron service status:', e);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     if (isAdmin) {
-      fetchStatus();
+      CronService.getStatus()
+        .then(setStatus)
+        .catch((e) => console.error('Failed to fetch cron service status:', e));
     }
   }, [isAdmin, refreshKey]);
 

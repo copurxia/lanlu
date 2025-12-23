@@ -2,12 +2,9 @@
 
 import { type SVGProps } from 'react';
 
-export type LogoProps = SVGProps<SVGSVGElement> & {
-  alt?: string;
-};
+export type LogoProps = SVGProps<SVGSVGElement>;
 
 export function Logo({
-  alt = 'Logo',
   className = '',
   ...props
 }: LogoProps) {
