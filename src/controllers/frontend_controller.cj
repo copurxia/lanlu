@@ -2,6 +2,7 @@ package lrr4cj.controllers
 
 import cjoy.*
 import std.fs.*
+import lrr4cj.utils.*
 
 /**
  * 前端控制器
@@ -73,12 +74,16 @@ public class FrontendController {
      */
     private static func serveFile(ctx: JoyContext, filePath: String) {
         println("Serving file: ${filePath}")
-        
+
         if (!exists(filePath)) {
             println("File not found: ${filePath}")
             FrontendController.serve404(ctx)
             return
         }
+
+        let fileInfo = FileInfo(filePath)
+        let fileSize = fileInfo.size
+        let lastModified = fileInfo.lastModificationTime
 
         let file = File(Path(filePath), Read)
         let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
@@ -87,6 +92,15 @@ public class FrontendController {
 
         if (bytesRead > 0) {
             let contentType = getContentType(filePath)
+
+            let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
+
+            if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+                ctx.status(304)
+                return
+            }
+
+            CacheUtils.setDynamicCacheHeaders(ctx, etag)
             ctx.header("Content-Type", contentType)
             ctx.data(buffer.slice(0, bytesRead))
         } else {
@@ -234,10 +248,21 @@ public class FrontendController {
             return
         }
 
+        let fileInfo = FileInfo(filePath)
+        let fileSize = fileInfo.size
+        let lastModified = fileInfo.lastModificationTime
         let contentType = getContentType(filePath)
+
+        let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
+
+        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+            ctx.status(304)
+            return
+        }
+
+        CacheUtils.setDynamicCacheHeaders(ctx, etag)
         ctx.header("Content-Type", contentType)
         ctx.status(200)
-        // HEAD 请求不返回内容，只返回状态码和头部
     }
 
     /**
