@@ -38,7 +38,7 @@ export class PluginSchemaService {
    */
   static async getPluginSchema(namespace: string): Promise<PluginSchemaResponse> {
     try {
-      console.log('🚀 PluginSchemaService.getPluginSchema called for:', namespace);
+
 
       // 检查是否在浏览器环境中
       if (typeof window === 'undefined') {
@@ -50,22 +50,22 @@ export class PluginSchemaService {
       }
 
       const response = await apiClient.get(`/api/plugins/${namespace}/config`);
-      console.log('✅ Config API response:', response.data, response.status);
+
 
       // 解析响应数据
       const data = response.data;
-      console.log('🔍 Raw response data:', data);
+
 
       // 处理新的API响应格式：{success: true, data: {has_schema: true, parameters: [...], message: ...}}
       let actualData = data;
       if (data && typeof data === 'object' && data.data && typeof data.data === 'object') {
         actualData = data.data;
-        console.log('🔄 Extracting nested data:', actualData);
+
       }
 
       if (typeof actualData === 'string') {
         const parsed = JSON.parse(actualData);
-        console.log('✅ Parsed data:', parsed);
+
         return {
           has_schema: parsed.has_schema === 'true' || parsed.has_schema === true,
           parameters: parsed.parameters,  // parameters现在应该是数组
@@ -73,7 +73,7 @@ export class PluginSchemaService {
         };
       }
 
-      console.log('✅ Object data:', actualData);
+
       return {
         has_schema: actualData.has_schema === 'true' || actualData.has_schema === true,
         parameters: actualData.parameters,  // parameters现在应该是数组

@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from 'next';
-// import { Inter } from 'next/font/google';
 import './globals.css';
 import { ThemeProvider } from '@/components/theme/theme-provider';
 import { LanguageProvider } from '@/contexts/LanguageContext';
@@ -8,9 +7,6 @@ import { ServerInfoProvider } from '@/contexts/ServerInfoContext';
 import { StaticGenerationProvider } from '@/contexts/StaticGenerationContext';
 import { ConfirmProvider } from '@/contexts/ConfirmProvider';
 import { Toaster } from 'sonner';
-
-// 使用系统字体而不是 Google Fonts 以避免构建时的网络依赖
-// const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: '兰鹿',

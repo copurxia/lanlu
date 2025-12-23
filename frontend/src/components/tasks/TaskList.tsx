@@ -47,29 +47,23 @@ export function TaskList({ className }: TaskListProps) {
   const [activeFilter, setActiveFilter] = useState('all');
 
   const fetchTasks = useCallback(async (page: number = currentPage) => {
-    console.log('fetchTasks called, page:', page, 'activeFilter:', activeFilter);
     try {
       setError(null);
-      console.log('Calling TaskPoolService.getTasks...');
       const result: TaskPageResult = await TaskPoolService.getTasks(page, pageSize);
-      console.log('API response:', result);
 
       // 确保 result.tasks 是数组
       const tasksArray = Array.isArray(result.tasks) ? result.tasks : [];
-      console.log('tasksArray length:', tasksArray.length);
 
       // Apply client-side filtering if needed
       let filteredTasks = tasksArray;
       if (activeFilter !== 'all') {
         filteredTasks = tasksArray.filter(task => task && task.status === activeFilter);
-        console.log('filteredTasks length:', filteredTasks.length);
       }
 
       setTasks(filteredTasks);
       setTotal(typeof result.total === 'number' ? result.total : 0);
       setTotalPages(typeof result.totalPages === 'number' ? result.totalPages : 0);
       setCurrentPage(page);
-      console.log('State updated - tasks:', filteredTasks.length, 'total:', result.total);
     } catch (err) {
       console.error('Failed to fetch tasks:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch tasks');
@@ -79,7 +73,6 @@ export function TaskList({ className }: TaskListProps) {
     } finally {
       setLoading(false);
       setRefreshing(false);
-      console.log('fetchTasks completed');
     }
   }, [activeFilter, currentPage, pageSize]);
 

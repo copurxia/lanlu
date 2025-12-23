@@ -76,8 +76,8 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
             f.id === uploadFile.id ? { ...f, progress } : f
           ))
         },
-        onChunkComplete: (chunkIndex, totalChunks) => {
-          console.log(`文件 ${uploadFile.id} 分片 ${chunkIndex + 1}/${totalChunks} 上传完成`)
+        onChunkComplete: () => {
+          // Chunk upload progress callback
         },
         onError: (error, chunkIndex) => {
           console.error(`文件 ${uploadFile.id} 分片上传错误:`, error, chunkIndex)

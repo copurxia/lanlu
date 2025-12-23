@@ -37,13 +37,11 @@ export function PluginConfigDialog({
     const loadPluginSchema = async () => {
       if (!plugin) return;
 
-      console.log('🔍 Loading parameters for plugin:', plugin.namespace);
       setLoadingSchema(true);
       setSchemaError('');
 
       try {
         const schemaResponse = await PluginSchemaService.getPluginSchema(plugin.namespace);
-        console.log('📋 Schema response:', schemaResponse);
 
         if (schemaResponse.has_schema && schemaResponse.parameters) {
           // 解析parameters字符串为数组

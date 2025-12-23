@@ -23,14 +23,14 @@ export interface Plugin {
 export class PluginService {
   static async getAllPlugins(): Promise<Plugin[]> {
     try {
-      console.log('正在获取插件列表...');
+
       const response = await apiClient.get('/api/plugins');
-      console.log('插件API响应:', response.data);
+
 
       // API 返回直接的数组
       const plugins = Array.isArray(response.data) ? response.data : [];
-      console.log('解析到的插件数据:', plugins);
-      console.log('插件数量:', plugins.length);
+
+
 
       return plugins;
     } catch (error) {

@@ -13,16 +13,6 @@ export function formatFileSize(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-export function parseTags(tags: string): string[] {
-  if (!tags) return [];
-  return tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0);
-}
-
-export function formatDate(timestamp: number): string {
-  if (!timestamp || timestamp === 0) return '未知';
-  return new Date(timestamp * 1000).toLocaleDateString('zh-CN');
-}
-
 export function getProgressPercentage(progress: number): string {
   return Math.round(progress * 100) + '%';
 }

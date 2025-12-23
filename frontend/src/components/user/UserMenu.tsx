@@ -25,7 +25,7 @@ export function UserMenu() {
 
   const handleUploadComplete = (archiveId: string) => {
     // 上传完成后的回调
-    console.log('Upload completed with archive ID:', archiveId);
+
 
     // 触发首页数据刷新事件
     // 支持上传和在线下载两种场景的刷新

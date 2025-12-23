@@ -110,7 +110,7 @@ export class ChunkedUploadService {
       
       // 如果有失败的分片，进行重传
       if (firstUploadResult.failedChunks.length > 0) {
-        console.log(`发现 ${firstUploadResult.failedChunks.length} 个失败分片，开始重传:`, firstUploadResult.failedChunks);
+
         
         // 重传失败的分片
         const retryResult = await this.uploadChunksConcurrently(
@@ -126,16 +126,16 @@ export class ChunkedUploadService {
         
         // 如果重传后仍有失败的分片，返回错误
         if (retryResult.failedChunks.length > 0) {
-          console.log('重传后仍有失败分片:', retryResult.failedChunks);
+
           return {
             success: false,
             error: `分片上传失败: ${retryResult.failedChunks.length} 个分片重传后仍然失败`
           };
         }
         
-        console.log(`所有分片上传成功: ${totalCompletedChunks}/${totalChunks}`);
+
       } else {
-        console.log(`所有分片上传成功: ${totalCompletedChunks}/${totalChunks}`);
+
       }
 
       // 8. 验证所有分片都已上传完成
@@ -157,7 +157,7 @@ export class ChunkedUploadService {
       if (taskId) {
         try {
           localStorage.removeItem(`upload_${taskId}`);
-          console.log(`Cleaned localStorage after upload failure: ${taskId}`);
+
         } catch (cleanupError) {
           console.warn('Failed to clean localStorage after upload failure:', cleanupError);
         }
@@ -436,11 +436,11 @@ export class ChunkedUploadService {
       await this.uploadChunk(taskId, chunkIndex, totalChunks, chunk);
       // 成功上传，如果之前有重试，说明重试成功了
       if (retryCount > 0) {
-        console.log(`分片 ${chunkIndex} 重试成功`);
+
       }
     } catch (error) {
       if (retryCount < this.MAX_RETRIES) {
-        console.log(`分片 ${chunkIndex} 上传失败，第 ${retryCount + 1} 次重试`);
+
         await this.delay(1000 * Math.pow(2, retryCount)); // 指数退避
         return this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks, retryCount + 1);
       } else {
@@ -510,13 +510,13 @@ export class ChunkedUploadService {
           const existingData = localStorage.getItem(sessionKey);
 
           if (existingData) {
-            console.log(`Cleaning localStorage for successful upload: ${taskId}`);
+
             localStorage.removeItem(sessionKey);
 
             // 验证清理是否成功
             const verifyCleanup = localStorage.getItem(sessionKey);
             if (verifyCleanup === null) {
-              console.log(`✓ Successfully cleaned localStorage for completed upload: ${taskId}`);
+
             } else {
               console.warn(`⚠ Failed to clean localStorage for completed upload: ${taskId} - data still exists`);
             }
@@ -533,7 +533,7 @@ export class ChunkedUploadService {
       // 即使complete操作失败，也尝试清理localStorage
       try {
         localStorage.removeItem(`upload_${taskId}`);
-        console.log(`Cleaned localStorage after failed complete operation: ${taskId}`);
+
       } catch (cleanupError) {
         console.warn('Failed to clean localStorage after failed complete:', cleanupError);
       }
@@ -596,7 +596,7 @@ export class ChunkedUploadService {
 
       // 如果有失败的分片，进行重传
       if (uploadResult.failedChunks.length > 0) {
-        console.log(`恢复上传发现 ${uploadResult.failedChunks.length} 个失败分片，开始重传:`, uploadResult.failedChunks);
+
 
         // 重传失败的分片
         const retryResult = await this.uploadChunksConcurrently(
@@ -612,12 +612,12 @@ export class ChunkedUploadService {
 
         // 如果重传后仍有失败的分片，返回错误
         if (retryResult.failedChunks.length > 0) {
-          console.log('恢复上传重传后仍有失败分片:', retryResult.failedChunks);
+
 
           // 清理localStorage中的失败会话数据
           try {
             localStorage.removeItem(`upload_${taskId}`);
-            console.log(`Cleaned localStorage after failed resume upload: ${taskId}`);
+
           } catch (cleanupError) {
             console.warn('Failed to clean localStorage after failed resume upload:', cleanupError);
           }
@@ -628,9 +628,9 @@ export class ChunkedUploadService {
           };
         }
 
-        console.log(`恢复上传所有分片上传成功: ${totalCompletedChunks}/${totalChunks}`);
+
       } else {
-        console.log(`恢复上传所有分片上传成功: ${totalCompletedChunks}/${totalChunks}`);
+
       }
 
       // 验证所有分片都已上传完成
@@ -640,7 +640,7 @@ export class ChunkedUploadService {
         // 清理localStorage中的失败会话数据
         try {
           localStorage.removeItem(`upload_${taskId}`);
-          console.log(`Cleaned localStorage after resume upload chunk count mismatch: ${taskId}`);
+
         } catch (cleanupError) {
           console.warn('Failed to clean localStorage after resume upload chunk count mismatch:', cleanupError);
         }
@@ -658,7 +658,7 @@ export class ChunkedUploadService {
       // 恢复上传失败时清理localStorage
       try {
         localStorage.removeItem(`upload_${taskId}`);
-        console.log(`Cleaned localStorage after resume upload failure: ${taskId}`);
+
       } catch (cleanupError) {
         console.warn('Failed to clean localStorage after resume upload failure:', cleanupError);
       }
@@ -714,7 +714,7 @@ export class ChunkedUploadService {
               }
 
               // 输出调试信息
-            console.log(`Upload session ${key}: status=${session.status}, age=${Math.round((now - createdAt) / (60 * 60 * 1000))}h, willClean=${isCompleted || isExpired}`);
+
           }
         } catch {
           // 如果数据损坏，也清理掉
@@ -728,20 +728,9 @@ export class ChunkedUploadService {
       // 清理过期的会话数据
       keysToRemove.forEach(key => {
         localStorage.removeItem(key);
-        console.log(`Cleaned upload session: ${key}`);
       });
 
-      // 输出清理统计信息
-      console.log(`Upload session cleanup completed:
-- Total upload sessions found: ${totalUploadKeys}
-- Completed sessions cleaned: ${completedSessions}
-- Expired sessions cleaned: ${expiredSessions}
-- Corrupted sessions cleaned: ${corruptedSessions}
-- Total sessions cleaned: ${keysToRemove.length}`);
-
-      if (keysToRemove.length === 0 && totalUploadKeys > 0) {
-        console.log('No upload sessions needed cleanup - all sessions are active and valid');
-      }
+      // Upload session cleanup completed
     } catch (error) {
       console.warn('Failed to cleanup expired upload sessions:', error);
     }
@@ -754,7 +743,7 @@ export class ChunkedUploadService {
   static cleanupUploadSession(taskId: string): void {
     try {
       localStorage.removeItem(`upload_${taskId}`);
-      console.log(`Cleaned upload session: ${taskId}`);
+
     } catch (error) {
       console.warn(`Failed to cleanup upload session ${taskId}:`, error);
     }
