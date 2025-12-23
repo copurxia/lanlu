@@ -1,0 +1,15 @@
+[package]
+  cjc-version = "1.0.3"
+  name = "cjcron"
+  description = "Cron expression parser and next-run calculator for Cangjie"
+  version = "0.1.0"
+  target-dir = ""
+  src-dir = "src"
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+

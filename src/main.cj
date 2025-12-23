@@ -88,29 +88,25 @@ main(): Int64 {
         return 1
     }
 
-    // Shinobu服务配置现在由SystemSettingsService管理，不需要单独初始化
-    logger.info("Application starting... step 9d: shinobu service configuration is managed by SystemSettingsService")
-
-    // 启动 Shinobu 后台服务
-    logger.info("Application starting... step 10: starting shinobu service")
-    let shinobuService = ShinobuService.getInstance()
-    let shinobuStarted = shinobuService.start()
-    logger.info("Application starting... step 11: shinobu service started")
-    if (shinobuStarted) {
-        logger.info("Shinobu service started successfully")
-    } else {
-        logger.error("Failed to start Shinobu service")
-        return 1
-    }
-
     // 启动 TaskPool（从tasks表领取pending任务执行）
-    logger.info("Application starting... step 11a: starting taskpool service")
+    logger.info("Application starting... step 10: starting taskpool service")
     let taskpool = TaskPoolService.getInstance()
     let taskpoolStarted = taskpool.start()
     if (taskpoolStarted) {
         logger.info("TaskPool service started successfully")
     } else {
         logger.error("Failed to start TaskPool service")
+        return 1
+    }
+
+    // 启动 CronService（定时任务调度服务，包含启动任务触发）
+    logger.info("Application starting... step 11: starting cron service")
+    let cronService = CronService.getInstance()
+    let cronStarted = cronService.start()
+    if (cronStarted) {
+        logger.info("CronService started successfully")
+    } else {
+        logger.error("Failed to start CronService")
         return 1
     }
 

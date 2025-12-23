@@ -7,24 +7,25 @@ import lrr4cj.services.*
 import lrr4cj.dao.*
 
 /**
- * Shinobu控制器
+ * Shinobu控制器（兼容旧API，实际调用CronService）
  */
 public class ShinobuController {
     /**
-     * 获取Shinobu状态
+     * 获取Shinobu状态（返回CronService状态）
      */
     public static func getShinobuStatus(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
-        let statusData = service.getStatus()
-        let status = ShinobuStatus(statusData.success, statusData.isAlive, statusData.operation, statusData.pid)
+        let service = CronService.getInstance()
+        let cronStatus = service.getStatus()
+        let alive: Int32 = if (cronStatus.running) { 1 } else { 0 }
+        let status = ShinobuStatus(1, alive, "shinobu_status", 0)
         ctx.json(status.toJson())
     }
-    
+
     /**
-     * 停止Shinobu
+     * 停止Shinobu（停止CronService）
      */
     public static func stopShinobu(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
+        let service = CronService.getInstance()
         let success = service.stop()
         if (success) {
             let response = "{\"operation\":\"shinobu_stop\",\"success\":1}"
@@ -34,23 +35,23 @@ public class ShinobuController {
             ctx.json(response)
         }
     }
-    
+
     /**
-     * 重启Shinobu
+     * 重启Shinobu（重启CronService）
      */
     public static func restartShinobu(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
-        let success = service.restart()
-        let statusData = service.getStatus()
-        let result = ShinobuResult(if (success) { 1 } else { 0 }, "shinobu_restart", statusData.pid)
+        let service = CronService.getInstance()
+        service.stop()
+        let success = service.start()
+        let result = ShinobuResult(if (success) { 1 } else { 0 }, "shinobu_restart", 0)
         ctx.json(result.toJson())
     }
-    
+
     /**
-     * 启动Shinobu
+     * 启动Shinobu（启动CronService）
      */
     public static func startShinobu(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
+        let service = CronService.getInstance()
         let success = service.start()
         if (success) {
             let response = "{\"operation\":\"shinobu_start\",\"success\":1}"
@@ -60,24 +61,37 @@ public class ShinobuController {
             ctx.json(response)
         }
     }
-    
+
     /**
      * 扫描档案文件
      */
     public static func scanArchives(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
+        let service = CronService.getInstance()
         let result = service.scanArchives()
         let json = "{\"processed_count\":${result.processedCount},\"error_count\":${result.errorCount},\"total_found\":${result.totalFound},\"task_id\":${result.taskId}}"
         ctx.json(json)
     }
-    
+
     /**
-     * 获取Shinobu配置
+     * 获取Shinobu配置（返回CronService状态）
      */
     public static func getShinobuConfiguration(ctx: JoyContext) {
-        let service = ShinobuService.getInstance()
-        let config = service.getConfiguration()
-        ctx.json(config.toJson())
+        let service = CronService.getInstance()
+        let cronStatus = service.getStatus()
+        // 返回兼容格式
+        let json = """
+            {
+            "enableAutoScan":false,
+            "enableInitialScan":${SystemSettingsService.getBoolean("ENABLE_INITIAL_SCAN")},
+            "scanIntervalCron":"",
+            "enableAutoThumbnail":false,
+            "thumbnailIntervalCron":"",
+            "scanFallbackIntervalMs":0,
+            "cronServiceRunning":${cronStatus.running},
+            "scheduledTasksCount":${cronStatus.totalTasks},
+            "enabledTasksCount":${cronStatus.enabledTasks}
+            }"""
+        ctx.json(json)
     }
 
     /**

@@ -13,6 +13,7 @@ import lrr4cj.routes.api.auth.*
 import lrr4cj.routes.api.tags.*
 import lrr4cj.routes.api.user.*
 import lrr4cj.routes.api.smart_filters.*
+import lrr4cj.routes.api.cron.*
 import lrr4cj.controllers.*
 
 /**
@@ -51,6 +52,9 @@ public func registerApiRoutes(router: JoyRouters) {
 
     // 注册智能分类路由
     registerSmartFilterRoutes(router)
+
+    // 注册Cron定时任务路由
+    registerCronRoutes(router)
 
     // 注册系统设置路由
     registerSystemSettingsRoutes(router)

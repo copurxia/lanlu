@@ -115,29 +115,20 @@ public class SystemSettingsService {
         settings.add(createSetting("ARCHIVE_PATH", "./data/archive", "path", "storage", "归档文件目录路径"))
         settings.add(createSetting("THUMBNAIL_PATH", "./data/thumb", "path", "storage", "缩略图目录路径"))
         settings.add(createSetting("CACHE_PATH", "./data/cache", "path", "storage", "缓存目录路径"))
-
-        // 任务设置 - 默认值
-        settings.add(createSetting("SCAN_INTERVAL_CRON", "0 0 * * *", "string", "task", "扫描定时任务表达式"))
-        settings.add(createSetting("THUMBNAIL_INTERVAL_CRON", "0 0 * * *", "string", "task", "缩略图定时任务表达式"))
-        settings.add(createSetting("ENABLE_AUTO_SCAN", "true", "boolean", "task", "启用自动扫描"))
-        settings.add(createSetting("ENABLE_AUTO_THUMBNAIL", "true", "boolean", "task", "启用自动缩略图"))
-        settings.add(createSetting("ENABLE_INITIAL_SCAN", "false", "boolean", "task", "启用初始扫描"))
+        settings.add(createSetting("PLUGIN_PATH", "./plugins", "path", "storage", "插件目录路径"))
 
         // 性能设置 - 默认值
         settings.add(createSetting("MAX_CONCURRENT_JOBS", "8", "integer", "performance", "最大并发任务数"))
         settings.add(createSetting("SCAN_FALLBACK_INTERVAL_MS", "300000", "long", "performance", "扫描回退间隔（毫秒）"))
 
-        // 数据库检查设置 - 默认值
-        settings.add(createSetting("ENABLE_DB_CHECK", "true", "boolean", "task", "启用数据库检查"))
-        settings.add(createSetting("DB_CHECK_INTERVAL_CRON", "0 2 * * *", "string", "task", "数据库检查定时任务表达式"))
-        settings.add(createSetting("ENABLE_INITIAL_DB_CHECK", "true", "boolean", "task", "启用初始数据库检查"))
-
-        // 插件设置 - 默认值
-        settings.add(createSetting("PLUGIN_PATH", "./plugins", "path", "storage", "插件目录路径"))
-
         // 服务器信息设置 - 默认值
         settings.add(createSetting("SERVER_NAME", "兰鹿", "string", "server", "服务器名称"))
         settings.add(createSetting("SERVER_MOTD", "兰鹿轻盈，自在如风", "string", "server", "服务器欢迎消息"))
+
+        // 定时任务/启动任务设置 - 归类到 cron 分类（不在系统设置页面显示，由定时任务管理页面管理）
+        settings.add(createSetting("ENABLE_INITIAL_SCAN", "false", "boolean", "cron", "启用初始扫描"))
+        settings.add(createSetting("ENABLE_INITIAL_DB_CHECK", "true", "boolean", "cron", "启用初始数据库检查"))
+        settings.add(createSetting("ENABLE_INITIAL_PLUGIN_SCAN", "true", "boolean", "cron", "启用初始插件扫描"))
 
         // 返回设置数组
         let settingsArray = settings.toArray()
@@ -200,6 +191,7 @@ public class SystemSettingsService {
         translations["启用数据库检查"] = "Enable Database Check"
         translations["数据库检查定时任务表达式"] = "Database Check Cron Expression"
         translations["启用初始数据库检查"] = "Enable Initial Database Check"
+        translations["启用初始插件扫描"] = "Enable Initial Plugin Scan"
         translations["插件目录路径"] = "Plugin Directory Path"
         translations["服务器名称"] = "Server Name"
         translations["服务器欢迎消息"] = "Server Welcome Message"
@@ -374,9 +366,9 @@ public class SystemSettingsService {
     }
 
     /**
-     * 获取所有分类
+     * 获取所有分类（仅返回系统设置页面显示的分类，不包含 cron）
      */
     public static func getCategories(): Array<String> {
-        return ["storage", "task", "performance", "server"]
+        return ["storage", "performance", "server"]
     }
 }
