@@ -256,7 +256,7 @@ public class PluginService {
                 logger.info("扫描插件类型目录", ("type", pluginType), ("path", typePath))
 
                 if (exists(typeDir)) {
-                    let entries = FsUtils.listDirectory(typePath)
+                    let entries = DirectoryScanner.listDirectory(typePath)
 
                     for (entry in entries) {
                         // 只支持.ts (TypeScript/Deno) 插件文件

@@ -364,24 +364,6 @@ public class ArchiveUtils {
         }
     }
 
-    // ==================== 原有方法（保留） ====================
-
-    /**
-     * 检查文件是否为支持的档案格式
-     */
-    public static func isSupportedArchive(fileName: String): Bool {
-        let ext = FileUtils.getFileExtensionWithoutDot(fileName)
-        return SUPPORTED_ARCHIVE_EXTENSIONS.contains(ext)
-    }
-
-    /**
-     * 检查文件是否为支持的图像格式
-     */
-    public static func isSupportedImage(fileName: String): Bool {
-        let ext = FileUtils.getFileExtensionWithoutDot(fileName)
-        return SUPPORTED_IMAGE_EXTENSIONS.contains(ext)
-    }
-
     /**
      * 从压缩包中提取单个文件到内存流
      */
@@ -563,32 +545,6 @@ public class ArchiveUtils {
             }
             return base + "/" + part
         }
-    }
-
-    /**
-     * 合并数组
-     */
-    public static func combineArrays(arr1: Array<String>, arr2: Array<String>): Array<String> {
-        let result = ArrayList<String>()
-        for (item in arr1) {
-            result.add(item)
-        }
-        for (item in arr2) {
-            result.add(item)
-        }
-        return result.toArray()
-    }
-
-    /**
-     * 添加文件到数组
-     */
-    public static func addFileToArray(arr: Array<String>, file: String): Array<String> {
-        let result = ArrayList<String>()
-        for (item in arr) {
-            result.add(item)
-        }
-        result.add(file)
-        return result.toArray()
     }
 
     /**
