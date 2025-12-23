@@ -334,7 +334,7 @@ public class CronService {
             "定时目录扫描",
             "0 */6 * * *",
             "scan_directory",
-            taskParameters: "{\"scan_path\":\"\",\"trigger_source\":\"cron\"}",
+            taskParameters: "",  // 不需要参数，会自动从系统设置读取 ARCHIVE_PATH
             enabled: false,  // 默认禁用，用户可手动启用
             priority: 30
         )
@@ -350,7 +350,7 @@ public class CronService {
             "定时数据库检查",
             "0 2 * * *",
             "check_database",
-            taskParameters: "{}",
+            taskParameters: "",  // 不需要参数
             enabled: false,
             priority: 50
         )
@@ -366,7 +366,7 @@ public class CronService {
             "定时插件扫描",
             "0 1 * * *",
             "scan_plugins",
-            taskParameters: "{}",
+            taskParameters: "",  // 不需要参数
             enabled: false,
             priority: 50
         )
@@ -393,9 +393,15 @@ public class CronService {
             logger.info("Recovered orphaned tasks", ("count", recoveredCount.toString()))
         }
 
-        // 触发插件扫描任务（总是在启动时执行）
-        let pluginTaskId = triggerPluginScan(priority: 50, triggerSource: "startup")
-        logger.info("Triggered startup scan_plugins task", ("task_id", pluginTaskId.toString()))
+        // 检查是否启用初始插件扫描
+        let enableInitialPluginScan = SystemSettingsService.getBoolean("ENABLE_INITIAL_PLUGIN_SCAN")
+        if (enableInitialPluginScan) {
+            logger.info("ENABLE_INITIAL_PLUGIN_SCAN is enabled, triggering plugin scan")
+            let pluginTaskId = triggerPluginScan(priority: 50, triggerSource: "startup")
+            logger.info("Triggered startup scan_plugins task", ("task_id", pluginTaskId.toString()))
+        } else {
+            logger.info("ENABLE_INITIAL_PLUGIN_SCAN is disabled, skipping initial plugin scan")
+        }
 
         // 检查是否启用初始扫描
         let enableInitialScan = SystemSettingsService.getBoolean("ENABLE_INITIAL_SCAN")
