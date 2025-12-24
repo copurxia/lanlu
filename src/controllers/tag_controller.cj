@@ -254,6 +254,49 @@ public class TagController {
     }
 
     /**
+     * GET /api/tags/autocomplete?q=...&lang=zh|en&limit=10
+     * 返回自动补全建议列表
+     */
+    public static func autocomplete(ctx: JoyContext): Unit {
+        let query = (ctx.getQuery("q") ?? "").trimAscii()
+        let lang = langFromQuery(ctx)
+        let limitStr = (ctx.getQuery("limit") ?? "10").trimAscii()
+
+        var limit: Int64 = 10
+        try { limit = Int64.parse(limitStr) } catch (_: Exception) {}
+        if (limit <= 0) { limit = 10 }
+        if (limit > 50) { limit = 50 }
+
+        if (query.size == 0) {
+            ResponseView.successJson(ctx, "{\"suggestions\":[]}", "获取自动补全建议成功")
+            return
+        }
+
+        let results = TagDao.autocompleteSearch(query, lang, limit)
+
+        var suggestionsJson = "["
+        var first = true
+        for ((fullName, translatedText) in results) {
+            if (!first) { suggestionsJson = suggestionsJson + "," } else { first = false }
+            // 返回格式：{ value: "namespace:name", label: "翻译文本", display: "namespace:翻译文本" }
+            let (namespace, _) = TagDao.parseTagName(fullName)
+            let display = if (namespace.size > 0) {
+                "${namespace}:${translatedText}"
+            } else {
+                translatedText
+            }
+            suggestionsJson = suggestionsJson + "{"
+            suggestionsJson = suggestionsJson + "\"value\":\"${escapeJsonString(fullName)}\","
+            suggestionsJson = suggestionsJson + "\"label\":\"${escapeJsonString(translatedText)}\","
+            suggestionsJson = suggestionsJson + "\"display\":\"${escapeJsonString(display)}\""
+            suggestionsJson = suggestionsJson + "}"
+        }
+        suggestionsJson = suggestionsJson + "]"
+
+        ResponseView.successJson(ctx, "{\"suggestions\":${suggestionsJson}}", "获取自动补全建议成功")
+    }
+
+    /**
      * GET /api/admin/tags/names
      * 返回所有标签名（用于自动补全）
      */

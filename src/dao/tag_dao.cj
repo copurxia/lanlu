@@ -1089,4 +1089,103 @@ public class TagDao {
     private static func escapeSQL(s: String): String {
         return s.replace("'", "''")
     }
+
+    // ============ 自动补全搜索方法 ============
+
+    /**
+     * 自动补全搜索标签
+     * 搜索标签名和翻译文本，返回带翻译的结果
+     * @param query 搜索词
+     * @param lang 语言代码
+     * @param limit 返回数量限制
+     * @return 匹配的标签列表 [(fullName, translatedText)]
+     */
+    public static func autocompleteSearch(query: String, lang: String, limit: Int64): ArrayList<(String, String)> {
+        var result: ArrayList<(String, String)> = ArrayList<(String, String)>()
+
+        if (query.size == 0) {
+            return result
+        }
+
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 搜索标签名(namespace:name)和翻译文本
+                    // 使用 JSONB 提取指定语言的翻译文本进行搜索
+                    // 优先级：1=name精确匹配, 2=name前缀匹配, 3=翻译精确匹配, 4=翻译前缀匹配, 5=模糊匹配
+                    let sql = """
+                        SELECT namespace, name, translations,
+                               CASE
+                                   WHEN name ILIKE ? THEN 1
+                                   WHEN name ILIKE ? THEN 2
+                                   WHEN translations->?->>'text' ILIKE ? THEN 3
+                                   WHEN translations->?->>'text' ILIKE ? THEN 4
+                                   ELSE 5
+                               END as match_priority
+                        FROM tags
+                        WHERE name ILIKE ?
+                           OR (namespace != '' AND namespace || ':' || name ILIKE ?)
+                           OR translations->?->>'text' ILIKE ?
+                           OR translations::text ILIKE ?
+                        ORDER BY match_priority, name
+                        LIMIT ?
+                    """
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        let exactPattern = query
+                        let prefixPattern = query + "%"
+                        let likePattern = "%" + query + "%"
+                        // CASE 中的参数
+                        stmt.set(0, exactPattern)       // name 精确匹配优先级
+                        stmt.set(1, prefixPattern)      // name 前缀匹配优先级
+                        stmt.set(2, lang)               // 翻译精确匹配的语言
+                        stmt.set(3, exactPattern)       // 翻译精确匹配
+                        stmt.set(4, lang)               // 翻译前缀匹配的语言
+                        stmt.set(5, prefixPattern)      // 翻译前缀匹配
+                        // WHERE 中的参数
+                        stmt.set(6, likePattern)        // name 模糊搜索
+                        stmt.set(7, likePattern)        // namespace:name 模糊搜索
+                        stmt.set(8, lang)               // 翻译搜索的语言
+                        stmt.set(9, likePattern)        // 翻译模糊搜索
+                        stmt.set(10, likePattern)       // 全文本模糊搜索（备用）
+                        stmt.set(11, limit)
+
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let namespace = rs.getOrNull<String>(0) ?? ""
+                                let name = rs.getOrNull<String>(1) ?? ""
+                                let translationsJson = rs.getOrNull<String>(2) ?? "{}"
+
+                                let fullName = if (namespace.size > 0) {
+                                    "${namespace}:${name}"
+                                } else {
+                                    name
+                                }
+
+                                // 获取对应语言的翻译
+                                let translations = parseTranslationsJson(translationsJson)
+                                let translatedText = match (translations.get(lang)) {
+                                    case Some(t) => if (t.text.size > 0) { t.text } else { name }
+                                    case None => name
+                                }
+
+                                result.add((fullName, translatedText))
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("自动补全搜索失败", ("error", e.message), ("query", query))
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => ()
+        }
+        return result
+    }
 }

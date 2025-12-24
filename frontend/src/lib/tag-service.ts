@@ -87,6 +87,21 @@ export class TagService {
   }
 
   /**
+   * 自动补全搜索标签
+   * @param q 搜索词
+   * @param lang 语言代码
+   * @param limit 返回数量限制
+   */
+  static async autocomplete(q: string, lang: string, limit: number = 10): Promise<{ value: string; label: string; display: string }[]> {
+    if (!q) return [];
+    const resp = await apiClient.get('/api/tags/autocomplete', {
+      params: { q, lang, limit }
+    });
+    const data = resp.data?.data;
+    return (data?.suggestions ?? []) as { value: string; label: string; display: string }[];
+  }
+
+  /**
    * 获取所有标签名（用于自动补全）
    */
   static async adminListTagNames(): Promise<string[]> {

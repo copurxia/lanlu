@@ -18,6 +18,11 @@ public func registerTagRoutes(router: JoyRouters): Unit {
         TagController.listNamespaces(ctx)
     })
 
+    // 公开接口：自动补全搜索
+    router.get("/api/tags/autocomplete", { ctx =>
+        TagController.autocomplete(ctx)
+    })
+
     // 公开接口：获取标签列表（支持分页和搜索）
     router.get("/api/tags", { ctx =>
         TagController.list(ctx)
