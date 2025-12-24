@@ -854,9 +854,9 @@ public class TagDao {
             return translatedTagsString
         }
 
-        // 获取所有标签的翻译映射
-        let allTags = listAllTagNames()
-        let allTranslationsMap = batchGetTranslations(allTags, lang)
+        // 获取当前标签的翻译映射（只查询需要的标签，而不是所有标签）
+        // let allTags = listAllTagNames()  // 移除：不再获取所有标签，避免性能问题
+        let allTranslationsMap = batchGetTranslations(tags.toArray(), lang)
 
         // 构建反向映射：翻译文本 -> 原始标签
         var reverseMap: HashMap<String, String> = HashMap<String, String>()

@@ -260,7 +260,13 @@ public class ArchiveController {
                     // 使用TagDao更新标签
                     let tagUpdateSuccess = TagDao.updateArchiveTags(id, originalTags)
                     if (!tagUpdateSuccess) {
-                        println("Failed to update tags for archive ${id}")
+                        // 记录错误日志到日志文件，而不是控制台
+                        getLogger("archive_controller").error("Failed to update tags for archive ${id}")
+                        // 返回错误响应给前端
+                        let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update tags\",\"success\":0}"
+                        ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                        ctx.json(errorResponse)
+                        return
                     }
                 case None => () // 不更新标签
             }
