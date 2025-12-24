@@ -67,8 +67,16 @@ export class TankoubonService {
   /**
    * Add archive to tankoubon
    */
-  static async addArchiveToTankoubon(tankoubonId: string, archiveId: string): Promise<void> {
-    await apiClient.put(`${this.baseUrl}/${tankoubonId}/${archiveId}`, undefined);
+  static async addArchiveToTankoubon(tankoubonId: string, archiveId: string): Promise<{ success: boolean; message?: string; error?: string }> {
+    const response = await apiClient.put<{ success: number; operation: string; successMessage?: string; error?: string }>(
+      `${this.baseUrl}/${tankoubonId}/${archiveId}`,
+      undefined
+    );
+    return {
+      success: response.data.success === 1,
+      message: response.data.successMessage,
+      error: response.data.error
+    };
   }
 
   /**

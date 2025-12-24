@@ -39,6 +39,13 @@ export function AddToTankoubonDialog({
   const [newTankoubonName, setNewTankoubonName] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [query, setQuery] = useState('');
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = useState(false);
+
+  // 设置mounted状态
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const filteredTankoubons = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -47,6 +54,7 @@ export function AddToTankoubonDialog({
   }, [query, tankoubons]);
 
   function handleOpenChange(newOpen: boolean) {
+    if (!mounted) return;
     setOpen(newOpen);
     if (!newOpen) {
       setShowCreateForm(false);
@@ -57,6 +65,7 @@ export function AddToTankoubonDialog({
 
   // Fetch all tankoubons
   const fetchTankoubons = async () => {
+    if (!mounted) return;
     try {
       setLoading(true);
       const data = await TankoubonService.getAllTankoubons();
@@ -69,20 +78,33 @@ export function AddToTankoubonDialog({
   };
 
   useEffect(() => {
-    if (open) {
+    if (open && mounted) {
       fetchTankoubons();
     }
-  }, [open]);
+  }, [open, mounted]);
 
   // Add archive to existing tankoubon
   const handleAddToTankoubon = async (tankoubonId: string) => {
+    if (!mounted) return;
     try {
       setAdding(tankoubonId);
-      await TankoubonService.addArchiveToTankoubon(tankoubonId, archiveId);
-      handleOpenChange(false);
-      onAdded?.();
+      const result = await TankoubonService.addArchiveToTankoubon(tankoubonId, archiveId);
+
+      if (result.success) {
+        handleOpenChange(false);
+        onAdded?.();
+        // 显示成功消息
+        if (result.message) {
+          console.log('成功添加到合集:', result.message);
+        }
+      } else {
+        console.error('添加失败:', result.error);
+        // TODO: 显示错误消息给用户
+        alert(`添加失败: ${result.error || '未知错误'}`);
+      }
     } catch (error) {
       console.error('Failed to add archive to tankoubon:', error);
+      alert('添加失败: 网络错误或服务器异常');
     } finally {
       setAdding(null);
     }
@@ -90,21 +112,29 @@ export function AddToTankoubonDialog({
 
   // Create new tankoubon and add archive
   const handleCreateAndAdd = async () => {
-    if (!newTankoubonName.trim()) return;
+    if (!mounted || !newTankoubonName.trim()) return;
 
     try {
       setCreating(true);
       const result = await TankoubonService.createTankoubon({ name: newTankoubonName.trim() });
 
       if (result.success && result.tankoubon_id) {
-        await TankoubonService.addArchiveToTankoubon(result.tankoubon_id, archiveId);
-        setNewTankoubonName('');
-        setShowCreateForm(false);
-        handleOpenChange(false);
-        onAdded?.();
+        const addResult = await TankoubonService.addArchiveToTankoubon(result.tankoubon_id, archiveId);
+
+        if (addResult.success) {
+          setNewTankoubonName('');
+          setShowCreateForm(false);
+          handleOpenChange(false);
+          onAdded?.();
+          console.log('成功创建合集并添加:', addResult.message || '成功');
+        } else {
+          console.error('添加失败:', addResult.error);
+          alert(`添加失败: ${addResult.error || '未知错误'}`);
+        }
       }
     } catch (error) {
       console.error('Failed to create tankoubon:', error);
+      alert('创建失败: 网络错误或服务器异常');
     } finally {
       setCreating(false);
     }

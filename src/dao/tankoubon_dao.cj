@@ -186,7 +186,7 @@ public class TankoubonDao {
                     let tankoubonId = "TANK_${timestamp}"
 
                     let stmt = conn.prepareStatement(
-                        "INSERT INTO tankoubons (tankoubon_id, name, summary, tags) VALUES (?, ?, '', '')")
+                        "INSERT INTO tankoubons (tankoubon_id, name, summary) VALUES (?, ?, '')")
                     try {
                         stmt.set(0, tankoubonId)
                         stmt.set(1, name)
@@ -211,18 +211,17 @@ public class TankoubonDao {
     /**
      * 更新Tankoubon元数据
      */
-    public static func updateTankoubon(tankoubonId: String, name: String, summary: String, tags: String): Bool {
+    public static func updateTankoubon(tankoubonId: String, name: String, summary: String): Bool {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement(
-                        "UPDATE tankoubons SET name = ?, summary = ?, tags = ?, updated_at = CURRENT_TIMESTAMP WHERE tankoubon_id = ?")
+                        "UPDATE tankoubons SET name = ?, summary = ?, updated_at = CURRENT_TIMESTAMP WHERE tankoubon_id = ?")
                     try {
                         stmt.set(0, name)
                         stmt.set(1, summary)
-                        stmt.set(2, tags)
-                        stmt.set(3, tankoubonId)
+                        stmt.set(2, tankoubonId)
                         stmt.update()
                         getLogger("tankoubon_dao").info("更新Tankoubon成功", ("tankoubonId", tankoubonId))
                         return true

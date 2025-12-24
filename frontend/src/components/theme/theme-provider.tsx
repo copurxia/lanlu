@@ -28,11 +28,27 @@ export function ThemeProvider({
   storageKey = 'lrr4cj-ui-theme',
   ...props
 }: ThemeProviderProps) {
-  const [theme, setTheme] = useState<Theme>(
-    () => (typeof window !== 'undefined' && (localStorage.getItem(storageKey) as Theme)) || defaultTheme
-  );
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = useState(false);
+  const [theme, setThemeState] = useState<Theme>(defaultTheme);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // 只有在挂载后才从localStorage读取主题
+  useEffect(() => {
+    if (!mounted) return;
+
+    const savedTheme = localStorage.getItem(storageKey) as Theme;
+    if (savedTheme) {
+      setThemeState(savedTheme);
+    }
+  }, [mounted, storageKey]);
+
+  useEffect(() => {
+    if (!mounted) return;
+
     const root = window.document.documentElement;
 
     root.classList.remove('light', 'dark');
@@ -50,15 +66,21 @@ export function ThemeProvider({
     }
 
     root.classList.add(theme);
-  }, [theme]);
+  }, [theme, mounted]);
 
   const value = {
-    theme,
+    theme: mounted ? theme : defaultTheme,
     setTheme: (theme: Theme) => {
+      if (!mounted) return;
       localStorage.setItem(storageKey, theme);
-      setTheme(theme);
+      setThemeState(theme);
     },
   };
+
+  // 避免水合不匹配：在组件未挂载前不渲染任何内容
+  if (!mounted) {
+    return <>{children}</>;
+  }
 
   return (
     <ThemeProviderContext.Provider {...props} value={value}>

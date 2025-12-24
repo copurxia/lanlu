@@ -94,7 +94,7 @@ public class TankoubonController {
         let summary = ctx.getQuery("summary") ?? ""
         let tags = ctx.getQuery("tags") ?? ""
         
-        let success = TankoubonModel.updateTankoubon(id, name, summary, tags, [])
+        let success = TankoubonModel.updateTankoubon(id, name, summary, "", [])
         if (success) {
             let successResponse = "{\"error\":\"\",\"operation\":\"update_tankoubon\",\"success\":1,\"successMessage\":\"Updated tankoubon \\\"${name}\\\"!\"}"
             ctx.json(successResponse)

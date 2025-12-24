@@ -16,27 +16,37 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = useState(false);
   // 使用函数初始化状态，避免在 effect 中调用 setState
-  const [token, setToken] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('auth_token');
-    }
-    return null;
-  });
+  const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
 
-  // 使用函数式初始化避免在effect中调用setState
-  // token状态已通过useState的初始化函数设置
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // 只在挂载后从localStorage读取token
+  useEffect(() => {
+    if (!mounted) return;
+
+    if (typeof window !== 'undefined') {
+      const savedToken = localStorage.getItem('auth_token');
+      setToken(savedToken);
+    }
+  }, [mounted]);
 
   // 当token变化时，更新用户状态
   useEffect(() => {
+    if (!mounted) return;
+
     if (!token) {
       // token不存在时，用户状态应为null
       // 使用微任务来避免同步调用setState
       Promise.resolve().then(() => setUser(null));
       return;
     }
-    
+
     // 只有在 token 存在时才拉取用户信息，但不在这里验证 token 有效性
     // token 有效性由具体的 API 请求失败时处理
     void (async () => {
@@ -54,11 +64,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
     })();
-  }, [token]);
+  }, [token, mounted]);
 
   // 监听 API 401 错误事件
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (!mounted || typeof window === 'undefined') {
       return;
     }
 
@@ -75,9 +85,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('auth:unauthorized', handleUnauthorized);
     };
-  }, []);
+  }, [mounted]);
 
   const login = (newToken: string, newUser?: AuthUser | null) => {
+    if (!mounted) return;
     setToken(newToken);
     if (newUser) {
       setUser(newUser);
@@ -89,6 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    if (!mounted) return;
     setToken(null);
     setUser(null);
     if (typeof window !== 'undefined') {
@@ -99,6 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const refreshMe = async () => {
+    if (!mounted) return;
     if (!token) {
       setUser(null);
       return;

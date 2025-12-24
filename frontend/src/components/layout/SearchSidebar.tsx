@@ -62,9 +62,17 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   const [favoriteonly, setFavoriteonly] = useState(false);
   const [groupbyTanks, setGroupbyTanks] = useState(true);
   const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = useState(false);
+
+  // 设置mounted状态
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Load smart filters from API
   useEffect(() => {
+    if (!mounted) return;
     const loadSmartFilters = async () => {
       try {
         const response = await fetch(getApiUrl('/api/smart_filters'));
@@ -77,9 +85,10 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
       }
     };
     loadSmartFilters();
-  }, []);
+  }, [mounted]);
 
   const handleSearch = () => {
+    if (!mounted) return;
     onSearch({
       query,
       sortBy,
@@ -94,6 +103,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   };
 
   const handleReset = () => {
+    if (!mounted) return;
     setQuery('');
     setSortBy('date_added');
     setSortOrder('desc');
@@ -115,13 +125,14 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   };
 
   const handleSmartFilterClick = useCallback((filter: SmartFilter) => {
+    if (!mounted) return;
     // Calculate date from relative days
     let calculatedDateFrom = '';
     let calculatedDateTo = '';
 
     if (filter.date_from) {
       const days = parseInt(filter.date_from);
-      if (!isNaN(days)) {
+      if (!isNaN(days) && typeof window !== 'undefined') {
         const date = new Date();
         date.setDate(date.getDate() + days);
         calculatedDateFrom = date.toISOString().split('T')[0];
@@ -130,7 +141,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
 
     if (filter.date_to) {
       const days = parseInt(filter.date_to);
-      if (!isNaN(days)) {
+      if (!isNaN(days) && typeof window !== 'undefined') {
         const date = new Date();
         date.setDate(date.getDate() + days);
         calculatedDateTo = date.toISOString().split('T')[0];
@@ -158,7 +169,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
       untaggedonly: filter.untaggedonly || undefined,
       groupby_tanks: true,
     });
-  }, [onSearch]);
+  }, [onSearch, mounted]);
 
   const getFilterIcon = (iconName: string) => {
     const IconComponent = ICON_MAP[iconName] || Filter;
@@ -184,7 +195,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
-            {smartFilters.length > 0 ? (
+            {mounted && smartFilters.length > 0 ? (
               smartFilters.map((filter) => (
                 <Button
                   key={filter.id}
@@ -198,13 +209,14 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                 </Button>
               ))
             ) : (
-              // Fallback to default filters if API returns empty
+              // Fallback to default filters if API returns empty or not mounted
               <>
                 <Button
                   variant="outline"
                   size="sm"
                   className="w-full justify-start"
                   onClick={() => {
+                    if (!mounted) return;
                     setNewonly(true);
                     setUntaggedonly(false);
                     onSearch({ newonly: true });
@@ -218,6 +230,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                   size="sm"
                   className="w-full justify-start"
                   onClick={() => {
+                    if (!mounted) return;
                     setNewonly(false);
                     setUntaggedonly(true);
                     onSearch({ untaggedonly: true });
@@ -231,6 +244,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
                   size="sm"
                   className="w-full justify-start"
                   onClick={() => {
+                    if (!mounted || typeof window === 'undefined') return;
                     const lastWeek = new Date();
                     lastWeek.setDate(lastWeek.getDate() - 7);
                     onSearch({

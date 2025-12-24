@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { SearchBar } from '@/components/search/SearchBar';
 import { ArchiveService } from '@/lib/archive-service';
@@ -23,13 +23,19 @@ export function Header() {
   const { serverName, serverInfo } = useServerInfo();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [randomLoading, setRandomLoading] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
   const { token } = useAuth();
   const showBackButton = pathname !== '/';
   const isSettingsPage = pathname?.startsWith('/settings');
 
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const handleBack = () => {
+    if (!mounted) return;
     if (typeof window !== 'undefined' && window.history.length > 1) {
       router.back();
       return;
@@ -38,6 +44,7 @@ export function Header() {
   };
 
   const handleRandomRead = async () => {
+    if (!mounted) return;
     try {
       setRandomLoading(true);
       const randomArchives = await ArchiveService.getRandom({ count: 1 });

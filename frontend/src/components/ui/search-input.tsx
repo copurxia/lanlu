@@ -42,9 +42,16 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   const containerRef = React.useRef<HTMLDivElement>(null)
   const suggestionsRef = React.useRef<HTMLDivElement>(null)
   const debounceRef = React.useRef<NodeJS.Timeout | null>(null)
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = React.useState(false)
 
   // 解析当前的搜索词
   const [searchTokens, setSearchTokens] = React.useState<string[]>([])
+
+  // 设置mounted状态
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
 
   React.useEffect(() => {
     // 解析 value 为 tokens（支持空格分隔）
@@ -59,7 +66,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
 
   // 计算下拉框位置
   const updateDropdownPosition = React.useCallback(() => {
-    if (containerRef.current) {
+    if (containerRef.current && typeof window !== 'undefined') {
       const rect = containerRef.current.getBoundingClientRect()
       setDropdownPosition({
         top: rect.bottom + window.scrollY + 4,
@@ -116,19 +123,23 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
 
   // 监听滚动和resize事件更新位置
   React.useEffect(() => {
-    if (!showSuggestions) return
+    if (!showSuggestions || !mounted) return
 
     const handleScroll = () => updateDropdownPosition()
     const handleResize = () => updateDropdownPosition()
 
-    window.addEventListener('scroll', handleScroll, true)
-    window.addEventListener('resize', handleResize)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('scroll', handleScroll, true)
+      window.addEventListener('resize', handleResize)
+    }
 
     return () => {
-      window.removeEventListener('scroll', handleScroll, true)
-      window.removeEventListener('resize', handleResize)
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('scroll', handleScroll, true)
+        window.removeEventListener('resize', handleResize)
+      }
     }
-  }, [showSuggestions, updateDropdownPosition])
+  }, [showSuggestions, updateDropdownPosition, mounted])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newInputValue = e.target.value
@@ -196,6 +207,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   }
 
   const handleInputBlur = () => {
+    if (!mounted) return
     // 延迟关闭建议列表，以便点击事件能够触发
     setTimeout(() => {
       setShowSuggestions(false)
@@ -204,6 +216,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   }
 
   const handleInputFocus = () => {
+    if (!mounted) return
     if (inputValue && suggestions.length > 0) {
       updateDropdownPosition()
       setShowSuggestions(true)
@@ -212,16 +225,17 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
 
   // 滚动选中项到可见区域
   React.useEffect(() => {
+    if (!mounted) return
     if (selectedIndex >= 0 && suggestionsRef.current) {
       const selectedElement = suggestionsRef.current.children[selectedIndex] as HTMLElement
       if (selectedElement) {
         selectedElement.scrollIntoView({ block: 'nearest' })
       }
     }
-  }, [selectedIndex])
+  }, [selectedIndex, mounted])
 
   // 下拉框内容
-  const dropdownContent = showSuggestions && suggestions.length > 0 && (
+  const dropdownContent = mounted && showSuggestions && suggestions.length > 0 && (
     <div
       ref={suggestionsRef}
       className="fixed z-[9999] max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
@@ -312,7 +326,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
       </div>
 
       {/* 使用 Portal 将下拉框渲染到 body，避免被父容器 overflow 裁剪 */}
-      {typeof document !== 'undefined' && createPortal(dropdownContent, document.body)}
+      {mounted && typeof document !== 'undefined' && createPortal(dropdownContent, document.body)}
 
       {/* 加载指示器 */}
       {loading && inputValue && (

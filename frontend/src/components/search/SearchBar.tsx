@@ -14,15 +14,23 @@ function SearchBarContent() {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const searchInputRef = React.useRef<{ getInputValue?: () => string }>(null);
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = React.useState(false);
 
   useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     const urlQuery = searchParams?.get('q');
     if (urlQuery) {
       setQuery(urlQuery);
     }
-  }, [searchParams]);
+  }, [searchParams, mounted]);
 
   const handleSubmit = (e: React.FormEvent) => {
+    if (!mounted) return;
     e.preventDefault();
 
     // 从 SearchInput 获取当前输入值

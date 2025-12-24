@@ -25,9 +25,16 @@ function useDialogContext() {
 }
 
 const Dialog: React.FC<DialogProps> = ({ open = false, onOpenChange, children }) => {
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = React.useState(false)
+
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
+
   return (
     <DialogContext.Provider value={{ open: !!open, onOpenChange }}>
-      {children}
+      {mounted ? children : null}
     </DialogContext.Provider>
   )
 }
@@ -65,6 +72,12 @@ const DialogContent: React.FC<{
   size?: DialogSize
 }> = ({ className, children, size = 'md' }) => {
   const { open, onOpenChange } = useDialogContext()
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = React.useState(false)
+
+  React.useEffect(() => {
+    setMounted(true)
+  }, [])
 
   React.useEffect(() => {
     if (!open) return
@@ -75,7 +88,8 @@ const DialogContent: React.FC<{
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [open, onOpenChange])
 
-  if (!open) return null
+  // 在未挂载或未打开时不渲染任何内容，避免水合不匹配
+  if (!mounted || !open) return null
 
   // 尺寸映射
   const sizeClasses = {

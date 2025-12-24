@@ -21,25 +21,39 @@ const messages = {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
+  // 添加mounted状态以避免水合错误
+  const [mounted, setMounted] = useState(false);
   // 使用函数初始化状态，避免在 effect 中调用 setState
-  const [language, setLanguage] = useState<Language>(() => {
+  const [language, setLanguage] = useState<Language>('zh');
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  // 只在挂载后从localStorage读取语言设置
+  useEffect(() => {
+    if (!mounted) return;
+
     if (typeof window !== 'undefined') {
       // 从 localStorage 读取保存的语言设置
       const savedLanguage = localStorage.getItem('language') as Language;
       if (savedLanguage && (savedLanguage === 'zh' || savedLanguage === 'en')) {
-        return savedLanguage;
+        setLanguage(savedLanguage);
+        return;
       }
       // 尝试从浏览器语言检测
       const browserLanguage = navigator.language.toLowerCase();
       if (browserLanguage.startsWith('en')) {
-        return 'en';
+        setLanguage('en');
+        return;
       }
     }
-    return 'zh';
-  });
+    setLanguage('zh');
+  }, [mounted]);
 
   useEffect(() => {
     // 只在客户端执行
+    if (!mounted) return;
     if (typeof window !== 'undefined') {
       // 保存语言设置到 localStorage
       localStorage.setItem('language', language);
@@ -50,7 +64,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
       const event = new CustomEvent('languagechange', { detail: language });
       window.dispatchEvent(event);
     }
-  }, [language]);
+  }, [language, mounted]);
 
   const t = (key: string, params?: Record<string, any>): string => {
     const keys = key.split('.');
