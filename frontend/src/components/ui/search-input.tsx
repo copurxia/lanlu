@@ -23,14 +23,14 @@ interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
   compact?: boolean
 }
 
-export function SearchInput({
+export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, SearchInputProps>(({
   value = "",
   onChange,
   placeholder = "输入搜索关键词或标签",
   className,
   compact = false,
   ...props
-}: SearchInputProps) {
+}, ref) => {
   const { language } = useLanguage()
   const [inputValue, setInputValue] = React.useState("")
   const [suggestions, setSuggestions] = React.useState<TagSuggestion[]>([])
@@ -43,16 +43,17 @@ export function SearchInput({
   const suggestionsRef = React.useRef<HTMLDivElement>(null)
   const debounceRef = React.useRef<NodeJS.Timeout | null>(null)
 
-  // 解析当前的搜索词和已选择的标签
+  // 解析当前的搜索词
   const [searchTokens, setSearchTokens] = React.useState<string[]>([])
 
   React.useEffect(() => {
-    // 解析 value 为 tokens（支持空格和逗号分隔）
+    // 解析 value 为 tokens（支持空格分隔）
     if (value) {
-      const tokens = value.split(/[\s,]+/).filter(t => t.trim())
+      const tokens = value.split(/\s+/).filter(t => t.trim())
       setSearchTokens(tokens)
     } else {
       setSearchTokens([])
+      setInputValue("")
     }
   }, [value])
 
@@ -130,10 +131,10 @@ export function SearchInput({
   }, [showSuggestions, updateDropdownPosition])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newValue = e.target.value
-    setInputValue(newValue)
+    const newInputValue = e.target.value
+    setInputValue(newInputValue)
     // 从最后一个 token 获取搜索词
-    const tokens = newValue.split(/[\s,]+/).filter(t => t.trim())
+    const tokens = newInputValue.split(/\s+/).filter(t => t.trim())
     const lastToken = tokens[tokens.length - 1] || ""
     debouncedFetch(lastToken)
   }
@@ -149,7 +150,7 @@ export function SearchInput({
   }
 
   const handleSelectSuggestion = (suggestion: TagSuggestion) => {
-    addToken(suggestion.display)
+    addToken(suggestion.label)
     inputRef.current?.focus()
   }
 
@@ -182,13 +183,7 @@ export function SearchInput({
       }
     }
 
-    if (e.key === "Enter" || e.key === "," || e.key === " ") {
-      e.preventDefault()
-      const newValue = inputValue.trim()
-      if (newValue) {
-        addToken(newValue)
-      }
-    } else if (e.key === "Backspace" && !inputValue && searchTokens.length > 0) {
+    if (e.key === "Backspace" && !inputValue && searchTokens.length > 0) {
       // 删除最后一个 token
       const newTokens = searchTokens.slice(0, -1)
       onChange(newTokens.join(' '))
@@ -204,11 +199,7 @@ export function SearchInput({
     // 延迟关闭建议列表，以便点击事件能够触发
     setTimeout(() => {
       setShowSuggestions(false)
-      // 失焦时如果有内容，添加为 token
-      const newValue = inputValue.trim()
-      if (newValue) {
-        addToken(newValue)
-      }
+      // 失焦时不再自动转换为标签，保持输入的文本
     }, 200)
   }
 
@@ -255,8 +246,8 @@ export function SearchInput({
           }}
           onMouseEnter={() => setSelectedIndex(index)}
         >
-          <span className="font-medium">{suggestion.display}</span>
-          {suggestion.display !== suggestion.value && (
+          <span className="font-medium">{suggestion.label}</span>
+          {suggestion.label !== suggestion.value && (
             <span className="ml-2 text-muted-foreground text-xs">
               ({suggestion.value})
             </span>
@@ -265,6 +256,11 @@ export function SearchInput({
       ))}
     </div>
   )
+
+  // 暴露方法给父组件
+  React.useImperativeHandle(ref, () => ({
+    getInputValue: () => inputValue
+  }), [inputValue])
 
   return (
     <div className="relative" ref={containerRef}>
@@ -326,4 +322,6 @@ export function SearchInput({
       )}
     </div>
   )
-}
+})
+
+SearchInput.displayName = "SearchInput"

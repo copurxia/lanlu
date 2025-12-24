@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { Button } from '@/components/ui/button';
 import { SearchInput } from '@/components/ui/search-input';
 import { Search } from 'lucide-react';
@@ -13,6 +13,7 @@ function SearchBarContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [query, setQuery] = useState('');
+  const searchInputRef = React.useRef<{ getInputValue?: () => string }>(null);
 
   useEffect(() => {
     const urlQuery = searchParams?.get('q');
@@ -23,8 +24,13 @@ function SearchBarContent() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (query.trim()) {
-      router.push(`/?q=${encodeURIComponent(query.trim())}`);
+
+    // 从 SearchInput 获取当前输入值
+    const currentInputValue = (searchInputRef.current as any)?.getInputValue?.() || '';
+    const fullQuery = currentInputValue ? `${query} ${currentInputValue}`.trim() : query;
+
+    if (fullQuery.trim()) {
+      router.push(`/?q=${encodeURIComponent(fullQuery.trim())}`);
     } else {
       appEvents.emit(AppEvents.SEARCH_RESET);
       router.push('/');
@@ -36,6 +42,7 @@ function SearchBarContent() {
       <div className="flex gap-2 items-center w-full">
         <div className="flex-1 min-w-0">
           <SearchInput
+            ref={searchInputRef}
             placeholder={t('search.placeholder')}
             value={query}
             onChange={setQuery}
