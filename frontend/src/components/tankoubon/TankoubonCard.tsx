@@ -6,13 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Eye, BookOpen, Heart } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { TankoubonService } from '@/lib/tankoubon-service';
 import { ArchiveService } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
 import { TagService } from '@/lib/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import type { Archive } from '@/types/archive';
 
 interface TankoubonCardProps {
   tankoubon: Tankoubon;
@@ -30,9 +28,10 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
   const [isFavorite, setIsFavorite] = useState(tankoubon.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
-  const [firstArchive, setFirstArchive] = useState<Archive | null>(null);
-  const [loadingFirstArchive, setLoadingFirstArchive] = useState(false);
   const [imageError, setImageError] = useState(false);
+
+  // 直接从 archives 获取第一个 ID，无需额外 API 调用
+  const firstArchiveId = tankoubon.archives?.[0];
 
   const allTags = useMemo(() => {
     return tankoubon.tags ? tankoubon.tags.split(',').map(tag => tag.trim()).filter(tag => tag) : [];
@@ -75,62 +74,6 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
     };
   }, [tankoubon.tankoubon_id, language, allTags.length]);
 
-  // 获取第一本归档的信息（用于显示封面和跳转阅读器）
-  useEffect(() => {
-    if (!tankoubon.tankoubon_id) return;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        setLoadingFirstArchive(true);
-
-        // 优先使用传入的 archives 数据
-        let archives = tankoubon.archives || [];
-
-        // 如果没有 archives 数据，记录警告但不发起API调用
-        // 依赖数据提供者确保数据完整性
-        if (archives.length === 0) {
-          console.warn('TankoubonCard: tankoubon.archives is empty. ' +
-            'Please provide complete data or use getTankoubonsWithArchives().');
-          return;
-        }
-
-        if (archives.length > 0 && !cancelled) {
-          try {
-            // 如果 archives 是ID数组，需要获取详细信息
-            // 如果已经是 Archive 对象，直接使用
-            let firstArchiveDetail: Archive;
-
-            if (typeof archives[0] === 'string') {
-              // archives[0] 是 ID 字符串
-              firstArchiveDetail = await ArchiveService.getArchive(archives[0] as string);
-            } else {
-              // archives[0] 已经是 Archive 对象
-              firstArchiveDetail = archives[0] as Archive;
-            }
-
-            if (!cancelled) {
-              setFirstArchive(firstArchiveDetail);
-            }
-          } catch (error) {
-            console.error('Failed to fetch first archive:', error);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to fetch tankoubon detail:', error);
-      } finally {
-        if (!cancelled) {
-          setLoadingFirstArchive(false);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [tankoubon.tankoubon_id, tankoubon.archives]);
-
   // 处理收藏点击
   const handleFavoriteClick = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -160,23 +103,19 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
           onClick={(e) => {
             e.stopPropagation(); // 阻止事件冒泡到卡片的点击事件
             // 点击封面进入第一本归档的阅读器
-            if (firstArchive) {
-              router.push(`/reader?id=${firstArchive.arcid}`);
+            if (firstArchiveId) {
+              router.push(`/reader?id=${firstArchiveId}`);
             }
           }}
         >
-          {firstArchive && !imageError ? (
+          {firstArchiveId && !imageError ? (
             <Image
-              src={ArchiveService.getThumbnailUrl(firstArchive.arcid)}
+              src={ArchiveService.getThumbnailUrl(firstArchiveId)}
               alt={tankoubon.name}
               fill
               className="object-cover"
               onError={() => setImageError(true)}
             />
-          ) : loadingFirstArchive ? (
-            <div className="w-full h-full bg-muted flex items-center justify-center">
-              <span className="text-muted-foreground animate-pulse">...</span>
-            </div>
           ) : (
             <div className="w-full h-full bg-muted flex items-center justify-center">
               <span className="text-muted-foreground">{t('archive.noCover')}</span>
