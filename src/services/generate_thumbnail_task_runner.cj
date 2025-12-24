@@ -49,15 +49,15 @@ public class GenerateThumbnailTaskRunner {
         let logger = getLogger("generate_thumbnail_task")
         TaskIO.appendLog(taskId, "generate_thumbnail task started")
 
-        let (archiveId, archivePath) = parseParameters(parameters)
+        let (archiveId, archivePath, archiveType) = parseParameters(parameters)
         if (archiveId.size == 0 || archivePath.size == 0) {
             fail(taskId, "archive_id and archive_path are required")
             return
         }
 
-        TaskModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId}")
+        TaskModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId} (type: ${archiveType})")
 
-        let result = generateThumbnail(taskId, archivePath, archiveId)
+        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType)
         if (!result.success) {
             logger.error("generate_thumbnail failed", ("archive_id", archiveId), ("error", result.error))
             fail(taskId, result.error)
@@ -74,51 +74,24 @@ public class GenerateThumbnailTaskRunner {
     /**
      * 生成缩略图
      */
-    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String): ProcessResultData {
+    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String): ProcessResultData {
         let logger = getLogger("generate_thumbnail")
-        TaskIO.appendLog(taskId, "Starting thumbnail generation for archive: ${archivePath}")
-        logger.info("Starting thumbnail generation for archive: ${archivePath}")
+        TaskIO.appendLog(taskId, "Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
+        logger.info("Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
 
         let actualArchivePath = FileUtils.resolvePath(archivePath)
         TaskIO.appendLog(taskId, "Resolved archive path: ${actualArchivePath}")
         logger.info("Resolved archive path: ${actualArchivePath}")
 
-        TaskIO.appendLog(taskId, "Listing archive entries...")
-        logger.info("Listing archive entries...")
-        let entries = ArchiveUtils.listArchiveEntries(actualArchivePath)
-        TaskIO.appendLog(taskId, "Found ${entries.size} entries in archive")
-        logger.info("Found ${entries.size} entries in archive")
-
-        if (entries.size == 0) {
-            let errorMsg = "Archive is empty or contains no entries: ${actualArchivePath}"
-            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-            logger.error(errorMsg)
-            return ProcessResultData(false, "", "No entries found in archive")
-        }
-
-        var firstImageEntry: String = ""
-        for (entry in entries) {
-            let ext = ArchiveUtils.getFileExtension(entry)
-            var isImageFile = false
-            for (imgExt in ArchiveUtils.SUPPORTED_IMAGE_EXTENSIONS) {
-                if (ext == imgExt) {
-                    isImageFile = true
-                    break
-                }
-            }
-            if (isImageFile) {
-                firstImageEntry = entry
-                break
-            }
-        }
-
+        // 根据archiveType获取第一张图片的路径
+        let (firstImageEntry, imageFilePath) = getFirstImageForThumbnail(taskId, actualArchivePath, archiveType, archiveId)
         if (firstImageEntry.size == 0) {
-            let errorMsg = "No image files found in archive"
+            let errorMsg = "No image files found in ${archiveType} archive"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
 
-        TaskIO.appendLog(taskId, "First image entry: ${firstImageEntry}")
+        TaskIO.appendLog(taskId, "First image: ${firstImageEntry}")
 
         // 使用任务ID创建独立的临时目录
         let taskTempDir = FileUtils.joinPath(cachePath.toString(), "task/${taskId}")
@@ -127,10 +100,19 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Created task temp directory: ${taskTempDir}")
 
         let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${ArchiveUtils.getFileExtension(firstImageEntry)}")
-        TaskIO.appendLog(taskId, "Extracting image to: ${tempImagePath}")
-        let extractSuccess = ArchiveUtils.extractArchiveEntry(actualArchivePath, firstImageEntry, tempImagePath)
-        if (!extractSuccess) {
-            let errorMsg = "Failed to extract image from archive"
+        TaskIO.appendLog(taskId, "Copying/Extracting image to: ${tempImagePath}")
+
+        // 根据类型复制或提取图片
+        let copySuccess = if (archiveType == "folder") {
+            // 文件夹类型：直接复制文件
+            copyImageFile(imageFilePath, tempImagePath)
+        } else {
+            // 压缩包类型：从归档中提取
+            ArchiveUtils.extractArchiveEntry(actualArchivePath, firstImageEntry, tempImagePath)
+        }
+
+        if (!copySuccess) {
+            let errorMsg = "Failed to copy/extract image from ${archiveType} archive"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
@@ -227,13 +209,14 @@ public class GenerateThumbnailTaskRunner {
         return ProcessResultData(true, thumbnailFilePath, thumbHash)
     }
 
-    private static func parseParameters(parameters: String): (String, String) {
+    private static func parseParameters(parameters: String): (String, String, String) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return ("", "")
+            return ("", "", "")
         }
         var archiveId = ""
         var archivePath = ""
+        var archiveType = "archive"  // 默认压缩包
         try {
             let jsonVal = JsonValue.fromStr(trimmed)
             match (jsonVal) {
@@ -253,10 +236,22 @@ public class GenerateThumbnailTaskRunner {
                             case _ => throw Exception("archive_path must be a string")
                         }
                     }
+                    if (fields.contains("type")) {
+                        let value = fields["type"]
+                        match (value) {
+                            case s: JsonString =>
+                                archiveType = s.getValue().trimAscii()
+                                // 验证类型有效性
+                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf") {
+                                    archiveType = "archive"
+                                }
+                            case _ => ()
+                        }
+                    }
                 case _ => ()
             }
         } catch (_: Exception) {}
-        return (archiveId, archivePath)
+        return (archiveId, archivePath, archiveType)
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
@@ -312,6 +307,128 @@ public class GenerateThumbnailTaskRunner {
             logger.error(errorMsg)
             // 失败时使用文件路径作为备选
             return "fallback_${ArchiveUtils.generateFileHash(imagePath)}"
+        }
+    }
+
+    /**
+     * 根据类型获取第一张图片信息
+     * 返回: (firstImageEntry, imageFilePath)
+     * firstImageEntry: 图片文件名（压缩包中的相对路径或文件夹中的文件名）
+     * imageFilePath: 图片文件的完整路径（用于文件夹类型）
+     */
+    private static func getFirstImageForThumbnail(taskId: Int64, archivePath: String, archiveType: String, archiveId: String): (String, String) {
+        if (archiveType == "folder") {
+            // 文件夹类型：列出文件夹中的文件
+            TaskIO.appendLog(taskId, "Listing files in folder: ${archivePath}")
+            let entries = DirectoryScanner.listDirectory(archivePath)
+            TaskIO.appendLog(taskId, "Found ${entries.size} entries in folder")
+
+            // 先尝试在当前目录查找图片
+            for (entry in entries) {
+                let fullPath = DirectoryScanner.joinPath(archivePath, entry)
+                TaskIO.appendLog(taskId, "Checking entry: ${entry}, fullPath: ${fullPath}")
+
+                // 跳过目录
+                if (DirectoryScanner.isDirectory(fullPath)) {
+                    TaskIO.appendLog(taskId, "Entry ${entry} is a directory, skipping for now")
+                    continue
+                }
+
+                if (DirectoryScanner.fileExists(fullPath)) {
+                    let ext = DirectoryScanner.getFileExtension(fullPath)
+                    TaskIO.appendLog(taskId, "File ${entry} has extension: ${ext}")
+                    var isImageFile = false
+                    for (imgExt in ArchiveUtils.SUPPORTED_IMAGE_EXTENSIONS) {
+                        if (ext == imgExt) {
+                            isImageFile = true
+                            break
+                        }
+                    }
+                    if (isImageFile) {
+                        TaskIO.appendLog(taskId, "Found first image in folder: ${entry}")
+                        return (entry, fullPath)
+                    }
+                } else {
+                    TaskIO.appendLog(taskId, "File does not exist or is not regular: ${fullPath}")
+                }
+            }
+
+            // 如果当前目录没有图片，递归搜索子目录
+            TaskIO.appendLog(taskId, "No images found in root folder, searching subdirectories...")
+            for (entry in entries) {
+                let fullPath = DirectoryScanner.joinPath(archivePath, entry)
+                if (DirectoryScanner.isDirectory(fullPath)) {
+                    TaskIO.appendLog(taskId, "Searching subdirectory: ${entry}")
+                    let subEntries = DirectoryScanner.listDirectory(fullPath)
+                    for (subEntry in subEntries) {
+                        let subFullPath = DirectoryScanner.joinPath(fullPath, subEntry)
+                        if (DirectoryScanner.fileExists(subFullPath)) {
+                            let ext = DirectoryScanner.getFileExtension(subFullPath)
+                            var isImageFile = false
+                            for (imgExt in ArchiveUtils.SUPPORTED_IMAGE_EXTENSIONS) {
+                                if (ext == imgExt) {
+                                    isImageFile = true
+                                    break
+                                }
+                            }
+                            if (isImageFile) {
+                                TaskIO.appendLog(taskId, "Found first image in subfolder: ${subEntry}")
+                                return (subEntry, subFullPath)
+                            }
+                        }
+                    }
+                }
+            }
+
+            TaskIO.appendLog(taskId, "No images found in folder or subdirectories")
+            return ("", "")
+        } else {
+            // 压缩包类型：列出归档中的文件
+            TaskIO.appendLog(taskId, "Listing archive entries...")
+            let entries = ArchiveUtils.listArchiveEntries(archivePath)
+            TaskIO.appendLog(taskId, "Found ${entries.size} entries in archive")
+
+            for (entry in entries) {
+                let ext = ArchiveUtils.getFileExtension(entry)
+                var isImageFile = false
+                for (imgExt in ArchiveUtils.SUPPORTED_IMAGE_EXTENSIONS) {
+                    if (ext == imgExt) {
+                        isImageFile = true
+                        break
+                    }
+                }
+                if (isImageFile) {
+                    TaskIO.appendLog(taskId, "Found first image in archive: ${entry}")
+                    return (entry, "")
+                }
+            }
+            return ("", "")
+        }
+    }
+
+    /**
+     * 复制图片文件
+     */
+    private static func copyImageFile(sourcePath: String, destPath: String): Bool {
+        try {
+            let sourceFile = File(Path(sourcePath), Read)
+            let destFile = File(Path(destPath), Write)
+            try {
+                let bufferSize = 8192
+                let buffer = Array<UInt8>(bufferSize, {_ => 0})
+                var bytesRead: Int64 = sourceFile.read(buffer)
+                while (bytesRead > 0) {
+                    let slice = buffer[0..bytesRead]
+                    destFile.write(slice)
+                    bytesRead = sourceFile.read(buffer)
+                }
+                return true
+            } finally {
+                sourceFile.close()
+                destFile.close()
+            }
+        } catch (_: Exception) {
+            return false
         }
     }
 

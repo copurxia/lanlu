@@ -188,8 +188,19 @@ public class DownloadUrlTaskRunner {
             let cachePathStr = cachePath.toString()
             let thumbnailPathStr = thumbnailPath.toString()
 
+            // 解析插件返回的 archive_type
+            let archiveType = parseArchiveTypeFromPlugin(output)
+
             // 创建 scan_archive 任务
-            let params = "{\"archive_path\":\"${escapeJson(finalArchivePathStr)}\",\"archive_base_path\":\"${escapeJson(archiveBasePath)}\",\"cache_path\":\"${escapeJson(cachePathStr)}\",\"thumbnail_path\":\"${escapeJson(thumbnailPathStr)}\"}"
+            let params = """
+                {
+                    "archive_path":"${escapeJson(finalArchivePathStr)}",
+                    "archive_base_path":"${escapeJson(archiveBasePath)}",
+                    "cache_path":"${escapeJson(cachePathStr)}",
+                    "thumbnail_path":"${escapeJson(thumbnailPathStr)}",
+                    "archive_type":"${archiveType}"
+                }
+            """
             let task = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "download_url:${taskId}", "upload")
             if (task.id <= 0) {
                 let errorJson = "{\"success\":0,\"relative_path\":\"${relativePath}\",\"error\":\"Failed to create scan_archive task\"}"
@@ -528,6 +539,46 @@ public class DownloadUrlTaskRunner {
             return true
         }
         return false
+    }
+
+    private static func parseArchiveTypeFromPlugin(output: String): String {
+        if (output.size == 0) {
+            return "archive"  // 默认压缩包
+        }
+        try {
+            let jsonVal = JsonValue.fromStr(output)
+            match (jsonVal) {
+                case obj: JsonObject =>
+                    let fields = obj.getFields()
+                    if (fields.contains("success")) {
+                        let successVal = fields["success"].toString()
+                        if (successVal == "true" || successVal == "1") {
+                            if (fields.contains("data")) {
+                                let dataVal = fields["data"]
+                                match (dataVal) {
+                                    case dataObj: JsonObject =>
+                                        let dataFields = dataObj.getFields()
+                                        if (dataFields.contains("archive_type")) {
+                                            let typeVal = dataFields["archive_type"]
+                                            match (typeVal) {
+                                                case typeStr: JsonString =>
+                                                    let typeName = typeStr.getValue().trimAscii()
+                                                    // 验证类型是否有效
+                                                    if (typeName == "archive" || typeName == "folder" || typeName == "pdf") {
+                                                        return typeName
+                                                    }
+                                                case _ => ()
+                                            }
+                                        }
+                                    case _ => ()
+                                }
+                            }
+                        }
+                    }
+                case _ => ()
+            }
+        } catch (_: Exception) {}
+        return "archive"  // 默认压缩包（向后兼容）
     }
 }
 

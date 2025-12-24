@@ -24,6 +24,7 @@ public class ArchiveData {
     public var relative_path: String = ""
     public var file_size: Int64 = 0
     public var pagecount: Int32 = 0
+    public var archive_type: String = "archive"  // 归档类型：archive=压缩包，folder=文件夹，pdf=PDF
     public var tags: String = ""
     // last_read_time 和 progress 不再存储在 archives 表中，而是从 user_archive_status 表获取
     // 这些字段仅用于 API 响应，由 UserArchiveStatusDao 填充
@@ -69,7 +70,7 @@ public class ArchiveDao {
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -85,6 +86,7 @@ public class ArchiveDao {
                                 archive.relative_path = rs.getOrNull<String>(7) ?? ""
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
                                 archives.add(archive)
                             }
                         } finally {
@@ -115,7 +117,7 @@ public class ArchiveDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives WHERE arcid = ?")
+                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives WHERE arcid = ?")
                     try {
                         stmt.set(0, id)
                         let rs = stmt.query()
@@ -132,6 +134,7 @@ public class ArchiveDao {
                                 archive.relative_path = rs.getOrNull<String>(7) ?? ""
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
                                 return archive
                             }
                         } finally {
@@ -446,7 +449,7 @@ public class ArchiveDao {
                 }
                 
                 // 然后查询分页数据，使用archives_with_tags视图获取标签信息
-                var sql = "SELECT id, arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, tags FROM archives_with_tags"
+                var sql = "SELECT id, arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags"
                 
                 // 使用相同的 WHERE 条件
                 if (whereConditions.size > 0) {
@@ -522,7 +525,8 @@ public class ArchiveDao {
                             archive.relative_path = rs.getOrNull<String>(8) ?? ""
                             archive.file_size = rs.getOrNull<Int64>(9) ?? 0
                             archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
-                            archive.tags = rs.getOrNull<String>(11) ?? ""
+                            archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
+                            archive.tags = rs.getOrNull<String>(12) ?? ""
                             archives.add(archive)
                         } catch (e: Exception) {
                             getLogger("archive_dao").error("读取字段时出错", ("error", e.message))
@@ -655,13 +659,13 @@ public class ArchiveDao {
     /**
      * 插入归档记录 - 专门为 ShinobuService 提供的方法
      */
-    public static func insertArchive(archiveId: String, title: String, fileName: String, fileSize: Int64, _: Int64, filePath: String): Bool {
+    public static func insertArchive(archiveId: String, title: String, fileName: String, fileSize: Int64, _: Int64, filePath: String, archiveType: String): Bool {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
                     // 使用数据库的默认值来处理时间戳，避免格式问题
-                    let sql = "INSERT INTO archives (arcid, title, filename, summary, thumbhash, relative_path, file_size, pagecount) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+                    let sql = "INSERT INTO archives (arcid, title, filename, summary, thumbhash, relative_path, file_size, pagecount, archive_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
                     let stmt = conn.prepareStatement(sql)
                     try {
@@ -673,6 +677,7 @@ public class ArchiveDao {
                         stmt.set(5, filePath)  // relative_path
                         stmt.set(6, fileSize)
                         stmt.set(7, 0)  // pagecount
+                        stmt.set(8, archiveType)
                         stmt.update()
                     } finally {
                         stmt.close()

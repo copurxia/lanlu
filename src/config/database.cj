@@ -369,7 +369,8 @@ public class DatabaseConfig {
                         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         relative_path TEXT DEFAULT '',
                         file_size BIGINT DEFAULT 0,
-                        pagecount INTEGER DEFAULT 0
+                        pagecount INTEGER DEFAULT 0,
+                        archive_type VARCHAR(20) DEFAULT 'archive'
                     )
                 """)
                 logger.info("archives表创建成功")
@@ -385,7 +386,8 @@ public class DatabaseConfig {
                     ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
                     ("relative_path", "TEXT DEFAULT ''"),
                     ("file_size", "BIGINT DEFAULT 0"),
-                    ("pagecount", "INTEGER DEFAULT 0")
+                    ("pagecount", "INTEGER DEFAULT 0"),
+                    ("archive_type", "VARCHAR(20) DEFAULT 'archive'")
                 ]
 
                 for ((column, definition) in columnsToAdd) {
@@ -1047,6 +1049,7 @@ public class DatabaseConfig {
                     a.relative_path,
                     a.file_size,
                     a.pagecount,
+                    a.archive_type,
                     COALESCE(string_agg(
                         CASE WHEN t.namespace != '' AND t.namespace IS NOT NULL
                              THEN t.namespace || ':' || t.name
@@ -1058,7 +1061,7 @@ public class DatabaseConfig {
                 GROUP BY
                     a.id, a.arcid, a.filename, a.title, a.summary, a.thumbhash,
                     a.created_at, a.updated_at, a.relative_path, a.file_size,
-                    a.pagecount
+                    a.pagecount, a.archive_type
             """)
 
             logger.info("归档/标签相关表与视图初始化完成")

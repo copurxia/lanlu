@@ -23,6 +23,7 @@ public class Archive {
     public var relative_path: String = ""
     public var file_size: Int64 = 0
     public var pagecount: Int32 = 0
+    public var archive_type: String = "archive"  // 归档类型：archive=压缩包，folder=文件夹，pdf=PDF
     public var tags: String = ""
     // isNew 字段已移除 - 现在使用 UserArchiveStatusDao 来管理用户级别的已读状态
     public var isNew: Bool = false  // 保留用于向后兼容，但不再从数据库读取
@@ -73,7 +74,7 @@ public class ArchiveModel {
                 var archives: ArrayList<Archive> = ArrayList<Archive>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -89,6 +90,7 @@ public class ArchiveModel {
                                 archive.relative_path = rs.getOrNull<String>(7) ?? ""
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
                                 archives.add(archive)
                             }
                         } finally {
@@ -126,6 +128,7 @@ public class ArchiveModel {
         archive.relative_path = archiveData.relative_path
         archive.file_size = archiveData.file_size
         archive.pagecount = archiveData.pagecount
+        archive.archive_type = archiveData.archive_type
         archive.tags = archiveData.tags
         return archive
     }
@@ -159,6 +162,7 @@ public class ArchiveModel {
             archive.relative_path = data.relative_path
             archive.file_size = data.file_size
             archive.pagecount = data.pagecount
+            archive.archive_type = data.archive_type
             archive.tags = data.tags
             archives.add(archive)
         }
@@ -205,6 +209,7 @@ public class ArchiveModel {
             archive.relative_path = data.relative_path
             archive.file_size = data.file_size
             archive.pagecount = data.pagecount
+            archive.archive_type = data.archive_type
             archive.tags = data.tags
             archives.add(archive)
         }

@@ -6,7 +6,7 @@ import stdx.log.*
 
 /**
  * 目录扫描工具类
- * 负责递归扫描目录中的压缩包文件
+ * 负责递归扫描目录中的压缩包文件和文件夹归档
  */
 public class DirectoryScanner {
     private static let logger = getLogger("directory_scanner")
@@ -16,8 +16,13 @@ public class DirectoryScanner {
         "zip", "rar", "7z", "tar", "cbz", "cbr", "cb7", "cbt", "tar.gz", "tgz"
     ]
 
+    // 支持的图片格式
+    private static let SUPPORTED_IMAGE_EXTENSIONS: Array<String> = [
+        "jpg", "jpeg", "png", "gif", "bmp", "webp"
+    ]
+
     /**
-     * 递归查找压缩包文件
+     * 递归查找压缩包文件和文件夹归档
      */
     public static func findArchiveFiles(dirPath: String): Array<String> {
         var result: Array<String> = Array<String>()
@@ -46,8 +51,15 @@ public class DirectoryScanner {
                 }
 
                 if (directoryExists(fullPath)) {
-                    logger.info("Entry ${entry} is a directory, recursing...")
+                    logger.info("Entry ${entry} is a directory, checking if it contains images...")
+                    // 检查目录是否包含图片文件（可能是folder类型的archive）
+                    if (directoryContainsImages(fullPath)) {
+                        logger.info("Directory ${entry} contains images, treating as folder archive: ${fullPath}")
+                        result = addFileToArray(result, fullPath)
+                    }
+
                     // 递归处理子目录
+                    logger.info("Recursing into subdirectory: ${entry}")
                     let subFiles = findArchiveFiles(fullPath)
                     result = combineArrays(result, subFiles)
 
@@ -112,6 +124,13 @@ public class DirectoryScanner {
             }
         })
         return result
+    }
+
+    /**
+     * 检查路径是否为目录（支持软链接）
+     */
+    public static func isDirectory(path: String): Bool {
+        return directoryExists(path)
     }
 
     /**
@@ -288,5 +307,33 @@ public class DirectoryScanner {
             return ext.toAsciiLower()
         }
         return ""
+    }
+
+    /**
+     * 检查目录是否包含图片文件
+     */
+    public static func directoryContainsImages(dirPath: String): Bool {
+        try {
+            if (!directoryExists(dirPath)) {
+                return false
+            }
+
+            let entries = listDirectory(dirPath)
+            for (entry in entries) {
+                let fullPath = joinPath(dirPath, entry)
+                if (fileExists(fullPath)) {
+                    let ext = getFileExtension(fullPath)
+                    for (imageExt in SUPPORTED_IMAGE_EXTENSIONS) {
+                        if (ext == imageExt) {
+                            return true
+                        }
+                    }
+                }
+            }
+            return false
+        } catch (e: Exception) {
+            logger.error("Error checking directory for images", ("path", dirPath), ("error", e.message))
+            return false
+        }
     }
 }

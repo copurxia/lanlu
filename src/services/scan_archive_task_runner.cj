@@ -61,7 +61,7 @@ public class ScanArchiveTaskRunner {
 
             TaskIO.appendLog(taskId, "Parsing configuration...")
             let config = parseConfig(parameters)
-            TaskIO.appendLog(taskId, "Parsed config: archivePath=${config.archivePath}, cachePath=${config.cachePath}, thumbnailPath=${config.thumbnailPath}")
+            TaskIO.appendLog(taskId, "Parsed config: archivePath=${config.archivePath}, archiveType=${config.archiveType}, cachePath=${config.cachePath}, thumbnailPath=${config.thumbnailPath}")
 
             if (config.archivePath.size == 0) {
                 TaskIO.appendLog(taskId, "ERROR: No archive path found in parameters")
@@ -103,9 +103,10 @@ public class ScanArchiveTaskRunner {
         var archivePath = ""
         var cachePath = ""
         var thumbnailPath = ""
+        var archiveType = "archive"  // 默认压缩包
 
         if (trimmed.size == 0) {
-            return ArchiveConfig(archivePath, cachePath, thumbnailPath)
+            return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType)
         }
 
         try {
@@ -135,11 +136,23 @@ public class ScanArchiveTaskRunner {
                             case _ => throw Exception("thumbnail_path must be a string")
                         }
                     }
+                    if (fields.contains("archive_type")) {
+                        let value = fields["archive_type"]
+                        match (value) {
+                            case s: JsonString =>
+                                archiveType = s.getValue().trimAscii()
+                                // 验证类型有效性
+                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf") {
+                                    archiveType = "archive"
+                                }
+                            case _ => ()
+                        }
+                    }
                 case _ => ()
             }
         } catch (_: Exception) {}
 
-        return ArchiveConfig(archivePath, cachePath, thumbnailPath)
+        return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType)
     }
 
     private static func processArchiveInternal(filePath: String, config: ArchiveConfig): ProcessResultData {
@@ -160,7 +173,9 @@ public class ScanArchiveTaskRunner {
                         logger.info("Thumbnail hash is empty, submitting thumbnail generation task for existing archive: ${archive.id}")
 
                         // 提交缩略图生成任务（异步）
-                        let taskSubmitted = submitThumbnailTask(filePath, archive.id)
+                        // 对于已存在的archive，自动检测类型
+                        let archiveType = detectArchiveTypeFromPath(filePath)
+                        let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType)
                         if (!taskSubmitted) {
                             logger.error("Failed to submit thumbnail generation task for archive: ${archive.id}")
                         }
@@ -176,14 +191,38 @@ public class ScanArchiveTaskRunner {
                     logger.debug("Archive not found in database, processing new file: ${filePath}")
             }
 
-            let entries = ArchiveUtils.listArchiveEntries(filePath)
+            // 根据 archive_type 进行不同处理
             var pageCount: Int32 = 0
-            for (entry in entries) {
-                if (ArchiveUtils.isImageFile(entry)) {
-                    pageCount++
+
+            if (config.archiveType == "folder") {
+                // 文件夹类型：直接遍历文件夹中的图片文件
+                pageCount = countImagesInFolder(filePath)
+                logger.info("Folder ${filePath} contains ${pageCount} images")
+            } else if (config.archiveType == "pdf") {
+                // PDF类型：需要解析PDF页数（TODO: 实现PDF解析）
+                // 暂时设置为0，实际应该调用PDF解析工具
+                pageCount = 0
+                logger.info("PDF file: ${filePath}, page count will be updated later")
+            } else if (config.archiveType == "archive") {
+                // 压缩包类型：使用现有逻辑
+                let entries = ArchiveUtils.listArchiveEntries(filePath)
+                for (entry in entries) {
+                    if (ArchiveUtils.isImageFile(entry)) {
+                        pageCount++
+                    }
                 }
+                logger.info("Archive ${filePath} contains ${pageCount} images")
+            } else {
+                // 未知类型，按压缩包处理
+                logger.warn("Unknown archive type: ${config.archiveType}, treating as archive")
+                let entries = ArchiveUtils.listArchiveEntries(filePath)
+                for (entry in entries) {
+                    if (ArchiveUtils.isImageFile(entry)) {
+                        pageCount++
+                    }
+                }
+                logger.info("Archive ${filePath} contains ${pageCount} images")
             }
-            logger.info("Archive ${filePath} contains ${pageCount} images")
 
             let dbResult = addArchiveToDatabase(filePath, config)
             if (!dbResult.success) {
@@ -196,7 +235,7 @@ public class ScanArchiveTaskRunner {
             }
 
             // 提交缩略图生成任务（异步）
-            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId)
+            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, config.archiveType)
             if (!taskSubmitted) {
                 logger.error("Failed to submit thumbnail generation task for archive: ${dbResult.archiveId}")
             }
@@ -218,13 +257,13 @@ public class ScanArchiveTaskRunner {
 
             let relativePath = ArchiveUtils.calculateRelativePath(filePath, config.archivePath)
 
-            let success = ArchiveDao.insertArchive(archiveId, defaultTitle, fileName, fileSize, fileModTime, relativePath)
+            let success = ArchiveDao.insertArchive(archiveId, defaultTitle, fileName, fileSize, fileModTime, relativePath, config.archiveType)
             if (!success) {
                 return ProcessResultData(false, "", "Failed to create archive record in database")
             }
 
             // 提交缩略图生成任务（异步）
-            let taskSubmitted = submitThumbnailTask(filePath, archiveId)
+            let taskSubmitted = submitThumbnailTask(filePath, archiveId, config.archiveType)
             if (!taskSubmitted) {
                 logger.error("Failed to submit thumbnail generation task for archive: ${archiveId}")
             }
@@ -240,9 +279,9 @@ public class ScanArchiveTaskRunner {
     /**
      * 提交缩略图生成任务到任务池
      */
-    private static func submitThumbnailTask(archivePath: String, archiveId: String): Bool {
+    private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String): Bool {
         try {
-            let parameters = "{\"archive_path\":\"${escapeJson(archivePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\"}"
+            let parameters = "{\"archive_path\":\"${escapeJson(archivePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\",\"type\":\"${archiveType}\"}"
             let task = TaskModel.createTaskWithOptions(
                 "生成封面",
                 "generate_thumbnail",
@@ -283,5 +322,48 @@ public class ScanArchiveTaskRunner {
         escaped = escaped.replace("\r", "\\r")
         escaped = escaped.replace("\t", "\\t")
         return escaped
+    }
+
+    /**
+     * 统计文件夹中的图片数量
+     */
+    private static func countImagesInFolder(folderPath: String): Int32 {
+        try {
+            let entries = DirectoryScanner.listDirectory(folderPath)
+            var count: Int32 = 0
+            for (entryName in entries) {
+                if (ArchiveUtils.isImageFile(entryName)) {
+                    count++
+                }
+            }
+            return count
+        } catch (e: Exception) {
+            logger.error("Error counting images in folder", ("path", folderPath), ("error", e.message))
+            return 0
+        }
+    }
+
+    /**
+     * 根据文件路径自动检测归档类型
+     * 用于已存在的archive记录需要重新生成缩略图时
+     */
+    private static func detectArchiveTypeFromPath(filePath: String): String {
+        try {
+            // 检查是否为目录
+            if (DirectoryScanner.isDirectory(filePath)) {
+                return "folder"
+            }
+
+            // 检查文件扩展名
+            let ext = ArchiveUtils.getFileExtension(filePath).toAsciiLower()
+            if (ext == "pdf") {
+                return "pdf"
+            }
+
+            // 默认为压缩包
+            return "archive"
+        } catch (_: Exception) {
+            return "archive"
+        }
     }
 }

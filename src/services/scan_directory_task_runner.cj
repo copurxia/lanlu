@@ -144,13 +144,35 @@ public class ScanDirectoryTaskRunner {
         let cachePathStr = cachePath.toString()
         let thumbnailPathStr = thumbnailPath.toString()
 
-        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_base_path\":\"${escapeJson(archiveBasePath)}\",\"cache_path\":\"${escapeJson(cachePathStr)}\",\"thumbnail_path\":\"${escapeJson(thumbnailPathStr)}\"}"
+        // 检测归档类型
+        let archiveType = detectArchiveType(filePath)
+
+        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_base_path\":\"${escapeJson(archiveBasePath)}\",\"cache_path\":\"${escapeJson(cachePathStr)}\",\"thumbnail_path\":\"${escapeJson(thumbnailPathStr)}\",\"archive_type\":\"${archiveType}\"}"
         let childTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, priority, groupId, triggerSource)
         if (childTask.id > 0) {
             TaskPoolService.getInstance().notifyTaskAvailable()
             return true
         }
         return false
+    }
+
+    /**
+     * 检测归档类型
+     */
+    private static func detectArchiveType(filePath: String): String {
+        // 检查是否为目录
+        if (DirectoryScanner.isDirectory(filePath)) {
+            return "folder"
+        }
+
+        // 检查文件扩展名
+        let ext = DirectoryScanner.getFileExtension(filePath)
+        if (ext == "pdf") {
+            return "pdf"
+        }
+
+        // 默认为压缩包
+        return "archive"
     }
 
     private static func parseParameters(parameters: String): (String, String, Int32) {
