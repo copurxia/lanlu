@@ -1,24 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Search } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { appEvents, AppEvents } from '@/lib/events';
 
-export function SearchBar() {
+function SearchBarContent() {
   const { t } = useLanguage();
-  const [query, setQuery] = useState('');
+  const searchParams = useSearchParams();
   const router = useRouter();
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    const urlQuery = searchParams?.get('q');
+    if (urlQuery) {
+      setQuery(urlQuery);
+    }
+  }, [searchParams]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (query.trim()) {
       router.push(`/?q=${encodeURIComponent(query.trim())}`);
     } else {
-      // 搜索栏为空时，清空搜索条件回到首页
       appEvents.emit(AppEvents.SEARCH_RESET);
       router.push('/');
     }
@@ -37,5 +44,25 @@ export function SearchBar() {
         <Search className="w-4 h-4" />
       </Button>
     </form>
+  );
+}
+
+export function SearchBar() {
+  return (
+    <Suspense fallback={
+      <form className="flex gap-2 w-full max-w-md">
+        <Input
+          type="text"
+          placeholder="搜索..."
+          className="flex-1"
+          disabled
+        />
+        <Button type="submit" size="icon" disabled>
+          <Search className="w-4 h-4" />
+        </Button>
+      </form>
+    }>
+      <SearchBarContent />
+    </Suspense>
   );
 }
