@@ -8,9 +8,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArchiveService } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
-import { TagService } from '@/lib/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 
 interface ArchiveCardProps {
   archive: Archive;
@@ -25,10 +24,9 @@ function stripNamespace(tag: string): string {
 
 export function ArchiveCard({ archive, index = 0 }: ArchiveCardProps) {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
   const [imageError, setImageError] = useState(false);
 
   const allTags = useMemo(() => {
@@ -36,12 +34,9 @@ export function ArchiveCard({ archive, index = 0 }: ArchiveCardProps) {
   }, [archive.tags]);
 
   const displayTag = useCallback((tag: string) => {
-    const key = String(tag || '').trim();
-    if (!key) return '';
-    const translated = tagI18nMap[key];
-    if (translated && String(translated).trim()) return String(translated);
-    return stripNamespace(key);
-  }, [tagI18nMap]);
+    // 现在标签已经是翻译后的，只需要去掉 namespace 前缀显示
+    return stripNamespace(tag);
+  }, []);
 
   const displayAllTags = useMemo(() => allTags.map(displayTag), [allTags, displayTag]);
   const hoverTags = allTags.slice(0, 8);
@@ -49,27 +44,6 @@ export function ArchiveCard({ archive, index = 0 }: ArchiveCardProps) {
     displayAllTags.length > 0 ? `${t('archive.tags')}: ${displayAllTags.join(', ')}` : '',
     archive.summary ? `${t('archive.summary')}: ${archive.summary}` : ''
   ].filter(Boolean);
-
-  // 加载该档案的 tag i18n
-  useEffect(() => {
-    if (!archive.arcid || allTags.length === 0) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const map = await TagService.getTranslations(language, archive.arcid);
-        if (!cancelled) {
-          setTagI18nMap(map || {});
-        }
-      } catch {
-        // 加载失败时静默处理，使用原始 tag
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [archive.arcid, language, allTags.length]);
 
   // 处理收藏点击
   const handleFavoriteClick = async (e: React.MouseEvent) => {

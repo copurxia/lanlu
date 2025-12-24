@@ -8,9 +8,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { ArchiveService } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
-import { TagService } from '@/lib/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 
 interface TankoubonCardProps {
   tankoubon: Tankoubon;
@@ -24,10 +23,9 @@ function stripNamespace(tag: string): string {
 
 export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
   const router = useRouter();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   const [isFavorite, setIsFavorite] = useState(tankoubon.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
   const [imageError, setImageError] = useState(false);
 
   // 直接从 archives 获取第一个 ID，无需额外 API 调用
@@ -38,12 +36,9 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
   }, [tankoubon.tags]);
 
   const displayTag = useCallback((tag: string) => {
-    const key = String(tag || '').trim();
-    if (!key) return '';
-    const translated = tagI18nMap[key];
-    if (translated && String(translated).trim()) return String(translated);
-    return stripNamespace(key);
-  }, [tagI18nMap]);
+    // 现在标签已经是翻译后的，只需要去掉 namespace 前缀显示
+    return stripNamespace(tag);
+  }, []);
 
   const displayAllTags = useMemo(() => allTags.map(displayTag), [allTags, displayTag]);
   const hoverTags = allTags.slice(0, 8);
@@ -52,27 +47,6 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
     tankoubon.summary ? `${t('archive.summary')}: ${tankoubon.summary}` : '',
     `${t('tankoubon.archiveCount')}: ${tankoubon.archive_count || 0}`
   ].filter(Boolean);
-
-  // 加载 tag i18n（使用 tankoubon_id 查询合集相关的所有标签翻译）
-  useEffect(() => {
-    if (!tankoubon.tankoubon_id || allTags.length === 0) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const map = await TagService.getTranslations(language, undefined, tankoubon.tankoubon_id);
-        if (!cancelled) {
-          setTagI18nMap(map || {});
-        }
-      } catch {
-        // 加载失败时静默处理，使用原始 tag
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [tankoubon.tankoubon_id, language, allTags.length]);
 
   // 处理收藏点击
   const handleFavoriteClick = async (e: React.MouseEvent) => {
