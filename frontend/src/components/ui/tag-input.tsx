@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -36,9 +37,23 @@ export function TagInput({
   const [showSuggestions, setShowSuggestions] = React.useState(false)
   const [selectedIndex, setSelectedIndex] = React.useState(-1)
   const [loading, setLoading] = React.useState(false)
+  const [dropdownPosition, setDropdownPosition] = React.useState({ top: 0, left: 0, width: 0 })
   const inputRef = React.useRef<HTMLInputElement>(null)
+  const containerRef = React.useRef<HTMLDivElement>(null)
   const suggestionsRef = React.useRef<HTMLDivElement>(null)
   const debounceRef = React.useRef<NodeJS.Timeout | null>(null)
+
+  // 计算下拉框位置
+  const updateDropdownPosition = React.useCallback(() => {
+    if (containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect()
+      setDropdownPosition({
+        top: rect.bottom + window.scrollY + 4,
+        left: rect.left + window.scrollX,
+        width: rect.width
+      })
+    }
+  }, [])
 
   // 搜索自动补全建议
   const fetchSuggestions = React.useCallback(async (query: string) => {
@@ -56,6 +71,7 @@ export function TagInput({
       setSuggestions(filtered)
       setShowSuggestions(filtered.length > 0)
       setSelectedIndex(-1)
+      updateDropdownPosition()
     } catch (error) {
       console.error('自动补全搜索失败:', error)
       setSuggestions([])
@@ -63,7 +79,7 @@ export function TagInput({
     } finally {
       setLoading(false)
     }
-  }, [enableAutocomplete, language, value])
+  }, [enableAutocomplete, language, value, updateDropdownPosition])
 
   // 防抖搜索
   const debouncedFetch = React.useCallback((query: string) => {
@@ -83,6 +99,22 @@ export function TagInput({
       }
     }
   }, [])
+
+  // 监听滚动和resize事件更新位置
+  React.useEffect(() => {
+    if (!showSuggestions) return
+
+    const handleScroll = () => updateDropdownPosition()
+    const handleResize = () => updateDropdownPosition()
+
+    window.addEventListener('scroll', handleScroll, true)
+    window.addEventListener('resize', handleResize)
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll, true)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [showSuggestions, updateDropdownPosition])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value
@@ -163,6 +195,7 @@ export function TagInput({
 
   const handleInputFocus = () => {
     if (inputValue && suggestions.length > 0) {
+      updateDropdownPosition()
       setShowSuggestions(true)
     }
   }
@@ -177,8 +210,45 @@ export function TagInput({
     }
   }, [selectedIndex])
 
+  // 下拉框内容
+  const dropdownContent = showSuggestions && suggestions.length > 0 && (
+    <div
+      ref={suggestionsRef}
+      className="fixed z-[9999] max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
+      style={{
+        top: dropdownPosition.top,
+        left: dropdownPosition.left,
+        width: dropdownPosition.width
+      }}
+    >
+      {suggestions.map((suggestion, index) => (
+        <div
+          key={suggestion.value}
+          className={cn(
+            "px-3 py-2 cursor-pointer text-sm",
+            index === selectedIndex
+              ? "bg-accent text-accent-foreground"
+              : "hover:bg-accent hover:text-accent-foreground"
+          )}
+          onMouseDown={(e) => {
+            e.preventDefault()
+            handleSelectSuggestion(suggestion)
+          }}
+          onMouseEnter={() => setSelectedIndex(index)}
+        >
+          <span className="font-medium">{suggestion.display}</span>
+          {suggestion.display !== suggestion.value && (
+            <span className="ml-2 text-muted-foreground text-xs">
+              ({suggestion.value})
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <div
         className={cn(
           "flex flex-wrap gap-2 items-center min-h-[42px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
@@ -219,37 +289,8 @@ export function TagInput({
         />
       </div>
 
-      {/* 自动补全建议列表 */}
-      {showSuggestions && suggestions.length > 0 && (
-        <div
-          ref={suggestionsRef}
-          className="absolute z-50 w-full mt-1 max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-md"
-        >
-          {suggestions.map((suggestion, index) => (
-            <div
-              key={suggestion.value}
-              className={cn(
-                "px-3 py-2 cursor-pointer text-sm",
-                index === selectedIndex
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent hover:text-accent-foreground"
-              )}
-              onMouseDown={(e) => {
-                e.preventDefault()
-                handleSelectSuggestion(suggestion)
-              }}
-              onMouseEnter={() => setSelectedIndex(index)}
-            >
-              <span className="font-medium">{suggestion.display}</span>
-              {suggestion.display !== suggestion.value && (
-                <span className="ml-2 text-muted-foreground text-xs">
-                  ({suggestion.value})
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* 使用 Portal 将下拉框渲染到 body，避免被父容器 overflow 裁剪 */}
+      {typeof document !== 'undefined' && createPortal(dropdownContent, document.body)}
 
       {/* 加载指示器 */}
       {loading && inputValue && (
