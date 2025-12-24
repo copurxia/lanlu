@@ -666,10 +666,8 @@ public class ArchiveUtils {
     public static func getPdfPageCount(pdfPath: String): Int32 {
         try {
             logger.info("Getting PDF page count", ("pdf_path", pdfPath))
-            let quotedPath = shellQuote(pdfPath)
-            let command = "gs -q -dNOSAFER -sDEVICE=nullpage -c '(${quotedPath}) (r) file runpdfbegin pdfpagecount = quit'"
-            logger.info("Executing command", ("command", command))
-            let (exitCode, stdout, stderr) = executeShellCommand(command)
+            let process = launch("gs", "-q", "-dNOSAFER", "-sDEVICE=nullpage", "-c", "(${pdfPath}) (r) file runpdfbegin pdfpagecount = quit", stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+            let (exitCode, stdout, stderr) = process.waitOutput()
 
             if (exitCode == 0 && stdout.size > 0) {
                 let output = String.fromUtf8(stdout)
@@ -710,11 +708,8 @@ public class ArchiveUtils {
                 Directory.create(outputDir, recursive: true)
             }
 
-            let quotedPdfPath = shellQuote(pdfPath)
-            let quotedOutputPath = shellQuote(outputPath)
-            let command = "gs -dNOPAUSE -dFirstPage=${pageNumber} -dLastPage=${pageNumber} -sDEVICE=jpeg -r200 -o ${quotedOutputPath} ${quotedPdfPath}"
-            logger.info("Executing command", ("command", command))
-            let (exitCode, _, stderr) = executeShellCommand(command)
+            let process = launch("gs", "-dNOPAUSE", "-dFirstPage=${pageNumber}", "-dLastPage=${pageNumber}", "-sDEVICE=jpeg", "-r200", "-o", outputPath, pdfPath, stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+            let (exitCode, _, stderr) = process.waitOutput()
 
             if (exitCode == 0) {
                 logger.info("Successfully extracted PDF page", ("pdf_path", pdfPath), ("page", pageNumber.toString()))
