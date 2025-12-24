@@ -14,6 +14,7 @@ import std.fs.*
 import std.convert.*
 import std.collection.*
 import std.database.sql.*
+import stdx.encoding.url.Form
 
 public class ArchiveController {
     /**
@@ -482,8 +483,10 @@ public class ArchiveController {
             if (i > 0) {
                 pagesJson = pagesJson + ","
             }
-            // 修正URL格式，使用 ? 而不是 &
-            let pageUrl = "/api/archives/${id}/page?path=${pageFiles[i]}"
+            // 修正URL格式，使用 ? 而不是 &，并对 path 参数进行 URL 编码
+            let form = Form()
+            form.set("path", pageFiles[i])
+            let pageUrl = "/api/archives/${id}/page?${form.toEncodeString()}"
             pagesJson = pagesJson + "\"${pageUrl}\""
         }
         pagesJson = pagesJson + "]"
