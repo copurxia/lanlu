@@ -347,7 +347,7 @@ public class SearchController {
                 }
                 if (lastReadTimeMap.contains(internalId)) {
                     match (lastReadTimeMap.get(internalId)) {
-                        case Some(t) => if (t > 0i64) { lastReadTime = t }
+                        case Some(t) => lastReadTime = t
                         case None => ()
                     }
                 }
@@ -363,7 +363,7 @@ public class SearchController {
             archivesJson += "{"
             archivesJson = archivesJson + "\"type\":\"archive\","
             archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
-            archivesJson = archivesJson + "\"extension\":\"${escapeJson(archive.extension())}\","
+            archivesJson = archivesJson + "\"archivetype\":\"${escapeJson(archive.archive_type)}\","
             archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
             archivesJson = archivesJson + "\"isnew\":${isNew},"
             archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
@@ -465,7 +465,7 @@ public class SearchController {
                 }
                 if (lastReadTimeMap.contains(internalId)) {
                     match (lastReadTimeMap.get(internalId)) {
-                        case Some(t) => if (t > 0i64) { lastReadTime = t }
+                        case Some(t) => lastReadTime = t
                         case None => ()
                     }
                 }
@@ -480,7 +480,7 @@ public class SearchController {
 
             archivesJson += "{"
             archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
-            archivesJson = archivesJson + "\"extension\":\"${escapeJson(archive.extension())}\","
+            archivesJson = archivesJson + "\"archivetype\":\"${escapeJson(archive.archive_type)}\","
             archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
             archivesJson = archivesJson + "\"isnew\":${isNew},"
             archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
