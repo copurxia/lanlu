@@ -39,7 +39,15 @@ export function ArchiveCard({ archive, index = 0 }: ArchiveCardProps) {
   }, []);
 
   const displayAllTags = useMemo(() => allTags.map(displayTag), [allTags, displayTag]);
-  const hoverTags = allTags.slice(0, 8);
+  // 过滤掉 source 相关的标签（包含 namespace 前缀和已翻译的标签）
+  const hoverTags = useMemo(() => {
+    return allTags
+      .filter(tag => {
+        const strippedTag = stripNamespace(tag).toLowerCase();
+        return !strippedTag.includes('source');
+      })
+      .slice(0, 8);
+  }, [allTags]);
   const hoverTitleParts = [
     displayAllTags.length > 0 ? `${t('archive.tags')}: ${displayAllTags.join(', ')}` : '',
     archive.summary ? `${t('archive.summary')}: ${archive.summary}` : ''
