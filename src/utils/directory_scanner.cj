@@ -13,7 +13,7 @@ public class DirectoryScanner {
 
     // 支持的压缩包格式
     private static let SUPPORTED_ARCHIVE_EXTENSIONS: Array<String> = [
-        "zip", "rar", "7z", "tar", "cbz", "cbr", "cb7", "cbt", "tar.gz", "tgz" ,"pdf"
+        "zip", "rar", "7z", "tar", "cbz", "cbr", "cb7", "cbt", "tar.gz", "tgz", "pdf", "epub"
     ]
 
     // 支持的图片格式

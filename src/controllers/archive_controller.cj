@@ -446,15 +446,24 @@ public class ArchiveController {
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
         let entries = handler.listEntries(actualPath)
 
-        // 过滤媒体文件（图片和视频）
+        // 过滤媒体文件（图片和视频）或者HTML文件（EPUB特殊处理）
         var pageFiles = ArrayList<String>()
         var totalEntries = 0
         var mediaEntries = 0
         for (entry in entries) {
             totalEntries += 1
-            if (ArchiveUtils.isMediaFile(entry)) {
-                pageFiles.add(entry)
-                mediaEntries += 1
+            // 对于EPUB类型，返回所有XHTML/HTML文件
+            // 对于其他类型，只返回媒体文件
+            if (archive.archive_type == ArchiveTypes.EPUB) {
+                if (isHtmlFile(entry)) {
+                    pageFiles.add(entry)
+                    mediaEntries += 1
+                }
+            } else {
+                if (ArchiveUtils.isMediaFile(entry)) {
+                    pageFiles.add(entry)
+                    mediaEntries += 1
+                }
             }
         }
 
@@ -470,13 +479,15 @@ public class ArchiveController {
             if (i > 0) {
                 pagesJson = pagesJson + ","
             }
-            // 修正URL格式，使用 ? 而不是 &，并对 path 参数进行 URL 编码
+            // 使用查询参数格式，对 path 参数进行 URL 编码
             let form = Form()
             form.set("path", pageFiles[i])
             let pageUrl = "/api/archives/${id}/page?${form.toEncodeString()}"
-            // 判断文件类型
+            // 判断文件类型 - 支持 image、video、html
             let fileType = if (ArchiveUtils.isVideoFile(pageFiles[i])) {
                 "video"
+            } else if (isHtmlFile(pageFiles[i])) {
+                "html"
             } else {
                 "image"
             }
@@ -651,7 +662,7 @@ public class ArchiveController {
         }
     }
 
-    // GET /api/archives/{id}/page
+    // GET /api/archives/{id}/page?path=...
     public static func getPage(ctx: JoyContext): Unit {
         let id = ctx.getParam("id").getOrThrow()
 
@@ -738,12 +749,32 @@ public class ArchiveController {
     }
     
     /**
+     * 检测是否为HTML/XHTML文件
+     */
+    private static func isHtmlFile(filePath: String): Bool {
+        let lowerPath = filePath.toAsciiLower()
+        return lowerPath.endsWith(".xhtml") ||
+               lowerPath.endsWith(".html") ||
+               lowerPath.endsWith(".htm")
+    }
+
+    /**
      * 根据文件路径获取Content-Type
      */
     private static func getContentTypeFromPath(filePath: String): String {
         let lowerPath = filePath.toAsciiLower()
+        // HTML/XHTML 类型
+        if (lowerPath.endsWith(".xhtml")) {
+            return "application/xhtml+xml; charset=utf-8"
+        } else if (lowerPath.endsWith(".html")) {
+            return "text/html; charset=utf-8"
+        } else if (lowerPath.endsWith(".htm")) {
+            return "text/html; charset=utf-8"
+        // CSS 类型
+        } else if (lowerPath.endsWith(".css")) {
+            return "text/css; charset=utf-8"
         // 图片类型
-        if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) {
+        } else if (lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg")) {
             return "image/jpeg"
         } else if (lowerPath.endsWith(".png")) {
             return "image/png"

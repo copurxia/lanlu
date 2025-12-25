@@ -33,6 +33,7 @@ public class ArchiveHandlerFactory {
                 // 注册默认处理器（按优先级顺序）
                 newInstance.registerHandler(FolderHandler())
                 newInstance.registerHandler(PdfHandler())
+                newInstance.registerHandler(EpubHandler())
                 newInstance.registerHandler(ArchiveFileHandler())  // 放最后作为默认
                 instance = Some(newInstance)
                 return newInstance

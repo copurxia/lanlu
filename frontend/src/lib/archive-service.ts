@@ -34,10 +34,10 @@ export interface MetadataPluginRunCallbacks {
   onUpdate?: (task: Task) => void;
 }
 
-// 页面信息接口（支持图片和视频）
+// 页面信息接口（支持图片、视频和HTML）
 export interface PageInfo {
   url: string;
-  type: 'image' | 'video';
+  type: 'image' | 'video' | 'html';
 }
 
 export class ArchiveService {

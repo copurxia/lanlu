@@ -14,18 +14,21 @@ public class ArchiveTypes {
     // PDF文件类型
     public static let PDF: String = "pdf"
 
+    // EPUB文件类型
+    public static let EPUB: String = "epub"
+
     /**
      * 获取所有支持的类型列表
      */
     public static func getAllTypes(): Array<String> {
-        return [ARCHIVE, FOLDER, PDF]
+        return [ARCHIVE, FOLDER, PDF, EPUB]
     }
 
     /**
      * 检查类型是否有效
      */
     public static func isValidType(`type`: String): Bool {
-        return `type` == ARCHIVE || `type` == FOLDER || `type` == PDF
+        return `type` == ARCHIVE || `type` == FOLDER || `type` == PDF || `type` == EPUB
     }
 
     /**
@@ -36,6 +39,7 @@ public class ArchiveTypes {
             case ARCHIVE => "压缩包"
             case FOLDER => "文件夹"
             case PDF => "PDF文件"
+            case EPUB => "EPUB电子书"
             case _ => "未知"
         }
     }

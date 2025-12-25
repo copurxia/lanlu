@@ -32,7 +32,11 @@ export function HtmlRenderer({ html, className }: HtmlRendererProps) {
   // 客户端渲染时使用 dangerouslySetInnerHTML
   return (
     <div
-      className={className}
+      className={`html-content-container ${className || ''}`}
+      style={{
+        overflowY: 'auto',
+        maxHeight: '100%',
+      }}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );
