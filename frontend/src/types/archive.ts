@@ -9,7 +9,7 @@ export interface Archive {
   isnew: boolean;  // 改为布尔值类型
   isfavorite?: boolean;  // 用户收藏状态（可选，仅在需要时提供）
   favoritetime?: string;  // 收藏时间（可选）
-  extension: string;
+  archivetype: string;
   lastreadtime: number;
   size: number;
 }
@@ -60,7 +60,7 @@ export interface ArchiveMetadata {
   lastreadtime: number;
   file_size: number;
   size: number;
-  extension: string;
+  archivetype: string;
   created_at: string;
   updated_at: string;
   relative_path: string;

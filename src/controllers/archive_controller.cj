@@ -186,7 +186,7 @@ public class ArchiveController {
         metadataJson += "\"lastreadtime\":${lastreadtime},"
         metadataJson += "\"file_size\":${archive.file_size},"
         metadataJson += "\"size\":${archive.file_size},"
-        metadataJson += "\"extension\":\"${archive.getExtension()}\","
+        metadataJson += "\"archivetype\":\"${archive.archive_type}\","
         metadataJson += "\"created_at\":\"${archive.created_at}\","
         metadataJson += "\"updated_at\":\"${archive.updated_at}\","
         metadataJson += "\"relative_path\":\"${archive.relative_path}\""

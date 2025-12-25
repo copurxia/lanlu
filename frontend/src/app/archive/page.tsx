@@ -623,7 +623,7 @@ function ArchiveDetailContent() {
 	                          </div>
 	                          <div className="flex items-center justify-between gap-3">
 	                            <span className="text-muted-foreground">{t('archive.fileType')}</span>
-	                            <span>{metadata.extension.toUpperCase()}</span>
+	                            <span>{metadata.archivetype.toUpperCase()}</span>
 	                          </div>
 	                          <div className="flex items-center justify-between gap-3">
 	                            <span className="text-muted-foreground">{t('archive.status')}</span>
@@ -931,7 +931,7 @@ function ArchiveDetailContent() {
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">{t('archive.fileType')}</span>
-                    <span>{metadata.extension.toUpperCase()}</span>
+                    <span>{metadata.archivetype.toUpperCase()}</span>
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
