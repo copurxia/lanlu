@@ -971,12 +971,24 @@ function ReaderContent() {
         return updated;
       });
     } else {
-      // 单页模式：只加载当前页
-      if (!loadedImages.has(currentPage)) {
-        setImagesLoading(new Set([currentPage]));
-      } else {
-        setImagesLoading(new Set());
-      }
+      // 单页/双页模式：预加载前1页和后5页
+      setImagesLoading(prev => {
+        const updated = new Set(prev);
+
+        // 预加载范围：前1页，后5页
+        const preloadBefore = 1;
+        const preloadAfter = 5;
+
+        for (let i = Math.max(0, currentPage - preloadBefore);
+             i <= Math.min(pages.length - 1, currentPage + preloadAfter);
+             i++) {
+          if (!loadedImages.has(i)) {
+            updated.add(i);
+          }
+        }
+
+        return updated;
+      });
     }
   }, [currentPage, readingMode, pages.length, loadedImages, visibleRange.start, visibleRange.end]);
 
@@ -1527,6 +1539,46 @@ function ReaderContent() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 隐藏的预加载区域：前1页和后5页（仅单页/双页模式） */}
+        {readingMode !== 'webtoon' && (
+          <div className="hidden">
+            {Array.from(imagesLoading).map(pageIndex => {
+              // 跳过当前页和双页模式下的下一页（它们已经在上面渲染了）
+              if (pageIndex === currentPage) return null;
+              if (doublePageMode && pageIndex === currentPage + 1) return null;
+              const page = pages[pageIndex];
+              if (!page) return null;
+
+              if (page.type === 'video') {
+                return (
+                  <video
+                    key={`preload-${pageIndex}`}
+                    src={page.url}
+                    preload="metadata"
+                    onLoadedData={() => handleImageLoad(pageIndex)}
+                    onError={() => handleImageError(pageIndex)}
+                  />
+                );
+              }
+
+              return (
+                <img
+                  key={`preload-${pageIndex}`}
+                  src={page.url}
+                  alt=""
+                  onLoad={() => {
+                    handleImageLoad(pageIndex);
+                    if (!cachedPages[pageIndex]) {
+                      cacheImage(page.url, pageIndex);
+                    }
+                  }}
+                  onError={() => handleImageError(pageIndex)}
+                />
+              );
+            })}
           </div>
         )}
 
