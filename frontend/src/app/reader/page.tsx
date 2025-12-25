@@ -115,6 +115,8 @@ function ReaderContent() {
   const imageLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 图片加载防抖引用
   const autoHideTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 自动隐藏定时器引用
   const AUTO_HIDE_DELAY = 3000; // 自动隐藏延迟时间（毫秒）
+  const mouseMoveTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 鼠标移动防抖引用
+  const MOUSE_MOVE_DEBOUNCE = 100; // 鼠标移动防抖延迟（毫秒）
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -382,43 +384,81 @@ function ReaderContent() {
     currentPageRef.current = currentPage;
   }, [currentPage]);
 
-  // 自动隐藏工具栏逻辑
+  // 自动隐藏工具栏逻辑（合并版）
   useEffect(() => {
-    // 清除之前的定时器
+    // 清除所有定时器
     if (autoHideTimeoutRef.current) {
       clearTimeout(autoHideTimeoutRef.current);
     }
+    if (mouseMoveTimeoutRef.current) {
+      clearTimeout(mouseMoveTimeoutRef.current);
+    }
 
-    // 如果启用了自动隐藏且工具栏当前可见，则设置定时器
-    if (autoHideEnabled && showToolbar) {
+    // 如果未启用自动隐藏，不设置任何逻辑
+    if (!autoHideEnabled) {
+      return;
+    }
+
+    // 设置自动隐藏定时器
+    const scheduleAutoHide = () => {
+      if (autoHideTimeoutRef.current) {
+        clearTimeout(autoHideTimeoutRef.current);
+      }
       autoHideTimeoutRef.current = setTimeout(() => {
         setShowToolbar(false);
       }, AUTO_HIDE_DELAY);
+    };
+
+    // 鼠标移动处理函数（带防抖）
+    const handleMouseMove = () => {
+      if (mouseMoveTimeoutRef.current) {
+        clearTimeout(mouseMoveTimeoutRef.current);
+      }
+
+      mouseMoveTimeoutRef.current = setTimeout(() => {
+        if (!showToolbar) {
+          setShowToolbar(true);
+        }
+        // 显示工具栏后，重新安排自动隐藏
+        scheduleAutoHide();
+      }, MOUSE_MOVE_DEBOUNCE);
+    };
+
+    // 触摸移动处理函数（移动端支持）
+    const handleTouchMove = () => {
+      if (mouseMoveTimeoutRef.current) {
+        clearTimeout(mouseMoveTimeoutRef.current);
+      }
+
+      mouseMoveTimeoutRef.current = setTimeout(() => {
+        if (!showToolbar) {
+          setShowToolbar(true);
+        }
+        scheduleAutoHide();
+      }, MOUSE_MOVE_DEBOUNCE);
+    };
+
+    // 如果工具栏当前可见，立即设置自动隐藏定时器
+    if (showToolbar) {
+      scheduleAutoHide();
     }
+
+    // 添加事件监听
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
 
     // 清理函数
     return () => {
       if (autoHideTimeoutRef.current) {
         clearTimeout(autoHideTimeoutRef.current);
       }
+      if (mouseMoveTimeoutRef.current) {
+        clearTimeout(mouseMoveTimeoutRef.current);
+      }
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('touchmove', handleTouchMove);
     };
   }, [showToolbar, autoHideEnabled]);
-
-  // 监听鼠标移动事件，当移动时显示工具栏
-  useEffect(() => {
-    if (!autoHideEnabled) return;
-
-    const handleMouseMove = () => {
-      if (!showToolbar) {
-        setShowToolbar(true);
-      }
-    };
-
-    document.addEventListener('mousemove', handleMouseMove);
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-    };
-  }, [autoHideEnabled, showToolbar]);
 
   // 重置变换
   const resetTransform = useCallback(() => {
@@ -1106,24 +1146,23 @@ function ReaderContent() {
   return (
     <div
       className="h-screen bg-background text-foreground flex flex-col overflow-hidden relative"
-      onMouseMove={() => {
-        if (!showToolbar) {
-          setShowToolbar(true);
-        }
-      }}
     >
       {/* 简洁的工具栏 */}
       <div className={`
         bg-background/95 backdrop-blur-sm border-b
-        transition-all duration-300 ease-in-out
-        ${showToolbar ? 'h-auto translate-y-0 opacity-100' : '!h-0 -translate-y-2 opacity-0 overflow-hidden'}
+        transition-all duration-250 ease-out
+        will-change-transform will-change-opacity
+        ${showToolbar 
+          ? 'h-auto translate-y-0 opacity-100' 
+          : '!h-0 -translate-y-4 opacity-0 overflow-hidden'}
       `}>
         <div className={`
-          ${showToolbar ? 'p-3 opacity-100 visible' : 'p-0 opacity-0 invisible overflow-hidden'}
+          transition-all duration-250 ease-out
+          ${showToolbar ? 'p-3 opacity-100' : 'p-0 opacity-0'}
         `}>
-          <div className={`flex items-center justify-between transition-all duration-200 ${showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+          <div className={`flex items-center justify-between transition-all duration-250 ease-out ${showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
             {/* 左侧：返回按钮和功能按钮 */}
-            <div className={`flex items-center space-x-2 transition-all duration-200 delay-75 ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-2'}`}>
+            <div className={`flex items-center space-x-2 transition-all duration-250 ease-out delay-50 ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'}`}>
               <Button
                 variant="outline"
                 size="sm"
@@ -1143,7 +1182,7 @@ function ReaderContent() {
 
             {/* 中间：标题显示（仅PC端且有标题时显示） */}
             {archiveTitle && (
-              <div className={`hidden lg:flex items-center justify-center flex-1 px-4 transition-all duration-200 delay-100 ${showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+              <div className={`hidden lg:flex items-center justify-center flex-1 px-4 transition-all duration-250 ease-out delay-75 ${showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
                 <h1 className="text-sm font-medium text-foreground truncate max-w-md text-center" title={archiveTitle}>
                   {archiveTitle}
                 </h1>
@@ -1155,7 +1194,7 @@ function ReaderContent() {
               variant="outline"
               size="sm"
               onClick={toggleReadingMode}
-              className={`border-border bg-background hover:bg-accent hover:text-accent-foreground transition-all duration-200 delay-75 ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-2'}`}
+              className={`border-border bg-background hover:bg-accent hover:text-accent-foreground transition-all duration-250 ease-out delay-50 ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'}`}
             >
               {getReadingModeIcon()}
               <span className="ml-2 hidden sm:inline">{getReadingModeText()}</span>
@@ -1165,7 +1204,14 @@ function ReaderContent() {
       </div>
 
       {/* 悬浮进度条和收藏按钮 - 紧挨在一起的两个独立区域 */}
-      <div className={`absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-3 transition-opacity duration-300 z-50 ${showToolbar ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}>
+      <div className={`
+        absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-3 
+        transition-all duration-250 ease-out z-50
+        will-change-transform will-change-opacity
+        ${showToolbar 
+          ? 'opacity-100 translate-y-0 pointer-events-auto' 
+          : 'opacity-0 translate-y-4 pointer-events-none'}
+      `}>
         {/* 进度条区域 */}
         <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full px-4 py-3 shadow-lg">
           <div className="flex items-center space-x-2">
@@ -1207,9 +1253,10 @@ function ReaderContent() {
                 size="sm"
                 className={`
                   rounded-full p-0 h-12 w-12
-                  transition-all duration-200 ease-in-out
+                  transition-all duration-150 ease-out
                   hover:scale-110 active:scale-95
                   text-muted-foreground hover:text-foreground hover:bg-accent
+                  will-change-transform
                 `}
                 style={{ padding: '3px' }}
                 title={t('reader.settings')}
@@ -1227,8 +1274,9 @@ function ReaderContent() {
                   className={`
                     flex flex-col items-center justify-center
                     aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-200
+                    rounded-lg border-2 transition-all duration-150 ease-out
                     shadow-sm hover:shadow-md
+                    will-change-transform will-change-opacity
                     ${doublePageMode
                       ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
@@ -1248,8 +1296,9 @@ function ReaderContent() {
                   className={`
                     flex flex-col items-center justify-center
                     aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-200
+                    rounded-lg border-2 transition-all duration-150 ease-out
                     shadow-sm hover:shadow-md
+                    will-change-transform will-change-opacity
                     ${splitCoverMode
                       ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
@@ -1268,8 +1317,9 @@ function ReaderContent() {
                   className={`
                     flex flex-col items-center justify-center
                     aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-200
+                    rounded-lg border-2 transition-all duration-150 ease-out
                     shadow-sm hover:shadow-md
+                    will-change-transform will-change-opacity
                     ${autoPlayMode
                       ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
@@ -1287,8 +1337,9 @@ function ReaderContent() {
                   className={`
                     flex flex-col items-center justify-center
                     aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-200
+                    rounded-lg border-2 transition-all duration-150 ease-out
                     shadow-sm hover:shadow-md
+                    will-change-transform will-change-opacity
                     ${isFullscreen
                       ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
@@ -1306,8 +1357,9 @@ function ReaderContent() {
                   className={`
                     flex flex-col items-center justify-center
                     aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-200
+                    rounded-lg border-2 transition-all duration-150 ease-out
                     shadow-sm hover:shadow-md
+                    will-change-transform will-change-opacity
                     ${doubleTapZoom
                       ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
@@ -1325,8 +1377,9 @@ function ReaderContent() {
                   className={`
                     flex flex-col items-center justify-center
                     aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-200
+                    rounded-lg border-2 transition-all duration-150 ease-out
                     shadow-sm hover:shadow-md
+                    will-change-transform will-change-opacity
                     ${autoHideEnabled
                       ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
                       : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
@@ -1369,9 +1422,10 @@ function ReaderContent() {
               onClick={toggleFavorite}
               className={`
                 rounded-full p-0 h-12 w-12
-                transition-all duration-200 ease-in-out
+                transition-all duration-150 ease-out
                 hover:scale-110 active:scale-95
                 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20
+                will-change-transform
               `}
               style={{ padding: '3px' }}
               title={t('reader.favorite')}
@@ -1384,7 +1438,7 @@ function ReaderContent() {
 
       {/* 主要阅读区域 */}
       <div
-        className={`flex-1 relative overflow-hidden transition-all duration-300 ease-in-out ${showToolbar ? 'pt-0' : 'pt-0'}`}
+        className="flex-1 relative overflow-hidden"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -1586,7 +1640,7 @@ function ReaderContent() {
         {readingMode === 'webtoon' && (
           <div
             ref={webtoonContainerRef}
-            className="h-full overflow-y-auto overflow-x-hidden transition-all duration-300 ease-in-out"
+            className="h-full overflow-y-auto overflow-x-hidden transition-all duration-250 ease-out"
             onScroll={(e) => {
               const container = e.currentTarget;
 
