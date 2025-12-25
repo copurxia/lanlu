@@ -166,12 +166,13 @@ class ArtStationDownloadPlugin extends BasePlugin {
 
     return {
       success: true,
-      data: {
+      data: [{
         relative_path: `plugins/artstation/${username}`,
         filename: username,
+        source: `https://www.artstation.com/${username}`,
         downloaded_count: downloadedCount,
         failed_count: failedCount
-      }
+      }]
     };
   }
 

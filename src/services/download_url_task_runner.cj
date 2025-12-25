@@ -116,8 +116,9 @@ public class DownloadUrlTaskRunner {
             TaskIO.appendLog(taskId, "plugin output: ${output}")
 
             // 插件自行下载并回传 relative_path（相对于 ./data）
-            let downloadedRelativePath = parseDownloadedRelativePath(output)
-            let usePluginDownloadedFile = downloadedRelativePath.size > 0
+            let downloadedRelativePaths = parseDownloadedRelativePath(output)
+            let usePluginDownloadedFile = downloadedRelativePaths.size > 0
+            let downloadedSource = parseDownloadedSource(output)
             var downloadUrl = ""
             if (!usePluginDownloadedFile) {
                 downloadUrl = parseDownloadUrl(output)
@@ -127,11 +128,25 @@ public class DownloadUrlTaskRunner {
                 }
             }
 
+            // 检查是否返回了多个档案
+            if (downloadedRelativePaths.size > 1) {
+                fail(taskId, "Multiple archives not yet supported in this version")
+                return
+            }
+
+            if (downloadedRelativePaths.size == 0) {
+                fail(taskId, "No archives returned from plugin")
+                return
+            }
+
             TaskModel.updateTaskProgress(taskId, 35, "下载文件")
 
             var fileName = ""
             var pluginTarget = Path("")
             var pluginRelativePath = ""
+
+            // 处理数组中的第一个（也是唯一的）档案
+            let downloadedRelativePath = downloadedRelativePaths.get(0).getOrThrow()
 
             if (usePluginDownloadedFile) {
                 if (downloadedRelativePath.contains("..") || downloadedRelativePath.startsWith("/") ||
@@ -191,6 +206,12 @@ public class DownloadUrlTaskRunner {
             // 解析插件返回的 archive_type
             let archiveType = parseArchiveTypeFromPlugin(output)
 
+            // 构建包含source的tags
+            var tags = ""
+            if (downloadedSource.size > 0) {
+                tags = "source:${downloadedSource}"
+            }
+
             // 创建 scan_archive 任务
             let params = """
                 {
@@ -198,7 +219,8 @@ public class DownloadUrlTaskRunner {
                     "archive_base_path":"${escapeJson(archiveBasePath)}",
                     "cache_path":"${escapeJson(cachePathStr)}",
                     "thumbnail_path":"${escapeJson(thumbnailPathStr)}",
-                    "archive_type":"${archiveType}"
+                    "archive_type":"${archiveType}",
+                    "tags":"${escapeJson(tags)}"
                 }
             """
             let task = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "download_url:${taskId}", "upload")
@@ -209,7 +231,7 @@ public class DownloadUrlTaskRunner {
                 return
             }
 
-            let resultJson = "{\"success\":1,\"relative_path\":\"${relativePath}\",\"plugin_relative_path\":\"${pluginRelativePath}\",\"task_id\":\"${task.id}\",\"filename\":\"${escapeJson(fileName)}\"}"
+            let resultJson = "{\"success\":1,\"archives\":[{\"relative_path\":\"${relativePath}\",\"plugin_relative_path\":\"${pluginRelativePath}\",\"filename\":\"${escapeJson(fileName)}\"}],\"task_id\":\"${task.id}\"}"
 
             TaskModel.updateTaskProgress(taskId, 100, "下载完成")
             TaskModel.completeTask(taskId, "download_url completed")
@@ -365,7 +387,52 @@ public class DownloadUrlTaskRunner {
         return ""
     }
 
-    private static func parseDownloadedRelativePath(output: String): String {
+    private static func parseDownloadedRelativePath(output: String): ArrayList<String> {
+        var paths = ArrayList<String>()
+        if (output.size == 0) {
+            return paths
+        }
+        try {
+            let jsonVal = JsonValue.fromStr(output)
+            match (jsonVal) {
+                case obj: JsonObject =>
+                    let fields = obj.getFields()
+                    if (fields.contains("success")) {
+                        let successVal = fields["success"].toString()
+                        if (successVal == "true" || successVal == "1") {
+                            if (fields.contains("data")) {
+                                let dataVal = fields["data"]
+                                match (dataVal) {
+                                    case dataArray: JsonArray =>
+                                        // 数组格式：提取每个档案的relative_path
+                                        for (i in 0..dataArray.size()) {
+                                            match (dataArray.get(i)) {
+                                                case Some(item: JsonObject) =>
+                                                    let itemFields = item.getFields()
+                                                    if (itemFields.contains("relative_path")) {
+                                                        let rpVal = itemFields["relative_path"]
+                                                        match (rpVal) {
+                                                            case rpStr: JsonString => paths.add(rpStr.getValue().trimAscii())
+                                                            case _ => paths.add(rpVal.toString().trimAscii())
+                                                        }
+                                                    }
+                                                case _ => ()
+                                            }
+                                        }
+                                    case _ => ()
+                                }
+                            }
+                        }
+                    }
+                case _ => ()
+            }
+        } catch (_: Exception) {
+            return paths
+        }
+        return paths
+    }
+
+    private static func parseDownloadedSource(output: String): String {
         if (output.size == 0) {
             return ""
         }
@@ -380,13 +447,20 @@ public class DownloadUrlTaskRunner {
                             if (fields.contains("data")) {
                                 let dataVal = fields["data"]
                                 match (dataVal) {
-                                    case dataObj: JsonObject =>
-                                        let dataFields = dataObj.getFields()
-                                        if (dataFields.contains("relative_path")) {
-                                            let rpVal = dataFields["relative_path"]
-                                            match (rpVal) {
-                                                case rpStr: JsonString => return rpStr.getValue().trimAscii()
-                                                case _ => return rpVal.toString().trimAscii()
+                                    case dataArray: JsonArray =>
+                                        // 数组格式：提取第一个档案的source
+                                        if (dataArray.size() > 0) {
+                                            match (dataArray.get(0)) {
+                                                case Some(item: JsonObject) =>
+                                                    let itemFields = item.getFields()
+                                                    if (itemFields.contains("source")) {
+                                                        let sourceVal = itemFields["source"]
+                                                        match (sourceVal) {
+                                                            case sourceStr: JsonString => return sourceStr.getValue().trimAscii()
+                                                            case _ => return sourceVal.toString().trimAscii()
+                                                        }
+                                                    }
+                                                case _ => ()
                                             }
                                         }
                                     case _ => ()

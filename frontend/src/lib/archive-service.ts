@@ -21,12 +21,13 @@ export interface DownloadProgressCallback {
 
 export interface DownloadResult {
   success: boolean;
+  archives: Array<{
+    relativePath: string;
+    pluginRelativePath: string;
+    filename: string;
+  }>;
   id?: string;
   error?: string;
-  filename?: string;
-  size?: number;
-  relativePath?: string;
-  pluginRelativePath?: string;
 }
 
 export interface MetadataPluginRunCallbacks {
@@ -252,7 +253,7 @@ export class ArchiveService {
       if (!enqueueSuccess) {
         const errorMessage = response.data?.error || 'Download failed';
         callbacks?.onError?.(errorMessage);
-        return { success: false, error: errorMessage };
+        return { success: false, error: errorMessage, archives: [] };
       }
 
       const jobId = response.data?.job;
@@ -262,10 +263,11 @@ export class ArchiveService {
           success: true,
           id: response.data.id,
           error: response.data.error,
-          filename: response.data.filename,
-          size: response.data.size,
-          relativePath: response.data.relative_path,
-          pluginRelativePath: response.data.plugin_relative_path
+          archives: response.data.relative_path ? [{
+            relativePath: response.data.relative_path,
+            pluginRelativePath: response.data.plugin_relative_path,
+            filename: response.data.filename
+          }] : []
         };
         callbacks?.onProgress?.(100);
         callbacks?.onComplete?.(result);
@@ -280,7 +282,7 @@ export class ArchiveService {
       const parsed = this.parseTaskOutput(finalTask);
       if (finalTask.status === 'failed' || parsed.success === false) {
         const err = parsed.error || finalTask.result || finalTask.message || 'Download failed';
-        const failResult: DownloadResult = { success: false, error: err };
+        const failResult: DownloadResult = { success: false, error: err, archives: [] };
         callbacks?.onComplete?.(failResult);
         return failResult;
       }
@@ -288,9 +290,7 @@ export class ArchiveService {
       const okResult: DownloadResult = {
         success: true,
         id: parsed.id,
-        filename: parsed.filename,
-        relativePath: parsed.relativePath,
-        pluginRelativePath: parsed.pluginRelativePath
+        archives: parsed.archives || []
       };
       callbacks?.onProgress?.(100);
       callbacks?.onComplete?.(okResult);
@@ -301,7 +301,8 @@ export class ArchiveService {
 
       return {
         success: false,
-        error: errorMessage
+        error: errorMessage,
+        archives: []
       };
     }
   }
@@ -375,9 +376,14 @@ export class ArchiveService {
     filename?: string;
     relativePath?: string;
     pluginRelativePath?: string;
+    archives?: Array<{
+      relativePath: string;
+      pluginRelativePath: string;
+      filename: string;
+    }>;
   } {
     const raw = task.result;
-    if (!raw) return { success: task.status === 'completed' };
+    if (!raw) return { success: task.status === 'completed', archives: [] };
     try {
       const obj = JSON.parse(raw);
       const rawSuccess = obj?.success;
@@ -387,16 +393,29 @@ export class ArchiveService {
         rawSuccess === "1" ||
         rawSuccess === "true";
 
+      // 解析 archives 数组
+      if (obj?.archives && Array.isArray(obj.archives)) {
+        return {
+          success,
+          archives: obj.archives.map((archive: any) => ({
+            relativePath: archive.relative_path,
+            pluginRelativePath: archive.plugin_relative_path,
+            filename: archive.filename
+          }))
+        };
+      }
+
       return {
         success,
         id: obj?.id,
         error: obj?.error,
         filename: obj?.filename,
         relativePath: obj?.relative_path,
-        pluginRelativePath: obj?.plugin_relative_path
+        pluginRelativePath: obj?.plugin_relative_path,
+        archives: []
       };
     } catch {
-      return { success: task.status === 'completed' };
+      return { success: task.status === 'completed', archives: [] };
     }
   }
 
@@ -431,7 +450,8 @@ export class ArchiveService {
       } catch (error: any) {
         results.push({
           success: false,
-          error: error.message || 'Download failed'
+          error: error.message || 'Download failed',
+          archives: []
         });
       }
     }
@@ -458,8 +478,11 @@ export class ArchiveService {
       const result: DownloadResult = {
         success: true,
         id: Math.random().toString(36).substr(2, 9),
-        filename: `archive_${Date.now()}.zip`,
-        size: Math.floor(Math.random() * 10000000) + 1000000
+        archives: [{
+          relativePath: `archive/archive_${Date.now()}.zip`,
+          pluginRelativePath: `plugins/simulate/archive_${Date.now()}.zip`,
+          filename: `archive_${Date.now()}.zip`
+        }]
       };
 
       callbacks?.onComplete?.(result);
@@ -470,7 +493,8 @@ export class ArchiveService {
 
       return {
         success: false,
-        error: errorMessage
+        error: errorMessage,
+        archives: []
       };
     }
   }

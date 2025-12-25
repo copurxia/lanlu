@@ -100,11 +100,12 @@ class EHentaiDownloadPlugin extends BasePlugin {
 
       return {
         success: true,
-        data: {
+        data: [{
           relative_path: downloaded.data.relativePath,
           filename: downloaded.data.filename,
+          source: 'https://e-hentai.org/g/' + gID + '/' + gToken,
           archive_size: params.forceresampled ? 'resampled' : 'original'
-        }
+        }]
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

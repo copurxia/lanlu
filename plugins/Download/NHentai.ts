@@ -191,12 +191,13 @@ class NHentaiDownloadPlugin extends BasePlugin {
 
     return {
       success: true,
-      data: {
+      data: [{
         relative_path: `plugins/nhentai/${folderName}`,
         filename: folderName,
+        source: `https://nhentai.net/g/${galleryId}/`,
         downloaded_count: downloadedCount,
         failed_count: failedCount
-      }
+      }]
     };
   }
 
