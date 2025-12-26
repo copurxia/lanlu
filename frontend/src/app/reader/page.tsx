@@ -14,6 +14,7 @@ import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { logger } from '@/lib/logger';
+import { toast } from 'sonner';
 import {
   useReadingMode,
   useDoublePageMode,
@@ -128,6 +129,11 @@ function ReaderContent() {
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [sidebarImagesLoading, setSidebarImagesLoading] = useState<Set<number>>(new Set());
   const [isEpub, setIsEpub] = useState(false); // 是否为EPUB文件
+  const [showAutoNextCountdown, setShowAutoNextCountdown] = useState(false); // 是否显示自动跳转倒计时
+  const [countdownSeconds, setCountdownSeconds] = useState(3); // 倒计时秒数
+  const countdownTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 倒计时定时器引用
+  const countdownToastId = useRef<string | number | null>(null); // toast ID引用
+  const COUNTDOWN_DURATION = 3; // 倒计时持续时间（秒）
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -135,6 +141,20 @@ function ReaderContent() {
       ? Math.min(800, window.innerWidth * 0.8)
       : Math.min(window.innerWidth * 0.95, window.innerWidth);
     return { containerWidth };
+  }, []);
+
+  // 清除倒计时定时器
+  const clearCountdown = useCallback(() => {
+    if (countdownTimeoutRef.current) {
+      clearTimeout(countdownTimeoutRef.current);
+      countdownTimeoutRef.current = null;
+    }
+    if (countdownToastId.current !== null) {
+      toast.dismiss(countdownToastId.current);
+      countdownToastId.current = null;
+    }
+    setShowAutoNextCountdown(false);
+    setCountdownSeconds(COUNTDOWN_DURATION);
   }, []);
 
   const getImageHeight = useCallback((naturalWidth: number, naturalHeight: number) => {
@@ -914,35 +934,122 @@ function ReaderContent() {
         const scrollHeight = htmlContainer.scrollHeight;
         const clientHeight = htmlContainer.clientHeight;
         const isAtTop = scrollTop <= 5; // 允许5px的误差
+        const isNearTop = scrollTop <= 150; // 接近顶部时开始倒计时
+        const isNearBottom = scrollTop >= scrollHeight - clientHeight - 150; // 提前150px开始倒计时
         const isAtBottom = scrollTop >= scrollHeight - clientHeight - 5;
 
         const deltaY = e.deltaY;
 
-        // 在顶部向上滚动 -> 上一页（跳转到上一页底部）
-        // 在底部向下滚动 -> 下一页（跳转到下一页顶部）
-        // 其他情况允许自然滚动
-        if ((isAtTop && deltaY < 0) || (isAtBottom && deltaY > 0)) {
+        // 如果正在显示倒计时，阻止滚动并处理倒计时逻辑
+        if (showAutoNextCountdown) {
           e.preventDefault();
           if (isAtTop && deltaY < 0) {
-            // 跳转到上一页底部
-            handlePrevPage();
-            // 等待页面渲染完成后，滚动到底部
-            setTimeout(() => {
-              const htmlContainer = document.querySelector('.html-content-container');
-              if (htmlContainer) {
-                htmlContainer.scrollTop = htmlContainer.scrollHeight;
-              }
-            }, 100);
+            // 倒计时结束后自动跳转
+            // 不需要手动处理，倒计时会自动执行
           } else if (isAtBottom && deltaY > 0) {
-            // 跳转到下一页顶部
-            handleNextPage();
-            // 等待页面渲染完成后，滚动到顶部
-            setTimeout(() => {
-              const htmlContainer = document.querySelector('.html-content-container');
-              if (htmlContainer) {
-                htmlContainer.scrollTop = 0;
-              }
-            }, 100);
+            // 倒计时结束后自动跳转
+            // 不需要手动处理，倒计时会自动执行
+          } else {
+            // 其他滚动行为，取消倒计时
+            clearCountdown();
+          }
+          return;
+        }
+
+        // 在顶部向上滚动 -> 上一页（跳转到上一页底部，显示倒计时）
+        // 在底部向下滚动 -> 下一页（跳转到下一页顶部，显示倒计时）
+        // 其他情况允许自然滚动
+        if (isNearTop && deltaY < 0) {
+          // 接近顶部时，开始倒计时
+          e.preventDefault();
+          if (!showAutoNextCountdown) {
+            setShowAutoNextCountdown(true);
+            setCountdownSeconds(COUNTDOWN_DURATION);
+
+            // 显示 toast
+            countdownToastId.current = toast.loading(`即将跳转到上一页（${COUNTDOWN_DURATION}秒后）`, {
+              duration: COUNTDOWN_DURATION * 1000,
+              action: {
+                label: '取消',
+                onClick: () => clearCountdown(),
+              },
+            });
+
+            // 开始倒计时
+            countdownTimeoutRef.current = setInterval(() => {
+              setCountdownSeconds(prev => {
+                if (prev <= 1) {
+                  // 倒计时结束，执行跳转
+                  clearCountdown();
+                  handlePrevPage();
+                  setTimeout(() => {
+                    const htmlContainer = document.querySelector('.html-content-container');
+                    if (htmlContainer) {
+                      htmlContainer.scrollTop = htmlContainer.scrollHeight;
+                    }
+                  }, 100);
+                  return 0;
+                }
+                // 更新 toast 消息
+                if (countdownToastId.current !== null) {
+                  toast.loading(`即将跳转到上一页（${prev - 1}秒后）`, {
+                    id: countdownToastId.current,
+                    duration: (prev - 1) * 1000,
+                    action: {
+                      label: '取消',
+                      onClick: () => clearCountdown(),
+                    },
+                  });
+                }
+                return prev - 1;
+              });
+            }, 1000);
+          }
+        } else if (isNearBottom && deltaY > 0) {
+          // 接近底部时，开始倒计时
+          e.preventDefault();
+          if (!showAutoNextCountdown) {
+            setShowAutoNextCountdown(true);
+            setCountdownSeconds(COUNTDOWN_DURATION);
+
+            // 显示 toast
+            countdownToastId.current = toast.loading(`即将跳转到下一页（${COUNTDOWN_DURATION}秒后）`, {
+              duration: COUNTDOWN_DURATION * 1000,
+              action: {
+                label: '取消',
+                onClick: () => clearCountdown(),
+              },
+            });
+
+            // 开始倒计时
+            countdownTimeoutRef.current = setInterval(() => {
+              setCountdownSeconds(prev => {
+                if (prev <= 1) {
+                  // 倒计时结束，执行跳转
+                  clearCountdown();
+                  handleNextPage();
+                  setTimeout(() => {
+                    const htmlContainer = document.querySelector('.html-content-container');
+                    if (htmlContainer) {
+                      htmlContainer.scrollTop = 0;
+                    }
+                  }, 100);
+                  return 0;
+                }
+                // 更新 toast 消息
+                if (countdownToastId.current !== null) {
+                  toast.loading(`即将跳转到下一页（${prev - 1}秒后）`, {
+                    id: countdownToastId.current,
+                    duration: (prev - 1) * 1000,
+                    action: {
+                      label: '取消',
+                      onClick: () => clearCountdown(),
+                    },
+                  });
+                }
+                return prev - 1;
+              });
+            }, 1000);
           }
         }
         // 其他情况不阻止默认行为，让HTML内容自然滚动
@@ -973,7 +1080,7 @@ function ReaderContent() {
         handlePrevPage();
       }
     }
-  }, [handlePrevPage, handleNextPage, readingMode, pages, currentPage]);
+  }, [handlePrevPage, handleNextPage, readingMode, pages, currentPage, showAutoNextCountdown, clearCountdown]);
 
   useEffect(() => {
     window.addEventListener('wheel', handleWheel);
@@ -1368,6 +1475,13 @@ function ReaderContent() {
       });
     }
   }, [readingMode, imageHeights, getImageHeight]);
+
+  // 组件卸载时清理倒计时定时器
+  useEffect(() => {
+    return () => {
+      clearCountdown();
+    };
+  }, [clearCountdown]);
 
   if (loading) {
     return (
