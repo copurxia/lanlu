@@ -1832,7 +1832,10 @@ function ReaderContent() {
       >
         {/* 侧边栏导航 */}
         {sidebarOpen && (
-          <div className="absolute left-0 top-0 bottom-0 w-[280px] sm:w-[320px] bg-background/95 backdrop-blur-sm border-r border-border z-40 flex flex-col">
+          <div
+            className="absolute left-0 top-0 bottom-0 w-[280px] sm:w-[320px] bg-background/95 backdrop-blur-sm border-r border-border z-40 flex flex-col"
+            onWheel={(e) => e.stopPropagation()}
+          >
             <div className="flex-1 overflow-y-auto">
               <div className="p-3">
                 {sidebarLoading ? (
