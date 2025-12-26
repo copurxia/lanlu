@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useConfirm } from '@/hooks/use-confirm';
 import { BookOpen, Plus, Check, Search } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 
@@ -31,10 +32,12 @@ export function AddToTankoubonDialog({
   fullWidth = false,
 }: AddToTankoubonDialogProps) {
   const { t } = useLanguage();
+  const { confirm, ConfirmComponent } = useConfirm();
   const [open, setOpen] = useState(false);
   const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [newTankoubonName, setNewTankoubonName] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -137,6 +140,38 @@ export function AddToTankoubonDialog({
       alert('创建失败: 网络错误或服务器异常');
     } finally {
       setCreating(false);
+    }
+  };
+
+  // Remove archive from tankoubon with confirmation
+  const handleRemoveFromTankoubon = async (tankoubonId: string) => {
+    if (!mounted) return;
+
+    // Get tankoubon name for confirmation message
+    const tankoubonName = tankoubons.find(t => t.tankoubon_id === tankoubonId)?.name || '';
+    const confirmed = await confirm({
+      title: '确认移除',
+      description: `确定要从合集"${tankoubonName}"中移除当前档案吗？`,
+      confirmText: '移除',
+      cancelText: '取消',
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      setRemoving(tankoubonId);
+      await TankoubonService.removeArchiveFromTankoubon(tankoubonId, archiveId);
+
+      // 刷新合集列表以更新UI
+      await fetchTankoubons();
+
+      console.log('成功从合集中移除');
+    } catch (error) {
+      console.error('Failed to remove archive from tankoubon:', error);
+      alert('移除失败: 网络错误或服务器异常');
+    } finally {
+      setRemoving(null);
     }
   };
 
@@ -253,10 +288,16 @@ export function AddToTankoubonDialog({
                         </div>
 
                         {isInTankoubon ? (
-                          <Badge variant="secondary" className="shrink-0">
-                            <Check className="w-3 h-3 mr-1" />
-                            {t('tankoubon.alreadyAdded')}
-                          </Badge>
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleRemoveFromTankoubon(tankoubon.tankoubon_id)}
+                            disabled={removing === tankoubon.tankoubon_id}
+                            className="shrink-0"
+                          >
+                            {removing === tankoubon.tankoubon_id ? <Spinner size="sm" /> : t('common.remove')}
+                          </Button>
                         ) : (
                           <Button
                             type="button"
@@ -283,6 +324,7 @@ export function AddToTankoubonDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <ConfirmComponent />
     </Dialog>
   );
 }
