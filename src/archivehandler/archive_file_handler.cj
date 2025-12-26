@@ -113,6 +113,14 @@ public class ArchiveFileHandler <: ArchiveHandler {
         return ext != "pdf"
     }
 
+    public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        let (entryName, _) = getFirstImage(archivePath)
+        if (entryName.isEmpty()) {
+            return (1i64, Array<UInt8>(), "No image found".toArray())
+        }
+        return extractEntryToStream(archivePath, entryName)
+    }
+
     // ==================== 私有工具方法 ====================
 
     private func fileExists(path: String): Bool {

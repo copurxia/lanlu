@@ -144,7 +144,7 @@ public class ScanArchiveTaskRunner {
                             case s: JsonString =>
                                 archiveType = s.getValue().trimAscii()
                                 // 验证类型有效性
-                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf") {
+                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
                                     archiveType = "archive"
                                 }
                             case _ => ()

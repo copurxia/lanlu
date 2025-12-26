@@ -16,6 +16,7 @@
   opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", output-type = "static", branch="master"}
   cjdotenv = { git = "https://gitcode.com/Cangjie-SIG/cjdotenv.git", tag = "master" }
   cjcron = { path = "packages/cjcron" }
+  epub = { path = "packages/epub" }
 
 [target]
   [target.x86_64-unknown-linux-gnu]

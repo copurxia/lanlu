@@ -76,6 +76,11 @@ public class PdfHandler <: ArchiveHandler {
         return ext == "pdf"
     }
 
+    public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        // 提取第一页作为封面
+        return extractEntryToStream(archivePath, "page_1.jpg")
+    }
+
     private func getPdfPageCount(pdfPath: String): Int32 {
         try {
             let process = launch("gs", "-q", "-dNOSAFER", "-sDEVICE=nullpage", "-c",

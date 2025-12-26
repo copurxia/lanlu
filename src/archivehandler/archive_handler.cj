@@ -49,6 +49,13 @@ public interface ArchiveHandler {
     func getFirstImage(archivePath: String): (String, String)
 
     /**
+     * 获取封面图片数据
+     * @param archivePath 档案路径
+     * @return (exitCode, imageData, errorData) - 0表示成功
+     */
+    func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>)
+
+    /**
      * 检测给定路径是否属于此类型
      * @param filePath 文件路径
      * @return 是否匹配此类型

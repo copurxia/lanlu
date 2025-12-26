@@ -98,6 +98,20 @@ public class FolderHandler <: ArchiveHandler {
         return DirectoryScanner.isDirectory(filePath)
     }
 
+    public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        let (entryName, fullPath) = getFirstImage(archivePath)
+        if (entryName.isEmpty() || fullPath.isEmpty()) {
+            return (1i64, Array<UInt8>(), "No image found".toArray())
+        }
+        try {
+            let data = File.readFrom(Path(fullPath))
+            let uint8Data = Array<UInt8>(data.size, { i => data[i] })
+            return (0i64, uint8Data, Array<UInt8>())
+        } catch (e: Exception) {
+            return (1i64, Array<UInt8>(), e.message.toArray())
+        }
+    }
+
     private func getParentDirectory(filePath: String): String {
         let parts = filePath.split("/")
         if (parts.size > 1) {

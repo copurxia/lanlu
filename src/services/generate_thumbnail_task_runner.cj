@@ -84,31 +84,39 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Resolved archive path: ${actualArchivePath}")
         logger.info("Resolved archive path: ${actualArchivePath}")
 
-        // 根据archiveType获取第一张图片的路径
-        let (firstImageEntry, imageFilePath) = getFirstImageForThumbnail(taskId, actualArchivePath, archiveType, archiveId)
-        if (firstImageEntry.size == 0) {
-            let errorMsg = "No image files found in ${archiveType} archive"
-            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-            return ProcessResultData(false, "", errorMsg)
-        }
-
-        TaskIO.appendLog(taskId, "First image: ${firstImageEntry}")
-
         // 使用任务ID创建独立的临时目录
         let taskTempDir = FileUtils.joinPath(cachePath.toString(), "task/${taskId}")
         let taskTempPath = Path(taskTempDir)
         FileUtils.ensureDirectoryExists(taskTempPath)
         TaskIO.appendLog(taskId, "Created task temp directory: ${taskTempDir}")
 
-        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${ArchiveUtils.getFileExtension(firstImageEntry)}")
-        TaskIO.appendLog(taskId, "Copying/Extracting image to: ${tempImagePath}")
-
-        // 使用 Handler 提取图片
+        // 使用 getCoverImage 直接获取封面图片数据
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
-        let copySuccess = handler.extractEntryToFile(actualArchivePath, firstImageEntry, tempImagePath)
+        TaskIO.appendLog(taskId, "Extracting cover image using getCoverImage...")
+        let (exitCode, imageData, errorData) = handler.getCoverImage(actualArchivePath)
 
-        if (!copySuccess) {
-            let errorMsg = "Failed to copy/extract image from ${archiveType} archive"
+        if (exitCode != 0 || imageData.size == 0) {
+            let errorMsg = if (errorData.size > 0) {
+                String.fromUtf8(errorData)
+            } else {
+                "No cover image found in ${archiveType} archive"
+            }
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            return ProcessResultData(false, "", errorMsg)
+        }
+
+        TaskIO.appendLog(taskId, "Cover image extracted, size: ${imageData.size} bytes")
+
+        // 将图片数据写入临时文件
+        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.jpg")
+        TaskIO.appendLog(taskId, "Writing cover image to: ${tempImagePath}")
+
+        try {
+            let tempFile = File(Path(tempImagePath), Write)
+            tempFile.write(imageData)
+            tempFile.close()
+        } catch (e: Exception) {
+            let errorMsg = "Failed to write cover image to temp file: ${e.message}"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
@@ -238,7 +246,7 @@ public class GenerateThumbnailTaskRunner {
                             case s: JsonString =>
                                 archiveType = s.getValue().trimAscii()
                                 // 验证类型有效性
-                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf") {
+                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
                                     archiveType = "archive"
                                 }
                             case _ => ()
@@ -304,23 +312,5 @@ public class GenerateThumbnailTaskRunner {
             // 失败时使用文件路径作为备选
             return "fallback_${ArchiveUtils.generateFileHash(imagePath)}"
         }
-    }
-
-    /**
-     * 根据类型获取第一张图片信息
-     * 返回: (firstImageEntry, imageFilePath)
-     * firstImageEntry: 图片文件名（压缩包中的相对路径或文件夹中的文件名）
-     * imageFilePath: 图片文件的完整路径（用于文件夹类型）
-     */
-    private static func getFirstImageForThumbnail(taskId: Int64, archivePath: String, archiveType: String, archiveId: String): (String, String) {
-        TaskIO.appendLog(taskId, "Getting first image for ${archiveType} archive")
-        let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
-        let (entryName, fullPath) = handler.getFirstImage(archivePath)
-        if (entryName.size > 0) {
-            TaskIO.appendLog(taskId, "Found first image: ${entryName}")
-        } else {
-            TaskIO.appendLog(taskId, "No images found in archive")
-        }
-        return (entryName, fullPath)
     }
 }

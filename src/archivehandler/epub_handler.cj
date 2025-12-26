@@ -1,15 +1,14 @@
 package lrr4cj.archivehandler
 
 import std.fs.*
-import std.process.*
 import std.collection.*
-import std.io.*
 import lrr4cj.models.ArchiveTypes
-import lrr4cj.utils.{ArchiveUtils, DirectoryScanner}
+import lrr4cj.utils.DirectoryScanner
+import epub.Epub
 
 /**
  * EPUB文件类型处理器
- * EPUB is a ZIP archive containing XHTML, CSS, images, and metadata
+ * 使用 packages/epub 库解析 EPUB 文件
  */
 public class EpubHandler <: ArchiveHandler {
 
@@ -19,7 +18,6 @@ public class EpubHandler <: ArchiveHandler {
 
     /**
      * 列出EPUB中的XHTML文件作为"页面"
-     * Filters only XHTML files (not CSS, images, metadata)
      */
     public func listEntries(archivePath: String): Array<String> {
         try {
@@ -27,38 +25,14 @@ public class EpubHandler <: ArchiveHandler {
                 return Array<String>()
             }
 
-            // List all files in EPUB (which is a ZIP)
-            let process = launch("bsdtar", "-tf", archivePath,
-                stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-            let reader = StringReader<InputStream>(process.stdOutPipe)
-            let output = reader.readToEnd()
-            process.wait()
-
-            let lines = output.split('\n')
+            let epub = Epub.open(archivePath)
             var entries = ArrayList<String>()
 
-            for (line in lines) {
-                let trimmedLine = line.trimAscii()
-                if (trimmedLine.size == 0) {
-                    continue
-                }
-
-                // Filter for XHTML files only
-                // Match: *.xhtml, *.html, *.htm (case insensitive)
-                let lowerLine = trimmedLine.toAsciiLower()
-                if (lowerLine.endsWith(".xhtml") ||
-                    lowerLine.endsWith(".html") ||
-                    lowerLine.endsWith(".htm")) {
-
-                    // Skip manifest and metadata files
-                    if (!trimmedLine.contains("META-INF/") &&
-                        !trimmedLine.endsWith("container.xml")) {
-                        entries.add(trimmedLine)
-                    }
-                }
+            for (file in epub.allFiles) {
+                entries.add(file.href)
             }
 
-            // Return entries as-is (EPUB files usually have proper ordering)
+            epub.close()
             return entries.toArray()
         } catch (_: Exception) {
             return Array<String>()
@@ -71,10 +45,14 @@ public class EpubHandler <: ArchiveHandler {
                 return (1i64, Array<UInt8>(), "Empty entry name".toArray())
             }
 
-            // Extract XHTML content from EPUB (ZIP)
-            let process = launch("bsdtar", "-xO", "-f", archivePath, entryName,
-                stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-            return process.waitOutput()
+            let epub = Epub.open(archivePath)
+            let dataOpt = epub.extractResource(entryName)
+            epub.close()
+
+            match (dataOpt) {
+                case Some(data) => return (0i64, data, Array<UInt8>())
+                case None => return (1i64, Array<UInt8>(), "Entry not found".toArray())
+            }
         } catch (e: Exception) {
             return (1i64, Array<UInt8>(), e.message.toArray())
         }
@@ -107,19 +85,27 @@ public class EpubHandler <: ArchiveHandler {
     }
 
     public func getMediaCount(archivePath: String): Int32 {
-        // EPUB doesn't have "media count" in the same sense
-        // Return XHTML page count instead
         let entries = listEntries(archivePath)
-        var count: Int32 = 0
-        for (entry in entries) {
-            count++
-        }
-        return count
+        return Int32(entries.size)
     }
 
     public func getFirstImage(archivePath: String): (String, String) {
-        // EPUB doesn't extract to images, return empty
-        return ("", "")
+        try {
+            let epub = Epub.open(archivePath)
+            let resources = epub.getResourceList()
+
+            for (item in resources) {
+                if (isImageMediaType(item.mediaType)) {
+                    epub.close()
+                    return (item.href, "")
+                }
+            }
+
+            epub.close()
+            return ("", "")
+        } catch (_: Exception) {
+            return ("", "")
+        }
     }
 
     public func canHandle(filePath: String): Bool {
@@ -128,6 +114,47 @@ public class EpubHandler <: ArchiveHandler {
         }
         let ext = DirectoryScanner.getFileExtension(filePath).toAsciiLower()
         return ext == "epub"
+    }
+
+    /**
+     * 获取封面图片数据
+     * 优先使用 EPUB 元数据中定义的封面，否则返回第一张图片
+     */
+    public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        try {
+            let epub = Epub.open(archivePath)
+
+            // 优先尝试获取元数据中定义的封面
+            let coverOpt = epub.getCoverBytes()
+            match (coverOpt) {
+                case Some(data) =>
+                    epub.close()
+                    return (0i64, data, Array<UInt8>())
+                case None => ()
+            }
+
+            // 如果没有封面元数据，尝试获取第一张图片
+            let resources = epub.getResourceList()
+            for (item in resources) {
+                if (isImageMediaType(item.mediaType)) {
+                    let dataOpt = epub.extractResource(item.href)
+                    epub.close()
+                    match (dataOpt) {
+                        case Some(data) => return (0i64, data, Array<UInt8>())
+                        case None => return (1i64, Array<UInt8>(), "Failed to extract image".toArray())
+                    }
+                }
+            }
+
+            epub.close()
+            return (1i64, Array<UInt8>(), "No cover image found".toArray())
+        } catch (e: Exception) {
+            return (1i64, Array<UInt8>(), e.message.toArray())
+        }
+    }
+
+    private func isImageMediaType(mediaType: String): Bool {
+        return mediaType.startsWith("image/")
     }
 
     private func getParentDirectory(filePath: String): String {
