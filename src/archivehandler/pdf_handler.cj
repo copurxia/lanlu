@@ -33,8 +33,13 @@ public class PdfHandler <: ArchiveHandler {
                 return (1i64, Array<UInt8>(), errorMsg.toArray())
             }
 
-            // 使用 /tmp 目录作为临时文件存储
-            let tempPath = "/tmp/temp_pdf_extract_${pageNumber}.jpg"
+            // 使用 ./data/cache/archive/(archiveName) 目录作为临时文件存储，避免并发冲突
+            let archiveName = getArchiveBaseName(archivePath)
+            let cacheDir = "./data/cache/archive/${archiveName}"
+            if (!DirectoryScanner.directoryExists(cacheDir)) {
+                Directory.create(cacheDir, recursive: true)
+            }
+            let tempPath = "${cacheDir}/temp_pdf_page_${pageNumber}.jpg"
 
             let success = extractPdfPage(archivePath, pageNumber, tempPath)
             if (success) {
@@ -139,6 +144,17 @@ public class PdfHandler <: ArchiveHandler {
             }
         }
         return -1i32
+    }
+
+    private func getArchiveBaseName(archivePath: String): String {
+        let parts = archivePath.split("/")
+        var fileName = if (parts.size > 0) { parts[parts.size - 1] } else { archivePath }
+        let dotIndex = fileName.lastIndexOf(".")
+        match (dotIndex) {
+            case Some(idx) => fileName = fileName[0..idx]
+            case None => ()
+        }
+        return fileName.replace(" ", "_").replace(":", "_")
     }
 
     private func getParentDirectory(filePath: String): String {
