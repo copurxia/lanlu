@@ -37,7 +37,8 @@ import {
   Maximize,
   Minimize,
   ZoomIn,
-  Eye
+  Eye,
+  Menu
 } from 'lucide-react';
 import Link from 'next/link';
 
@@ -119,6 +120,14 @@ function ReaderContent() {
   const AUTO_HIDE_DELAY = 3000; // 自动隐藏延迟时间（毫秒）
   const mouseMoveTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 鼠标移动防抖引用
   const MOUSE_MOVE_DEBOUNCE = 100; // 鼠标移动防抖延迟（毫秒）
+
+  // 侧边栏状态管理
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarDisplayPages, setSidebarDisplayPages] = useState<PageInfo[]>([]);
+  const [sidebarLoadedCount, setSidebarLoadedCount] = useState(10);
+  const [sidebarLoading, setSidebarLoading] = useState(false);
+  const [sidebarImagesLoading, setSidebarImagesLoading] = useState<Set<number>>(new Set());
+  const [isEpub, setIsEpub] = useState(false); // 是否为EPUB文件
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -258,6 +267,39 @@ function ReaderContent() {
       setError(t('reader.fetchError'));
     }
   }, [error, t]);
+
+  // 初始化侧边栏状态和EPUB检测
+  useEffect(() => {
+    // 从localStorage恢复侧边栏状态
+    if (typeof window !== 'undefined') {
+      const savedSidebarState = localStorage.getItem('reader_sidebar_open');
+      if (savedSidebarState !== null) {
+        setSidebarOpen(savedSidebarState === 'true');
+      }
+    }
+
+    // 检测是否为EPUB文件
+    if (pages.length > 0) {
+      // 如果第一个页面的类型是 'html'，则认为是EPUB
+      const isEpubFile = pages[0]?.type === 'html';
+      setIsEpub(isEpubFile);
+    }
+  }, [pages]);
+
+  // 侧边栏状态持久化
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('reader_sidebar_open', sidebarOpen.toString());
+    }
+  }, [sidebarOpen]);
+
+  // 侧边栏页面数据初始化
+  useEffect(() => {
+    if (pages.length > 0) {
+      setSidebarDisplayPages(pages.slice(0, sidebarLoadedCount));
+      setSidebarLoading(false);
+    }
+  }, [pages, sidebarLoadedCount]);
 
   // 更新阅读进度
   const updateReadingProgress = useCallback(async (page: number) => {
@@ -687,6 +729,24 @@ function ReaderContent() {
     }
   }, [currentPage, pages.length, resetTransform, doublePageMode, splitCoverMode]);
 
+  // 侧边栏页面选择处理
+  const handleSidebarPageSelect = useCallback((pageIndex: number) => {
+    setCurrentPage(pageIndex);
+    resetTransform();
+
+    // 移动端选择页面后自动关闭侧边栏
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setSidebarOpen(false);
+    }
+  }, [resetTransform]);
+
+  // 加载更多侧边栏页面
+  const handleLoadMoreSidebarPages = useCallback(() => {
+    setSidebarLoading(true);
+    const newCount = sidebarLoadedCount + 10;
+    setSidebarLoadedCount(newCount);
+    setSidebarDisplayPages(pages.slice(0, newCount));
+  }, [pages, sidebarLoadedCount]);
 
   const handleImageError = useCallback((pageIndex: number) => {
     setImagesLoading(prev => {
@@ -1371,6 +1431,20 @@ function ReaderContent() {
 
               {/* 语言切换按钮 */}
               <LanguageButton />
+
+              {/* 侧边栏导航图标按钮 */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSidebarOpen(!sidebarOpen)}
+                className={`
+                  transition-all duration-250 ease-out delay-50
+                  ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'}
+                `}
+                title={t('reader.navigation')}
+              >
+                <Menu className="w-5 h-5" />
+              </Button>
             </div>
 
             {/* 中间：标题显示（仅PC端且有标题时显示） */}
@@ -1642,9 +1716,148 @@ function ReaderContent() {
           }
         }}
       >
+        {/* 侧边栏导航 */}
+        {sidebarOpen && (
+          <div className="absolute left-0 top-0 bottom-0 w-[280px] sm:w-[320px] bg-background/95 backdrop-blur-sm border-r border-border z-40 flex flex-col">
+            <div className="flex-1 overflow-y-auto">
+              <div className="p-3">
+                {sidebarLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Spinner />
+                  </div>
+                ) : isEpub ? (
+                  // EPUB章节列表视图
+                  <div className="space-y-1">
+                    {sidebarDisplayPages.map((page, index) => (
+                      <button
+                        key={index}
+                        onClick={() => handleSidebarPageSelect(index)}
+                        className={`w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors group text-left ${
+                          currentPage === index ? 'bg-accent text-accent-foreground' : ''
+                        }`}
+                      >
+                        <span className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
+                          {index + 1}
+                        </span>
+                        <span className="flex-1 truncate text-sm group-hover:text-primary transition-colors">
+                          {page.title || `${t('archive.chapter')} ${index + 1}`}
+                        </span>
+                        <Book className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  // 缩略图网格视图
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {sidebarDisplayPages.map((page, index) => {
+                      const actualPageIndex = index;
+                      const isLoading = sidebarImagesLoading.has(actualPageIndex);
+                      const isCurrentPage = currentPage === actualPageIndex;
+
+                      return (
+                        <button
+                          key={actualPageIndex}
+                          onClick={() => handleSidebarPageSelect(actualPageIndex)}
+                          className={`group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all duration-200 ${
+                            isCurrentPage ? 'ring-2 ring-primary' : ''
+                          }`}
+                        >
+                          {/* 当前页面高亮 */}
+                          {isCurrentPage && (
+                            <div className="absolute inset-0 bg-primary/10 z-10 flex items-center justify-center">
+                              <div className="bg-primary text-primary-foreground text-xs px-2 py-1 rounded-full font-medium">
+                                {actualPageIndex + 1}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 加载状态 */}
+                          {isLoading && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                            </div>
+                          )}
+
+                          {/* 页面图片/视频 */}
+                          <div className="relative w-full h-full">
+                            {page.type === 'video' ? (
+                              <video
+                                src={page.url}
+                                className="w-full h-full object-cover"
+                                muted
+                                loop
+                                playsInline
+                                onMouseEnter={(e) => {
+                                  const video = e.target as HTMLVideoElement;
+                                  video.play().catch(() => {});
+                                }}
+                                onMouseLeave={(e) => {
+                                  const video = e.target as HTMLVideoElement;
+                                  video.pause();
+                                  video.currentTime = 0;
+                                }}
+                              />
+                            ) : (
+                              <Image
+                                src={page.url}
+                                alt={t('archive.previewPage').replace('{current}', String(actualPageIndex + 1)).replace('{total}', String(pages.length))}
+                                fill
+                                className={`object-contain transition-opacity duration-200 ${isLoading ? 'opacity-0' : 'opacity-100'}`}
+                                onLoadingComplete={() => {
+                                  setSidebarImagesLoading(prev => {
+                                    const newSet = new Set(prev);
+                                    newSet.delete(actualPageIndex);
+                                    return newSet;
+                                  });
+                                }}
+                                onError={() => {
+                                  setSidebarImagesLoading(prev => {
+                                    const newSet = new Set(prev);
+                                    newSet.delete(actualPageIndex);
+                                    return newSet;
+                                  });
+                                }}
+                                draggable={false}
+                              />
+                            )}
+                          </div>
+
+                          {/* 页码标签 */}
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs py-1 px-1 text-center truncate">
+                            {actualPageIndex + 1}{page.type === 'video' ? ' 🎬' : ''}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* 加载更多按钮 */}
+                {!isEpub && sidebarLoadedCount < pages.length && (
+                  <div className="mt-4 text-center">
+                    <Button
+                      variant="outline"
+                      onClick={handleLoadMoreSidebarPages}
+                      disabled={sidebarLoading}
+                      className="w-full"
+                    >
+                      {sidebarLoading ? <Spinner className="mr-2" /> : null}
+                      {t('archive.loadMore')}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 单页模式 */}
         {readingMode !== 'webtoon' && (
-          <div className="w-full h-full">
+          <div
+            className={`w-full h-full transition-all duration-300 ${
+              sidebarOpen ? 'pl-[280px] sm:pl-[320px]' : 'pl-0'
+            }`}
+          >
             {/* 图片显示区域 */}
             <div className="flex items-center justify-center w-full h-full relative">
               {/* 双页模式下的加载提示 */}
@@ -1847,7 +2060,9 @@ function ReaderContent() {
         {readingMode === 'webtoon' && (
           <div
             ref={webtoonContainerRef}
-            className="h-full overflow-y-auto overflow-x-hidden transition-all duration-250 ease-out"
+            className={`h-full overflow-y-auto overflow-x-hidden transition-all duration-250 ease-out ${
+              sidebarOpen ? 'pl-[280px] sm:pl-[320px]' : 'pl-0'
+            }`}
             onScroll={(e) => {
               const container = e.currentTarget;
 
