@@ -5,27 +5,11 @@ import lrr4cj.models.*
 import lrr4cj.dao.*
 import lrr4cj.middleware.*
 import stdx.net.http.HttpStatusCode
-import std.convert.*
 
 /**
  * 单行本控制器
  */
 public class TankoubonController {
-    /**
-     * JSON字符串转义函数
-     */
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     /**
      * 获取所有单行本
      */
@@ -92,7 +76,6 @@ public class TankoubonController {
         let id = ctx.getParam("id") ?? ""
         let name = ctx.getQuery("name") ?? ""
         let summary = ctx.getQuery("summary") ?? ""
-        let tags = ctx.getQuery("tags") ?? ""
         
         let success = TankoubonModel.updateTankoubon(id, name, summary, "", [])
         if (success) {

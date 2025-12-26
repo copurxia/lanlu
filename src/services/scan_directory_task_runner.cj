@@ -149,25 +149,6 @@ public class ScanDirectoryTaskRunner {
         return false
     }
 
-    /**
-     * 检测归档类型
-     */
-    private static func detectArchiveType(filePath: String): String {
-        // 检查是否为目录
-        if (DirectoryScanner.isDirectory(filePath)) {
-            return "folder"
-        }
-
-        // 检查文件扩展名
-        let ext = DirectoryScanner.getFileExtension(filePath)
-        if (ext == "pdf") {
-            return "pdf"
-        }
-
-        // 默认为压缩包
-        return "archive"
-    }
-
     private static func parseParameters(parameters: String): (String, String, Int32) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {

@@ -6,7 +6,6 @@ import lrr4cj.models.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
 import lrr4cj.middleware.*
-import lrr4cj.config.*
 import std.convert.*
 import std.collection.*
 

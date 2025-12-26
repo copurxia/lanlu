@@ -805,41 +805,6 @@ public class ArchiveController {
     }
 
     /**
-     * 从路径中提取页码（格式：page_1.jpg）
-     */
-    private static func extractPageNumberFromPath(path: String): Int32 {
-        try {
-            // 路径格式：page_1.jpg 或 page_001.jpg
-            // 提取文件名部分
-            let parts = path.split("/")
-            let fileName = if (parts.size > 0) { parts[parts.size - 1] } else { path }
-
-            // 提取页码（page_1.jpg -> 1）
-            if (fileName.startsWith("page_")) {
-                let withoutPrefix = fileName[5..]  // 移除 "page_"
-                
-                let dotIndexOpt = withoutPrefix.indexOf(".")
-                match (dotIndexOpt) {
-                    case Some(dotIndex) =>
-                        if (dotIndex > 0) {
-                            let numberStr = withoutPrefix[0..dotIndex]
-                            let result = try {
-                                Int32.parse(numberStr)
-                            } catch (_: Exception) {
-                                -1i32
-                            }
-                            return result
-                        }
-                    case None => ()
-                }
-            }
-            return -1
-        } catch (_: Exception) {
-            return -1
-        }
-    }
-
-    /**
      * 根据 arcid 获取归档的数据库内部ID
      */
     private static func getArchiveInternalId(arcid: String): Int64 {

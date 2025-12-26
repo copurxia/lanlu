@@ -6,7 +6,6 @@ import stdx.log.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
-import cjcron.*
 
 /**
  * CronService: 定时任务调度服务
