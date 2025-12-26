@@ -125,7 +125,7 @@ function ReaderContent() {
   // 侧边栏状态管理
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarDisplayPages, setSidebarDisplayPages] = useState<PageInfo[]>([]);
-  const [sidebarLoadedCount, setSidebarLoadedCount] = useState(10);
+  const [sidebarLoadedCount, setSidebarLoadedCount] = useState(20);
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [sidebarImagesLoading, setSidebarImagesLoading] = useState<Set<number>>(new Set());
   const [isEpub, setIsEpub] = useState(false); // 是否为EPUB文件
