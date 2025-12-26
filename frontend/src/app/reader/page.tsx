@@ -134,6 +134,7 @@ function ReaderContent() {
   const countdownTimeoutRef = useRef<NodeJS.Timeout | null>(null); // 倒计时定时器引用
   const countdownToastId = useRef<string | number | null>(null); // toast ID引用
   const COUNTDOWN_DURATION = 3; // 倒计时持续时间（秒）
+  const sidebarScrollRef = useRef<HTMLDivElement | null>(null); // 侧边栏滚动容器引用
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -315,11 +316,12 @@ function ReaderContent() {
 
   // 侧边栏页面数据初始化
   useEffect(() => {
-    if (pages.length > 0) {
+    if (pages.length > 0 && sidebarDisplayPages.length === 0) {
+      // 只在首次加载或pages数组变化时重置，避免load more时重新渲染
       setSidebarDisplayPages(pages.slice(0, sidebarLoadedCount));
       setSidebarLoading(false);
     }
-  }, [pages, sidebarLoadedCount]);
+  }, [pages, sidebarLoadedCount, sidebarDisplayPages.length]);
 
   // 更新阅读进度
   const updateReadingProgress = useCallback(async (page: number) => {
@@ -762,10 +764,27 @@ function ReaderContent() {
 
   // 加载更多侧边栏页面
   const handleLoadMoreSidebarPages = useCallback(() => {
+    // 保存当前滚动位置
+    const scrollElement = sidebarScrollRef.current;
+    const scrollTop = scrollElement?.scrollTop || 0;
+
     setSidebarLoading(true);
     const newCount = sidebarLoadedCount + 10;
+
+    // 直接追加新页面到现有数组
+    const newPages = pages.slice(sidebarLoadedCount, newCount);
+    setSidebarDisplayPages(prev => [...prev, ...newPages]);
+
     setSidebarLoadedCount(newCount);
-    setSidebarDisplayPages(pages.slice(0, newCount));
+    setSidebarLoading(false);
+
+    // 使用requestAnimationFrame在DOM更新后恢复滚动位置
+    // 确保与静态导出环境兼容
+    requestAnimationFrame(() => {
+      if (scrollElement) {
+        scrollElement.scrollTop = scrollTop;
+      }
+    });
   }, [pages, sidebarLoadedCount]);
 
   const handleImageError = useCallback((pageIndex: number) => {
@@ -1833,6 +1852,7 @@ function ReaderContent() {
         {/* 侧边栏导航 */}
         {sidebarOpen && (
           <div
+            ref={sidebarScrollRef}
             className="absolute left-0 top-0 bottom-0 w-[280px] sm:w-[320px] bg-background/95 backdrop-blur-sm border-r border-border z-40 flex flex-col"
             onWheel={(e) => e.stopPropagation()}
           >
