@@ -61,4 +61,11 @@ public interface ArchiveHandler {
      * @return 是否匹配此类型
      */
     func canHandle(filePath: String): Bool
+
+    /**
+     * 列出档案中的所有条目/页面（带标题信息）
+     * @param archivePath 档案路径
+     * @return 条目列表，每个元素为 (href, title)，title 可能为空字符串
+     */
+    func listEntriesWithTitle(archivePath: String): Array<(String, String)>
 }

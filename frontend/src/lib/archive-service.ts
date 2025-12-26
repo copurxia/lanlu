@@ -38,6 +38,7 @@ export interface MetadataPluginRunCallbacks {
 export interface PageInfo {
   url: string;
   type: 'image' | 'video' | 'html';
+  title?: string;  // 章节标题（EPUB类型会有值）
 }
 
 export class ArchiveService {

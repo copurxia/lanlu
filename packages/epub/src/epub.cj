@@ -64,8 +64,10 @@ public class Epub {
         var packageDoc = OpfParser.parse(opfXml)
         packageDoc.opfPath = opfPath
 
-        // 3. 查找并解析导航文件
+        // 3. 查找并解析导航文件 (EPUB 3 nav.xhtml 或 EPUB 2 toc.ncx)
         var navTitles = HashMap<String, String>()
+
+        // 首先尝试 EPUB 3 导航文件
         for (item in packageDoc.manifest) {
             if (item.hasProperty("nav")) {
                 let navPath = resolvePath(opfPath, item.href)
@@ -74,6 +76,20 @@ public class Epub {
                     navTitles = NavParser.parse(navHtml)
                 } catch (_: Exception) {}
                 break
+            }
+        }
+
+        // 如果没有找到 EPUB 3 导航，尝试 EPUB 2 的 toc.ncx
+        if (navTitles.isEmpty()) {
+            for (item in packageDoc.manifest) {
+                if (item.mediaType == "application/x-dtbncx+xml") {
+                    let ncxPath = resolvePath(opfPath, item.href)
+                    try {
+                        let ncxXml = extractor.extractToString(ncxPath)
+                        navTitles = NcxParser.parse(ncxXml)
+                    } catch (_: Exception) {}
+                    break
+                }
             }
         }
 

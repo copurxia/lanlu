@@ -121,6 +121,15 @@ public class ArchiveFileHandler <: ArchiveHandler {
         return extractEntryToStream(archivePath, entryName)
     }
 
+    public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+        let entries = listEntries(archivePath)
+        var result = ArrayList<(String, String)>()
+        for (entry in entries) {
+            result.add((entry, ""))
+        }
+        return result.toArray()
+    }
+
     // ==================== 私有工具方法 ====================
 
     private func fileExists(path: String): Bool {

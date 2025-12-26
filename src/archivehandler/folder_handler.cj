@@ -1,6 +1,7 @@
 package lrr4cj.archivehandler
 
 import std.fs.*
+import std.collection.*
 import lrr4cj.models.ArchiveTypes
 import lrr4cj.utils.{ArchiveUtils, DirectoryScanner}
 
@@ -110,6 +111,15 @@ public class FolderHandler <: ArchiveHandler {
         } catch (e: Exception) {
             return (1i64, Array<UInt8>(), e.message.toArray())
         }
+    }
+
+    public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+        let entries = listEntries(archivePath)
+        var result = ArrayList<(String, String)>()
+        for (entry in entries) {
+            result.add((entry, ""))
+        }
+        return result.toArray()
     }
 
     private func getParentDirectory(filePath: String): String {

@@ -1086,7 +1086,7 @@ public class ArchiveDao {
             case Some(conn) => try {
                 // 使用 archives_with_tags 视图获取包含标签的数据
                 let stmt = conn.prepareStatement(
-                    "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, tags FROM archives_with_tags WHERE arcid = ?")
+                    "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags WHERE arcid = ?")
                 stmt.set(0, id)
                 let rs = stmt.query()
 
@@ -1102,8 +1102,9 @@ public class ArchiveDao {
                     archive.relative_path = rs.getOrNull<String>(7) ?? ""
                     archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                     archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                    archive.tags = rs.getOrNull<String>(10) ?? ""
-                    
+                    archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
+                    archive.tags = rs.getOrNull<String>(11) ?? ""
+
                     // 关闭查询的资源
                     rs.close()
                     stmt.close()

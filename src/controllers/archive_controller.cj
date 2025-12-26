@@ -442,26 +442,27 @@ public class ArchiveController {
         // 对于文件访问，需要解析软链接到实际路径
         let actualPath = FileUtils.resolvePath(fullArchivePath)
 
-        // 使用 Handler 获取文件列表
+        // 使用 Handler 获取文件列表（带标题）
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
-        let entries = handler.listEntries(actualPath)
+        let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
 
         // 过滤媒体文件（图片和视频）或者HTML文件（EPUB特殊处理）
-        var pageFiles = ArrayList<String>()
+        var pageFiles = ArrayList<(String, String)>()
         var totalEntries = 0
         var mediaEntries = 0
-        for (entry in entries) {
+        for (entry in entriesWithTitle) {
+            let (href, title) = entry
             totalEntries += 1
             // 对于EPUB类型，返回所有XHTML/HTML文件
             // 对于其他类型，只返回媒体文件
             if (archive.archive_type == ArchiveTypes.EPUB) {
-                if (isHtmlFile(entry)) {
-                    pageFiles.add(entry)
+                if (isHtmlFile(href)) {
+                    pageFiles.add((href, title))
                     mediaEntries += 1
                 }
             } else {
-                if (ArchiveUtils.isMediaFile(entry)) {
-                    pageFiles.add(entry)
+                if (ArchiveUtils.isMediaFile(href)) {
+                    pageFiles.add((href, title))
                     mediaEntries += 1
                 }
             }
@@ -473,25 +474,28 @@ public class ArchiveController {
             // 目前保持只返回媒体文件
         }
 
-        // 构建页面URL列表（包含类型信息）
+        // 构建页面URL列表（包含类型和标题信息）
         var pagesJson = "["
         for (i in 0..pageFiles.size) {
             if (i > 0) {
                 pagesJson = pagesJson + ","
             }
+            let (href, title) = pageFiles[i]
             // 使用查询参数格式，对 path 参数进行 URL 编码
             let form = Form()
-            form.set("path", pageFiles[i])
+            form.set("path", href)
             let pageUrl = "/api/archives/${id}/page?${form.toEncodeString()}"
             // 判断文件类型 - 支持 image、video、html
-            let fileType = if (ArchiveUtils.isVideoFile(pageFiles[i])) {
+            let fileType = if (ArchiveUtils.isVideoFile(href)) {
                 "video"
-            } else if (isHtmlFile(pageFiles[i])) {
+            } else if (isHtmlFile(href)) {
                 "html"
             } else {
                 "image"
             }
-            pagesJson = pagesJson + "{\"url\":\"${pageUrl}\",\"type\":\"${fileType}\"}"
+            // 转义标题中的特殊字符
+            let escapedTitle = escapeJson(title)
+            pagesJson = pagesJson + "{\"url\":\"${pageUrl}\",\"type\":\"${fileType}\",\"title\":\"${escapedTitle}\"}"
         }
         pagesJson = pagesJson + "]"
 

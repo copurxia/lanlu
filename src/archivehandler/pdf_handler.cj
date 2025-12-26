@@ -81,6 +81,15 @@ public class PdfHandler <: ArchiveHandler {
         return extractEntryToStream(archivePath, "page_1.jpg")
     }
 
+    public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+        let entries = listEntries(archivePath)
+        var result = ArrayList<(String, String)>()
+        for (entry in entries) {
+            result.add((entry, ""))
+        }
+        return result.toArray()
+    }
+
     private func getPdfPageCount(pdfPath: String): Int32 {
         try {
             let process = launch("gs", "-q", "-dNOSAFER", "-sDEVICE=nullpage", "-c",

@@ -157,6 +157,30 @@ public class EpubHandler <: ArchiveHandler {
         return mediaType.startsWith("image/")
     }
 
+    public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
+        try {
+            if (!DirectoryScanner.fileExists(archivePath)) {
+                return Array<(String, String)>()
+            }
+
+            let epub = Epub.open(archivePath)
+            var entries = ArrayList<(String, String)>()
+
+            for (file in epub.allFiles) {
+                let title = match (file.title) {
+                    case Some(t) => t
+                    case None => ""
+                }
+                entries.add((file.href, title))
+            }
+
+            epub.close()
+            return entries.toArray()
+        } catch (_: Exception) {
+            return Array<(String, String)>()
+        }
+    }
+
     private func getParentDirectory(filePath: String): String {
         let parts = filePath.split("/")
         if (parts.size > 1) {
