@@ -52,7 +52,7 @@ public class SystemSettingsService {
                 let needsUpdate = !isDescriptionFormatValid(existingSetting.description)
                 if (needsUpdate) {
                     updateSettings.add(setting)
-                    logger.info("发现需要更新description格式的设置项", ("key", setting.key))
+                    logger.debug("发现需要更新description格式的设置项", ("key", setting.key))
                 }
             }
         }
@@ -80,7 +80,7 @@ public class SystemSettingsService {
                 logger.error("更新description格式失败")
                 return false
             }
-            logger.info("更新description格式成功")
+            logger.debug("更新description格式成功")
         } else {
             logger.info("所有设置项的description格式正确，无需更新")
         }
@@ -211,7 +211,7 @@ public class SystemSettingsService {
         }
         cacheInitialized = true
         cacheMutex.unlock()
-        getLogger("system_settings_service").info("系统设置缓存已更新", ("count", settings.size.toString()))
+        getLogger("system_settings_service").debug("系统设置缓存已更新", ("count", settings.size.toString()))
     }
 
     /**

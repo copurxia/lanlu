@@ -139,7 +139,7 @@ public class TaskPoolService {
 
     private func runWorker(task: TaskData, workerId: Int32): Unit {
         let logger = getLogger("taskpool")
-        logger.info("TaskPool worker executing", ("worker", workerId.toString()), ("task_id", task.id.toString()), ("task_type", task.taskType))
+        logger.debug("TaskPool worker executing", ("worker", workerId.toString()), ("task_id", task.id.toString()), ("task_type", task.taskType))
         executeTask(task, workerId)
 
         // 释放 slot 并尝试领取下一个 pending
@@ -183,6 +183,6 @@ public class TaskPoolService {
                 TaskIO.writeOutput(task.id, "{\"success\":0,\"error\":\"Unknown task type: ${task.taskType}\"}")
         }
 
-        logger.info("TaskPool task finished", ("id", task.id.toString()), ("type", task.taskType), ("worker", workerIndex.toString()))
+        logger.debug("TaskPool task finished", ("id", task.id.toString()), ("type", task.taskType), ("worker", workerIndex.toString()))
     }
 }

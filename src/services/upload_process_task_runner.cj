@@ -40,7 +40,7 @@ public class UploadProcessTaskRunner {
 
             if (scanTask.id > 0) {
                 TaskPoolService.getInstance().notifyTaskAvailable()
-                logger.info("Created scan_archive task for upload", ("scan_task_id", scanTask.id.toString()), ("archive_path", archivePath))
+                logger.debug("Created scan_archive task for upload", ("scan_task_id", scanTask.id.toString()), ("archive_path", archivePath))
 
                 let okJson =
                     "{\"success\":1,\"scan_task_id\":${scanTask.id},\"relative_path\":\"${escapeJson(relativePath)}\",\"filename\":\"${escapeJson(fileName)}\",\"message\":\"Archive scan task created\"}"

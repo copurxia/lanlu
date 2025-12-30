@@ -75,7 +75,7 @@ public class CronService {
         // 初始化默认定时任务（如果没有任何定时任务）
         initializeDefaultTasks()
 
-        logger.info("CronService starting")
+        logger.debug("CronService starting")
 
         // 触发启动任务
         triggerStartupTasks()
@@ -85,7 +85,7 @@ public class CronService {
             runScheduleLoop()
         }
 
-        logger.info("CronService started successfully")
+        logger.debug("CronService started successfully")
         return true
     }
 
@@ -315,7 +315,7 @@ public class CronService {
                 break
             }
 
-            logger.info("Triggering scheduled task from cache", ("id", task.id.toString()), ("name", task.name), ("type", task.taskType))
+            logger.debug("Triggering scheduled task from cache", ("id", task.id.toString()), ("name", task.name), ("type", task.taskType))
 
             // 触发任务执行
             let success = triggerTask(task)
@@ -413,7 +413,7 @@ public class CronService {
         // 通知TaskPool有新任务
         TaskPoolService.getInstance().notifyTaskAvailable()
 
-        logger.info("Created task for scheduled task",
+        logger.debug("Created task for scheduled task",
             ("task_id", task.id.toString()),
             ("scheduled_task_id", scheduledTask.id.toString()),
             ("type", taskType))
@@ -594,7 +594,7 @@ public class CronService {
         )
         match (scanTask) {
             case Some(t) =>
-                logger.info("Created default scan_all_categories task", ("id", t.id.toString()))
+                logger.debug("Created default scan_all_categories task", ("id", t.id.toString()))
             case None =>
                 logger.error("Failed to create default scan_all_categories task")
         }
@@ -626,12 +626,12 @@ public class CronService {
         )
         match (pluginScanTask) {
             case Some(t) =>
-                logger.info("Created default scan_plugins task", ("id", t.id.toString()))
+                logger.debug("Created default scan_plugins task", ("id", t.id.toString()))
             case None =>
                 logger.error("Failed to create default scan_plugins task")
         }
 
-        logger.info("Default scheduled tasks created")
+        logger.debug("Default scheduled tasks created")
     }
 
     /**
@@ -654,7 +654,7 @@ public class CronService {
             let pluginTaskId = triggerPluginScan(priority: 50, triggerSource: "startup")
             logger.info("Triggered startup scan_plugins task", ("task_id", pluginTaskId.toString()))
         } else {
-            logger.info("ENABLE_INITIAL_PLUGIN_SCAN is disabled, skipping initial plugin scan")
+            logger.debug("ENABLE_INITIAL_PLUGIN_SCAN is disabled, skipping initial plugin scan")
         }
 
         // 检查是否启用初始扫描（改用分类系统）
@@ -672,9 +672,9 @@ public class CronService {
         // 检查是否启用初始数据库检查
         let enableInitialDbCheck = SystemSettingsService.getBoolean("ENABLE_INITIAL_DB_CHECK")
         if (enableInitialDbCheck) {
-            logger.info("ENABLE_INITIAL_DB_CHECK is enabled, triggering database check")
+            logger.debug("ENABLE_INITIAL_DB_CHECK is enabled, triggering database check")
             let dbCheckTaskId = triggerDatabaseCheck(priority: 50, triggerSource: "startup")
-            logger.info("Triggered startup check_database task", ("task_id", dbCheckTaskId.toString()))
+            logger.debug("Triggered startup check_database task", ("task_id", dbCheckTaskId.toString()))
         } else {
             logger.info("ENABLE_INITIAL_DB_CHECK is disabled, skipping initial database check")
         }
@@ -711,7 +711,7 @@ public class CronService {
         let task = TaskModel.createTaskWithOptions("数据库检查", "check_database", params, priority, "", source)
         TaskPoolService.getInstance().notifyTaskAvailable()
         let logger = getLogger("cron_service")
-        logger.info("Enqueued check_database task", ("task_id", task.id.toString()))
+        logger.debug("Enqueued check_database task", ("task_id", task.id.toString()))
         return task.id
     }
 
@@ -737,7 +737,7 @@ public class CronService {
         let params = "{}"
         let task = TaskModel.createTaskWithOptions("扫描所有分类", "scan_all_categories", params, 30, "", source)
         TaskPoolService.getInstance().notifyTaskAvailable()
-        logger.info("Enqueued scan_all_categories task", ("task_id", task.id.toString()))
+        logger.debug("Enqueued scan_all_categories task", ("task_id", task.id.toString()))
         return ScanResultData(0, 0, 0, [], taskId: task.id)
     }
 

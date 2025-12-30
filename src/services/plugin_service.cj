@@ -268,7 +268,7 @@ public class PluginService {
                             let pluginData = createDenoPluginFromFile(pluginFile, pluginType)
                             if (pluginData.namespace.size > 0) {
                                 discoveredPlugins = addPluginToArray(discoveredPlugins, pluginData)
-                                logger.info(
+                                logger.debug(
                                     "成功解析TypeScript插件: ${pluginData.name}, namespace: ${pluginData.namespace}, type: ${pluginType}")
                             } else {
                                 logger.warn("解析TypeScript插件失败: ${entry}")
@@ -321,7 +321,7 @@ public class PluginService {
                 if (!output.contains("\"error\"")) {
                     // 从JSON解析插件信息
                     pluginData = parsePluginInfoFromJson(output, fileName, pluginType)
-                    logger.info("成功解析Deno插件元数据: ${fileName}, execution_time: ${executionTime}")
+                    logger.debug("成功解析Deno插件元数据: ${fileName}, execution_time: ${executionTime}")
                 } else {
                     logger.error("Deno插件返回错误: ${fileName}, error: ${output}")
                 }
@@ -380,12 +380,12 @@ public class PluginService {
                     // 解析权限字段
                     if (fields.contains("permissions")) {
                         let perms = fields["permissions"]
-                        logger.info("开始解析插件权限", [("plugin", pluginData.name), ("permissions_raw", perms.toString())])
+                        logger.debug("开始解析插件权限", [("plugin", pluginData.name), ("permissions_raw", perms.toString())])
                         match (perms) {
                             case array: JsonArray =>
                                 var permissionList = ArrayList<String>()
                                 let size = array.size()
-                                logger.info("权限数组大小", [("plugin", pluginData.name), ("array_size", size.toString())])
+                                logger.debug("权限数组大小", [("plugin", pluginData.name), ("array_size", size.toString())])
                                 for (i in 0..size) {
                                     let itemOpt = array.get(i)
                                     match (itemOpt) {
@@ -394,32 +394,32 @@ public class PluginService {
                                                 case permStr: JsonString =>
                                                     let permission = normalizePermission(permStr.getValue())
                                                     permissionList.add(permission)
-                                                    logger.info("添加权限", [("plugin", pluginData.name), ("permission", permission)])
+                                                    logger.debug("添加权限", [("plugin", pluginData.name), ("permission", permission)])
                                                 case _ =>
                                                     let permission = normalizePermission(item.toString())
                                                     permissionList.add(permission)
-                                                    logger.info("添加权限(非JsonString)", [("plugin", pluginData.name), ("permission", permission)])
+                                                    logger.debug("添加权限(非JsonString)", [("plugin", pluginData.name), ("permission", permission)])
                                             }
                                         case None =>
-                                            logger.info("数组元素为空", [("plugin", pluginData.name), ("index", i.toString())])
+                                            logger.debug("数组元素为空", [("plugin", pluginData.name), ("index", i.toString())])
                                     }
                                 }
                                 if (permissionList.size > 0) {
                                     pluginData.permissions = String.join(permissionList.toArray(), delimiter: ",")
-                                    logger.info("权限解析完成", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
+                                    logger.debug("权限解析完成", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
                                 } else {
                                     pluginData.permissions = ""
-                                    logger.info("权限列表为空", [("plugin", pluginData.name)])
+                                    logger.debug("权限列表为空", [("plugin", pluginData.name)])
                                 }
                             case str: JsonString =>
                                 pluginData.permissions = normalizePermission(str.getValue())
-                                logger.info("权限字符串解析", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
+                                logger.debug("权限字符串解析", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
                             case _ =>
                                 pluginData.permissions = normalizePermission(perms.toString())
-                                logger.info("权限其他格式", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
+                                logger.debug("权限其他格式", [("plugin", pluginData.name), ("permissions", pluginData.permissions)])
                         }
                     } else {
-                        logger.info("插件没有权限字段", [("plugin", pluginData.name)])
+                        logger.debug("插件没有权限字段", [("plugin", pluginData.name)])
                     }
 
                     // 解析参数信息
@@ -427,7 +427,7 @@ public class PluginService {
                         let params = fields["parameters"]
                         pluginData.parameters = params.toString()
                         pluginData.has_schema = true
-                        logger.info("成功解析插件参数", ("plugin", pluginData.name),
+                        logger.debug("成功解析插件参数", ("plugin", pluginData.name),
                             ("parameters_count", getParameterCount(params)))
                     } else {
                         pluginData.has_schema = false
@@ -610,7 +610,7 @@ public class PluginService {
         let logger = getLogger("plugin_service")
         let startTime = DateTime.now().toUnixTimeStamp().toSeconds()
 
-        logger.info("开始执行元数据插件: ${plugin.namespace}")
+        logger.debug("开始执行元数据插件: ${plugin.namespace}")
 
         let archive = ArchiveDao.getArchiveById(archiveId)
         if (archive.id.size == 0) {
@@ -794,7 +794,7 @@ public class PluginService {
         let logger = getLogger("plugin_service")
         let startTime = DateTime.now().toUnixTimeStamp().toSeconds()
 
-        logger.info("开始执行登录插件: ${plugin.namespace}")
+        logger.debug("开始执行登录插件: ${plugin.namespace}")
 
         // 获取插件文件路径
         let pluginFile = "./data/plugins/${plugin.namespace}/Login.ts"
@@ -961,7 +961,7 @@ public class PluginService {
         let path = Path(pluginFilePath)
         let fileExists = exists(path)
         let logger = getLogger("plugin_service")
-        logger.info("检查插件文件", ("plugin", plugin.namespace), ("path", pluginFilePath),
+        logger.debug("检查插件文件", ("plugin", plugin.namespace), ("path", pluginFilePath),
             ("exists", fileExists.toString()))
         return fileExists
     }

@@ -205,7 +205,7 @@ public class TagI18nImportTaskRunner {
                     TaskIO.writeOutput(taskId, result)
                     TaskModel.completeTask(taskId, result)
                     TaskIO.appendLog(taskId, "completed imported=${imported.toString()} received=${received.toString()}")
-                    logger.info("tag_i18n_import completed", ("task_id", taskId.toString()), ("imported", imported.toString()))
+                    logger.debug("tag_i18n_import completed", ("task_id", taskId.toString()), ("imported", imported.toString()))
                 } catch (e: Exception) {
                     try { conn.close() } catch (_: Exception) {}
                     fail(taskId, "写入数据库失败: ${e.message}")

@@ -209,7 +209,7 @@ public class ScanArchiveTaskRunner {
                         return ProcessResultData(true, archive.id, "")
                     } else {
                         // Archive存在且已生成thumbhash - 跳过所有处理，直接返回成功
-                        logger.info("Archive already processed with thumbnail: ${filePath}")
+                        logger.debug("Archive already processed with thumbnail: ${filePath}")
                         return ProcessResultData(true, archive.id, "")
                     }
                 case None =>

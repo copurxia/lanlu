@@ -123,10 +123,10 @@ public class GenerateThumbnailTaskRunner {
 
         // 计算thumbhash（基于第一张图片的内容）
         TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
-        logger.info("Calculating thumbhash for archive: ${archiveId}")
+        logger.debug("Calculating thumbhash for archive: ${archiveId}")
         let thumbHash = calculateThumbHash(tempImagePath)
         TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
-        logger.info("Calculated thumbhash: ${thumbHash}")
+        logger.debug("Calculated thumbhash: ${thumbHash}")
 
         // 使用thumbhash作为缩略图文件名
         let thumbnailFilePath = FileUtils.joinPath(thumbnailPath.toString(), "${thumbHash}.jpg")

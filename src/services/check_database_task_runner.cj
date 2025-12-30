@@ -125,7 +125,7 @@ public class CheckDatabaseTaskRunner {
             if (deletedCount > 0) {
                 logger.info("Database check completed with deletions", ("deleted_count", deletedCount.toString()), ("checked_count", checkedCount.toString()))
             } else {
-                logger.info("Database check completed successfully - all ${checkedCount} files exist", ("checked_count", checkedCount.toString()))
+                logger.debug("Database check completed successfully - all ${checkedCount} files exist", ("checked_count", checkedCount.toString()))
             }
 
             return CheckResultData(true, deletedCount, checkedCount, "")
