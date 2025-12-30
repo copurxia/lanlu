@@ -20,12 +20,10 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider';
 export default function CategoriesSettingsPage() {
   const { t } = useLanguage();
   const { user, isAuthenticated } = useAuth();
-  const { success } = useToast();
+  const { success, error: showError } = useToast();
   const { confirm } = useConfirmContext();
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Categories list
   const [categories, setCategories] = useState<Category[]>([]);
@@ -79,7 +77,7 @@ export default function CategoriesSettingsPage() {
       }
       setCategories(filtered);
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.categoryLoadFailed'));
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryLoadFailed'));
     } finally {
       setCategoriesLoading(false);
     }
@@ -94,17 +92,14 @@ export default function CategoriesSettingsPage() {
 
   const handleCreateCategory = async () => {
     if (!createForm.name.trim() || !createForm.scan_path.trim()) {
-      setError(t('settings.categoryNamePathRequired'));
+      showError(t('settings.categoryNamePathRequired'));
       return;
     }
 
     setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
 
     try {
       await CategoryService.createCategory(createForm);
-      setSuccessMsg(t('settings.categoryCreatedSuccess'));
       setCreateForm({
         name: '',
         scan_path: '',
@@ -117,8 +112,7 @@ export default function CategoriesSettingsPage() {
       await loadCategories();
       success(t('settings.categoryCreatedSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.categoryCreateFailed'));
-      setSuccessMsg(null);
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryCreateFailed'));
     } finally {
       setLoading(false);
     }
@@ -140,24 +134,20 @@ export default function CategoriesSettingsPage() {
   const handleUpdateCategory = async () => {
     if (!editingCategory) return;
     if (!editForm.name?.trim() || !editForm.scan_path?.trim()) {
-      setError(t('settings.categoryNamePathRequired'));
+      showError(t('settings.categoryNamePathRequired'));
       return;
     }
 
     setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
 
     try {
       await CategoryService.updateCategory(editingCategory.catid, editForm);
-      setSuccessMsg(t('settings.categoryUpdatedSuccess'));
       setEditDialogOpen(false);
       setEditingCategory(null);
       await loadCategories();
       success(t('settings.categoryUpdatedSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.categoryUpdateFailed'));
-      setSuccessMsg(null);
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryUpdateFailed'));
     } finally {
       setLoading(false);
     }
@@ -175,14 +165,12 @@ export default function CategoriesSettingsPage() {
     if (!confirmed) return;
 
     setLoading(true);
-    setError(null);
     try {
       await CategoryService.deleteCategory(catid);
-      setSuccessMsg(t('settings.categoryDeletedSuccess'));
       await loadCategories();
       success(t('settings.categoryDeletedSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.categoryDeleteFailed'));
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryDeleteFailed'));
     } finally {
       setLoading(false);
     }
@@ -190,17 +178,15 @@ export default function CategoriesSettingsPage() {
 
   const handleScanCategory = async (catid: string) => {
     setLoading(true);
-    setError(null);
     try {
       const result = await CategoryService.scanCategory(catid);
       if (result.success) {
-        setSuccessMsg(t('settings.categoryScanStarted'));
         success(t('settings.categoryScanStarted'));
       } else {
-        setError(result.error || t('settings.categoryScanFailed'));
+        showError(result.error || t('settings.categoryScanFailed'));
       }
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.categoryScanFailed'));
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryScanFailed'));
     } finally {
       setLoading(false);
     }
@@ -259,9 +245,6 @@ export default function CategoriesSettingsPage() {
           <p className="text-sm text-muted-foreground">{t('settings.categoriesDescription')}</p>
         </div>
       </div>
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {successMsg ? <p className="text-sm text-green-600">{successMsg}</p> : null}
 
       <Card>
         <CardHeader>

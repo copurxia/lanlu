@@ -15,6 +15,7 @@ import {
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirm } from '@/hooks/use-confirm';
+import { useToast } from '@/hooks/use-toast';
 import { BookOpen, Plus, Check, Search } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 
@@ -33,6 +34,7 @@ export function AddToTankoubonDialog({
 }: AddToTankoubonDialogProps) {
   const { t } = useLanguage();
   const { confirm, ConfirmComponent } = useConfirm();
+  const { error: showError, success: showSuccess } = useToast();
   const [open, setOpen] = useState(false);
   const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
   const [loading, setLoading] = useState(false);
@@ -96,18 +98,14 @@ export function AddToTankoubonDialog({
       if (result.success) {
         handleOpenChange(false);
         onAdded?.();
-        // 显示成功消息
-        if (result.message) {
-          console.log('成功添加到合集:', result.message);
-        }
+        showSuccess('成功添加到合集');
       } else {
         console.error('添加失败:', result.error);
-        // TODO: 显示错误消息给用户
-        alert(`添加失败: ${result.error || '未知错误'}`);
+        showError(`添加失败: ${result.error || '未知错误'}`);
       }
     } catch (error) {
       console.error('Failed to add archive to tankoubon:', error);
-      alert('添加失败: 网络错误或服务器异常');
+      showError('添加失败: 网络错误或服务器异常');
     } finally {
       setAdding(null);
     }
@@ -129,15 +127,15 @@ export function AddToTankoubonDialog({
           setShowCreateForm(false);
           handleOpenChange(false);
           onAdded?.();
-          console.log('成功创建合集并添加:', addResult.message || '成功');
+          showSuccess('成功创建合集并添加');
         } else {
           console.error('添加失败:', addResult.error);
-          alert(`添加失败: ${addResult.error || '未知错误'}`);
+          showError(`添加失败: ${addResult.error || '未知错误'}`);
         }
       }
     } catch (error) {
       console.error('Failed to create tankoubon:', error);
-      alert('创建失败: 网络错误或服务器异常');
+      showError('创建失败: 网络错误或服务器异常');
     } finally {
       setCreating(false);
     }
@@ -165,11 +163,10 @@ export function AddToTankoubonDialog({
 
       // 刷新合集列表以更新UI
       await fetchTankoubons();
-
-      console.log('成功从合集中移除');
+      showSuccess('成功从合集中移除');
     } catch (error) {
       console.error('Failed to remove archive from tankoubon:', error);
-      alert('移除失败: 网络错误或服务器异常');
+      showError('移除失败: 网络错误或服务器异常');
     } finally {
       setRemoving(null);
     }

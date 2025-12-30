@@ -28,12 +28,10 @@ interface ResetPasswordForm {
 export default function UsersSettingsPage() {
   const { t } = useLanguage();
   const { user, isAuthenticated } = useAuth();
-  const { error: showError } = useToast();
+  const { success, error: showError } = useToast();
   const { confirm } = useConfirmContext();
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Users list
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -64,7 +62,7 @@ export default function UsersSettingsPage() {
       const resp = await apiClient.get<ApiEnvelope<{ users: AdminUser[] }>>('/api/auth/admin/users');
       setUsers(resp.data.data.users || []);
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to load users');
+      showError(e?.response?.data?.message || e?.message || 'Failed to load users');
     } finally {
       setUsersLoading(false);
     }
@@ -84,8 +82,6 @@ export default function UsersSettingsPage() {
     }
 
     setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
 
     try {
       const resp = await apiClient.post<ApiEnvelope<{ user: AdminUser; generatedPassword: string }>>('/api/auth/admin/users', {
@@ -95,15 +91,14 @@ export default function UsersSettingsPage() {
 
       const createdUser = resp.data.data.user;
       const generatedPassword = resp.data.data.generatedPassword;
-      setSuccessMsg(`${t('auth.userCreatedSuccess')} "${createdUser.username}", ${t('auth.generatedPassword')}: ${generatedPassword}`);
+      success(`${t('auth.userCreatedSuccess')} "${createdUser.username}", ${t('auth.generatedPassword')}: ${generatedPassword}`);
       setCreateForm({
         username: '',
         isAdmin: false,
       });
       await loadUsers();
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to create user');
-      setSuccessMsg(null); // 确保错误时不显示成功消息
+      showError(e?.response?.data?.message || e?.message || 'Failed to create user');
     } finally {
       setLoading(false);
     }
@@ -111,15 +106,14 @@ export default function UsersSettingsPage() {
 
   const handleToggleAdmin = async (userId: number, isAdmin: boolean) => {
     setLoading(true);
-    setError(null);
     try {
       await apiClient.put(`/api/auth/admin/users/${userId}/role`, {
         isAdmin,
       });
-      setSuccessMsg(t('auth.userRoleUpdated'));
+      success(t('auth.userRoleUpdated'));
       await loadUsers();
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to update user role');
+      showError(e?.response?.data?.message || e?.message || 'Failed to update user role');
     } finally {
       setLoading(false);
     }
@@ -137,13 +131,12 @@ export default function UsersSettingsPage() {
     if (!confirmed) return;
 
     setLoading(true);
-    setError(null);
     try {
       await apiClient.delete(`/api/auth/admin/users/${userId}`);
-      setSuccessMsg(t('auth.userDeletedSuccess'));
+      success(t('auth.userDeletedSuccess'));
       await loadUsers();
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to delete user');
+      showError(e?.response?.data?.message || e?.message || 'Failed to delete user');
     } finally {
       setLoading(false);
     }
@@ -153,26 +146,25 @@ export default function UsersSettingsPage() {
     if (!resetPasswordUser) return;
 
     if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
-      setError(t('auth.passwordMismatch'));
+      showError(t('auth.passwordMismatch'));
       return;
     }
 
     if (resetPasswordForm.newPassword.length < 6) {
-      setError(t('auth.passwordTooShort'));
+      showError(t('auth.passwordTooShort'));
       return;
     }
 
     setLoading(true);
-    setError(null);
     try {
       await apiClient.post(`/api/auth/admin/users/${resetPasswordUser.id}/reset-password`, {
         newPassword: resetPasswordForm.newPassword,
       });
-      setSuccessMsg(t('auth.passwordResetSuccess'));
+      success(t('auth.passwordResetSuccess'));
       setResetPasswordUser(null);
       setResetPasswordForm({ newPassword: '', confirmPassword: '' });
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to reset password');
+      showError(e?.response?.data?.message || e?.message || 'Failed to reset password');
     } finally {
       setLoading(false);
     }
@@ -232,8 +224,6 @@ export default function UsersSettingsPage() {
         </div>
       </div>
 
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-
       <Card>
         <CardHeader>
           <CardTitle>{t('auth.createUser')}</CardTitle>
@@ -261,18 +251,6 @@ export default function UsersSettingsPage() {
               />
               <Label htmlFor="isAdmin">{t('auth.makeAdmin')}</Label>
             </div>
-          </div>
-
-          <div className="p-3 bg-muted rounded-md">
-            <p className="text-sm">
-              {successMsg ? (
-                <span className="text-green-600">{successMsg}</span>
-              ) : (
-                <span className="text-muted-foreground">
-                  {t('auth.autoGeneratePasswordNote') || 'A random password will be automatically generated for the new user.'}
-                </span>
-              )}
-            </p>
           </div>
 
           <Button onClick={handleCreateUser} disabled={loading || !createForm.username.trim()}>

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { useLanguage } from "@/contexts/LanguageContext"
+import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -38,6 +39,7 @@ interface UploadDrawerProps {
 
 export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadComplete, trigger }: UploadDrawerProps) {
   const { t } = useLanguage()
+  const { error: showError } = useToast()
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen !== undefined ? controlledOpen : internalOpen
   const setOpen = onOpenChange || setInternalOpen
@@ -81,7 +83,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
 
     // 检查是否已选择分类
     if (!selectedCategoryId) {
-      alert("请先选择要上传到的分类")
+      showError("请先选择要上传到的分类")
       return
     }
 
@@ -178,7 +180,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
   const startDownload = async (url: string) => {
     // 检查是否已选择分类
     if (!selectedCategoryId) {
-      alert("请先选择要下载到的分类")
+      showError("请先选择要下载到的分类")
       return
     }
 

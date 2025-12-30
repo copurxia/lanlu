@@ -51,12 +51,10 @@ interface EditTagForm {
 export default function TagsSettingsPage() {
   const { t } = useLanguage();
   const { user, isAuthenticated } = useAuth();
-  const { success } = useToast();
+  const { success, error: showError } = useToast();
   const { confirm } = useConfirmContext();
 
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Tags list
   const [tags, setTags] = useState<TagItem[]>([]);
@@ -118,7 +116,7 @@ export default function TagsSettingsPage() {
       setTags(response.items || []);
       setTotalTags(response.total || 0);
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.tagLoadFailed'));
+      showError(e?.response?.data?.message || e?.message || t('settings.tagLoadFailed'));
     } finally {
       setTagsLoading(false);
     }
@@ -144,13 +142,11 @@ export default function TagsSettingsPage() {
 
   const handleCreateTag = async () => {
     if (!createForm.namespace.trim() || !createForm.name.trim()) {
-      setError(t('settings.tagNamespaceNameRequired'));
+      showError(t('settings.tagNamespaceNameRequired'));
       return;
     }
 
     setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
 
     try {
       const translations: Record<string, { text: string; intro: string }> = {};
@@ -174,7 +170,6 @@ export default function TagsSettingsPage() {
         links: createForm.links,
       });
 
-      setSuccessMsg(t('settings.tagCreatedSuccess'));
       setCreateForm({
         namespace: '',
         name: '',
@@ -186,9 +181,9 @@ export default function TagsSettingsPage() {
       });
       await loadTags();
       await loadNamespaces();
+      success(t('settings.tagCreatedSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.tagCreateFailed'));
-      setSuccessMsg(null);
+      showError(e?.response?.data?.message || e?.message || t('settings.tagCreateFailed'));
     } finally {
       setLoading(false);
     }
@@ -211,13 +206,11 @@ export default function TagsSettingsPage() {
 
   const handleUpdateTag = async () => {
     if (!editForm.namespace.trim() || !editForm.name.trim()) {
-      setError(t('settings.tagNamespaceNameRequired'));
+      showError(t('settings.tagNamespaceNameRequired'));
       return;
     }
 
     setLoading(true);
-    setError(null);
-    setSuccessMsg(null);
 
     try {
       const translations: Record<string, { text: string; intro: string }> = {};
@@ -239,14 +232,13 @@ export default function TagsSettingsPage() {
         links: editForm.links,
       });
 
-      setSuccessMsg(t('settings.tagUpdatedSuccess'));
       setEditDialogOpen(false);
       setEditingTag(null);
       await loadTags();
       await loadNamespaces();
+      success(t('settings.tagUpdatedSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.tagUpdateFailed'));
-      setSuccessMsg(null);
+      showError(e?.response?.data?.message || e?.message || t('settings.tagUpdateFailed'));
     } finally {
       setLoading(false);
     }
@@ -264,14 +256,12 @@ export default function TagsSettingsPage() {
     if (!confirmed) return;
 
     setLoading(true);
-    setError(null);
     try {
       await TagService.adminDelete(tagId);
-      setSuccessMsg(t('settings.tagDeletedSuccess'));
       await loadTags();
       success(t('settings.tagDeletedSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.tagDeleteFailed'));
+      showError(e?.response?.data?.message || e?.message || t('settings.tagDeleteFailed'));
     } finally {
       setLoading(false);
     }
@@ -289,9 +279,9 @@ export default function TagsSettingsPage() {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      setSuccessMsg(t('settings.tagExportSuccess'));
+      success(t('settings.tagExportSuccess'));
     } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('settings.tagExportFailed'));
+      showError(e?.response?.data?.message || e?.message || t('settings.tagExportFailed'));
     }
   };
 
@@ -324,7 +314,6 @@ export default function TagsSettingsPage() {
       }
 
       setLoading(true);
-      setError(null);
       try {
         // Init import job
         const initResp = await TagService.adminImportInit();
@@ -333,12 +322,11 @@ export default function TagsSettingsPage() {
         // Upload file
         await TagService.adminImportUpload(job, file, initResp.chunk_size);
 
-        setSuccessMsg(t('settings.tagImportStarted', { job }));
         await loadTags();
         await loadNamespaces();
-        success('标签导入成功');
+        success(t('settings.tagImportStarted', { job }));
       } catch (e: any) {
-        setError(e?.response?.data?.message || e?.message || t('settings.tagImportFailed'));
+        showError(e?.response?.data?.message || e?.message || t('settings.tagImportFailed'));
       } finally {
         setLoading(false);
         // Remove the temporary input
@@ -424,9 +412,6 @@ export default function TagsSettingsPage() {
           </Button>
         </div>
       </div>
-
-      {error ? <p className="text-sm text-destructive">{error}</p> : null}
-      {successMsg ? <p className="text-sm text-green-600">{successMsg}</p> : null}
 
       <Card>
         <CardHeader>
