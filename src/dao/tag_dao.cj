@@ -85,14 +85,15 @@ public class TagDao {
      * 根据 namespace 和 name 获取或创建标签
      */
     public static func getOrCreate(namespace: String, name: String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
             case None => return 0
-            case Some(conn) =>
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     return getOrCreateTagInternal(conn, namespace, name)
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
         }
     }
@@ -145,10 +146,11 @@ public class TagDao {
      * @return 是否更新成功
      */
     public static func updateArchiveTags(archiveId: String, tagsString: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
             case None => false
-            case Some(conn) =>
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 首先获取档案的内部ID
                     let getArchiveIdStmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
@@ -236,10 +238,11 @@ public class TagDao {
      * 获取档案的所有标签
      */
     public static func getArchiveTags(archiveId: String): String {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
             case None => ""
-            case Some(conn) =>
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("SELECT tags FROM archives_with_tags WHERE arcid = ?")
                     try {
@@ -260,7 +263,7 @@ public class TagDao {
                     getLogger("tag_dao").error("Error getting archive tags", ("error", e.message))
                     ""
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
         }
     }
@@ -269,9 +272,10 @@ public class TagDao {
      * 获取所有标签（支持分页和搜索）
      */
     public static func list(namespace: ?String, query: ?String, limit: Int64, offset: Int64): ArrayList<TagData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     var sql = "SELECT id, namespace, name, translations, links, created_at, updated_at FROM tags WHERE 1=1"
                     var params: ArrayList<String> = ArrayList<String>()
@@ -329,7 +333,7 @@ public class TagDao {
                     getLogger("tag_dao").error("查询标签列表失败", ("error", e.message))
                     return ArrayList<TagData>()
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("tag_dao").error("无法连接到数据库")
@@ -341,9 +345,10 @@ public class TagDao {
      * 统计标签数量
      */
     public static func count(namespace: ?String, query: ?String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     var sql = "SELECT COUNT(*) FROM tags WHERE 1=1"
                     var params: ArrayList<String> = ArrayList<String>()
@@ -387,7 +392,7 @@ public class TagDao {
                     getLogger("tag_dao").error("统计标签数量失败", ("error", e.message))
                     return 0
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return 0
@@ -398,9 +403,10 @@ public class TagDao {
      * 根据ID获取标签
      */
     public static func getById(id: Int64): ?TagData {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement(
                         "SELECT id, namespace, name, translations, links, created_at, updated_at FROM tags WHERE id = ?")
@@ -431,7 +437,7 @@ public class TagDao {
                     getLogger("tag_dao").error("查询标签失败", ("error", e.message), ("id", id.toString()))
                     return None
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return None
@@ -442,9 +448,10 @@ public class TagDao {
      * 根据 namespace 和 name 获取标签
      */
     public static func getByNamespaceName(namespace: String, name: String): ?TagData {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement(
                         "SELECT id, namespace, name, translations, links, created_at, updated_at FROM tags WHERE namespace = ? AND name = ?")
@@ -476,7 +483,7 @@ public class TagDao {
                     getLogger("tag_dao").error("查询标签失败", ("error", e.message))
                     return None
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return None
@@ -487,9 +494,10 @@ public class TagDao {
      * 创建标签
      */
     public static func create(namespace: String, name: String, translations: HashMap<String, TagTranslation>, links: String): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let translationsJson = serializeTranslationsJson(translations)
                     let stmt = conn.prepareStatement(
@@ -515,7 +523,7 @@ public class TagDao {
                     getLogger("tag_dao").error("创建标签失败", ("error", e.message), ("namespace", namespace), ("name", name))
                     return 0
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return 0
@@ -526,9 +534,10 @@ public class TagDao {
      * 更新标签
      */
     public static func update(id: Int64, translations: HashMap<String, TagTranslation>, links: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let translationsJson = serializeTranslationsJson(translations)
                     let stmt = conn.prepareStatement(
@@ -546,7 +555,7 @@ public class TagDao {
                     getLogger("tag_dao").error("更新标签失败", ("error", e.message), ("id", id.toString()))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return false
@@ -557,9 +566,10 @@ public class TagDao {
      * 删除标签
      */
     public static func delete(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("DELETE FROM tags WHERE id = ?")
                     try {
@@ -573,7 +583,7 @@ public class TagDao {
                     getLogger("tag_dao").error("删除标签失败", ("error", e.message), ("id", id.toString()))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return false
@@ -592,9 +602,10 @@ public class TagDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 构建查询条件
                     var conditions: ArrayList<String> = ArrayList<String>()
@@ -631,7 +642,7 @@ public class TagDao {
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("批量获取标签翻译失败", ("error", e.message))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -644,9 +655,10 @@ public class TagDao {
     public static func getTranslationsMap(lang: String): HashMap<String, String> {
         var result: HashMap<String, String> = HashMap<String, String>()
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("SELECT namespace, name, translations FROM tags")
                     let rs = stmt.query()
@@ -674,7 +686,7 @@ public class TagDao {
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("获取标签翻译映射失败", ("error", e.message))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -685,9 +697,10 @@ public class TagDao {
      * 获取所有命名空间
      */
     public static func listNamespaces(): Array<String> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace")
                     let rs = stmt.query()
@@ -708,7 +721,7 @@ public class TagDao {
                     getLogger("tag_dao").error("获取命名空间列表失败", ("error", e.message))
                     return Array<String>()
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return Array<String>()
@@ -719,9 +732,10 @@ public class TagDao {
      * 获取当前系统已存在的所有标签名（用于自动补全等）
      */
     public static func listAllTagNames(): Array<String> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT DISTINCT
@@ -750,7 +764,7 @@ public class TagDao {
                     getLogger("tag_dao").error("获取全量标签失败", ("error", e.message))
                     return Array<String>()
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return Array<String>()
@@ -761,9 +775,10 @@ public class TagDao {
      * 插入或更新标签（用于导入）
      */
     public static func upsert(namespace: String, name: String, translations: HashMap<String, TagTranslation>, links: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let translationsJson = serializeTranslationsJson(translations)
                     let stmt = conn.prepareStatement("""
@@ -788,7 +803,7 @@ public class TagDao {
                     getLogger("tag_dao").error("upsert标签失败", ("error", e.message), ("namespace", namespace), ("name", name))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 return false
@@ -909,9 +924,10 @@ public class TagDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索
                     let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ?"
@@ -940,7 +956,7 @@ public class TagDao {
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", searchTerm))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -960,9 +976,10 @@ public class TagDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let sql = "SELECT namespace, name, translations FROM tags"
                     let stmt = conn.prepareStatement(sql)
@@ -997,7 +1014,7 @@ public class TagDao {
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("根据精确翻译查找标签失败", ("error", e.message), ("searchTerm", searchTerm))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -1107,9 +1124,10 @@ public class TagDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 搜索标签名(namespace:name)和翻译文本
                     // 使用 JSONB 提取指定语言的翻译文本进行搜索
@@ -1182,7 +1200,7 @@ public class TagDao {
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("自动补全搜索失败", ("error", e.message), ("query", query))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }

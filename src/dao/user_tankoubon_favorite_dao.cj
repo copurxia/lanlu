@@ -38,9 +38,10 @@ public class UserTankoubonFavoriteDao {
      */
     public static func addFavorite(userId: Int64, tankoubonId: String): Bool {
         let logger = getLogger("user_tankoubon_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
                     if (tankInternalId <= 0) {
@@ -64,7 +65,7 @@ public class UserTankoubonFavoriteDao {
                     logger.error("添加Tankoubon收藏失败", ("tankoubonId", tankoubonId), ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -77,9 +78,10 @@ public class UserTankoubonFavoriteDao {
      */
     public static func removeFavorite(userId: Int64, tankoubonId: String): Bool {
         let logger = getLogger("user_tankoubon_favorite_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
                     if (tankInternalId <= 0) {
@@ -102,7 +104,7 @@ public class UserTankoubonFavoriteDao {
                     logger.error("取消Tankoubon收藏失败", ("tankoubonId", tankoubonId), ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -114,9 +116,10 @@ public class UserTankoubonFavoriteDao {
      * 检查是否已收藏
      */
     public static func isFavorite(userId: Int64, tankoubonId: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
                     if (tankInternalId <= 0) {
@@ -145,7 +148,7 @@ public class UserTankoubonFavoriteDao {
                 } catch (_: Exception) {
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -157,9 +160,10 @@ public class UserTankoubonFavoriteDao {
      */
     public static func getUserFavoriteTankoubonIds(userId: Int64): Array<String> {
         let result = ArrayList<String>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT t.tankoubon_id
@@ -187,7 +191,7 @@ public class UserTankoubonFavoriteDao {
                 } catch (e: Exception) {
                     getLogger("user_tankoubon_favorite_dao").error("获取Tankoubon收藏列表失败", ("error", e.message))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("user_tankoubon_favorite_dao").error("无法连接到数据库")
@@ -202,9 +206,10 @@ public class UserTankoubonFavoriteDao {
         let ids = ArrayList<String>()
         var totalCount: Int32 = 0
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // total count
                     try {
@@ -253,7 +258,7 @@ public class UserTankoubonFavoriteDao {
                 } catch (e: Exception) {
                     getLogger("user_tankoubon_favorite_dao").error("获取Tankoubon收藏分页失败", ("error", e.message))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("user_tankoubon_favorite_dao").error("无法连接到数据库")
@@ -272,9 +277,10 @@ public class UserTankoubonFavoriteDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     var inClause = ""
                     for (i in 0..tankoubonIds.size) {
@@ -312,7 +318,7 @@ public class UserTankoubonFavoriteDao {
                 } catch (_: Exception) {
                     // ignore
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }
@@ -330,9 +336,10 @@ public class UserTankoubonFavoriteDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     var inClause = ""
                     for (i in 0..tankoubonIds.size) {
@@ -371,7 +378,7 @@ public class UserTankoubonFavoriteDao {
                 } catch (_: Exception) {
                     // ignore
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => ()
         }

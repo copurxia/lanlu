@@ -48,9 +48,10 @@ public class ScheduledTaskDao {
      */
     public static func createTable(): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 检查表是否存在
                     let checkTable = conn.prepareStatement("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'scheduled_tasks')")
@@ -110,7 +111,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -146,9 +147,10 @@ public class ScheduledTaskDao {
      */
     public static func create(data: ScheduledTaskData): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         INSERT INTO scheduled_tasks (
@@ -213,7 +215,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -229,9 +231,10 @@ public class ScheduledTaskDao {
      */
     public static func getById(id: Int64): ScheduledTaskData {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
@@ -262,7 +265,7 @@ public class ScheduledTaskDao {
                     return ScheduledTaskData()
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -278,9 +281,10 @@ public class ScheduledTaskDao {
      */
     public static func getEnabledTasks(): Array<ScheduledTaskData> {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
@@ -303,7 +307,7 @@ public class ScheduledTaskDao {
                     return Array<ScheduledTaskData>()
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -319,9 +323,10 @@ public class ScheduledTaskDao {
      */
     public static func getDueTasks(): Array<ScheduledTaskData> {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
@@ -347,7 +352,7 @@ public class ScheduledTaskDao {
                     return Array<ScheduledTaskData>()
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -363,9 +368,10 @@ public class ScheduledTaskDao {
      */
     public static func getWithPagination(offset: Int32, limit: Int32): Array<ScheduledTaskData> {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
@@ -390,7 +396,7 @@ public class ScheduledTaskDao {
                     return Array<ScheduledTaskData>()
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -406,9 +412,10 @@ public class ScheduledTaskDao {
      */
     public static func getCount(): Int32 {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("SELECT COUNT(*) FROM scheduled_tasks")
                     let rs = stmt.query()
@@ -428,7 +435,7 @@ public class ScheduledTaskDao {
                     return 0
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -444,9 +451,10 @@ public class ScheduledTaskDao {
      */
     public static func update(data: ScheduledTaskData): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         UPDATE scheduled_tasks SET
@@ -491,7 +499,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -507,9 +515,10 @@ public class ScheduledTaskDao {
      */
     public static func delete(id: Int64): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("DELETE FROM scheduled_tasks WHERE id = ?")
                     try {
@@ -525,7 +534,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -541,9 +550,10 @@ public class ScheduledTaskDao {
      */
     public static func setEnabled(id: Int64, enabled: Bool): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         UPDATE scheduled_tasks SET enabled = ?, updated_at = NOW()
@@ -563,7 +573,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -579,9 +589,10 @@ public class ScheduledTaskDao {
      */
     public static func updateRunResult(id: Int64, success: Bool, errorMessage: String): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let status = if (success) { "success" } else { "failed" }
                     let successIncrement = if (success) { 1 } else { 0 }
@@ -620,7 +631,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }
@@ -636,9 +647,10 @@ public class ScheduledTaskDao {
      */
     public static func updateNextRunAt(id: Int64, nextRunAt: String): Bool {
         let logger = getLogger("scheduled_task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         UPDATE scheduled_tasks SET next_run_at = ?, updated_at = NOW()
@@ -663,7 +675,7 @@ public class ScheduledTaskDao {
                     return false
                 } finally {
                     try {
-                        DatabaseConfig.releasePooledConnection(conn)
+                        DatabaseConfig.releasePooledConnection(handle)
                     } catch (closeError: Exception) {
                         logger.warn("关闭Connection失败: ${closeError.message}")
                     }

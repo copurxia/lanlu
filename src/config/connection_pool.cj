@@ -21,6 +21,20 @@ public class PooledConnection {
 }
 
 /**
+ * 连接句柄，用于追踪从连接池获取的连接
+ * 包含连接本身和连接池内部ID，用于精确释放
+ */
+public class ConnectionHandle {
+    public let connection: Connection
+    public let poolId: Int64  // 连接池内部ID，用于释放时精确匹配
+
+    public init(conn: Connection, poolId: Int64) {
+        this.connection = conn
+        this.poolId = poolId
+    }
+}
+
+/**
  * 数据库连接池
  * 线程安全的连接池实现，复用数据库连接以提升性能
  */
@@ -92,49 +106,41 @@ public class ConnectionPool {
     }
 
     /**
-     * 获取连接
+     * 获取连接（返回 ConnectionHandle 以支持精确释放）
      */
-    public func getConnection(): Option<Connection> {
+    public func getConnection(): Option<ConnectionHandle> {
         poolMutex.lock()
         let logger = getLogger("connection_pool")
 
-        // 1. 查找空闲连接
+        // 1. 查找空闲连接（不在锁内验证连接，直接标记使用）
         for (pooled in connections) {
             if (!pooled.isInUse) {
-                // 检查连接有效性
-                if (isConnectionValid(pooled.connection)) {
-                    pooled.isInUse = true
-                    poolMutex.unlock()
-                    logger.debug("复用现有连接")
-                    return Some(pooled.connection)
-                } else {
-                    // 连接无效，尝试重建
-                    match (createNewConnection()) {
-                        case Some(newConn) =>
-                            pooled.connection = newConn
-                            pooled.isInUse = true
-                            poolMutex.unlock()
-                            logger.debug("重建无效连接")
-                            return Some(pooled.connection)
-                        case None => ()
-                    }
-                }
+                pooled.isInUse = true
+                let handle = ConnectionHandle(pooled.connection, pooled.id)
+                poolMutex.unlock()
+                logger.debug("复用现有连接", ("id", pooled.id.toString()))
+                return Some(handle)
             }
         }
 
         // 2. 如果没有空闲连接且未达上限，创建新连接
         if (connections.size < maxConnections) {
+            // 先释放锁再创建连接，避免长时间持有锁
+            let connId = nextConnectionId
+            nextConnectionId += 1
+            poolMutex.unlock()
+
             match (createNewConnection()) {
                 case Some(conn) =>
-                    let pooled = PooledConnection(conn, nextConnectionId)
-                    nextConnectionId += 1
+                    poolMutex.lock()
+                    let pooled = PooledConnection(conn, connId)
                     pooled.isInUse = true
                     connections.add(pooled)
                     poolMutex.unlock()
-                    logger.debug("创建新连接", ("total", connections.size.toString()))
-                    return Some(conn)
+                    let handle = ConnectionHandle(conn, connId)
+                    logger.debug("创建新连接", ("id", connId.toString()))
+                    return Some(handle)
                 case None =>
-                    poolMutex.unlock()
                     logger.error("无法创建新连接")
                     return None
             }
@@ -148,18 +154,26 @@ public class ConnectionPool {
 
     /**
      * 释放连接（归还到池中）
-     * 注意：由于 Connection 接口不支持直接比较，这里采用简化策略
-     * 将第一个标记为使用中的连接释放
+     * 通过连接池内部ID精确匹配要释放的连接
      */
-    public func releaseConnection(_: Connection): Unit {
+    public func releaseConnection(poolId: Int64): Unit {
         poolMutex.lock()
+        let logger = getLogger("connection_pool")
         for (pooled in connections) {
-            if (pooled.isInUse) {
+            if (pooled.id == poolId && pooled.isInUse) {
                 pooled.isInUse = false
+                logger.debug("释放连接", ("id", poolId.toString()))
                 break
             }
         }
         poolMutex.unlock()
+    }
+
+    /**
+     * 释放连接句柄（便捷方法）
+     */
+    public func releaseHandle(handle: ConnectionHandle): Unit {
+        releaseConnection(handle.poolId)
     }
 
     /**

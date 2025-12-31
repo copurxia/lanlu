@@ -25,9 +25,10 @@ public class UserArchiveStatusDao {
      */
     public static func setIsNew(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 使用 UPSERT 语法（INSERT ... ON CONFLICT）
                     let stmt = conn.prepareStatement("""
@@ -49,7 +50,7 @@ public class UserArchiveStatusDao {
                     logger.error("设置isNew标记失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -62,9 +63,10 @@ public class UserArchiveStatusDao {
      */
     public static func clearIsNew(userId: Int64, archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 使用 UPSERT 语法
                     let stmt = conn.prepareStatement("""
@@ -86,7 +88,7 @@ public class UserArchiveStatusDao {
                     logger.error("清除isNew标记失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -103,9 +105,10 @@ public class UserArchiveStatusDao {
      */
     public static func updateProgress(userId: Int64, archiveId: Int64, progress: Int32): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 使用 UPSERT 语法，同时更新 progress 和 is_new
                     let stmt = conn.prepareStatement("""
@@ -132,7 +135,7 @@ public class UserArchiveStatusDao {
                     logger.error("更新阅读进度失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) { /* ignore */ }
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) { /* ignore */ }
                 }
             case None =>
                 logger.error("无法连接到数据库")
@@ -144,9 +147,10 @@ public class UserArchiveStatusDao {
      * 获取用户对特定归档的状态
      */
     public static func getStatus(userId: Int64, archiveId: Int64): Option<UserArchiveStatusRow> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, user_id, archive_id, is_new, progress, created_at, updated_at
@@ -179,7 +183,7 @@ public class UserArchiveStatusDao {
                 } catch (_: Exception) {
                     return None
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return None
         }
@@ -192,9 +196,10 @@ public class UserArchiveStatusDao {
      * @return 最后阅读时间的Unix时间戳，如果没有记录返回 0
      */
     public static func getLastReadTime(userId: Int64, archiveId: Int64): Int64 {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0)
@@ -219,7 +224,7 @@ public class UserArchiveStatusDao {
                 } catch (_: Exception) {
                     return 0
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return 0
         }
@@ -260,9 +265,10 @@ public class UserArchiveStatusDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 构建 IN 子句的占位符
                     var inClause = ""
@@ -314,7 +320,7 @@ public class UserArchiveStatusDao {
                         result[archiveId] = true
                     }
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 // 无法连接时，所有归档默认为新
@@ -338,9 +344,10 @@ public class UserArchiveStatusDao {
             return (progressMap, lastReadTimeMap)
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 构建 IN 子句的占位符
                     var inClause = ""
@@ -399,7 +406,7 @@ public class UserArchiveStatusDao {
                         lastReadTimeMap[archiveId] = 0
                     }
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 // 无法连接时，设置默认值
@@ -417,9 +424,10 @@ public class UserArchiveStatusDao {
      */
     public static func deleteByUserId(userId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("DELETE FROM user_archive_status WHERE user_id = ?")
                     try {
@@ -433,7 +441,7 @@ public class UserArchiveStatusDao {
                     logger.error("删除用户归档状态失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -444,9 +452,10 @@ public class UserArchiveStatusDao {
      */
     public static func deleteByArchiveId(archiveId: Int64): Bool {
         let logger = getLogger("user_archive_status_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("DELETE FROM user_archive_status WHERE archive_id = ?")
                     try {
@@ -460,7 +469,7 @@ public class UserArchiveStatusDao {
                     logger.error("删除归档状态失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -473,9 +482,10 @@ public class UserArchiveStatusDao {
     public static func getUserReadArchives(userId: Int64, start: Int32, count: Int32): (Array<ArchiveData>, Int64) {
         let result = ArrayList<ArchiveData>()
         var totalCount: Int64 = 0
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 先获取总数
                     let countStmt = conn.prepareStatement("""
@@ -541,7 +551,7 @@ public class UserArchiveStatusDao {
                 } catch (e: Exception) {
                     getLogger("user_archive_status_dao").error("获取用户已读档案失败", ("error", e.message))
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("user_archive_status_dao").error("无法连接到数据库")

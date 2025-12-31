@@ -88,16 +88,18 @@ public class DatabaseConfig {
     /**
      * 从连接池获取连接（推荐使用）
      * 复用连接以提升性能
+     * 返回 ConnectionHandle，使用完毕后需调用 releasePooledConnection 释放
      */
-    public static func getPooledConnection(): Option<Connection> {
+    public static func getPooledConnection(): Option<ConnectionHandle> {
         return ConnectionPool.getInstance().getConnection()
     }
 
     /**
      * 释放连接回连接池
+     * @param handle 连接句柄（从 getPooledConnection 获取）
      */
-    public static func releasePooledConnection(conn: Connection): Unit {
-        ConnectionPool.getInstance().releaseConnection(conn)
+    public static func releasePooledConnection(handle: ConnectionHandle): Unit {
+        ConnectionPool.getInstance().releaseHandle(handle)
     }
 
     /**

@@ -37,9 +37,10 @@ public class SmartFilterDao {
      * 获取所有启用的智能分类（按排序顺序）
      */
     public static func getEnabledFilters(): Array<SmartFilterData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 var filters: ArrayList<SmartFilterData> = ArrayList<SmartFilterData>()
                 try {
                     let stmt = conn.prepareStatement(
@@ -62,7 +63,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
                     return Array<SmartFilterData>()
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -74,9 +75,10 @@ public class SmartFilterDao {
      * 获取所有智能分类（管理用）
      */
     public static func getAllFilters(): Array<SmartFilterData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 var filters: ArrayList<SmartFilterData> = ArrayList<SmartFilterData>()
                 try {
                     let stmt = conn.prepareStatement(
@@ -99,7 +101,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
                     return Array<SmartFilterData>()
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -111,9 +113,10 @@ public class SmartFilterDao {
      * 根据 ID 获取智能分类
      */
     public static func getById(id: Int64): Option<SmartFilterData> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement(
                         "SELECT id, name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled, created_at, updated_at FROM smart_filters WHERE id = ?")
@@ -135,7 +138,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("查询智能分类失败", ("error", e.message))
                     return None
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -147,9 +150,10 @@ public class SmartFilterDao {
      * 创建智能分类
      */
     public static func create(filter: SmartFilterData): Option<Int64> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement(
                         "INSERT INTO smart_filters (name, translations, icon, query, sort_by, sort_order, date_from, date_to, newonly, untaggedonly, sort_order_num, enabled) VALUES (?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
@@ -183,7 +187,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("创建智能分类失败", ("error", e.message))
                     return None
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -195,9 +199,10 @@ public class SmartFilterDao {
      * 更新智能分类
      */
     public static func update(filter: SmartFilterData): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement(
                         "UPDATE smart_filters SET name = ?, translations = ?::jsonb, icon = ?, query = ?, sort_by = ?, sort_order = ?, date_from = ?, date_to = ?, newonly = ?, untaggedonly = ?, sort_order_num = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -224,7 +229,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("更新智能分类失败", ("error", e.message))
                     return false
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -236,9 +241,10 @@ public class SmartFilterDao {
      * 删除智能分类
      */
     public static func delete(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("DELETE FROM smart_filters WHERE id = ?")
                     try {
@@ -252,7 +258,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("删除智能分类失败", ("error", e.message))
                     return false
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -264,9 +270,10 @@ public class SmartFilterDao {
      * 批量更新排序顺序
      */
     public static func batchUpdateSortOrder(orders: Array<(Int64, Int32)>): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     for ((id, sortOrder) in orders) {
                         let stmt = conn.prepareStatement(
@@ -284,7 +291,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("批量更新排序顺序失败", ("error", e.message))
                     return false
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")
@@ -296,9 +303,10 @@ public class SmartFilterDao {
      * 切换启用状态
      */
     public static func toggleEnabled(id: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement(
                         "UPDATE smart_filters SET enabled = NOT enabled, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -313,7 +321,7 @@ public class SmartFilterDao {
                     getLogger("smart_filter_dao").error("切换智能分类状态失败", ("error", e.message))
                     return false
                 } finally {
-                    DatabaseConfig.releasePooledConnection(conn)
+                    DatabaseConfig.releasePooledConnection(handle)
                 }
             case None =>
                 getLogger("smart_filter_dao").error("无法连接到数据库")

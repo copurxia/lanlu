@@ -20,9 +20,10 @@ public class UserRow {
 public class UserDao {
     public static func createTable(): Bool {
         let logger = getLogger("user_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 先检查表是否已存在
                     let checkStmt = conn.prepareStatement("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public'")
@@ -81,7 +82,7 @@ public class UserDao {
                     logger.error("异常类型: ${e.toString()}")
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None =>
                 logger.error("无法创建数据库连接")
@@ -90,9 +91,10 @@ public class UserDao {
     }
 
     public static func getByUsername(username: String): UserRow {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, username, password_salt, password_hash, is_admin, created_at
@@ -123,16 +125,17 @@ public class UserDao {
                 } catch (_: Exception) {
                     return UserRow()
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return UserRow()
         }
     }
 
     public static func getById(id: Int64): UserRow {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, username, password_salt, password_hash, is_admin, created_at
@@ -163,7 +166,7 @@ public class UserDao {
                 } catch (_: Exception) {
                     return UserRow()
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return UserRow()
         }
@@ -183,9 +186,10 @@ public class UserDao {
         let salt = AuthUtils.generateTokenHex(bytesLen: 16) // 16 bytes -> 32 hex chars
         let passHash = AuthUtils.sha256Hex("${salt}:${password}:${pepper}")
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         INSERT INTO users (username, password_salt, password_hash, is_admin)
@@ -217,7 +221,7 @@ public class UserDao {
                     logger.warn("创建用户失败", ("error", e.message))
                     return None
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return None
         }
@@ -228,9 +232,11 @@ public class UserDao {
      */
     public static func isEmpty(): Bool {
         let logger = getLogger("user_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) => checkUserTableIsEmpty(conn, logger)
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
+                checkUserTableIsEmpty(conn, handle, logger)
             case None => handleNoConnection(logger)
         }
     }
@@ -240,7 +246,7 @@ public class UserDao {
         return true
     }
 
-    private static func checkUserTableIsEmpty(conn: Connection, logger: Logger): Bool {
+    private static func checkUserTableIsEmpty(conn: Connection, handle: ConnectionHandle, logger: Logger): Bool {
         try {
             logger.debug("开始查询用户表记录数量")
             let stmt = conn.prepareStatement("SELECT COUNT(*) FROM users")
@@ -266,7 +272,7 @@ public class UserDao {
             logger.error("异常类型: ${e.toString()}")
             return true
         } finally {
-            try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+            try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
         }
     }
 
@@ -294,9 +300,10 @@ public class UserDao {
         let salt = AuthUtils.generateTokenHex(bytesLen: 16)
         let passHash = AuthUtils.sha256Hex("${salt}:${newPassword}:${pepper}")
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?
@@ -314,7 +321,7 @@ public class UserDao {
                     logger.error("修改密码失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -331,9 +338,10 @@ public class UserDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 检查新用户名是否已被其他用户使用
                     let checkStmt = conn.prepareStatement("SELECT id FROM users WHERE username = ? AND id <> ?")
@@ -367,7 +375,7 @@ public class UserDao {
                     logger.error("修改用户名失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -377,9 +385,10 @@ public class UserDao {
      * 检查用户是否为管理员
      */
     public static func isAdmin(userId: Int64): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("SELECT is_admin FROM users WHERE id = ?")
                     try {
@@ -399,7 +408,7 @@ public class UserDao {
                 } catch (_: Exception) {
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -409,9 +418,10 @@ public class UserDao {
      * 获取所有用户列表
      */
     public static func listAllUsers(): Array<UserRow> {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, username, is_admin, created_at
@@ -441,7 +451,7 @@ public class UserDao {
                 } catch (_: Exception) {
                     return []
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return []
         }
@@ -452,9 +462,10 @@ public class UserDao {
      */
     public static func deleteUser(userId: Int64): Bool {
         let logger = getLogger("user_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     // 先检查用户是否存在
                     let checkStmt = conn.prepareStatement("SELECT id FROM users WHERE id = ?")
@@ -494,7 +505,7 @@ public class UserDao {
                     logger.error("删除用户失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -505,9 +516,10 @@ public class UserDao {
      */
     public static func updateUserRole(userId: Int64, isAdmin: Bool): Bool {
         let logger = getLogger("user_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("UPDATE users SET is_admin = ? WHERE id = ?")
                     try {
@@ -522,7 +534,7 @@ public class UserDao {
                     logger.error("更新用户角色失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
@@ -540,9 +552,10 @@ public class UserDao {
         let salt = AuthUtils.generateTokenHex(bytesLen: 16)
         let passHash = AuthUtils.sha256Hex("${salt}:${newPassword}:${pepper}")
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
+        let handleOpt = DatabaseConfig.getPooledConnection()
+        match (handleOpt) {
+            case Some(handle) =>
+                let conn = handle.connection
                 try {
                     let stmt = conn.prepareStatement("""
                         UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?
@@ -560,7 +573,7 @@ public class UserDao {
                     logger.error("重置用户密码失败", ("error", e.message))
                     return false
                 } finally {
-                    try { DatabaseConfig.releasePooledConnection(conn) } catch (_: Exception) {}
+                    try { DatabaseConfig.releasePooledConnection(handle) } catch (_: Exception) {}
                 }
             case None => return false
         }
