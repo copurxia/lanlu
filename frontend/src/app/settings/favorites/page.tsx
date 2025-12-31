@@ -72,9 +72,8 @@ export default function FavoritesPage() {
       }
       setTankoubonError(null);
 
-      // 使用新的批量获取方法，获取包含 archives 的合集数据
-      const response = await TankoubonService.searchTankoubonsWithArchives({
-        favorite_tankoubons_only: true,
+      // 直接通过搜索接口获取收藏的合集数据（包含 archives）
+      const response = await TankoubonService.getFavoriteTankoubons({
         start: 0,
         count: 1000
       });

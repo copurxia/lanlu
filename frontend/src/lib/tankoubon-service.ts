@@ -98,4 +98,27 @@ export class TankoubonService {
       )
       .map(result => result.value);
   }
+
+  /**
+   * 直接通过搜索接口获取收藏的合集列表（包含 archives）
+   */
+  static async getFavoriteTankoubons(params?: {
+    start?: number;
+    count?: number;
+  }): Promise<{ data: Tankoubon[] }> {
+    const response = await apiClient.get('/api/search', {
+      params: {
+        favorite_tankoubons_only: true,
+        groupby_tanks: true,
+        start: params?.start ?? 0,
+        count: params?.count ?? 1000
+      }
+    });
+
+    return {
+      data: response.data.data as unknown as Tankoubon[]
+    };
+  }
+
+
 }
