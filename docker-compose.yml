@@ -1,0 +1,45 @@
+services:
+  lanlu:
+    image: copurx/lanlu:latest
+    container_name: lanlu
+    ports:
+      - "8082:8082"
+    environment:
+      - DB_STRING=postgres://user:password@postgres:5432/lanlu?sslmode=disable
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data/archive:/app/data/archive
+      - ./data/thumb:/app/data/thumb
+      - ./data/logs:/app/data/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - lanlu-network
+
+  postgres:
+    image: postgres:18-alpine
+    container_name: lanlu-postgres
+    environment:
+      - POSTGRES_DB=lanlu
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d lanlu"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - lanlu-network
+
+volumes:
+  postgres-data:
+    driver: local
+
+networks:
+  lanlu-network:
+    driver: bridge

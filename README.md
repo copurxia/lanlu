@@ -82,31 +82,6 @@ lrr4cj/
 - PostgreSQL 12+
 - Docker (可选)
 
-### 配置环境变量
-
-```bash
-cp .env.example .env
-```
-
-编辑 `.env` 文件：
-
-```env
-# 服务器配置
-PORT=8082
-HOST=0.0.0.0
-
-# 数据库配置
-DB_HOST=127.0.0.1
-DB_PORT=5432
-DB_NAME=lgr
-DB_USER=lgr
-DB_PASSWORD=lgr
-
-# 认证配置
-API_KEY=your_api_key
-JWT_SECRET=your_jwt_secret
-```
-
 ### 构建后端
 
 ```bash
@@ -142,10 +117,9 @@ docker build -t lrr4cj:latest .
 # 运行容器
 docker run -d \
   -p 8082:8082 \
-  -e DB_HOST=postgres \
-  -e DB_NAME=lgr \
-  -e DB_USER=lgr \
-  -e DB_PASSWORD=lgr \
+  -e DB_STRING=postgres://user:password@postgres:5432/lanlu?sslmode=disable \
+  -e JWT_SECRET=d2015833994569e3a4e3 \
+  -e CORS_ORIGIN=* \
   -v /path/to/archives:/app/data/archive \
   lrr4cj:latest
 ```
