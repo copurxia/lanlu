@@ -24,36 +24,38 @@ public class ChunkedUploadController {
     /**
      * 初始化上传会话
      * POST /api/archives/upload/init
+     * 优化：使用 createTaskFull 将 3 次数据库操作合并为 1 次
      */
     public static func initUpload(ctx: JoyContext): Unit {
         try {
-            // 直接读取请求体中的JSON字符串并存储到任务参数中
+            // 直接读取请求体中的JSON字符串
             let requestBody = ctx.readString()
 
-            // 创建TaskPool任务来跟踪上传过程
-            let task = TaskModel.createTask("文件上传", "upload")
+            // 使用 createTaskFull 一次性创建任务并设置所有字段
+            // 原来需要 3 次数据库连接，现在只需要 1 次
+            let task = TaskModel.createTaskFull(
+                "文件上传",
+                "upload",
+                requestBody,
+                10,
+                "上传初始化完成，等待分片上传"
+            )
+
+            // 检查任务创建是否成功
+            if (task.id == 0) {
+                let errorResponse = "{\"success\":0,\"error\":\"创建任务失败\"}"
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.json(errorResponse)
+                return
+            }
 
             // 创建临时目录，使用taskId作为目录名
             createTempDirectories()
             let uploadDir = Path("${CACHE_DIR}/task/${task.id}")
-            // 检查目录是否存在，如果不存在才创建
             if (!exists(uploadDir)) {
                 Directory.create(uploadDir, recursive: true)
-                getLogger("chunked_upload").info("创建上传目录", ("taskId", task.id.toString()), ("directory", uploadDir.toString()))
-            } else {
-                getLogger("chunked_upload").info("上传目录已存在，跳过创建", ("taskId", task.id.toString()), ("directory", uploadDir.toString()))
+                getLogger("chunked_upload").debug("创建上传目录", ("taskId", task.id.toString()))
             }
-
-            // 存储原始JSON到任务参数中
-            if (requestBody.size > 0) {
-                // 直接将原始JSON存储到任务参数中
-                TaskDao.updateTaskParameters(task.id, requestBody)
-                getLogger("chunked_upload").info("存储原始JSON到任务参数", ("taskId", task.id.toString()), ("jsonSize", requestBody.size.toString()))
-            } else {
-                getLogger("chunked_upload").warn("请求体为空，无法存储JSON参数")
-            }
-
-            TaskModel.updateTaskProgress(task.id, 10, "上传初始化完成，等待分片上传")
 
             let response = "{\"success\":1,\"taskId\":\"${task.id}\"}"
             ctx.json(response)

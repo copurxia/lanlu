@@ -344,6 +344,54 @@ public class TaskModel {
         return task
     }
 
+    /**
+     * 创建任务（完整版，单次数据库操作）
+     * 适用于需要同时设置 parameters、progress、message 的场景
+     * 减少数据库连接次数，提升性能
+     */
+    public static func createTaskFull(
+        name: String,
+        taskType: String,
+        parameters: String,
+        progress: Int32,
+        message: String
+    ): Task {
+        let logger = getLogger("task_model")
+        let currentTime = getCurrentTimeString()
+
+        let idOpt = TaskDao.createTaskDataFull(
+            name,
+            taskType,
+            "running",
+            progress,
+            message,
+            parameters,
+            50,
+            "manual"
+        )
+
+        match (idOpt) {
+            case Some(id) =>
+                logger.debug("创建完整任务成功", ("id", id.toString()), ("name", name))
+                return Task(
+                    id, name, "running", progress, message,
+                    taskType: taskType, pluginNamespace: "", parameters: parameters,
+                    result: "", createdAt: currentTime, startedAt: "",
+                    completedAt: "", priority: 50, groupId: "",
+                    timeoutAt: "", triggerSource: "manual"
+                )
+            case None =>
+                logger.error("创建完整任务失败", ("name", name))
+                return Task(
+                    0, name, "failed", 0, "创建任务失败",
+                    taskType: taskType, pluginNamespace: "", parameters: "",
+                    result: "", createdAt: currentTime, startedAt: "",
+                    completedAt: "", priority: 50, groupId: "",
+                    timeoutAt: "", triggerSource: "manual"
+                )
+        }
+    }
+
     private static func calculateTimeoutAt(timeoutSeconds: Int32): String {
         if (timeoutSeconds <= 0) {
             return ""

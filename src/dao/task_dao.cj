@@ -170,7 +170,64 @@ public class TaskDao {
         }
     }
 
+    /**
+     * 创建任务（完整版，单次数据库操作）
+     * 用于减少数据库连接次数，一次性设置所有字段
+     */
+    public static func createTaskDataFull(
+        name: String,
+        taskType: String,
+        status: String,
+        progress: Int32,
+        message: String,
+        parameters: String,
+        priority: Int32,
+        triggerSource: String
+    ): Option<Int64> {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at)
+                        VALUES (?, ?, ?, ?, ?, '', ?, '', ?, NULL, NULL, ?, NULL, NULL) RETURNING id
+                    """)
+                    try {
+                        stmt.set(0, name)
+                        stmt.set(1, taskType)
+                        stmt.set(2, status)
+                        stmt.set(3, progress)
+                        stmt.set(4, message)
+                        stmt.set(5, parameters)
+                        stmt.set(6, priority)
+                        stmt.set(7, triggerSource)
 
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                let id = rs.getOrNull<Int64>(0) ?? 0
+                                logger.debug("创建完整任务", ("id", id.toString()))
+                                return Some(id)
+                            }
+                            return None
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("创建完整任务失败", ("error", e.message))
+                    return None
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return None
+        }
+    }
 
     /**
      * 根据ID获取任务

@@ -84,7 +84,29 @@ public class DatabaseConfig {
                 return None
         }
     }
-    
+
+    /**
+     * 从连接池获取连接（推荐使用）
+     * 复用连接以提升性能
+     */
+    public static func getPooledConnection(): Option<Connection> {
+        return ConnectionPool.getInstance().getConnection()
+    }
+
+    /**
+     * 释放连接回连接池
+     */
+    public static func releasePooledConnection(conn: Connection): Unit {
+        ConnectionPool.getInstance().releaseConnection(conn)
+    }
+
+    /**
+     * 初始化连接池
+     */
+    public static func initializePool(): Bool {
+        return ConnectionPool.getInstance().initialize()
+    }
+
     /**
      * 初始化数据库表结构
      */
