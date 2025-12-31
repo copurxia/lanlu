@@ -50,14 +50,6 @@ public func registerPluginsRoutes(router: JoyRouters) {
         }
     })
 
-    // 发现并注册插件
-    router.post("/api/plugins/discover", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(_) => PluginsController.discoverPlugins(ctx)
-            case None => return
-        }
-    })
-
     // 获取插件配置Schema
     router.get("/api/plugins/{namespace}/schema", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
