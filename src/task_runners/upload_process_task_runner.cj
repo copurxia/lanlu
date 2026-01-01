@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import stdx.encoding.json.*
 import stdx.log.*
@@ -10,7 +10,7 @@ import lrr4cj.utils.*
  * 重构后：创建 scan_archive 子任务，由 TaskPool 异步处理
  */
 public class UploadProcessTaskRunner {
-    public static func run(taskId: Int64, parameters: String): Unit {
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("upload_process_task")
         TaskIO.appendLog(taskId, "upload_process task started")
 
@@ -39,7 +39,7 @@ public class UploadProcessTaskRunner {
             )
 
             if (scanTask.id > 0) {
-                TaskPoolService.getInstance().notifyTaskAvailable()
+                context.notifyTaskAvailable()
                 logger.debug("Created scan_archive task for upload", ("scan_task_id", scanTask.id.toString()), ("archive_path", archivePath))
 
                 let okJson =

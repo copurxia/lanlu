@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.collection.*
 import stdx.log.*
@@ -12,7 +12,7 @@ import lrr4cj.utils.*
  */
 public class ScanAllCategoriesTaskRunner {
 
-    public static func run(taskId: Int64, parameters: String): Unit {
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("scan_all_categories")
         TaskIO.appendLog(taskId, "scan_all_categories task started")
         TaskIO.appendLog(taskId, "Task parameters: ${parameters}")
@@ -39,7 +39,7 @@ public class ScanAllCategoriesTaskRunner {
 
             // 为每个分类创建 scan_single_category 任务
             for (cat in categories) {
-                let taskIdStr = enqueueSingleCategoryScan(cat, groupId)
+                let taskIdStr = enqueueSingleCategoryScan(cat, groupId, context.notifyTaskAvailable)
                 if (taskIdStr > 0) {
                     created++
                     TaskIO.appendLog(taskId, "Created scan_single_category task for category: ${cat.name} (task_id: ${taskIdStr})")
@@ -65,7 +65,7 @@ public class ScanAllCategoriesTaskRunner {
         }
     }
 
-    private static func enqueueSingleCategoryScan(category: CategoryData, groupId: String): Int64 {
+    private static func enqueueSingleCategoryScan(category: CategoryData, groupId: String, notifier: TaskNotifier): Int64 {
         let params = "{\"category_id\":\"${escapeJson(category.catid)}\"}"
         let triggerSource = "scan_all_categories"
         let childTask = TaskModel.createTaskWithOptions(
@@ -77,7 +77,7 @@ public class ScanAllCategoriesTaskRunner {
             triggerSource
         )
         if (childTask.id > 0) {
-            TaskPoolService.getInstance().notifyTaskAvailable()
+            notifier()
             return childTask.id
         }
         return 0

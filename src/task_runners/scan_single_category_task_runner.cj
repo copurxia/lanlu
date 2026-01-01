@@ -1,7 +1,6 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.fs.*
-import std.sync.*
 import std.convert.*
 import stdx.log.*
 import lrr4cj.models.*
@@ -13,48 +12,13 @@ import lrr4cj.dao.*
  * 负责扫描一个具体分类的目录并创建 scan_archive 子任务
  */
 public class ScanSingleCategoryTaskRunner {
-    // 配置 - 使用静态变量存储配置
-    private static var cachePath: Path = Path("")
-    private static var thumbnailPath: Path = Path("")
-    private static var initialized: Bool = false
-    private static let initMutex: Mutex = Mutex()
 
-    // 私有初始化方法（懒加载）
-    private static func ensureInitialized(): Unit {
-        initMutex.lock()
-        if (!initialized) {
-            try {
-                let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-                let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
-
-                let cachePathTemp = Path(cachePathStr)
-                let thumbnailPathTemp = Path(thumbnailPathStr)
-                FileUtils.ensureDirectoryExists(cachePathTemp)
-                FileUtils.ensureDirectoryExists(thumbnailPathTemp)
-
-                cachePath = canonicalize(cachePathStr)
-                thumbnailPath = canonicalize(thumbnailPathStr)
-
-                initialized = true
-            } catch (e: Exception) {
-                initialized = true
-                throw e
-            }
-        }
-        initMutex.unlock()
-    }
-
-    public static func run(taskId: Int64, parameters: String): Unit {
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("scan_single_category")
         TaskIO.appendLog(taskId, "scan_single_category task started")
         TaskIO.appendLog(taskId, "Task parameters: ${parameters}")
 
         try {
-            // 确保配置已初始化
-            TaskIO.appendLog(taskId, "Initializing configuration...")
-            ensureInitialized()
-            TaskIO.appendLog(taskId, "Configuration initialized successfully")
-
             let (catidParam, triggerSourceParam, childPriorityParam) = parseParameters(parameters)
             if (catidParam.size == 0) {
                 let errorMsg = "category_id is required"
@@ -106,7 +70,7 @@ public class ScanSingleCategoryTaskRunner {
             TaskModel.updateTaskProgress(taskId, 50, "Creating scan_archive tasks...")
 
             for (filePath in archiveFiles) {
-                if (enqueueScanArchiveTask(filePath, groupId, triggerSource, childPriority, catid, scanPath)) {
+                if (enqueueScanArchiveTask(filePath, groupId, triggerSource, childPriority, catid, scanPath, context.notifyTaskAvailable)) {
                     created++
                 }
             }
@@ -127,7 +91,7 @@ public class ScanSingleCategoryTaskRunner {
         }
     }
 
-    private static func enqueueScanArchiveTask(filePath: String, groupId: String, triggerSource: String, priority: Int32, catid: String, basePath: String): Bool {
+    private static func enqueueScanArchiveTask(filePath: String, groupId: String, triggerSource: String, priority: Int32, catid: String, basePath: String, notifier: TaskNotifier): Bool {
         let relativePath = ArchiveUtils.calculateRelativePath(filePath, basePath)
         let fileName = ArchiveUtils.getFullFileName(filePath)
 
@@ -147,7 +111,7 @@ public class ScanSingleCategoryTaskRunner {
         let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"category_id\":\"${escapeJson(catid)}\"}"
         let childTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, priority, groupId, triggerSource)
         if (childTask.id > 0) {
-            TaskPoolService.getInstance().notifyTaskAvailable()
+            notifier()
             return true
         }
         return false

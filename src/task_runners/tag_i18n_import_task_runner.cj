@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.fs.*
 import stdx.encoding.json.stream.*
@@ -33,7 +33,7 @@ public class TagI18nImportTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJsonString(message)}\"}")
     }
 
-    public static func run(taskId: Int64, parameters: String): Unit {
+    public static func run(taskId: Int64, parameters: String, _: TaskRunnerContext): Unit {
         let logger = getLogger("tag_i18n_import_task")
         TaskIO.appendLog(taskId, "tag_i18n_import task started")
         TaskModel.updateTaskProgress(taskId, 1, "导入任务开始")

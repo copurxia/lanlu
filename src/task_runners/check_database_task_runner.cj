@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import stdx.log.*
 import lrr4cj.models.*
@@ -10,7 +10,7 @@ import lrr4cj.dao.*
  */
 public class CheckDatabaseTaskRunner {
 
-    public static func run(taskId: Int64, _: String): Unit {
+    public static func run(taskId: Int64, _: String, _: TaskRunnerContext): Unit {
         let logger = getLogger("check_database_task")
         TaskIO.appendLog(taskId, "check_database task started")
 

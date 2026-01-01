@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import stdx.encoding.json.*
 import stdx.log.*
@@ -6,7 +6,6 @@ import std.fs.*
 import std.process.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
-import std.sync.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
@@ -16,36 +15,14 @@ import lrr4cj.archivehandler.*
  * 缩略图生成任务：为单个档案生成缩略图
  */
 public class GenerateThumbnailTaskRunner {
-    // 配置 - 使用静态变量存储配置
-    private static var cachePath: Path = Path("")
-    private static var thumbnailPath: Path = Path("")
-    private static var initialized: Bool = false
-    private static let initMutex: Mutex = Mutex()
 
-    // 私有初始化方法（懒加载）
-    private static func ensureInitialized(): Unit {
-        initMutex.lock()
-        if (!initialized) {
-            // 从数据库读取配置
-            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
+        let cachePath = context.paths.cachePath
+        let thumbnailPath = context.paths.thumbnailPath
 
-            // 转换为 Path 类型并规范化
-            cachePath = canonicalize(cachePathStr)
-            thumbnailPath = canonicalize(thumbnailPathStr)
-
-            // 确保必要的目录存在
-            FileUtils.ensureDirectoryExists(cachePath)
-            FileUtils.ensureDirectoryExists(thumbnailPath)
-
-            initialized = true
-        }
-        initMutex.unlock()
-    }
-
-    public static func run(taskId: Int64, parameters: String): Unit {
-        // 确保配置已初始化
-        ensureInitialized()
+        // 确保目录存在
+        FileUtils.ensureDirectoryExists(Path(cachePath))
+        FileUtils.ensureDirectoryExists(Path(thumbnailPath))
 
         let logger = getLogger("generate_thumbnail_task")
         TaskIO.appendLog(taskId, "generate_thumbnail task started")
@@ -58,7 +35,7 @@ public class GenerateThumbnailTaskRunner {
 
         TaskModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId} (type: ${archiveType})")
 
-        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType)
+        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType, cachePath, thumbnailPath)
         if (!result.success) {
             logger.error("generate_thumbnail failed", ("archive_id", archiveId), ("error", result.error))
             fail(taskId, result.error)
@@ -75,7 +52,7 @@ public class GenerateThumbnailTaskRunner {
     /**
      * 生成缩略图
      */
-    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String): ProcessResultData {
+    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String, cachePath: String, thumbnailPath: String): ProcessResultData {
         let logger = getLogger("generate_thumbnail")
         TaskIO.appendLog(taskId, "Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
         logger.debug("Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
@@ -85,7 +62,7 @@ public class GenerateThumbnailTaskRunner {
         logger.debug("Resolved archive path: ${actualArchivePath}")
 
         // 使用任务ID创建独立的临时目录
-        let taskTempDir = FileUtils.joinPath(cachePath.toString(), "task/${taskId}")
+        let taskTempDir = FileUtils.joinPath(cachePath, "task/${taskId}")
         let taskTempPath = Path(taskTempDir)
         FileUtils.ensureDirectoryExists(taskTempPath)
         TaskIO.appendLog(taskId, "Created task temp directory: ${taskTempDir}")
@@ -129,7 +106,7 @@ public class GenerateThumbnailTaskRunner {
         logger.debug("Calculated thumbhash: ${thumbHash}")
 
         // 使用thumbhash作为缩略图文件名
-        let thumbnailFilePath = FileUtils.joinPath(thumbnailPath.toString(), "${thumbHash}.jpg")
+        let thumbnailFilePath = FileUtils.joinPath(thumbnailPath, "${thumbHash}.jpg")
         TaskIO.appendLog(taskId, "Thumbnail file path: ${thumbnailFilePath}")
 
         // 如果文件已存在，先删除（避免重复）

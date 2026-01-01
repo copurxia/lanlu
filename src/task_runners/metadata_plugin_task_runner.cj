@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.collection.*
 import stdx.encoding.json.*
@@ -12,7 +12,7 @@ import lrr4cj.utils.*
  * 运行 metadata 插件并将返回的 title/tags/summary 写回归档
  */
 public class MetadataPluginTaskRunner {
-    public static func run(taskId: Int64, parameters: String): Unit {
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         TaskIO.appendLog(taskId, "metadata_plugin task started")
         TaskModel.updateTaskProgress(taskId, 1, "元数据插件任务开始")
         TaskIO.appendLog(taskId, "metadata_plugin: about to parse parameters")
@@ -102,7 +102,7 @@ public class MetadataPluginTaskRunner {
         }
 
         // 通知 TaskPool
-        TaskPoolService.getInstance().notifyTaskAvailable()
+        context.notifyTaskAvailable()
 
         TaskModel.updateTaskProgress(taskId, 30, "等待插件执行")
 

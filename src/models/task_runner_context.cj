@@ -1,8 +1,32 @@
-package lrr4cj.services
+package lrr4cj.models
 
 import std.sync.*
 import std.collection.*
 import std.time.*
+
+/**
+ * 任务通知回调类型
+ */
+public type TaskNotifier = () -> Unit
+
+/**
+ * TaskRunner 运行时路径配置
+ */
+public class TaskRunnerPaths {
+    public let cachePath: String
+    public let thumbnailPath: String
+    public let pluginPath: String
+
+    public init(
+        cachePath!: String = "",
+        thumbnailPath!: String = "",
+        pluginPath!: String = ""
+    ) {
+        this.cachePath = cachePath
+        this.thumbnailPath = thumbnailPath
+        this.pluginPath = pluginPath
+    }
+}
 
 /**
  * KV 存储条目
@@ -10,7 +34,7 @@ import std.time.*
 public class KVEntry {
     public var value: String
     public var createdAt: Int64
-    public var ttlSeconds: Int64  // 生存时间（秒），0 表示永不过期
+    public var ttlSeconds: Int64
 
     public init(value: String, ttlSeconds!: Int64 = 0) {
         this.value = value
@@ -29,18 +53,13 @@ public class KVEntry {
 
 /**
  * Task 组 KV 存储
- * 提供内存中的临时存储，用于 task 组内共享数据
- * 数据在组释放时自动清理
  */
 public class TaskGroupKVStore {
     private static var instance: Option<TaskGroupKVStore> = Option.None
     private static let instanceMutex: Mutex = Mutex()
 
-    // groupId -> (key -> KVEntry)
     private var stores: HashMap<String, HashMap<String, KVEntry>>
     private let storeMutex: Mutex = Mutex()
-
-    // 组引用计数
     private var groupRefCounts: HashMap<String, Int32>
 
     private init() {
@@ -48,9 +67,6 @@ public class TaskGroupKVStore {
         groupRefCounts = HashMap<String, Int32>()
     }
 
-    /**
-     * 获取单例实例
-     */
     public static func getInstance(): TaskGroupKVStore {
         instanceMutex.lock()
         match (instance) {
@@ -65,10 +81,6 @@ public class TaskGroupKVStore {
         }
     }
 
-    /**
-     * 获取组的 KV store 引用
-     * 如果不存在则创建
-     */
     public func acquireGroup(groupId: String): Unit {
         storeMutex.lock()
         match (groupRefCounts.get(groupId)) {
@@ -81,10 +93,6 @@ public class TaskGroupKVStore {
         storeMutex.unlock()
     }
 
-    /**
-     * 释放组的 KV store 引用
-     * 引用计数归零时自动清理
-     */
     public func releaseGroup(groupId: String): Unit {
         storeMutex.lock()
         match (groupRefCounts.get(groupId)) {
@@ -100,9 +108,6 @@ public class TaskGroupKVStore {
         storeMutex.unlock()
     }
 
-    /**
-     * 设置值
-     */
     public func set(groupId: String, key: String, value: String, ttlSeconds!: Int64 = 0): Bool {
         storeMutex.lock()
         match (stores.get(groupId)) {
@@ -116,9 +121,6 @@ public class TaskGroupKVStore {
         }
     }
 
-    /**
-     * 获取值
-     */
     public func get(groupId: String, key: String): Option<String> {
         storeMutex.lock()
         match (stores.get(groupId)) {
@@ -143,9 +145,6 @@ public class TaskGroupKVStore {
         }
     }
 
-    /**
-     * 删除键
-     */
     public func delete(groupId: String, key: String): Bool {
         storeMutex.lock()
         match (stores.get(groupId)) {
@@ -159,9 +158,6 @@ public class TaskGroupKVStore {
         }
     }
 
-    /**
-     * 检查组是否存在
-     */
     public func hasGroup(groupId: String): Bool {
         storeMutex.lock()
         let exists = stores.contains(groupId)
@@ -169,9 +165,6 @@ public class TaskGroupKVStore {
         return exists
     }
 
-    /**
-     * 获取组内所有键
-     */
     public func getKeys(groupId: String): Array<String> {
         storeMutex.lock()
         match (stores.get(groupId)) {
@@ -186,5 +179,24 @@ public class TaskGroupKVStore {
                 storeMutex.unlock()
                 return Array<String>()
         }
+    }
+}
+
+/**
+ * TaskRunner 上下文，包含运行时所需的所有依赖
+ */
+public class TaskRunnerContext {
+    public let paths: TaskRunnerPaths
+    public let notifyTaskAvailable: TaskNotifier
+    public let kvStore: TaskGroupKVStore
+
+    public init(
+        paths: TaskRunnerPaths,
+        notifyTaskAvailable: TaskNotifier,
+        kvStore: TaskGroupKVStore
+    ) {
+        this.paths = paths
+        this.notifyTaskAvailable = notifyTaskAvailable
+        this.kvStore = kvStore
     }
 }

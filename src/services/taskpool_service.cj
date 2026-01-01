@@ -6,6 +6,7 @@ import stdx.log.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import lrr4cj.task_runners.*
 
 /**
  * TaskPool：用worker线程从DB领取pending任务并执行
@@ -156,27 +157,30 @@ public class TaskPoolService {
         let logger = getLogger("taskpool")
         TaskIO.appendLog(task.id, "[worker ${workerIndex}] start task ${task.id} type=${task.taskType}")
 
+        // 创建 TaskRunnerContext
+        let context = createTaskRunnerContext()
+
         match (task.taskType) {
             case "download_url" =>
-                DownloadUrlTaskRunner.run(task.id, task.parameters)
+                DownloadUrlTaskRunner.run(task.id, task.parameters, context)
             case "upload_process" =>
-                UploadProcessTaskRunner.run(task.id, task.parameters)
+                UploadProcessTaskRunner.run(task.id, task.parameters, context)
             case "metadata_plugin" =>
-                MetadataPluginTaskRunner.run(task.id, task.parameters)
+                MetadataPluginTaskRunner.run(task.id, task.parameters, context)
             case "tag_import" =>
-                TagI18nImportTaskRunner.run(task.id, task.parameters)
+                TagI18nImportTaskRunner.run(task.id, task.parameters, context)
             case "scan_all_categories" =>
-                ScanAllCategoriesTaskRunner.run(task.id, task.parameters)
+                ScanAllCategoriesTaskRunner.run(task.id, task.parameters, context)
             case "scan_single_category" =>
-                ScanSingleCategoryTaskRunner.run(task.id, task.parameters)
+                ScanSingleCategoryTaskRunner.run(task.id, task.parameters, context)
             case "scan_archive" =>
-                ScanArchiveTaskRunner.run(task.id, task.parameters)
+                ScanArchiveTaskRunner.run(task.id, task.parameters, context)
             case "generate_thumbnail" =>
-                GenerateThumbnailTaskRunner.run(task.id, task.parameters)
+                GenerateThumbnailTaskRunner.run(task.id, task.parameters, context)
             case "check_database" =>
-                CheckDatabaseTaskRunner.run(task.id, task.parameters)
+                CheckDatabaseTaskRunner.run(task.id, task.parameters, context)
             case "scan_plugins" =>
-                ScanPluginsTaskRunner.run(task.id, task.parameters)
+                ScanPluginsTaskRunner.run(task.id, task.parameters, context)
             case "deno_task" =>
                 DenoTaskRunner.run(task.id, task.parameters)
             case _ =>
@@ -186,5 +190,19 @@ public class TaskPoolService {
         }
 
         logger.debug("TaskPool task finished", ("id", task.id.toString()), ("type", task.taskType), ("worker", workerIndex.toString()))
+    }
+
+    /**
+     * 创建 TaskRunnerContext
+     */
+    private func createTaskRunnerContext(): TaskRunnerContext {
+        let paths = TaskRunnerPaths(
+            cachePath: SystemSettingsService.getPath("CACHE_PATH"),
+            thumbnailPath: SystemSettingsService.getPath("THUMBNAIL_PATH"),
+            pluginPath: SystemSettingsService.getPath("PLUGIN_PATH")
+        )
+        let notifier: TaskNotifier = { => this.notifyTaskAvailable() }
+        let kvStore = TaskGroupKVStore.getInstance()
+        return TaskRunnerContext(paths, notifier, kvStore)
     }
 }

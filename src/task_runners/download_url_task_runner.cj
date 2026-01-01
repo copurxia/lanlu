@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.regex.*
 import std.fs.*
@@ -8,7 +8,6 @@ import std.convert.*
 import std.collection.*
 import stdx.encoding.json.*
 import stdx.log.*
-import std.sync.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -17,36 +16,14 @@ import lrr4cj.utils.*
  * download_url 任务执行器（运行在TaskPool中）
  */
 public class DownloadUrlTaskRunner {
-    // 配置 - 使用静态变量存储配置（archivePath 已移除，改用分类系统）
-    private static var cachePath: Path = Path("")
-    private static var thumbnailPath: Path = Path("")
-    private static var initialized: Bool = false
-    private static let initMutex: Mutex = Mutex()
 
-    // 私有初始化方法（懒加载）
-    private static func ensureInitialized(): Unit {
-        initMutex.lock()
-        if (!initialized) {
-            // 从数据库读取配置（archivePath 已移除，改用分类的 scan_path）
-            let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-            let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
+        let cachePath = context.paths.cachePath
+        let thumbnailPath = context.paths.thumbnailPath
 
-            // 转换为 Path 类型并规范化
-            cachePath = canonicalize(cachePathStr)
-            thumbnailPath = canonicalize(thumbnailPathStr)
-
-            // 确保必要的目录存在
-            FileUtils.ensureDirectoryExists(cachePath)
-            FileUtils.ensureDirectoryExists(thumbnailPath)
-
-            initialized = true
-        }
-        initMutex.unlock()
-    }
-
-    public static func run(taskId: Int64, parameters: String): Unit {
-        // 确保配置已初始化
-        ensureInitialized()
+        // 确保目录存在
+        FileUtils.ensureDirectoryExists(Path(cachePath))
+        FileUtils.ensureDirectoryExists(Path(thumbnailPath))
 
         let _ = getLogger("download_url_task")
         TaskIO.appendLog(taskId, "download_url task started")
@@ -111,7 +88,7 @@ public class DownloadUrlTaskRunner {
             }
 
             // 通知 TaskPool
-            TaskPoolService.getInstance().notifyTaskAvailable()
+            context.notifyTaskAvailable()
 
             TaskModel.updateTaskProgress(taskId, 15, "等待插件执行")
 

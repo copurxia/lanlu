@@ -1,9 +1,8 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.fs.*
 import stdx.encoding.json.*
 import stdx.log.*
-import std.sync.*
 import std.convert.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -16,47 +15,12 @@ import lrr4cj.archivehandler.*
 public class ScanArchiveTaskRunner {
     private static var logger = getLogger("scan_archive_task")
 
-    // 配置
-    private static var initialized: Bool = false
-    private static let initMutex: Mutex = Mutex()
-
-    // 私有初始化方法（懒加载）
-    private static func ensureInitialized(): Unit {
-        initMutex.lock()
-        if (!initialized) {
-            try {
-                // 从数据库读取配置
-                let cachePathStr = SystemSettingsService.getPath("CACHE_PATH")
-                let thumbnailPathStr = SystemSettingsService.getPath("THUMBNAIL_PATH")
-
-                // 先确保目录存在，然后规范化路径
-                // 注意：canonicalize() 要求路径存在，否则会失败
-                let cachePath = Path(cachePathStr)
-                let thumbnailPath = Path(thumbnailPathStr)
-                FileUtils.ensureDirectoryExists(cachePath)
-                FileUtils.ensureDirectoryExists(thumbnailPath)
-
-                initialized = true
-            } catch (e: Exception) {
-                // 即使初始化失败，也设置为 true 避免死锁
-                initialized = true
-                throw e
-            }
-        }
-        initMutex.unlock()
-    }
-
-    public static func run(taskId: Int64, parameters: String): Unit {
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("scan_archive_task")
         TaskIO.appendLog(taskId, "scan_archive task started")
         TaskIO.appendLog(taskId, "Task parameters: ${parameters}")
 
         try {
-            // 确保配置已初始化
-            TaskIO.appendLog(taskId, "Initializing configuration...")
-            ensureInitialized()
-            TaskIO.appendLog(taskId, "Configuration initialized successfully")
-
             TaskIO.appendLog(taskId, "Parsing configuration...")
             let config = parseConfig(parameters)
             TaskIO.appendLog(taskId, "Parsed config: archivePath=${config.archivePath}, archiveType=${config.archiveType}, cachePath=${config.cachePath}, thumbnailPath=${config.thumbnailPath}")
@@ -70,7 +34,7 @@ public class ScanArchiveTaskRunner {
             TaskIO.appendLog(taskId, "Starting archive processing for: ${config.archivePath}")
             TaskModel.updateTaskProgress(taskId, 10, "Processing ${config.archivePath}")
 
-            let result = processArchiveInternal(config.archivePath, config)
+            let result = processArchiveInternal(config.archivePath, config, context.notifyTaskAvailable)
             TaskIO.appendLog(taskId, "processArchiveInternal returned: success=${result.success}, archiveId=${result.archiveId}, error=${result.error}")
 
             if (!result.success) {
@@ -168,7 +132,7 @@ public class ScanArchiveTaskRunner {
         return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId)
     }
 
-    private static func processArchiveInternal(filePath: String, config: ArchiveConfig): ProcessResultData {
+    private static func processArchiveInternal(filePath: String, config: ArchiveConfig, notifier: TaskNotifier): ProcessResultData {
         try {
             let archiveBasePath = if (config.categoryId.size > 0) {
                 match (CategoryDao.getCategoryById(config.categoryId)) {
@@ -196,7 +160,7 @@ public class ScanArchiveTaskRunner {
                         // 提交缩略图生成任务（异步）
                         // 使用 ArchiveHandlerFactory 自动检测类型
                         let archiveType = ArchiveHandlerFactory.getInstance().detectType(filePath)
-                        let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType)
+                        let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, notifier)
                         if (!taskSubmitted) {
                             logger.error("Failed to submit thumbnail generation task for archive: ${archive.id}")
                         }
@@ -242,7 +206,7 @@ public class ScanArchiveTaskRunner {
             }
 
             // 提交缩略图生成任务（异步）
-            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType)
+            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, notifier)
             if (!taskSubmitted) {
                 logger.error("Failed to submit thumbnail generation task for archive: ${dbResult.archiveId}")
             }
@@ -287,7 +251,7 @@ public class ScanArchiveTaskRunner {
     /**
      * 提交缩略图生成任务到任务池
      */
-    private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String): Bool {
+    private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String, notifier: TaskNotifier): Bool {
         try {
             let parameters = "{\"archive_path\":\"${escapeJson(archivePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\",\"type\":\"${archiveType}\"}"
             let task = TaskModel.createTaskWithOptions(
@@ -300,7 +264,7 @@ public class ScanArchiveTaskRunner {
             )
 
             if (task.id > 0) {
-                TaskPoolService.getInstance().notifyTaskAvailable()
+                notifier()
                 logger.debug("Submitted thumbnail generation task", ("archive_id", archiveId), ("task_id", task.id.toString()))
                 return true
             } else {

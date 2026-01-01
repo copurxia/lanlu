@@ -1,4 +1,4 @@
-package lrr4cj.services
+package lrr4cj.task_runners
 
 import std.fs.*
 import std.process.*
@@ -10,40 +10,21 @@ import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
 import cjoy.json.*
-import std.sync.*
 
 /**
  * 插件扫描任务：扫描并注册TypeScript/Deno插件文件（Metadata、Login、Download 插件）
  */
 public class ScanPluginsTaskRunner {
-    // 插件路径配置
-    private static var pluginPath: Path = Path("")
-    private static var initialized: Bool = false
-    private static let initMutex: Mutex = Mutex()
 
-    // 私有初始化方法（懒加载）
-    private static func ensureInitialized(): Unit {
-        initMutex.lock()
-        if (!initialized) {
-            // 从数据库读取配置
-            let pluginPathStr = SystemSettingsService.getPath("PLUGIN_PATH")
-            pluginPath = canonicalize(pluginPathStr)
-            FileUtils.ensureDirectoryExists(pluginPath)
-
-            initialized = true
-        }
-        initMutex.unlock()
-    }
-
-    public static func run(taskId: Int64, _: String): Unit {
-        // 确保配置已初始化
-        ensureInitialized()
+    public static func run(taskId: Int64, _: String, context: TaskRunnerContext): Unit {
+        let pluginPath = context.paths.pluginPath
+        FileUtils.ensureDirectoryExists(Path(pluginPath))
 
         TaskIO.appendLog(taskId, "scan_plugins task started")
 
         TaskModel.updateTaskProgress(taskId, 10, "Starting plugin scan")
 
-        let result = scanPlugins(taskId)
+        let result = scanPlugins(taskId, pluginPath)
 
         if (result.errorCount > 0) {
             let errorJson = "{\"success\":1,\"processed_count\":${result.processedCount},\"total_found\":${result.totalFound},\"error_count\":${result.errorCount}}"
@@ -63,24 +44,24 @@ public class ScanPluginsTaskRunner {
     /**
      * 扫描插件文件
      */
-    private static func scanPlugins(taskId: Int64): ScanResultData {
+    private static func scanPlugins(taskId: Int64, pluginPath: String): ScanResultData {
         let startTime = getCurrentTimeMillis()
         var processedCount: Int64 = 0
         var errorCount: Int64 = 0
         var errors: Array<String> = Array<String>()
 
         TaskIO.appendLog(taskId, "Starting plugin scan")
-        TaskIO.appendLog(taskId, "Plugin path: ${pluginPath.toString()}")
+        TaskIO.appendLog(taskId, "Plugin path: ${pluginPath}")
 
         // 检查目录是否存在
-        if (!directoryExists(pluginPath.toString())) {
-            let error = "Plugin directory does not exist: ${pluginPath.toString()}"
+        if (!directoryExists(pluginPath)) {
+            let error = "Plugin directory does not exist: ${pluginPath}"
             TaskIO.appendLog(taskId, "ERROR: ${error}")
             return ScanResultData(0, 0, 1, [error])
         }
 
         // 扫描插件文件
-        let pluginFiles = findPluginFiles(taskId, pluginPath.toString())
+        let pluginFiles = findPluginFiles(taskId, pluginPath)
         TaskIO.appendLog(taskId, "Found ${pluginFiles.size} plugin files to process")
 
         // 处理每个插件文件
