@@ -5,7 +5,6 @@ import std.collection.*
 import std.fs.*
 import stdx.encoding.json.*
 import stdx.log.*
-import std.sync.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -40,24 +39,11 @@ public class DenoExecutionResult {
  * 统一处理所有 Deno 插件执行
  */
 public class DenoTaskRunner {
-    private static var pluginPath: String = ""
-    private static var initialized: Bool = false
-    private static let initMutex: Mutex = Mutex()
-
-    private static func ensureInitialized(): Unit {
-        initMutex.lock()
-        if (!initialized) {
-            pluginPath = SystemSettingsService.getPath("PLUGIN_PATH")
-            initialized = true
-        }
-        initMutex.unlock()
-    }
 
     /**
      * 任务入口
      */
     public static func run(taskId: Int64, parameters: String): Unit {
-        ensureInitialized()
         TaskIO.appendLog(taskId, "deno_task started")
         TaskModel.updateTaskProgress(taskId, 1, "Deno任务开始")
 
