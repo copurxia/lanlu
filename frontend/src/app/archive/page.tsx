@@ -937,7 +937,7 @@ function ArchiveDetailContent() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   <div className="sm:col-span-2 flex items-center justify-between gap-3">
                     <span className="text-muted-foreground">{t('archive.fileName')}</span>
-                    <span className="truncate max-w-[22rem]" title={metadata.filename}>{metadata.filename}</span>
+                    <span className="truncate max-w-[22rem] sm:max-w-[30rem] md:max-w-[40rem] lg:max-w-[50rem]" title={metadata.filename}>{metadata.filename}</span>
                   </div>
 
                   <div className="flex items-center justify-between gap-3">
