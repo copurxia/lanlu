@@ -631,6 +631,22 @@ public class CronService {
                 logger.error("Failed to create default scan_plugins task")
         }
 
+        // 定时清理缓存（每天凌晨3点）
+        let clearCacheTask = createScheduledTask(
+            "定时清理缓存",
+            "0 3 * * *",
+            "clear_cache",
+            taskParameters: "{\"maxAgeDays\":7}",  // 清理7天前的缓存
+            enabled: true,  // 默认启用，缓存清理是安全的维护操作
+            priority: 40
+        )
+        match (clearCacheTask) {
+            case Some(t) =>
+                logger.debug("Created default clear_cache task", ("id", t.id.toString()))
+            case None =>
+                logger.error("Failed to create default clear_cache task")
+        }
+
         logger.debug("Default scheduled tasks created")
     }
 
@@ -714,6 +730,19 @@ public class CronService {
         TaskPoolService.getInstance().notifyTaskAvailable()
         let logger = getLogger("cron_service")
         logger.debug("Enqueued scan_plugins task", ("task_id", task.id.toString()))
+        return task.id
+    }
+
+    /**
+     * 触发缓存清理任务
+     */
+    public func triggerClearCache(priority!: Int32 = 40, triggerSource!: String = "manual", maxAgeDays!: Int64 = 7): Int64 {
+        let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
+        let params = "{\"maxAgeDays\":${maxAgeDays}}"
+        let task = TaskModel.createTaskWithOptions("清理缓存", "clear_cache", params, priority, "", source)
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        let logger = getLogger("cron_service")
+        logger.debug("Enqueued clear_cache task", ("task_id", task.id.toString()), ("maxAgeDays", maxAgeDays.toString()))
         return task.id
     }
 

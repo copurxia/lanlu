@@ -226,6 +226,8 @@ public class TaskPoolService {
                 DenoTaskRunner.run(task.id, task.parameters)
             case "metadata_plugin_callback" =>
                 MetadataPluginCallbackRunner.run(task.id, task.parameters, context)
+            case "clear_cache" =>
+                ClearCacheTaskRunner.run(task.id, task.parameters, context)
             case _ =>
                 TaskIO.appendLog(task.id, "Unknown task type: ${task.taskType}")
                 TaskModel.failTask(task.id, "Unknown task type: ${task.taskType}")
