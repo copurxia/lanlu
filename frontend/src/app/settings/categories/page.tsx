@@ -198,6 +198,15 @@ export default function CategoriesSettingsPage() {
     }
   };
 
+  const handleToggleEnabled = async (catid: string, enabled: boolean) => {
+    try {
+      await CategoryService.updateCategory(catid, { enabled });
+      await loadCategories();
+    } catch (e: any) {
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryUpdateFailed'));
+    }
+  };
+
   const handleScanCategory = async (catid: string) => {
     setLoading(true);
     try {
@@ -326,9 +335,11 @@ export default function CategoriesSettingsPage() {
                         {category.icon && <span className="text-2xl">{category.icon}</span>}
                         <CardTitle className="text-lg">{category.name}</CardTitle>
                       </div>
-                      <Badge variant={category.enabled ? 'default' : 'secondary'}>
-                        {category.enabled ? t('settings.categoryEnabled') : t('settings.categoryDisabled')}
-                      </Badge>
+                      <Switch
+                        checked={category.enabled}
+                        onCheckedChange={(checked) => handleToggleEnabled(category.catid, checked)}
+                        disabled={loading}
+                      />
                     </div>
                     <CardDescription className="line-clamp-2">
                       {category.description || t('settings.categoryNoDescription')}
@@ -563,7 +574,7 @@ export default function CategoriesSettingsPage() {
                 rows={2}
               />
             </div>
-            <div className="flex items-center gap-4">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="edit-icon">{t('settings.categoryIcon')}</Label>
                 <Input
@@ -584,15 +595,6 @@ export default function CategoriesSettingsPage() {
                   placeholder="0"
                   disabled={loading}
                 />
-              </div>
-              <div className="flex items-center space-x-2">
-                <Switch
-                  id="edit-enabled"
-                  checked={editForm.enabled ?? false}
-                  onCheckedChange={(checked) => setEditForm({ ...editForm, enabled: checked })}
-                  disabled={loading}
-                />
-                <Label htmlFor="edit-enabled">{t('settings.categoryEnabled')}</Label>
               </div>
             </div>
             {metadataPlugins.length > 0 && (
