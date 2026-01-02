@@ -26,6 +26,7 @@ public class TaskData {
     public var groupId: String = ""
     public var timeoutAt: String = ""
     public var triggerSource: String = ""
+    public var waitForTaskId: Int64 = 0  // 条件驱动：等待指定任务完成后才能执行
 
     public init() {}
 }
@@ -1165,6 +1166,216 @@ public class TaskDao {
             case None =>
                 logger.error("无法创建数据库连接")
                 return Option<TaskData>.None
+        }
+    }
+
+    /**
+     * 创建等待状态的任务（条件驱动）
+     * 任务创建后处于 waiting 状态，等待 waitForTaskId 指定的任务完成后自动转为 pending
+     */
+    public static func createWaitingTaskData(data: TaskData, waitForTaskId: Int64): Bool {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, wait_for_task_id, started_at, completed_at)
+                        VALUES (?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL) RETURNING id
+                    """)
+                    try {
+                        stmt.set(0, data.name)
+                        stmt.set(1, data.taskType)
+                        stmt.set(2, data.progress)
+                        stmt.set(3, data.message)
+                        stmt.set(4, data.pluginNamespace)
+                        stmt.set(5, data.parameters)
+                        stmt.set(6, data.result)
+                        stmt.set(7, data.priority)
+                        if (data.groupId.size > 0) {
+                            stmt.set(8, data.groupId)
+                        } else {
+                            stmt.setNull(8)
+                        }
+                        if (data.timeoutAt.size > 0) {
+                            stmt.set(9, data.timeoutAt)
+                        } else {
+                            stmt.setNull(9)
+                        }
+                        if (data.triggerSource.size > 0) {
+                            stmt.set(10, data.triggerSource)
+                        } else {
+                            stmt.setNull(10)
+                        }
+                        stmt.set(11, waitForTaskId)
+
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                data.id = rs.getOrNull<Int64>(0) ?? 0
+                                data.status = "waiting"
+                                data.waitForTaskId = waitForTaskId
+                                logger.info("创建等待任务", ("id", data.id.toString()), ("wait_for", waitForTaskId.toString()))
+                                return true
+                            }
+                            return false
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("创建等待任务失败", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 查询等待指定任务完成的所有任务
+     */
+    public static func getTasksWaitingFor(taskId: Int64): Array<TaskData> {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
+                               priority, group_id, timeout_at, trigger_source, wait_for_task_id,
+                               created_at, started_at, completed_at
+                        FROM tasks
+                        WHERE wait_for_task_id = ? AND status = 'waiting'
+                    """)
+                    try {
+                        stmt.set(0, taskId)
+                        let rs = stmt.query()
+                        var taskList = ArrayList<TaskData>()
+                        try {
+                            while (rs.next()) {
+                                let data = TaskData()
+                                data.id = rs.getOrNull<Int64>(0) ?? 0
+                                data.name = rs.getOrNull<String>(1) ?? ""
+                                data.taskType = rs.getOrNull<String>(2) ?? ""
+                                data.status = rs.getOrNull<String>(3) ?? ""
+                                data.progress = rs.getOrNull<Int32>(4) ?? 0
+                                data.message = rs.getOrNull<String>(5) ?? ""
+                                data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
+                                data.parameters = rs.getOrNull<String>(7) ?? ""
+                                data.result = rs.getOrNull<String>(8) ?? ""
+                                data.priority = rs.getOrNull<Int32>(9) ?? 50
+                                data.groupId = rs.getOrNull<String>(10) ?? ""
+                                data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                                data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                                data.waitForTaskId = rs.getOrNull<Int64>(13) ?? 0
+                                data.createdAt = rs.getOrNull<String>(14) ?? ""
+                                data.startedAt = rs.getOrNull<String>(15) ?? ""
+                                data.completedAt = rs.getOrNull<String>(16) ?? ""
+                                taskList.add(data)
+                            }
+                            let size = taskList.size
+                            if (size > 0) {
+                                var result = Array<TaskData>(size, { _ => TaskData() })
+                                for (i in 0..size) {
+                                    result[i] = taskList[i]
+                                }
+                                return result
+                            }
+                            return Array<TaskData>()
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("查询等待任务失败", ("error", e.message))
+                    return Array<TaskData>()
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return Array<TaskData>()
+        }
+    }
+
+    /**
+     * 激活等待任务（将 waiting 状态转为 pending）
+     */
+    public static func activateWaitingTask(taskId: Int64): Bool {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks SET status = 'pending', message = '依赖任务已完成，等待执行'
+                        WHERE id = ? AND status = 'waiting'
+                    """)
+                    try {
+                        stmt.set(0, taskId)
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            logger.info("激活等待任务", ("id", taskId.toString()))
+                            return true
+                        }
+                        return false
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("激活等待任务失败", ("id", taskId.toString()), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 将等待任务标记为失败（依赖任务失败时调用）
+     */
+    public static func failWaitingTask(taskId: Int64, errorMessage: String): Bool {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks SET status = 'failed', message = ?, completed_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND status = 'waiting'
+                    """)
+                    try {
+                        stmt.set(0, errorMessage)
+                        stmt.set(1, taskId)
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            logger.info("等待任务标记失败", ("id", taskId.toString()))
+                            return true
+                        }
+                        return false
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("标记等待任务失败", ("id", taskId.toString()), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
         }
     }
 }

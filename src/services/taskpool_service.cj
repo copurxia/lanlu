@@ -143,6 +143,9 @@ public class TaskPoolService {
         logger.debug("TaskPool worker executing", ("worker", workerId.toString()), ("task_id", task.id.toString()), ("task_type", task.taskType))
         executeTask(task, workerId)
 
+        // 触发依赖此任务的等待任务
+        triggerDependentTasks(task.id)
+
         // 释放 slot 并尝试领取下一个 pending
         dispatchMutex.lock()
         if (currentWorkers > 0) {
@@ -151,6 +154,44 @@ public class TaskPoolService {
         dispatchMutex.unlock()
 
         dispatch()
+    }
+
+    /**
+     * 触发依赖指定任务的等待任务
+     * 当任务完成时，检查是否有等待它的任务，并根据完成状态激活或失败它们
+     */
+    private func triggerDependentTasks(completedTaskId: Int64): Unit {
+        let logger = getLogger("taskpool")
+
+        // 获取已完成任务的最新状态
+        let completedTask = TaskDao.getTaskDataById(completedTaskId)
+        if (completedTask.id == 0) {
+            return
+        }
+
+        // 查询等待此任务的所有任务
+        let waitingTasks = TaskDao.getTasksWaitingFor(completedTaskId)
+        if (waitingTasks.size == 0) {
+            return
+        }
+
+        logger.debug("触发依赖任务", ("completed_id", completedTaskId.toString()), ("waiting_count", waitingTasks.size.toString()))
+
+        for (waitingTask in waitingTasks) {
+            if (completedTask.status == "completed") {
+                // 依赖任务成功完成，激活等待任务
+                TaskDao.activateWaitingTask(waitingTask.id)
+                logger.debug("激活等待任务", ("id", waitingTask.id.toString()))
+            } else {
+                // 依赖任务失败或停止，级联失败
+                let errorMsg = "依赖任务失败: ${completedTask.status} - ${completedTask.message}"
+                TaskDao.failWaitingTask(waitingTask.id, errorMsg)
+                logger.debug("等待任务级联失败", ("id", waitingTask.id.toString()))
+            }
+        }
+
+        // 通知有新任务可用
+        notifyTaskAvailable()
     }
 
     private func executeTask(task: TaskData, workerIndex: Int32): Unit {
@@ -183,6 +224,8 @@ public class TaskPoolService {
                 ScanPluginsTaskRunner.run(task.id, task.parameters, context)
             case "deno_task" =>
                 DenoTaskRunner.run(task.id, task.parameters)
+            case "metadata_plugin_callback" =>
+                MetadataPluginCallbackRunner.run(task.id, task.parameters, context)
             case _ =>
                 TaskIO.appendLog(task.id, "Unknown task type: ${task.taskType}")
                 TaskModel.failTask(task.id, "Unknown task type: ${task.taskType}")

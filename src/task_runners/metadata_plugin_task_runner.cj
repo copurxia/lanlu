@@ -101,78 +101,47 @@ public class MetadataPluginTaskRunner {
             return
         }
 
-        // 通知 TaskPool
+        TaskIO.appendLog(taskId, "deno_task created: ${denoTask.id}")
+
+        // 创建回调任务（等待 deno_task 完成后自动触发）
+        TaskModel.updateTaskProgress(taskId, 20, "创建回调任务")
+        let callbackParams = buildCallbackParams(archiveId, plugin.namespace, denoTask.id)
+        let callbackTask = TaskModel.createWaitingTask(
+            "元数据写回",
+            "metadata_plugin_callback",
+            callbackParams,
+            denoTask.id,
+            groupId,
+            "metadata_plugin:${taskId}"
+        )
+
+        if (callbackTask.id <= 0) {
+            fail(taskId, "Failed to create callback task")
+            return
+        }
+
+        TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for deno_task: ${denoTask.id}")
+
+        // 通知 TaskPool 有新任务可用
         context.notifyTaskAvailable()
 
-        TaskModel.updateTaskProgress(taskId, 30, "等待插件执行")
-
-        // 等待 deno_task 完成
-        let denoResult = waitForTaskCompletion(denoTask.id, 300)
-        if (!denoResult.success) {
-            fail(taskId, "Deno task failed: ${denoResult.error}")
-            return
-        }
-
-        let output = denoResult.output
-        TaskIO.appendLog(taskId, "plugin output: ${output}")
-
-        TaskModel.updateTaskProgress(taskId, 70, "解析并写回元数据")
-        let parsed = parseMetadataOutput(output)
-        if (!parsed.success) {
-            fail(taskId, parsed.error)
-            return
-        }
-
-        let newTitle = parsed.title
-        let newTags = parsed.tags
-        let newSummary = parsed.summary
-
-        // 写回 archives 表
-        var archiveToUpdate = ArchiveDao.getArchiveById(archiveId)
-        if (archiveToUpdate.id.size == 0) {
-            fail(taskId, "Archive not found when updating")
-            return
-        }
-
-        var changed = false
-        if (newTitle.size > 0) {
-            archiveToUpdate.title = newTitle
-            changed = true
-        }
-        if (newSummary.size > 0) {
-            archiveToUpdate.summary = newSummary
-            changed = true
-        }
-        if (changed) {
-            archiveToUpdate.updated_at = DateTime.now().toString()
-            let ok = ArchiveDao.update(archiveToUpdate)
-            if (!ok) {
-                fail(taskId, "Failed to update archive metadata")
-                return
-            }
-        }
-
-        // 写回 tags
-        if (newTags.size > 0) {
-            let tagOk = TagDao.updateArchiveTags(archiveId, newTags)
-            if (!tagOk) {
-                TaskIO.appendLog(taskId, "WARN: failed to update tags")
-            }
-        }
-
-        TaskModel.updateTaskProgress(taskId, 100, "元数据插件执行完成")
-        let resultJson =
-            "{" +
-            "\"success\":1," +
-            "\"archive_id\":\"${escapeJson(archiveId)}\"," +
-            "\"namespace\":\"${escapeJson(plugin.namespace)}\"," +
-            "\"title\":\"${escapeJson(newTitle)}\"," +
-            "\"summary\":\"${escapeJson(newSummary)}\"," +
-            "\"tags\":\"${escapeJson(newTags)}\"," +
-            "\"plugin_output\":\"${escapeJson(output)}\"" +
-            "}"
-        TaskModel.completeTask(taskId, "metadata_plugin completed")
+        // 立即完成原任务（不再等待）
+        TaskModel.updateTaskProgress(taskId, 100, "任务已提交")
+        let resultJson = "{\"success\":1,\"deno_task_id\":${denoTask.id},\"callback_task_id\":${callbackTask.id}}"
+        TaskModel.completeTask(taskId, "metadata_plugin task submitted")
         TaskIO.writeOutput(taskId, resultJson)
+    }
+
+    /**
+     * 构建回调任务参数
+     */
+    private static func buildCallbackParams(archiveId: String, namespace: String, denoTaskId: Int64): String {
+        var paramsObj = JsonObject()
+        let fields = paramsObj.getFields()
+        fields["archiveId"] = JsonString(archiveId)
+        fields["namespace"] = JsonString(namespace)
+        fields["denoTaskId"] = JsonInt(denoTaskId)
+        return paramsObj.toString()
     }
 
     private static func parseParameters(parameters: String): (String, String, String) {
@@ -248,98 +217,11 @@ public class MetadataPluginTaskRunner {
         return (Option<String>.Some(trimmed), Option.None)
     }
 
-    private static func parseMetadataOutput(output: String): ParsedMetadataResult {
-        if (output.trimAscii().size == 0) {
-            return ParsedMetadataResult(false, "Plugin returned empty output", "", "", "")
-        }
-
-        try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    if (!getJsonBool(obj, "success")) {
-                        let err = getJsonString(obj, "error")
-                        return ParsedMetadataResult(false, if (err.size > 0) { err } else { "Plugin returned success=false" }, "", "", "")
-                    }
-                    var title = ""
-                    var summary = ""
-                    var tags = ""
-                    let fields = obj.getFields()
-                    if (fields.contains("data")) {
-                        match (fields["data"]) {
-                            case dataObj: JsonObject =>
-                                title = getJsonString(dataObj, "title")
-                                summary = getJsonString(dataObj, "summary")
-                                tags = getJsonString(dataObj, "tags")
-                            case _ => ()
-                        }
-                    }
-                    return ParsedMetadataResult(true, "", title, summary, tags)
-                case _ =>
-                    return ParsedMetadataResult(false, "Plugin output is not a JSON object", "", "", "")
-            }
-        } catch (e: Exception) {
-            return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
-        }
-    }
-
-    private static func getJsonBool(jsonObj: JsonObject, key: String): Bool {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) { return false }
-        match (fields[key]) {
-            case b: JsonBool => return b.getValue()
-            case s: JsonString =>
-                let v = s.getValue()
-                return v == "true" || v == "True" || v == "TRUE" || v == "1"
-            case _ =>
-                let v = fields[key].toString()
-                return v == "true" || v == "True" || v == "TRUE" || v == "1"
-        }
-    }
-
-    private static func getJsonString(jsonObj: JsonObject, key: String): String {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) { return "" }
-        match (fields[key]) {
-            case s: JsonString => return s.getValue()
-            case _ => return fields[key].toString()
-        }
-    }
-
     private static func fail(taskId: Int64, message: String): Unit {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
-    }
-
-    /**
-     * 等待任务完成（轮询 + 指数退避）
-     */
-    private static func waitForTaskCompletion(taskId: Int64, timeoutSeconds: Int32): TaskWaitResult {
-        let startTime = DateTime.now().toUnixTimeStamp().toSeconds()
-        var sleepMs: Int64 = 100
-
-        while (true) {
-            let task = TaskDao.getTaskDataById(taskId)
-            if (task.status == "completed") {
-                let output = TaskIO.readOutput(taskId)
-                return TaskWaitResult(true, "", output)
-            }
-            if (task.status == "failed" || task.status == "stopped") {
-                return TaskWaitResult(false, task.message, "")
-            }
-
-            let elapsed = DateTime.now().toUnixTimeStamp().toSeconds() - startTime
-            if (elapsed > Int64(timeoutSeconds)) {
-                return TaskWaitResult(false, "Timeout waiting for task", "")
-            }
-
-            sleep(Duration.millisecond * sleepMs)
-            sleepMs = if (sleepMs * 2 > 2000) { 2000 } else { sleepMs * 2 }
-        }
-        // This line should never be reached but satisfies the compiler
-        return TaskWaitResult(false, "Unexpected error", "")
     }
 
     private static func escapeJson(s: String): String {
@@ -352,21 +234,5 @@ public class MetadataPluginTaskRunner {
         escaped = escaped.replace("\r", "\\r")
         escaped = escaped.replace("\t", "\\t")
         return escaped
-    }
-}
-
-public class ParsedMetadataResult {
-    public var success: Bool = false
-    public var error: String = ""
-    public var title: String = ""
-    public var summary: String = ""
-    public var tags: String = ""
-
-    public init(success: Bool, error: String, title: String, summary: String, tags: String) {
-        this.success = success
-        this.error = error
-        this.title = title
-        this.summary = summary
-        this.tags = tags
     }
 }

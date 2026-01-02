@@ -29,12 +29,13 @@ public class Task {
     public var groupId: String
     public var timeoutAt: String
     public var triggerSource: String
+    public var waitForTaskId: Int64  // 条件驱动：等待指定任务完成后才能执行
 
     public init(id: Int64, name: String, status: String, progress: Int32, message: String,
                 taskType!: String = "", pluginNamespace!: String = "", parameters!: String = "",
                 result!: String = "", createdAt!: String = "", startedAt!: String = "",
                 completedAt!: String = "", priority!: Int32 = 50, groupId!: String = "",
-                timeoutAt!: String = "", triggerSource!: String = "") {
+                timeoutAt!: String = "", triggerSource!: String = "", waitForTaskId!: Int64 = 0) {
         this.id = id
         this.name = name
         this.status = status
@@ -51,6 +52,7 @@ public class Task {
         this.groupId = groupId
         this.timeoutAt = timeoutAt
         this.triggerSource = triggerSource
+        this.waitForTaskId = waitForTaskId
     }
 
     /**
@@ -182,6 +184,7 @@ public class TaskModel {
                     ensureColumnExists(conn, "group_id", "ALTER TABLE tasks ADD COLUMN group_id VARCHAR(255)")
                     ensureColumnExists(conn, "timeout_at", "ALTER TABLE tasks ADD COLUMN timeout_at TIMESTAMP")
                     ensureColumnExists(conn, "trigger_source", "ALTER TABLE tasks ADD COLUMN trigger_source VARCHAR(50)")
+                    ensureColumnExists(conn, "wait_for_task_id", "ALTER TABLE tasks ADD COLUMN wait_for_task_id BIGINT DEFAULT NULL")
 
                     return true
                 } catch (e: Exception) {
@@ -515,7 +518,8 @@ public class TaskModel {
             taskType: data.taskType, pluginNamespace: data.pluginNamespace,
             parameters: data.parameters, result: data.result,
             createdAt: data.createdAt, startedAt: data.startedAt, completedAt: data.completedAt,
-            priority: data.priority, groupId: data.groupId, timeoutAt: data.timeoutAt, triggerSource: data.triggerSource
+            priority: data.priority, groupId: data.groupId, timeoutAt: data.timeoutAt,
+            triggerSource: data.triggerSource, waitForTaskId: data.waitForTaskId
         )
     }
 
@@ -540,7 +544,48 @@ public class TaskModel {
         data.groupId = task.groupId
         data.timeoutAt = task.timeoutAt
         data.triggerSource = task.triggerSource
+        data.waitForTaskId = task.waitForTaskId
         return data
+    }
+
+    /**
+     * 创建等待状态的任务（条件驱动）
+     * 任务创建后处于 waiting 状态，等待 waitForTaskId 指定的任务完成后自动转为 pending
+     */
+    public static func createWaitingTask(
+        name: String,
+        taskType: String,
+        parameters: String,
+        waitForTaskId: Int64,
+        groupId: String,
+        triggerSource: String
+    ): Task {
+        let logger = getLogger("task_model")
+        let currentTime = getCurrentTimeString()
+
+        let data = TaskData()
+        data.name = name
+        data.taskType = taskType
+        data.progress = 0
+        data.message = "等待依赖任务完成"
+        data.parameters = parameters
+        data.priority = 50
+        data.groupId = groupId
+        data.triggerSource = triggerSource
+
+        let success = TaskDao.createWaitingTaskData(data, waitForTaskId)
+        if (success) {
+            logger.info("创建等待任务成功", ("id", data.id.toString()), ("wait_for", waitForTaskId.toString()))
+            return Task(
+                data.id, name, "waiting", 0, "等待依赖任务完成",
+                taskType: taskType, parameters: parameters,
+                createdAt: currentTime, priority: 50, groupId: groupId,
+                triggerSource: triggerSource, waitForTaskId: waitForTaskId
+            )
+        } else {
+            logger.error("创建等待任务失败", ("name", name))
+            return Task(0, name, "failed", 0, "创建任务失败", taskType: taskType)
+        }
     }
 
 
