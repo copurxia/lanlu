@@ -529,14 +529,7 @@ export default function CategoriesSettingsPage() {
         }
       }}>
         <DialogContent size="lg">
-          <DialogHeader>
-            <DialogTitle>{t('settings.categoryEdit')}</DialogTitle>
-          </DialogHeader>
           <DialogBody className="space-y-4">
-            {editingCategory ? (
-              <p className="text-sm text-muted-foreground">{editingCategory.catid}</p>
-            ) : null}
-
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="edit-name">{t('settings.categoryName')} *</Label>
