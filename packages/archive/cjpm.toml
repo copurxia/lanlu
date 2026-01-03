@@ -8,10 +8,7 @@
   output-type = "dynamic"
   compile-option = ""
   override-compile-option = ""
-  link-option = ""
+  link-option = "-larchive"
   package-configuration = {}
 
 [dependencies]
-
-[ffi.c]
-  archive = { path = "/lib/x86_64-linux-gnu" } 
