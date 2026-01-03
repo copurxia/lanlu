@@ -283,8 +283,30 @@ public class Epub {
  */
 func resolvePath(basePath: String, relativePath: String): String {
     let slashPos = basePath.lastIndexOf("/")
-    match (slashPos) {
+    let combined = match (slashPos) {
         case Some(pos) => "${basePath[0..pos]}/${relativePath}"
         case None => relativePath
     }
+    return normalizePath(combined)
+}
+
+/**
+ * 规范化路径，处理 .. 和 . 引用
+ */
+func normalizePath(path: String): String {
+    let parts = path.split("/")
+    var result = ArrayList<String>()
+
+    for (part in parts) {
+        if (part == "..") {
+            if (!result.isEmpty()) {
+                let lastIdx = result.size - 1
+                result.remove(lastIdx..lastIdx + 1)
+            }
+        } else if (part != "." && part.size > 0) {
+            result.add(part)
+        }
+    }
+
+    return String.join(result.toArray(), delimiter: "/")
 }
