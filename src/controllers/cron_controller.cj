@@ -426,7 +426,20 @@ public class CronController {
             return ""
         }
 
-        return json[(startQuote + 1)..endQuote]
+        // 反转义JSON字符串
+        let raw = json[(startQuote + 1)..endQuote]
+        return unescapeJsonString(raw)
+    }
+
+    // 反转义JSON字符串中的转义字符
+    private static func unescapeJsonString(str: String): String {
+        var result = str
+        result = result.replace("\\\"", "\"")
+        result = result.replace("\\\\", "\\")
+        result = result.replace("\\n", "\n")
+        result = result.replace("\\r", "\r")
+        result = result.replace("\\t", "\t")
+        return result
     }
 
     private static func extractJsonInt32(json: String, key: String, defaultValue: Int32): Int32 {

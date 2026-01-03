@@ -84,13 +84,7 @@ public class ScheduledTask {
         json += "\"name\":\"${escapeJsonString(name)}\","
         json += "\"cronExpression\":\"${escapeJsonString(cronExpression)}\","
         json += "\"taskType\":\"${escapeJsonString(taskType)}\","
-        // taskParameters 可能是JSON字符串
-        json += "\"taskParameters\":"
-        if (taskParameters.size > 0 && taskParameters[0] == 123) {
-            json += "${taskParameters},"
-        } else {
-            json += "\"${escapeJsonString(taskParameters)}\","
-        }
+        json += "\"taskParameters\":\"${escapeJsonString(taskParameters)}\","
         json += "\"enabled\":${enabled},"
         json += "\"priority\":${priority},"
         json += "\"timeoutSeconds\":${timeoutSeconds},"
