@@ -647,6 +647,22 @@ public class CronService {
                 logger.error("Failed to create default clear_cache task")
         }
 
+        // 定时清理日志（每天凌晨4点）
+        let clearLogTask = createScheduledTask(
+            "定时清理日志",
+            "0 4 * * *",
+            "clear_log",
+            taskParameters: "{\"maxAgeDays\":7}",  // 清理7天前的任务日志
+            enabled: true,  // 默认启用，日志清理是安全的维护操作
+            priority: 40
+        )
+        match (clearLogTask) {
+            case Some(t) =>
+                logger.debug("Created default clear_log task", ("id", t.id.toString()))
+            case None =>
+                logger.error("Failed to create default clear_log task")
+        }
+
         logger.debug("Default scheduled tasks created")
     }
 
@@ -743,6 +759,19 @@ public class CronService {
         TaskPoolService.getInstance().notifyTaskAvailable()
         let logger = getLogger("cron_service")
         logger.debug("Enqueued clear_cache task", ("task_id", task.id.toString()), ("maxAgeDays", maxAgeDays.toString()))
+        return task.id
+    }
+
+    /**
+     * 触发日志清理任务
+     */
+    public func triggerClearLog(priority!: Int32 = 40, triggerSource!: String = "manual", maxAgeDays!: Int64 = 7): Int64 {
+        let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
+        let params = "{\"maxAgeDays\":${maxAgeDays}}"
+        let task = TaskModel.createTaskWithOptions("清理日志", "clear_log", params, priority, "", source)
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        let logger = getLogger("cron_service")
+        logger.debug("Enqueued clear_log task", ("task_id", task.id.toString()), ("maxAgeDays", maxAgeDays.toString()))
         return task.id
     }
 
