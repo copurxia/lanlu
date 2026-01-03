@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState, useEffect, useCallback, Suspense, useRef, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Suspense, useRef, memo } from 'react';
 import Image from 'next/image';
 import { ArchiveService, PageInfo } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
@@ -12,7 +12,15 @@ import { ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from '@/components/ui/sheet';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
 import {
@@ -128,6 +136,7 @@ function ReaderContent() {
   const [sidebarLoadedCount, setSidebarLoadedCount] = useState(20);
   const [sidebarLoading, setSidebarLoading] = useState(false);
   const [sidebarImagesLoading, setSidebarImagesLoading] = useState<Set<number>>(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isEpub, setIsEpub] = useState(false); // 是否为EPUB文件
   const [showAutoNextCountdown, setShowAutoNextCountdown] = useState(false); // 是否显示自动跳转倒计时
   const [countdownSeconds, setCountdownSeconds] = useState(3); // 倒计时秒数
@@ -414,6 +423,76 @@ function ReaderContent() {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
     };
   }, [setIsFullscreen]);
+
+  const settingButtons = useMemo(
+    () => [
+      {
+        key: 'doublePage',
+        label: t('reader.doublePage'),
+        icon: Layout,
+        active: doublePageMode,
+        disabled: readingMode === 'webtoon',
+        onClick: () => setDoublePageMode((prev) => !prev),
+        tooltip: t('reader.doublePageTooltip'),
+      },
+      {
+        key: 'splitCover',
+        label: t('reader.splitCover'),
+        icon: Scissors,
+        active: splitCoverMode,
+        disabled: !doublePageMode,
+        onClick: () => setSplitCoverMode((prev) => !prev),
+        tooltip: t('reader.splitCoverTooltip'),
+      },
+      {
+        key: 'autoPlay',
+        label: t('reader.autoPlay'),
+        icon: Play,
+        active: autoPlayMode,
+        disabled: false,
+        onClick: () => setAutoPlayMode((prev) => !prev),
+        tooltip: t('reader.autoPlayTooltip'),
+      },
+      {
+        key: 'fullscreen',
+        label: t('reader.fullscreen'),
+        icon: isFullscreen ? Minimize : Maximize,
+        active: isFullscreen,
+        disabled: false,
+        onClick: toggleFullscreen,
+        tooltip: t('reader.fullscreenTooltip'),
+      },
+      {
+        key: 'doubleTap',
+        label: t('reader.doubleTap'),
+        icon: ZoomIn,
+        active: doubleTapZoom,
+        disabled: false,
+        onClick: () => setDoubleTapZoom((prev) => !prev),
+        tooltip: t('reader.doubleTapTooltip'),
+      },
+      {
+        key: 'autoHide',
+        label: t('reader.autoHide'),
+        icon: Eye,
+        active: autoHideEnabled,
+        disabled: false,
+        onClick: () => setAutoHideEnabled((prev) => !prev),
+        tooltip: t('reader.autoHideTooltip'),
+      },
+    ],
+    [
+      t,
+      readingMode,
+      doublePageMode,
+      splitCoverMode,
+      autoPlayMode,
+      isFullscreen,
+      doubleTapZoom,
+      autoHideEnabled,
+      toggleFullscreen,
+    ]
+  );
 
   // 监听页码变化并更新进度
   useEffect(() => {
@@ -1646,171 +1725,115 @@ function ReaderContent() {
 
         {/* 设置按钮区域 */}
         <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full p-0 shadow-lg">
-          <Popover>
-            <PopoverTrigger asChild>
+          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <SheetTrigger asChild>
               <Button
                 variant="ghost"
                 size="sm"
                 className={`
-                  rounded-full p-0 h-12 w-12
+                  rounded-full h-11 w-11 p-1
                   transition-all duration-150 ease-out
                   hover:scale-110 active:scale-95
                   text-muted-foreground hover:text-foreground hover:bg-accent
                   will-change-transform
                 `}
-                style={{ padding: '3px' }}
                 title={t('reader.settings')}
               >
-                <Settings className="w-4 h-4" />
+                <Settings className="h-4 w-4" />
               </Button>
-            </PopoverTrigger>
-            <PopoverContent align="center" sideOffset={12} className="w-auto p-4">
-              <div className="grid grid-cols-3 gap-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDoublePageMode(!doublePageMode)}
-                  disabled={readingMode === 'webtoon'}
-                  className={`
-                    flex flex-col items-center justify-center
-                    aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-150 ease-out
-                    shadow-sm hover:shadow-md
-                    will-change-transform will-change-opacity
-                    ${doublePageMode
-                      ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
-                    }
-                    ${readingMode === 'webtoon' ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                  title={t('reader.doublePageTooltip')}
-                >
-                  <Layout className="w-5 h-5 md:w-6 md:h-6 mb-1.5" />
-                  <span className="text-xs md:text-sm leading-tight text-center px-1">{t('reader.doublePage')}</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSplitCoverMode(!splitCoverMode)}
-                  disabled={!doublePageMode}
-                  className={`
-                    flex flex-col items-center justify-center
-                    aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-150 ease-out
-                    shadow-sm hover:shadow-md
-                    will-change-transform will-change-opacity
-                    ${splitCoverMode
-                      ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
-                    }
-                    ${!doublePageMode ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                  title={t('reader.splitCoverTooltip')}
-                >
-                  <Scissors className="w-5 h-5 md:w-6 md:h-6 mb-1.5" />
-                  <span className="text-xs md:text-sm leading-tight text-center px-1">{t('reader.splitCover')}</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setAutoPlayMode(!autoPlayMode)}
-                  className={`
-                    flex flex-col items-center justify-center
-                    aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-150 ease-out
-                    shadow-sm hover:shadow-md
-                    will-change-transform will-change-opacity
-                    ${autoPlayMode
-                      ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
-                    }
-                  `}
-                  title={t('reader.autoPlayTooltip')}
-                >
-                  <Play className="w-5 h-5 md:w-6 md:h-6 mb-1.5" />
-                  <span className="text-xs md:text-sm leading-tight text-center px-1">{t('reader.autoPlay')}</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={toggleFullscreen}
-                  className={`
-                    flex flex-col items-center justify-center
-                    aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-150 ease-out
-                    shadow-sm hover:shadow-md
-                    will-change-transform will-change-opacity
-                    ${isFullscreen
-                      ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
-                    }
-                  `}
-                  title={t('reader.fullscreenTooltip')}
-                >
-                  {isFullscreen ? <Minimize className="w-5 h-5 md:w-6 md:h-6 mb-1.5" /> : <Maximize className="w-5 h-5 md:w-6 md:h-6 mb-1.5" />}
-                  <span className="text-xs md:text-sm leading-tight text-center px-1">{t('reader.fullscreen')}</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setDoubleTapZoom(!doubleTapZoom)}
-                  className={`
-                    flex flex-col items-center justify-center
-                    aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-150 ease-out
-                    shadow-sm hover:shadow-md
-                    will-change-transform will-change-opacity
-                    ${doubleTapZoom
-                      ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
-                    }
-                  `}
-                  title={t('reader.doubleTapTooltip')}
-                >
-                  <ZoomIn className="w-5 h-5 md:w-6 md:h-6 mb-1.5" />
-                  <span className="text-xs md:text-sm leading-tight text-center px-1">{t('reader.doubleTap')}</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setAutoHideEnabled(!autoHideEnabled)}
-                  className={`
-                    flex flex-col items-center justify-center
-                    aspect-square h-14 md:h-20
-                    rounded-lg border-2 transition-all duration-150 ease-out
-                    shadow-sm hover:shadow-md
-                    will-change-transform will-change-opacity
-                    ${autoHideEnabled
-                      ? 'border-primary bg-primary/20 text-primary hover:bg-primary/30'
-                      : 'border-border bg-background text-muted-foreground hover:text-foreground hover:bg-accent hover:border-primary/50'
-                    }
-                  `}
-                  title={t('reader.autoHideTooltip')}
-                >
-                  <Eye className="w-5 h-5 md:w-6 md:h-6 mb-1.5" />
-                  <span className="text-xs md:text-sm leading-tight text-center px-1">{t('reader.autoHide')}</span>
-                </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="flex flex-col max-w-sm !p-5 sm:!p-6">
+              <SheetHeader className="space-y-3 text-left">
+                <div className="flex items-center gap-2.5">
+                  <Settings className="h-5 w-5 shrink-0 text-muted-foreground" />
+                  <div className="flex flex-col">
+                    <SheetTitle className="text-base">{t('reader.settings')}</SheetTitle>
+                    {archiveTitle ? (
+                      <div className="max-w-[240px] truncate text-xs text-muted-foreground">{archiveTitle}</div>
+                    ) : null}
+                  </div>
+                </div>
+              </SheetHeader>
+
+              <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
+                <div className="flex flex-col gap-2.5">
+                  {settingButtons.map((setting) => {
+                    const Icon = setting.icon;
+                    const borderClass = setting.active
+                      ? 'border-primary/70 bg-primary/10 text-primary'
+                      : 'border-border/70 bg-background/90 text-foreground hover:border-foreground/50 hover:bg-accent/30';
+                    const disabledClass = setting.disabled
+                      ? 'opacity-55 cursor-not-allowed hover:border-border/70 hover:bg-background/90'
+                      : '';
+
+                    return (
+                      <Button
+                        key={setting.key}
+                        variant="ghost"
+                        size="sm"
+                        onClick={setting.onClick}
+                        disabled={setting.disabled}
+                        title={setting.tooltip}
+                        className={`
+                          flex items-center w-full gap-3 rounded-xl border px-3.5 py-3 text-left text-sm font-medium
+                          transition-colors duration-150 hover:shadow-sm
+                          ${borderClass}
+                          ${disabledClass}
+                        `}
+                      >
+                        <Icon
+                          className={`h-5 w-5 shrink-0 ${
+                            setting.disabled
+                              ? 'text-muted-foreground/50'
+                              : setting.active
+                                ? 'text-primary'
+                                : 'text-muted-foreground'
+                          }`}
+                        />
+                        <span className="flex-1">{setting.label}</span>
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${
+                            setting.disabled
+                              ? 'bg-muted-foreground/25'
+                              : setting.active
+                                ? 'bg-primary'
+                                : 'bg-muted-foreground/35'
+                          }`}
+                          aria-hidden
+                        />
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                {/* 自动翻页间隔时间调整 */}
+                {autoPlayMode && (
+                  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">{t('reader.pageInterval')}</span>
+                      <span className="text-sm text-muted-foreground">{autoPlayInterval}秒</span>
+                    </div>
+                    <Slider
+                      value={[autoPlayInterval]}
+                      onValueChange={(value) => setAutoPlayInterval(value[0])}
+                      max={10}
+                      min={1}
+                      step={1}
+                      className="w-full"
+                    />
+                  </div>
+                )}
               </div>
 
-              {/* 自动翻页间隔时间调整 */}
-              {autoPlayMode && (
-                <div className="mt-4 pt-4 border-t border-border col-span-full">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-sm font-medium">{t('reader.pageInterval')}</span>
-                    <span className="text-sm text-muted-foreground">{autoPlayInterval}秒</span>
-                  </div>
-                  <Slider
-                    value={[autoPlayInterval]}
-                    onValueChange={(value) => setAutoPlayInterval(value[0])}
-                    max={10}
-                    min={1}
-                    step={1}
-                    className="w-full"
-                  />
-                </div>
-              )}
-            </PopoverContent>
-          </Popover>
+              <SheetFooter className="mt-5 border-t border-border/60 pt-4">
+                <SheetClose asChild>
+                  <Button variant="outline" className="w-full justify-center rounded-xl">
+                    {t('common.close')}
+                  </Button>
+                </SheetClose>
+              </SheetFooter>
+            </SheetContent>
+          </Sheet>
         </div>
 
         {/* 收藏按钮区域 - 仅在未收藏时显示 */}
@@ -1821,13 +1844,12 @@ function ReaderContent() {
               size="sm"
               onClick={toggleFavorite}
               className={`
-                rounded-full p-0 h-12 w-12
+                rounded-full h-11 w-11 p-1
                 transition-all duration-150 ease-out
                 hover:scale-110 active:scale-95
                 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20
                 will-change-transform
               `}
-              style={{ padding: '3px' }}
               title={t('reader.favorite')}
             >
               <Heart className="w-4 h-4" />
