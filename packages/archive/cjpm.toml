@@ -1,0 +1,17 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "archive"
+  description = "nothing here"
+  version = "1.0.0"
+  target-dir = ""
+  src-dir = ""
+  output-type = "dynamic"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+
+[ffi.c]
+  archive = { path = "/lib/x86_64-linux-gnu" } 

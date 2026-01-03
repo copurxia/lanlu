@@ -1,9 +1,8 @@
 package lrr4cj.archivehandler
 
 import std.fs.*
-import std.process.*
 import std.collection.*
-import std.io.*
+import archive.Archive
 import lrr4cj.models.ArchiveTypes
 import lrr4cj.utils.{ArchiveUtils, DirectoryScanner}
 
@@ -16,44 +15,12 @@ public class ArchiveFileHandler <: ArchiveHandler {
     public func getType(): String {
         return ArchiveTypes.ARCHIVE
     }
-
     public func listEntries(archivePath: String): Array<String> {
-        try {
-            if (!fileExists(archivePath)) {
-                return Array<String>()
-            }
-
-            // 使用 bsdtar 的 -tf 选项列出文件
-            let process = launch("bsdtar", "-tf", archivePath,
-                stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-            let reader = StringReader<InputStream>(process.stdOutPipe)
-            let output = reader.readToEnd()
-
-            // 将输出按行分割，去除空行
-            let lines = output.split('\n')
-            var entries = ArrayList<String>()
-
-            for (line in lines) {
-                let trimmedLine = line.trimAscii()
-                if (trimmedLine.size > 0) {
-                    entries.add(trimmedLine)
-                }
-            }
-
-            return entries.toArray()
-        } catch (_: Exception) {
-            return Array<String>()
-        }
+        return Archive.listEntries(archivePath)
     }
 
-    public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>) {
-        try {
-            let process = launch("bsdtar", "-xO", "-f", archivePath, entryName,
-                stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-            return process.waitOutput()
-        } catch (_: Exception) {
-            return (1, [], [])
-        }
+    public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>){
+        return (0i64,Archive.extractEntry(archivePath, entryName), "success".toArray())
     }
 
     public func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool {

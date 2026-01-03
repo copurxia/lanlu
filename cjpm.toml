@@ -17,9 +17,10 @@
   cjdotenv = { git = "https://gitcode.com/Cangjie-SIG/cjdotenv.git", tag = "master" }
   cjcron = { path = "packages/cjcron" }
   epub = { path = "packages/epub" }
+  archive = { path = "packages/archive" }
 
 [target]
   [target.x86_64-unknown-linux-gnu]
-    compile-option = "--static -O2 --cfg \"ohos=false\""
+    compile-option = "-O2 --cfg \"ohos=false\""
     [target.x86_64-unknown-linux-gnu.bin-dependencies]
       path-option = [ "${CANGJIE_STDX_PATH}/linux_x86_64_llvm/static/stdx" ]
