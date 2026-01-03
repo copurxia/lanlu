@@ -34,26 +34,15 @@ public class ClearCacheTaskRunner {
             var totalSkippedCount: Int64 = 0
             var errors = ArrayList<String>()
 
-            // 清理 archive 缓存目录
-            TaskIO.appendLog(taskId, "Cleaning archive cache directory...")
-            TaskModel.updateTaskProgress(taskId, 30, "Cleaning archive cache")
-            let archiveResult = cleanDirectory("data/cache/archive", maxAgeSeconds, dryRun)
-            totalDeletedCount += archiveResult.deletedCount
-            totalDeletedSize += archiveResult.deletedSize
-            totalSkippedCount += archiveResult.skippedCount
-            for (error in archiveResult.errors) {
-                errors.add("archive: ${error}")
-            }
-
-            // 清理 task 缓存目录
-            TaskIO.appendLog(taskId, "Cleaning task cache directory...")
-            TaskModel.updateTaskProgress(taskId, 70, "Cleaning task cache")
-            let taskResult = cleanDirectory("data/cache/task", maxAgeSeconds, dryRun)
-            totalDeletedCount += taskResult.deletedCount
-            totalDeletedSize += taskResult.deletedSize
-            totalSkippedCount += taskResult.skippedCount
-            for (error in taskResult.errors) {
-                errors.add("task: ${error}")
+            // 清理整个 cache 目录
+            TaskIO.appendLog(taskId, "Cleaning cache directory...")
+            TaskModel.updateTaskProgress(taskId, 30, "Cleaning cache")
+            let cacheResult = cleanDirectory("data/cache", maxAgeSeconds, dryRun)
+            totalDeletedCount += cacheResult.deletedCount
+            totalDeletedSize += cacheResult.deletedSize
+            totalSkippedCount += cacheResult.skippedCount
+            for (error in cacheResult.errors) {
+                errors.add(error)
             }
 
             // 更新进度：完成
@@ -120,7 +109,7 @@ public class ClearCacheTaskRunner {
                             for (i in numStart..trimmed.size) {
                                 let c = trimmed[i]
                                 if (c >= 48 && c <= 57) {  // '0'-'9'
-                                    numStr += c.toString()
+                                    numStr += Rune(UInt32(c)).toString()
                                 } else {
                                     break
                                 }
@@ -179,7 +168,7 @@ public class ClearCacheTaskRunner {
     }
 
     /**
-     * 清理指定目录下的过期文件
+     * 清理指定目录下的过期文件（递归）
      */
     private static func cleanDirectory(dirPath: String, maxAgeSeconds: Int64, dryRun: Bool): CleanResult {
         let logger = getLogger("clear_cache")
@@ -191,29 +180,58 @@ public class ClearCacheTaskRunner {
 
         try {
             let currentTime = DateTime.now().toUnixTimeStamp().toSeconds()
+
+            // 递归清理过期文件
+            cleanFilesRecursive(dirPath, currentTime, maxAgeSeconds, dryRun, result)
+
+            // 清理空目录（但保留根目录）
+            removeEmptyDirectories(dirPath, dirPath, result)
+        } catch (e: Exception) {
+            result.errors.add("Error accessing directory ${dirPath}: ${e.message}")
+        }
+
+        return result
+    }
+
+    /**
+     * 递归清理过期文件
+     */
+    private static func cleanFilesRecursive(
+        dirPath: String,
+        currentTime: Int64,
+        maxAgeSeconds: Int64,
+        dryRun: Bool,
+        result: CleanResult
+    ): Unit {
+        try {
             let entries = listDirectory(dirPath)
 
             for (entry in entries) {
                 let fullPath = joinPath(dirPath, entry)
 
                 try {
-                    let lastModified = getLastModifiedTime(fullPath)
-                    let ageSeconds = currentTime - lastModified
+                    let fileInfo = FileInfo(Path(fullPath))
 
-                    if (ageSeconds > maxAgeSeconds) {
-                        // 文件过期，准备删除
-                        let size = getFileOrDirectorySize(fullPath)
+                    if (fileInfo.isDirectory()) {
+                        // 递归处理子目录
+                        cleanFilesRecursive(fullPath, currentTime, maxAgeSeconds, dryRun, result)
+                    } else {
+                        // 检查文件是否过期
+                        let lastModified = getLastModifiedTime(fullPath)
+                        let ageSeconds = currentTime - lastModified
 
-                        if (dryRun) {
-                            // 仅预览模式，记录但不删除
-                            result.skippedCount += 1
-                        } else {
-                            // 执行删除
-                            if (removeFileOrDirectory(fullPath)) {
-                                result.deletedCount += 1
-                                result.deletedSize += size
+                        if (ageSeconds > maxAgeSeconds) {
+                            let size = fileInfo.size
+
+                            if (dryRun) {
+                                result.skippedCount += 1
                             } else {
-                                result.errors.add("Failed to remove: ${fullPath}")
+                                if (removeFile(fullPath)) {
+                                    result.deletedCount += 1
+                                    result.deletedSize += size
+                                } else {
+                                    result.errors.add("Failed to remove file: ${fullPath}")
+                                }
                             }
                         }
                     }
@@ -222,10 +240,54 @@ public class ClearCacheTaskRunner {
                 }
             }
         } catch (e: Exception) {
-            result.errors.add("Error accessing directory ${dirPath}: ${e.message}")
+            result.errors.add("Error listing directory ${dirPath}: ${e.message}")
         }
+    }
 
-        return result
+    /**
+     * 递归删除空目录（从叶子向上）
+     */
+    private static func removeEmptyDirectories(dirPath: String, rootPath: String, result: CleanResult): Bool {
+        try {
+            let entries = listDirectory(dirPath)
+
+            // 先递归处理子目录
+            for (entry in entries) {
+                let fullPath = joinPath(dirPath, entry)
+                let fileInfo = FileInfo(Path(fullPath))
+
+                if (fileInfo.isDirectory()) {
+                    removeEmptyDirectories(fullPath, rootPath, result)
+                }
+            }
+
+            // 重新检查当前目录是否为空
+            let currentEntries = listDirectory(dirPath)
+            if (currentEntries.size == 0 && dirPath != rootPath) {
+                // 目录为空且不是根目录，删除它
+                try {
+                    remove(Path(dirPath))
+                    return true
+                } catch (_: Exception) {
+                    result.errors.add("Failed to remove empty directory: ${dirPath}")
+                }
+            }
+        } catch (e: Exception) {
+            result.errors.add("Error checking directory ${dirPath}: ${e.message}")
+        }
+        return false
+    }
+
+    /**
+     * 删除单个文件
+     */
+    private static func removeFile(path: String): Bool {
+        try {
+            remove(Path(path))
+            return true
+        } catch (_: Exception) {
+            return false
+        }
     }
 
     /**
