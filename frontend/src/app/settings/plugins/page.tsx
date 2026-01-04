@@ -143,46 +143,41 @@ export default function SettingsPluginsPage() {
       requireAdmin
       actions={refreshButton}
     >
-      <Card>
-        <CardHeader>
-          <Tabs value={activeType} onValueChange={setActiveType}>
-            <TabsList className="flex flex-wrap justify-start h-auto">
-              <TabsTrigger value="all">{t('settings.all')}</TabsTrigger>
-              {availableTypes.map((type) => (
-                <TabsTrigger key={type} value={type}>
-                  {getPluginTypeLabel(type)}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-center py-12">
-              <Spinner size="lg" />
-              <p className="text-muted-foreground mt-4">{t('common.loading')}</p>
-            </div>
-          ) : filteredPlugins.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredPlugins.map((plugin) => (
-                <PluginCard
-                  key={plugin.id}
-                  plugin={plugin}
-                  onToggleStatus={handleTogglePluginStatus}
-                  onOpenConfig={handleOpenConfig}
-                  getPluginTypeColor={getPluginTypeColor}
-                  getPluginTypeLabel={getPluginTypeLabel}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="text-center py-12">
-              <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <p className="text-muted-foreground">{t('settings.noPlugins')}</p>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <Tabs value={activeType} onValueChange={setActiveType}>
+        <TabsList className="flex flex-wrap justify-start h-auto">
+          <TabsTrigger value="all">{t('settings.all')}</TabsTrigger>
+          {availableTypes.map((type) => (
+            <TabsTrigger key={type} value={type}>
+              {getPluginTypeLabel(type)}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      {loading ? (
+        <div className="text-center py-12">
+          <Spinner size="lg" />
+          <p className="text-muted-foreground mt-4">{t('common.loading')}</p>
+        </div>
+      ) : filteredPlugins.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {filteredPlugins.map((plugin) => (
+            <PluginCard
+              key={plugin.id}
+              plugin={plugin}
+              onToggleStatus={handleTogglePluginStatus}
+              onOpenConfig={handleOpenConfig}
+              getPluginTypeColor={getPluginTypeColor}
+              getPluginTypeLabel={getPluginTypeLabel}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-12">
+          <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <p className="text-muted-foreground">{t('settings.noPlugins')}</p>
+        </div>
+      )}
 
       <PluginConfigDialog
         open={configDialogOpen}
