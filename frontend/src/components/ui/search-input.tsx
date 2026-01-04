@@ -2,9 +2,7 @@
 
 import * as React from "react"
 import { createPortal } from "react-dom"
-import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { TagService } from "@/lib/tag-service"
 import { useLanguage } from "@/contexts/LanguageContext"
@@ -45,24 +43,10 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
 
-  // 解析当前的搜索词
-  const [searchTokens, setSearchTokens] = React.useState<string[]>([])
-
   // 设置mounted状态
   React.useEffect(() => {
     setMounted(true)
   }, [])
-
-  React.useEffect(() => {
-    // 解析 value 为 tokens（支持空格分隔）
-    if (value) {
-      const tokens = value.split(/\s+/).filter(t => t.trim())
-      setSearchTokens(tokens)
-    } else {
-      setSearchTokens([])
-      setInputValue("")
-    }
-  }, [value])
 
   // 计算下拉框位置
   const updateDropdownPosition = React.useCallback(() => {
@@ -87,10 +71,8 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     setLoading(true)
     try {
       const results = await TagService.autocomplete(query, language, 10)
-      // 过滤已选择的标签
-      const filtered = results.filter(s => !searchTokens.includes(s.display))
-      setSuggestions(filtered)
-      setShowSuggestions(filtered.length > 0)
+      setSuggestions(results)
+      setShowSuggestions(results.length > 0)
       setSelectedIndex(-1)
       updateDropdownPosition()
     } catch (error) {
@@ -100,7 +82,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     } finally {
       setLoading(false)
     }
-  }, [language, searchTokens, updateDropdownPosition])
+  }, [language, updateDropdownPosition])
 
   // 防抖搜索
   const debouncedFetch = React.useCallback((query: string) => {
@@ -142,26 +124,36 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   }, [showSuggestions, updateDropdownPosition, mounted])
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newInputValue = e.target.value
-    setInputValue(newInputValue)
-    // 从最后一个 token 获取搜索词
-    const tokens = newInputValue.split(/\s+/).filter(t => t.trim())
-    const lastToken = tokens[tokens.length - 1] || ""
-    debouncedFetch(lastToken)
-  }
-
-  const addToken = (token: string) => {
-    const newTokens = [...searchTokens, token]
-    const newValue = newTokens.join(' ')
+    const newValue = e.target.value
+    setInputValue(newValue)
     onChange(newValue)
-    setInputValue("")
-    setSuggestions([])
-    setShowSuggestions(false)
-    setSelectedIndex(-1)
+    // 获取最后一个词用于自动补全
+    const words = newValue.split(/\s+/).filter(w => w.trim())
+    const lastWord = words[words.length - 1] || ""
+    debouncedFetch(lastWord)
   }
 
   const handleSelectSuggestion = (suggestion: TagSuggestion) => {
-    addToken(suggestion.label)
+    // 获取当前输入值和光标位置
+    const currentValue = inputValue
+    const words = currentValue.split(/\s+/)
+    const lastWordIndex = words.length - 1
+
+    // 替换最后一个词
+    if (lastWordIndex >= 0) {
+      words[lastWordIndex] = suggestion.label
+      const newValue = words.join(' ')
+      setInputValue(newValue)
+      onChange(newValue)
+    } else {
+      const newValue = suggestion.label
+      setInputValue(newValue)
+      onChange(newValue)
+    }
+
+    setSuggestions([])
+    setShowSuggestions(false)
+    setSelectedIndex(-1)
     inputRef.current?.focus()
   }
 
@@ -193,17 +185,6 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
         return
       }
     }
-
-    if (e.key === "Backspace" && !inputValue && searchTokens.length > 0) {
-      // 删除最后一个 token
-      const newTokens = searchTokens.slice(0, -1)
-      onChange(newTokens.join(' '))
-    }
-  }
-
-  const removeToken = (tokenToRemove: string) => {
-    const newTokens = searchTokens.filter(token => token !== tokenToRemove)
-    onChange(newTokens.join(' '))
   }
 
   const handleInputBlur = () => {
@@ -211,7 +192,6 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     // 延迟关闭建议列表，以便点击事件能够触发
     setTimeout(() => {
       setShowSuggestions(false)
-      // 失焦时不再自动转换为标签，保持输入的文本
     }, 200)
   }
 
@@ -278,52 +258,18 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
 
   return (
     <div className="relative" ref={containerRef}>
-      <div
-        className={cn(
-          "flex flex-wrap gap-2 items-center w-full rounded-md border border-input bg-background text-sm ring-offset-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2",
-          compact ? "min-h-[32px] px-2 py-1" : "min-h-[42px] px-3 py-2",
-          className
-        )}
-        onClick={() => inputRef.current?.focus()}
-      >
-        {searchTokens.map((token) => (
-          <Badge
-            key={token}
-            variant="secondary"
-            className={cn(
-              "gap-1 pr-1",
-              compact ? "h-[22px] text-xs" : "h-6"
-            )}
-          >
-            {token}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                removeToken(token)
-              }}
-              className="rounded-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              <X className={cn("text-muted-foreground hover:text-foreground", compact ? "h-3 w-3" : "h-3 w-3")} />
-            </button>
-          </Badge>
-        ))}
-        <Input
-          ref={inputRef}
-          value={inputValue}
-          onChange={handleInputChange}
-          onKeyDown={handleInputKeyDown}
-          onBlur={handleInputBlur}
-          onFocus={handleInputFocus}
-          placeholder={searchTokens.length === 0 ? placeholder : ""}
-          className={cn(
-            "flex-1 min-w-[80px] border-0 p-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0",
-            compact ? "h-[24px] text-xs" : "h-auto"
-          )}
-          autoComplete="off"
-          {...props}
-        />
-      </div>
+      <Input
+        ref={inputRef}
+        value={inputValue}
+        onChange={handleInputChange}
+        onKeyDown={handleInputKeyDown}
+        onBlur={handleInputBlur}
+        onFocus={handleInputFocus}
+        placeholder={placeholder}
+        className={className}
+        autoComplete="off"
+        {...props}
+      />
 
       {/* 使用 Portal 将下拉框渲染到 body，避免被父容器 overflow 裁剪 */}
       {mounted && typeof document !== 'undefined' && createPortal(dropdownContent, document.body)}
