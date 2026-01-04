@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { ArchiveService, PageInfo } from '@/lib/archive-service';
 import { ArchiveMetadata } from '@/types/archive';
 import { PluginService, type Plugin } from '@/lib/plugin-service';
+import { TagService } from '@/lib/tag-service';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -54,6 +55,16 @@ function ArchiveDetailContent() {
       setMetadata(data);
       // 从元数据中获取收藏状态
       setIsFavorite(data.isfavorite || false);
+
+      // 获取该档案的标签翻译映射
+      try {
+        const translations = await TagService.getTranslations(language, id);
+        setTagTranslations(translations);
+      } catch (err) {
+        logger.apiError('fetch tag translations', err);
+        setTagTranslations({});
+      }
+
       return data;
     } catch (error) {
       logger.apiError('fetch metadata', error);
@@ -80,6 +91,9 @@ function ArchiveDetailContent() {
   const [loadingImages, setLoadingImages] = useState<Set<number>>(new Set());
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
+
+  // 标签翻译映射：原始标签 -> 翻译文本
+  const [tagTranslations, setTagTranslations] = useState<Record<string, string>>({});
 
   // 每页显示的图片数量
   const pageSize = 10;
@@ -120,6 +134,48 @@ function ArchiveDetailContent() {
     } finally {
       setFavoriteLoading(false);
     }
+  };
+
+  // 处理标签点击：查询原始标签并进行搜索
+  const handleTagClick = (fullTag: string) => {
+    const colonIdx = fullTag.indexOf(':');
+    const namespace = colonIdx > 0 ? fullTag.slice(0, colonIdx).trim() : '';
+    const translatedText = colonIdx > 0 ? fullTag.slice(colonIdx + 1).trim() : fullTag;
+
+    // 在翻译映射中查找原始标签（优先匹配相同namespace的标签）
+    let originalTag = '';
+    let bestMatch = '';
+
+    for (const [origTag, translated] of Object.entries(tagTranslations)) {
+      if (translated === translatedText) {
+        // 检查namespace是否匹配
+        const origColonIdx = origTag.indexOf(':');
+        const origNamespace = origColonIdx > 0 ? origTag.slice(0, origColonIdx).trim() : '';
+
+        if (origNamespace === namespace) {
+          // 完全匹配（namespace和翻译文本都匹配）
+          originalTag = origTag;
+          break;
+        } else if (bestMatch === '') {
+          // 记录第一个匹配的作为备选
+          bestMatch = origTag;
+        }
+      }
+    }
+
+    // 如果没找到完全匹配的，使用备选匹配
+    if (originalTag === '' && bestMatch !== '') {
+      originalTag = bestMatch;
+    }
+
+    // 如果没找到翻译映射，使用原始标签
+    if (originalTag === '') {
+      originalTag = fullTag;
+    }
+
+    // 使用原始标签进行精确搜索（添加$后缀）
+    const searchQuery = `${originalTag}$`;
+    router.push(`/?q=${encodeURIComponent(searchQuery)}`);
   };
 
   // 获取存档页面列表
@@ -656,8 +712,6 @@ function ArchiveDetailContent() {
                             const tagName = colonIdx > 0 ? fullTag.slice(colonIdx + 1).trim() : fullTag;
                             const isSource = namespace === 'source';
                             const sourceUrl = isSource ? (label.startsWith('http') ? label : `https://${label}`) : '';
-                            // 使用原始的 namespace:name$ 格式进行跳转
-                            const searchQuery = `${namespace}:${tagName}$`;
 
                             return (
                               <Badge
@@ -665,10 +719,9 @@ function ArchiveDetailContent() {
                                 variant="secondary"
                                 className="px-2.5 py-1 text-sm cursor-pointer select-none transition-colors hover:bg-secondary/80 flex items-center gap-1"
                                 title={fullTag}
+                                onClick={() => handleTagClick(fullTag)}
                               >
-                                <Link href={`/?q=${encodeURIComponent(searchQuery)}`}>
-                                  {label}
-                                </Link>
+                                <span>{label}</span>
                                 {isSource && sourceUrl && (
                                   <a
                                     href={sourceUrl}
