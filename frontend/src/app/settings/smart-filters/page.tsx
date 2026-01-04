@@ -327,85 +327,83 @@ export default function SmartFiltersPage() {
         </Button>
       </div>
 
-      <Card>
-      <CardContent className="pt-6 space-y-4">
-          {loading ? (
-            <div className="text-center py-8 text-muted-foreground">{t('common.loading')}</div>
-          ) : filters.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">{t('common.noData')}</div>
-          ) : (
-            <div className="space-y-2">
-              {filters.map((filter, index) => (
-                <div
-                  key={filter.id}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, index)}
-                  onDragOver={(e) => handleDragOver(e, index)}
-                  onDragLeave={handleDragLeave}
-                  onDrop={(e) => handleDrop(e, index)}
-                  onDragEnd={handleDragEnd}
-                  className={`flex items-center gap-4 p-3 border rounded-lg transition-all
-                    ${dragIndex === index ? 'opacity-50 scale-[0.98]' : ''}
-                    ${dropIndex === index ? 'border-primary border-2 bg-primary/5' : 'hover:bg-muted/50'}
-                    cursor-grab active:cursor-grabbing
-                  `}
-                >
-                  <div className="flex items-center text-muted-foreground">
-                    <GripVertical className="h-5 w-5" />
-                  </div>
-                  <div className="flex items-center gap-2 min-w-[120px]">
-                    {getIconComponent(filter.icon)}
-                    <span className="font-medium">
-                      {language !== 'zh' && filter.translations?.[language]?.text ? filter.translations[language].text : filter.name}
-                    </span>
-                  </div>
-                  <div className="flex-1 text-sm text-muted-foreground truncate">
-                    {filter.query && <span className="mr-2">Q: {filter.query}</span>}
-                    {filter.newonly && <span className="mr-2 text-blue-500">{t('search.newOnly')}</span>}
-                    {filter.untaggedonly && <span className="mr-2 text-orange-500">{t('search.untaggedOnly')}</span>}
-                    {filter.date_from && <span className="mr-2">{t('settings.smartFilterDateFrom')}: {filter.date_from}</span>}
-                    <span>{t('search.sortBy')}: {getSortByLabel(filter.sort_by)} {getSortOrderLabel(filter.sort_order)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* 第一项显示下移按钮 */}
-                    {index === 0 && filters.length > 1 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleMoveDown(index)}
-                        className="h-8 w-8"
-                      >
-                        <ChevronDown className="h-4 w-4" />
-                      </Button>
-                    )}
-                    {/* 其他项显示上移按钮 */}
-                    {index > 0 && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleMoveUp(index)}
-                        className="h-8 w-8"
-                      >
-                        <ChevronUp className="h-4 w-4" />
-                      </Button>
-                    )}
-                    <Switch
-                      checked={filter.enabled}
-                      onCheckedChange={() => handleToggle(filter.id)}
-                    />
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(filter)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" onClick={() => handleDelete(filter.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
+      <div className="space-y-4">
+        {loading ? (
+          <div className="text-center py-8 text-muted-foreground">{t('common.loading')}</div>
+        ) : filters.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">{t('common.noData')}</div>
+        ) : (
+          <div className="space-y-2">
+            {filters.map((filter, index) => (
+              <div
+                key={filter.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragLeave={handleDragLeave}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
+                className={`flex items-center gap-4 p-3 border rounded-lg transition-all
+                  ${dragIndex === index ? 'opacity-50 scale-[0.98]' : ''}
+                  ${dropIndex === index ? 'border-primary border-2 bg-primary/5' : 'hover:bg-muted/50'}
+                  cursor-grab active:cursor-grabbing
+                `}
+              >
+                <div className="flex items-center text-muted-foreground">
+                  <GripVertical className="h-5 w-5" />
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                <div className="flex items-center gap-2 min-w-[120px]">
+                  {getIconComponent(filter.icon)}
+                  <span className="font-medium">
+                    {language !== 'zh' && filter.translations?.[language]?.text ? filter.translations[language].text : filter.name}
+                  </span>
+                </div>
+                <div className="flex-1 text-sm text-muted-foreground truncate">
+                  {filter.query && <span className="mr-2">Q: {filter.query}</span>}
+                  {filter.newonly && <span className="mr-2 text-blue-500">{t('search.newOnly')}</span>}
+                  {filter.untaggedonly && <span className="mr-2 text-orange-500">{t('search.untaggedOnly')}</span>}
+                  {filter.date_from && <span className="mr-2">{t('settings.smartFilterDateFrom')}: {filter.date_from}</span>}
+                  <span>{t('search.sortBy')}: {getSortByLabel(filter.sort_by)} {getSortOrderLabel(filter.sort_order)}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {/* 第一项显示下移按钮 */}
+                  {index === 0 && filters.length > 1 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleMoveDown(index)}
+                      className="h-8 w-8"
+                    >
+                      <ChevronDown className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {/* 其他项显示上移按钮 */}
+                  {index > 0 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleMoveUp(index)}
+                      className="h-8 w-8"
+                    >
+                      <ChevronUp className="h-4 w-4" />
+                    </Button>
+                  )}
+                  <Switch
+                    checked={filter.enabled}
+                    onCheckedChange={() => handleToggle(filter.id)}
+                  />
+                  <Button variant="ghost" size="icon" onClick={() => handleEdit(filter)}>
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button variant="ghost" size="icon" onClick={() => handleDelete(filter.id)}>
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
