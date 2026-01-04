@@ -318,6 +318,7 @@ class EhdbMetadataPlugin extends BasePlugin {
 
   /**
    * 策略1: 全文搜索 (使用 title_tsv)
+   * artist 为优先匹配条件，匹配不到时回退到纯标题搜索
    */
   private async searchByFullText(core: string, artist: string): Promise<PluginResult> {
     // 构建 tsquery
@@ -328,74 +329,118 @@ class EhdbMetadataPlugin extends BasePlugin {
 
     const tsquery = words.map(w => w.replace(/['"\\]/g, '')).join(' & ');
 
-    let query = `
+    // 如果有 artist，先尝试带 artist 过滤的查询
+    if (artist) {
+      const artistLower = artist.toLowerCase();
+      const queryWithArtist = `
+        SELECT gid, token, title, title_jpn,
+               ts_rank(title_tsv, to_tsquery('simple', $1)) as rank
+        FROM gallery
+        WHERE title_tsv @@ to_tsquery('simple', $1)
+          AND (tags @> $2::jsonb OR tags @> $3::jsonb)
+        ORDER BY rank DESC, posted DESC LIMIT 10
+      `;
+      const result = await this.dbClient.queryObject(queryWithArtist, [
+        tsquery,
+        JSON.stringify([`artist:${artistLower}`]),
+        JSON.stringify([`group:${artistLower}`])
+      ]);
+      if (result.rows && result.rows.length > 0) {
+        return this.selectBestMatch(result.rows, core);
+      }
+    }
+
+    // 回退：不带 artist 过滤
+    const query = `
       SELECT gid, token, title, title_jpn,
              ts_rank(title_tsv, to_tsquery('simple', $1)) as rank
       FROM gallery
       WHERE title_tsv @@ to_tsquery('simple', $1)
+      ORDER BY rank DESC, posted DESC LIMIT 10
     `;
-    const params: any[] = [tsquery];
-
-    // 如果有 artist，添加标签过滤
-    if (artist) {
-      query += ` AND tags @> $2::jsonb`;
-      params.push(JSON.stringify([`artist:${artist}`]));
-    }
-
-    query += ` ORDER BY rank DESC, posted DESC LIMIT 10`;
-
-    const result = await this.dbClient.queryObject(query, params);
+    const result = await this.dbClient.queryObject(query, [tsquery]);
     return this.selectBestMatch(result.rows, core);
   }
 
   /**
    * 策略2: 关键词 trigram 搜索
+   * artist 为优先匹配条件，匹配不到时回退到纯标题搜索
    */
   private async searchByKeywords(keywords: string[], artist: string): Promise<PluginResult> {
-    // 使用 ILIKE 匹配多个关键词
     const conditions = keywords.map((_, i) =>
       `(title ILIKE $${i + 1} OR title_jpn ILIKE $${i + 1})`
     );
     const params = keywords.map(k => `%${k}%`);
 
-    let query = `
+    // 如果有 artist，先尝试带 artist 过滤的查询
+    if (artist) {
+      const artistLower = artist.toLowerCase();
+      const idx1 = params.length + 1;
+      const idx2 = params.length + 2;
+      const queryWithArtist = `
+        SELECT gid, token, title, title_jpn
+        FROM gallery
+        WHERE ${conditions.join(' AND ')}
+          AND (tags @> $${idx1}::jsonb OR tags @> $${idx2}::jsonb)
+        ORDER BY posted DESC LIMIT 10
+      `;
+      const paramsWithArtist = [
+        ...params,
+        JSON.stringify([`artist:${artistLower}`]),
+        JSON.stringify([`group:${artistLower}`])
+      ];
+      const result = await this.dbClient.queryObject(queryWithArtist, paramsWithArtist);
+      if (result.rows && result.rows.length > 0) {
+        return this.selectBestMatch(result.rows, keywords.join(' '));
+      }
+    }
+
+    // 回退：不带 artist 过滤
+    const query = `
       SELECT gid, token, title, title_jpn
       FROM gallery
       WHERE ${conditions.join(' AND ')}
+      ORDER BY posted DESC LIMIT 10
     `;
-
-    // 如果有 artist，添加标签过滤
-    if (artist) {
-      query += ` AND tags @> $${params.length + 1}::jsonb`;
-      params.push(JSON.stringify([`artist:${artist}`]));
-    }
-
-    query += ` ORDER BY posted DESC LIMIT 10`;
-
     const result = await this.dbClient.queryObject(query, params);
     return this.selectBestMatch(result.rows, keywords.join(' '));
   }
 
   /**
    * 策略3: Trigram 相似度搜索
+   * artist 为优先匹配条件，匹配不到时回退到纯标题搜索
    */
   private async searchByTrigram(core: string, artist: string): Promise<PluginResult> {
-    let query = `
+    // 如果有 artist，先尝试带 artist 过滤的查询
+    if (artist) {
+      const artistLower = artist.toLowerCase();
+      const queryWithArtist = `
+        SELECT gid, token, title, title_jpn,
+               GREATEST(similarity(title, $1), similarity(title_jpn, $1)) as sim
+        FROM gallery
+        WHERE (title % $1 OR title_jpn % $1)
+          AND (tags @> $2::jsonb OR tags @> $3::jsonb)
+        ORDER BY sim DESC, posted DESC LIMIT 10
+      `;
+      const result = await this.dbClient.queryObject(queryWithArtist, [
+        core,
+        JSON.stringify([`artist:${artistLower}`]),
+        JSON.stringify([`group:${artistLower}`])
+      ]);
+      if (result.rows && result.rows.length > 0) {
+        return this.selectBestMatch(result.rows, core);
+      }
+    }
+
+    // 回退：不带 artist 过滤
+    const query = `
       SELECT gid, token, title, title_jpn,
              GREATEST(similarity(title, $1), similarity(title_jpn, $1)) as sim
       FROM gallery
       WHERE (title % $1 OR title_jpn % $1)
+      ORDER BY sim DESC, posted DESC LIMIT 10
     `;
-    const params: any[] = [core];
-
-    if (artist) {
-      query += ` AND tags @> $2::jsonb`;
-      params.push(JSON.stringify([`artist:${artist}`]));
-    }
-
-    query += ` ORDER BY sim DESC, posted DESC LIMIT 10`;
-
-    const result = await this.dbClient.queryObject(query, params);
+    const result = await this.dbClient.queryObject(query, [core]);
     return this.selectBestMatch(result.rows, core);
   }
 
