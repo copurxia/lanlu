@@ -42,6 +42,8 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   const debounceRef = React.useRef<NodeJS.Timeout | null>(null)
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
+  // 添加处理标志以避免重复补全
+  const isProcessingRef = React.useRef(false)
 
   // 设置mounted状态
   React.useEffect(() => {
@@ -134,30 +136,49 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
   }
 
   const handleSelectSuggestion = (suggestion: TagSuggestion) => {
-    // 获取当前输入值和光标位置
-    const currentValue = inputValue
-    const words = currentValue.split(/\s+/)
-    const lastWordIndex = words.length - 1
+    // 防止重复处理
+    if (isProcessingRef.current) return
+    isProcessingRef.current = true
 
-    // 使用 namespace:value$ 格式
-    const formattedValue = `${suggestion.value}$`
+    try {
+      // 获取当前输入值
+      let currentValue = inputValue
 
-    // 替换最后一个词
-    if (lastWordIndex >= 0) {
-      words[lastWordIndex] = formattedValue
+      // 移除所有末尾的+号、空格和制表符
+      currentValue = currentValue.replace(/[+\s\t]+$/g, '')
+
+      // 使用 namespace:value$ 格式
+      const formattedValue = `${suggestion.value}$`
+
+      // 将输入值分割成单词
+      const words = currentValue.trim().split(/\s+/).filter(w => w.trim())
+
+      if (words.length > 0) {
+        // 替换最后一个词
+        words[words.length - 1] = formattedValue
+      } else {
+        // 如果没有词，则直接添加
+        words.push(formattedValue)
+      }
+
+      // 组合新值
       const newValue = words.join(' ')
-      setInputValue(newValue)
-      onChange(newValue)
-    } else {
-      const newValue = formattedValue
-      setInputValue(newValue)
-      onChange(newValue)
-    }
 
-    setSuggestions([])
-    setShowSuggestions(false)
-    setSelectedIndex(-1)
-    inputRef.current?.focus()
+      // 更新本地状态
+      setInputValue(newValue)
+      // 通知父组件
+      onChange(newValue)
+
+      setSuggestions([])
+      setShowSuggestions(false)
+      setSelectedIndex(-1)
+      inputRef.current?.focus()
+    } finally {
+      // 确保处理标志被重置
+      setTimeout(() => {
+        isProcessingRef.current = false
+      }, 0)
+    }
   }
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
