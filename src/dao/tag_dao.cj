@@ -1116,24 +1116,26 @@ public class TagDao {
             case Some(conn) =>
                 
                 try {
-                    // 搜索标签名(namespace:name)和翻译文本
+                    // 搜索标签名(namespace:name)和翻译文本，只返回有档案关联的标签
                     // 使用 JSONB 提取指定语言的翻译文本进行搜索
+                    // 使用 INNER JOIN archive_tags 过滤，只保留在数据库中有档案关联的标签
                     // 优先级：1=name精确匹配, 2=name前缀匹配, 3=翻译精确匹配, 4=翻译前缀匹配, 5=模糊匹配
                     let sql = """
-                        SELECT namespace, name, translations,
+                        SELECT DISTINCT t.namespace, t.name, t.translations,
                                CASE
-                                   WHEN name ILIKE ? THEN 1
-                                   WHEN name ILIKE ? THEN 2
-                                   WHEN translations->?->>'text' ILIKE ? THEN 3
-                                   WHEN translations->?->>'text' ILIKE ? THEN 4
+                                   WHEN t.name ILIKE ? THEN 1
+                                   WHEN t.name ILIKE ? THEN 2
+                                   WHEN t.translations->?->>'text' ILIKE ? THEN 3
+                                   WHEN t.translations->?->>'text' ILIKE ? THEN 4
                                    ELSE 5
                                END as match_priority
-                        FROM tags
-                        WHERE name ILIKE ?
-                           OR (namespace != '' AND namespace || ':' || name ILIKE ?)
-                           OR translations->?->>'text' ILIKE ?
-                           OR translations::text ILIKE ?
-                        ORDER BY match_priority, name
+                        FROM tags t
+                        INNER JOIN archive_tags at ON at.tag_id = t.id
+                        WHERE t.name ILIKE ?
+                           OR (t.namespace != '' AND t.namespace || ':' || t.name ILIKE ?)
+                           OR t.translations->?->>'text' ILIKE ?
+                           OR t.translations::text ILIKE ?
+                        ORDER BY match_priority, t.name
                         LIMIT ?
                     """
                     let stmt = conn.prepareStatement(sql)
