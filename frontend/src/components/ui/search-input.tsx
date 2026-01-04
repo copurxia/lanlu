@@ -204,9 +204,12 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
         )
         return
       }
-      if (e.key === "Enter" && selectedIndex >= 0) {
-        e.preventDefault()
-        handleSelectSuggestion(suggestions[selectedIndex])
+      if (e.key === "Enter") {
+        if (selectedIndex >= 0) {
+          e.preventDefault()
+          handleSelectSuggestion(suggestions[selectedIndex])
+        }
+        // 如果没有选中建议，则让回车键继续传播（用于表单提交）
         return
       }
       if (e.key === "Escape") {

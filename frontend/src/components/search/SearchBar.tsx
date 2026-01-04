@@ -35,10 +35,12 @@ function SearchBarContent() {
 
     // 从 SearchInput 获取当前输入值
     const currentInputValue = (searchInputRef.current as any)?.getInputValue?.() || '';
-    const fullQuery = currentInputValue ? `${query} ${currentInputValue}`.trim() : query;
 
-    if (fullQuery.trim()) {
-      router.push(`/?q=${encodeURIComponent(fullQuery.trim())}`);
+    // 使用当前输入值，如果为空则使用状态中的query
+    const searchQuery = currentInputValue.trim() || query.trim();
+
+    if (searchQuery) {
+      router.push(`/?q=${encodeURIComponent(searchQuery)}`);
     } else {
       appEvents.emit(AppEvents.SEARCH_RESET);
       router.push('/');
