@@ -99,14 +99,20 @@ public class TagDao {
 
     /**
      * 内部方法：获取或创建标签（使用已有连接）
+     * 使用 INSERT ... ON CONFLICT 避免并发插入时的重复键错误
      */
     private static func getOrCreateTagInternal(conn: Connection, namespace: String, name: String): Int64 {
-        // 尝试查找现有标签
-        let findStmt = conn.prepareStatement("SELECT id FROM tags WHERE namespace = ? AND name = ?")
+        // 使用 upsert 模式：尝试插入，如果冲突则返回现有记录的 id
+        let stmt = conn.prepareStatement("""
+            INSERT INTO tags (namespace, name)
+            VALUES (?, ?)
+            ON CONFLICT (namespace, name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+            RETURNING id
+        """)
         try {
-            findStmt.set(0, namespace)
-            findStmt.set(1, name)
-            let result = findStmt.query()
+            stmt.set(0, namespace)
+            stmt.set(1, name)
+            let result = stmt.query()
             try {
                 if (result.next()) {
                     return result.getOrNull<Int64>(0) ?? 0
@@ -115,24 +121,7 @@ public class TagDao {
                 result.close()
             }
         } finally {
-            findStmt.close()
-        }
-
-        // 创建新标签
-        let insertStmt = conn.prepareStatement("INSERT INTO tags (namespace, name) VALUES (?, ?) RETURNING id")
-        try {
-            insertStmt.set(0, namespace)
-            insertStmt.set(1, name)
-            let insertResult = insertStmt.query()
-            try {
-                if (insertResult.next()) {
-                    return insertResult.getOrNull<Int64>(0) ?? 0
-                }
-            } finally {
-                insertResult.close()
-            }
-        } finally {
-            insertStmt.close()
+            stmt.close()
         }
 
         0
