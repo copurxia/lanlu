@@ -122,6 +122,7 @@ class EhdbMetadataPlugin extends BasePlugin {
     try {
       let gID = "";
       let gToken = "";
+      let hasSrc = false;
 
       // 从 oneshot 参数提取 GID/Token
       if (lrrInfo.oneshot_param && lrrInfo.oneshot_param.match(/.*\/g\/([0-9]*)\/([0-z]*)\/*.*/)) {
@@ -130,6 +131,19 @@ class EhdbMetadataPlugin extends BasePlugin {
           gID = match[1];
           gToken = match[2];
           await this.logInfo("search:use_oneshot", { gID, gToken: `${gToken.slice(0, 6)}…` });
+        }
+      }
+      // 从 existing_tags 的 source 标签提取 GID/Token
+      else if (lrrInfo.existing_tags && lrrInfo.existing_tags.match(/.*source:\s*(?:https?:\/\/)?e(?:x|-)hentai\.org\/g\/([0-9]*)\/([0-z]*)\/*.*/gi)) {
+        const match = lrrInfo.existing_tags.match(/.*source:\s*(?:https?:\/\/)?e(?:x|-)hentai\.org\/g\/([0-9]*)\/([0-z]*)\/*.*/gi);
+        if (match) {
+          const srcMatch = match[0].match(/g\/([0-9]*)\/([0-z]*)/);
+          if (srcMatch) {
+            gID = srcMatch[1];
+            gToken = srcMatch[2];
+            hasSrc = true;
+            await this.logInfo("search:use_source_tag", { gID, gToken: `${gToken.slice(0, 6)}…` });
+          }
         }
       }
 
@@ -163,10 +177,12 @@ class EhdbMetadataPlugin extends BasePlugin {
 
       const hashData: any = { tags: tagsResult.data.tags };
 
-      // 添加 source URL
+      // 添加 source URL（如果不是从 source 标签获取的）
       if (hashData.tags) {
-        const sourceUrl = `e-hentai.org/g/${gID}/${gToken}`;
-        hashData.tags += `, source:${sourceUrl}`;
+        if (!hasSrc) {
+          const sourceUrl = `e-hentai.org/g/${gID}/${gToken}`;
+          hashData.tags += `, source:${sourceUrl}`;
+        }
         hashData.title = tagsResult.data.title;
       }
 
@@ -177,47 +193,120 @@ class EhdbMetadataPlugin extends BasePlugin {
     }
   }
 
+  /**
+   * 预处理标题：移除方括号/圆括号内容，提取核心标题
+   */
+  private preprocessTitle(title: string): { core: string; keywords: string[]; artist: string } {
+    let core = title;
+    let artist = '';
+
+    // 提取并移除开头的 [作者/社团] 部分
+    const artistMatch = core.match(/^\s*[\[【\(（]([^\]】\)）]+)[\]】\)）]\s*/);
+    if (artistMatch) {
+      artist = artistMatch[1].trim();
+      core = core.replace(artistMatch[0], '');
+    }
+
+    // 移除常见的后缀标记
+    const suffixPatterns = [
+      /[\[【\(（][^\]】\)）]*(?:DL|Digital|デジタル|電子|无修正|無修正|中文|汉化|漢化|翻訳|翻译)[^\]】\)）]*[\]】\)）]/gi,
+      /[\[【\(（](?:C\d+|COMIC\d*|例大祭|コミケ|Comiket)[^\]】\)）]*[\]】\)）]/gi,
+      /[\[【\(（]\d{4}[-\/]\d{1,2}[-\/]?\d{0,2}[\]】\)）]/g,
+      /\.(zip|rar|7z|cbz|cbr)$/i,
+    ];
+
+    for (const pattern of suffixPatterns) {
+      core = core.replace(pattern, '');
+    }
+
+    // 移除剩余的方括号内容（保守处理）
+    core = core.replace(/[\[【][^\]】]*[\]】]/g, ' ');
+    core = core.replace(/[\(（][^\)）]*[\)）]/g, ' ');
+
+    // 清理多余空格
+    core = core.replace(/\s+/g, ' ').trim();
+
+    // 提取关键词（用于分词搜索）
+    const keywords = core
+      .split(/[\s\-_～~]+/)
+      .filter(k => k.length >= 2)
+      .slice(0, 8);
+
+    return { core, keywords, artist };
+  }
+
+  /**
+   * 计算标题相似度评分
+   */
+  private calculateSimilarity(input: string, dbTitle: string, dbTitleJpn: string): number {
+    const inputLower = input.toLowerCase();
+    const titleLower = dbTitle.toLowerCase();
+    const titleJpnLower = (dbTitleJpn || '').toLowerCase();
+
+    let score = 0;
+
+    // 完全包含得高分
+    if (titleLower.includes(inputLower) || titleJpnLower.includes(inputLower)) {
+      score += 50;
+    }
+
+    // 计算关键词匹配
+    const inputWords = inputLower.split(/[\s\-_]+/).filter(w => w.length >= 2);
+    for (const word of inputWords) {
+      if (titleLower.includes(word) || titleJpnLower.includes(word)) {
+        score += 10;
+      }
+    }
+
+    return score;
+  }
+
   private async lookupGalleryByTitleAndTags(title: string, tags: string): Promise<PluginResult> {
     try {
       if (!this.dbClient) {
         return { success: false, error: "Database not connected" };
       }
 
-      // 构建查询
-      let query = `
-        SELECT gid, token, title, title_jpn
-        FROM gallery
-        WHERE 1=1
-      `;
+      // 预处理标题
+      const { core, keywords, artist } = this.preprocessTitle(title);
+      await this.logInfo("search:preprocess", {
+        original: title.slice(0, 80),
+        core: core.slice(0, 80),
+        keywords: keywords.slice(0, 5),
+        artist
+      });
 
-      const params: any[] = [];
-      let paramIndex = 1;
+      // 从 existing_tags 提取 artist
+      let tagArtist = '';
+      const artistTagMatch = tags.match(/artist:\s*([^,]+)/i);
+      if (artistTagMatch) {
+        tagArtist = artistTagMatch[1].trim();
+      }
+      const finalArtist = tagArtist || artist;
 
-      // 标题搜索
-      if (title) {
-        query += ` AND (title ILIKE $${paramIndex} OR title_jpn ILIKE $${paramIndex})`;
-        params.push(`%${title}%`);
-        paramIndex++;
+      // 策略1: 全文搜索 (使用 title_tsv)
+      let result = await this.searchByFullText(core, finalArtist);
+      if (result.success) {
+        await this.logInfo("search:fulltext_hit", { gID: result.data.gID });
+        return result;
       }
 
-      // 按发布时间倒序排列，限制 1 个结果
-      query += ` ORDER BY posted DESC LIMIT 1`;
+      // 策略2: 关键词 trigram 搜索
+      if (keywords.length > 0) {
+        result = await this.searchByKeywords(keywords, finalArtist);
+        if (result.success) {
+          await this.logInfo("search:keywords_hit", { gID: result.data.gID });
+          return result;
+        }
+      }
 
-      await this.logInfo("search:query", { title: title.slice(0, 100) });
-
-      const result = await this.dbClient.queryObject(query, params);
-
-      if (result.rows && result.rows.length > 0) {
-        const row = result.rows[0];
-        return {
-          success: true,
-          data: {
-            gID: row.gid.toString(),
-            gToken: row.token,
-            title: row.title,
-            title_jpn: row.title_jpn
-          }
-        };
+      // 策略3: 模糊匹配 (trigram similarity)
+      if (core.length >= 4) {
+        result = await this.searchByTrigram(core, finalArtist);
+        if (result.success) {
+          await this.logInfo("search:trigram_hit", { gID: result.data.gID });
+          return result;
+        }
       }
 
       return { success: false, error: 'No gallery found in database' };
@@ -225,6 +314,132 @@ class EhdbMetadataPlugin extends BasePlugin {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, error: `Database query failed: ${errorMessage}` };
     }
+  }
+
+  /**
+   * 策略1: 全文搜索 (使用 title_tsv)
+   */
+  private async searchByFullText(core: string, artist: string): Promise<PluginResult> {
+    // 构建 tsquery
+    const words = core.split(/\s+/).filter(w => w.length >= 2);
+    if (words.length === 0) {
+      return { success: false, error: 'No valid search terms' };
+    }
+
+    const tsquery = words.map(w => w.replace(/['"\\]/g, '')).join(' & ');
+
+    let query = `
+      SELECT gid, token, title, title_jpn,
+             ts_rank(title_tsv, to_tsquery('simple', $1)) as rank
+      FROM gallery
+      WHERE title_tsv @@ to_tsquery('simple', $1)
+    `;
+    const params: any[] = [tsquery];
+
+    // 如果有 artist，添加标签过滤
+    if (artist) {
+      query += ` AND tags @> $2::jsonb`;
+      params.push(JSON.stringify([`artist:${artist}`]));
+    }
+
+    query += ` ORDER BY rank DESC, posted DESC LIMIT 10`;
+
+    const result = await this.dbClient.queryObject(query, params);
+    return this.selectBestMatch(result.rows, core);
+  }
+
+  /**
+   * 策略2: 关键词 trigram 搜索
+   */
+  private async searchByKeywords(keywords: string[], artist: string): Promise<PluginResult> {
+    // 使用 ILIKE 匹配多个关键词
+    const conditions = keywords.map((_, i) =>
+      `(title ILIKE $${i + 1} OR title_jpn ILIKE $${i + 1})`
+    );
+    const params = keywords.map(k => `%${k}%`);
+
+    let query = `
+      SELECT gid, token, title, title_jpn
+      FROM gallery
+      WHERE ${conditions.join(' AND ')}
+    `;
+
+    // 如果有 artist，添加标签过滤
+    if (artist) {
+      query += ` AND tags @> $${params.length + 1}::jsonb`;
+      params.push(JSON.stringify([`artist:${artist}`]));
+    }
+
+    query += ` ORDER BY posted DESC LIMIT 10`;
+
+    const result = await this.dbClient.queryObject(query, params);
+    return this.selectBestMatch(result.rows, keywords.join(' '));
+  }
+
+  /**
+   * 策略3: Trigram 相似度搜索
+   */
+  private async searchByTrigram(core: string, artist: string): Promise<PluginResult> {
+    let query = `
+      SELECT gid, token, title, title_jpn,
+             GREATEST(similarity(title, $1), similarity(title_jpn, $1)) as sim
+      FROM gallery
+      WHERE (title % $1 OR title_jpn % $1)
+    `;
+    const params: any[] = [core];
+
+    if (artist) {
+      query += ` AND tags @> $2::jsonb`;
+      params.push(JSON.stringify([`artist:${artist}`]));
+    }
+
+    query += ` ORDER BY sim DESC, posted DESC LIMIT 10`;
+
+    const result = await this.dbClient.queryObject(query, params);
+    return this.selectBestMatch(result.rows, core);
+  }
+
+  /**
+   * 从多个候选结果中选择最佳匹配
+   * 相似度低于阈值的结果会被抛弃
+   */
+  private static readonly MIN_SIMILARITY_SCORE = 20;
+
+  private selectBestMatch(rows: any[], input: string): PluginResult {
+    if (!rows || rows.length === 0) {
+      return { success: false, error: 'No results found' };
+    }
+
+    // 计算每个结果的相似度评分
+    let bestRow = rows[0];
+    let bestScore = this.calculateSimilarity(input, bestRow.title, bestRow.title_jpn);
+
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      const score = this.calculateSimilarity(input, row.title, row.title_jpn);
+      if (score > bestScore) {
+        bestScore = score;
+        bestRow = row;
+      }
+    }
+
+    // 相似度过低则抛弃
+    if (bestScore < EhdbMetadataPlugin.MIN_SIMILARITY_SCORE) {
+      return {
+        success: false,
+        error: `Best match score (${bestScore}) below threshold (${EhdbMetadataPlugin.MIN_SIMILARITY_SCORE})`
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        gID: bestRow.gid.toString(),
+        gToken: bestRow.token.trim(),
+        title: bestRow.title,
+        title_jpn: bestRow.title_jpn
+      }
+    };
   }
 
   private async getTagsFromDatabase(gID: string): Promise<PluginResult> {
