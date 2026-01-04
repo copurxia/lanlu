@@ -570,14 +570,6 @@ public class DatabaseConfig {
                     }
                 } catch (_: Exception) {}
 
-                // 启用 pg_trgm 扩展（用于模糊搜索）
-                try {
-                    execUpdate(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
-                    logger.debug("pg_trgm扩展已启用")
-                } catch (e: Exception) {
-                    logger.warn("启用pg_trgm扩展失败（可忽略）: ${e.toString()}")
-                }
-
                 // 添加 title_tsv 列（用于全文搜索）
                 if (!columnExists(conn, "archives", "title_tsv")) {
                     logger.debug("archives表缺少title_tsv列，添加中")
@@ -603,16 +595,6 @@ public class DatabaseConfig {
                     }
                 } catch (e: Exception) {
                     logger.warn("创建title_tsv索引失败（可忽略）: ${e.toString()}")
-                }
-
-                // 创建 trigram 索引（用于模糊匹配）
-                try {
-                    if (!indexExists(conn, "idx_archives_title_trgm")) {
-                        execUpdate(conn, "CREATE INDEX idx_archives_title_trgm ON archives USING GIN (title gin_trgm_ops)")
-                        logger.debug("title trigram索引创建成功")
-                    }
-                } catch (e: Exception) {
-                    logger.warn("创建title trigram索引失败（可忽略）: ${e.toString()}")
                 }
             }
 

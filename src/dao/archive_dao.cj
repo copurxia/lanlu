@@ -239,8 +239,8 @@ public class ArchiveDao {
         }
         let tsQueryStr = String.join(tsQueryTerms.toArray(), delimiter: " ")
 
-        // 构建完整的评分表达式
-        let relevanceExpr = "COALESCE(ts_rank(search_tsv, websearch_to_tsquery('simple', '" + tsQueryStr + "')) * 2, 0) + (" + ilikeScoreExpr + ") + GREATEST(similarity(title, '" + tsQueryStr + "'), similarity(filename, '" + tsQueryStr + "')) * 0.3"
+        // 构建完整的评分表达式（全文搜索 + ILIKE 匹配）
+        let relevanceExpr = "COALESCE(ts_rank(search_tsv, websearch_to_tsquery('simple', '" + tsQueryStr + "')) * 2, 0) + (" + ilikeScoreExpr + ")"
 
         return relevanceExpr
     }

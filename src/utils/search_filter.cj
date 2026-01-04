@@ -24,8 +24,6 @@ public class SearchFilterResult {
  * 搜索过滤器解析器
  * 支持以下特殊字符：
  * - 引号 ("..."): 精确短语搜索
- * - 问号 (?) 和下划线 (_): 匹配单个字符的通配符
- * - 星号 (*) 和百分号 (%): 匹配任意字符序列的通配符
  * - 减号 (-): 排除词
  * - 美元符号 ($): 精确标签搜索
  */
@@ -188,22 +186,16 @@ public class SearchFilter {
 
     /**
      * 将搜索词转换为 SQL LIKE 模式
-     * - 将 * 转换为 %（匹配任意字符序列）
-     * - 将 ? 转换为 _（匹配单个字符）
-     * - 转义字面量的 % 和 _
+     * 转义特殊字符，添加前后通配符
      */
     public static func toLikePattern(input: String): String {
         var s = input
 
-        // 先转义反斜杠
+        // 转义反斜杠
         s = s.replace("\\", "\\\\")
-        // 转义字面量的 % 和 _（用户输入的 % 和 _ 需要转义）
-        // 注意：这里假设用户使用 * 和 ? 作为通配符
+        // 转义 SQL LIKE 特殊字符
         s = s.replace("%", "\\%")
         s = s.replace("_", "\\_")
-        // 将用户通配符转换为 SQL 通配符
-        s = s.replace("*", "%")
-        s = s.replace("?", "_")
 
         return "%" + s + "%"
     }
@@ -214,14 +206,11 @@ public class SearchFilter {
     public static func toExactLikePattern(input: String): String {
         var s = input
 
-        // 先转义反斜杠
+        // 转义反斜杠
         s = s.replace("\\", "\\\\")
-        // 转义字面量的 % 和 _
+        // 转义 SQL LIKE 特殊字符
         s = s.replace("%", "\\%")
         s = s.replace("_", "\\_")
-        // 将用户通配符转换为 SQL 通配符
-        s = s.replace("*", "%")
-        s = s.replace("?", "_")
 
         return s
     }
