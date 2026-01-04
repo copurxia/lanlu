@@ -50,6 +50,13 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     setMounted(true)
   }, [])
 
+  // 同步外部传入的 value 到内部 inputValue
+  React.useEffect(() => {
+    if (value !== inputValue) {
+      setInputValue(value)
+    }
+  }, [value])
+
   // 计算下拉框位置
   const updateDropdownPosition = React.useCallback(() => {
     if (containerRef.current && typeof window !== 'undefined') {
