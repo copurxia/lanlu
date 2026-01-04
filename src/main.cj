@@ -5,6 +5,8 @@ import lrr4cj.config.*
 import lrr4cj.services.*
 import lrr4cj.utils.*
 import lrr4cj.models.*
+import lrr4cj.migrations.*
+import lrr4cj.migrations.versions.*
 import std.convert.*
 import cjoy.*
 import cjdotenv.load
@@ -47,14 +49,15 @@ main(): Int64 {
     logger.debug("Server configuration", ("host", host), ("port", portStr))
     logger.debug("Application starting... step 7: database config loaded")
 
-    // 初始化数据库
-    logger.debug("Application starting... step 8: initializing database")
-    let dbInitialized = DatabaseConfig.initializeDatabase()
-    logger.debug("Application starting... step 9: database initialized")
-    if (dbInitialized) {
-        logger.debug("Database initialized successfully")
+    // 注册并运行数据库迁移
+    logger.debug("Application starting... step 8: running database migrations")
+    MigrationRegistry.register(V001_InitialSchema())
+    let migrationsOk = MigrationRunner.runPendingMigrations()
+    logger.debug("Application starting... step 9: database migrations completed")
+    if (migrationsOk) {
+        logger.info("Database migrations completed successfully")
     } else {
-        logger.error("Failed to initialize database")
+        logger.error("Failed to run database migrations")
         return 1
     }
 
@@ -68,23 +71,13 @@ main(): Int64 {
         return 1
     }
 
-    // 初始化用户/Token表
-    logger.info("Application starting... step 9a: initializing auth tables")
-    let authTablesInitialized = UserModel.initialize()
-    if (authTablesInitialized) {
-        logger.info("Auth tables initialized successfully")
+    // 初始化用户认证（检查并创建默认管理员）
+    logger.info("Application starting... step 9a: initializing auth")
+    let authInitialized = UserModel.initialize()
+    if (authInitialized) {
+        logger.info("Auth initialized successfully")
     } else {
-        logger.error("Failed to initialize auth tables")
-        return 1
-    }
-
-    // 初始化Task任务表
-    logger.debug("Application starting... step 9b: initializing task tables")
-    let taskTablesInitialized = TaskModel.initialize()
-    if (taskTablesInitialized) {
-        logger.debug("Task tables initialized successfully")
-    } else {
-        logger.error("Failed to initialize task tables")
+        logger.error("Failed to initialize auth")
         return 1
     }
 

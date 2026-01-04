@@ -152,82 +152,9 @@ public class TaskPageResult {
  * Task数据访问层
  */
 public class TaskModel {
-    /**
-     * 初始化数据库表
-     */
-    public static func initialize(): Bool {
-        let logger = getLogger("task_model")
-        logger.debug("初始化Task任务数据库表")
-
-        let tableCreated = TaskDao.createTable()
-        if (!tableCreated) {
-            logger.error("创建tasks表失败")
-            return false
-        }
-
-        // 检查并修复表结构
-        return fixTableSchema()
-    }
-
-    /**
-     * 检查并修复表结构
-     */
-    private static func fixTableSchema(): Bool {
-        let logger = getLogger("task_model")
-        let connOpt = DatabaseConfig.createConnection()
-
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    ensureColumnExists(conn, "message", "ALTER TABLE tasks ADD COLUMN message TEXT")
-                    ensureColumnExists(conn, "priority", "ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 50")
-                    ensureColumnExists(conn, "group_id", "ALTER TABLE tasks ADD COLUMN group_id VARCHAR(255)")
-                    ensureColumnExists(conn, "timeout_at", "ALTER TABLE tasks ADD COLUMN timeout_at TIMESTAMP")
-                    ensureColumnExists(conn, "trigger_source", "ALTER TABLE tasks ADD COLUMN trigger_source VARCHAR(50)")
-                    ensureColumnExists(conn, "wait_for_task_id", "ALTER TABLE tasks ADD COLUMN wait_for_task_id BIGINT DEFAULT NULL")
-
-                    return true
-                } catch (e: Exception) {
-                    logger.error("检查/修复表结构失败", ("error", e.message))
-                    return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("关闭Connection失败: ${closeError.message}")
-                    }
-                }
-            case None =>
-                logger.error("无法获取数据库连接")
-                return false
-        }
-    }
-
-    private static func ensureColumnExists(conn: Connection, columnName: String, alterSql: String): Unit {
-        let logger = getLogger("task_model")
-        let checkStmt = conn.prepareStatement("SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_name = 'tasks' AND column_name = ?)")
-        checkStmt.set(0, columnName)
-        let rs = checkStmt.query()
-        var columnExists = false
-        try {
-            if (rs.next()) {
-                columnExists = rs.getOrNull<Bool>(0) ?? false
-            }
-        } finally {
-            rs.close()
-            checkStmt.close()
-        }
-
-        if (!columnExists) {
-            logger.info("添加缺失的${columnName}列")
-            let stmt = conn.prepareStatement(alterSql)
-            stmt.update()
-            stmt.close()
-            logger.info("${columnName}列添加成功")
-        } else {
-            logger.info("${columnName}列已存在")
-        }
-    }
+    // 注意：数据库表初始化已由迁移系统处理
+    // 原 initialize()、fixTableSchema() 和 ensureColumnExists() 方法已移除
+    // 请参考 src/migrations/versions/v001_initial_schema.cj
 
     /**
      * 根据ID获取任务

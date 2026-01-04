@@ -18,76 +18,7 @@ public class UserRow {
 }
 
 public class UserDao {
-    public static func createTable(): Bool {
-        let logger = getLogger("user_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    // 先检查表是否已存在
-                    let checkStmt = conn.prepareStatement("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'users' AND table_schema = 'public'")
-                    let rs = checkStmt.query()
-                    var tableExists = false
-                    if (rs.next()) {
-                        let count = rs.getOrNull<Int64>(0) ?? 0
-                        tableExists = count > 0
-                    }
-                    rs.close()
-                    checkStmt.close()
-
-                    if (!tableExists) {
-                        logger.debug("users表不存在，创建新表")
-                        let sql = """
-                            CREATE TABLE users (
-                                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
-                                username VARCHAR(64) UNIQUE NOT NULL,
-                                password_salt VARCHAR(64) NOT NULL,
-                                password_hash VARCHAR(64) NOT NULL,
-                                is_admin BOOLEAN DEFAULT FALSE,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                            )
-                        """
-                        let stmt = conn.prepareStatement(sql)
-                        stmt.update()
-                        stmt.close()
-                        logger.debug("users表创建成功")
-                    } else {
-                        logger.debug("users表已存在，检查并添加缺失的列")
-                        // 检查 is_admin 列是否存在
-                        let checkColumnStmt = conn.prepareStatement("SELECT COUNT(*) FROM information_schema.columns WHERE table_name = 'users' AND column_name = 'is_admin'")
-                        let columnRs = checkColumnStmt.query()
-                        var columnExists = false
-                        if (columnRs.next()) {
-                            let count = columnRs.getOrNull<Int64>(0) ?? 0
-                            columnExists = count > 0
-                        }
-                        columnRs.close()
-                        checkColumnStmt.close()
-
-                        if (!columnExists) {
-                            logger.debug("添加 is_admin 列")
-                            let alterStmt = conn.prepareStatement("ALTER TABLE users ADD COLUMN is_admin BOOLEAN DEFAULT FALSE")
-                            alterStmt.update()
-                            alterStmt.close()
-                            logger.debug("is_admin 列添加成功")
-                        } else {
-                            logger.debug("is_admin 列已存在，无需添加")
-                        }
-                    }
-                    logger.debug("users表结构检查完成")
-                    return true
-                } catch (e: Exception) {
-                    logger.error("创建 users 表失败", ("error", e.message))
-                    logger.error("异常类型: ${e.toString()}")
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
-        }
-    }
+    // 注意：表创建已由迁移系统处理，createTable() 方法已移除
 
     public static func getByUsername(username: String): UserRow {
         let connOpt = DatabaseConfig.getPooledConnection()

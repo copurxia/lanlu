@@ -36,57 +36,7 @@ public class TaskData {
  * 负责处理所有与任务相关的数据库操作
  */
 public class TaskDao {
-
-    /**
-     * 创建任务表
-     */
-    public static func createTable(): Bool {
-        let logger = getLogger("task_dao")
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    // 首先检查表是否存在
-                    let checkTable = conn.prepareStatement("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'tasks')")
-                    let rs = checkTable.query()
-                    var tableExists = false
-                    try {
-                        if (rs.next()) {
-                            tableExists = rs.getOrNull<Bool>(0) ?? false
-                        }
-                    } finally {
-                        rs.close()
-                        checkTable.close()
-                    }
-
-                    if (!tableExists) {
-                        logger.debug("tasks表不存在，创建新的tasks表")
-                        let createTableSql = "CREATE TABLE tasks (id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, task_type VARCHAR(50) NOT NULL DEFAULT 'generic', status VARCHAR(50) NOT NULL DEFAULT 'pending', progress INTEGER NOT NULL DEFAULT 0, message TEXT, plugin_namespace VARCHAR(255), parameters TEXT, result TEXT, priority INTEGER NOT NULL DEFAULT 50, group_id VARCHAR(255), timeout_at TIMESTAMP, trigger_source VARCHAR(50), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, started_at TIMESTAMP, completed_at TIMESTAMP)"
-
-                        let stmt = conn.prepareStatement(createTableSql)
-                        stmt.update()
-                        stmt.close()
-                        logger.debug("tasks表创建成功")
-                    } else {
-                        logger.debug("tasks表已存在，跳过创建")
-                    }
-                    return true
-                } catch (e: Exception) {
-                    logger.error("创建tasks表失败", ("error", e.message))
-                    return false
-                } finally {
-                    try {
-                        conn.close()
-                    } catch (closeError: Exception) {
-                        logger.warn("释放连接失败: ${closeError.message}")
-                    }
-                }
-            case None =>
-                logger.error("无法创建数据库连接")
-                return false
-        }
-    }
+    // 注意：表创建已由迁移系统处理，createTable() 方法已移除
 
     /**
      * 创建任务（含扩展字段）
