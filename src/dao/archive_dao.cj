@@ -207,33 +207,40 @@ public class ArchiveDao {
 
     /**
      * 构建相关度评分 SQL 表达式
+     * 只对普通搜索词计算相关度
+     * 精确短语、精确标签、排除词等是硬性过滤条件，不参与相关度计算
      * @param filter 搜索词
      * @return 相关度评分表达式字符串
      */
     private static func buildRelevanceExpr(filter: String): String {
-        var searchWords: ArrayList<String> = ArrayList<String>()
-        for (w in filter.split(" ")) {
-            if (w.size > 0) {
-                searchWords.add(w)
-            }
-        }
+        // 使用 SearchFilter 解析搜索语法
+        let searchResult = SearchFilter.parse(filter)
 
-        if (searchWords.size == 0) {
-            return "1"  // 无搜索词时返回常量
+        // 只有普通搜索词参与相关度计算
+        let relevanceTerms = searchResult.terms
+
+        if (relevanceTerms.size == 0) {
+            return "1"  // 无普通搜索词时返回常量
         }
 
         // 构建 ILIKE 条件用于评分
         var ilikeScoreExpr = "0"
-        for (word in searchWords) {
-            let escapedWord = word.replace("'", "''")
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN title ILIKE '%" + escapedWord + "%' THEN 0.15 ELSE 0 END"
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN filename ILIKE '%" + escapedWord + "%' THEN 0.1 ELSE 0 END"
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN tags ILIKE '%" + escapedWord + "%' THEN 0.05 ELSE 0 END"
+        for (term in relevanceTerms) {
+            let escapedTerm = term.replace("'", "''")
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN title ILIKE '%" + escapedTerm + "%' THEN 0.15 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN filename ILIKE '%" + escapedTerm + "%' THEN 0.1 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN tags ILIKE '%" + escapedTerm + "%' THEN 0.05 ELSE 0 END"
         }
 
+        // 构建用于全文搜索的查询字符串
+        var tsQueryTerms: ArrayList<String> = ArrayList<String>()
+        for (term in relevanceTerms) {
+            tsQueryTerms.add(term.replace("'", "''"))
+        }
+        let tsQueryStr = String.join(tsQueryTerms.toArray(), delimiter: " ")
+
         // 构建完整的评分表达式
-        let escapedFilter = filter.replace("'", "''")
-        let relevanceExpr = "COALESCE(ts_rank(search_tsv, websearch_to_tsquery('simple', '" + escapedFilter + "')) * 2, 0) + (" + ilikeScoreExpr + ") + GREATEST(similarity(title, '" + escapedFilter + "'), similarity(filename, '" + escapedFilter + "')) * 0.3"
+        let relevanceExpr = "COALESCE(ts_rank(search_tsv, websearch_to_tsquery('simple', '" + tsQueryStr + "')) * 2, 0) + (" + ilikeScoreExpr + ") + GREATEST(similarity(title, '" + tsQueryStr + "'), similarity(filename, '" + tsQueryStr + "')) * 0.3"
 
         return relevanceExpr
     }
