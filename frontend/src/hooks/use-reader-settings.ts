@@ -42,3 +42,4 @@ export const useFullscreenMode = () => useLocalStorage<boolean>('reader-fullscre
 export const useDoubleTapZoom = () => useLocalStorage<boolean>('reader-double-tap-zoom', false);
 export const useAutoHideEnabled = () => useLocalStorage<boolean>('reader-auto-hide-enabled', false);
 export const useTapTurnPageEnabled = () => useLocalStorage<boolean>('reader-tap-turn-page-enabled', false);
+export const useMediaInfoEnabled = () => useLocalStorage<boolean>('reader-media-info-enabled', false);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState, useEffect, useCallback, useMemo, Suspense, useRef, memo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Suspense, useRef, memo, forwardRef } from 'react';
 import Image from 'next/image';
 import { ArchiveService, PageInfo } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
@@ -34,6 +34,7 @@ import {
   useDoubleTapZoom,
   useAutoHideEnabled,
   useTapTurnPageEnabled,
+  useMediaInfoEnabled,
 } from '@/hooks/use-reader-settings';
 import {
   ArrowLeft,
@@ -49,6 +50,7 @@ import {
   Minimize,
   ZoomIn,
   Eye,
+  Info,
   Menu,
   MousePointerClick
 } from 'lucide-react';
@@ -68,38 +70,131 @@ const MemoizedImage = memo(Image, (prevProps, nextProps) => {
 MemoizedImage.displayName = 'MemoizedImage';
 
 // Memo化的视频组件
-const MemoizedVideo = memo(function MemoizedVideo({
-  src,
-  className,
-  style,
-  onLoadedData,
-  onError,
-}: {
-  src: string;
-  className?: string;
-  style?: React.CSSProperties;
-  onLoadedData?: () => void;
-  onError?: () => void;
-}) {
-  return (
-    <video
-      src={src}
-      controls
-      playsInline
-      preload="metadata"
-      className={className}
-      style={style}
-      onLoadedData={onLoadedData}
-      onError={onError}
-    />
-  );
-});
+const MemoizedVideo = memo(
+  forwardRef(function MemoizedVideo(
+    {
+      src,
+      className,
+      style,
+      onLoadedData,
+      onError,
+    }: {
+      src: string;
+      className?: string;
+      style?: React.CSSProperties;
+      onLoadedData?: () => void;
+      onError?: () => void;
+    },
+    ref: React.ForwardedRef<HTMLVideoElement>
+  ) {
+    return (
+      <video
+        ref={ref}
+        src={src}
+        controls
+        playsInline
+        preload="metadata"
+        className={className}
+        style={style}
+        onLoadedData={onLoadedData}
+        onError={onError}
+      />
+    );
+  })
+);
 
 MemoizedVideo.displayName = 'MemoizedVideo';
 
 const TAP_MOVE_THRESHOLD_PX = 10;
 const TAP_MAX_DURATION_MS = 350;
 const IGNORE_CLICK_AFTER_TOUCH_MS = 800;
+
+function formatSeconds(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '--:--';
+  const whole = Math.floor(seconds);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return '--%';
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatMiB(bytes: number | null) {
+  if (!bytes || !Number.isFinite(bytes) || bytes <= 0) return '-- MiB';
+  return `${(bytes / 1024 / 1024).toFixed(2)} MiB`;
+}
+
+function getApproxResourceBytes(resourceUrl: string) {
+  if (typeof window === 'undefined') return null;
+  if (!resourceUrl) return null;
+
+  if (resourceUrl.startsWith('data:')) {
+    const base64Index = resourceUrl.indexOf('base64,');
+    if (base64Index >= 0) {
+      const base64 = resourceUrl.slice(base64Index + 'base64,'.length);
+      const padding = base64.endsWith('==') ? 2 : base64.endsWith('=') ? 1 : 0;
+      return Math.floor((base64.length * 3) / 4) - padding;
+    }
+    return null;
+  }
+
+  try {
+    const entries = performance.getEntriesByName(resourceUrl) as PerformanceEntry[];
+    const resourceEntries = entries.filter((entry) => entry.entryType === 'resource') as PerformanceResourceTiming[];
+    const latest = resourceEntries.sort((a, b) => a.startTime - b.startTime).at(-1);
+    if (!latest) return null;
+    const bytes = latest.transferSize || latest.encodedBodySize || latest.decodedBodySize;
+    return bytes && bytes > 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
+function getImageFormatLabel(resourceUrl: string) {
+  if (!resourceUrl) return null;
+
+  if (resourceUrl.startsWith('data:')) {
+    const match = resourceUrl.match(/^data:([^;,]+)[;,]/i);
+    const mime = match?.[1]?.toLowerCase() || '';
+    if (mime.startsWith('image/')) return mime.slice('image/'.length);
+    return null;
+  }
+
+  try {
+    const parsed = new URL(resourceUrl, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const pathnameExt = parsed.pathname.split('/').pop()?.split('.').pop();
+    if (pathnameExt && pathnameExt !== parsed.pathname) return pathnameExt.toLowerCase();
+
+    const pathParam = parsed.searchParams.get('path');
+    if (pathParam) {
+      const decoded = decodeURIComponent(pathParam);
+      const ext = decoded.split('/').pop()?.split('.').pop();
+      if (ext) return ext.toLowerCase();
+    }
+  } catch {
+    const ext = resourceUrl.split('?')[0]?.split('#')[0]?.split('.').pop();
+    if (ext && ext !== resourceUrl) return ext.toLowerCase();
+  }
+
+  return null;
+}
+
+function getLastPathSegment(url: string) {
+  try {
+    const parsed = new URL(url, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const pathname = parsed.pathname || '';
+    const last = pathname.split('/').filter(Boolean).pop();
+    return last || url;
+  } catch {
+    const parts = url.split('?')[0]?.split('#')[0]?.split('/').filter(Boolean);
+    return parts?.[parts.length - 1] || url;
+  }
+}
 
 function ReaderContent() {
   const router = useRouter();
@@ -210,8 +305,13 @@ function ReaderContent() {
   const [doubleTapZoom, setDoubleTapZoom] = useDoubleTapZoom();
   const [autoHideEnabled, setAutoHideEnabled] = useAutoHideEnabled();
   const [tapTurnPageEnabled, setTapTurnPageEnabled] = useTapTurnPageEnabled();
+  const [mediaInfoEnabled, setMediaInfoEnabled] = useMediaInfoEnabled();
   const htmlContentsRef = useRef<Record<number, string>>({});
   const htmlLoadingRef = useRef<Set<number>>(new Set());
+  const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const htmlContainerRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const imageRequestUrls = useRef<(string | null)[]>([]);
+  const [mediaInfoTick, setMediaInfoTick] = useState(0);
 
   const isInteractiveTarget = useCallback((target: EventTarget | null) => {
     if (!(target instanceof HTMLElement)) return false;
@@ -668,6 +768,15 @@ function ReaderContent() {
         onClick: () => setTapTurnPageEnabled((prev) => !prev),
         tooltip: t('reader.tapTurnPageTooltip'),
       },
+      {
+        key: 'mediaInfo',
+        label: t('reader.mediaInfo'),
+        icon: Info,
+        active: mediaInfoEnabled,
+        disabled: false,
+        onClick: () => setMediaInfoEnabled((prev) => !prev),
+        tooltip: t('reader.mediaInfoTooltip'),
+      },
     ],
     [
       t,
@@ -679,9 +788,152 @@ function ReaderContent() {
       doubleTapZoom,
       autoHideEnabled,
       tapTurnPageEnabled,
+      mediaInfoEnabled,
       toggleFullscreen,
+      setMediaInfoEnabled,
     ]
   );
+
+  useEffect(() => {
+    if (!mediaInfoEnabled) return;
+    const interval = window.setInterval(() => setMediaInfoTick((prev) => prev + 1), 250);
+    return () => window.clearInterval(interval);
+  }, [mediaInfoEnabled]);
+
+  const mediaInfoOverlayLines = useMemo(() => {
+    if (!mediaInfoEnabled) return [];
+    void mediaInfoTick;
+    const page = pages[currentPage];
+    if (!page) return [];
+
+    const showSecondPage =
+      readingMode !== 'webtoon' &&
+      doublePageMode &&
+      !(splitCoverMode && currentPage === 0) &&
+      currentPage + 1 < pages.length;
+
+    const indices = showSecondPage ? [currentPage, currentPage + 1] : [currentPage];
+
+    const readImageInfo = (index: number) => {
+      const element = imageRefs.current[index];
+      if (!element) return null;
+      const rect = element.getBoundingClientRect();
+      const resourceUrl = imageRequestUrls.current[index] || element.currentSrc || element.src;
+      return {
+        naturalWidth: element.naturalWidth,
+        naturalHeight: element.naturalHeight,
+        displayedWidth: Math.round(rect.width),
+        displayedHeight: Math.round(rect.height),
+        bytes: getApproxResourceBytes(resourceUrl),
+        format: getImageFormatLabel(resourceUrl),
+      };
+    };
+
+    const readVideoInfo = (index: number) => {
+      const element = videoRefs.current[index];
+      if (!element) return null;
+      const buffered = element.buffered;
+      const bufferedEnd = buffered && buffered.length > 0 ? buffered.end(buffered.length - 1) : 0;
+      return {
+        videoWidth: element.videoWidth,
+        videoHeight: element.videoHeight,
+        duration: element.duration,
+        currentTime: element.currentTime,
+        playbackRate: element.playbackRate,
+        muted: element.muted,
+        volume: element.volume,
+        paused: element.paused,
+        readyState: element.readyState,
+        bufferedEnd,
+      };
+    };
+
+    const readHtmlInfo = (index: number) => {
+      const html = htmlContents[index] || '';
+      let title: string | null = null;
+      if (html) {
+        try {
+          const parsed = new DOMParser().parseFromString(html, 'text/html');
+          title = parsed.querySelector('title')?.textContent?.trim() || null;
+        } catch {
+          title = null;
+        }
+      }
+      const container = htmlContainerRefs.current[index];
+      const scrollable =
+        readingMode !== 'webtoon' && container && container.scrollHeight > container.clientHeight;
+      return {
+        title,
+        length: html.length,
+        scrollTop: container ? Math.round(container.scrollTop) : null,
+        scrollHeight: container ? Math.round(container.scrollHeight) : null,
+        clientHeight: container ? Math.round(container.clientHeight) : null,
+        scrollable,
+      };
+    };
+
+    const lines: string[] = [];
+    const headerIndexLabel = indices.length === 2 ? `${indices[0] + 1}-${indices[1] + 1}` : `${indices[0] + 1}`;
+    lines.push(`P ${headerIndexLabel}/${pages.length}  ${readingMode}${doublePageMode ? '  double' : ''}`);
+    if (isFullscreen) lines.push(`fullscreen`);
+
+    indices.forEach((index, idx) => {
+      const p = pages[index];
+      if (!p) return;
+      const prefix = indices.length === 2 ? `#${idx + 1} ` : '';
+      const src = p.type === 'image' ? (cachedPages[index] || p.url) : p.url;
+      lines.push(`${prefix}${p.type}  ${getLastPathSegment(src)}`);
+
+      if (p.type === 'video') {
+        const info = readVideoInfo(index);
+        if (info) {
+          const time = `${formatSeconds(info.currentTime)}/${formatSeconds(info.duration)}`;
+          const bufferedPct =
+            info.duration > 0 ? formatPercent(Math.min(1, Math.max(0, info.bufferedEnd / info.duration))) : '--%';
+          lines.push(
+            `${prefix}${info.videoWidth}x${info.videoHeight}  t ${time}  buf ${bufferedPct}`
+          );
+          lines.push(
+            `${prefix}${info.paused ? 'paused' : 'playing'}  ${info.playbackRate.toFixed(2)}x  vol ${formatPercent(
+              info.muted ? 0 : info.volume
+            )}  ready ${info.readyState}`
+          );
+        }
+      } else if (p.type === 'html') {
+        const info = readHtmlInfo(index);
+        if (info.title) lines.push(`${prefix}title  ${info.title}`);
+        if (info.scrollable && info.scrollTop !== null && info.scrollHeight !== null && info.clientHeight !== null) {
+          lines.push(`${prefix}scroll  ${info.scrollTop}/${info.scrollHeight - info.clientHeight}`);
+        } else if (info.length) {
+          lines.push(`${prefix}len  ${info.length}`);
+        }
+      } else {
+        const info = readImageInfo(index);
+        if (info) {
+          lines.push(`${prefix}${info.naturalWidth}x${info.naturalHeight}  disp ${info.displayedWidth}x${info.displayedHeight}`);
+          lines.push(`${prefix}fmt  ${info.format || '--'}`);
+          lines.push(`${prefix}size  ${formatMiB(info.bytes)}`);
+          lines.push(`${prefix}zoom  ${scale.toFixed(2)}x`);
+        } else {
+          lines.push(`${prefix}zoom  ${scale.toFixed(2)}x`);
+        }
+      }
+    });
+
+    return lines;
+  }, [
+    mediaInfoEnabled,
+    mediaInfoTick,
+    pages,
+    currentPage,
+    readingMode,
+    doublePageMode,
+    splitCoverMode,
+    cachedPages,
+    htmlContents,
+    scale,
+    isFullscreen,
+  ]);
 
   // 监听页码变化并更新进度
   useEffect(() => {
@@ -2158,6 +2410,23 @@ function ReaderContent() {
           toggleToolbar();
         }}
       >
+        {mediaInfoEnabled && mediaInfoOverlayLines.length > 0 && (
+          <div
+            className={[
+              'absolute top-3 z-[60] pointer-events-none select-none',
+              sidebarOpen ? 'left-[calc(280px+12px)] sm:left-[calc(320px+12px)]' : 'left-3',
+            ].join(' ')}
+          >
+            <div className="rounded-lg bg-black/55 backdrop-blur-sm border border-white/10 px-3 py-2 text-[11px] leading-snug font-mono text-white max-w-[70vw] sm:max-w-[520px]">
+              {mediaInfoOverlayLines.map((line, idx) => (
+                <div key={idx} className="whitespace-pre-wrap">
+                  {line}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* 侧边栏导航 */}
         {sidebarOpen && (
           <div
@@ -2335,6 +2604,9 @@ function ReaderContent() {
                       <MemoizedVideo
                         key={`page-${currentPage}`}
                         src={pages[currentPage].url}
+                        ref={(el) => {
+                          videoRefs.current[currentPage] = el;
+                        }}
                         className={`
                           ${doublePageMode && !(splitCoverMode && currentPage === 0) ? 'object-cover' : 'object-contain'} select-none touch-none
                           w-full h-full
@@ -2352,7 +2624,12 @@ function ReaderContent() {
                         onError={() => handleImageError(currentPage)}
                       />
                     ) : pages[currentPage]?.type === 'html' ? (
-                      <div className="w-full h-full overflow-auto bg-white">
+                      <div
+                        ref={(el) => {
+                          htmlContainerRefs.current[currentPage] = el;
+                        }}
+                        className="w-full h-full overflow-auto bg-white"
+                      >
                         <HtmlRenderer
                           html={htmlContents[currentPage] || ''}
                           className="max-w-4xl mx-auto p-4"
@@ -2378,7 +2655,9 @@ function ReaderContent() {
                           transition: doublePageMode ? 'none' : 'transform 0.1s ease-out',
                           cursor: doublePageMode ? 'pointer' : (scale > 1 ? 'grab' : 'default')
                         }}
-                        onLoadingComplete={() => {
+                        onLoadingComplete={(img) => {
+                          imageRefs.current[currentPage] = img;
+                          imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
                           handleImageLoad(currentPage);
                           // 图片加载完成后缓存它（优化：只在缓存中没有该图片时才缓存）
                           if (!cachedPages[currentPage] && pages[currentPage]) {
@@ -2400,6 +2679,9 @@ function ReaderContent() {
                         <MemoizedVideo
                           key={`page-${currentPage + 1}`}
                           src={pages[currentPage + 1].url}
+                          ref={(el) => {
+                            videoRefs.current[currentPage + 1] = el;
+                          }}
                           className={`
                             object-cover select-none touch-none
                             w-full h-full
@@ -2415,7 +2697,12 @@ function ReaderContent() {
                           onError={() => handleImageError(currentPage + 1)}
                         />
                       ) : pages[currentPage + 1]?.type === 'html' ? (
-                        <div className="w-full h-full overflow-auto bg-white">
+                        <div
+                          ref={(el) => {
+                            htmlContainerRefs.current[currentPage + 1] = el;
+                          }}
+                          className="w-full h-full overflow-auto bg-white"
+                        >
                           <HtmlRenderer
                             html={htmlContents[currentPage + 1] || ''}
                             className="max-w-4xl mx-auto p-4"
@@ -2441,7 +2728,9 @@ function ReaderContent() {
                             transition: 'none',
                             cursor: 'pointer'
                           }}
-                          onLoadingComplete={() => {
+                          onLoadingComplete={(img) => {
+                            imageRefs.current[currentPage + 1] = img;
+                            imageRequestUrls.current[currentPage + 1] = img.currentSrc || img.src;
                             handleImageLoad(currentPage + 1);
                             // 图片加载完成后缓存它
                             if (!cachedPages[currentPage + 1] && pages[currentPage + 1]) {
@@ -2620,6 +2909,9 @@ function ReaderContent() {
                               <MemoizedVideo
                                 key={`page-${actualIndex}`}
                                 src={page.url}
+                                ref={(el) => {
+                                  videoRefs.current[actualIndex] = el;
+                                }}
                                 className="object-contain select-none"
                                 style={{
                                   maxWidth: '100%',
@@ -2634,7 +2926,12 @@ function ReaderContent() {
                                 onError={() => handleImageError(actualIndex)}
                               />
                             ) : page.type === 'html' ? (
-                              <div className={readingMode === 'webtoon' ? 'w-full bg-white' : 'w-full h-full overflow-auto bg-white'}>
+                              <div
+                                ref={(el) => {
+                                  htmlContainerRefs.current[actualIndex] = el;
+                                }}
+                                className={readingMode === 'webtoon' ? 'w-full bg-white' : 'w-full h-full overflow-auto bg-white'}
+                              >
                                 {htmlContents[actualIndex] ? (
                                   <HtmlRenderer
                                     html={htmlContents[actualIndex]}
@@ -2666,7 +2963,9 @@ function ReaderContent() {
                                   transition: 'transform 0.1s ease-out',
                                   cursor: scale > 1 ? 'grab' : 'default'
                                 }}
-                                onLoadingComplete={() => {
+                                onLoadingComplete={(img) => {
+                                  imageRefs.current[actualIndex] = img;
+                                  imageRequestUrls.current[actualIndex] = img.currentSrc || img.src;
                                   handleImageLoad(actualIndex);
                                   if (!cachedPages[actualIndex]) {
                                     cacheImage(page.url, actualIndex);

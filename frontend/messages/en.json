@@ -223,6 +223,8 @@
     "autoHideTooltip": "Show on click, hide on scroll/swipe/timeout",
     "tapTurnPage": "Tap Turn",
     "tapTurnPageTooltip": "Tap edges to turn page (left/top prev, right/bottom next)",
+    "mediaInfo": "Media Info",
+    "mediaInfoTooltip": "Show media debug overlay at top-left",
     "splitCover": "Split Cover",
     "splitCoverDescription": "Split Cover",
     "splitCoverTooltip": "Split cover (requires double page mode)",
