@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { ArchiveService, PageInfo } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
 import { Slider } from '@/components/ui/slider';
 import { ThemeButton } from '@/components/theme/theme-toggle';
@@ -50,6 +51,7 @@ import {
   Menu
 } from 'lucide-react';
 import Link from 'next/link';
+import type { ArchiveMetadata } from '@/types/archive';
 
 // Memo化的图片组件，减少不必要的重渲染
 const MemoizedImage = memo(Image, (prevProps, nextProps) => {
@@ -98,7 +100,7 @@ function ReaderContent() {
   const searchParams = useSearchParams();
   const id = searchParams?.get('id') ?? null;
   const pageParam = searchParams?.get('page');
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [cachedPages, setCachedPages] = useState<string[]>([]);
@@ -113,6 +115,7 @@ function ReaderContent() {
   const [showToolbar, setShowToolbar] = useState(true);
   const [isFavorited, setIsFavorited] = useState(false); // 收藏状态
   const [archiveTitle, setArchiveTitle] = useState<string>(''); // 归档标题
+  const [archiveMetadata, setArchiveMetadata] = useState<ArchiveMetadata | null>(null);
   const [scale, setScale] = useState(1);
   const [translateX, setTranslateX] = useState(0);
   const [translateY, setTranslateY] = useState(0);
@@ -266,18 +269,6 @@ function ReaderContent() {
         if (initialPage > 0) {
           setImagesLoading(new Set([initialPage]));
         }
-
-        // 获取metadata（包含收藏状态和标题）
-        try {
-          const metadata = await ArchiveService.getMetadata(id);
-          setIsFavorited(metadata.isfavorite);
-          if (metadata.title && metadata.title.trim()) {
-            setArchiveTitle(metadata.title);
-          }
-        } catch (favErr) {
-          logger.apiError('fetch favorite status', favErr);
-          // 收藏状态失败不影响阅读体验，静默处理
-        }
       } catch (err) {
         logger.apiError('fetch archive pages', err);
         setError('Failed to fetch archive pages');
@@ -288,6 +279,45 @@ function ReaderContent() {
 
     fetchPages();
   }, [id, pageParam]);
+
+  // 获取 metadata（包含标题、摘要、标签、收藏状态等）
+  useEffect(() => {
+    if (!id) {
+      setArchiveMetadata(null);
+      return;
+    }
+
+    let cancelled = false;
+    setArchiveMetadata(null);
+
+    (async () => {
+      try {
+        const metadata = await ArchiveService.getMetadata(id, language);
+        if (cancelled) return;
+        setArchiveMetadata(metadata);
+        setIsFavorited(metadata.isfavorite);
+        if (metadata.title && metadata.title.trim()) {
+          setArchiveTitle(metadata.title);
+        }
+      } catch (metaErr) {
+        logger.apiError('fetch archive metadata', metaErr);
+        if (cancelled) return;
+        setArchiveMetadata(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, language]);
+
+  const metadataTags = useMemo(() => {
+    if (!archiveMetadata?.tags) return [];
+    return archiveMetadata.tags
+      .split(',')
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+  }, [archiveMetadata?.tags]);
 
   // 单独处理错误消息的翻译
   useEffect(() => {
@@ -1756,6 +1786,50 @@ function ReaderContent() {
               </SheetHeader>
 
               <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
+                {archiveMetadata ? (
+                  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{t('archive.summary')}</span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-8 rounded-lg px-3"
+                        disabled={!id}
+                        onClick={() => {
+                          if (!id) return;
+                          setSettingsOpen(false);
+                          router.push(`/archive?id=${id}`);
+                        }}
+                      >
+                        {t('archive.details')}
+                      </Button>
+                    </div>
+                    <div className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap line-clamp-4">
+                      {archiveMetadata.summary ? archiveMetadata.summary : t('archive.noSummary')}
+                    </div>
+                    <div className="space-y-2">
+                      <span className="text-sm font-medium">{t('archive.tags')}</span>
+                      {metadataTags.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {metadataTags.slice(0, 10).map((tag, index) => (
+                            <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
+                              {tag}
+                            </Badge>
+                          ))}
+                          {metadataTags.length > 10 ? (
+                            <Badge variant="secondary" className="text-xs">
+                              +{metadataTags.length - 10}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-muted-foreground">{t('archive.noTags')}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+
                 <div className="flex flex-col gap-2.5">
                   {settingButtons.map((setting) => {
                     const Icon = setting.icon;
