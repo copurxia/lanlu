@@ -367,7 +367,7 @@ function HomePageContent() {
 
             {/* 筛选对话框 */}
             <Dialog open={filterDialogOpen} onOpenChange={setFilterDialogOpen}>
-              <DialogContent className="max-w-[90vw] w-full">
+              <DialogContent className="w-full">
                 <DialogHeader className="px-4 py-3 border-b">
                   <DialogTitle>{t('home.advancedFilter')}</DialogTitle>
                 </DialogHeader>

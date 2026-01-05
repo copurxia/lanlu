@@ -43,7 +43,7 @@ const DialogHeader: React.FC<{ className?: string; children: React.ReactNode }> 
   className,
   children
 }) => (
-  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left px-6 pt-6 pb-4", className)}>
+  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left px-0 sm:px-6 pt-4 sm:pt-6 pb-4", className)}>
     {children}
   </div>
 )
@@ -74,10 +74,20 @@ const DialogContent: React.FC<{
   const { open, onOpenChange } = useDialogContext()
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
+  const [isMobile, setIsMobile] = React.useState(false)
 
   React.useEffect(() => {
     setMounted(true)
   }, [])
+
+  React.useEffect(() => {
+    if (!mounted) return
+    const mql = window.matchMedia("(max-width: 639px)")
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches)
+    setIsMobile(mql.matches)
+    mql.addEventListener("change", onChange)
+    return () => mql.removeEventListener("change", onChange)
+  }, [mounted])
 
   React.useEffect(() => {
     if (!open) return
@@ -101,7 +111,12 @@ const DialogContent: React.FC<{
   }
 
   return (
-    <div className="fixed inset-0 z-modal-overlay flex items-center justify-center p-4">
+    <div
+      className={cn(
+        "fixed inset-0 z-modal-overlay flex",
+        isMobile ? "items-end justify-center" : "items-center justify-center p-4"
+      )}
+    >
       <div
         className="fixed inset-0 bg-black/50"
         onClick={() => onOpenChange?.(false)}
@@ -110,12 +125,15 @@ const DialogContent: React.FC<{
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-modal-content w-full max-h-[90vh] rounded-lg border bg-background shadow-lg overflow-hidden flex flex-col",
-          sizeClasses[size],
+          "relative z-modal-content w-full border bg-background shadow-lg overflow-hidden flex flex-col",
+          isMobile
+            ? "max-h-[85vh] rounded-t-xl rounded-b-none border-x-0"
+            : cn("max-h-[90vh] rounded-lg", sizeClasses[size]),
           className
         )}
         onClick={(e) => e.stopPropagation()}
       >
+        {isMobile && <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-muted" />}
         {children}
       </div>
     </div>
@@ -126,7 +144,7 @@ const DialogBody: React.FC<{ className?: string; children: React.ReactNode }> = 
   className,
   children
 }) => (
-  <div className={cn("flex-1 overflow-y-auto px-6 py-5", className)}>
+  <div className={cn("flex-1 overflow-y-auto px-0 sm:px-6 py-5", className)}>
     {children}
   </div>
 )
@@ -136,7 +154,7 @@ const DialogFooter: React.FC<{ className?: string; children: React.ReactNode }> 
   children
 }) => (
   <div className={cn(
-    "mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-6 pt-4 pb-6 border-t",
+    "mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-0 sm:px-6 pt-4 pb-6 border-t",
     className
   )}>
     {children}
