@@ -611,6 +611,36 @@ function ReaderContent() {
     }
   }, [pages, sidebarLoadedCount, sidebarDisplayPages.length]);
 
+  // 监听currentPage变化，自动扩展侧边栏加载范围
+  useEffect(() => {
+    // 如果当前页面超出已加载范围，且还有更多内容可以加载
+    if (currentPage >= sidebarLoadedCount && sidebarLoadedCount < pages.length && !sidebarLoading) {
+      // 计算需要加载的页数，确保至少加载到当前页面+10页
+      const targetCount = Math.min(pages.length, currentPage + 10);
+      const newPages = pages.slice(sidebarLoadedCount, targetCount);
+
+      if (newPages.length > 0) {
+        setSidebarDisplayPages(prev => [...prev, ...newPages]);
+        setSidebarLoadedCount(targetCount);
+
+        // 同时添加新页面到缩略图加载队列
+        const newPageIndices: number[] = [];
+        for (let i = sidebarLoadedCount; i < targetCount; i++) {
+          if (!loadedImages.has(i) && !imagesLoading.has(i)) {
+            newPageIndices.push(i);
+          }
+        }
+        if (newPageIndices.length > 0) {
+          setSidebarImagesLoading(prev => {
+            const updated = new Set(prev);
+            newPageIndices.forEach(index => updated.add(index));
+            return updated;
+          });
+        }
+      }
+    }
+  }, [currentPage, pages.length, sidebarLoadedCount, sidebarLoading, loadedImages, imagesLoading]);
+
   // 更新阅读进度
   const updateReadingProgress = useCallback(async (page: number) => {
     if (!id) return;
