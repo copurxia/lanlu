@@ -33,6 +33,7 @@ import {
   useFullscreenMode,
   useDoubleTapZoom,
   useAutoHideEnabled,
+  useTapTurnPageEnabled,
 } from '@/hooks/use-reader-settings';
 import {
   ArrowLeft,
@@ -48,7 +49,8 @@ import {
   Minimize,
   ZoomIn,
   Eye,
-  Menu
+  Menu,
+  MousePointerClick
 } from 'lucide-react';
 import Link from 'next/link';
 import type { ArchiveMetadata } from '@/types/archive';
@@ -127,6 +129,7 @@ function ReaderContent() {
   const tapStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const tapMovedRef = useRef(false);
   const lastTouchAtRef = useRef(0);
+  const readerAreaRef = useRef<HTMLDivElement | null>(null);
   const webtoonContainerRef = useRef<HTMLDivElement>(null);
   const imageRefs = useRef<(HTMLImageElement | null)[]>([]);
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -205,6 +208,50 @@ function ReaderContent() {
   const [isFullscreen, setIsFullscreen] = useFullscreenMode();
   const [doubleTapZoom, setDoubleTapZoom] = useDoubleTapZoom();
   const [autoHideEnabled, setAutoHideEnabled] = useAutoHideEnabled();
+  const [tapTurnPageEnabled, setTapTurnPageEnabled] = useTapTurnPageEnabled();
+
+  const isInteractiveTarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(
+      target.closest(
+        'a,button,input,textarea,select,option,[role="button"],[role="link"],[data-no-reader-tap]'
+      )
+    );
+  }, []);
+
+  const isHtmlContentTarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    return Boolean(target.closest('.html-content-container'));
+  }, []);
+
+  const getTapTurnAction = useCallback((clientX: number, clientY: number) => {
+    const el = readerAreaRef.current;
+    if (!el) return 'none' as const;
+    const rect = el.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > rect.width || y > rect.height) return 'none' as const;
+
+    const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+    const edgeW = clamp(rect.width * 0.22, 72, 180);
+    const edgeH = clamp(rect.height * 0.22, 72, 180);
+
+    const inLeft = x <= edgeW;
+    const inRight = x >= rect.width - edgeW;
+    const inTop = y <= edgeH;
+    const inBottom = y >= rect.height - edgeH;
+
+    if (!(inLeft || inRight || inTop || inBottom)) return 'none' as const;
+
+    const leftDist = x;
+    const rightDist = rect.width - x;
+    const topDist = y;
+    const bottomDist = rect.height - y;
+    const minDist = Math.min(leftDist, rightDist, topDist, bottomDist);
+
+    if (minDist === rightDist || minDist === bottomDist) return 'next' as const;
+    return 'prev' as const;
+  }, []);
 
   const clearAutoHideTimers = useCallback(() => {
     if (autoHideTimeoutRef.current) {
@@ -550,6 +597,15 @@ function ReaderContent() {
         onClick: () => setAutoHideEnabled((prev) => !prev),
         tooltip: t('reader.autoHideTooltip'),
       },
+      {
+        key: 'tapTurnPage',
+        label: t('reader.tapTurnPage'),
+        icon: MousePointerClick,
+        active: tapTurnPageEnabled,
+        disabled: false,
+        onClick: () => setTapTurnPageEnabled((prev) => !prev),
+        tooltip: t('reader.tapTurnPageTooltip'),
+      },
     ],
     [
       t,
@@ -560,6 +616,7 @@ function ReaderContent() {
       isFullscreen,
       doubleTapZoom,
       autoHideEnabled,
+      tapTurnPageEnabled,
       toggleFullscreen,
     ]
   );
@@ -843,6 +900,50 @@ function ReaderContent() {
       resetTransform();
     }
   }, [currentPage, pages.length, resetTransform, doublePageMode, splitCoverMode]);
+
+  const runTapTurnAction = useCallback((action: 'prev' | 'next') => {
+    if (autoHideEnabled && showToolbar) {
+      hideToolbar();
+    }
+
+    // 条漫模式下需要滚动到对应位置，仅更新 currentPage 不足以产生可见变化
+    if (readingMode === 'webtoon' && webtoonContainerRef.current) {
+      const nextPage =
+        action === 'prev'
+          ? Math.max(0, currentPage - 1)
+          : Math.min(pages.length - 1, currentPage + 1);
+
+      setCurrentPage(nextPage);
+
+      requestAnimationFrame(() => {
+        if (!webtoonContainerRef.current) return;
+        let accumulatedHeight = 0;
+        for (let i = 0; i < nextPage; i++) {
+          accumulatedHeight += imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+        }
+        webtoonContainerRef.current.scrollTop = accumulatedHeight;
+      });
+
+      return;
+    }
+
+    if (action === 'prev') {
+      handlePrevPage();
+    } else {
+      handleNextPage();
+    }
+  }, [
+    autoHideEnabled,
+    showToolbar,
+    hideToolbar,
+    readingMode,
+    currentPage,
+    pages.length,
+    imageHeights,
+    containerHeight,
+    handlePrevPage,
+    handleNextPage,
+  ]);
 
   // 侧边栏页面选择处理
   const handleSidebarPageSelect = useCallback((pageIndex: number) => {
@@ -1290,6 +1391,26 @@ function ReaderContent() {
     const isTap = Boolean(start && !moved && duration <= TAP_MAX_DURATION_MS);
 
     if (isTap) {
+      // HTML内容区域内的点击交给内容自身处理（链接、选择等）
+      if (isHtmlContentTarget(e.target) || isInteractiveTarget(e.target)) {
+        tapStartRef.current = null;
+        tapMovedRef.current = false;
+        return;
+      }
+
+      if (tapTurnPageEnabled && endTouch) {
+        const action = getTapTurnAction(endTouch.clientX, endTouch.clientY);
+        if (action === 'prev' || action === 'next') {
+          runTapTurnAction(action);
+          tapStartRef.current = null;
+          tapMovedRef.current = false;
+          setTouchStart(null);
+          setTouchEnd(null);
+          setLastTouchDistance(0);
+          return;
+        }
+      }
+
       toggleToolbar();
       tapStartRef.current = null;
       tapMovedRef.current = false;
@@ -1356,7 +1477,22 @@ function ReaderContent() {
     setTouchStart(null);
     setTouchEnd(null);
     setLastTouchDistance(0);
-  }, [touchStart, touchEnd, handleNextPage, handlePrevPage, readingMode, toggleToolbar, autoHideEnabled, showToolbar, hideToolbar]);
+  }, [
+    touchStart,
+    touchEnd,
+    handleNextPage,
+    handlePrevPage,
+    readingMode,
+    toggleToolbar,
+    autoHideEnabled,
+    showToolbar,
+    hideToolbar,
+    isHtmlContentTarget,
+    isInteractiveTarget,
+    tapTurnPageEnabled,
+    getTapTurnAction,
+    runTapTurnAction,
+  ]);
 
   const getReadingModeIcon = () => {
     switch (readingMode) {
@@ -1976,13 +2112,26 @@ function ReaderContent() {
 
       {/* 主要阅读区域 */}
       <div
+        ref={readerAreaRef}
         className="flex-1 relative overflow-hidden"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onClick={() => {
+        onClick={(e) => {
+          // HTML内容/交互元素的点击交给内容自身处理
+          if (isHtmlContentTarget(e.target) || isInteractiveTarget(e.target)) return;
+
           // 显示条件只有点击：触摸后的合成 click 一律忽略（避免滑动触发）
           if (Date.now() - lastTouchAtRef.current < IGNORE_CLICK_AFTER_TOUCH_MS) return;
+
+          if (tapTurnPageEnabled) {
+            const action = getTapTurnAction(e.clientX, e.clientY);
+            if (action === 'prev' || action === 'next') {
+              runTapTurnAction(action);
+              return;
+            }
+          }
+
           toggleToolbar();
         }}
       >

@@ -227,6 +227,8 @@
     "hideToolbar": "隐藏工具栏",
     "showToolbar": "显示工具栏",
     "autoHide": "自动",
+    "tapTurnPage": "点击翻页",
+    "tapTurnPageTooltip": "点击边缘区域翻页（左/上：上一页，右/下：下一页）",
     "splitCover": "封面",
     "splitCoverDescription": "封面",
     "splitCoverTooltip": "拆分封面（需要开启双页模式）",

@@ -220,6 +220,8 @@
     "hideToolbar": "Hide Toolbar",
     "showToolbar": "Show Toolbar",
     "autoHide": "Auto",
+    "tapTurnPage": "Tap Turn",
+    "tapTurnPageTooltip": "Tap edges to turn page (left/top prev, right/bottom next)",
     "splitCover": "Cover",
     "splitCoverDescription": "Split Cover",
     "splitCoverTooltip": "Split cover (requires double page mode)",
