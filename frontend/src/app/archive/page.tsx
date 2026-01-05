@@ -685,22 +685,6 @@ function ArchiveDetailContent() {
 	                            <span>{metadata.pagecount}</span>
 	                          </div>
 	                          <div className="flex items-center justify-between gap-3">
-	                            <span className="text-muted-foreground">{t('archive.progress')}</span>
-	                            <span>{metadata.progress}/{metadata.pagecount}</span>
-	                          </div>
-	                          <div className="flex items-center justify-between gap-3">
-	                            <span className="text-muted-foreground">{t('archive.fileSize')}</span>
-	                            <span>{formatFileSize(metadata.file_size)}</span>
-	                          </div>
-	                          <div className="flex items-center justify-between gap-3">
-	                            <span className="text-muted-foreground">{t('archive.fileType')}</span>
-	                            <span>{metadata.archivetype.toUpperCase()}</span>
-	                          </div>
-	                          <div className="flex items-center justify-between gap-3">
-	                            <span className="text-muted-foreground">{t('archive.status')}</span>
-	                            <span>{metadata.isnew ? t('archive.statusNew') : t('archive.statusRead')}</span>
-	                          </div>
-	                          <div className="flex items-center justify-between gap-3">
 	                            <span className="text-muted-foreground">{t('archive.updatedAt')}</span>
 	                            <span className="truncate">{formatDate(metadata.updated_at)}</span>
 	                          </div>
