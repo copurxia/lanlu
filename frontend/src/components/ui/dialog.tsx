@@ -43,7 +43,7 @@ const DialogHeader: React.FC<{ className?: string; children: React.ReactNode }> 
   className,
   children
 }) => (
-  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left px-0 sm:px-6 pt-4 sm:pt-6 pb-4", className)}>
+  <div className={cn("flex flex-col gap-1.5 text-center sm:text-left px-4 sm:px-6 pt-4 sm:pt-6 pb-4", className)}>
     {children}
   </div>
 )
@@ -144,7 +144,7 @@ const DialogBody: React.FC<{ className?: string; children: React.ReactNode }> = 
   className,
   children
 }) => (
-  <div className={cn("flex-1 overflow-y-auto px-0 sm:px-6 py-5", className)}>
+  <div className={cn("flex-1 overflow-y-auto px-4 sm:px-6 py-5", className)}>
     {children}
   </div>
 )
@@ -154,7 +154,7 @@ const DialogFooter: React.FC<{ className?: string; children: React.ReactNode }> 
   children
 }) => (
   <div className={cn(
-    "mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-0 sm:px-6 pt-4 pb-6 border-t",
+    "mt-auto flex flex-col-reverse gap-2 sm:flex-row sm:justify-end px-4 sm:px-6 pt-4 pb-6 border-t",
     className
   )}>
     {children}
