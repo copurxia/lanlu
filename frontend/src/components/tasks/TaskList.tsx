@@ -225,26 +225,26 @@ export function TaskList({ className }: TaskListProps) {
 
       {/* Filters */}
       <Tabs value={activeFilter} onValueChange={setActiveFilter}>
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="all" className="flex items-center space-x-2">
-            <span>{t('settings.taskManagement.all')}</span>
+        <TabsList className="w-full justify-start overflow-x-auto">
+          <TabsTrigger value="all" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+            <span className="whitespace-nowrap">{t('settings.taskManagement.all')}</span>
             <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5 flex items-center justify-center">{total}</Badge>
           </TabsTrigger>
-          <TabsTrigger value="pending" className="flex items-center space-x-2">
-            <Clock className="w-4 h-4" />
-            <span>{t('settings.taskManagement.pending')}</span>
+          <TabsTrigger value="pending" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+            <Clock className="w-4 h-4 shrink-0" />
+            <span className="whitespace-nowrap">{t('settings.taskManagement.pending')}</span>
           </TabsTrigger>
-          <TabsTrigger value="running" className="flex items-center space-x-2">
-            <RefreshCw className="w-4 h-4" />
-            <span>{t('settings.taskManagement.running')}</span>
+          <TabsTrigger value="running" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+            <RefreshCw className="w-4 h-4 shrink-0" />
+            <span className="whitespace-nowrap">{t('settings.taskManagement.running')}</span>
           </TabsTrigger>
-          <TabsTrigger value="completed" className="flex items-center space-x-2">
-            <CheckCircle className="w-4 h-4" />
-            <span>{t('settings.taskManagement.completed')}</span>
+          <TabsTrigger value="completed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+            <CheckCircle className="w-4 h-4 shrink-0" />
+            <span className="whitespace-nowrap">{t('settings.taskManagement.completed')}</span>
           </TabsTrigger>
-          <TabsTrigger value="failed" className="flex items-center space-x-2">
-            <XCircle className="w-4 h-4" />
-            <span>{t('settings.taskManagement.failed')}</span>
+          <TabsTrigger value="failed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+            <XCircle className="w-4 h-4 shrink-0" />
+            <span className="whitespace-nowrap">{t('settings.taskManagement.failed')}</span>
           </TabsTrigger>
         </TabsList>
       </Tabs>
@@ -255,25 +255,25 @@ export function TaskList({ className }: TaskListProps) {
           {tasks.map((task) => (
             <Card key={task.id} className="w-full">
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <CardTitle className="text-base">{task.name}</CardTitle>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CardTitle className="text-base truncate min-w-0">{task.name}</CardTitle>
                     <Badge
                       className={TaskPoolService.getStatusColor(task.status)}
                       variant="secondary"
                     >
-                      <div className="flex items-center space-x-1">
+                      <div className="flex items-center gap-1 whitespace-nowrap">
                         {getStatusIcon(task.status)}
                         <span>{TaskPoolService.getStatusLabel(task.status, t)}</span>
                       </div>
                     </Badge>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Badge variant="outline" className="font-mono text-xs">
+                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                    <Badge variant="outline" className="font-mono text-xs whitespace-nowrap">
                       Job #{task.id}
                     </Badge>
                     {/* 优先级徽章 - 新增 */}
-                    <Badge className={TaskPoolService.getPriorityColor(task.priority)}>
+                    <Badge className={TaskPoolService.getPriorityColor(task.priority)} title={`P${task.priority}`}>
                       P{task.priority}
                     </Badge>
                     <Badge
@@ -284,7 +284,7 @@ export function TaskList({ className }: TaskListProps) {
                     </Badge>
                     {/* 触发源徽章 - 新增 */}
                     {task.triggerSource && (
-                      <Badge variant="outline">
+                      <Badge variant="outline" className="whitespace-nowrap">
                         {TaskPoolService.getTriggerSourceLabel(task.triggerSource)}
                       </Badge>
                     )}
@@ -367,7 +367,7 @@ export function TaskList({ className }: TaskListProps) {
                 {(task.status === 'completed' || task.status === 'failed') && task.result && (
                   <div className="text-sm">
                     <strong>{t('settings.taskManagement.result')}:</strong>
-                    <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-20 overflow-y-auto whitespace-pre-wrap">
+                    <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-20 overflow-y-auto overflow-x-auto whitespace-pre-wrap font-mono">
                       {(() => {
                         try {
                           return JSON.stringify(JSON.parse(task.result), null, 2);

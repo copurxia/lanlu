@@ -52,18 +52,30 @@ export default function SettingsTasksPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
+      <div className="flex items-start justify-between gap-3">
+        <div className="space-y-1 min-w-0">
           <h2 className="text-xl font-semibold flex items-center gap-2">
             <ListTodo className="w-5 h-5" />
             {t('settings.tasks')}
           </h2>
           <p className="text-sm text-muted-foreground">{t('settings.tasksDescription')}</p>
         </div>
+
+        {/* Mobile: icon button; Desktop: text button */}
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={handleRefresh}
+          className="sm:hidden shrink-0"
+          aria-label={t('common.refresh')}
+          title={t('common.refresh')}
+        >
+          <RefreshCw className="w-4 h-4" />
+        </Button>
         <Button
           variant="outline"
           onClick={handleRefresh}
-          className="flex items-center space-x-2"
+          className="hidden sm:inline-flex items-center space-x-2 shrink-0"
         >
           <RefreshCw className="w-4 h-4" />
           <span>{t('common.refresh')}</span>
@@ -74,4 +86,3 @@ export default function SettingsTasksPage() {
     </div>
   );
 }
-
