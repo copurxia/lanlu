@@ -186,7 +186,10 @@ public class FolderHandler <: ArchiveHandler {
         let entries = listEntries(archivePath)
         var result = ArrayList<(String, String)>()
         for (entry in entries) {
-            result.add((entry, ""))
+            // 只返回媒体文件
+            if (isMediaFile(entry)) {
+                result.add((entry, ""))
+            }
         }
         return result.toArray()
     }

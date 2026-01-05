@@ -157,6 +157,16 @@ public class EpubHandler <: ArchiveHandler {
         return mediaType.startsWith("image/")
     }
 
+    /**
+     * 检查文件是否为HTML/XHTML格式
+     */
+    private func isHtmlFile(filePath: String): Bool {
+        let lowerPath = filePath.toAsciiLower()
+        return lowerPath.endsWith(".xhtml") ||
+               lowerPath.endsWith(".html") ||
+               lowerPath.endsWith(".htm")
+    }
+
     public func listEntriesWithTitle(archivePath: String): Array<(String, String)> {
         try {
             if (!DirectoryScanner.fileExists(archivePath)) {
@@ -167,11 +177,14 @@ public class EpubHandler <: ArchiveHandler {
             var entries = ArrayList<(String, String)>()
 
             for (file in epub.allFiles) {
-                let title = match (file.title) {
-                    case Some(t) => t
-                    case None => ""
+                // 只返回HTML/XHTML文件
+                if (isHtmlFile(file.href)) {
+                    let title = match (file.title) {
+                        case Some(t) => t
+                        case None => ""
+                    }
+                    entries.add((file.href, title))
                 }
-                entries.add((file.href, title))
             }
 
             epub.close()

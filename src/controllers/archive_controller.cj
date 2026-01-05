@@ -465,26 +465,15 @@ public class ArchiveController {
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
         let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
 
-        // 过滤媒体文件（图片和视频）或者HTML文件（EPUB特殊处理）
+        // handler 已经进行了适当的过滤：EPUB返回HTML文件，其他返回媒体文件
         var pageFiles = ArrayList<(String, String)>()
         var totalEntries = 0
         var mediaEntries = 0
         for (entry in entriesWithTitle) {
             let (href, title) = entry
             totalEntries += 1
-            // 对于EPUB类型，返回所有XHTML/HTML文件
-            // 对于其他类型，只返回媒体文件
-            if (archive.archive_type == ArchiveTypes.EPUB) {
-                if (isHtmlFile(href)) {
-                    pageFiles.add((href, title))
-                    mediaEntries += 1
-                }
-            } else {
-                if (ArchiveUtils.isMediaFile(href)) {
-                    pageFiles.add((href, title))
-                    mediaEntries += 1
-                }
-            }
+            mediaEntries += 1
+            pageFiles.add((href, title))
         }
 
         // 如果不需要只返回图片文件，获取所有文件
@@ -504,11 +493,11 @@ public class ArchiveController {
             let form = Form()
             form.set("path", href)
             let pageUrl = "/api/archives/${id}/page?${form.toEncodeString()}"
-            // 判断文件类型 - 支持 image、video、html
-            let fileType = if (ArchiveUtils.isVideoFile(href)) {
-                "video"
-            } else if (isHtmlFile(href)) {
+            // 判断文件类型 - handler已经过滤过了，EPUB返回HTML，其他返回媒体文件
+            let fileType = if (archive.archive_type == ArchiveTypes.EPUB) {
                 "html"
+            } else if (ArchiveUtils.isVideoFile(href)) {
+                "video"
             } else {
                 "image"
             }
@@ -782,16 +771,6 @@ public class ArchiveController {
         }
     }
     
-    /**
-     * 检测是否为HTML/XHTML文件
-     */
-    private static func isHtmlFile(filePath: String): Bool {
-        let lowerPath = filePath.toAsciiLower()
-        return lowerPath.endsWith(".xhtml") ||
-               lowerPath.endsWith(".html") ||
-               lowerPath.endsWith(".htm")
-    }
-
     /**
      * 根据文件路径获取Content-Type
      */
