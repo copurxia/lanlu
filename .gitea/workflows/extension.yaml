@@ -1,0 +1,47 @@
+name: Build Extension
+run-name: ${{ github.actor }} is building browser extension 🚀
+on: [push]
+
+jobs:
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@10.27.0
+
+      - name: Install dependencies
+        run: |
+          cd extension
+          pnpm install
+
+      - name: Build extension
+        run: |
+          cd extension
+          pnpm run build
+
+      - name: Lint extension
+        run: |
+          cd extension
+          pnpm run lint
+
+      - name: Package extension
+        run: |
+          cd extension/out
+          zip -r ../../extension.zip .
+          cd ../..
+          ls -lh extension.zip
+
+      - name: Archive extension package
+        uses: actions/upload-artifact@v3
+        with:
+          name: extension-package
+          path: extension.zip
+          retention-days: 30
