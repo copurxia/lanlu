@@ -5,6 +5,7 @@ import std.collection.*
 import archive_ffi.Archive
 import lrr4cj.models.ArchiveTypes
 import lrr4cj.utils.DirectoryScanner
+import lrr4cj.utils.NaturalSort
 
 /**
  * 压缩包类型处理器
@@ -64,12 +65,18 @@ public class ArchiveFileHandler <: ArchiveHandler {
 
     public func getFirstImage(archivePath: String): (String, String) {
         let entries = listEntries(archivePath)
+        // 筛选图片文件并排序
+        let imageEntries = ArrayList<String>()
         for (entry in entries) {
             if (isImageFile(entry)) {
-                return (entry, "")
+                imageEntries.add(entry)
             }
         }
-        return ("", "")
+        if (imageEntries.isEmpty()) {
+            return ("", "")
+        }
+        NaturalSort.sortStrings(imageEntries)
+        return (imageEntries[0], "")
     }
 
     // 支持的压缩包扩展名
@@ -117,6 +124,8 @@ public class ArchiveFileHandler <: ArchiveHandler {
                 result.add((entry, ""))
             }
         }
+        // 按文件名自然排序
+        NaturalSort.sortTuples(result)
         return result.toArray()
     }
 

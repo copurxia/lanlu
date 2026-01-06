@@ -4,6 +4,7 @@ import std.fs.*
 import std.collection.*
 import lrr4cj.models.ArchiveTypes
 import lrr4cj.utils.DirectoryScanner
+import lrr4cj.utils.NaturalSort
 
 /**
  * 文件夹类型处理器
@@ -80,25 +81,41 @@ public class FolderHandler <: ArchiveHandler {
     public func getFirstImage(archivePath: String): (String, String) {
         let entries = listEntries(archivePath)
 
+        // 筛选当前目录的图片文件并排序
+        let imageEntries = ArrayList<String>()
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(archivePath, entry)
             if (DirectoryScanner.isDirectory(fullPath)) {
                 continue
             }
             if (DirectoryScanner.fileExists(fullPath) && isImageFile(entry)) {
-                return (entry, fullPath)
+                imageEntries.add(entry)
             }
         }
+        if (!imageEntries.isEmpty()) {
+            NaturalSort.sortStrings(imageEntries)
+            let firstEntry = imageEntries[0]
+            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
+            return (firstEntry, fullPath)
+        }
 
+        // 如果当前目录没有图片，查找子目录
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(archivePath, entry)
             if (DirectoryScanner.isDirectory(fullPath)) {
                 let subEntries = DirectoryScanner.listDirectory(fullPath)
+                let subImageEntries = ArrayList<String>()
                 for (subEntry in subEntries) {
                     let subFullPath = DirectoryScanner.joinPath(fullPath, subEntry)
                     if (DirectoryScanner.fileExists(subFullPath) && isImageFile(subEntry)) {
-                        return (subEntry, subFullPath)
+                        subImageEntries.add(subEntry)
                     }
+                }
+                if (!subImageEntries.isEmpty()) {
+                    NaturalSort.sortStrings(subImageEntries)
+                    let firstSubEntry = subImageEntries[0]
+                    let subFullPath = DirectoryScanner.joinPath(fullPath, firstSubEntry)
+                    return (firstSubEntry, subFullPath)
                 }
             }
         }
@@ -191,6 +208,8 @@ public class FolderHandler <: ArchiveHandler {
                 result.add((entry, ""))
             }
         }
+        // 按文件名自然排序
+        NaturalSort.sortTuples(result)
         return result.toArray()
     }
 
