@@ -396,44 +396,6 @@ public class ArchiveUtils {
     }
 
     /**
-     * 检查文件是否存在
-     */
-    private static func fileExists(path: String): Bool {
-        try {
-            let filePath = Path(path)
-            return exists(filePath)
-        } catch (_: Exception) {
-            return false
-        }
-    }
-
-    /**
-     * 拼接路径
-     */
-    private static func joinPath(base: String, part: String): String {
-        if (base.endsWith("/")) {
-            if (part.startsWith("/")) {
-                // 移除 part 的前导斜杠
-                let parts = part.split("/")
-                var rest = ""
-                for (i in 1..parts.size) {
-                    if (i > 1) {
-                        rest += "/"
-                    }
-                    rest += parts[i]
-                }
-                return base + rest
-            }
-            return base + part
-        } else {
-            if (part.startsWith("/")) {
-                return base + part
-            }
-            return base + "/" + part
-        }
-    }
-
-    /**
      * 获取PDF文件的页数
      * 使用GhostScript命令: gs -q -dNOSAFER -sDEVICE=jpeg -f "$pdf_path" -c "pdfpagecount = quit"
      */

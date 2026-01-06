@@ -2,8 +2,6 @@ package lrr4cj.models
 
 import lrr4cj.dao.*
 import lrr4cj.utils.*
-import lrr4cj.config.*
-import std.database.sql.*
 import std.collection.*
 import std.time.*
 
