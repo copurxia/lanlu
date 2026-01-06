@@ -60,6 +60,66 @@ public class ArchiveData {
  * 负责处理所有与归档相关的数据库操作
  */
 public class ArchiveDao {
+    /**
+     * 从搜索 token 中剥离 `$` 精确匹配后缀。
+     * 约定：`xxx$` 表示对标签进行完全匹配（tag token 精确匹配）。
+     */
+    private static func stripExactSuffix(token: String): (String, Bool) {
+        let t = token.trimAscii()
+        if (t.size > 1 && t.endsWith("$")) {
+            return (t[0..t.size - 1], true)
+        }
+        return (t, false)
+    }
+
+    /**
+     * 为 tags 字段构建“完全匹配单个 tag token”的条件（tags 为逗号分隔字符串，无空格）。
+     * 匹配四种情况：唯一标签/开头/中间/结尾。
+     */
+    private static func buildExactTagMatchCondition(tagToken: String, params: ArrayList<String>): String {
+        let escaped = SearchFilter.toExactLikePattern(tagToken)
+        params.add(escaped)                 // tags = ?
+        params.add(escaped + ",%")          // tags LIKE 'tag,%'
+        params.add("%," + escaped + ",%")   // tags LIKE '%,tag,%'
+        params.add("%," + escaped)          // tags LIKE '%,tag'
+        return "(tags = ? OR tags LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\')"
+    }
+
+    /**
+     * 带翻译扩展的精确标签匹配条件：
+     * `tag$` 将匹配 tag 本身以及通过翻译检索到的原始标签（namespace:name）。
+     */
+    private static func buildExactTagMatchConditionWithTranslations(tagToken: String, params: ArrayList<String>): String {
+        var candidates: ArrayList<String> = ArrayList<String>()
+        var seen: HashMap<String, Bool> = HashMap<String, Bool>()
+
+        // 原 token
+        if (tagToken.size > 0) {
+            candidates.add(tagToken)
+            seen[tagToken] = true
+        }
+
+        // 翻译命中标签（去重）
+        let translatedTags = TagDao.findTagsByTranslation(tagToken)
+        for (t in translatedTags) {
+            match (seen.get(t)) {
+                case Some(_) => ()
+                case None =>
+                    candidates.add(t)
+                    seen[t] = true
+            }
+        }
+
+        var condition = "("
+        for (i in 0..candidates.size) {
+            if (i > 0) {
+                condition += " OR "
+            }
+            condition += buildExactTagMatchCondition(candidates[i], params)
+        }
+        condition += ")"
+        return condition
+    }
     
     /**
      * 获取所有归档
@@ -217,7 +277,13 @@ public class ArchiveDao {
         let searchResult = SearchFilter.parse(filter)
 
         // 只有普通搜索词参与相关度计算
-        let relevanceTerms = searchResult.terms
+        var relevanceTerms: ArrayList<String> = ArrayList<String>()
+        for (term in searchResult.terms) {
+            let (_, isExactTag) = stripExactSuffix(term)
+            if (!isExactTag) {
+                relevanceTerms.add(term)
+            }
+        }
 
         if (relevanceTerms.size == 0) {
             return "1"  // 无普通搜索词时返回常量
@@ -278,7 +344,18 @@ public class ArchiveDao {
                 if (searchResult.terms.size > 0) {
                     var termConditions: ArrayList<String> = ArrayList<String>()
                     for (term in searchResult.terms) {
-                        let pattern = SearchFilter.toLikePattern(term)
+                        let (termValue, isExactTag) = stripExactSuffix(term)
+                        if (termValue.size == 0) {
+                            continue
+                        }
+
+                        // `$`：标签完全匹配（硬性过滤条件，不参与 OR 相关度）
+                        if (isExactTag) {
+                            whereConditions.add(buildExactTagMatchConditionWithTranslations(termValue, filterParams))
+                            continue
+                        }
+
+                        let pattern = SearchFilter.toLikePattern(termValue)
                         // 原有的字段匹配条件
                         var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'"
                         filterParams.add(pattern)
@@ -287,7 +364,7 @@ public class ArchiveDao {
                         filterParams.add(pattern)
 
                         // 查询翻译匹配的标签，添加 OR 条件
-                        let translatedTags = TagDao.findTagsByTranslation(term)
+                        let translatedTags = TagDao.findTagsByTranslation(termValue)
                         for (tagName in translatedTags) {
                             fieldCondition += " OR tags LIKE ? ESCAPE '\\'"
                             filterParams.add("%" + tagName + "%")
@@ -311,7 +388,18 @@ public class ArchiveDao {
                 // 处理精确短语（引号内的内容，支持翻译搜索）
                 if (searchResult.exactTerms.size > 0) {
                     for (phrase in searchResult.exactTerms) {
-                        let pattern = SearchFilter.toLikePattern(phrase)
+                        let (phraseValue, isExactTag) = stripExactSuffix(phrase)
+                        if (phraseValue.size == 0) {
+                            continue
+                        }
+
+                        // `"xxx$"` 且不包含空格时，按标签完全匹配处理
+                        if (isExactTag && !phraseValue.contains(" ")) {
+                            whereConditions.add(buildExactTagMatchConditionWithTranslations(phraseValue, filterParams))
+                            continue
+                        }
+
+                        let pattern = SearchFilter.toLikePattern(phraseValue)
                         var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'"
                         filterParams.add(pattern)
                         filterParams.add(pattern)
@@ -319,7 +407,7 @@ public class ArchiveDao {
                         filterParams.add(pattern)
 
                         // 查询翻译匹配的标签
-                        let translatedTags = TagDao.findTagsByTranslation(phrase)
+                        let translatedTags = TagDao.findTagsByTranslation(phraseValue)
                         for (tagName in translatedTags) {
                             fieldCondition += " OR tags LIKE ? ESCAPE '\\'"
                             filterParams.add("%" + tagName + "%")
@@ -333,7 +421,18 @@ public class ArchiveDao {
                 // 处理排除词（支持翻译搜索）
                 if (searchResult.excludeTerms.size > 0) {
                     for (excludeTerm in searchResult.excludeTerms) {
-                        let pattern = SearchFilter.toLikePattern(excludeTerm)
+                        let (excludeValue, isExactTag) = stripExactSuffix(excludeTerm)
+                        if (excludeValue.size == 0) {
+                            continue
+                        }
+
+                        // `-xxx$`：排除包含该精确标签的归档
+                        if (isExactTag) {
+                            whereConditions.add("NOT " + buildExactTagMatchConditionWithTranslations(excludeValue, filterParams))
+                            continue
+                        }
+
+                        let pattern = SearchFilter.toLikePattern(excludeValue)
                         var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'"
                         filterParams.add(pattern)
                         filterParams.add(pattern)
@@ -341,7 +440,7 @@ public class ArchiveDao {
                         filterParams.add(pattern)
 
                         // 查询翻译匹配的标签
-                        let translatedTags = TagDao.findTagsByTranslation(excludeTerm)
+                        let translatedTags = TagDao.findTagsByTranslation(excludeValue)
                         for (tagName in translatedTags) {
                             fieldCondition += " OR tags LIKE ? ESCAPE '\\'"
                             filterParams.add("%" + tagName + "%")
@@ -405,7 +504,7 @@ public class ArchiveDao {
                     }
 
                     // 当有搜索词时，添加相关度阈值过滤
-                    if (filter.size > 0) {
+                    if (filter.size > 0 && relevanceExpr != "1") {
                         if (whereClause.size > 0) {
                             whereClause += " AND "
                         }
@@ -451,7 +550,7 @@ public class ArchiveDao {
                     }
 
                     // 当有搜索词时，添加相关度阈值过滤
-                    if (filter.size > 0) {
+                    if (filter.size > 0 && relevanceExpr != "1") {
                         if (whereClause.size > 0) {
                             whereClause += " AND "
                         }
@@ -483,7 +582,7 @@ public class ArchiveDao {
                 } else if (sortby == "size") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY file_size ${orderDirection}"
-                } else if (sortby == "relevance" && filter.size > 0) {
+                } else if (sortby == "relevance" && filter.size > 0 && relevanceExpr != "1") {
                     // 相关度排序：使用已构建的评分表达式
                     sql += " ORDER BY (" + relevanceExpr + ") DESC, created_at DESC"
                 } else {
