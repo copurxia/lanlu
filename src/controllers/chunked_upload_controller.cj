@@ -51,7 +51,18 @@ public class ChunkedUploadController {
                                     let name = reader.readName()
                                     match (name) {
                                         case "filename" => filename = reader.readValue<String>()
-                                        case "category_id" => categoryId = reader.readValue<String>()
+                                        case "category_id" =>
+                                            // 兼容 number/string
+                                            try {
+                                                categoryId = reader.readValue<String>()
+                                            } catch (_: Exception) {
+                                                try {
+                                                    let id = reader.readValue<Int64>()
+                                                    categoryId = id.toString()
+                                                } catch (_: Exception) {
+                                                    let _ = reader.skip()
+                                                }
+                                            }
                                         case "overwrite" =>
                                             // 支持布尔值或字符串
                                             let rawValue = reader.readValue<String>()
@@ -71,7 +82,12 @@ public class ChunkedUploadController {
 
             // 如果有 category_id 和 filename，检查目标文件是否已存在
             if (categoryId.size > 0 && filename.size > 0 && !overwrite) {
-                let categoryOpt = CategoryDao.getCategoryById(categoryId)
+                let internalId = try {
+                    Int64.parse(categoryId)
+                } catch (_: Exception) {
+                    CategoryDao.getInternalId(categoryId)
+                }
+                let categoryOpt = CategoryDao.getCategoryByInternalId(internalId)
                 match (categoryOpt) {
                     case Some(cat) =>
                         let targetPath = Path("${cat.scanPath}/${filename}")
@@ -232,7 +248,17 @@ public class ChunkedUploadController {
                                             originalFileName = reader.readValue<String>()
                                             getLogger("chunked_upload").info("从JSON中解析到文件名", ("originalFileName", originalFileName))
                                         case "category_id" =>
-                                            categoryId = reader.readValue<String>()
+                                            // 兼容 number/string
+                                            try {
+                                                categoryId = reader.readValue<String>()
+                                            } catch (_: Exception) {
+                                                try {
+                                                    let id = reader.readValue<Int64>()
+                                                    categoryId = id.toString()
+                                                } catch (_: Exception) {
+                                                    let _ = reader.skip()
+                                                }
+                                            }
                                             getLogger("chunked_upload").info("从JSON中解析到分类ID", ("categoryId", categoryId))
                                         case "overwrite" =>
                                             let rawValue = reader.readValue<String>()
@@ -300,8 +326,13 @@ public class ChunkedUploadController {
                 return
             }
 
-            // 从分类获取归档目录
-            let categoryOpt = CategoryDao.getCategoryById(categoryId)
+            // 从分类获取归档目录（统一使用内部数字ID）
+            let categoryInternalId = try {
+                Int64.parse(categoryId)
+            } catch (_: Exception) {
+                CategoryDao.getInternalId(categoryId)
+            }
+            let categoryOpt = CategoryDao.getCategoryByInternalId(categoryInternalId)
             var archivePath = ""
             match (categoryOpt) {
                 case Some(cat) => archivePath = cat.scanPath
@@ -383,7 +414,8 @@ public class ChunkedUploadController {
                     "{" +
                     "\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\"," +
                     "\"relative_path\":\"${escapeJsonString(finalArchivePath.toString())}\"," +
-                    "\"filename\":\"${escapeJsonString(originalFileName)}\"" +
+                    "\"filename\":\"${escapeJsonString(originalFileName)}\"," +
+                    "\"category_id\":${categoryInternalId}" +
                     "}"
                 TaskDao.updateTaskParameters(taskId, paramsJson)
                 TaskDao.updateTaskType(taskId, "upload_process")
@@ -401,7 +433,7 @@ public class ChunkedUploadController {
             let cachePath = SystemSettingsService.getPath("CACHE_PATH")
             let thumbnailPath = SystemSettingsService.getPath("THUMBNAIL_PATH")
 
-            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"category_id\":\"${escapeJsonString(categoryId)}\",\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\"}"
+            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"category_id\":${categoryInternalId},\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\"}"
             let scanTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "chunked_upload:${taskId}", "upload")
             if (scanTask.id > 0) {
                 TaskPoolService.getInstance().notifyTaskAvailable()

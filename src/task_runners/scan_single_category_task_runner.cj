@@ -43,10 +43,17 @@ public class ScanSingleCategoryTaskRunner {
 
             let triggerSource = if (triggerSourceParam.size > 0) { triggerSourceParam } else { "manual" }
             let childPriority = if (childPriorityParam > 0) { childPriorityParam } else { 30i32 }
-            let catid = catidParam
+            let categoryInternalId = CategoryDao.getInternalId(catidParam)
+            if (categoryInternalId <= 0) {
+                let errorMsg = "Category not found: ${catidParam}"
+                TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                TaskModel.failTask(taskId, errorMsg)
+                TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
+                return
+            }
             let groupId = "scan_single_category:${taskId}"
 
-            TaskIO.appendLog(taskId, "Parsed parameters: scanPath=${scanPath}, triggerSource=${triggerSource}, childPriority=${childPriority}, categoryId=${catid}")
+            TaskIO.appendLog(taskId, "Parsed parameters: scanPath=${scanPath}, triggerSource=${triggerSource}, childPriority=${childPriority}, categoryId=${categoryInternalId.toString()}")
             TaskModel.updateTaskProgress(taskId, 10, "Scanning directory ${scanPath}")
 
             TaskIO.appendLog(taskId, "Starting directory scan with streaming task submission...")
@@ -54,7 +61,7 @@ public class ScanSingleCategoryTaskRunner {
             // 使用流式遍历，发现即提交
             var total: Int64 = 0
             var created: Int64 = 0
-            let scanContext = ScanContext(groupId, triggerSource, childPriority, catid, scanPath, context.notifyTaskAvailable)
+            let scanContext = ScanContext(groupId, triggerSource, childPriority, categoryInternalId, scanPath, context.notifyTaskAvailable)
             let (scannedTotal, createdCount) = scanDirectoryRecursive(scanPath, scanContext)
             total = scannedTotal
             created = createdCount
@@ -132,7 +139,7 @@ public class ScanSingleCategoryTaskRunner {
                 getLogger("scan_single_category").debug("Archive not found in database, will process: ${filePath}")
         }
 
-        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"category_id\":\"${escapeJson(ctx.catid)}\"}"
+        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"category_id\":${ctx.categoryId}}"
         let childTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, ctx.priority, ctx.groupId, ctx.triggerSource)
         if (childTask.id > 0) {
             ctx.notifier()
@@ -196,15 +203,15 @@ class ScanContext {
     public let groupId: String
     public let triggerSource: String
     public let priority: Int32
-    public let catid: String
+    public let categoryId: Int64
     public let basePath: String
     public let notifier: TaskNotifier
 
-    public init(groupId: String, triggerSource: String, priority: Int32, catid: String, basePath: String, notifier: TaskNotifier) {
+    public init(groupId: String, triggerSource: String, priority: Int32, categoryId: Int64, basePath: String, notifier: TaskNotifier) {
         this.groupId = groupId
         this.triggerSource = triggerSource
         this.priority = priority
-        this.catid = catid
+        this.categoryId = categoryId
         this.basePath = basePath
         this.notifier = notifier
     }

@@ -45,7 +45,8 @@ public class DownloadUrlTaskRunner {
         let categoryOpt = CategoryDao.getCategoryByInternalId(categoryId)
         var categoryPath = ""
         match (categoryOpt) {
-            case Some(cat) => categoryPath = cat.scanPath
+            case Some(cat) =>
+                categoryPath = cat.scanPath
             case None =>
                 fail(taskId, "Category not found")
                 return
@@ -291,7 +292,15 @@ public class DownloadUrlTaskRunner {
                 case obj: JsonObject =>
                     let fields = obj.getFields()
                     if (fields.contains("category_id")) {
-                        return Int64.parse(fields["category_id"].toString().trimAscii())
+                        let raw = fields["category_id"].toString().trimAscii()
+                        // 兼容两种格式：
+                        // - 直接传内部ID（Int）
+                        // - 传 catid（如 CAT_...），需要再查一次内部ID
+                        try {
+                            return Int64.parse(raw)
+                        } catch (_: Exception) {
+                            return CategoryDao.getInternalId(raw)
+                        }
                     }
                 case _ => ()
             }
@@ -655,4 +664,3 @@ public class DownloadUrlTaskRunner {
         return "archive"  // 默认压缩包（向后兼容）
     }
 }
-

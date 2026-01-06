@@ -17,9 +17,14 @@ public class UploadProcessTaskRunner {
         let archivePath = parseField(parameters, "archive_path")
         let relativePath = parseField(parameters, "relative_path")
         let fileName = parseField(parameters, "filename")
+        let categoryId = parseField(parameters, "category_id")
 
         if (archivePath.size == 0) {
             fail(taskId, "archive_path is required")
+            return
+        }
+        if (categoryId.size == 0) {
+            fail(taskId, "category_id is required")
             return
         }
 
@@ -27,7 +32,7 @@ public class UploadProcessTaskRunner {
             TaskModel.updateTaskProgress(taskId, 50, "创建档案扫描任务")
 
             // 创建 scan_archive 子任务（优先级 20，高于定时扫描）
-            let scanParams = "{\"archive_path\":\"${escapeJson(archivePath)}\"}"
+            let scanParams = "{\"archive_path\":\"${escapeJson(archivePath)}\",\"category_id\":${categoryId}}"
             let groupId = "upload:${taskId}"
             let scanTask = TaskModel.createTaskWithOptions(
                 "扫描上传档案",
@@ -95,4 +100,3 @@ public class UploadProcessTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 }
-

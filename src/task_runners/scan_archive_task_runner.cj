@@ -122,6 +122,8 @@ public class ScanArchiveTaskRunner {
                         let value = fields["category_id"]
                         match (value) {
                             case s: JsonString => categoryId = s.getValue().trimAscii()
+                            case n: JsonInt => categoryId = n.getValue().toString()
+                            case n: JsonFloat => categoryId = Int64(n.getValue()).toString()
                             case _ => ()
                         }
                     }
@@ -130,6 +132,28 @@ public class ScanArchiveTaskRunner {
         } catch (_: Exception) {}
 
         return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId)
+    }
+
+    private static func resolveCategory(categoryIdOrCatid: String): (Int64, String, String) {
+        let trimmed = categoryIdOrCatid.trimAscii()
+        if (trimmed.size == 0) {
+            return (0, "", "")
+        }
+
+        // 优先按内部数字ID解析
+        try {
+            let internalId = Int64.parse(trimmed)
+            match (CategoryDao.getCategoryByInternalId(internalId)) {
+                case Some(cat) => return (internalId, cat.scanPath, cat.catid)
+                case None => return (0, "", "")
+            }
+        } catch (_: Exception) {
+            // 再按 catid 解析（兼容旧参数）
+            match (CategoryDao.getCategoryById(trimmed)) {
+                case Some(cat) => return (cat.id, cat.scanPath, cat.catid)
+                case None => return (0, "", "")
+            }
+        }
     }
 
     private static func processArchiveInternal(filePath: String, config: ArchiveConfig, notifier: TaskNotifier): ProcessResultData {
@@ -146,13 +170,13 @@ public class ScanArchiveTaskRunner {
             let handler = handlerOpt.getOrThrow()
             let archiveType = handler.getType()
 
-            let archiveBasePath = if (config.categoryId.size > 0) {
-                match (CategoryDao.getCategoryById(config.categoryId)) {
-                    case Some(cat) => cat.scanPath
-                    case None => throw Exception("Category not found: ${config.categoryId}")
-                }
-            } else {
+            if (config.categoryId.size == 0) {
                 throw Exception("category_id is required")
+            }
+
+            let (categoryInternalId, archiveBasePath, categoryCatid) = resolveCategory(config.categoryId)
+            if (categoryInternalId <= 0 || archiveBasePath.size == 0) {
+                throw Exception("Category not found: ${config.categoryId}")
             }
             let relativePath = ArchiveUtils.calculateRelativePath(filePath, archiveBasePath)
             let fileName = ArchiveUtils.getFullFileName(filePath)
@@ -196,7 +220,7 @@ public class ScanArchiveTaskRunner {
                 return ProcessResultData(true, "", "")
             }
 
-            let dbResult = addArchiveToDatabase(filePath, archiveBasePath, config.categoryId, archiveType)
+            let dbResult = addArchiveToDatabase(filePath, archiveBasePath, categoryInternalId, archiveType)
             if (!dbResult.success) {
                 return dbResult
             }
@@ -223,7 +247,7 @@ public class ScanArchiveTaskRunner {
             }
 
             // 提交元数据插件任务（根据分类配置）
-            submitMetadataPluginTasks(config.categoryId, dbResult.archiveId, notifier)
+            submitMetadataPluginTasks(categoryInternalId, dbResult.archiveId, notifier)
 
             return ProcessResultData(true, dbResult.archiveId, "")
         } catch (e: Exception) {
@@ -231,7 +255,7 @@ public class ScanArchiveTaskRunner {
         }
     }
 
-    private static func addArchiveToDatabase(filePath: String, archiveBasePath: String, catid: String, archiveType: String): ProcessResultData {
+    private static func addArchiveToDatabase(filePath: String, archiveBasePath: String, categoryId: Int64, archiveType: String): ProcessResultData {
         try {
             let archiveId = ArchiveUtils.generateArchiveId(filePath)
 
@@ -242,9 +266,8 @@ public class ScanArchiveTaskRunner {
 
             let relativePath = ArchiveUtils.calculateRelativePath(filePath, archiveBasePath)
 
-            let categoryId = CategoryDao.getInternalId(catid)
             if (categoryId == 0) {
-                return ProcessResultData(false, "", "Category not found: ${catid}")
+                return ProcessResultData(false, "", "category_id is required")
             }
 
             let success = ArchiveDao.insertArchive(archiveId, defaultTitle, fileName, fileSize, fileModTime, relativePath, archiveType, categoryId)
@@ -292,12 +315,10 @@ public class ScanArchiveTaskRunner {
     /**
      * 根据分类配置提交元数据插件任务
      */
-    private static func submitMetadataPluginTasks(categoryId: String, archiveId: String, notifier: TaskNotifier): Unit {
-        if (categoryId.size == 0) {
-            return
-        }
+    private static func submitMetadataPluginTasks(categoryId: Int64, archiveId: String, notifier: TaskNotifier): Unit {
+        if (categoryId <= 0) { return }
 
-        let categoryOpt = CategoryDao.getCategoryById(categoryId)
+        let categoryOpt = CategoryDao.getCategoryByInternalId(categoryId)
         match (categoryOpt) {
             case Some(category) =>
                 let pluginNamespaces = parsePluginsArray(category.plugins)
