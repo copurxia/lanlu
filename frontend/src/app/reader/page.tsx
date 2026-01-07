@@ -1,27 +1,20 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useState, useEffect, useCallback, useMemo, Suspense, useRef, memo, forwardRef } from 'react';
-import Image from 'next/image';
+import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'react';
+import type React from 'react';
 import { ArchiveService, PageInfo } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
-import { Slider } from '@/components/ui/slider';
-import { ThemeButton } from '@/components/theme/theme-toggle';
-import { LanguageButton } from '@/components/language/LanguageButton';
-import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { useLanguage } from '@/contexts/LanguageContext';
-import {
-  Sheet,
-  SheetClose,
-  SheetContent,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from '@/components/ui/sheet';
+import { MediaInfoOverlay } from '@/components/reader/components/MediaInfoOverlay';
+import { ReaderFloatingControls } from '@/components/reader/components/ReaderFloatingControls';
+import { ReaderPreloadArea } from '@/components/reader/components/ReaderPreloadArea';
+import { ReaderSidebar } from '@/components/reader/components/ReaderSidebar';
+import { ReaderSingleModeView } from '@/components/reader/components/ReaderSingleModeView';
+import { ReaderTopBar } from '@/components/reader/components/ReaderTopBar';
+import { ReaderWebtoonModeView } from '@/components/reader/components/ReaderWebtoonModeView';
 import { logger } from '@/lib/logger';
 import { toast } from 'sonner';
 import {
@@ -41,8 +34,6 @@ import {
   Book,
   ArrowRight,
   ArrowDown,
-  Heart,
-  Settings,
   Layout,
   Play,
   Scissors,
@@ -51,59 +42,10 @@ import {
   ZoomIn,
   Eye,
   Info,
-  Menu,
   MousePointerClick
 } from 'lucide-react';
 import Link from 'next/link';
 import type { ArchiveMetadata } from '@/types/archive';
-
-// Memo化的图片组件，减少不必要的重渲染
-const MemoizedImage = memo(Image, (prevProps, nextProps) => {
-  return (
-    prevProps.src === nextProps.src &&
-    prevProps.fill === nextProps.fill &&
-    prevProps.className === nextProps.className &&
-    prevProps.style === nextProps.style
-  );
-});
-
-MemoizedImage.displayName = 'MemoizedImage';
-
-// Memo化的视频组件
-const MemoizedVideo = memo(
-  forwardRef(function MemoizedVideo(
-    {
-      src,
-      className,
-      style,
-      onLoadedData,
-      onError,
-    }: {
-      src: string;
-      className?: string;
-      style?: React.CSSProperties;
-      onLoadedData?: () => void;
-      onError?: () => void;
-    },
-    ref: React.ForwardedRef<HTMLVideoElement>
-  ) {
-    return (
-      <video
-        ref={ref}
-        src={src}
-        controls
-        playsInline
-        preload="metadata"
-        className={className}
-        style={style}
-        onLoadedData={onLoadedData}
-        onError={onError}
-      />
-    );
-  })
-);
-
-MemoizedVideo.displayName = 'MemoizedVideo';
 
 const TAP_MOVE_THRESHOLD_PX = 10;
 const TAP_MAX_DURATION_MS = 350;
@@ -251,6 +193,7 @@ function ReaderContent() {
   const countdownToastId = useRef<string | number | null>(null); // toast ID引用
   const COUNTDOWN_DURATION = 3; // 倒计时持续时间（秒）
   const sidebarScrollRef = useRef<HTMLDivElement | null>(null); // 侧边栏滚动容器引用
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -294,6 +237,12 @@ function ReaderContent() {
       router.push('/');
     }
   }, [router]);
+
+  const handleNavigateToArchiveFromSettings = useCallback(() => {
+    if (!id) return;
+    setSettingsOpen(false);
+    router.push(`/archive?id=${id}`);
+  }, [id, router]);
 
   // 使用新的阅读设置hooks，统一管理所有localStorage逻辑
   const [readingMode, toggleReadingMode] = useReadingMode();
@@ -1045,6 +994,23 @@ function ReaderContent() {
     setTranslateY(0);
   }, []);
 
+  const handleSliderChangePage = useCallback(
+    (newPage: number) => {
+      setCurrentPage(newPage);
+      resetTransform();
+
+      if (readingMode === 'webtoon' && webtoonContainerRef.current) {
+        let accumulatedHeight = 0;
+        for (let i = 0; i < newPage; i++) {
+          const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+          accumulatedHeight += imageHeight;
+        }
+        webtoonContainerRef.current.scrollTop = accumulatedHeight;
+      }
+    },
+    [resetTransform, readingMode, imageHeights, containerHeight]
+  );
+
   // 处理双击放大
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     if (!doubleTapZoom) return;
@@ -1213,6 +1179,22 @@ function ReaderContent() {
     }
   }, [resetTransform]);
 
+  const handleSidebarThumbLoaded = useCallback((pageIndex: number) => {
+    setSidebarImagesLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(pageIndex);
+      return next;
+    });
+  }, []);
+
+  const handleSidebarThumbError = useCallback((pageIndex: number) => {
+    setSidebarImagesLoading((prev) => {
+      const next = new Set(prev);
+      next.delete(pageIndex);
+      return next;
+    });
+  }, []);
+
   // 加载更多侧边栏页面
   const handleLoadMoreSidebarPages = useCallback(() => {
     // 保存当前滚动位置
@@ -1347,6 +1329,39 @@ function ReaderContent() {
 
     return { start: startIndex, end: endIndex };
   }, [pages.length, imageHeights]);
+
+  const handleWebtoonScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const container = e.currentTarget;
+
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+
+      scrollTimeoutRef.current = setTimeout(() => {
+        let accumulatedHeight = 0;
+        let newPageIndex = 0;
+
+        for (let i = 0; i < pages.length; i++) {
+          const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
+          accumulatedHeight += imageHeight;
+          if (accumulatedHeight > container.scrollTop + container.clientHeight * 0.3) {
+            newPageIndex = i;
+            break;
+          }
+        }
+
+        if (newPageIndex !== currentPage && newPageIndex >= 0 && newPageIndex < pages.length) {
+          setCurrentPage(newPageIndex);
+        }
+
+        const newVisibleRange = calculateVisibleRange(container.scrollTop, container.clientHeight);
+        setVisibleRange(newVisibleRange);
+        setContainerHeight(container.clientHeight);
+      }, 16);
+    },
+    [calculateVisibleRange, containerHeight, currentPage, imageHeights, pages.length]
+  );
 
   // 条漫模式下测量HTML页高度，避免HTML页内部滚动/高度不准导致的滚动计算错误
   useEffect(() => {
@@ -2003,9 +2018,6 @@ function ReaderContent() {
     }
   }, [currentPage, readingMode, pages.length, loadedImages, visibleRange.start, visibleRange.end]);
 
-  // 滚动事件防抖处理
-  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
   // 设置Intersection Observer用于懒加载
   useEffect(() => {
     if (readingMode === 'webtoon') {
@@ -2125,295 +2137,37 @@ function ReaderContent() {
     <div
       className="h-screen bg-background text-foreground flex flex-col overflow-hidden relative"
     >
-      {/* 简洁的工具栏 */}
-      <div className={`
-        bg-background/95 backdrop-blur-sm border-b
-        transition-all duration-250 ease-out
-        will-change-transform will-change-opacity
-        ${showToolbar 
-          ? 'h-auto translate-y-0 opacity-100' 
-          : '!h-0 -translate-y-4 opacity-0 overflow-hidden'}
-      `}>
-        <div className={`
-          transition-all duration-250 ease-out
-          ${showToolbar ? 'p-3 opacity-100' : 'p-0 opacity-0'}
-        `}>
-          <div className={`flex items-center justify-between transition-all duration-250 ease-out ${showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
-            {/* 左侧：返回按钮和功能按钮 */}
-            <div className={`flex items-center space-x-2 transition-all duration-250 ease-out delay-50 ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4'}`}>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-border bg-background hover:bg-accent hover:text-accent-foreground pointer-events-auto relative z-50"
-                onClick={handleBack}
-              >
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                <span className="hidden sm:inline">{t('reader.back')}</span>
-              </Button>
+      <ReaderTopBar
+        showToolbar={showToolbar}
+        archiveTitle={archiveTitle}
+        onBack={handleBack}
+        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
+        onToggleReadingMode={toggleReadingMode}
+        readingModeIcon={getReadingModeIcon()}
+        readingModeText={getReadingModeText()}
+        t={t}
+      />
 
-              {/* 主题切换按钮 */}
-              <ThemeButton />
-
-              {/* 语言切换按钮 */}
-              <LanguageButton />
-
-              {/* 侧边栏导航图标按钮 */}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setSidebarOpen(!sidebarOpen)}
-                className={`
-                  transition-all duration-250 ease-out delay-50
-                  ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4 pointer-events-none'}
-                `}
-                title={t('reader.navigation')}
-              >
-                <Menu className="w-5 h-5" />
-              </Button>
-            </div>
-
-            {/* 中间：标题显示（仅PC端且有标题时显示） */}
-            {archiveTitle && (
-              <div className={`hidden lg:flex items-center justify-center flex-1 px-4 transition-all duration-250 ease-out delay-75 ${showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
-                <h1 className="text-sm font-medium text-foreground truncate max-w-md text-center" title={archiveTitle}>
-                  {archiveTitle}
-                </h1>
-              </div>
-            )}
-
-            {/* 右侧：阅读模式切换 */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={toggleReadingMode}
-              className={`border-border bg-background hover:bg-accent hover:text-accent-foreground transition-all duration-250 ease-out delay-50 ${showToolbar ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'}`}
-            >
-              {getReadingModeIcon()}
-              <span className="ml-2 hidden sm:inline">{getReadingModeText()}</span>
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      {/* 悬浮进度条和收藏按钮 - 紧挨在一起的两个独立区域 */}
-      <div className={`
-        absolute bottom-8 left-1/2 transform -translate-x-1/2 flex items-center gap-3 
-        transition-all duration-250 ease-out z-50
-        will-change-transform will-change-opacity
-        ${showToolbar 
-          ? 'opacity-100 translate-y-0 pointer-events-auto' 
-          : 'opacity-0 translate-y-4 pointer-events-none'}
-      `}>
-        {/* 进度条区域 */}
-        <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full px-4 py-3 shadow-lg">
-          <div className="flex items-center space-x-2">
-            <Slider
-              value={[currentPage]}
-              onValueChange={(value) => {
-                const newPage = value[0];
-                setCurrentPage(newPage);
-                resetTransform();
-
-                // 条漫模式下需要滚动到对应位置
-                if (readingMode === 'webtoon' && webtoonContainerRef.current) {
-                  let accumulatedHeight = 0;
-
-                  // 按单个图片计算
-                  for (let i = 0; i < newPage; i++) {
-                    const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-                    accumulatedHeight += imageHeight;
-                  }
-
-                  webtoonContainerRef.current.scrollTop = accumulatedHeight;
-                }
-              }}
-              max={pages.length - 1}
-              min={0}
-              step={1}
-              className="w-40 sm:w-64 h-2"
-            />
-            <span className="text-sm whitespace-nowrap font-medium text-foreground">{currentPage + 1}/{pages.length}</span>
-          </div>
-        </div>
-
-        {/* 设置按钮区域 */}
-        <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full p-0 shadow-lg">
-          <Sheet open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <SheetTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className={`
-                  rounded-full h-11 w-11 p-1
-                  transition-all duration-150 ease-out
-                  hover:scale-110 active:scale-95
-                  text-muted-foreground hover:text-foreground hover:bg-accent
-                  will-change-transform
-                `}
-                title={t('reader.settings')}
-              >
-                <Settings className="h-4 w-4" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="right" className="flex flex-col max-w-sm !p-5 sm:!p-6">
-              <SheetHeader className="space-y-3 text-left">
-                <div className="flex items-center gap-2.5">
-                  <Settings className="h-5 w-5 shrink-0 text-muted-foreground" />
-                  <div className="flex flex-col">
-                    <SheetTitle className="text-base">{t('reader.settings')}</SheetTitle>
-                    {archiveTitle ? (
-                      <div className="max-w-[240px] truncate text-xs text-muted-foreground">{archiveTitle}</div>
-                    ) : null}
-                  </div>
-                </div>
-              </SheetHeader>
-
-              <div className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1">
-                {archiveMetadata ? (
-                  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium">{t('archive.summary')}</span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-8 rounded-lg px-3"
-                        disabled={!id}
-                        onClick={() => {
-                          if (!id) return;
-                          setSettingsOpen(false);
-                          router.push(`/archive?id=${id}`);
-                        }}
-                      >
-                        {t('archive.details')}
-                      </Button>
-                    </div>
-                    <div className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap line-clamp-4">
-                      {archiveMetadata.summary ? archiveMetadata.summary : t('archive.noSummary')}
-                    </div>
-                    <div className="space-y-2">
-                      <span className="text-sm font-medium">{t('archive.tags')}</span>
-                      {metadataTags.length > 0 ? (
-                        <div className="flex flex-wrap gap-1.5">
-                          {metadataTags.slice(0, 10).map((tag, index) => (
-                            <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
-                              {tag}
-                            </Badge>
-                          ))}
-                          {metadataTags.length > 10 ? (
-                            <Badge variant="secondary" className="text-xs">
-                              +{metadataTags.length - 10}
-                            </Badge>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="text-xs text-muted-foreground">{t('archive.noTags')}</div>
-                      )}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="flex flex-col gap-2.5">
-                  {settingButtons.map((setting) => {
-                    const Icon = setting.icon;
-                    const borderClass = setting.active
-                      ? 'border-primary/70 bg-primary/10 text-primary'
-                      : 'border-border/70 bg-background/90 text-foreground hover:border-foreground/50 hover:bg-accent/30';
-                    const disabledClass = setting.disabled
-                      ? 'opacity-55 cursor-not-allowed hover:border-border/70 hover:bg-background/90'
-                      : '';
-
-                    return (
-                      <Button
-                        key={setting.key}
-                        variant="ghost"
-                        size="sm"
-                        onClick={setting.onClick}
-                        disabled={setting.disabled}
-                        title={setting.tooltip}
-                        className={`
-                          flex items-center w-full gap-3 rounded-xl border px-3.5 py-3 text-left text-sm font-medium
-                          transition-colors duration-150 hover:shadow-sm
-                          ${borderClass}
-                          ${disabledClass}
-                        `}
-                      >
-                        <Icon
-                          className={`h-5 w-5 shrink-0 ${
-                            setting.disabled
-                              ? 'text-muted-foreground/50'
-                              : setting.active
-                                ? 'text-primary'
-                                : 'text-muted-foreground'
-                          }`}
-                        />
-                        <span className="flex-1">{setting.label}</span>
-                        <span
-                          className={`h-2.5 w-2.5 rounded-full ${
-                            setting.disabled
-                              ? 'bg-muted-foreground/25'
-                              : setting.active
-                                ? 'bg-primary'
-                                : 'bg-muted-foreground/35'
-                          }`}
-                          aria-hidden
-                        />
-                      </Button>
-                    );
-                  })}
-                </div>
-
-                {/* 自动翻页间隔时间调整 */}
-                {autoPlayMode && (
-                  <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{t('reader.pageInterval')}</span>
-                      <span className="text-sm text-muted-foreground">{autoPlayInterval}秒</span>
-                    </div>
-                    <Slider
-                      value={[autoPlayInterval]}
-                      onValueChange={(value) => setAutoPlayInterval(value[0])}
-                      max={10}
-                      min={1}
-                      step={1}
-                      className="w-full"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <SheetFooter className="mt-5 border-t border-border/60 pt-4">
-                <SheetClose asChild>
-                  <Button variant="outline" className="w-full justify-center rounded-xl">
-                    {t('common.close')}
-                  </Button>
-                </SheetClose>
-              </SheetFooter>
-            </SheetContent>
-          </Sheet>
-        </div>
-
-        {/* 收藏按钮区域 - 仅在未收藏时显示 */}
-        {!isFavorited && (
-          <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full p-0 shadow-lg">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleFavorite}
-              className={`
-                rounded-full h-11 w-11 p-1
-                transition-all duration-150 ease-out
-                hover:scale-110 active:scale-95
-                text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20
-                will-change-transform
-              `}
-              title={t('reader.favorite')}
-            >
-              <Heart className="w-4 h-4" />
-            </Button>
-          </div>
-        )}
-      </div>
+      <ReaderFloatingControls
+        showToolbar={showToolbar}
+        currentPage={currentPage}
+        totalPages={pages.length}
+        onChangePage={handleSliderChangePage}
+        settingsOpen={settingsOpen}
+        onSettingsOpenChange={setSettingsOpen}
+        archiveTitle={archiveTitle}
+        archiveMetadata={archiveMetadata}
+        metadataTags={metadataTags}
+        id={id}
+        onNavigateToArchive={handleNavigateToArchiveFromSettings}
+        settingButtons={settingButtons}
+        autoPlayMode={autoPlayMode}
+        autoPlayInterval={autoPlayInterval}
+        onAutoPlayIntervalChange={setAutoPlayInterval}
+        isFavorited={isFavorited}
+        onToggleFavorite={toggleFavorite}
+        t={t}
+      />
 
       {/* 主要阅读区域 */}
       <div
@@ -2440,600 +2194,97 @@ function ReaderContent() {
           toggleToolbar();
         }}
       >
-        {mediaInfoEnabled && mediaInfoOverlayLines.length > 0 && (
-          <div
-            className={[
-              'absolute top-3 z-[60] pointer-events-none select-none',
-              sidebarOpen ? 'left-[calc(280px+12px)] sm:left-[calc(320px+12px)]' : 'left-3',
-            ].join(' ')}
-          >
-            <div className="rounded-lg bg-black/55 backdrop-blur-sm border border-white/10 px-3 py-2 text-[11px] leading-snug font-mono text-white max-w-[70vw] sm:max-w-[520px]">
-              {mediaInfoOverlayLines.map((line, idx) => (
-                <div key={idx} className="whitespace-pre-wrap">
-                  {line}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {mediaInfoEnabled ? (
+          <MediaInfoOverlay lines={mediaInfoOverlayLines} sidebarOpen={sidebarOpen} />
+        ) : null}
 
         {/* 侧边栏导航 */}
-        {sidebarOpen && (
-          <div
-            ref={sidebarScrollRef}
-            className="absolute left-0 top-0 bottom-0 w-[280px] sm:w-[320px] bg-background/95 backdrop-blur-sm border-r border-border z-40 flex flex-col"
-            onWheel={(e) => e.stopPropagation()}
-          >
-            <div className="flex-1 overflow-y-auto">
-              <div className="p-3">
-                {sidebarLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Spinner />
-                  </div>
-                ) : isEpub ? (
-                  // EPUB章节列表视图
-                  <div className="space-y-1">
-                    {sidebarDisplayPages.map((page, index) => (
-                      <button
-                        key={index}
-                        onClick={() => handleSidebarPageSelect(index)}
-                        className={`w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors group text-left ${
-                          currentPage === index ? 'bg-accent text-accent-foreground' : ''
-                        }`}
-                      >
-                        <span className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
-                          {index + 1}
-                        </span>
-                        <span className="flex-1 truncate text-sm group-hover:text-primary transition-colors">
-                          {page.title || `${t('archive.chapter')} ${index + 1}`}
-                        </span>
-                        <Book className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  // 缩略图网格视图
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {sidebarDisplayPages.map((page, index) => {
-                      const actualPageIndex = index;
-                      const isLoading = sidebarImagesLoading.has(actualPageIndex);
-                      const isCurrentPage = currentPage === actualPageIndex;
-
-                      return (
-                        <button
-                          key={actualPageIndex}
-                          onClick={() => handleSidebarPageSelect(actualPageIndex)}
-                          className={`group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all duration-200 ${
-                            isCurrentPage ? 'ring-2 ring-primary' : ''
-                          }`}
-                        >
-                          {/* 当前页面高亮 */}
-                          {isCurrentPage && (
-                            <div className="absolute inset-0 bg-primary/10 z-10 flex items-center justify-center">
-                              <div className="bg-primary text-primary-foreground text-xs px-2 py-1 rounded-full font-medium">
-                                {actualPageIndex + 1}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 加载状态 */}
-                          {isLoading && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-muted/50 z-10">
-                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                            </div>
-                          )}
-
-                          {/* 页面图片/视频 */}
-                          <div className="relative w-full h-full">
-                            {page.type === 'video' ? (
-                              <video
-                                src={page.url}
-                                className="w-full h-full object-cover"
-                                muted
-                                loop
-                                playsInline
-                                onMouseEnter={(e) => {
-                                  const video = e.target as HTMLVideoElement;
-                                  video.play().catch(() => {});
-                                }}
-                                onMouseLeave={(e) => {
-                                  const video = e.target as HTMLVideoElement;
-                                  video.pause();
-                                  video.currentTime = 0;
-                                }}
-                              />
-                            ) : (
-                              <Image
-                                src={page.url}
-                                alt={t('archive.previewPage').replace('{current}', String(actualPageIndex + 1)).replace('{total}', String(pages.length))}
-                                fill
-                                className={`object-contain transition-opacity duration-200 ${isLoading ? 'opacity-0' : 'opacity-100'}`}
-                                onLoadingComplete={() => {
-                                  setSidebarImagesLoading(prev => {
-                                    const newSet = new Set(prev);
-                                    newSet.delete(actualPageIndex);
-                                    return newSet;
-                                  });
-                                }}
-                                onError={() => {
-                                  setSidebarImagesLoading(prev => {
-                                    const newSet = new Set(prev);
-                                    newSet.delete(actualPageIndex);
-                                    return newSet;
-                                  });
-                                }}
-                                draggable={false}
-                              />
-                            )}
-                          </div>
-
-                          {/* 页码标签 */}
-                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs py-1 px-1 text-center truncate">
-                            {actualPageIndex + 1}{page.type === 'video' ? ' 🎬' : ''}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* 加载更多按钮 */}
-                {!isEpub && sidebarLoadedCount < pages.length && (
-                  <div className="mt-4 text-center">
-                    <Button
-                      variant="outline"
-                      onClick={handleLoadMoreSidebarPages}
-                      disabled={sidebarLoading}
-                      className="w-full"
-                    >
-                      {sidebarLoading ? <Spinner className="mr-2" /> : null}
-                      {t('archive.loadMore')}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <ReaderSidebar
+          open={sidebarOpen}
+          sidebarScrollRef={sidebarScrollRef}
+          sidebarLoading={sidebarLoading}
+          isEpub={isEpub}
+          sidebarDisplayPages={sidebarDisplayPages}
+          currentPage={currentPage}
+          sidebarImagesLoading={sidebarImagesLoading}
+          pagesLength={pages.length}
+          canLoadMore={sidebarLoadedCount < pages.length}
+          onSelectPage={handleSidebarPageSelect}
+          onLoadMore={handleLoadMoreSidebarPages}
+          onThumbLoaded={handleSidebarThumbLoaded}
+          onThumbError={handleSidebarThumbError}
+          t={t}
+        />
 
         {/* 单页模式 */}
-        {readingMode !== 'webtoon' && (
-          <div
-            className={`w-full h-full transition-all duration-300 ${
-              sidebarOpen ? 'pl-[280px] sm:pl-[320px]' : 'pl-0'
-            }`}
-          >
-            {/* 图片显示区域 */}
-            <div className="flex items-center justify-center w-full h-full relative">
-              {/* 双页模式下的加载提示 */}
-              {doublePageMode && (
-                (imagesLoading.has(currentPage) && !loadedImages.has(currentPage)) ||
-                (currentPage + 1 < pages.length && imagesLoading.has(currentPage + 1) && !loadedImages.has(currentPage + 1))
-              ) && !loadedImages.has(currentPage) && (
-                <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-                  <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
-                    <Spinner size="lg" />
-                  </div>
-                </div>
-              )}
-
-              <div
-                className="relative flex items-center justify-center w-full h-full"
-                style={{
-                  maxHeight: '100%',
-                  height: '100%',
-                  transform: doublePageMode ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : 'none',
-                  transition: 'all 300ms ease-in-out',
-                  cursor: doublePageMode && scale > 1 ? 'grab' : 'default'
-                }}
-              >
-                <div className="relative w-full h-full flex">
-                  {/* 当前页 */}
-                  <div className={`relative ${doublePageMode && !(splitCoverMode && currentPage === 0) ? 'flex-1' : 'w-full'} h-full min-w-0`}>
-                    {pages[currentPage]?.type === 'video' ? (
-                      <MemoizedVideo
-                        key={`page-${currentPage}`}
-                        src={pages[currentPage].url}
-                        ref={(el) => {
-                          videoRefs.current[currentPage] = el;
-                        }}
-                        className={`
-                          ${doublePageMode && !(splitCoverMode && currentPage === 0) ? 'object-cover' : 'object-contain'} select-none touch-none
-                          w-full h-full
-                          transition-opacity duration-300 ease-in-out
-                          ${doublePageMode ? 'max-h-full' : ''}
-                        `}
-                        style={{
-                          maxHeight: '100%',
-                          height: '100%',
-                          opacity: loadedImages.has(currentPage) ? 1 : 0.3,
-                          transform: doublePageMode ? 'none' : `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                          transition: doublePageMode ? 'none' : 'transform 0.1s ease-out',
-                        }}
-                        onLoadedData={() => handleImageLoad(currentPage)}
-                        onError={() => handleImageError(currentPage)}
-                      />
-                    ) : pages[currentPage]?.type === 'html' ? (
-                      <div
-                        ref={(el) => {
-                          htmlContainerRefs.current[currentPage] = el;
-                        }}
-                        className="w-full h-full overflow-auto bg-white"
-                      >
-                        <HtmlRenderer
-                          html={htmlContents[currentPage] || ''}
-                          className="max-w-4xl mx-auto p-4"
-                        />
-                      </div>
-                    ) : (
-                      <MemoizedImage
-                        key={`page-${currentPage}`}
-                        src={cachedPages[currentPage] || pages[currentPage]?.url}
-                        alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
-                        fill
-                        className={`
-                          ${doublePageMode && !(splitCoverMode && currentPage === 0) ? 'object-cover' : 'object-contain'} select-none touch-none
-                          w-full h-full
-                          transition-opacity duration-300 ease-in-out
-                          ${doublePageMode ? 'max-h-full' : ''}
-                        `}
-                        style={{
-                          maxHeight: '100%',
-                          height: '100%',
-                          opacity: loadedImages.has(currentPage) ? 1 : 0.3,
-                          transform: doublePageMode ? 'none' : `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                          transition: doublePageMode ? 'none' : 'transform 0.1s ease-out',
-                          cursor: doublePageMode ? 'pointer' : (scale > 1 ? 'grab' : 'default')
-                        }}
-                        onLoadingComplete={(img) => {
-                          imageRefs.current[currentPage] = img;
-                          imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
-                          handleImageLoad(currentPage);
-                          // 图片加载完成后缓存它（优化：只在缓存中没有该图片时才缓存）
-                          if (!cachedPages[currentPage] && pages[currentPage]) {
-                            cacheImage(pages[currentPage].url, currentPage);
-                          }
-                        }}
-                        onError={() => handleImageError(currentPage)}
-                        onDoubleClick={(e) => handleDoubleClick(e)}
-                        onDragStart={handleImageDragStart}
-                        draggable={false}
-                      />
-                    )}
-                  </div>
-
-                  {/* 下一页（仅在双页模式下且不是拆分封面模式的封面时显示） */}
-                  {doublePageMode && !(splitCoverMode && currentPage === 0) && currentPage + 1 < pages.length && (
-                    <div className="relative flex-1 h-full min-w-0">
-                      {pages[currentPage + 1]?.type === 'video' ? (
-                        <MemoizedVideo
-                          key={`page-${currentPage + 1}`}
-                          src={pages[currentPage + 1].url}
-                          ref={(el) => {
-                            videoRefs.current[currentPage + 1] = el;
-                          }}
-                          className={`
-                            object-cover select-none touch-none
-                            w-full h-full
-                            transition-opacity duration-300 ease-in-out
-                            max-h-full
-                          `}
-                          style={{
-                            maxHeight: '100%',
-                            height: '100%',
-                            opacity: loadedImages.has(currentPage + 1) ? 1 : 0.3,
-                          }}
-                          onLoadedData={() => handleImageLoad(currentPage + 1)}
-                          onError={() => handleImageError(currentPage + 1)}
-                        />
-                      ) : pages[currentPage + 1]?.type === 'html' ? (
-                        <div
-                          ref={(el) => {
-                            htmlContainerRefs.current[currentPage + 1] = el;
-                          }}
-                          className="w-full h-full overflow-auto bg-white"
-                        >
-                          <HtmlRenderer
-                            html={htmlContents[currentPage + 1] || ''}
-                            className="max-w-4xl mx-auto p-4"
-                          />
-                        </div>
-                      ) : (
-                        <MemoizedImage
-                          key={`page-${currentPage + 1}`}
-                          src={cachedPages[currentPage + 1] || pages[currentPage + 1]?.url}
-                          alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
-                          fill
-                          className={`
-                            object-cover select-none touch-none
-                            w-full h-full
-                            transition-opacity duration-300 ease-in-out
-                            max-h-full
-                          `}
-                          style={{
-                            maxHeight: '100%',
-                            height: '100%',
-                            opacity: loadedImages.has(currentPage + 1) ? 1 : 0.3,
-                            transform: 'none',
-                            transition: 'none',
-                            cursor: 'pointer'
-                          }}
-                          onLoadingComplete={(img) => {
-                            imageRefs.current[currentPage + 1] = img;
-                            imageRequestUrls.current[currentPage + 1] = img.currentSrc || img.src;
-                            handleImageLoad(currentPage + 1);
-                            // 图片加载完成后缓存它
-                            if (!cachedPages[currentPage + 1] && pages[currentPage + 1]) {
-                              cacheImage(pages[currentPage + 1].url, currentPage + 1);
-                            }
-                          }}
-                          onError={() => handleImageError(currentPage + 1)}
-                          onDoubleClick={(e) => handleDoubleClick(e)}
-                          onDragStart={handleImageDragStart}
-                          draggable={false}
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        <ReaderSingleModeView
+          enabled={readingMode !== 'webtoon'}
+          sidebarOpen={sidebarOpen}
+          pages={pages}
+          cachedPages={cachedPages}
+          currentPage={currentPage}
+          doublePageMode={doublePageMode}
+          splitCoverMode={splitCoverMode}
+          imagesLoading={imagesLoading}
+          loadedImages={loadedImages}
+          scale={scale}
+          translateX={translateX}
+          translateY={translateY}
+          htmlContents={htmlContents}
+          imageRefs={imageRefs}
+          videoRefs={videoRefs}
+          htmlContainerRefs={htmlContainerRefs}
+          imageRequestUrls={imageRequestUrls}
+          onImageLoaded={handleImageLoad}
+          onImageError={handleImageError}
+          onCacheImage={cacheImage}
+          onDoubleClick={handleDoubleClick}
+          onImageDragStart={handleImageDragStart}
+          t={t}
+        />
 
         {/* 隐藏的预加载区域：前1页和后5页（仅单页/双页模式） */}
-        {readingMode !== 'webtoon' && (
-          <div className="hidden">
-            {Array.from(imagesLoading).map(pageIndex => {
-              // 跳过当前页和双页模式下的下一页（它们已经在上面渲染了）
-              if (pageIndex === currentPage) return null;
-              if (doublePageMode && pageIndex === currentPage + 1) return null;
-              const page = pages[pageIndex];
-              if (!page) return null;
-
-              if (page.type === 'video') {
-                return (
-                  <video
-                    key={`preload-${pageIndex}`}
-                    src={page.url}
-                    preload="metadata"
-                    onLoadedData={() => handleImageLoad(pageIndex)}
-                    onError={() => handleImageError(pageIndex)}
-                  />
-                );
-              }
-
-              return (
-                <img
-                  key={`preload-${pageIndex}`}
-                  src={page.url}
-                  alt=""
-                  onLoad={() => {
-                    handleImageLoad(pageIndex);
-                    if (!cachedPages[pageIndex]) {
-                      cacheImage(page.url, pageIndex);
-                    }
-                  }}
-                  onError={() => handleImageError(pageIndex)}
-                />
-              );
-            })}
-          </div>
-        )}
+        <ReaderPreloadArea
+          enabled={readingMode !== 'webtoon'}
+          imagesLoading={imagesLoading}
+          currentPage={currentPage}
+          doublePageMode={doublePageMode}
+          pages={pages}
+          cachedPages={cachedPages}
+          onLoaded={handleImageLoad}
+          onError={handleImageError}
+          onCacheImage={cacheImage}
+        />
 
         {/* 条漫模式 */}
-        {readingMode === 'webtoon' && (
-          <div
-            ref={webtoonContainerRef}
-            className={`h-full overflow-y-auto overflow-x-hidden transition-all duration-250 ease-out ${
-              sidebarOpen ? 'pl-[280px] sm:pl-[320px]' : 'pl-0'
-            }`}
-            onScroll={(e) => {
-              const container = e.currentTarget;
-
-              // 防抖处理滚动事件
-              if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-              }
-
-              scrollTimeoutRef.current = setTimeout(() => {
-                // 更精确的页面索引计算
-                let accumulatedHeight = 0;
-                let newPageIndex = 0;
-
-                // 按单个页面计算滚动位置（包含HTML页）
-                for (let i = 0; i < pages.length; i++) {
-                  const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-
-                  accumulatedHeight += imageHeight;
-                  if (accumulatedHeight > container.scrollTop + container.clientHeight * 0.3) {
-                    newPageIndex = i;
-                    break;
-                  }
-                }
-
-                if (newPageIndex !== currentPage && newPageIndex >= 0 && newPageIndex < pages.length) {
-                  setCurrentPage(newPageIndex);
-                }
-
-                // 更新可见范围
-                const newVisibleRange = calculateVisibleRange(container.scrollTop, container.clientHeight);
-                setVisibleRange(newVisibleRange);
-
-                // 更新容器高度
-                setContainerHeight(container.clientHeight);
-              }, 16); // 减少防抖延迟到16ms（约等于60fps的一帧时间）
-            }}
-          >
-            <div
-              className="flex flex-col items-center mx-auto relative"
-              style={{
-                // 精确计算总高度，确保滚动条准确（包含HTML页）
-                height: `${Array.from({ length: pages.length }, (_, i) => {
-                  return imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-                }).reduce((sum, height) => sum + height, 0)}px`,
-                // 根据设备类型动态设置最大宽度
-                maxWidth: window.innerWidth >= 1024 ? '800px' : '1200px',
-                width: '100%',
-                padding: window.innerWidth >= 1024 ? '0 1rem' : '0' // PC端添加左右边距
-              }}
-            >
-              {/* 上方占位符 */}
-              {visibleRange.start > 0 && (
-                <div
-                  style={{
-                    height: `${Array.from({length: visibleRange.start}, (_, i) => {
-                      return imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-                    }).reduce((sum, height) => sum + height, 0)}px`,
-                    minHeight: '1px'
-                  }}
-                  className="w-full"
-                />
-              )}
-              
-              {/* 渲染可见范围内的图片 */}
-              {(() => {
-                const elements = [];
-                let i = visibleRange.start;
-
-                while (i <= visibleRange.end) {
-                  const actualIndex = i;
-                  const page = pages[actualIndex];
-                  const imageHeight = imageHeights[actualIndex] || containerHeight || window.innerHeight * 0.7;
-
-                  if (page) {
-                    elements.push(
-                      <div key={actualIndex} className="relative w-full">
-                        {imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) && (
-                          <div
-                            className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
-                            style={{
-                              height: `${imageHeight}px`,
-                              minHeight: '100px'
-                            }}
-                          >
-                            <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
-                              <Spinner size="lg" />
-                            </div>
-                          </div>
-                        )}
-
-                        <div
-                          className="relative flex justify-center w-full"
-                          ref={(el) => {
-                            if (readingMode === 'webtoon') {
-                              webtoonPageElementRefs.current[actualIndex] = el;
-                            }
-                          }}
-                          style={
-                            readingMode === 'webtoon' && page.type === 'html'
-                              ? { minHeight: '100px' }
-                              : {
-                                  height: `${imageHeight}px`,
-                                  minHeight: '100px'
-                                }
-                          }
-                        >
-                          <div className="relative w-full h-full flex justify-center">
-                            {page.type === 'video' ? (
-                              <MemoizedVideo
-                                key={`page-${actualIndex}`}
-                                src={page.url}
-                                ref={(el) => {
-                                  videoRefs.current[actualIndex] = el;
-                                }}
-                                className="object-contain select-none"
-                                style={{
-                                  maxWidth: '100%',
-                                  maxHeight: '100%',
-                                  width: 'auto',
-                                  height: 'auto',
-                                  display: 'block',
-                                  margin: '0 auto',
-                                  opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
-                                }}
-                                onLoadedData={() => handleImageLoad(actualIndex)}
-                                onError={() => handleImageError(actualIndex)}
-                              />
-                            ) : page.type === 'html' ? (
-                              <div
-                                ref={(el) => {
-                                  htmlContainerRefs.current[actualIndex] = el;
-                                }}
-                                className={readingMode === 'webtoon' ? 'w-full bg-white' : 'w-full h-full overflow-auto bg-white'}
-                              >
-                                {htmlContents[actualIndex] ? (
-                                  <HtmlRenderer
-                                    html={htmlContents[actualIndex]}
-                                    className="max-w-4xl mx-auto p-4"
-                                    scrollable={readingMode !== 'webtoon'}
-                                  />
-                                ) : (
-                                  <div className="p-6 flex items-center justify-center">
-                                    <Spinner />
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <MemoizedImage
-                                key={`page-${actualIndex}`}
-                                src={cachedPages[actualIndex] || page.url}
-                                alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
-                                fill
-                                className="object-contain select-none"
-                                style={{
-                                  maxWidth: '100%',
-                                  maxHeight: '100%',
-                                  width: 'auto',
-                                  height: 'auto',
-                                  display: 'block',
-                                  margin: '0 auto',
-                                  opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
-                                  transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                                  transition: 'transform 0.1s ease-out',
-                                  cursor: scale > 1 ? 'grab' : 'default'
-                                }}
-                                onLoadingComplete={(img) => {
-                                  imageRefs.current[actualIndex] = img;
-                                  imageRequestUrls.current[actualIndex] = img.currentSrc || img.src;
-                                  handleImageLoad(actualIndex);
-                                  if (!cachedPages[actualIndex]) {
-                                    cacheImage(page.url, actualIndex);
-                                  }
-                                }}
-                                onError={() => handleImageError(actualIndex)}
-                                onDoubleClick={(e) => handleDoubleClick(e)}
-                                onDragStart={handleImageDragStart}
-                                draggable={false}
-                              />
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-                  i += 1;
-                }
-
-                return elements;
-              })()}
-              
-              {/* 下方占位符 */}
-              {visibleRange.end < pages.length - 1 && (
-                <div
-                  style={{
-                    height: `${Array.from({length: pages.length - visibleRange.end - 1}, (_, i) => {
-                      const index = visibleRange.end + 1 + i;
-                      return imageHeights[index] || containerHeight || window.innerHeight * 0.7;
-                    }).reduce((sum, height) => sum + height, 0)}px`,
-                    minHeight: '1px'
-                  }}
-                  className="w-full"
-                />
-              )}
-            </div>
-          </div>
-        )}
+        <ReaderWebtoonModeView
+          enabled={readingMode === 'webtoon'}
+          webtoonContainerRef={webtoonContainerRef}
+          sidebarOpen={sidebarOpen}
+          onScroll={handleWebtoonScroll}
+          pages={pages}
+          cachedPages={cachedPages}
+          visibleRange={visibleRange}
+          imageHeights={imageHeights}
+          containerHeight={containerHeight}
+          imagesLoading={imagesLoading}
+          loadedImages={loadedImages}
+          scale={scale}
+          translateX={translateX}
+          translateY={translateY}
+          htmlContents={htmlContents}
+          webtoonPageElementRefs={webtoonPageElementRefs}
+          imageRefs={imageRefs}
+          videoRefs={videoRefs}
+          htmlContainerRefs={htmlContainerRefs}
+          imageRequestUrls={imageRequestUrls}
+          onImageLoaded={handleImageLoad}
+          onImageError={handleImageError}
+          onCacheImage={cacheImage}
+          onDoubleClick={handleDoubleClick}
+          onImageDragStart={handleImageDragStart}
+          t={t}
+        />
       </div>
     </div>
   );
