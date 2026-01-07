@@ -285,8 +285,9 @@ function ReaderContent() {
     if (x < 0 || y < 0 || x > rect.width || y > rect.height) return 'none' as const;
 
     const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
-    const edgeW = clamp(rect.width * 0.22, 72, 180);
-    const edgeH = clamp(rect.height * 0.22, 72, 180);
+    // 点击翻页的边缘区域：在大屏/鼠标场景下也保持足够大，使鼠标与触摸体验一致
+    const edgeW = clamp(rect.width * 0.22, 72, Math.min(320, rect.width * 0.45));
+    const edgeH = clamp(rect.height * 0.22, 72, Math.min(320, rect.height * 0.45));
 
     const inLeft = x <= edgeW;
     const inRight = x >= rect.width - edgeW;
