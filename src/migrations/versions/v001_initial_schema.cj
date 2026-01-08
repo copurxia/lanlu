@@ -577,6 +577,7 @@ public class V001_InitialSchema <: Migration {
             MigrationHelpers.addColumnIfNotExists(conn, "tasks", "timeout_at", "TIMESTAMP")
             MigrationHelpers.addColumnIfNotExists(conn, "tasks", "trigger_source", "VARCHAR(50)")
             MigrationHelpers.addColumnIfNotExists(conn, "tasks", "wait_for_task_id", "BIGINT DEFAULT NULL")
+            createTasksIndexes(conn)
             return true
         }
 
@@ -604,7 +605,32 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
+        createTasksIndexes(conn)
         return true
+    }
+
+    private func createTasksIndexes(conn: Connection): Unit {
+        // TaskPool 领取 pending：WHERE status='pending' ORDER BY priority, created_at, id
+        MigrationHelpers.createIndexIfNotExists(
+            conn,
+            "idx_tasks_status_priority_created_id",
+            "tasks",
+            "status, priority, created_at, id"
+        )
+        // 依赖任务：WHERE wait_for_task_id=? AND status='waiting'
+        MigrationHelpers.createIndexIfNotExists(
+            conn,
+            "idx_tasks_wait_for_status",
+            "tasks",
+            "wait_for_task_id, status"
+        )
+        // group 查询：WHERE group_id=? ORDER BY created_at
+        MigrationHelpers.createIndexIfNotExists(
+            conn,
+            "idx_tasks_group_created_at",
+            "tasks",
+            "group_id, created_at"
+        )
     }
 
     private func createScheduledTasksTable(conn: Connection): Bool {
