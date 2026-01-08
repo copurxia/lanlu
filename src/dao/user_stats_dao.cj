@@ -63,6 +63,43 @@ public class UserStatsDao {
     }
 
     /**
+     * 获取全局总阅读页数（所有用户）
+     * 计算所有用户的 progress 总和
+     */
+    public static func getGlobalTotalPagesRead(): Int64 {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(SUM(progress), 0) as total_pages
+                        FROM user_archive_status
+                        WHERE is_new = false
+                    """)
+                    try {
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<Int64>(0) ?? 0
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                    return 0
+                } catch (e: Exception) {
+                    getLogger("user_stats_dao").error("获取全局总阅读页数失败", ("error", e.message))
+                    return 0
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return 0
+        }
+    }
+
+    /**
      * 获取用户总阅读页数
      * 计算用户已读档案的 progress 总和（从 user_archive_status.progress 获取）
      */
