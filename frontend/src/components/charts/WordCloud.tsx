@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import cloud from 'd3-cloud';
 import { cn } from '@/lib/utils';
 
 export type WordCloudItem = {
@@ -102,33 +101,45 @@ export function WordCloud({ items, onWordClick, className, ariaLabel, maxWords =
       return;
     }
 
-    const scale = createFontScale(prepared.map((w) => w.weight));
+    let cancelled = false;
+    let layout: { start: () => void; stop: () => void } | null = null;
 
-    const layout = cloud<LayoutWord>()
-      .size([size, size])
-      .words(
-        prepared.map((w) => ({
-          text: w.text,
-          size: scale(w.weight),
-          x: 0,
-          y: 0,
-          rotate: 0,
-          meta: w.meta ?? w.id,
-        }))
-      )
-      .padding(2)
-      .rotate(() => 0)
-      .font('system-ui')
-      .fontWeight(() => 700)
-      .fontSize((d) => d.size)
-      .spiral('archimedean')
-      .on('end', (result) => {
-        setWords(result);
-      });
+    (async () => {
+      const mod = await import('d3-cloud');
+      if (cancelled) return;
 
-    layout.start();
+      const scale = createFontScale(prepared.map((w) => w.weight));
+      const cloudFactory = mod.default as unknown as <T extends object>() => any;
+
+      const nextLayout = cloudFactory<LayoutWord>()
+        .size([size, size])
+        .words(
+          prepared.map((w) => ({
+            text: w.text,
+            size: scale(w.weight),
+            x: 0,
+            y: 0,
+            rotate: 0,
+            meta: w.meta ?? w.id,
+          }))
+        )
+        .padding(2)
+        .rotate(() => 0)
+        .font('system-ui')
+        .fontWeight(() => 700)
+        .fontSize((d: LayoutWord) => d.size)
+        .spiral('archimedean')
+        .on('end', (result: LayoutWord[]) => {
+          if (!cancelled) setWords(result);
+        });
+
+      layout = nextLayout;
+      nextLayout.start();
+    })();
+
     return () => {
-      layout.stop();
+      cancelled = true;
+      layout?.stop();
     };
   }, [prepared, size]);
 
