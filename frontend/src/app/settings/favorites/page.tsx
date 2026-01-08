@@ -20,7 +20,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 export default function FavoritesPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { success } = useToast();
   const { confirm } = useConfirmContext();
   const [activeTab, setActiveTab] = useState<'archives' | 'tankoubons'>('archives');
@@ -47,7 +47,8 @@ export default function FavoritesPage() {
         sortby: 'date_added',
         order: 'desc',
         start: 0,
-        count: 1000
+        count: 1000,
+        lang: language
       });
 
       const archiveData = response.data as Archive[];
@@ -63,7 +64,7 @@ export default function FavoritesPage() {
         setArchiveLoading(false);
       }
     }
-  }, [t]);
+  }, [t, language]);
 
   const loadTankoubonFavorites = useCallback(async (silent = false) => {
     try {

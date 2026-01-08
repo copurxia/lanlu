@@ -13,7 +13,7 @@ import { Archive } from '@/types/archive';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 
 export default function ReadingHistoryPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [loading, setLoading] = useState(true);
   const [archives, setArchives] = useState<Archive[]>([]);
   const [groupedArchives, setGroupedArchives] = useState<TimeGroup[]>([]);
@@ -32,7 +32,8 @@ export default function ReadingHistoryPage() {
         sortby: 'lastread',
         order: 'desc',
         start: 0,
-        count: 1000
+        count: 1000,
+        lang: language
       });
 
       const archiveData = response.data as Archive[];
@@ -48,7 +49,7 @@ export default function ReadingHistoryPage() {
         setLoading(false);
       }
     }
-  }, [t]);
+  }, [t, language]);
 
   useEffect(() => {
     loadReadingHistory();
