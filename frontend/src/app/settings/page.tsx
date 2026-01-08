@@ -1,16 +1,36 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import dynamic from 'next/dynamic';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
 import { logger } from '@/lib/logger';
 import { LayoutGrid, Heart, BookOpen, FileText, Database } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserStatsService, UserStats, ReadingTrendItem } from '@/lib/user-stats-service';
 import { StatsCard } from '@/components/dashboard/StatsCard';
-import { ReadingTrendChart } from '@/components/dashboard/ReadingTrendChart';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
 import { Archive } from '@/types/archive';
+
+const ReadingTrendChart = dynamic(
+  () => import('@/components/dashboard/ReadingTrendChart').then((m) => m.ReadingTrendChart),
+  {
+    ssr: false,
+    loading: () => (
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Skeleton className="h-5 w-36" />
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-[200px] w-full" />
+        </CardContent>
+      </Card>
+    ),
+  }
+);
 
 export default function SettingsPage() {
   const { t } = useLanguage();
