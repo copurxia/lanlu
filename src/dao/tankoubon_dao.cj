@@ -723,7 +723,7 @@ public class TankoubonDao {
             let tags = tankoubonTags.split(",")
             for (tag in tags) {
                 let trimmed = tag.trimAscii()
-                if (trimmed != "") {
+                if (trimmed != "" && !TagDao.isSourceTag(trimmed)) {
                     tagSet[trimmed] = true
                 }
             }
@@ -734,7 +734,7 @@ public class TankoubonDao {
             let tags = archiveTags.split(",")
             for (tag in tags) {
                 let trimmed = tag.trimAscii()
-                if (trimmed != "") {
+                if (trimmed != "" && !TagDao.isSourceTag(trimmed)) {
                     tagSet[trimmed] = true
                 }
             }

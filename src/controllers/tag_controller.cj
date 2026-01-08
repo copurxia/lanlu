@@ -104,7 +104,7 @@ public class TagController {
                         if (archiveTags.size > 0) {
                             for (part in archiveTags.split(",")) {
                                 let t = part.trimAscii()
-                                if (t.size > 0) {
+                                if (t.size > 0 && !TagDao.isSourceTag(t)) {
                                     tagSet.add(t)
                                 }
                             }

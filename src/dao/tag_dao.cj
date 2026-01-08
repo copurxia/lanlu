@@ -82,6 +82,17 @@ public class TagDao {
     }
 
     /**
+     * 判断标签是否属于 source 命名空间（source:xxx）
+     */
+    public static func isSourceTag(fullName: String): Bool {
+        let trimmed = fullName.trimAscii()
+        if (trimmed.size == 0) { return false }
+        if (trimmed.startsWith("source:")) { return true }
+        let (namespace, _) = parseTagName(trimmed)
+        return namespace == "source"
+    }
+
+    /**
      * 根据 namespace 和 name 获取或创建标签
      */
     public static func getOrCreate(namespace: String, name: String): Int64 {
