@@ -459,6 +459,53 @@ public class TankoubonDao {
     }
 
     /**
+     * 获取归档所属的所有Tankoubon（返回tankoubon_id列表）
+     */
+    public static func getTankoubonsForArchive(archiveArcid: String): Array<String> {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT t.tankoubon_id
+                        FROM tankoubon_archives ta
+                        JOIN tankoubons t ON t.id = ta.tankoubon_id
+                        JOIN archives a ON a.id = ta.archive_id
+                        WHERE a.arcid = ?
+                        ORDER BY t.name, t.tankoubon_id
+                    """)
+                    try {
+                        stmt.set(0, archiveArcid)
+                        let rs = stmt.query()
+                        try {
+                            var list: ArrayList<String> = ArrayList<String>()
+                            while (rs.next()) {
+                                let tid = rs.getOrNull<String>(0) ?? ""
+                                if (tid != "") {
+                                    list.add(tid)
+                                }
+                            }
+                            return list.toArray()
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tankoubon_dao").error("获取归档所属Tankoubon列表失败",
+                        ("archiveArcid", archiveArcid), ("error", e.message))
+                    return Array<String>()
+                } finally {
+                    try { conn.close() } catch (closeException: Exception) {}
+                }
+            case None =>
+                getLogger("tankoubon_dao").error("无法连接到数据库")
+                return Array<String>()
+        }
+    }
+
+    /**
      * 获取Tankoubon的聚合元数据（用于搜索结果）
      */
     public static func getAggregatedMetadata(tankoubonId: String, userId: Int64): Option<TankoubonAggregatedData> {

@@ -100,6 +100,14 @@ export class TankoubonService {
   }
 
   /**
+   * 获取某个归档所属的合集列表（包含 archives）
+   */
+  static async getTankoubonsForArchive(archiveId: string): Promise<Tankoubon[]> {
+    const response = await apiClient.get<TankoubonResponse>(`/api/archives/${archiveId}/tankoubons`);
+    return this.normalizeResult(response.data);
+  }
+
+  /**
    * 直接通过搜索接口获取收藏的合集列表（包含 archives）
    */
   static async getFavoriteTankoubons(params?: {

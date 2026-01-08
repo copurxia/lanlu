@@ -93,6 +93,37 @@ public class TankoubonModel {
         }
     }
 
+    /**
+     * 获取某个归档所属的所有Tankoubon（包含archives列表）
+     */
+    public static func getTankoubonsForArchive(archiveArcid: String): Array<Tankoubon> {
+        let ids = TankoubonDao.getTankoubonsForArchive(archiveArcid)
+        if (ids.size == 0) { return [] }
+
+        var list: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
+        for (id in ids) {
+            let tank = getTankoubonById(id)
+            if (tank.id.size > 0) {
+                list.add(tank)
+            }
+        }
+        return list.toArray()
+    }
+
+    public static func getTankoubonsForArchiveWithUser(archiveArcid: String, userId: Int64): Array<Tankoubon> {
+        let ids = TankoubonDao.getTankoubonsForArchive(archiveArcid)
+        if (ids.size == 0) { return [] }
+
+        var list: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
+        for (id in ids) {
+            let tank = getTankoubonByIdWithUser(id, userId)
+            if (tank.id.size > 0) {
+                list.add(tank)
+            }
+        }
+        return list.toArray()
+    }
+
     private static func buildTankoubonFromData(data: TankoubonData): Tankoubon {
         let tankoubon = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
         let (archiveCount, totalPages) = TankoubonDao.getTankoubonArchiveStats(data.tankoubon_id)

@@ -21,6 +21,8 @@ import { ArchiveMainCard } from './components/ArchiveMainCard';
 import { ArchivePreviewCard } from './components/ArchivePreviewCard';
 import { ArchiveBasicInfoCard } from './components/ArchiveBasicInfoCard';
 import { ArchiveMobileActions } from './components/ArchiveMobileActions';
+import { ArchiveCollectionsCard } from './components/ArchiveCollectionsCard';
+import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
 
 export function ArchiveDetailContent() {
   const router = useRouter();
@@ -43,6 +45,10 @@ export function ArchiveDetailContent() {
   const pageSize = 10;
   const { previewLoading, previewError, archivePages, displayPages, loadingImages, loadMorePages, handleImageLoadEnd, handleImageError } =
     useArchivePreview({ id, showPreview, pageSize, t });
+
+  const { tankoubons, tankoubonPreviewArchives, loading: tankoubonsLoading } = useArchiveTankoubons({
+    archiveId: id,
+  });
 
   const tags = useMemo(() => {
     const raw = metadata?.tags ?? '';
@@ -356,6 +362,16 @@ export function ArchiveDetailContent() {
             handleImageError={handleImageError}
           />
 
+          {tankoubonsLoading || tankoubons.length > 0 ? (
+            <ArchiveCollectionsCard
+              t={t}
+              currentArchiveId={metadata.arcid}
+              tankoubons={tankoubons}
+              previewArchivesByTankoubonId={tankoubonPreviewArchives}
+              loading={tankoubonsLoading}
+            />
+          ) : null}
+
           <ArchiveBasicInfoCard metadata={metadata} t={t} />
         </div>
       </main>
@@ -379,4 +395,3 @@ export function ArchiveDetailContent() {
     </div>
   );
 }
-

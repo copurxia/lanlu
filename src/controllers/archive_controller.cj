@@ -209,6 +209,39 @@ public class ArchiveController {
         
         ctx.json(metadataJson)
     }
+
+    // GET /api/archives/{id}/tankoubons
+    public static func getTankoubonsForArchive(ctx: JoyContext): Unit {
+        let arcid = ctx.getParam("id").getOrThrow()
+        if (arcid.size == 0) {
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.json("{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
+            return
+        }
+
+        let userIdOpt = AuthMiddleware.optionalUser(ctx)
+        let tankoubons = match (userIdOpt) {
+            case Some(userId) => TankoubonModel.getTankoubonsForArchiveWithUser(arcid, userId)
+            case None => TankoubonModel.getTankoubonsForArchive(arcid)
+        }
+
+        // 查询收藏状态（登录用户）
+        match (userIdOpt) {
+            case Some(userId) =>
+                for (i in 0..tankoubons.size) {
+                    tankoubons[i].isfavorite = UserTankoubonFavoriteDao.isFavorite(userId, tankoubons[i].id)
+                }
+            case None => ()
+        }
+
+        var result = "{\"filtered\":${tankoubons.size},\"result\":["
+        for (i in 0..tankoubons.size) {
+            if (i > 0) { result += "," }
+            result += tankoubons[i].toJson()
+        }
+        result += "],\"total\":${tankoubons.size}}"
+        ctx.json(result)
+    }
     
     // PUT /api/archives/{id}/metadata
     public static func updateMetadata(ctx: JoyContext): Unit {

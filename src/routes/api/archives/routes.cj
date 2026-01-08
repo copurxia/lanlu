@@ -50,6 +50,12 @@ public class ArchiveRoutes {
             ArchiveController.getFiles(ctx)
         })
 
+        // 获取归档所属合集列表
+        router.get("/api/archives/{id}/tankoubons", { ctx =>
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
+            ArchiveController.getTankoubonsForArchive(ctx)
+        })
+
         // 下载归档
         router.get("/api/archives/{id}/download", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
