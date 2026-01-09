@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/refs */
 import { useMemo, useRef } from 'react';
 import type { PageInfo } from '@/lib/archive-service';
 import {
@@ -286,6 +287,9 @@ export function useMediaInfoOverlayLines({
     loadedImages,
     visibleRange.start,
     visibleRange.end,
+    htmlContainerRefs,
+    imageRefs,
+    imageRequestUrls,
+    videoRefs,
   ]);
 }
-

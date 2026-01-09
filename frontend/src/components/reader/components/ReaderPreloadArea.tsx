@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 import type { PageInfo } from '@/lib/archive-service';
 
 export function ReaderPreloadArea({
@@ -61,4 +62,3 @@ export function ReaderPreloadArea({
     </div>
   );
 }
-

@@ -64,8 +64,8 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
         const enabledCats = cats.filter(cat => cat.enabled)
         setCategories(enabledCats)
         // 如果有可用的分类且当前未选择，自动选择第一个
-        if (enabledCats.length > 0 && !selectedCategoryId) {
-          setSelectedCategoryId(enabledCats[0].catid)
+        if (enabledCats.length > 0) {
+          setSelectedCategoryId((prev) => prev || enabledCats[0].catid)
         }
       } catch (error) {
         console.error("Failed to load categories:", error)

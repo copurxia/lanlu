@@ -7,7 +7,6 @@ import { PluginConfigDialog } from '@/components/settings/PluginConfigDialog';
 import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 import { PluginService, Plugin } from '@/lib/plugin-service';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Package, RefreshCw } from 'lucide-react';

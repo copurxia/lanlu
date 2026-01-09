@@ -56,10 +56,11 @@ export function useReaderImageLoading({
 
   useEffect(() => {
     mountedRef.current = true;
+    const retryTimers = retryTimersRef.current;
     return () => {
       mountedRef.current = false;
-      retryTimersRef.current.forEach((timerId) => clearTimeout(timerId));
-      retryTimersRef.current.clear();
+      retryTimers.forEach((timerId) => clearTimeout(timerId));
+      retryTimers.clear();
     };
   }, []);
 
@@ -310,7 +311,7 @@ export function useReaderImageLoading({
     return () => {
       observerRef.current?.disconnect();
     };
-  }, [readingMode, pages.length, visibleRange.end, visibleRange.start, imageRefs]);
+  }, [readingMode, pages.length, visibleRange.end, visibleRange.start, imageRefs, shouldLoadIndexNow]);
 
   return {
     cachedPages,

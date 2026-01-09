@@ -50,13 +50,14 @@ export function useReaderArchiveMetadata({
     };
   }, [id, language]);
 
+  const archiveTags = archiveMetadata?.tags ?? '';
   const metadataTags = useMemo(() => {
-    if (!archiveMetadata?.tags) return [];
-    return archiveMetadata.tags
+    if (!archiveTags) return [];
+    return archiveTags
       .split(',')
       .map((tag) => tag.trim())
       .filter(Boolean);
-  }, [archiveMetadata?.tags]);
+  }, [archiveTags]);
 
   const toggleFavorite = useCallback(
     async (e?: React.MouseEvent) => {
@@ -89,4 +90,3 @@ export function useReaderArchiveMetadata({
     toggleFavorite,
   } as const;
 }
-

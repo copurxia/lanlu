@@ -14,15 +14,6 @@ import { WordCloud } from '@/components/charts/WordCloud';
 
 type CloudItem = { tag: string; display: string; count: number };
 
-function formatDateTimeFromUnixSeconds(seconds?: number): string {
-  if (!seconds || !Number.isFinite(seconds)) return '-';
-  try {
-    return new Date(seconds * 1000).toLocaleString();
-  } catch {
-    return String(seconds);
-  }
-}
-
 export default function ServerInfoSettingsPage() {
   const { t, language } = useLanguage();
   const router = useRouter();

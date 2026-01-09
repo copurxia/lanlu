@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -285,8 +285,6 @@ export default function TagsSettingsPage() {
     }
   };
 
-  const [fileInputKey, setFileInputKey] = useState(0);
-
   const handleImportClick = () => {
     // Create a new file input element each time to reset the browser's file memory
     const input = document.createElement('input');
@@ -309,7 +307,6 @@ export default function TagsSettingsPage() {
       if (!confirmed) {
         // Remove the temporary input
         document.body.removeChild(input);
-        setFileInputKey(prev => prev + 1); // Force re-render of the visible input
         return;
       }
 
@@ -331,7 +328,6 @@ export default function TagsSettingsPage() {
         setLoading(false);
         // Remove the temporary input
         document.body.removeChild(input);
-        setFileInputKey(prev => prev + 1); // Force re-render of the visible input
       }
     };
 

@@ -55,7 +55,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     if (value !== inputValue) {
       setInputValue(value)
     }
-  }, [value])
+  }, [value, inputValue])
 
   // 计算下拉框位置
   const updateDropdownPosition = React.useCallback(() => {
@@ -300,7 +300,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
         onBlur={handleInputBlur}
         onFocus={handleInputFocus}
         placeholder={placeholder}
-        className={className}
+        className={cn(className, compact && "h-8 text-sm")}
         autoComplete="off"
         {...props}
       />

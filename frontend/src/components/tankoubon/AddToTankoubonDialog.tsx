@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { Badge } from '@/components/ui/badge';
 import {
   Dialog,
   DialogBody,
@@ -16,7 +15,7 @@ import { TankoubonService } from '@/lib/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirm } from '@/hooks/use-confirm';
 import { useToast } from '@/hooks/use-toast';
-import { BookOpen, Plus, Check, Search } from 'lucide-react';
+import { BookOpen, Plus, Search } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 
 interface AddToTankoubonDialogProps {
@@ -69,7 +68,7 @@ export function AddToTankoubonDialog({
   }
 
   // Fetch all tankoubons
-  const fetchTankoubons = async () => {
+  const fetchTankoubons = useCallback(async () => {
     if (!mounted) return;
     try {
       setLoading(true);
@@ -80,13 +79,13 @@ export function AddToTankoubonDialog({
     } finally {
       setLoading(false);
     }
-  };
+  }, [mounted]);
 
   useEffect(() => {
     if (open && mounted) {
       fetchTankoubons();
     }
-  }, [open, mounted]);
+  }, [open, mounted, fetchTankoubons]);
 
   // Add archive to existing tankoubon
   const handleAddToTankoubon = async (tankoubonId: string) => {

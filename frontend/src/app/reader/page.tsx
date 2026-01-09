@@ -153,6 +153,7 @@ function ReaderContent() {
     visibleRange: webtoonVirtualization.visibleRange,
     imageRefs,
   });
+  const { setImagesLoading } = imageLoading;
 
   useEffect(() => {
     async function fetchPages() {
@@ -217,7 +218,7 @@ function ReaderContent() {
 
         // 如果有进度且需要预加载图片，添加到加载队列
         if (initialPage > 0) {
-          imageLoading.setImagesLoading(new Set([initialPage]));
+          setImagesLoading(new Set([initialPage]));
         }
       } catch (err) {
         logger.apiError('fetch archive pages', err);
@@ -228,7 +229,7 @@ function ReaderContent() {
     }
 
     fetchPages();
-  }, [id, pageParam, imageLoading.setImagesLoading]);
+  }, [id, pageParam, setImagesLoading]);
 
   // 单独处理错误消息的翻译
   useEffect(() => {
@@ -359,11 +360,17 @@ function ReaderContent() {
       readingMode,
       doublePageMode,
       splitCoverMode,
+      setDoublePageMode,
+      setSplitCoverMode,
+      setAutoPlayMode,
       autoPlayMode,
       isFullscreen,
       doubleTapZoom,
+      setDoubleTapZoom,
       autoHideEnabled,
+      setAutoHideEnabled,
       tapTurnPageEnabled,
+      setTapTurnPageEnabled,
       mediaInfoEnabled,
       toggleFullscreen,
       setMediaInfoEnabled,

@@ -109,9 +109,9 @@ export function WordCloud({ items, onWordClick, className, ariaLabel, maxWords =
       if (cancelled) return;
 
       const scale = createFontScale(prepared.map((w) => w.weight));
-      const cloudFactory = mod.default as unknown as <T extends object>() => any;
+      const cloudFactory = mod.default as unknown as () => any;
 
-      const nextLayout = cloudFactory<LayoutWord>()
+      const nextLayout = cloudFactory()
         .size([size, size])
         .words(
           prepared.map((w) => ({

@@ -26,7 +26,7 @@ export function useReaderWheelNavigation({
   onNextPage: () => void;
 }) {
   const [showAutoNextCountdown, setShowAutoNextCountdown] = useState(false);
-  const [countdownSeconds, setCountdownSeconds] = useState(COUNTDOWN_DURATION);
+  const countdownSecondsRef = useRef(COUNTDOWN_DURATION);
   const countdownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownToastId = useRef<string | number | null>(null);
 
@@ -40,7 +40,7 @@ export function useReaderWheelNavigation({
       countdownToastId.current = null;
     }
     setShowAutoNextCountdown(false);
-    setCountdownSeconds(COUNTDOWN_DURATION);
+    countdownSecondsRef.current = COUNTDOWN_DURATION;
   }, []);
 
   useEffect(() => {
@@ -98,7 +98,7 @@ export function useReaderWheelNavigation({
           if (isNearTop && deltaY < 0) {
             e.preventDefault();
             setShowAutoNextCountdown(true);
-            setCountdownSeconds(COUNTDOWN_DURATION);
+            countdownSecondsRef.current = COUNTDOWN_DURATION;
 
             countdownToastId.current = toast.loading(`即将跳转到上一页（${COUNTDOWN_DURATION}秒后）`, {
               duration: COUNTDOWN_DURATION * 1000,
@@ -106,32 +106,29 @@ export function useReaderWheelNavigation({
             });
 
             countdownTimeoutRef.current = setInterval(() => {
-              setCountdownSeconds((prev) => {
-                if (prev <= 1) {
-                  clearCountdown();
-                  onPrevPage();
-                  setTimeout(() => {
-                    const el = document.querySelector('.html-content-container') as HTMLElement | null;
-                    if (el) el.scrollTop = el.scrollHeight;
-                  }, 100);
-                  return 0;
-                }
+              countdownSecondsRef.current -= 1;
+              if (countdownSecondsRef.current <= 0) {
+                clearCountdown();
+                onPrevPage();
+                setTimeout(() => {
+                  const el = document.querySelector('.html-content-container') as HTMLElement | null;
+                  if (el) el.scrollTop = el.scrollHeight;
+                }, 100);
+                return;
+              }
 
-                if (countdownToastId.current !== null) {
-                  toast.loading(`即将跳转到上一页（${prev - 1}秒后）`, {
-                    id: countdownToastId.current,
-                    duration: (prev - 1) * 1000,
-                    action: { label: '取消', onClick: () => clearCountdown() },
-                  });
-                }
-
-                return prev - 1;
-              });
+              if (countdownToastId.current !== null) {
+                toast.loading(`即将跳转到上一页（${countdownSecondsRef.current}秒后）`, {
+                  id: countdownToastId.current,
+                  duration: countdownSecondsRef.current * 1000,
+                  action: { label: '取消', onClick: () => clearCountdown() },
+                });
+              }
             }, 1000);
           } else if (isNearBottom && deltaY > 0) {
             e.preventDefault();
             setShowAutoNextCountdown(true);
-            setCountdownSeconds(COUNTDOWN_DURATION);
+            countdownSecondsRef.current = COUNTDOWN_DURATION;
 
             countdownToastId.current = toast.loading(`即将跳转到下一页（${COUNTDOWN_DURATION}秒后）`, {
               duration: COUNTDOWN_DURATION * 1000,
@@ -139,27 +136,24 @@ export function useReaderWheelNavigation({
             });
 
             countdownTimeoutRef.current = setInterval(() => {
-              setCountdownSeconds((prev) => {
-                if (prev <= 1) {
-                  clearCountdown();
-                  onNextPage();
-                  setTimeout(() => {
-                    const el = document.querySelector('.html-content-container') as HTMLElement | null;
-                    if (el) el.scrollTop = 0;
-                  }, 100);
-                  return 0;
-                }
+              countdownSecondsRef.current -= 1;
+              if (countdownSecondsRef.current <= 0) {
+                clearCountdown();
+                onNextPage();
+                setTimeout(() => {
+                  const el = document.querySelector('.html-content-container') as HTMLElement | null;
+                  if (el) el.scrollTop = 0;
+                }, 100);
+                return;
+              }
 
-                if (countdownToastId.current !== null) {
-                  toast.loading(`即将跳转到下一页（${prev - 1}秒后）`, {
-                    id: countdownToastId.current,
-                    duration: (prev - 1) * 1000,
-                    action: { label: '取消', onClick: () => clearCountdown() },
-                  });
-                }
-
-                return prev - 1;
-              });
+              if (countdownToastId.current !== null) {
+                toast.loading(`即将跳转到下一页（${countdownSecondsRef.current}秒后）`, {
+                  id: countdownToastId.current,
+                  duration: countdownSecondsRef.current * 1000,
+                  action: { label: '取消', onClick: () => clearCountdown() },
+                });
+              }
             }, 1000);
           }
 
@@ -211,4 +205,3 @@ export function useReaderWheelNavigation({
     };
   }, [handleWheel]);
 }
-

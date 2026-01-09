@@ -38,10 +38,11 @@ export function useReaderHtmlPages({
 
   useEffect(() => {
     mountedRef.current = true;
+    const retryTimers = retryTimersRef.current;
     return () => {
       mountedRef.current = false;
-      retryTimersRef.current.forEach((timerId) => clearTimeout(timerId));
-      retryTimersRef.current.clear();
+      retryTimers.forEach((timerId) => clearTimeout(timerId));
+      retryTimers.clear();
     };
   }, []);
 
