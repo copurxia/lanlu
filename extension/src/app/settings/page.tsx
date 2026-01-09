@@ -35,6 +35,7 @@ export default function SettingsPage() {
         <div className="space-y-1">
           <label className="text-xs font-medium">Token</label>
           <input
+            type="password"
             className="w-full h-9 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
             placeholder="Bearer token（登录页可复制）"
             value={settings.token}
@@ -92,4 +93,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-
