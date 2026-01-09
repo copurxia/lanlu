@@ -65,6 +65,19 @@ public class PdfHandler <: ArchiveHandler {
         return extractPdfPage(archivePath, pageNumber, outputPath)
     }
 
+    public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        // PDF 提取后使用 MemoryEntryReader
+        let (exitCode, data, error) = extractEntryToStream(archivePath, entryName)
+        if (exitCode == 0) {
+            let reader = MemoryEntryReader(data)
+            return (0i64, Some(reader), "")
+        } else {
+            var errorStr = ""
+            try { errorStr = String.fromUtf8(error) } catch (_: Exception) { errorStr = "Unknown error" }
+            return (exitCode, None, errorStr)
+        }
+    }
+
     public func getMediaCount(archivePath: String): Int32 {
         return getPdfPageCount(archivePath)
     }

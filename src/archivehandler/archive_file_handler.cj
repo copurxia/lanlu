@@ -8,6 +8,40 @@ import lrr4cj.utils.DirectoryScanner
 import lrr4cj.utils.NaturalSort
 
 /**
+ * 内存数据读取器 - 从已加载的数据中分块读取
+ */
+public class MemoryEntryReader <: EntryReader {
+    private let data: Array<UInt8>
+    private var offset: Int64 = 0
+    private var closed: Bool = false
+
+    public init(data: Array<UInt8>) {
+        this.data = data
+    }
+
+    public func getSize(): Int64 {
+        return Int64(data.size)
+    }
+
+    public func read(buffer: Array<Byte>): Int64 {
+        if (closed || offset >= Int64(data.size)) {
+            return 0
+        }
+        let remaining = Int64(data.size) - offset
+        let toRead = if (Int64(buffer.size) < remaining) { Int64(buffer.size) } else { remaining }
+        for (i in 0..toRead) {
+            buffer[i] = data[offset + i]
+        }
+        offset += toRead
+        return toRead
+    }
+
+    public func close(): Unit {
+        closed = true
+    }
+}
+
+/**
  * 压缩包类型处理器
  * 支持: zip, rar, 7z, tar, cbz, cbr, cb7, cbt, tar.gz, tgz
  */
@@ -22,6 +56,19 @@ public class ArchiveFileHandler <: ArchiveHandler {
 
     public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>){
         return (0i64,Archive.extractEntry(archivePath, entryName), "success".toArray())
+    }
+
+    public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        try {
+            let data = Archive.extractEntry(archivePath, entryName)
+            if (data.size == 0) {
+                return (1i64, None, "Entry not found or empty: ${entryName}")
+            }
+            let reader = MemoryEntryReader(data)
+            return (0i64, Some(reader), "")
+        } catch (e: Exception) {
+            return (1i64, None, "Exception extracting entry: ${e.message}")
+        }
     }
 
     public func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool {

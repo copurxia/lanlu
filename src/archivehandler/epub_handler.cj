@@ -58,6 +58,27 @@ public class EpubHandler <: ArchiveHandler {
         }
     }
 
+    public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        try {
+            if (entryName.size == 0) {
+                return (1i64, None, "Empty entry name")
+            }
+
+            let epub = Epub.open(archivePath)
+            let dataOpt = epub.extractResource(entryName)
+            epub.close()
+
+            match (dataOpt) {
+                case Some(data) =>
+                    let reader = MemoryEntryReader(data)
+                    return (0i64, Some(reader), "")
+                case None => return (1i64, None, "Entry not found")
+            }
+        } catch (e: Exception) {
+            return (1i64, None, e.message)
+        }
+    }
+
     public func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool {
         try {
             if (entryName.size == 0) {

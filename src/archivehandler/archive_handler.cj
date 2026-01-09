@@ -1,6 +1,30 @@
 package lrr4cj.archivehandler
 
 /**
+ * 条目读取器接口
+ * 支持分块读取档案中的条目内容
+ */
+public interface EntryReader {
+    /**
+     * 获取条目的总大小（字节）
+     * @return 条目大小，-1 表示未知
+     */
+    func getSize(): Int64
+
+    /**
+     * 读取一块数据
+     * @param buffer 目标缓冲区
+     * @return 实际读取的字节数，0 表示已读完
+     */
+    func read(buffer: Array<Byte>): Int64
+
+    /**
+     * 关闭读取器，释放资源
+     */
+    func close(): Unit
+}
+
+/**
  * 档案处理器接口
  * 定义所有档案类型必须实现的操作
  */
@@ -24,6 +48,14 @@ public interface ArchiveHandler {
      * @return (exitCode, data, error)
      */
     func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>)
+
+    /**
+     * 获取条目的流式读取器（支持分块读取）
+     * @param archivePath 档案路径
+     * @param entryName 条目名称
+     * @return (exitCode, reader, error) - reader 可能为 None
+     */
+    func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String)
 
     /**
      * 提取单个条目/页面到指定文件

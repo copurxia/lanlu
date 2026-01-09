@@ -7,6 +7,39 @@ import lrr4cj.utils.DirectoryScanner
 import lrr4cj.utils.NaturalSort
 
 /**
+ * 文件读取器 - 支持分块读取文件
+ */
+public class FileEntryReader <: EntryReader {
+    private var file: File
+    private let fileSize: Int64
+    private var closed: Bool = false
+
+    public init(filePath: String) {
+        let path = Path(filePath)
+        this.file = File(path, Read)
+        this.fileSize = this.file.info.size
+    }
+
+    public func getSize(): Int64 {
+        return fileSize
+    }
+
+    public func read(buffer: Array<Byte>): Int64 {
+        if (closed) {
+            return 0
+        }
+        return file.read(buffer)
+    }
+
+    public func close(): Unit {
+        if (!closed) {
+            closed = true
+            file.close()
+        }
+    }
+}
+
+/**
  * 文件夹类型处理器
  */
 public class FolderHandler <: ArchiveHandler {
@@ -42,6 +75,19 @@ public class FolderHandler <: ArchiveHandler {
         } catch (e: Exception) {
             let errorMsg = "Exception reading file: ${e.message}"
             return (1i64, Array<UInt8>(), errorMsg.toArray())
+        }
+    }
+
+    public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        try {
+            let filePath = DirectoryScanner.joinPath(archivePath, entryName)
+            if (!DirectoryScanner.fileExists(filePath)) {
+                return (1i64, None, "File not found: ${filePath}")
+            }
+            let reader = FileEntryReader(filePath)
+            return (0i64, Some(reader), "")
+        } catch (e: Exception) {
+            return (1i64, None, "Exception opening file: ${e.message}")
         }
     }
 

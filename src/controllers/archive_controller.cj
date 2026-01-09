@@ -795,82 +795,252 @@ public class ArchiveController {
         // 获取查询参数
         let pathParam = ctx.getQuery("path")
         match (pathParam) {
-            case Some(path) =>
-                if (path.size == 0) {
-                    let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
-                    return
-                }
-
-                // 检查归档是否存在（使用ArchiveDao以获取archive_type）
-                let archive = ArchiveDao.getArchiveById(id)
-                if (archive.id.size == 0) {
-                    let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Archive not found\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
-                    return
-                }
-
-                // 构建归档文件完整路径（从分类获取基础路径）
-                let archivePath = getArchiveBasePath(archive.id)
-                if (archivePath.size == 0) {
-                    ctx.status(500)
-                    ctx.json("{\"success\":0,\"error\":\"Category not found for archive\"}")
-                    return
-                }
-                let fullArchivePath = if (archive.relative_path.size > 0) {
-                    "${archivePath}/${archive.relative_path}/${archive.filename}"
-                } else {
-                    "${archivePath}/${archive.filename}"
-                }
-
-                try {
-                    // 对于文件访问，需要解析软链接到实际路径
-                    let actualPath = FileUtils.resolvePath(fullArchivePath)
-
-                    // 使用 Handler 提取文件内容
-                    let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
-                    let (exitCode, data, error) = handler.extractEntryToStream(actualPath, path)
-
-                    if (exitCode == 0) {
-                        let contentSize = data.size
-                        let etag = CacheUtils.generateETag("${id}-${path}-${contentSize}")
-
-                        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
-                            CacheUtils.sendNotModifiedDynamic(ctx, etag)
-                            return
-                        }
-
-                        CacheUtils.setDynamicCacheHeaders(ctx, etag)
-                        let contentType = getContentTypeFromPath(path)
-                        ctx.header("Content-Type", contentType)
-                        ctx.status(HttpStatusCode.STATUS_OK)
-                        let byteData = Array<Byte>(contentSize, { i => data[i] })
-                        ctx.data(byteData)
-                    } else {
-                        var errorStr = ""
-                        try {
-                            errorStr = String.fromUtf8(error)
-                        } catch (_: Exception) {
-                            errorStr = "Failed to extract file"
-                        }
-                        let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"${errorStr}\",\"success\":0}"
-                        ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ctx.json(errorResponse)
-                    }
-                } catch (e: Exception) {
-                    let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Exception extracting file: ${e.message}\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
-                }
+            case Some(path) => getPageInternal(ctx, id, path)
             case None =>
                 let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ctx.json(errorResponse)
         }
     }
-    
+
+    /**
+     * getPage 内部实现
+     */
+    private static func getPageInternal(ctx: JoyContext, id: String, path: String): Unit {
+        if (path.size == 0) {
+            let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.json(errorResponse)
+            return
+        }
+
+        // 检查归档是否存在（使用ArchiveDao以获取archive_type）
+        let archive = ArchiveDao.getArchiveById(id)
+        if (archive.id.size == 0) {
+            let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Archive not found\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.json(errorResponse)
+            return
+        }
+
+        // 构建归档文件完整路径
+        let archivePath = getArchiveBasePath(archive.id)
+        if (archivePath.size == 0) {
+            ctx.status(500)
+            ctx.json("{\"success\":0,\"error\":\"Category not found for archive\"}")
+            return
+        }
+        let fullArchivePath = if (archive.relative_path.size > 0) {
+            "${archivePath}/${archive.relative_path}/${archive.filename}"
+        } else {
+            "${archivePath}/${archive.filename}"
+        }
+
+        try {
+            // 对于文件访问，需要解析软链接到实际路径
+            let actualPath = FileUtils.resolvePath(fullArchivePath)
+
+            // 使用 Handler 获取流式读取器
+            let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
+            let (exitCode, readerOpt, errorMsg) = handler.getEntryReader(actualPath, path)
+
+            if (exitCode == 0) {
+                match (readerOpt) {
+                    case Some(reader) => sendPageDataWithReader(ctx, id, path, reader)
+                    case None =>
+                        let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}"
+                        ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                        ctx.json(errorResponse)
+                }
+            } else {
+                let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}"
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.json(errorResponse)
+            }
+        } catch (e: Exception) {
+            let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ctx.json(errorResponse)
+        }
+    }
+
+    /**
+     * 发送页面数据，大文件使用 chunked 分块传输
+     */
+    private static func sendPageData(ctx: JoyContext, id: String, path: String, data: Array<UInt8>): Unit {
+        let contentSize = data.size
+        let etag = CacheUtils.generateETag("${id}-${path}-${contentSize}")
+
+        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+            CacheUtils.sendNotModifiedDynamic(ctx, etag)
+            return
+        }
+
+        let contentType = getContentTypeFromPath(path)
+
+        // 根据数据大小选择传输方式
+        if (Int64(contentSize) > CHUNKED_THRESHOLD) {
+            // 大文件：使用 chunked 分块传输
+            sendPageDataChunked(ctx, data, contentType, etag)
+        } else {
+            // 小文件：一次性返回
+            sendPageDataSmall(ctx, data, contentType, etag)
+        }
+    }
+
+    /**
+     * 小文件：一次性返回
+     */
+    private static func sendPageDataSmall(
+        ctx: JoyContext,
+        data: Array<UInt8>,
+        contentType: String,
+        etag: String
+    ): Unit {
+        CacheUtils.setDynamicCacheHeaders(ctx, etag)
+        ctx.header("Content-Type", contentType)
+        ctx.header("Content-Length", "${data.size}")
+        ctx.status(HttpStatusCode.STATUS_OK)
+        let byteData = Array<Byte>(data.size, { i => data[i] })
+        ctx.data(byteData)
+    }
+
+    /**
+     * 大文件：使用 chunked 分块传输
+     */
+    private static func sendPageDataChunked(
+        ctx: JoyContext,
+        data: Array<UInt8>,
+        contentType: String,
+        etag: String
+    ): Unit {
+        let writer = ctx.chunkedWriter()
+
+        // 设置响应头
+        writer.header("Content-Type", contentType)
+        writer.header("ETag", etag)
+        writer.header("Cache-Control", "private, max-age=3600")
+
+        // 分块发送数据
+        let totalSize = Int64(data.size)
+        let chunkSizeInt = Int64(CHUNK_SIZE)
+        var offset: Int64 = 0
+
+        while (offset < totalSize) {
+            let remaining = totalSize - offset
+            let currentChunkSize = if (remaining > chunkSizeInt) { chunkSizeInt } else { remaining }
+
+            // 使用 sliceToBytes 辅助函数创建块数据
+            let chunk = sliceToBytes(data, offset, currentChunkSize)
+            writer.write(chunk)
+
+            offset += currentChunkSize
+        }
+
+        writer.end()
+    }
+
+    /**
+     * 从 UInt8 数组切片转换为 Byte 数组
+     */
+    private static func sliceToBytes(data: Array<UInt8>, start: Int64, length: Int64): Array<Byte> {
+        let result = Array<Byte>(length, {_ => 0})
+        for (i in 0..length) {
+            result[i] = data[start + i]
+        }
+        return result
+    }
+
+    /**
+     * 使用 EntryReader 发送页面数据，支持真正的流式分块传输
+     */
+    private static func sendPageDataWithReader(
+        ctx: JoyContext,
+        id: String,
+        path: String,
+        reader: EntryReader
+    ): Unit {
+        let fileSize = reader.getSize()
+        let contentType = getContentTypeFromPath(path)
+        let etag = CacheUtils.generateETag("${id}-${path}-${fileSize}")
+
+        // 检查缓存
+        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+            reader.close()
+            CacheUtils.sendNotModifiedDynamic(ctx, etag)
+            return
+        }
+
+        // 根据文件大小选择传输方式
+        if (fileSize > CHUNKED_THRESHOLD) {
+            // 大文件：使用 chunked 流式传输
+            sendWithReaderChunked(ctx, reader, contentType, etag)
+        } else {
+            // 小文件：一次性读取返回
+            sendWithReaderSmall(ctx, reader, fileSize, contentType, etag)
+        }
+    }
+
+    /**
+     * 小文件：一次性读取返回
+     */
+    private static func sendWithReaderSmall(
+        ctx: JoyContext,
+        reader: EntryReader,
+        fileSize: Int64,
+        contentType: String,
+        etag: String
+    ): Unit {
+        let buffer = Array<Byte>(fileSize, {_ => 0})
+        reader.read(buffer)
+        reader.close()
+
+        CacheUtils.setDynamicCacheHeaders(ctx, etag)
+        ctx.header("Content-Type", contentType)
+        ctx.header("Content-Length", "${fileSize}")
+        ctx.status(HttpStatusCode.STATUS_OK)
+        ctx.data(buffer)
+    }
+
+    /**
+     * 大文件：使用 chunked 流式传输
+     */
+    private static func sendWithReaderChunked(
+        ctx: JoyContext,
+        reader: EntryReader,
+        contentType: String,
+        etag: String
+    ): Unit {
+        let writer = ctx.chunkedWriter()
+
+        // 设置响应头
+        writer.header("Content-Type", contentType)
+        writer.header("ETag", etag)
+        writer.header("Cache-Control", "private, max-age=3600")
+
+        // 分块读取并发送
+        let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+
+        while (true) {
+            let bytesRead = reader.read(chunkBuffer)
+            if (bytesRead <= 0) {
+                break
+            }
+
+            if (bytesRead == CHUNK_SIZE) {
+                // 完整块
+                writer.write(chunkBuffer)
+            } else {
+                // 最后一块，可能不足 CHUNK_SIZE
+                let lastChunk = Array<Byte>(bytesRead, { i => chunkBuffer[i] })
+                writer.write(lastChunk)
+            }
+        }
+
+        reader.close()
+        writer.end()
+    }
+
     /**
      * 根据文件路径获取Content-Type
      */
