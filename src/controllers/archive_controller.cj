@@ -653,9 +653,14 @@ public class ArchiveController {
     }
 
     // GET /api/archives/{id}/download
+    // 大文件阈值：5MB
+    private static let CHUNKED_THRESHOLD: Int64 = 5 * 1024 * 1024
+    // 分块大小：1MB
+    private static let CHUNK_SIZE: Int64 = 1024 * 1024
+
     public static func downloadArchive(ctx: JoyContext): Unit {
         let id = ctx.getParam("id").getOrThrow()
-        
+
         // 检查ID是否为空
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
@@ -663,7 +668,7 @@ public class ArchiveController {
             ctx.json(errorResponse)
             return
         }
-        
+
         // 检查归档是否存在
         let archive = ArchiveModel.getArchiveById(id)
         if (archive.id.size == 0) {
@@ -694,23 +699,85 @@ public class ArchiveController {
             let file = File(filePath, Read)
             let fileInfo = file.info
             let fileSize = fileInfo.size
-            let buffer = Array<Byte>(fileSize, {_ => 0})
-            file.read(buffer)
-            file.close()
-            
-            // 设置响应头
-            ctx.header("Content-Type", "application/octet-stream")
-            ctx.header("Content-Disposition", "attachment; filename=\"${archive.filename}\"")
-            ctx.header("Content-Length", "${fileSize}")
-            ctx.status(HttpStatusCode.STATUS_OK)
-            
-            // 返回文件内容
-            ctx.data(buffer)
+
+            // 根据文件大小选择传输方式
+            if (fileSize > CHUNKED_THRESHOLD) {
+                // 大文件：使用 chunked 分块传输
+                downloadArchiveChunked(ctx, file, fileSize, archive.filename)
+            } else {
+                // 小文件：一次性读取返回
+                downloadArchiveSmall(ctx, file, fileSize, archive.filename)
+            }
         } catch (e: Exception) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Failed to read archive file: ${e.message}\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
             ctx.json(errorResponse)
         }
+    }
+
+    /**
+     * 小文件下载：一次性读取到内存返回
+     */
+    private static func downloadArchiveSmall(ctx: JoyContext, file: File, fileSize: Int64, filename: String): Unit {
+        let buffer = Array<Byte>(fileSize, {_ => 0})
+        file.read(buffer)
+        file.close()
+
+        // 设置响应头
+        ctx.header("Content-Type", "application/octet-stream")
+        ctx.header("Content-Disposition", "attachment; filename=\"${filename}\"")
+        ctx.header("Content-Length", "${fileSize}")
+        ctx.status(HttpStatusCode.STATUS_OK)
+
+        // 返回文件内容
+        ctx.data(buffer)
+    }
+
+    /**
+     * 大文件下载：使用 chunked 分块传输，流式读取不占用大量内存
+     */
+    private static func downloadArchiveChunked(ctx: JoyContext, file: File, fileSize: Int64, filename: String): Unit {
+        // 获取 chunked writer
+        let writer = ctx.chunkedWriter()
+
+        // 设置响应头（在第一次 write 之前设置）
+        writer.header("Content-Type", "application/octet-stream")
+        writer.header("Content-Disposition", "attachment; filename=\"${filename}\"")
+        // 注意：chunked 传输不设置 Content-Length，由 Transfer-Encoding: chunked 处理
+
+        // 分块读取并发送
+        var remaining = fileSize
+        let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+
+        while (remaining > 0) {
+            let toRead = if (remaining > CHUNK_SIZE) { CHUNK_SIZE } else { remaining }
+
+            // 读取一块数据
+            if (toRead == CHUNK_SIZE) {
+                // 完整块，直接使用预分配的 buffer
+                let bytesRead = file.read(chunkBuffer)
+                if (bytesRead > 0) {
+                    writer.write(chunkBuffer)
+                    remaining -= bytesRead
+                } else {
+                    break
+                }
+            } else {
+                // 最后一块，可能不足 CHUNK_SIZE
+                let lastBuffer = Array<Byte>(toRead, {_ => 0})
+                let bytesRead = file.read(lastBuffer)
+                if (bytesRead > 0) {
+                    writer.write(lastBuffer)
+                    remaining -= bytesRead
+                } else {
+                    break
+                }
+            }
+        }
+
+        // 关闭文件和结束 chunked 传输
+        file.close()
+        writer.end()
     }
 
     // GET /api/archives/{id}/page?path=...
