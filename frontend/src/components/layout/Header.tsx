@@ -67,7 +67,7 @@ export function Header() {
 
   return (
     <header className="bg-background border-b border-border sticky top-0 z-50">
-      <div className="mx-auto px-2 sm:px-4 py-3">
+      <div className="mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
           {/* Logo和标题 */}
           <div className="flex items-center gap-3">
