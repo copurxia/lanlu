@@ -15,7 +15,7 @@ import { logger } from '@/lib/logger';
 import { useMounted } from './hooks/useMounted';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
-import { getSearchQueryForTag } from './utils/tag';
+import { displayTag } from './utils/tag';
 import { ArchiveCoverCard } from './components/ArchiveCoverCard';
 import { ArchiveMainCard } from './components/ArchiveMainCard';
 import { ArchivePreviewCard } from './components/ArchivePreviewCard';
@@ -35,7 +35,7 @@ export function ArchiveDetailContent() {
   const { confirm } = useConfirmContext();
   const mounted = useMounted();
 
-  const { metadata, loading, error, isFavorite, setIsFavorite, tagTranslations, refetch } = useArchiveMetadata({
+  const { metadata, loading, error, isFavorite, setIsFavorite, refetch } = useArchiveMetadata({
     id,
     language,
     t,
@@ -61,10 +61,9 @@ export function ArchiveDetailContent() {
 
   const handleTagClick = useCallback(
     (fullTag: string) => {
-      const searchQuery = getSearchQueryForTag(fullTag, tagTranslations);
-      router.push(`/?q=${encodeURIComponent(searchQuery)}`);
+      router.push(`/?q=${encodeURIComponent(displayTag(fullTag))}`);
     },
-    [router, tagTranslations]
+    [router]
   );
 
   const [favoriteLoading, setFavoriteLoading] = useState(false);

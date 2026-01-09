@@ -15,7 +15,7 @@ export interface Archive {
 }
 
 export interface SearchResponse {
-  data: Archive[];
+  data: Array<Archive | import('./tankoubon').Tankoubon>;
   draw: number;
   recordsFiltered: number;
   recordsTotal: number;

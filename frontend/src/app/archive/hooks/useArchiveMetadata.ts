@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { ArchiveService } from '@/lib/archive-service';
-import { TagService } from '@/lib/tag-service';
 import { logger } from '@/lib/logger';
 import type { ArchiveMetadata } from '@/types/archive';
 
@@ -17,7 +16,6 @@ export function useArchiveMetadata({ id, language, t }: UseArchiveMetadataParams
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isFavorite, setIsFavorite] = useState(false);
-  const [tagTranslations, setTagTranslations] = useState<Record<string, string>>({});
 
   const fetchMetadata = useCallback(async (): Promise<ArchiveMetadata | null> => {
     if (!id) return null;
@@ -26,14 +24,6 @@ export function useArchiveMetadata({ id, language, t }: UseArchiveMetadataParams
       const data = await ArchiveService.getMetadata(id, language);
       setMetadata(data);
       setIsFavorite(data.isfavorite || false);
-
-      try {
-        const translations = await TagService.getTranslations(language, id);
-        setTagTranslations(translations);
-      } catch (err) {
-        logger.apiError('fetch tag translations', err);
-        setTagTranslations({});
-      }
 
       return data;
     } catch (err) {
@@ -77,8 +67,6 @@ export function useArchiveMetadata({ id, language, t }: UseArchiveMetadataParams
     error,
     isFavorite,
     setIsFavorite,
-    tagTranslations,
     refetch: fetchMetadata,
   };
 }
-

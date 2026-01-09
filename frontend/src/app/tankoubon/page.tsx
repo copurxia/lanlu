@@ -32,7 +32,6 @@ import {
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { ArchiveService } from '@/lib/archive-service';
 import { FavoriteService } from '@/lib/favorite-service';
-import { TagService } from '@/lib/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/logger';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search } from 'lucide-react';
@@ -79,9 +78,6 @@ function TankoubonDetailContent() {
   // Archive filter (within this collection)
   const [archiveFilter, setArchiveFilter] = useState('');
 
-  // Tag i18n state
-  const [tagI18nMap, setTagI18nMap] = useState<Record<string, string>>({});
-
   // Fetch tankoubon details
   const fetchTankoubon = useCallback(async () => {
     if (!tankoubonId) return;
@@ -89,6 +85,28 @@ function TankoubonDetailContent() {
     try {
       setLoading(true);
       const data = await TankoubonService.getTankoubonById(tankoubonId);
+
+      // Prefer translated tags coming from the search endpoint (avoids /api/tags/translations)
+      try {
+        const searchResult = await ArchiveService.search({
+          tankoubon_id: tankoubonId,
+          groupby_tanks: true,
+          start: 0,
+          count: 1,
+          sortby: 'tank_order',
+          order: 'asc',
+          lang: language,
+        });
+        const tankItem = searchResult.data.find(
+          (item): item is Tankoubon => Boolean(item) && typeof item === 'object' && 'tankoubon_id' in item
+        );
+        if (tankItem && tankItem.tankoubon_id === tankoubonId && typeof tankItem.tags === 'string') {
+          data.tags = tankItem.tags;
+        }
+      } catch {
+        // Ignore; fall back to untranslated tags
+      }
+
       setTankoubon(data);
       setIsFavorite(data.isfavorite || false);
 
@@ -101,7 +119,7 @@ function TankoubonDetailContent() {
     } finally {
       setLoading(false);
     }
-  }, [tankoubonId]);
+  }, [tankoubonId, language]);
 
   // Fetch archives in tankoubon
   const fetchArchives = useCallback(async () => {
@@ -118,14 +136,19 @@ function TankoubonDetailContent() {
         order: 'asc',
         start: 0,
         count: 10000,
+        groupby_tanks: false,
+        lang: language,
       });
-      setArchives(result.data || []);
+      const archiveItems = result.data.filter(
+        (item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item
+      );
+      setArchives(archiveItems || []);
     } catch (error) {
       logger.apiError('fetch archives', error);
     } finally {
       setArchivesLoading(false);
     }
-  }, [tankoubon?.archives, tankoubon?.tankoubon_id]);
+  }, [tankoubon?.archives, tankoubon?.tankoubon_id, language]);
 
   useEffect(() => {
     fetchTankoubon();
@@ -137,37 +160,13 @@ function TankoubonDetailContent() {
     }
   }, [tankoubon, fetchArchives]);
 
-  // Fetch tag i18n translations
-  useEffect(() => {
-    if (!tankoubonId) return;
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const map = await TagService.getTranslations(language, undefined, tankoubonId);
-        if (!cancelled) {
-          setTagI18nMap(map || {});
-        }
-      } catch {
-        // Silently fail, use original tags
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [tankoubonId, language]);
-
   // Helper function to display translated tag
   const displayTag = useCallback((tag: string): string => {
     const key = String(tag || '').trim();
     if (!key) return '';
-    const translated = tagI18nMap[key];
-    if (translated && String(translated).trim()) return String(translated);
-    // Strip namespace prefix for display
     const idx = key.indexOf(':');
     return idx > 0 ? key.slice(idx + 1) : key;
-  }, [tagI18nMap]);
+  }, []);
 
   const handleFavoriteClick = async () => {
     if (!tankoubon || favoriteLoading) return;
@@ -253,11 +252,14 @@ function TankoubonDetailContent() {
         filter: searchQuery,
         count: 50,
         groupby_tanks: false, // Don't group by tanks when searching for archives to add
+        lang: language,
       });
 
       // Filter out archives already in this tankoubon
       const existingArcids = new Set(tankoubon?.archives || []);
-      const filtered = result.data.filter((a: Archive) => !existingArcids.has(a.arcid));
+      const filtered = result.data
+        .filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item)
+        .filter((a) => !existingArcids.has(a.arcid));
       setAvailableArchives(filtered);
     } catch (error) {
       logger.apiError('search archives', error);

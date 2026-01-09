@@ -6,6 +6,7 @@ import type { Archive } from '@/types/archive';
 import { TankoubonService } from '@/lib/tankoubon-service';
 import { ArchiveService } from '@/lib/archive-service';
 import { logger } from '@/lib/logger';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 type Params = {
   archiveId: string | null;
@@ -13,8 +14,9 @@ type Params = {
 };
 
 export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon = 6 }: Params) {
+  const { language } = useLanguage();
   const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
-  const [archivesById, setArchivesById] = useState<Record<string, Archive>>({});
+  const [previewArchivesByTankoubonId, setPreviewArchivesByTankoubonId] = useState<Record<string, Archive[]>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const seqRef = useRef(0);
@@ -23,7 +25,7 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
     const seq = ++seqRef.current;
     if (!archiveId) {
       setTankoubons([]);
-      setArchivesById({});
+      setPreviewArchivesByTankoubonId({});
       setLoading(false);
       setError(null);
       return;
@@ -36,66 +38,56 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
       if (seq !== seqRef.current) return;
       setTankoubons(tanks);
 
-      const idsToFetch = new Set<string>();
-      for (const tank of tanks) {
-        const rawArcids = (tank.archives || []).filter((id) => id);
-        const arcids = (() => {
-          if (!archiveId) return rawArcids.slice(0, maxPreviewArchivesPerTankoubon);
-          const idx = rawArcids.indexOf(archiveId);
-          if (idx < 0) return rawArcids.slice(0, maxPreviewArchivesPerTankoubon);
-          const reordered = [archiveId, ...rawArcids.slice(0, idx), ...rawArcids.slice(idx + 1)];
-          return reordered.slice(0, maxPreviewArchivesPerTankoubon);
-        })();
-        for (const id of arcids) idsToFetch.add(id);
-      }
-
-      if (idsToFetch.size === 0) {
-        setArchivesById({});
+      if (tanks.length === 0) {
+        setPreviewArchivesByTankoubonId({});
         return;
       }
 
+      const windowSize = Math.max(1, maxPreviewArchivesPerTankoubon);
       const results = await Promise.allSettled(
-        Array.from(idsToFetch).map(async (id) => {
-          const archive = (await ArchiveService.getArchive(id)) as Archive;
-          return { id, archive };
+        tanks.map(async (tank) => {
+          const arcids = (tank.archives || []).filter((id) => id);
+          const idx = archiveId ? arcids.indexOf(archiveId) : -1;
+          const start = idx >= 0 ? Math.max(0, idx - Math.floor(windowSize / 2)) : 0;
+
+          const resp = await ArchiveService.search({
+            tankoubon_id: tank.tankoubon_id,
+            sortby: 'tank_order',
+            order: 'asc',
+            start,
+            count: windowSize,
+            groupby_tanks: false,
+            lang: language,
+          });
+
+          const archives = resp.data.filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item);
+          return { tankoubonId: tank.tankoubon_id, archives };
         })
       );
 
       if (seq !== seqRef.current) return;
-      const map: Record<string, Archive> = {};
+      const preview: Record<string, Archive[]> = {};
       for (const r of results) {
-        if (r.status === 'fulfilled' && r.value?.archive) {
-          map[r.value.id] = r.value.archive;
-        }
+        if (r.status !== 'fulfilled') continue;
+        const { tankoubonId, archives } = r.value;
+        const idx = archives.findIndex((a) => a.arcid === archiveId);
+        const ordered = idx > 0 ? [archives[idx], ...archives.slice(0, idx), ...archives.slice(idx + 1)] : archives;
+        preview[tankoubonId] = ordered.slice(0, maxPreviewArchivesPerTankoubon);
       }
-      setArchivesById(map);
+      setPreviewArchivesByTankoubonId(preview);
     } catch (e) {
       logger.apiError('fetch archive tankoubons', e);
       if (seq === seqRef.current) setError('failed');
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
-  }, [archiveId, maxPreviewArchivesPerTankoubon]);
+  }, [archiveId, language, maxPreviewArchivesPerTankoubon]);
 
   useEffect(() => {
     refetch();
   }, [refetch]);
 
-  const tankoubonPreviewArchives = useMemo(() => {
-    const byTank: Record<string, Archive[]> = {};
-    if (!archiveId) return byTank;
-
-    for (const tank of tankoubons) {
-      const rawArcids = (tank.archives || []).filter((id) => id);
-      const idx = rawArcids.indexOf(archiveId);
-      const arcids =
-        idx < 0
-          ? rawArcids.slice(0, maxPreviewArchivesPerTankoubon)
-          : [archiveId, ...rawArcids.slice(0, idx), ...rawArcids.slice(idx + 1)].slice(0, maxPreviewArchivesPerTankoubon);
-      byTank[tank.tankoubon_id] = arcids.map((id) => archivesById[id]).filter(Boolean);
-    }
-    return byTank;
-  }, [archiveId, archivesById, maxPreviewArchivesPerTankoubon, tankoubons]);
+  const tankoubonPreviewArchives = useMemo(() => previewArchivesByTankoubonId, [previewArchivesByTankoubonId]);
 
   return {
     tankoubons,
