@@ -8,16 +8,18 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = "-larchive"
+  link-option = "-larchive -lavif"
   package-configuration = {}
 
 [dependencies]
   cjoy = { git = "https://gitcode.com/Cangjie-SIG/cjoy.git", branch = "main" }
   opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", output-type = "static", branch="master"}
   cjdotenv = { git = "https://gitcode.com/Cangjie-SIG/cjdotenv.git", tag = "master" }
+  ahash = { git = "https://gitcode.com/OpenCangjieCommunity/ahash.git", tag = "master" }
   cjcron = { path = "packages/cjcron" }
   epub = { path = "packages/epub" }
   archive_ffi = { path = "packages/archive_ffi" }
+  avif_ffi = { path = "packages/avif_ffi" }
 
 [target]
   [target.x86_64-unknown-linux-gnu]

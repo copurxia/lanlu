@@ -4,12 +4,12 @@ import stdx.encoding.json.*
 import stdx.log.*
 import std.fs.*
 import std.process.*
-import stdx.crypto.digest.*
-import stdx.encoding.hex.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
 import lrr4cj.archivehandler.*
+import avif_ffi.*
+import ahash.*
 
 /**
  * 缩略图生成任务：为单个档案生成缩略图
@@ -98,35 +98,10 @@ public class GenerateThumbnailTaskRunner {
             return ProcessResultData(false, "", errorMsg)
         }
 
-        // 计算thumbhash（基于第一张图片的内容）
-        TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
-        logger.debug("Calculating thumbhash for archive: ${archiveId}")
-        let thumbHash = calculateThumbHash(tempImagePath)
-        TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
-        logger.debug("Calculated thumbhash: ${thumbHash}")
-
-        // 使用thumbhash作为缩略图文件名
-        let thumbnailFilePath = FileUtils.joinPath(thumbnailPath, "${thumbHash}.avif")
-        TaskIO.appendLog(taskId, "Thumbnail file path: ${thumbnailFilePath}")
-
-        // 如果文件已存在，先删除（避免重复）
-        if (fileExists(thumbnailFilePath)) {
-            TaskIO.appendLog(taskId, "Existing thumbnail found, removing: ${thumbnailFilePath}")
-            let rmExitCode = try {
-                let process = launch("rm", ["-f", thumbnailFilePath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                process.wait()
-            } catch (e: Exception) {
-                1
-            }
-            if (rmExitCode != 0) {
-                let warnMsg = "Failed to delete existing thumbnail: ${thumbnailFilePath}"
-                TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
-                logger.warn(warnMsg)
-            }
-        }
-
+        // 先转换图片为 AVIF 格式（临时路径）
         TaskIO.appendLog(taskId, "Converting image to AVIF format...")
-        let convertResult = ArchiveUtils.convertImageToAvif(tempImagePath, thumbnailFilePath, taskTempDir)
+        let tempAvifPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.avif")
+        let convertResult = ArchiveUtils.convertImageToAvif(tempImagePath, tempAvifPath, taskTempDir)
 
         // 清理临时文件和目录
         try {
@@ -173,6 +148,30 @@ public class GenerateThumbnailTaskRunner {
 
         TaskIO.appendLog(taskId, "Image conversion successful")
 
+        // 计算 thumbhash（基于转换后的 AVIF）
+        TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
+        logger.debug("Calculating thumbhash for archive: ${archiveId}")
+        let thumbHash = calculateThumbHash(tempAvifPath)
+        TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
+        logger.debug("Calculated thumbhash: ${thumbHash}")
+
+        // 使用 thumbhash 作为文件名
+        let finalThumbnailPath = FileUtils.joinPath(thumbnailPath, "${thumbHash}.avif")
+
+        // 移动文件到最终位置
+        TaskIO.appendLog(taskId, "Moving thumbnail to final location: ${finalThumbnailPath}")
+        let mvExitCode = try {
+            let process = launch("mv", ["-f", tempAvifPath, finalThumbnailPath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+            process.wait()
+        } catch (e: Exception) {
+            1
+        }
+        if (mvExitCode != 0) {
+            let errorMsg = "Failed to move thumbnail to final location"
+            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+            return ProcessResultData(false, "", errorMsg)
+        }
+
         // 将thumbhash存储到数据库
         TaskIO.appendLog(taskId, "Saving thumbhash to database for archive: ${archiveId}")
         logger.debug("Saving thumbhash to database for archive: ${archiveId}")
@@ -187,7 +186,7 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Thumbhash saved to database successfully")
         logger.debug("Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
         TaskIO.appendLog(taskId, "Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
-        return ProcessResultData(true, thumbnailFilePath, thumbHash)
+        return ProcessResultData(true, finalThumbnailPath, thumbHash)
     }
 
     private static func parseParameters(parameters: String): (String, String, String) {
@@ -262,32 +261,53 @@ public class GenerateThumbnailTaskRunner {
     }
 
     /**
-     * 计算图片的thumbhash（基于SHA1）
+     * 计算图片的thumbhash（基于像素内容的ahash）
      */
     private static func calculateThumbHash(imagePath: String): String {
-        try {
-            // 获取文件信息
-            let filePath = Path(imagePath)
-            let file = File(filePath, Read)
-            let fileInfo = file.info
-            file.close()
+        // 读取图片文件
+        let filePath = Path(imagePath)
+        let file = File(filePath, Read)
+        let fileInfo = file.info
+        let fileSize = Int64(fileInfo.size)
+        let buffer = Array<Byte>(fileSize, {_ => 0})
+        let bytesRead = file.read(buffer)
+        file.close()
 
-            // 组合内容：文件路径 + 大小（简单哈希，避免读取大文件）
-            let content = imagePath + fileInfo.size.toString()
-
-            // 使用 SHA1 算法生成哈希
-            var sha1Instance = SHA1()
-            sha1Instance.write(content.toArray())
-            let hash: Array<Byte> = sha1Instance.finish()
-
-            let result = toHexString(hash)
-            return result
-        } catch (e: Exception) {
-            let logger = getLogger("generate_thumbnail")
-            let errorMsg = "Error calculating thumbhash for ${imagePath}: ${e.message}"
-            logger.error(errorMsg)
-            // 失败时使用文件路径作为备选
-            return "fallback_${ArchiveUtils.generateFileHash(imagePath)}"
+        if (bytesRead <= 0) {
+            throw Exception("Failed to read file: ${imagePath}")
         }
+
+        let imageData = buffer[0..bytesRead]
+
+        // 使用 avif_ffi 解码图片
+        if (let Some((_, _, pixels)) <- AvifDecoder.decodeRGBA(imageData)) {
+            // 使用 ahash 计算像素数据的哈希
+            let builder = RandomState.new()
+            let hasher = builder.buildHasher()
+            hasher.write(pixels)
+            let hash = hasher.finish()
+            return hashToHex(hash)
+        }
+
+        throw Exception("AVIF decode failed for: ${imagePath}")
+    }
+
+    /**
+     * 将 UInt64 转换为十六进制字符串
+     */
+    private static func hashToHex(hash: UInt64): String {
+        var result = ""
+        var h = hash
+        for (_ in 0..16) {
+            let nibble = Int64((h >> 60) & 0xF)
+            let c = if (nibble < 10) {
+                Rune(UInt32(48 + nibble))  // '0' = 48
+            } else {
+                Rune(UInt32(97 + nibble - 10))  // 'a' = 97
+            }
+            result += c.toString()
+            h <<= 4
+        }
+        return result
     }
 }

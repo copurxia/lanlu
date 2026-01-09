@@ -377,7 +377,7 @@ public class ArchiveController {
             let thumbnailPath = ArchiveModel.getThumbnailFilePath(id, page)
             println("Thumbnail exists, reading from: ${thumbnailPath}")
             try {
-                // 生成 ETag（优先使用 thumbhash，否则基于 id+page 生成）
+                // 生成 ETag（使用 thumbhash）
                 let etag = if (archive.thumbhash.size > 0) {
                     "\"${archive.thumbhash}\""
                 } else {
