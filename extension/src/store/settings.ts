@@ -15,6 +15,7 @@ type SettingsState = {
 
   hydrate: () => Promise<void>;
   setSettings: (next: ExtensionSettings) => void;
+  setCategoryId: (categoryId: string) => Promise<void>;
   save: () => Promise<void>;
   refreshCategories: () => Promise<void>;
   clearError: () => void;
@@ -38,6 +39,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   setSettings: (next) => set({ settings: next }),
+
+  setCategoryId: async (categoryId) => {
+    const { settings } = get();
+    const next = { ...settings, categoryId };
+    set({ settings: next, saving: true, error: null });
+    try {
+      await saveSettings(next);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "保存失败";
+      set({ error: message });
+    } finally {
+      set({ saving: false });
+    }
+  },
 
   save: async () => {
     const { settings } = get();
@@ -87,4 +102,3 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   clearError: () => set({ error: null }),
 }));
-

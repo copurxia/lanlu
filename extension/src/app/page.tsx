@@ -22,7 +22,8 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 export default function AddPage() {
-  const { settings, categories, hydrated } = useSettingsStore();
+  const { settings, categories, hydrated, loadingCategories, saving, setCategoryId, refreshCategories } =
+    useSettingsStore();
   const addEntry = useDownloadQueueStore((s) => s.add);
   const entries = useDownloadQueueStore((s) => s.entries);
 
@@ -214,8 +215,44 @@ export default function AddPage() {
 
       <div className="rounded-lg border bg-card text-card-foreground p-3 space-y-2">
         <div className="text-xs font-medium">一键添加</div>
-        <div className="text-[11px] text-muted-foreground">
-          {auth ? (selectedCategory ? `分类：${selectedCategory.name}` : "需要在设置中选择分类") : "需要配置服务器与 Token"}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <label className="text-[11px] text-muted-foreground">分类</label>
+            <button
+              type="button"
+              className="text-[11px] underline underline-offset-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+              onClick={() => void refreshCategories()}
+              disabled={!auth || loadingCategories || saving}
+            >
+              {loadingCategories ? "刷新中…" : "刷新"}
+            </button>
+          </div>
+          <select
+            className="w-full h-9 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            value={settings.categoryId}
+            onChange={(e) => void setCategoryId(e.target.value)}
+            disabled={!auth || loadingCategories || saving || !!busy}
+          >
+            {loadingCategories ? (
+              <option value="">加载中...</option>
+            ) : categories.length === 0 ? (
+              <option value="">暂无可用分类</option>
+            ) : (
+              <>
+                <option value="" disabled>
+                  请选择分类
+                </option>
+                {categories.map((c) => (
+                  <option key={c.catid} value={c.catid}>
+                    {c.name}
+                  </option>
+                ))}
+              </>
+            )}
+          </select>
+          <div className="text-[11px] text-muted-foreground">
+            {auth ? (selectedCategory ? `当前：${selectedCategory.name}` : "请选择分类") : "需要配置服务器与 Token"}
+          </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2 pt-1">
@@ -288,4 +325,3 @@ export default function AddPage() {
     </div>
   );
 }
-
