@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/layout/Header';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Settings } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -9,7 +10,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const { t } = useLanguage();
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 lg:pb-0">
       <Header />
 
       <div className="container mx-auto px-4 py-8">
@@ -32,6 +33,8 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           <main className="min-w-0">{children}</main>
         </div>
       </div>
+
+      <MobileBottomNav />
     </div>
   );
 }

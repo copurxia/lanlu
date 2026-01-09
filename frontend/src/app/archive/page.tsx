@@ -2,6 +2,7 @@
 
 import { Suspense } from 'react';
 import { Header } from '@/components/layout/Header';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ArchiveDetailContent } from './ArchiveDetailContent';
 
@@ -9,7 +10,7 @@ export default function ArchiveDetailPage() {
   const { t } = useLanguage();
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen pb-20 lg:pb-0">
       <Header />
 
       <Suspense
@@ -23,7 +24,8 @@ export default function ArchiveDetailPage() {
       >
         <ArchiveDetailContent />
       </Suspense>
+
+      <MobileBottomNav />
     </div>
   );
 }
-

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/layout/Header';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -350,7 +351,7 @@ function TankoubonDetailContent() {
   const progressPercent = Math.max(0, Math.min(100, Math.round(tankoubon.progress ?? 0)));
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background pb-20 lg:pb-0">
       <Header />
       <main className="container mx-auto px-4 py-8">
         {/* Header / hero */}
@@ -657,6 +658,8 @@ function TankoubonDetailContent() {
           </DialogContent>
         </Dialog>
       </main>
+
+      <MobileBottomNav />
     </div>
   );
 }
@@ -664,13 +667,14 @@ function TankoubonDetailContent() {
 export default function TankoubonDetailPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background pb-20 lg:pb-0">
         <Header />
         <main className="container mx-auto px-4 py-8">
           <div className="flex items-center justify-center py-12">
             <Spinner size="lg" />
           </div>
         </main>
+        <MobileBottomNav />
       </div>
     }>
       <TankoubonDetailContent />

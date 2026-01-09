@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Header } from '@/components/layout/Header';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { ArchiveService } from '@/lib/archive-service';
 import { TankoubonService } from '@/lib/tankoubon-service';
@@ -260,7 +261,7 @@ function HomePageContent() {
     <div className="min-h-screen bg-background">
       <Header />
 
-      {/* 固定高度容器，减去Header高度（约64px） */}
+      {/* 固定高度容器，减去Header高度（约64px）；移动端不再减去底部栏高度，让内容滚动经过底部栏以呈现毛玻璃效果 */}
       <div className="flex h-[calc(100vh-4rem)]">
         {/* 侧栏 - 桌面端显示 */}
         <div className="hidden lg:block flex-shrink-0 border-r border-border w-80">
@@ -268,7 +269,7 @@ function HomePageContent() {
         </div>
 
         {/* 主内容区 - 独立滚动 */}
-        <main className="flex-1 min-w-0 overflow-y-auto">
+        <main className="flex-1 min-w-0 overflow-y-auto pb-24 lg:pb-0">
           <div className="px-4 py-8">
           {/* 随机推荐 - 搜索模式下隐藏 */}
           {!isSearchMode && (
@@ -402,6 +403,8 @@ function HomePageContent() {
           </div>
         </main>
       </div>
+
+      <MobileBottomNav />
     </div>
   );
 }
