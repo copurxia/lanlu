@@ -1,16 +1,26 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { SearchInput } from '@/components/ui/search-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { DateRangePicker } from '@/components/ui/date-range-picker';
 import { Switch } from '@/components/ui/switch';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Search, Filter, SortAsc, SortDesc, BookOpen, Tag, Calendar, Clock, Star, FolderOpen } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getApiUrl } from '@/lib/api';
 import { CategoryService, type Category } from '@/lib/services/category-service';
+
+// 动态加载日期范围选择器以减少初始 JS 体积
+const DateRangePicker = dynamic(
+  () => import('@/components/ui/date-range-picker').then((m) => m.DateRangePicker),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-10 w-full" />,
+  }
+);
 
 interface SmartFilter {
   id: number;

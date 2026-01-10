@@ -34,6 +34,7 @@ export interface BaseMediaCardProps {
   extraBadge?: React.ReactNode
   detailsLabel?: string
   pagesLabel?: string
+  priority?: boolean  // 优先加载图片（用于 LCP 优化）
 
   // 收藏回调
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
@@ -55,6 +56,7 @@ export function BaseMediaCard({
   extraBadge,
   detailsLabel,
   pagesLabel,
+  priority = false,
   onFavoriteToggle,
 }: BaseMediaCardProps) {
   const router = useRouter()
@@ -111,6 +113,7 @@ export function BaseMediaCard({
             alt={title}
             fill
             className="object-cover"
+            priority={priority}
             onError={() => setImageError(true)}
           />
         ) : (

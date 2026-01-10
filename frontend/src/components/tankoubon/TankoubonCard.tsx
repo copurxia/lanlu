@@ -7,9 +7,10 @@ import { useLanguage } from '@/contexts/LanguageContext';
 
 interface TankoubonCardProps {
   tankoubon: Tankoubon;
+  priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
 }
 
-export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
+export function TankoubonCard({ tankoubon, priority = false }: TankoubonCardProps) {
   const { t } = useLanguage();
   const firstArchiveId = tankoubon.archives?.[0];
 
@@ -29,6 +30,7 @@ export function TankoubonCard({ tankoubon }: TankoubonCardProps) {
       isnew={tankoubon.isnew}
       isfavorite={tankoubon.isfavorite}
       type="tankoubon"
+      priority={priority}
       detailsLabel={t('common.details')}
       pagesLabel={t('tankoubon.totalPages').replace('{count}', String(tankoubon.pagecount || 0))}
       badge={

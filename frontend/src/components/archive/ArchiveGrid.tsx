@@ -15,12 +15,14 @@ interface ArchiveGridProps {
   archives: (Archive | Tankoubon)[];
   variant?: 'default' | 'home' | 'random';
   preloadTankoubonDetails?: boolean; // 新增选项
+  priorityCount?: number; // 首屏优先加载的图片数量（用于 LCP 优化）
 }
 
 export function ArchiveGrid({
   archives,
   variant = 'default',
-  preloadTankoubonDetails = true  // 默认启用预加载
+  preloadTankoubonDetails = true,  // 默认启用预加载
+  priorityCount = 0  // 默认不优先加载，首页可传入首屏可见卡片数
 }: ArchiveGridProps) {
   const { t } = useLanguage();
 
@@ -60,6 +62,7 @@ export function ArchiveGrid({
             <TankoubonCard
               key={item.tankoubon_id}
               tankoubon={item}
+              priority={index < priorityCount}
             />
           );
         } else {
@@ -68,6 +71,7 @@ export function ArchiveGrid({
               key={item.arcid}
               archive={item}
               index={index}
+              priority={index < priorityCount}
             />
           );
         }

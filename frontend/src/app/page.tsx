@@ -291,7 +291,7 @@ function HomePageContent() {
             </div>
 
             {randomArchives.length > 0 ? (
-              <ArchiveGrid archives={randomArchives} variant="random" />
+              <ArchiveGrid archives={randomArchives} variant="random" priorityCount={6} />
             ) : !randomLoading ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">{t('home.noRecommendations')}</p>
