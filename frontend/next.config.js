@@ -5,8 +5,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  
+
   experimental: {
+    // 内联关键 CSS，减少渲染阻塞
+    inlineCss: true,
     optimizePackageImports: [
       'lucide-react',
       '@radix-ui/react-icons',
