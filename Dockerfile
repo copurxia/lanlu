@@ -3,7 +3,7 @@ FROM docker.1ms.run/ubuntu
 WORKDIR /app
 
 RUN apt-get update && \
-    apt-get install -y ffmpeg ghostscript tzdata libssl3 libarchive13 libavif16 && \
+    apt-get install -y ffmpeg ghostscript tzdata libssl-dev libarchive13 libavif16 && \
     rm -rf /var/lib/apt/lists/*
 
 ENV LD_LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
