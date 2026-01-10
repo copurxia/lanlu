@@ -843,19 +843,19 @@ public class ArchiveController {
                 match (readerOpt) {
                     case Some(reader) => sendPageDataWithReader(ctx, id, path, reader)
                     case None =>
-                        let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}"
+                        CacheUtils.setNoCacheHeaders(ctx)
                         ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ctx.json(errorResponse)
+                        ctx.json("{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
                 }
             } else {
-                let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}"
+                CacheUtils.setNoCacheHeaders(ctx)
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ctx.json("{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}")
             }
         } catch (e: Exception) {
-            let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}"
+            CacheUtils.setNoCacheHeaders(ctx)
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ctx.json("{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}")
         }
     }
 
