@@ -2,7 +2,6 @@ package lrr4cj.task_runners
 
 import std.regex.*
 import std.fs.*
-import std.process.*
 import std.time.*
 import std.convert.*
 import std.collection.*
@@ -101,20 +100,16 @@ public class DownloadUrlTaskRunner {
             }
 
             let output = denoResult.output
-            let loginCookiesJson = denoResult.cookiesJson
             TaskIO.appendLog(taskId, "plugin output: ${output}")
 
             // 插件自行下载并回传 relative_path（相对于 ./data）
             let downloadedRelativePaths = parseDownloadedRelativePath(output)
-            let usePluginDownloadedFile = downloadedRelativePaths.size > 0
             let downloadedSource = parseDownloadedSource(output)
-            var downloadUrl = ""
-            if (!usePluginDownloadedFile) {
-                downloadUrl = parseDownloadUrl(output)
-                if (downloadUrl.size == 0) {
-                    fail(taskId, "Plugin did not return download_url or relative_path")
-                    return
-                }
+
+            // 检查是否返回了档案
+            if (downloadedRelativePaths.size == 0) {
+                fail(taskId, "Plugin did not return relative_path")
+                return
             }
 
             // 检查是否返回了多个档案
@@ -123,48 +118,24 @@ public class DownloadUrlTaskRunner {
                 return
             }
 
-            if (downloadedRelativePaths.size == 0) {
-                fail(taskId, "No archives returned from plugin")
-                return
-            }
-
-            TaskModel.updateTaskProgress(taskId, 35, "下载文件")
-
-            var fileName = ""
-            var pluginTarget = Path("")
+            TaskModel.updateTaskProgress(taskId, 35, "处理下载文件")
 
             // 处理数组中的第一个（也是唯一的）档案
             let downloadedRelativePath = downloadedRelativePaths.get(0).getOrThrow()
 
-            if (usePluginDownloadedFile) {
-                if (downloadedRelativePath.contains("..") || downloadedRelativePath.startsWith("/") ||
-                    !downloadedRelativePath.startsWith("plugins/${plugin.namespace}/")) {
-                    fail(taskId, "Plugin returned invalid relative_path")
-                    return
-                }
-
-                pluginTarget = Path("./data/${downloadedRelativePath}")
-                if (!exists(pluginTarget)) {
-                    fail(taskId, "Plugin downloaded file not found")
-                    return
-                }
-                fileName = pluginTarget.fileName
-            } else {
-                fileName = deriveFileName(downloadUrl)
-                if (fileName.size == 0) {
-                    fileName = "download_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}.bin"
-                }
-
-                let pluginDataDir = "./data/plugins/${plugin.namespace}"
-                pluginTarget = Path("${pluginDataDir}/${fileName}")
-                FileUtils.ensureDirectoryExists(Path(pluginDataDir))
-
-                let downloadOk = downloadToPath(downloadUrl, pluginTarget.toString(), loginCookiesJson)
-                if (!downloadOk) {
-                    fail(taskId, "Failed to download file from plugin url")
-                    return
-                }
+            // 安全检查：防止路径遍历
+            if (downloadedRelativePath.contains("..") || downloadedRelativePath.startsWith("/") ||
+                !downloadedRelativePath.startsWith("plugins/${plugin.namespace}/")) {
+                fail(taskId, "Plugin returned invalid relative_path")
+                return
             }
+
+            let pluginTarget = Path("./data/${downloadedRelativePath}")
+            if (!exists(pluginTarget)) {
+                fail(taskId, "Plugin downloaded file not found")
+                return
+            }
+            let fileName = pluginTarget.fileName
 
             TaskModel.updateTaskProgress(taskId, 60, "移动到archive")
 
@@ -359,43 +330,6 @@ public class DownloadUrlTaskRunner {
         return Option<PluginData>.None
     }
 
-    private static func parseDownloadUrl(output: String): String {
-        if (output.size == 0) {
-            return ""
-        }
-        try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataObj: JsonObject =>
-                                        let dataFields = dataObj.getFields()
-                                        if (dataFields.contains("download_url")) {
-                                            let dlVal = dataFields["download_url"]
-                                            match (dlVal) {
-                                                case dlStr: JsonString => return dlStr.getValue()
-                                                case _ => return dlVal.toString()
-                                            }
-                                        }
-                                    case _ => ()
-                                }
-                            }
-                        }
-                    }
-                case _ => ()
-            }
-        } catch (_: Exception) {
-            return ""
-        }
-        return ""
-    }
-
     private static func parseDownloadedRelativePath(output: String): ArrayList<String> {
         var paths = ArrayList<String>()
         if (output.size == 0) {
@@ -483,145 +417,6 @@ public class DownloadUrlTaskRunner {
             return ""
         }
         return ""
-    }
-
-    private static func deriveFileName(downloadUrl: String): String {
-        let parts = downloadUrl.split("/")
-        if (parts.size == 0) {
-            return ""
-        }
-        var candidate = parts[parts.size - 1]
-        if (candidate.contains("?")) {
-            candidate = candidate.split("?")[0]
-        }
-        return candidate
-    }
-
-    private static func downloadToPath(url: String, outputPath: String, loginCookiesJson: String): Bool {
-        try {
-            var args = ArrayList<String>()
-            args.add("-L")
-            args.add("-A")
-            args.add("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
-
-            let cookieHeader = buildCookieHeaderForUrl(url, loginCookiesJson)
-            if (cookieHeader.size > 0) {
-                args.add("-H")
-                args.add("Cookie: ${cookieHeader}")
-            }
-
-            args.add(url)
-            args.add("-o")
-            args.add(outputPath)
-
-            let process = launch("curl", args.toArray(), stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-            let exitCode = process.wait()
-            return exitCode == 0
-        } catch (_: Exception) {
-            return false
-        }
-    }
-
-    private static func buildCookieHeaderForUrl(targetUrl: String, cookiesJson: String): String {
-        let trimmed = cookiesJson.trimAscii()
-        if (trimmed.size == 0) {
-            return ""
-        }
-
-        let host = extractHostname(targetUrl)
-        if (host.size == 0) {
-            return ""
-        }
-
-        try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case arr: JsonArray =>
-                    var parts = ArrayList<String>()
-                    let size = arr.size()
-                    for (i in 0..size) {
-                        match (arr.get(i)) {
-                            case Some(v) =>
-                                match (v) {
-                                    case obj: JsonObject =>
-                                        let fields = obj.getFields()
-                                        let name = match (fields.get("name")) {
-                                            case Some(s: JsonString) => s.getValue().trimAscii()
-                                            case Some(other) => other.toString().trimAscii()
-                                            case None => ""
-                                        }
-                                        let value = match (fields.get("value")) {
-                                            case Some(s: JsonString) => s.getValue().trimAscii()
-                                            case Some(other) => other.toString().trimAscii()
-                                            case None => ""
-                                        }
-                                        let domain = match (fields.get("domain")) {
-                                            case Some(s: JsonString) => s.getValue().trimAscii()
-                                            case Some(other) => other.toString().trimAscii()
-                                            case None => ""
-                                        }
-                                        if (name.size > 0 && value.size > 0 && domainMatches(domain, host)) {
-                                            parts.add("${name}=${value}")
-                                        }
-                                    case _ => ()
-                                }
-                            case None => ()
-                        }
-                    }
-                    if (parts.size == 0) {
-                        return ""
-                    }
-                    return String.join(parts.toArray(), delimiter: "; ")
-                case _ => return ""
-            }
-        } catch (_: Exception) {
-            return ""
-        }
-    }
-
-    private static func extractHostname(url: String): String {
-        try {
-            let m = Regex("^https?://([^/]+)").find(url, group: true)
-            match (m) {
-                case Some(md) => return md.matchString(1).trimAscii()
-                case None => ()
-            }
-        } catch (_: Exception) {
-            return ""
-        }
-        return ""
-    }
-
-    private static func domainMatches(cookieDomainRaw: String, targetHostRaw: String): Bool {
-        var cookieDomain = cookieDomainRaw.trimAscii()
-        var targetHost = targetHostRaw.trimAscii()
-
-        if (cookieDomain.startsWith(".")) {
-            let parts = cookieDomain.split(".", 2)
-            if (parts.size == 2) {
-                cookieDomain = parts[1]
-            }
-        }
-        if (targetHost.startsWith("www.")) {
-            let parts = targetHost.split("www.", 2)
-            if (parts.size == 2) {
-                targetHost = parts[1]
-            }
-        }
-
-        if (cookieDomain.size == 0 || targetHost.size == 0) {
-            return false
-        }
-        if (targetHost == cookieDomain) {
-            return true
-        }
-        if (targetHost.endsWith(".${cookieDomain}")) {
-            return true
-        }
-        if (cookieDomain.endsWith(".${targetHost}")) {
-            return true
-        }
-        return false
     }
 
     private static func parseArchiveTypeFromPlugin(output: String): String {
