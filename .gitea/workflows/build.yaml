@@ -24,6 +24,7 @@ jobs:
           apt-get install -y build-essential libarchive-dev libavif-dev xmake clang ninja-build
       - name: Set Up Cangjie and build
         run: |
+          which xmake && xmake --version
           export CANGJIE_STDX_PATH="$PWD/stdx"
           export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
           source cangjie/envsetup.sh
