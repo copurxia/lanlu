@@ -1120,6 +1120,90 @@ public class TaskDao {
     }
 
     /**
+     * 批量领取待执行任务（原子地将多个pending置为running）
+     * @param limit 最多领取的任务数量
+     * @return 领取到的任务列表
+     */
+    public static func claimPendingTasks(limit: Int32): ArrayList<TaskData> {
+        let logger = getLogger("task_dao")
+        var result = ArrayList<TaskData>()
+        if (limit <= 0) {
+            return result
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // 使用子查询实现批量原子领取
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks
+                        SET status = 'running',
+                            message = '任务已启动',
+                            progress = 0,
+                            started_at = CURRENT_TIMESTAMP
+                        WHERE id IN (
+                            SELECT id FROM tasks
+                            WHERE status = 'pending'
+                            ORDER BY priority ASC, created_at ASC, id ASC
+                            LIMIT ?
+                        )
+                        AND status = 'pending'
+                        RETURNING id, name, task_type, status, progress, message,
+                                  plugin_namespace, parameters, result,
+                                  priority, group_id, timeout_at, trigger_source,
+                                  created_at, started_at, completed_at
+                    """)
+                    stmt.set(0, Int64(limit))
+
+                    let rs = stmt.query()
+                    try {
+                        while (rs.next()) {
+                            let data = TaskData()
+                            data.id = rs.getOrNull<Int64>(0) ?? 0
+                            data.name = rs.getOrNull<String>(1) ?? ""
+                            data.taskType = rs.getOrNull<String>(2) ?? ""
+                            data.status = rs.getOrNull<String>(3) ?? ""
+                            data.progress = rs.getOrNull<Int32>(4) ?? 0
+                            data.message = rs.getOrNull<String>(5) ?? ""
+                            data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
+                            data.parameters = rs.getOrNull<String>(7) ?? ""
+                            data.result = rs.getOrNull<String>(8) ?? ""
+                            data.priority = rs.getOrNull<Int32>(9) ?? 50
+                            data.groupId = rs.getOrNull<String>(10) ?? ""
+                            data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                            data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                            data.createdAt = rs.getOrNull<String>(13) ?? ""
+                            data.startedAt = rs.getOrNull<String>(14) ?? ""
+                            data.completedAt = rs.getOrNull<String>(15) ?? ""
+                            result.add(data)
+                        }
+                    } finally {
+                        try {
+                            rs.close()
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            logger.warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                    return result
+                } catch (e: Exception) {
+                    logger.error("批量领取待执行任务失败", ("error", e.message))
+                    return result
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return result
+        }
+    }
+
+    /**
      * 创建等待状态的任务（条件驱动）
      * 任务创建后处于 waiting 状态，等待 waitForTaskId 指定的任务完成后自动转为 pending
      */

@@ -20,9 +20,9 @@ public class TaskPoolService {
 
     // 并发 worker 上限
     private var maxWorkers: Int32 = 2
-    private var currentWorkers: Int32 = 0
-    private var workerSeq: Int32 = 0
-    private let dispatchMutex: Mutex = Mutex()
+    // 使用原子操作管理 worker 计数，减少锁竞争
+    private let currentWorkers: AtomicInt32 = AtomicInt32(0)
+    private let workerSeq: AtomicInt32 = AtomicInt32(0)
 
     private init() {
         loadMaxWorkersConfig()
@@ -101,39 +101,36 @@ public class TaskPoolService {
     }
 
     /**
-     * 调度：在并发上限内领取 pending 任务并 spawn worker 执行
+     * 调度：批量领取 pending 任务并 spawn worker 执行
+     * 使用原子操作实现无锁调度，一次 DB 查询领取多个任务
      */
     private func dispatch(): Unit {
-        while (true) {
-            if (!isServiceRunning()) {
-                return
-            }
+        if (!isServiceRunning()) {
+            return
+        }
 
-            // 先占用一个 worker slot（避免并发超发），DB 操作不持锁
-            dispatchMutex.lock()
-            if (currentWorkers >= maxWorkers) {
-                dispatchMutex.unlock()
-                return
-            }
-            let workerId = workerSeq
-            workerSeq += 1
-            currentWorkers += 1
-            dispatchMutex.unlock()
+        // 计算可用 slot 数量
+        let current = currentWorkers.load()
+        let available = maxWorkers - current
+        if (available <= 0) {
+            return
+        }
 
-            // 领取一个 pending（无任务则释放 slot 并退出）
-            match (TaskDao.claimNextPendingTask()) {
-                case Some(taskData) =>
-                    let id = workerId
-                    spawn {
-                        runWorker(taskData, id)
-                    }
-                case None =>
-                    dispatchMutex.lock()
-                    if (currentWorkers > 0) {
-                        currentWorkers -= 1
-                    }
-                    dispatchMutex.unlock()
-                    return
+        // 批量领取任务（一次 DB 往返）
+        let tasks = TaskDao.claimPendingTasks(available)
+        if (tasks.size == 0) {
+            return
+        }
+
+        // 为每个任务 spawn worker
+        for (task in tasks) {
+            // 原子增加 worker 计数
+            currentWorkers.fetchAdd(1)
+            let workerId = workerSeq.fetchAdd(1)
+            let taskData = task
+            let id = workerId
+            spawn {
+                runWorker(taskData, id)
             }
         }
     }
@@ -143,15 +140,12 @@ public class TaskPoolService {
         logger.debug("TaskPool worker executing", ("worker", workerId.toString()), ("task_id", task.id.toString()), ("task_type", task.taskType))
         executeTask(task, workerId)
 
-        // 触发依赖此任务的等待任务
-        triggerDependentTasks(task.id)
+        // 异步触发依赖此任务的等待任务（不阻塞 worker 释放）
+        let completedTaskId = task.id
+        spawn { triggerDependentTasks(completedTaskId) }
 
-        // 释放 slot 并尝试领取下一个 pending
-        dispatchMutex.lock()
-        if (currentWorkers > 0) {
-            currentWorkers -= 1
-        }
-        dispatchMutex.unlock()
+        // 释放 slot 并尝试领取下一个 pending（使用原子操作）
+        currentWorkers.fetchSub(1)
 
         dispatch()
     }
