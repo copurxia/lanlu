@@ -663,6 +663,22 @@ public class CronService {
                 logger.error("Failed to create default clear_log task")
         }
 
+        // 清理所有缩略图哈希（手动触发，默认禁用）
+        let clearThumbhashTask = createScheduledTask(
+            "清理缩略图哈希",
+            "0 5 * * *",
+            "clear_thumbhash",
+            taskParameters: "",  // 不需要参数
+            enabled: false,  // 默认禁用，需要手动触发
+            priority: 50
+        )
+        match (clearThumbhashTask) {
+            case Some(t) =>
+                logger.debug("Created default clear_thumbhash task", ("id", t.id.toString()))
+            case None =>
+                logger.error("Failed to create default clear_thumbhash task")
+        }
+
         logger.debug("Default scheduled tasks created")
     }
 

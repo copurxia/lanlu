@@ -230,6 +230,8 @@ public class TaskPoolService {
                 ClearCacheTaskRunner.run(task.id, task.parameters, context)
             case "clear_log" =>
                 ClearLogTaskRunner.run(task.id, task.parameters, context)
+            case "clear_thumbhash" =>
+                ClearThumbhashTaskRunner.run(task.id, task.parameters, context)
             case _ =>
                 TaskIO.appendLog(task.id, "Unknown task type: ${task.taskType}")
                 TaskModel.failTask(task.id, "Unknown task type: ${task.taskType}")

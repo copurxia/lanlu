@@ -1296,6 +1296,34 @@ public class ArchiveDao {
     }
 
     /**
+     * 清理所有 Archive 的 thumbhash 字段
+     * @return 清理的记录数，失败返回 -1
+     */
+    public static func clearAllThumbhash(): Int64 {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("UPDATE archives SET thumbhash = '' WHERE thumbhash != '' AND thumbhash IS NOT NULL")
+                    try {
+                        let result = stmt.update()
+                        return result.rowCount
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("清理所有thumbhash失败", ("error", e.message))
+                    return -1
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return -1
+        }
+    }
+
+    /**
      * 更新档案的 category_id
      */
     public static func updateArchiveCategoryId(arcid: String, categoryId: Int64): Bool {
