@@ -47,10 +47,13 @@ export function TaskList({ className }: TaskListProps) {
   const [activeFilter, setActiveFilter] = useState('all');
 
   const fetchTasks = useCallback(
-    async (page: number) => {
+    async (page: number, isAutoRefresh = false) => {
       try {
         setError(null);
-        setLoading(true); 
+        // Only show loading spinner on initial load, not on auto-refresh
+        if (!isAutoRefresh) {
+          setLoading(true);
+        }
 
         const result: TaskPageResult = await TaskPoolService.getTasks(page + 1, pageSize);
 
@@ -79,23 +82,29 @@ export function TaskList({ className }: TaskListProps) {
     [activeFilter, pageSize] 
   );
 
-  
+  // Track previous filter to detect changes
+  const [prevFilter, setPrevFilter] = useState(activeFilter);
+
+  // Combined effect: handle filter change (reset page) and fetch data
   useEffect(() => {
-    fetchTasks(currentPage);
-  }, [currentPage, activeFilter, fetchTasks]);
+    if (activeFilter !== prevFilter) {
+      // Filter changed: reset to page 0 and fetch
+      setPrevFilter(activeFilter);
+      setCurrentPage(0);
+      fetchTasks(0);
+    } else {
+      // Normal page change or initial load
+      fetchTasks(currentPage);
+    }
+  }, [currentPage, activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  
-  useEffect(() => {
-    setCurrentPage(0);
-  }, [activeFilter]);
-
-
+  // Auto-refresh when there are active tasks
   useEffect(() => {
     const hasActive = tasks.some(t => t?.status === 'running' || t?.status === 'pending');
     if (!hasActive || loading || refreshing) return;
 
     const timer = setInterval(() => {
-      fetchTasks(currentPage);
+      fetchTasks(currentPage, true);
     }, 1500);
 
     return () => clearInterval(timer);
