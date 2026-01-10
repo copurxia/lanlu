@@ -157,7 +157,7 @@ export function MediaInfoOverlay({
   return (
     <div
       className={[
-        'absolute top-3 z-[60] pointer-events-none select-none',
+        'absolute top-3 z-30 pointer-events-none select-none',
         sidebarOpen ? 'left-[calc(280px+12px)] sm:left-[calc(320px+12px)]' : 'left-3',
       ].join(' ')}
     >
