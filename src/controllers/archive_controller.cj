@@ -608,20 +608,15 @@ public class ArchiveController {
                 let deleteSuccess = ArchiveDao.delete(id)
 
                 // 5. 删除相关文件（缩略图和原始档案）
-                // 删除缩略图文件
-                if (archive.thumbhash.size > 0) {
-                    let thumbnailDir = DatabaseConfig.getThumbnailPath()
-                    let exts = ["avif", "jpg", "jpeg", "png", "webp"]
-                    for (ext in exts) {
-                        let thumbPath = "${thumbnailDir}/${archive.thumbhash}.${ext}"
-                        try {
-                            remove(Path(thumbPath))
-                            getLogger("archive_controller").info("Deleted thumbnail file", ("path", thumbPath), ("arcid", id))
-                        } catch (_: Exception) {
-                            // 忽略删除失败（文件可能不存在）
-                            getLogger("archive_controller").debug("Thumbnail file not found or delete failed", ("path", thumbPath), ("arcid", id))
-                        }
-                    }
+                // 删除缩略图文件（以 archiveId 命名）
+                let thumbnailDir = DatabaseConfig.getThumbnailPath()
+                let thumbPath = "${thumbnailDir}/${id}.avif"
+                try {
+                    remove(Path(thumbPath))
+                    getLogger("archive_controller").info("Deleted thumbnail file", ("path", thumbPath), ("arcid", id))
+                } catch (_: Exception) {
+                    // 忽略删除失败（文件可能不存在）
+                    getLogger("archive_controller").debug("Thumbnail file not found or delete failed", ("path", thumbPath), ("arcid", id))
                 }
 
                 // 删除原始档案文件

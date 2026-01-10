@@ -241,31 +241,22 @@ public class ArchiveModel {
 
     /**
      * 获取归档缩略图的文件系统路径
+     * 缩略图文件以 archiveId 命名：{thumbnailDir}/{archiveId}.avif
      */
     public static func getThumbnailFilePath(id: String, _: Int32): String {
         let thumbnailDir = DatabaseConfig.getThumbnailPath()
 
-        // 优先使用数据库记录的 thumbhash（LANraragi 兼容：data/thumb/<thumbhash>.jpg）
-        let thumbhash = ArchiveDao.getThumbnailHash(id)
-        if (thumbhash.size > 0) {
-            let exts = ["avif", "jpg", "jpeg", "png", "webp"]
-            for (ext in exts) {
-                let byHashPath = "${thumbnailDir}/${thumbhash}.${ext}"
-                println("Trying thumbhash path: ${byHashPath}")
-                try {
-                    let filePath = Path(byHashPath)
-                    if (exists(filePath)) {
-                        let fileInfo = FileInfo(filePath)
-                        if (fileInfo.isRegular()) {
-                            println("Found thumbnail using thumbhash: ${byHashPath}")
-                            return byHashPath
-                        }
-                    }
-                } catch (e: Exception) {
-                    println("Error checking thumbhash file: ${e}")
+        // 使用 archiveId 作为文件名查找缩略图
+        let thumbPath = "${thumbnailDir}/${id}.avif"
+        try {
+            let filePath = Path(thumbPath)
+            if (exists(filePath)) {
+                let fileInfo = FileInfo(filePath)
+                if (fileInfo.isRegular()) {
+                    return thumbPath
                 }
             }
-        }
+        } catch (_: Exception) {}
 
         println("Thumbnail not found for archive: ${id}")
         return ""
@@ -273,35 +264,20 @@ public class ArchiveModel {
 
     /**
      * 检查缩略图文件是否存在
+     * 缩略图文件以 archiveId 命名：{thumbnailDir}/{archiveId}.avif
      */
     public static func thumbnailExists(id: String, _: Int32): Bool {
-        // 使用DAO层直接获取thumbhash，避免循环依赖
-        let thumbhash = ArchiveDao.getThumbnailHash(id)
-        if (thumbhash.size == 0) {
-            println("No thumbhash found for archive: ${id}")
-            return false
-        }
-
         let thumbnailDir = DatabaseConfig.getThumbnailPath()
+        let thumbPath = "${thumbnailDir}/${id}.avif"
 
-        // 优先检查 data/thumb/<thumbhash>.<ext>
-        let exts = ["avif", "jpg", "jpeg", "png", "webp"]
-        for (ext in exts) {
-            let byHashPath = "${thumbnailDir}/${thumbhash}.${ext}"
-            println("Checking if thumbnail exists at: ${byHashPath}")
-            try {
-                let filePath = Path(byHashPath)
-                if (exists(filePath)) {
-                    let fileInfo = FileInfo(filePath)
-                    println("Thumbnail file exists and is regular: ${fileInfo.isRegular()}")
-                    return fileInfo.isRegular()
-                }
-            } catch (e: Exception) {
-                println("Error checking thumbnail file: ${e}")
+        try {
+            let filePath = Path(thumbPath)
+            if (exists(filePath)) {
+                let fileInfo = FileInfo(filePath)
+                return fileInfo.isRegular()
             }
-        }
+        } catch (_: Exception) {}
 
-        println("Thumbnail file does not exist")
         return false
     }
 

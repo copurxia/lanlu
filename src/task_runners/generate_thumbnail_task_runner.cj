@@ -84,8 +84,8 @@ public class GenerateThumbnailTaskRunner {
 
         TaskIO.appendLog(taskId, "Cover image extracted, size: ${imageData.size} bytes")
 
-        // 将图片数据写入临时文件
-        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.jpg")
+        // 将图片/视频数据写入临时文件（FFmpeg 会自动检测实际格式）
+        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.tmp")
         TaskIO.appendLog(taskId, "Writing cover image to: ${tempImagePath}")
 
         try {
@@ -148,15 +148,15 @@ public class GenerateThumbnailTaskRunner {
 
         TaskIO.appendLog(taskId, "Image conversion successful")
 
-        // 计算 thumbhash（基于转换后的 AVIF）
+        // 计算 thumbhash（基于转换后的 AVIF，仅用于数据库记录）
         TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
         logger.debug("Calculating thumbhash for archive: ${archiveId}")
         let thumbHash = calculateThumbHash(tempAvifPath)
         TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
         logger.debug("Calculated thumbhash: ${thumbHash}")
 
-        // 使用 thumbhash 作为文件名
-        let finalThumbnailPath = FileUtils.joinPath(thumbnailPath, "${thumbHash}.avif")
+        // 使用 archiveId 作为文件名（thumbhash 仅存入数据库）
+        let finalThumbnailPath = FileUtils.joinPath(thumbnailPath, "${archiveId}.avif")
 
         // 移动文件到最终位置
         TaskIO.appendLog(taskId, "Moving thumbnail to final location: ${finalThumbnailPath}")
