@@ -873,14 +873,9 @@ public class ArchiveController {
 
         let contentType = getContentTypeFromPath(path)
 
-        // 根据数据大小选择传输方式
-        if (Int64(contentSize) > CHUNKED_THRESHOLD) {
-            // 大文件：使用 chunked 分块传输
-            sendPageDataChunked(ctx, data, contentType, etag)
-        } else {
-            // 小文件：一次性返回
-            sendPageDataSmall(ctx, data, contentType, etag)
-        }
+        // 统一使用流式传输，避免大缓冲区占用内存
+        // 即使数据已经在内存中，使用 chunked 传输也能避免一次性写入大量数据
+        sendPageDataChunked(ctx, data, contentType, etag)
     }
 
     /**
@@ -966,14 +961,9 @@ public class ArchiveController {
             return
         }
 
-        // 根据文件大小选择传输方式
-        if (fileSize > CHUNKED_THRESHOLD) {
-            // 大文件：使用 chunked 流式传输
-            sendWithReaderChunked(ctx, reader, contentType, etag)
-        } else {
-            // 小文件：一次性读取返回
-            sendWithReaderSmall(ctx, reader, fileSize, contentType, etag)
-        }
+        // 统一使用流式传输，避免大缓冲区占用内存
+        // 小文件也可以使用流式传输，性能影响可忽略，但能避免内存峰值问题
+        sendWithReaderChunked(ctx, reader, contentType, etag)
     }
 
     /**
