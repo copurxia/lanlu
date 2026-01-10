@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import type { PageInfo } from '@/lib/archive-service';
+import type { PageInfo } from '@/lib/services/archive-service';
 
 const COUNTDOWN_DURATION = 3;
 

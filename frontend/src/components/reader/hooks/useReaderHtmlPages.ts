@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { PageInfo } from '@/lib/archive-service';
-import { ArchiveService } from '@/lib/archive-service';
-import { logger } from '@/lib/logger';
+import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { logger } from '@/lib/utils/logger';
 
 const MAX_RETRIES = 5;
 const BASE_RETRY_DELAY_MS = 500;

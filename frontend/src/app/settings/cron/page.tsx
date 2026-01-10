@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/ca
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { CronService, CronServiceStatus } from '@/lib/cron-service';
+import { CronService, CronServiceStatus } from '@/lib/services/cron-service';
 import { ScheduledTaskList } from '@/components/cron/ScheduledTaskList';
 import { ScheduledTaskDialog } from '@/components/cron/ScheduledTaskDialog';
 import { StartupTaskSettings } from '@/components/cron/StartupTaskSettings';

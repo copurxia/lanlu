@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { apiClient } from '../api';
 
 // 上传元数据接口
 export interface UploadMetadata {

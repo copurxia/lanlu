@@ -3,10 +3,10 @@
 import * as React from "react"
 import { createPortal } from "react-dom"
 import { X } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils/utils"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { TagService } from "@/lib/tag-service"
+import { TagService } from "@/lib/services/tag-service"
 import { useLanguage } from "@/contexts/LanguageContext"
 
 interface TagSuggestion {

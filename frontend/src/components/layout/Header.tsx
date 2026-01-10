@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { SearchBar } from '@/components/search/SearchBar';
-import { ArchiveService } from '@/lib/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
@@ -16,7 +16,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { Logo } from '@/components/brand/Logo';
-import { appEvents, AppEvents } from '@/lib/events';
+import { appEvents, AppEvents } from '@/lib/utils/events';
 
 export function Header() {
   const { t } = useLanguage();

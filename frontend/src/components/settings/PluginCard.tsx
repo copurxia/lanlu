@@ -1,6 +1,6 @@
 'use client';
 
-import { Plugin } from '@/lib/plugin-service';
+import { Plugin } from '@/lib/services/plugin-service';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

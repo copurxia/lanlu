@@ -1,6 +1,6 @@
 'use client';
 
-import { apiClient } from './api';
+import { apiClient } from '../api';
 
 export interface Plugin {
   id: number;

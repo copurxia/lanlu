@@ -13,8 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Folder, Plus, Search, Edit2, Trash2, Play, FolderOpen } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { CategoryService, type Category, type CategoryCreateRequest, type CategoryUpdateRequest } from '@/lib/category-service';
-import { PluginService, type Plugin } from '@/lib/plugin-service';
+import { CategoryService, type Category, type CategoryCreateRequest, type CategoryUpdateRequest } from '@/lib/services/category-service';
+import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { Checkbox } from '@/components/ui/checkbox';

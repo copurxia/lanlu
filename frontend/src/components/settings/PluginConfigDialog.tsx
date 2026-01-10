@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Plugin } from '@/lib/plugin-service';
-import { PluginSchemaService, PluginParameter } from '@/lib/plugin-schema-service';
+import { Plugin } from '@/lib/services/plugin-service';
+import { PluginSchemaService, PluginParameter } from '@/lib/services/plugin-schema-service';
 import { Dialog, DialogBody, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

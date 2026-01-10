@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
-import type { PageInfo } from '@/lib/archive-service';
+import type { PageInfo } from '@/lib/services/archive-service';
 import type { ReadingMode } from '@/hooks/use-reader-settings';
 
 type VisibleRange = { start: number; end: number };

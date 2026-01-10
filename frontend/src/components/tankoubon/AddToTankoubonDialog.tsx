@@ -11,7 +11,7 @@ import {
   DialogFooter,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import { TankoubonService } from '@/lib/tankoubon-service';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirm } from '@/hooks/use-confirm';
 import { useToast } from '@/hooks/use-toast';

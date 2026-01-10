@@ -6,7 +6,7 @@ import { BookOpen, Eye, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ArchiveMetadata } from '@/types/archive';
-import type { PageInfo } from '@/lib/archive-service';
+import type { PageInfo } from '@/lib/services/archive-service';
 
 type Props = {
   metadata: ArchiveMetadata;

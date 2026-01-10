@@ -5,7 +5,7 @@ import { DayPicker } from "react-day-picker"
 import { zhCN, enUS } from "date-fns/locale"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils/utils"
 import { buttonVariants } from "@/components/ui/button"
 import { useLanguage } from "@/contexts/LanguageContext"
 import {

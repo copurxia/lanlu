@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -13,7 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getApiUrl } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
-import { ICON_OPTIONS, SORT_BY_OPTIONS, getIconByValue } from '@/lib/constants';
+import { ICON_OPTIONS, SORT_BY_OPTIONS, getIconByValue } from '@/lib/utils/constants';
 
 interface SmartFilter {
   id: number;

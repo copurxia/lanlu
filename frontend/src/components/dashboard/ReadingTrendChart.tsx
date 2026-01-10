@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { TrendingUp } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { ReadingTrendItem } from '@/lib/user-stats-service';
+import { ReadingTrendItem } from '@/lib/services/user-stats-service';
 
 interface ReadingTrendChartProps {
   data: ReadingTrendItem[];

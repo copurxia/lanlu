@@ -1,5 +1,5 @@
 // 用户统计服务 - 获取用户阅读统计、趋势等数据
-import { apiClient } from './api';
+import { apiClient } from '../api';
 import { Archive } from '@/types/archive';
 
 export interface UserStats {

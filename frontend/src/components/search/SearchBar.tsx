@@ -6,7 +6,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import { Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { appEvents, AppEvents } from '@/lib/events';
+import { appEvents, AppEvents } from '@/lib/utils/events';
 
 function SearchBarContent() {
   const { t } = useLanguage();

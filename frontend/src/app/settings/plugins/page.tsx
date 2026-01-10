@@ -2,10 +2,10 @@
 
 import { useEffect, useState, useCallback } from 'react';
 import { PluginCard } from '@/components/settings/PluginCard';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 import { PluginConfigDialog } from '@/components/settings/PluginConfigDialog';
 import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
-import { PluginService, Plugin } from '@/lib/plugin-service';
+import { PluginService, Plugin } from '@/lib/services/plugin-service';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';

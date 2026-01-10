@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { LayoutGrid, Package, ListTodo, KeyRound, Users, Tag, Heart, BookOpen, Filter, Server, Clock, FolderOpen, BarChart3 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib/utils/utils';
 
 type SettingsSection = {
   id: string;

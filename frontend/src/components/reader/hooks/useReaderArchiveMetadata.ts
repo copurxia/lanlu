@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import type { ArchiveMetadata } from '@/types/archive';
-import { ArchiveService } from '@/lib/archive-service';
-import { FavoriteService } from '@/lib/favorite-service';
-import { logger } from '@/lib/logger';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { FavoriteService } from '@/lib/services/favorite-service';
+import { logger } from '@/lib/utils/logger';
 
 export function useReaderArchiveMetadata({
   id,

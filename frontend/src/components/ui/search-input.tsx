@@ -2,9 +2,9 @@
 
 import * as React from "react"
 import { createPortal } from "react-dom"
-import { cn } from "@/lib/utils"
+import { cn } from "@/lib/utils/utils"
 import { Input } from "@/components/ui/input"
-import { TagService } from "@/lib/tag-service"
+import { TagService } from "@/lib/services/tag-service"
 import { useLanguage } from "@/contexts/LanguageContext"
 
 interface TagSuggestion {

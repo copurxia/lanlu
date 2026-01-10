@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { apiClient } from '../api';
 
 // 插件参数定义 - 对应后端 PluginParameter
 export interface PluginParameter {

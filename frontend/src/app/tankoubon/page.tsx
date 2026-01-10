@@ -30,11 +30,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { TankoubonService } from '@/lib/tankoubon-service';
-import { ArchiveService } from '@/lib/archive-service';
-import { FavoriteService } from '@/lib/favorite-service';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { FavoriteService } from '@/lib/services/favorite-service';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';

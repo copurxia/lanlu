@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
-import { TankoubonService } from '@/lib/tankoubon-service';
-import { ArchiveService } from '@/lib/archive-service';
-import { logger } from '@/lib/logger';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { logger } from '@/lib/utils/logger';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 type Params = {

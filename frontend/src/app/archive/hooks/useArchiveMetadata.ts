@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ArchiveService } from '@/lib/archive-service';
-import { logger } from '@/lib/logger';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { logger } from '@/lib/utils/logger';
 import type { ArchiveMetadata } from '@/types/archive';
 
 type UseArchiveMetadataParams = {

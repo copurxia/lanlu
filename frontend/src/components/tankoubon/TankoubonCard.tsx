@@ -6,8 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Eye, BookOpen, Heart } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArchiveService } from '@/lib/archive-service';
-import { FavoriteService } from '@/lib/favorite-service';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { FavoriteService } from '@/lib/services/favorite-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useState, useCallback, useMemo } from 'react';
 

@@ -11,8 +11,8 @@ import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
 import type { ArchiveMetadata } from '@/types/archive';
-import type { Plugin } from '@/lib/plugin-service';
-import { ArchiveService } from '@/lib/archive-service';
+import type { Plugin } from '@/lib/services/plugin-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import { formatDate } from '../utils/format';
 import { displayTag } from '../utils/tag';
 

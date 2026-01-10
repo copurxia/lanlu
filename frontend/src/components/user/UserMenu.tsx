@@ -15,7 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Upload, User, Settings, LogOut } from "lucide-react"
 import { UploadDrawer } from "@/components/upload/UploadDrawer"
 import { useAuth } from "@/contexts/AuthContext"
-import { appEvents, AppEvents } from "@/lib/events"
+import { appEvents, AppEvents } from "@/lib/utils/events"
 
 export function UserMenu() {
   const { t } = useLanguage()

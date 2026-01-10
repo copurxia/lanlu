@@ -2,7 +2,7 @@ import Image from 'next/image';
 import { Book } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import type { PageInfo } from '@/lib/archive-service';
+import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
 export function ReaderSidebar({

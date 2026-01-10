@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import { X } from 'lucide-react';
-import { ArchiveService } from '@/lib/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import { Card, CardContent } from '@/components/ui/card';
 
 type Props = {

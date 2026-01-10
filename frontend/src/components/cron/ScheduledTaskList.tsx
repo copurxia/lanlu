@@ -6,7 +6,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { CronService, ScheduledTask } from '@/lib/cron-service';
+import { CronService, ScheduledTask } from '@/lib/services/cron-service';
 import { useToast } from '@/hooks/use-toast';
 import {
   AlertDialog,

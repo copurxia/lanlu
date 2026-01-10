@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'react';
 import type React from 'react';
-import { ArchiveService, PageInfo } from '@/lib/archive-service';
+import { ArchiveService, PageInfo } from '@/lib/services/archive-service';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { MediaInfoOverlay } from '@/components/reader/components/MediaInfoOverlay';
@@ -25,7 +25,7 @@ import { useReaderSidebar } from '@/components/reader/hooks/useReaderSidebar';
 import { useReaderToolbarAutoHide } from '@/components/reader/hooks/useReaderToolbarAutoHide';
 import { useReaderWebtoonVirtualization } from '@/components/reader/hooks/useReaderWebtoonVirtualization';
 import { useReaderWheelNavigation } from '@/components/reader/hooks/useReaderWheelNavigation';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 import {
   useReadingMode,
   useDoublePageMode,

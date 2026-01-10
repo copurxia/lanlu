@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { AuthUser } from '@/types/auth';
-import { AuthService } from '@/lib/auth-service';
+import { AuthService } from '@/lib/services/auth-service';
 
 interface AuthContextType {
   token: string | null;

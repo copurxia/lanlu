@@ -1,6 +1,6 @@
 'use client';
 
-import { apiClient, uploadClient } from './api';
+import { apiClient, uploadClient } from '../api';
 
 export type TagTranslation = {
   text: string;

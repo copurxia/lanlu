@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Task, TaskPageResult } from '@/types/task';
-import { TaskPoolService } from '@/lib/taskpool-service';
+import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

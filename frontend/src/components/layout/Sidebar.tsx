@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { ArchiveService } from '@/lib/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import { ServerInfo } from '@/types/server';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';

@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { ArchiveService, type PageInfo } from '@/lib/archive-service';
-import { logger } from '@/lib/logger';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
+import { logger } from '@/lib/utils/logger';
 
 type UseArchivePreviewParams = {
   id: string | null;

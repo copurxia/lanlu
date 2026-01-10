@@ -3,7 +3,7 @@ import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { ArchiveCard } from './ArchiveCard';
 import { TankoubonCard } from '../tankoubon/TankoubonCard';
-import { TankoubonService } from '@/lib/tankoubon-service';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 // Type guard to check if an item is a Tankoubon

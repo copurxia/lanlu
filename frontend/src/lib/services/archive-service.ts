@@ -1,4 +1,4 @@
-import { apiClient } from './api';
+import { apiClient } from '../api';
 import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } from '@/types/archive';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';

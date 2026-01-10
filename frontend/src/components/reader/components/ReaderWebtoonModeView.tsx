@@ -2,7 +2,7 @@
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
-import type { PageInfo } from '@/lib/archive-service';
+import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
 export function ReaderWebtoonModeView({

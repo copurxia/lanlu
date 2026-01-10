@@ -9,17 +9,17 @@ import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/
 import { Header } from '@/components/layout/Header';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
-import { ArchiveService } from '@/lib/archive-service';
-import { TankoubonService } from '@/lib/tankoubon-service';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
-import { appEvents, AppEvents } from '@/lib/events';
+import { appEvents, AppEvents } from '@/lib/utils/events';
 import { RefreshCw, Filter } from 'lucide-react';
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useGridColumnCount } from '@/hooks/common-hooks';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 
 function HomePageContent() {
   const { t, language } = useLanguage();

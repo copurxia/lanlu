@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,7 +13,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useDebounceCallback } from '@/hooks/use-debounce';
-import { SystemSetting } from '@/lib/system-settings-api';
+import { SystemSetting } from '@/lib/services/system-settings-api';
 
 interface SettingsByCategory {
   [category: string]: SystemSetting[];

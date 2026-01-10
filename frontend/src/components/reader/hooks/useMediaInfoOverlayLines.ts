@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/refs */
 import { useMemo, useRef } from 'react';
-import type { PageInfo } from '@/lib/archive-service';
+import type { PageInfo } from '@/lib/services/archive-service';
 import {
   formatKiB,
   formatMiB,

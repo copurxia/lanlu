@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/utils/logger';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { BookOpen, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { ArchiveService } from '@/lib/archive-service';
-import { groupArchivesByTime, TimeGroup } from '@/lib/time-group';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { groupArchivesByTime, TimeGroup } from '@/lib/utils/time-group';
 import { Archive } from '@/types/archive';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 

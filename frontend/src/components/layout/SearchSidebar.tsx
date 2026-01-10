@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Search, Filter, SortAsc, SortDesc, BookOpen, Tag, Calendar, Clock, Star, FolderOpen } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getApiUrl } from '@/lib/api';
-import { CategoryService, type Category } from '@/lib/category-service';
+import { CategoryService, type Category } from '@/lib/services/category-service';
 
 interface SmartFilter {
   id: number;

@@ -7,7 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Button } from '@/components/ui/button';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
 import type { ArchiveMetadata } from '@/types/archive';
-import { ArchiveService } from '@/lib/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 
 type Props = {
   metadata: ArchiveMetadata;

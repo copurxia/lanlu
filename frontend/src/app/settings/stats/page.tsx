@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
-import { TagService } from '@/lib/tag-service';
-import { logger } from '@/lib/logger';
+import { TagService } from '@/lib/services/tag-service';
+import { logger } from '@/lib/utils/logger';
 import { WordCloud } from '@/components/charts/WordCloud';
 
 type CloudItem = { tag: string; display: string; count: number };

@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { KeyRound } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { AuthService } from '@/lib/auth-service';
+import { AuthService } from '@/lib/services/auth-service';
 import type { AuthToken, AuthSession } from '@/types/auth';
 import { AuthGuard } from '@/components/settings/AuthGuard';
 

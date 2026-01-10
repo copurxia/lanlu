@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { ServerInfo } from '@/types/server';
-import { ArchiveService } from '@/lib/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 
 interface ServerInfoContextType {
   serverInfo: ServerInfo | null;

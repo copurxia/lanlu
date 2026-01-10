@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tag, Plus, Search, Download, Upload, Edit2, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { TagService } from '@/lib/tag-service';
+import { TagService } from '@/lib/services/tag-service';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 

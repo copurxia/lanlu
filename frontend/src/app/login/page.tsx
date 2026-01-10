@@ -11,7 +11,7 @@ import { LogIn, ShieldCheck, Key } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
-import { AuthService } from '@/lib/auth-service';
+import { AuthService } from '@/lib/services/auth-service';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { ThemeButton } from '@/components/theme/theme-toggle';
 import { Logo } from '@/components/brand/Logo';

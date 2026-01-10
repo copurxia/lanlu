@@ -1,5 +1,5 @@
 // 收藏功能服务 - 用户级别的档案收藏管理
-import { apiClient } from './api';
+import { apiClient } from '../api';
 
 export class FavoriteService {
   // 添加收藏

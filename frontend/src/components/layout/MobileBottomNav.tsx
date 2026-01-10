@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Home, Settings, Shuffle } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { ArchiveService } from '@/lib/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { cn } from '@/lib/utils';
+import { cn } from '@/lib/utils/utils';
 
 export function MobileBottomNav() {
   const { t } = useLanguage();
