@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from 'react';
 
 /**
  * 常用 React Hooks 的统一导出
@@ -9,6 +9,18 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 // 重新导出常用的 React hooks
 export { useState, useEffect, useCallback, useMemo, useRef };
+
+/**
+ * 检测组件是否已挂载的 Hook
+ * 用于避免 SSR 水合错误
+ */
+export function useMounted(): boolean {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false
+  );
+}
 
 /**
  * 统一管理本地存储的 Hook
@@ -242,4 +254,33 @@ export function useGridColumnCount() {
   }, [width]);
 
   return columnCount;
+}
+
+/**
+ * 防抖回调 Hook
+ */
+export function useDebounceCallback<T extends (...args: any[]) => any>(
+  callback: T,
+  delay: number
+): T {
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const debouncedCallback = useCallback((...args: Parameters<T>) => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    timeoutRef.current = setTimeout(() => {
+      callback(...args);
+    }, delay);
+  }, [callback, delay]) as T;
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
+
+  return debouncedCallback;
 }

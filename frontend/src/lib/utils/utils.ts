@@ -16,3 +16,12 @@ export function formatFileSize(bytes: number): string {
 export function getProgressPercentage(progress: number): string {
   return Math.round(progress * 100) + '%';
 }
+
+export function formatDate(dateString: string, unknownLabel: string = 'Unknown'): string {
+  if (!dateString) return unknownLabel;
+  try {
+    return new Date(dateString).toLocaleString();
+  } catch {
+    return dateString;
+  }
+}

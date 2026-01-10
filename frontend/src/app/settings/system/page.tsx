@@ -12,7 +12,7 @@ import { Settings, Save, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useDebounceCallback } from '@/hooks/use-debounce';
+import { useDebounceCallback } from '@/hooks/common-hooks';
 import { SystemSetting } from '@/lib/services/system-settings-api';
 
 interface SettingsByCategory {

@@ -3,7 +3,7 @@
 import { Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ArchiveMetadata } from '@/types/archive';
-import { formatDate, formatFileSize } from '../utils/format';
+import { formatDate, formatFileSize } from '@/lib/utils/utils';
 
 type Props = {
   metadata: ArchiveMetadata;

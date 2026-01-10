@@ -13,8 +13,8 @@ import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialo
 import type { ArchiveMetadata } from '@/types/archive';
 import type { Plugin } from '@/lib/services/plugin-service';
 import { ArchiveService } from '@/lib/services/archive-service';
-import { formatDate } from '../utils/format';
-import { displayTag } from '../utils/tag';
+import { formatDate } from '@/lib/utils/utils';
+import { stripNamespace } from '@/lib/utils/tag-utils';
 
 type FormData = {
   title: string;
@@ -197,7 +197,7 @@ export function ArchiveMainCard({
           ) : tags.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {tags.map((fullTag) => {
-                const label = displayTag(fullTag);
+                const label = stripNamespace(fullTag);
                 const colonIdx = fullTag.indexOf(':');
                 const namespace = colonIdx > 0 ? fullTag.slice(0, colonIdx).trim().toLowerCase() : '';
                 const isSource = namespace === 'source';

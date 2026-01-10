@@ -12,10 +12,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { logger } from '@/lib/utils/logger';
-import { useMounted } from './hooks/useMounted';
+import { useMounted } from '@/hooks/common-hooks';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
-import { displayTag } from './utils/tag';
+import { stripNamespace } from '@/lib/utils/tag-utils';
 import { ArchiveCoverCard } from './components/ArchiveCoverCard';
 import { ArchiveMainCard } from './components/ArchiveMainCard';
 import { ArchivePreviewCard } from './components/ArchivePreviewCard';
@@ -61,7 +61,7 @@ export function ArchiveDetailContent() {
 
   const handleTagClick = useCallback(
     (fullTag: string) => {
-      router.push(`/?q=${encodeURIComponent(displayTag(fullTag))}`);
+      router.push(`/?q=${encodeURIComponent(stripNamespace(fullTag))}`);
     },
     [router]
   );
