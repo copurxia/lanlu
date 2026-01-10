@@ -977,7 +977,7 @@ public class ArchiveController {
     }
 
     /**
-     * 小文件：一次性读取返回
+     * 小文件（< 1MB）：一次读取后返回
      */
     private static func sendWithReaderSmall(
         ctx: JoyContext,
@@ -986,15 +986,16 @@ public class ArchiveController {
         contentType: String,
         etag: String
     ): Unit {
+        // 小文件 < 1MB，缓冲区 = 1MB，一次 read 即可读完
         let buffer = Array<Byte>(fileSize, {_ => 0})
-        reader.read(buffer)
+        let bytesRead = reader.read(buffer)
         reader.close()
 
         CacheUtils.setDynamicCacheHeaders(ctx, etag)
         ctx.header("Content-Type", contentType)
-        ctx.header("Content-Length", "${fileSize}")
+        ctx.header("Content-Length", "${bytesRead}")
         ctx.status(HttpStatusCode.STATUS_OK)
-        ctx.data(buffer)
+        ctx.data(Array<Byte>(bytesRead, { i => buffer[i] }))
     }
 
     /**

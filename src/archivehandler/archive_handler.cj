@@ -1,5 +1,7 @@
 package lrr4cj.archivehandler
 
+import archive_ffi.ArchiveEntryReader
+
 /**
  * 条目读取器接口
  * 支持分块读取档案中的条目内容
@@ -22,6 +24,71 @@ public interface EntryReader {
      * 关闭读取器，释放资源
      */
     func close(): Unit
+}
+
+/**
+ * 内存数据读取器 - 从已加载的数据中分块读取
+ */
+public class MemoryEntryReader <: EntryReader {
+    private let data: Array<UInt8>
+    private var offset: Int64 = 0
+    private var closed: Bool = false
+
+    public init(data: Array<UInt8>) {
+        this.data = data
+    }
+
+    public func getSize(): Int64 {
+        return Int64(data.size)
+    }
+
+    public func read(buffer: Array<Byte>): Int64 {
+        if (closed || offset >= Int64(data.size)) {
+            return 0
+        }
+        let remaining = Int64(data.size) - offset
+        let toRead = if (Int64(buffer.size) < remaining) { Int64(buffer.size) } else { remaining }
+        for (i in 0..toRead) {
+            buffer[i] = data[offset + i]
+        }
+        offset += toRead
+        return toRead
+    }
+
+    public func close(): Unit {
+        closed = true
+    }
+}
+
+/**
+ * 压缩包流式读取器适配器 - 包装 archive_ffi.ArchiveEntryReader
+ * 实现真正的流式读取，避免一次性加载整个文件到内存
+ */
+public class ArchiveStreamEntryReader <: EntryReader {
+    private var reader: ArchiveEntryReader
+    private var closed: Bool = false
+
+    public init(reader: ArchiveEntryReader) {
+        this.reader = reader
+    }
+
+    public func getSize(): Int64 {
+        return reader.getSize()
+    }
+
+    public func read(buffer: Array<Byte>): Int64 {
+        if (closed) {
+            return 0
+        }
+        return reader.read(buffer)
+    }
+
+    public func close(): Unit {
+        if (!closed) {
+            closed = true
+            reader.close()
+        }
+    }
 }
 
 /**

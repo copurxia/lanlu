@@ -6,40 +6,7 @@ import archive_ffi.Archive
 import lrr4cj.models.ArchiveTypes
 import lrr4cj.utils.DirectoryScanner
 import lrr4cj.utils.NaturalSort
-
-/**
- * 内存数据读取器 - 从已加载的数据中分块读取
- */
-public class MemoryEntryReader <: EntryReader {
-    private let data: Array<UInt8>
-    private var offset: Int64 = 0
-    private var closed: Bool = false
-
-    public init(data: Array<UInt8>) {
-        this.data = data
-    }
-
-    public func getSize(): Int64 {
-        return Int64(data.size)
-    }
-
-    public func read(buffer: Array<Byte>): Int64 {
-        if (closed || offset >= Int64(data.size)) {
-            return 0
-        }
-        let remaining = Int64(data.size) - offset
-        let toRead = if (Int64(buffer.size) < remaining) { Int64(buffer.size) } else { remaining }
-        for (i in 0..toRead) {
-            buffer[i] = data[offset + i]
-        }
-        offset += toRead
-        return toRead
-    }
-
-    public func close(): Unit {
-        closed = true
-    }
-}
+import lrr4cj.utils.getLogger
 
 /**
  * 压缩包类型处理器
@@ -59,15 +26,27 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
-        try {
-            let data = Archive.extractEntry(archivePath, entryName)
-            if (data.size == 0) {
-                return (1i64, None, "Entry not found or empty: ${entryName}")
+        let logger = getLogger("archive_file_handler")
+        logger.debug("getEntryReader called", ("archivePath", archivePath), ("entryName", entryName))
+
+        // 使用流式读取，避免一次性加载整个文件到内存
+        let (success, readerOpt, size, errorMsg) = Archive.openEntryReader(archivePath, entryName)
+        logger.debug("openEntryReader result", ("success", success.toString()), ("size", size.toString()), ("errorMsg", errorMsg))
+
+        if (success) {
+            match (readerOpt) {
+                case Some(archiveReader) =>
+                    logger.debug("Creating ArchiveStreamEntryReader")
+                    let reader = ArchiveStreamEntryReader(archiveReader)
+                    logger.debug("ArchiveStreamEntryReader created successfully", ("readerSize", reader.getSize().toString()))
+                    return (0i64, Some(reader), "")
+                case None =>
+                    logger.error("readerOpt is None despite success=true")
+                    return (1i64, None, "Failed to create reader")
             }
-            let reader = MemoryEntryReader(data)
-            return (0i64, Some(reader), "")
-        } catch (e: Exception) {
-            return (1i64, None, "Exception extracting entry: ${e.message}")
+        } else {
+            logger.error("openEntryReader failed", ("errorMsg", errorMsg))
+            return (1i64, None, errorMsg)
         }
     }
 
