@@ -100,7 +100,12 @@ public class FrontendController {
                 return
             }
 
-            CacheUtils.setDynamicCacheHeaders(ctx, etag)
+            // _next/static/ 下的资源使用长期缓存（带哈希，永不变化）
+            if (filePath.contains("/_next/static/")) {
+                CacheUtils.setStaticCacheHeaders(ctx, etag)
+            } else {
+                CacheUtils.setDynamicCacheHeaders(ctx, etag)
+            }
             ctx.header("Content-Type", contentType)
             ctx.data(buffer.slice(0, bytesRead))
         } else {
@@ -260,7 +265,12 @@ public class FrontendController {
             return
         }
 
-        CacheUtils.setDynamicCacheHeaders(ctx, etag)
+        // _next/static/ 下的资源使用长期缓存（带哈希，永不变化）
+        if (filePath.contains("/_next/static/")) {
+            CacheUtils.setStaticCacheHeaders(ctx, etag)
+        } else {
+            CacheUtils.setDynamicCacheHeaders(ctx, etag)
+        }
         ctx.header("Content-Type", contentType)
         ctx.status(200)
     }
