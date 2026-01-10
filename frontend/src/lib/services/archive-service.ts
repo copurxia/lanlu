@@ -1,8 +1,9 @@
-import { apiClient } from '../api';
+import { apiClient, getAuthToken } from '../api';
 import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } from '@/types/archive';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
 import { TaskPoolService } from './taskpool-service';
+import { isSuccessResponse, extractApiError } from '@/lib/utils/api-utils';
 import type { Task } from '@/types/task';
 
 // 下载相关接口定义
@@ -154,10 +155,7 @@ export class ArchiveService {
   }
 
   static getDownloadUrl(id: string): string {
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('auth_token')
-      : null;
-
+    const token = getAuthToken();
     if (token) {
       return `/api/archives/${id}/download?token=${encodeURIComponent(token)}`;
     }
@@ -168,13 +166,8 @@ export class ArchiveService {
    * 为 URL 添加认证 token 参数
    */
   static addTokenToUrl(url: string): string {
-    const token = typeof window !== 'undefined'
-      ? localStorage.getItem('auth_token')
-      : null;
-
-    if (!token) {
-      return url;
-    }
+    const token = getAuthToken();
+    if (!token) return url;
 
     const separator = url.includes('?') ? '&' : '?';
     return `${url}${separator}token=${encodeURIComponent(token)}`;
@@ -272,11 +265,7 @@ export class ArchiveService {
       });
 
       const rawSuccess = response.data?.success;
-      const enqueueSuccess =
-        rawSuccess === true ||
-        rawSuccess === 1 ||
-        rawSuccess === "1" ||
-        rawSuccess === "true";
+      const enqueueSuccess = isSuccessResponse(rawSuccess);
 
       if (!enqueueSuccess) {
         const errorMessage = response.data?.error || 'Download failed';
@@ -351,11 +340,7 @@ export class ArchiveService {
     });
 
     const rawSuccess = response.data?.success;
-    const enqueueSuccess =
-      rawSuccess === true ||
-      rawSuccess === 1 ||
-      rawSuccess === "1" ||
-      rawSuccess === "true";
+    const enqueueSuccess = isSuccessResponse(rawSuccess);
 
     if (!enqueueSuccess) {
       const errorMessage = response.data?.error || 'Metadata plugin enqueue failed';
@@ -438,12 +423,7 @@ export class ArchiveService {
     if (!raw) return { success: task.status === 'completed', archives: [] };
     try {
       const obj = JSON.parse(raw);
-      const rawSuccess = obj?.success;
-      const success =
-        rawSuccess === true ||
-        rawSuccess === 1 ||
-        rawSuccess === "1" ||
-        rawSuccess === "true";
+      const success = isSuccessResponse(obj?.success);
 
       // 解析 archives 数组
       if (obj?.archives && Array.isArray(obj.archives)) {

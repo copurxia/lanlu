@@ -1,3 +1,5 @@
+export type { ApiEnvelope } from './common';
+
 export type AuthUser = {
   id: number;
   username: string;
@@ -26,11 +28,5 @@ export type AuthSession = {
   prefix: string;
   createdAt?: string;
   lastUsedAt?: string;
-};
-
-export type ApiEnvelope<T> = {
-  code: number;
-  message: string;
-  data: T;
 };
 

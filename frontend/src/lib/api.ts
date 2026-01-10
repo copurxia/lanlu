@@ -1,20 +1,18 @@
-import axios from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 
 // 区分服务端和客户端的API配置
 const getApiConfig = () => {
   const configuredBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
 
-  // 静态生成时也要调用API，使用环境变量配置的API地址
   if (typeof window === 'undefined') {
     return {
       baseURL: configuredBaseUrl || 'http://localhost:8080',
-      skipRequest: false // 静态生成时也要调用API
+      skipRequest: false
     };
   }
 
-  // 客户端默认使用相对路径；若显式配置了 NEXT_PUBLIC_API_URL，则使用它（便于 next dev 单独运行）
   return {
-    baseURL: configuredBaseUrl || '', // 空字符串表示相对路径，会自动使用当前域名和端口
+    baseURL: configuredBaseUrl || '',
     skipRequest: false
   };
 };
@@ -22,91 +20,73 @@ const getApiConfig = () => {
 const { baseURL, skipRequest } = getApiConfig();
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
+/**
+ * 获取认证 Token
+ */
+export function getAuthToken(): string | null {
+  return (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null) || API_KEY || null;
+}
+
+/**
+ * 通用请求拦截器
+ */
+function createRequestInterceptor(config: InternalAxiosRequestConfig): InternalAxiosRequestConfig {
+  const token = getAuthToken();
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+}
+
+/**
+ * 通用响应错误处理
+ */
+function handleResponseError(error: AxiosError, logPrefix: string = 'API'): Promise<never> {
+  console.error(`${logPrefix} Error:`, (error.response?.data as any) || error.message);
+
+  if (error?.response?.status === 401) {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auth_token');
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
+      const currentPath = window.location.pathname;
+      const redirectParam = currentPath === '/' ? '' : `?redirect=${encodeURIComponent(currentPath)}`;
+      window.location.href = `/login${redirectParam}`;
+    }
+  }
+
+  return Promise.reject(error);
+}
+
+/**
+ * 为 Axios 实例添加拦截器
+ */
+function setupInterceptors(client: AxiosInstance, logPrefix: string = 'API'): void {
+  client.interceptors.request.use(createRequestInterceptor, (error) => Promise.reject(error));
+  client.interceptors.response.use(
+    (response: AxiosResponse) => response,
+    (error: AxiosError) => handleResponseError(error, logPrefix)
+  );
+}
+
 export const apiClient = axios.create({
   baseURL,
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  timeout: 10000 // 默认10秒，用于普通API请求
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 10000
 });
 
-// 创建专门用于上传的客户端，具有更长的超时时间
 export const uploadClient = axios.create({
   baseURL,
-  headers: {
-    'Content-Type': 'application/json'
-  },
-  timeout: 300000 // 5分钟超时，用于上传请求
+  headers: { 'Content-Type': 'application/json' },
+  timeout: 300000
 });
 
-// 为上传客户端添加请求拦截器
-uploadClient.interceptors.request.use(
-  (config) => {
-    const token =
-      (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null) || API_KEY;
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+// 统一设置拦截器
+setupInterceptors(apiClient, 'API');
+setupInterceptors(uploadClient, 'Upload API');
 
-// 为上传客户端添加响应拦截器
-uploadClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('Upload API Error:', error.response?.data || error.message);
-    return Promise.reject(error);
-  }
-);
-
-// 请求拦截器 - 动态设置 Authorization 头
-apiClient.interceptors.request.use(
-  (config) => {
-    const token =
-      (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null) || API_KEY;
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// 导出skipRequest标志，用于在静态生成期间跳过API调用
 export { skipRequest };
 
-// 获取完整的API URL
-export const getApiUrl = (path: string): string => {
-  return `${baseURL}${path}`;
-};
-
-
-// 响应拦截器
-apiClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('API Error:', error.response?.data || error.message);
-
-    // 如果是 401 未授权，清空 token 并重定向到登录页
-    if (error?.response?.status === 401 || error?.status === 401) {
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem('auth_token');
-        // 发送自定义事件，通知 AuthContext 更新状态
-        window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-
-        // 获取当前路径，用于登录后跳转
-        const currentPath = window.location.pathname;
-        const redirectParam = currentPath === '/' ? '' : `?redirect=${encodeURIComponent(currentPath)}`;
-        // 重定向到登录页
-        window.location.href = `/login${redirectParam}`;
-      }
-    }
-
-    return Promise.reject(error);
-  }
-);
+export const getApiUrl = (path: string): string => `${baseURL}${path}`;
 
 // API wrapper functions
 export const api = {

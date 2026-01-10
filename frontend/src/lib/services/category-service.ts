@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/api';
+import { isSuccessResponse, extractApiError, normalizeArrayResponse } from '@/lib/utils/api-utils';
 
 export interface Category {
   id: number;
@@ -49,9 +50,8 @@ export class CategoryService {
    */
   static async getAllCategories(): Promise<Category[]> {
     const response = await apiClient.get<CategoryResponse>(this.baseUrl);
-    if (response.data.success === 1) {
-      const data = response.data.data;
-      return Array.isArray(data) ? data : [data];
+    if (isSuccessResponse(response.data.success)) {
+      return normalizeArrayResponse(response.data.data);
     }
     return [];
   }
@@ -61,9 +61,8 @@ export class CategoryService {
    */
   static async getCategoryById(catid: string): Promise<Category | null> {
     const response = await apiClient.get<CategoryResponse>(`${this.baseUrl}/${catid}`);
-    if (response.data.success === 1) {
-      const data = response.data.data;
-      return Array.isArray(data) ? data[0] : data;
+    if (isSuccessResponse(response.data.success)) {
+      return normalizeArrayResponse(response.data.data)[0] ?? null;
     }
     return null;
   }
@@ -74,14 +73,12 @@ export class CategoryService {
   static async createCategory(data: CategoryCreateRequest): Promise<{ success: boolean; category?: Category; error?: string }> {
     try {
       const response = await apiClient.post<CategoryResponse>(this.baseUrl, data);
-      if (response.data.success === 1) {
-        const cat = response.data.data;
-        return { success: true, category: Array.isArray(cat) ? cat[0] : cat };
+      if (isSuccessResponse(response.data.success)) {
+        return { success: true, category: normalizeArrayResponse(response.data.data)[0] };
       }
       return { success: false, error: 'Failed to create category' };
     } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } };
-      return { success: false, error: err.response?.data?.error || 'Failed to create category' };
+      return { success: false, error: extractApiError(error, 'Failed to create category') };
     }
   }
 
@@ -91,10 +88,9 @@ export class CategoryService {
   static async updateCategory(catid: string, data: CategoryUpdateRequest): Promise<{ success: boolean; error?: string }> {
     try {
       const response = await apiClient.put<{ success: number; error?: string }>(`${this.baseUrl}/${catid}`, data);
-      return { success: response.data.success === 1, error: response.data.error };
+      return { success: isSuccessResponse(response.data.success), error: response.data.error };
     } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } };
-      return { success: false, error: err.response?.data?.error || 'Failed to update category' };
+      return { success: false, error: extractApiError(error, 'Failed to update category') };
     }
   }
 
@@ -104,10 +100,9 @@ export class CategoryService {
   static async deleteCategory(catid: string): Promise<{ success: boolean; error?: string }> {
     try {
       const response = await apiClient.delete<{ success: number; error?: string }>(`${this.baseUrl}/${catid}`);
-      return { success: response.data.success === 1, error: response.data.error };
+      return { success: isSuccessResponse(response.data.success), error: response.data.error };
     } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } };
-      return { success: false, error: err.response?.data?.error || 'Failed to delete category' };
+      return { success: false, error: extractApiError(error, 'Failed to delete category') };
     }
   }
 
@@ -120,13 +115,12 @@ export class CategoryService {
         `${this.baseUrl}/${catid}/scan`
       );
       return {
-        success: response.data.success === 1,
+        success: isSuccessResponse(response.data.success),
         task_id: response.data.task_id,
         error: response.data.error
       };
     } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } };
-      return { success: false, error: err.response?.data?.error || 'Failed to trigger scan' };
+      return { success: false, error: extractApiError(error, 'Failed to trigger scan') };
     }
   }
 }
