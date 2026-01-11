@@ -321,8 +321,9 @@ public class ArchiveUtils {
             let process = launch(
                 "ffmpeg",
                 "-y",                    // 覆盖输出文件
+                "-threads", "1",
                 "-i", inputPath,         // 输入文件
-                "-vf", "scale='min(500,iw)':'min(1000,ih)':force_original_aspect_ratio=decrease",
+                "-vf", "scale='min(500,iw)':'min(1000,ih)':force_original_aspect_ratio=decrease:threads=1",
                 "-frames:v", "1",        // 只输出一帧
                 "-q:v", "2",             // 质量设置
                 "-map_metadata", "-1",   // 过滤元数据
