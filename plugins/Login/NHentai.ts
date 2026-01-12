@@ -19,7 +19,8 @@ class NHentaiLoginPlugin extends BasePlugin {
         { name: "cf_clearance", type: "string", desc: "cf_clearance cookie from browser (required for Cloudflare bypass)" },
         { name: "csrftoken", type: "string", desc: "csrftoken cookie (optional)" }
       ],
-      permissions: ["net=nhentai.net"]
+      permissions: ["net=nhentai.net"],
+      update_url: "https://git.copur.xyz/copur/lanlu/raw/branch/main/plugins/Login/NHentai.ts"
     };
   }
 

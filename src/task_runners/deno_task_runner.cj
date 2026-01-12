@@ -195,7 +195,7 @@ public class DenoTaskRunner {
      */
     private static func ensurePluginScriptReady(plugin: PluginData, scriptName: String): Bool {
         try {
-            let pluginsRoot = Path("./data/plugins")
+            let pluginsRoot = Path(PluginPaths.getPluginRuntimeRoot())
             FileUtils.ensureDirectoryExists(pluginsRoot)
 
             // 复制共享基础插件
@@ -212,7 +212,7 @@ public class DenoTaskRunner {
             FileUtils.ensureDirectoryExists(pluginDir)
 
             let targetFile = Path("${pluginDir.toString()}/${scriptName}.ts")
-            let sourcePath = Path("./plugins/${plugin.plugin_type}/${plugin.entry}")
+            let sourcePath = Path(PluginPaths.buildPluginFilePath(plugin.plugin_type, plugin.entry))
             if (!exists(sourcePath)) {
                 getLogger("deno_task").error("源插件文件不存在", ("path", sourcePath.toString()))
                 return false
@@ -339,10 +339,10 @@ public class DenoTaskRunner {
         denoArgs.add("run")
 
         // 默认给予插件目录的读写权限
-        let pluginDir = "./data/plugins/${plugin.namespace}"
+        let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
         denoArgs.add("--allow-read=${pluginDir}")
         denoArgs.add("--allow-write=${pluginDir}")
-        denoArgs.add("--allow-read=./data/plugins")
+        denoArgs.add("--allow-read=${PluginPaths.getPluginRuntimeRoot()}")
 
         // 解析插件声明的权限
         let permissionsStr = plugin.permissions.trimAscii()
@@ -434,6 +434,7 @@ public class DenoTaskRunner {
     private static func buildStdinJson(
         action: String,
         pluginType: String,
+        pluginDir: String,
         archiveId: String,
         archiveTitle: String,
         existingTags: String,
@@ -447,6 +448,7 @@ public class DenoTaskRunner {
         let fields = json.getFields()
         fields["action"] = JsonString(action)
         fields["pluginType"] = JsonString(pluginType)
+        fields["pluginDir"] = JsonString(pluginDir)
         fields["archiveId"] = JsonString(archiveId)
         fields["archiveTitle"] = JsonString(archiveTitle)
         fields["existingTags"] = JsonString(existingTags)
@@ -656,7 +658,8 @@ public class DenoTaskRunner {
      * 执行登录插件
      */
     private static func executeLoginPluginDirect(taskId: Int64, plugin: PluginData): DenoExecutionResult {
-        let pluginFile = "./data/plugins/${plugin.namespace}/Login.ts"
+        let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
+        let pluginFile = "${pluginDir}/Login.ts"
 
         if (!exists(pluginFile)) {
             return DenoExecutionResult(false, "Plugin file not found", "", "", 1)
@@ -670,6 +673,7 @@ public class DenoTaskRunner {
         let inputJson = buildStdinJson(
             "run",
             "Login",
+            pluginDir,
             "",
             "",
             "",
@@ -761,7 +765,8 @@ public class DenoTaskRunner {
         extraParams: String,
         loginCookiesJson: String
     ): DenoExecutionResult {
-        let pluginFile = "./data/plugins/${plugin.namespace}/Metadata.ts"
+        let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
+        let pluginFile = "${pluginDir}/Metadata.ts"
 
         if (!exists(pluginFile)) {
             return DenoExecutionResult(false, "Plugin file not found", "")
@@ -786,6 +791,7 @@ public class DenoTaskRunner {
         let inputJson = buildStdinJson(
             "run",
             "Metadata",
+            pluginDir,
             archiveId,
             archive.title,
             tagsString,
@@ -850,7 +856,8 @@ public class DenoTaskRunner {
         url: String,
         loginCookiesJson: String
     ): DenoExecutionResult {
-        let pluginFile = "./data/plugins/${plugin.namespace}/Download.ts"
+        let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
+        let pluginFile = "${pluginDir}/Download.ts"
 
         if (!exists(pluginFile)) {
             return DenoExecutionResult(false, "Plugin file not found", "")
@@ -864,6 +871,7 @@ public class DenoTaskRunner {
         let inputJson = buildStdinJson(
             "run",
             "Download",
+            pluginDir,
             "",
             "",
             "",

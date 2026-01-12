@@ -114,7 +114,7 @@ public class SystemSettingsService {
         // 存储设置 - 默认值
         settings.add(createSetting("THUMBNAIL_PATH", "./data/thumb", "path", "storage", "缩略图目录路径"))
         settings.add(createSetting("CACHE_PATH", "./data/cache", "path", "storage", "缓存目录路径"))
-        settings.add(createSetting("PLUGIN_PATH", "./plugins", "path", "storage", "插件目录路径"))
+        settings.add(createSetting("PLUGIN_PATH", "./data/plugins", "path", "storage", "插件目录路径"))
 
         // 性能设置 - 默认值
         settings.add(createSetting("MAX_CONCURRENT_JOBS", "8", "integer", "performance", "最大并发任务数"))

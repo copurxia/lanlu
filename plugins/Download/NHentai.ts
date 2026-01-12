@@ -44,7 +44,8 @@ class NHentaiDownloadPlugin extends BasePlugin {
       description: "Downloads all images from an nhentai gallery to a folder",
       parameters: [],
       url_regex: "https?://nhentai\\.net/g/\\d+/?",
-      permissions: ["net=nhentai.net", "net=i1.nhentai.net", "net=i2.nhentai.net", "net=i3.nhentai.net", "net=i4.nhentai.net", "net=i5.nhentai.net", "net=i6.nhentai.net", "net=i7.nhentai.net"]
+      permissions: ["net=nhentai.net", "net=i1.nhentai.net", "net=i2.nhentai.net", "net=i3.nhentai.net", "net=i4.nhentai.net", "net=i5.nhentai.net", "net=i6.nhentai.net", "net=i7.nhentai.net"],
+      update_url: "https://git.copur.xyz/copur/lanlu/raw/branch/main/plugins/Download/NHentai.ts"
     };
   }
 
@@ -131,7 +132,7 @@ class NHentaiDownloadPlugin extends BasePlugin {
     // 创建下载目录
     const sanitizedName = this.sanitizeFilename(doujinshi.pretty_name || doujinshi.name);
     const folderName = `${doujinshi.id}_${sanitizedName}`;
-    const pluginDir = `./data/plugins/nhentai/${folderName}`;
+    const pluginDir = `${this.input?.pluginDir || './data/cache/plugins/nhentai'}/${folderName}`;
     await Deno.mkdir(pluginDir, { recursive: true });
 
     // 下载所有图片

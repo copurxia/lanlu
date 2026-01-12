@@ -10,6 +10,7 @@ import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
 import cjoy.json.*
+import semver.*
 
 /**
  * 插件扫描任务：扫描并注册TypeScript/Deno插件文件（Metadata、Login、Download 插件）
@@ -55,14 +56,24 @@ public class ScanPluginsTaskRunner {
 
         // 检查目录是否存在
         if (!directoryExists(pluginPath)) {
-            let error = "Plugin directory does not exist: ${pluginPath}"
-            TaskIO.appendLog(taskId, "ERROR: ${error}")
-            return ScanResultData(0, 0, 1, [error])
+            // 尝试创建目录（避免因为目录缺失导致任务直接失败）
+            try {
+                Directory.create(Path(pluginPath), recursive: true)
+            } catch (_: Exception) {}
+
+            if (!directoryExists(pluginPath)) {
+                let error = "Plugin directory does not exist: ${pluginPath}"
+                TaskIO.appendLog(taskId, "ERROR: ${error}")
+                return ScanResultData(0, 0, 1, [error])
+            }
         }
 
         // 扫描插件文件
         let pluginFiles = findPluginFiles(taskId, pluginPath)
         TaskIO.appendLog(taskId, "Found ${pluginFiles.size} plugin files to process")
+
+        // 清理已删除的插件
+        let removedCount = cleanupRemovedPlugins(taskId, pluginPath, pluginFiles)
 
         // 处理每个插件文件
         for (pluginFile in pluginFiles) {
@@ -97,7 +108,7 @@ public class ScanPluginsTaskRunner {
     }
 
     /**
-     * 查找插件文件
+     * 查找插件文件 - 扫描目录下所有 .ts 文件（包括子目录）
      */
     private static func findPluginFiles(taskId: Int64, dirPath: String): ArrayList<String> {
         var result: ArrayList<String> = ArrayList<String>()
@@ -110,21 +121,17 @@ public class ScanPluginsTaskRunner {
             let entries = listDirectory(dirPath)
             TaskIO.appendLog(taskId, "Scanning plugin directory: ${dirPath} (${entries.size} entries)")
 
-            // 扫描EHentai相关的插件类型目录
-            let pluginTypes = ["Metadata", "Login", "Download"]
-
             for (entry in entries) {
                 let fullPath = joinPath(dirPath, entry)
 
-                if (directoryExists(fullPath)) {
-                    // 检查是否是插件类型目录
-                    for (pluginType in pluginTypes) {
-                        if (entry == pluginType) {
-                            let pluginFiles = findPluginFilesInType(taskId, fullPath)
-                            result.add(all: pluginFiles)
-                            break
-                        }
-                    }
+                if (fileExists(fullPath) && entry.endsWith(".ts")) {
+                    // 直接在根目录的 .ts 文件
+                    result.add(fullPath)
+                    TaskIO.appendLog(taskId, "Found TypeScript plugin: ${fullPath}")
+                } else if (directoryExists(fullPath)) {
+                    // 递归扫描子目录
+                    let subFiles = findPluginFilesInDir(taskId, fullPath)
+                    result.add(all: subFiles)
                 }
             }
         } catch (e: Exception) {
@@ -135,25 +142,28 @@ public class ScanPluginsTaskRunner {
     }
 
     /**
-     * 在指定类型目录中查找插件文件
+     * 递归扫描目录中的插件文件
      */
-    private static func findPluginFilesInType(taskId: Int64, typeDirPath: String): ArrayList<String> {
+    private static func findPluginFilesInDir(taskId: Int64, dirPath: String): ArrayList<String> {
         var result: ArrayList<String> = ArrayList<String>()
 
         try {
-            let entries = listDirectory(typeDirPath)
+            let entries = listDirectory(dirPath)
 
             for (entry in entries) {
-                let fullPath = joinPath(typeDirPath, entry)
+                let fullPath = joinPath(dirPath, entry)
 
-                // 只扫描 TypeScript 插件文件
                 if (fileExists(fullPath) && entry.endsWith(".ts")) {
                     result.add(fullPath)
                     TaskIO.appendLog(taskId, "Found TypeScript plugin: ${fullPath}")
+                } else if (directoryExists(fullPath)) {
+                    // 递归扫描子目录
+                    let subFiles = findPluginFilesInDir(taskId, fullPath)
+                    result.add(all: subFiles)
                 }
             }
         } catch (e: Exception) {
-            TaskIO.appendLog(taskId, "ERROR: Error scanning plugin type directory ${typeDirPath}: ${e.message}")
+            TaskIO.appendLog(taskId, "ERROR: Error scanning directory ${dirPath}: ${e.message}")
         }
 
         return result
@@ -164,29 +174,52 @@ public class ScanPluginsTaskRunner {
      */
     private static func processPluginFile(taskId: Int64, filePath: String): ProcessResultData {
         try {
-            // 解析插件路径获取类型和文件名
             let pathParts = filePath.split("/")
             let fileName = pathParts[pathParts.size - 1]
-            let pluginType = if (pathParts.size >= 2) { pathParts[pathParts.size - 2] } else { "Unknown" }
 
-            TaskIO.appendLog(taskId, "Processing plugin file: ${fileName} (type: ${pluginType})")
+            TaskIO.appendLog(taskId, "Processing plugin file: ${fileName}")
 
-            // 使用Deno解析插件元数据
-            let pluginMetadata = parsePluginMetadataWithDeno(taskId, filePath, pluginType)
-
-            // 检查插件是否已存在（通过namespace检查）
-            if (PluginDao.exists(pluginMetadata.namespace)) {
-                TaskIO.appendLog(taskId, "Plugin already exists: ${pluginMetadata.namespace}")
-                return ProcessResultData(true, pluginMetadata.namespace, "")
-            }
+            // 使用Deno解析插件元数据，类型从元数据获取
+            let pluginMetadata = parsePluginMetadataWithDeno(taskId, filePath)
 
             if (pluginMetadata.name.size == 0) {
                 return ProcessResultData(false, "", "Failed to parse plugin metadata")
             }
 
-            // 创建插件数据记录
+            // 从元数据获取插件类型，转换为首字母大写格式
+            let pluginType = capitalizeFirst(pluginMetadata.plugin_type)
+            if (pluginType.size == 0) {
+                return ProcessResultData(false, "", "Plugin type not found in metadata")
+            }
+
+            TaskIO.appendLog(taskId, "Plugin type from metadata: ${pluginType}")
+
+            // 检查插件是否已存在（通过namespace检查）
+            if (PluginDao.exists(pluginMetadata.namespace)) {
+                let existingPlugin = PluginDao.getPluginByNamespace(pluginMetadata.namespace)
+                let compareResult = compare(existingPlugin.version, pluginMetadata.version)
+
+                match (compareResult) {
+                    case Equal =>
+                        TaskIO.appendLog(taskId, "Plugin version unchanged: ${pluginMetadata.namespace} (${existingPlugin.version})")
+                        return ProcessResultData(true, pluginMetadata.namespace, "")
+                    case MajorUpgrade =>
+                        TaskIO.appendLog(taskId, "Major upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, clearing parameters")
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, pluginType, true)
+                    case MinorUpgrade | PatchUpgrade =>
+                        TaskIO.appendLog(taskId, "Upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, preserving parameters")
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, pluginType, false)
+                    case Downgrade =>
+                        TaskIO.appendLog(taskId, "Version downgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, skipping")
+                        return ProcessResultData(true, pluginMetadata.namespace, "")
+                    case Invalid =>
+                        TaskIO.appendLog(taskId, "Invalid version format for ${pluginMetadata.namespace}, skipping")
+                        return ProcessResultData(true, pluginMetadata.namespace, "")
+                }
+            }
+
+            // 创建新插件数据记录
             var pluginData = PluginData()
-            // id会由数据库自动生成
             pluginData.name = pluginMetadata.name
             pluginData.namespace = pluginMetadata.namespace
             pluginData.version = pluginMetadata.version
@@ -196,6 +229,7 @@ public class ScanPluginsTaskRunner {
             pluginData.plugin_type = pluginType
             pluginData.tags = pluginMetadata.tags
             pluginData.permissions = pluginMetadata.permissions
+            pluginData.update_url = pluginMetadata.update_url
             pluginData.parameters = pluginMetadata.parameters
             pluginData.has_schema = pluginMetadata.has_schema
             pluginData.url_regex = pluginMetadata.url_regex
@@ -222,7 +256,7 @@ public class ScanPluginsTaskRunner {
     /**
      * 使用Deno解析TypeScript插件元数据
      */
-    private static func parsePluginMetadataWithDeno(taskId: Int64, filePath: String, pluginType: String): PluginMetadata {
+    private static func parsePluginMetadataWithDeno(taskId: Int64, filePath: String): PluginMetadata {
         var metadata = PluginMetadata()
 
         try {
@@ -248,7 +282,8 @@ public class ScanPluginsTaskRunner {
                             metadata.description = getJsonString(jsonObj, "description")
                             metadata.author = getJsonString(jsonObj, "author")
                             metadata.tags = getJsonString(jsonObj, "tags")
-                            metadata.permissions = getJsonString(jsonObj, "permissions")
+                            metadata.permissions = getJsonCommaSeparated(jsonObj, "permissions")
+                            metadata.update_url = getJsonString(jsonObj, "update_url")
 
                             // 解析parameters字段
                             if (jsonObj.getFields().contains("parameters")) {
@@ -267,37 +302,22 @@ public class ScanPluginsTaskRunner {
                             metadata.url_regex = getJsonString(jsonObj, "url_regex")
                             metadata.login_from = getJsonString(jsonObj, "login_from")
                             metadata.icon = getJsonString(jsonObj, "icon")
+                            metadata.plugin_type = getJsonString(jsonObj, "type")
 
-                            TaskIO.appendLog(taskId, "Successfully parsed plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, has_schema=${metadata.has_schema}")
+                            TaskIO.appendLog(taskId, "Successfully parsed plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, type=${metadata.plugin_type}")
                         case _ =>
-                            setDefaultMetadata(metadata, filePath, pluginType)
-                            TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON, using defaults for ${filePath}")
+                            TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON for ${filePath}")
                     }
                 } else {
-                    setDefaultMetadata(metadata, filePath, pluginType)
-                    TaskIO.appendLog(taskId, "WARN: No result message found in plugin output, using defaults for ${filePath}")
+                    TaskIO.appendLog(taskId, "WARN: No result message found in plugin output for ${filePath}")
                 }
             } else {
-                // 执行失败，使用文件名作为默认信息
+                // 执行失败
                 let stderrStr = String.fromUtf8(stderr)
-                let fileNameOnly = Path(filePath).fileName.toString()
-                metadata.name = fileNameOnly
-                metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
-                metadata.version = "1.0"
-                metadata.description = "${pluginType} plugin"
-                metadata.author = "Unknown"
-
                 TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stderr=${stderrStr}")
             }
         } catch (e: Exception) {
             TaskIO.appendLog(taskId, "ERROR: Error parsing plugin metadata for ${filePath}: ${e.message}")
-            // 异常情况下，使用文件名作为默认信息
-            let fileNameOnly = Path(filePath).fileName.toString()
-            metadata.name = fileNameOnly
-            metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
-            metadata.version = "1.0"
-            metadata.description = "${pluginType} plugin"
-            metadata.author = "Unknown"
         }
 
         return metadata
@@ -332,6 +352,40 @@ public class ScanPluginsTaskRunner {
             }
         }
         return ""
+    }
+
+    private static func getJsonCommaSeparated(jsonObj: JsonObject, key: String): String {
+        let fields = jsonObj.getFields()
+        if (!fields.contains(key)) {
+            return ""
+        }
+
+        let value = fields[key]
+        match (value) {
+            case arr: JsonArray =>
+                var out = ""
+                var first = true
+                let size = arr.size()
+                for (i in 0..size) {
+                    match (arr.get(i)) {
+                        case Some(v) =>
+                            let s = match (v) {
+                                case js: JsonString => js.getValue()
+                                case _ => v.toString()
+                            }.trimAscii()
+                            if (s.size == 0) { continue }
+                            if (!first) { out += "," }
+                            out += s
+                            first = false
+                        case None => ()
+                    }
+                }
+                return out
+            case jsonStr: JsonString =>
+                return jsonStr.getValue()
+            case _ =>
+                return value.toString()
+        }
     }
 
     /**
@@ -370,15 +424,107 @@ public class ScanPluginsTaskRunner {
     }
 
     /**
-     * 设置默认元数据
+     * 将插件类型转换为首字母大写格式
      */
-    private static func setDefaultMetadata(metadata: PluginMetadata, filePath: String, pluginType: String): Unit {
-        let fileNameOnly = Path(filePath).fileName.toString()
-        metadata.name = fileNameOnly
-        metadata.namespace = "plugin." + pluginType.toAsciiLower() + "." + fileNameOnly.replace(".ts", "")
-        metadata.version = "1.0"
-        metadata.description = "${pluginType} plugin"
-        metadata.author = "Unknown"
+    private static func capitalizeFirst(s: String): String {
+        if (s.size == 0) { return s }
+        let lower = s.toAsciiLower()
+        match (lower) {
+            case "metadata" => return "Metadata"
+            case "login" => return "Login"
+            case "download" => return "Download"
+            case _ => return s
+        }
+    }
+
+    /**
+     * 更新已存在的插件
+     * @param clearParameters 是否清除参数（破坏性更新时为 true）
+     */
+    private static func updateExistingPlugin(
+        taskId: Int64,
+        existingPlugin: PluginData,
+        newMetadata: PluginMetadata,
+        fileName: String,
+        pluginType: String,
+        clearParameters: Bool
+    ): ProcessResultData {
+        var pluginData = PluginData()
+        pluginData.id = existingPlugin.id
+        pluginData.name = newMetadata.name
+        pluginData.namespace = newMetadata.namespace
+        pluginData.version = newMetadata.version
+        pluginData.description = newMetadata.description
+        pluginData.author = newMetadata.author
+        pluginData.entry = fileName
+        pluginData.plugin_type = pluginType
+        pluginData.tags = newMetadata.tags
+        pluginData.permissions = newMetadata.permissions
+        pluginData.url_regex = newMetadata.url_regex
+        pluginData.login_from = newMetadata.login_from
+        pluginData.icon = newMetadata.icon
+        pluginData.update_url = if (newMetadata.update_url.trimAscii().size > 0) { newMetadata.update_url } else { existingPlugin.update_url }
+        pluginData.enabled = existingPlugin.enabled
+        pluginData.installed = true
+        pluginData.has_schema = newMetadata.has_schema
+
+        // 根据是否破坏性更新决定是否清除参数
+        if (clearParameters) {
+            pluginData.parameters = newMetadata.parameters
+        } else {
+            pluginData.parameters = existingPlugin.parameters
+        }
+
+        if (PluginDao.update(pluginData)) {
+            let action = if (clearParameters) { "updated (parameters cleared)" } else { "updated" }
+            TaskIO.appendLog(taskId, "Plugin ${action}: ${pluginData.namespace} (${pluginData.name})")
+            return ProcessResultData(true, pluginData.namespace, "")
+        } else {
+            TaskIO.appendLog(taskId, "ERROR: Failed to update plugin in database")
+            return ProcessResultData(false, "", "Failed to update plugin in database")
+        }
+    }
+
+    /**
+     * 清理已删除的插件文件
+     * 检查数据库中的插件，如果对应的文件不存在则从数据库中删除
+     */
+    private static func cleanupRemovedPlugins(
+        taskId: Int64,
+        pluginPath: String,
+        existingFiles: ArrayList<String>
+    ): Int64 {
+        var removedCount: Int64 = 0
+
+        let allPlugins = PluginDao.getAllPlugins()
+        TaskIO.appendLog(taskId, "Checking ${allPlugins.size} plugins in database for removed files")
+
+        for (plugin in allPlugins) {
+            let expectedPath = buildPluginPath(pluginPath, plugin.plugin_type, plugin.entry)
+
+            if (!existingFiles.contains(expectedPath) && !fileExists(expectedPath)) {
+                TaskIO.appendLog(taskId, "Plugin file not found, removing: ${plugin.namespace} (${expectedPath})")
+                if (PluginDao.delete(plugin.namespace)) {
+                    removedCount++
+                    TaskIO.appendLog(taskId, "Removed plugin: ${plugin.namespace}")
+                } else {
+                    TaskIO.appendLog(taskId, "ERROR: Failed to remove plugin: ${plugin.namespace}")
+                }
+            }
+        }
+
+        if (removedCount > 0) {
+            TaskIO.appendLog(taskId, "Cleaned up ${removedCount} removed plugins")
+        }
+
+        return removedCount
+    }
+
+    /**
+     * 构建插件文件路径
+     */
+    private static func buildPluginPath(basePath: String, pluginType: String, entry: String): String {
+        joinPath(joinPath(basePath, pluginType), entry)
     }
 
     /**
@@ -440,8 +586,30 @@ public class ScanPluginsTaskRunner {
      */
     private static func executePluginInfoWithStdio(taskId: Int64, filePath: String): (Int32, Array<UInt8>, Array<UInt8>) {
         try {
+            // 构建一个临时目录，模拟 ./plugins/<Type>/X.ts 与 ./plugins/base_plugin.ts 的相对结构，
+            // 以兼容插件里常见的 `../base_plugin.ts` 引用。
+            let pathParts = filePath.split("/")
+            let fileName = Path(filePath).fileName.toString()
+            let pluginTypeDir = if (pathParts.size >= 2) { pathParts[pathParts.size - 2] } else { "Temp" }
+
+            let tempRoot = Path("${PluginPaths.getPluginInfoTempRoot()}/${getCurrentTimeMillis().toString()}")
+            let pluginsRoot = Path("${tempRoot.toString()}/plugins")
+            let tempTypeDir = Path("${pluginsRoot.toString()}/${pluginTypeDir}")
+            Directory.create(tempTypeDir, recursive: true)
+
+            // 复制 base_plugin.ts
+            let baseSource = Path("./plugins/base_plugin.ts")
+            let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
+            if (exists(baseSource)) {
+                copy(baseSource, to: baseTarget, overwrite: true)
+            }
+
+            // 复制插件文件
+            let tempPluginFile = Path("${tempTypeDir.toString()}/${fileName}")
+            copy(Path(filePath), to: tempPluginFile, overwrite: true)
+
             // 构建 deno 命令
-            let cmd = "deno run --allow-read '${filePath}'"
+            let cmd = "deno run --allow-read '${pluginsRoot.toString()}' '${tempPluginFile.toString()}'"
             TaskIO.appendLog(taskId, "Executing: ${cmd}")
 
             // 启动进程
@@ -468,6 +636,11 @@ public class ScanPluginsTaskRunner {
             // 读取 stderr
             let stderrReader = StringReader<InputStream>(process.stdErrPipe)
             let stderrContent = stderrReader.readToEnd()
+
+            // 清理临时目录
+            try {
+                remove(tempRoot, recursive: true)
+            } catch (_: Exception) {}
 
             return (Int32(exitCode), output.toArray(), stderrContent.toArray())
         } catch (e: Exception) {

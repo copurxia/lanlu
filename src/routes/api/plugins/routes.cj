@@ -57,4 +57,28 @@ public func registerPluginsRoutes(router: JoyRouters) {
             case None => return
         }
     })
+
+    // 安装/更新插件
+    router.post("/api/plugins/install", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => PluginsController.installPlugin(ctx)
+            case None => return
+        }
+    })
+
+    // 删除插件
+    router.delete("/api/plugins/{namespace}", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => PluginsController.deletePlugin(ctx)
+            case None => return
+        }
+    })
+
+    // 更新插件（使用插件声明的 update_url）
+    router.post("/api/plugins/{namespace}/update", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => PluginsController.updatePlugin(ctx)
+            case None => return
+        }
+    })
 }

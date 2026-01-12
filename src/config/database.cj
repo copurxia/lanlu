@@ -148,6 +148,6 @@ public class DatabaseConfig {
      * 读取插件路径
      */
     public static func getPluginPath(): String {
-        return readConfigWithDefault("PLUGIN_PATH", "./plugins")
+        return readConfigWithDefault("PLUGIN_PATH", "./data/plugins")
     }
 }

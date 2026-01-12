@@ -26,6 +26,7 @@ export interface PluginInfo {
   url_regex?: string;
   icon?: string;
   permissions?: string[];
+  update_url?: string;  // 插件更新地址
 }
 
 /**
@@ -43,6 +44,7 @@ export interface PluginResult {
 export interface PluginInput {
   action: 'plugin_info' | 'run';
   pluginType: string;
+  pluginDir?: string;  // 插件工作目录，由系统传入
   archiveId?: string;
   archiveTitle?: string;
   existingTags?: string;

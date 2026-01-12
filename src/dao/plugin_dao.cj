@@ -27,6 +27,7 @@ public class PluginData {
     public var installed: Bool = false
     public var has_schema: Bool = false          // 是否包含参数
     public var parameters: String = "[]"          // 带value的参数数组
+    public var update_url: String = ""            // 插件更新地址
     public var created_at: String = ""
     public var updated_at: String = ""
 
@@ -45,10 +46,10 @@ public class PluginDao {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
-                
+
                 var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
                 let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, created_at, updated_at FROM plugins ORDER BY id")
+                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins ORDER BY id")
                 try {
                     let rs = stmt.query()
 
@@ -76,8 +77,9 @@ public class PluginDao {
                             plugin.installed = rs.getOrNull<Bool>(14) ?? false
                             plugin.has_schema = rs.getOrNull<Bool>(15) ?? false
                             plugin.parameters = rs.getOrNull<String>(16) ?? "[]"
-                            plugin.created_at = rs.getOrNull<String>(17) ?? ""
-                            plugin.updated_at = rs.getOrNull<String>(18) ?? ""
+                            plugin.update_url = rs.getOrNull<String>(17) ?? ""
+                            plugin.created_at = rs.getOrNull<String>(18) ?? ""
+                            plugin.updated_at = rs.getOrNull<String>(19) ?? ""
                             plugins.add(plugin)
                         }
                     } finally {
@@ -120,7 +122,7 @@ public class PluginDao {
                 
                 var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
                 let stmt = conn.prepareStatement(
-                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) ORDER BY id")
+                    "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) ORDER BY id")
                 try {
                     stmt.set(0, pluginType)
                     let rs = stmt.query()
@@ -149,8 +151,9 @@ public class PluginDao {
                             plugin.installed = rs.getOrNull<Bool>(14) ?? false
                             plugin.has_schema = rs.getOrNull<Bool>(15) ?? false
                             plugin.parameters = rs.getOrNull<String>(16) ?? "[]"
-                            plugin.created_at = rs.getOrNull<String>(17) ?? ""
-                            plugin.updated_at = rs.getOrNull<String>(18) ?? ""
+                            plugin.update_url = rs.getOrNull<String>(17) ?? ""
+                            plugin.created_at = rs.getOrNull<String>(18) ?? ""
+                            plugin.updated_at = rs.getOrNull<String>(19) ?? ""
                             plugins.add(plugin)
                         }
                     } finally {
@@ -193,7 +196,7 @@ public class PluginDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, created_at, updated_at FROM plugins WHERE namespace = ?")
+                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE namespace = ?")
                     try {
                         stmt.set(0, namespace)
                         let rs = stmt.query()
@@ -221,8 +224,9 @@ public class PluginDao {
                                 plugin.installed = rs.getOrNull<Bool>(14) ?? false
                                 plugin.has_schema = rs.getOrNull<Bool>(15) ?? false
                                 plugin.parameters = rs.getOrNull<String>(16) ?? "[]"
-                                plugin.created_at = rs.getOrNull<String>(17) ?? ""
-                                plugin.updated_at = rs.getOrNull<String>(18) ?? ""
+                                plugin.update_url = rs.getOrNull<String>(17) ?? ""
+                                plugin.created_at = rs.getOrNull<String>(18) ?? ""
+                                plugin.updated_at = rs.getOrNull<String>(19) ?? ""
 
                                 return plugin
                             }
@@ -252,7 +256,7 @@ public class PluginDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                        "INSERT INTO plugins (name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, update_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
                     try {
                         stmt.set(0, plugin.name)
                         stmt.set(1, plugin.namespace)
@@ -270,6 +274,7 @@ public class PluginDao {
                         stmt.set(13, plugin.installed)
                         stmt.set(14, plugin.has_schema)
                         stmt.set(15, plugin.parameters)
+                        stmt.set(16, plugin.update_url)
 
                         stmt.update()
                         return true
@@ -298,7 +303,7 @@ public class PluginDao {
                 
                 try {
                 let stmt = conn.prepareStatement(
-                    "UPDATE plugins SET name = ?, version = ?, description = ?, author = ?, entry = ?, plugin_type = ?, tags = ?, url_regex = ?, login_from = ?, permissions = ?, icon = ?, enabled = ?, installed = ?, has_schema = ?, parameters = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?")
+                    "UPDATE plugins SET name = ?, version = ?, description = ?, author = ?, entry = ?, plugin_type = ?, tags = ?, url_regex = ?, login_from = ?, permissions = ?, icon = ?, enabled = ?, installed = ?, has_schema = ?, parameters = ?, update_url = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ?")
 
                 stmt.set(0, plugin.name)
                 stmt.set(1, plugin.version)
@@ -315,7 +320,8 @@ public class PluginDao {
                 stmt.set(12, plugin.installed)
                 stmt.set(13, plugin.has_schema)
                 stmt.set(14, plugin.parameters)
-                stmt.set(15, plugin.namespace)
+                stmt.set(15, plugin.update_url)
+                stmt.set(16, plugin.namespace)
 
                 stmt.update()
                 conn.close()
@@ -437,7 +443,7 @@ public class PluginDao {
                 var plugins: ArrayList<PluginData> = ArrayList<PluginData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) AND enabled = true ORDER BY id")
+                        "SELECT id, name, namespace, version, description, author, entry, plugin_type, tags, url_regex, login_from, permissions, icon, enabled, installed, has_schema, parameters, update_url, created_at, updated_at FROM plugins WHERE LOWER(plugin_type) = LOWER(?) AND enabled = true ORDER BY id")
                     stmt.set(0, pluginType)
                     let rs = stmt.query()
 
@@ -464,8 +470,9 @@ public class PluginDao {
                         plugin.installed = rs.getOrNull<Bool>(14) ?? false
                         plugin.has_schema = rs.getOrNull<Bool>(15) ?? false
                         plugin.parameters = rs.getOrNull<String>(16) ?? "[]"
-                        plugin.created_at = rs.getOrNull<String>(17) ?? ""
-                        plugin.updated_at = rs.getOrNull<String>(18) ?? ""
+                        plugin.update_url = rs.getOrNull<String>(17) ?? ""
+                        plugin.created_at = rs.getOrNull<String>(18) ?? ""
+                        plugin.updated_at = rs.getOrNull<String>(19) ?? ""
                         plugins.add(plugin)
                     }
 

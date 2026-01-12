@@ -49,7 +49,8 @@ class ArtStationDownloadPlugin extends BasePlugin {
         { name: "bypass_url", type: "string", desc: "CloudflareBypass URL (e.g. http://localhost:8089)", default_value: "" }
       ],
       url_regex: "https?://(www\\.artstation\\.com/[^/]+|[^/]+\\.artstation\\.com)/?.*",
-      permissions: ["net"]  // Allow all network for FlareSolverr support
+      permissions: ["net"],  // Allow all network for FlareSolverr support
+      update_url: "https://git.copur.xyz/copur/lanlu/raw/branch/main/plugins/Download/ArtStation.ts"
     };
   }
 
@@ -128,7 +129,7 @@ class ArtStationDownloadPlugin extends BasePlugin {
     await this.logInfo('Found projects', { count: projectHashIds.length });
 
     // 创建下载目录
-    const pluginDir = `./data/plugins/artstation/${username}`;
+    const pluginDir = `${this.input?.pluginDir || './data/cache/plugins/artstation'}/${username}`;
     await Deno.mkdir(pluginDir, { recursive: true });
 
     // 下载所有项目的图片

@@ -4,23 +4,29 @@ import { useEffect, useState, useCallback } from 'react';
 import { PluginCard } from '@/components/settings/PluginCard';
 import { logger } from '@/lib/utils/logger';
 import { PluginConfigDialog } from '@/components/settings/PluginConfigDialog';
+import { PluginInstallDialog } from '@/components/settings/PluginInstallDialog';
 import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 import { PluginService, Plugin } from '@/lib/services/plugin-service';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Package, RefreshCw } from 'lucide-react';
+import { Package, RefreshCw, Download } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useConfirm } from '@/hooks/use-confirm';
+import { useToast } from '@/hooks/use-toast';
 
 const TYPE_ORDER = ['metadata', 'download', 'login', 'script'];
 
 export default function SettingsPluginsPage() {
   const { t } = useLanguage();
+  const { confirm } = useConfirm();
+  const { success, error: showError } = useToast();
 
   const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeType, setActiveType] = useState('all');
 
@@ -70,6 +76,41 @@ export default function SettingsPluginsPage() {
     } finally {
       setRefreshing(false);
     }
+  };
+
+  const handleDeletePlugin = async (plugin: Plugin) => {
+    const confirmed = await confirm({
+      title: t('settings.pluginDelete'),
+      description: t('settings.pluginDeleteConfirm', { name: plugin.name }),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+
+    if (!confirmed) return;
+
+    try {
+      await PluginService.deletePlugin(plugin.namespace);
+      success(t('settings.pluginDeleteSuccess'));
+      await fetchPlugins();
+    } catch (e: any) {
+      showError(e?.response?.data?.error || e?.message || t('settings.pluginDeleteFailed'));
+    }
+  };
+
+  const handleUpdatePlugin = async (plugin: Plugin) => {
+    try {
+      await PluginService.updatePlugin(plugin.namespace);
+      success(t('settings.pluginUpdateSuccess'));
+      await fetchPlugins();
+    } catch (e: any) {
+      showError(e?.response?.data?.error || e?.message || t('settings.pluginUpdateFailed'));
+    }
+  };
+
+  const handleInstallSuccess = async () => {
+    success(t('settings.pluginInstallSuccess'));
+    await fetchPlugins();
   };
 
   const availableTypes = Array.from(
@@ -122,16 +163,26 @@ export default function SettingsPluginsPage() {
     }
   };
 
-  const refreshButton = (
-    <Button
-      variant="outline"
-      onClick={handleRefresh}
-      disabled={refreshing}
-      className="flex items-center space-x-2"
-    >
-      <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-      <span>{t('common.refresh')}</span>
-    </Button>
+  const actionButtons = (
+    <div className="flex items-center space-x-2">
+      <Button
+        variant="default"
+        onClick={() => setInstallDialogOpen(true)}
+        className="flex items-center space-x-2"
+      >
+        <Download className="w-4 h-4" />
+        <span>{t('settings.pluginInstall')}</span>
+      </Button>
+      <Button
+        variant="outline"
+        onClick={handleRefresh}
+        disabled={refreshing}
+        className="flex items-center space-x-2"
+      >
+        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+        <span>{t('common.refresh')}</span>
+      </Button>
+    </div>
   );
 
   return (
@@ -140,7 +191,7 @@ export default function SettingsPluginsPage() {
       description={t('settings.pluginsDescription')}
       icon={<Package className="w-5 h-5" />}
       requireAdmin
-      actions={refreshButton}
+      actions={actionButtons}
     >
       <Tabs value={activeType} onValueChange={setActiveType}>
         <TabsList className="flex flex-wrap justify-start h-auto">
@@ -166,6 +217,8 @@ export default function SettingsPluginsPage() {
               plugin={plugin}
               onToggleStatus={handleTogglePluginStatus}
               onOpenConfig={handleOpenConfig}
+              onDelete={handleDeletePlugin}
+              onUpdate={handleUpdatePlugin}
               getPluginTypeColor={getPluginTypeColor}
               getPluginTypeLabel={getPluginTypeLabel}
             />
@@ -183,6 +236,12 @@ export default function SettingsPluginsPage() {
         onOpenChange={setConfigDialogOpen}
         plugin={selectedPlugin}
         onConfigSaved={handleConfigSaved}
+      />
+
+      <PluginInstallDialog
+        open={installDialogOpen}
+        onOpenChange={setInstallDialogOpen}
+        onInstalled={handleInstallSuccess}
       />
     </SettingsPageWrapper>
   );

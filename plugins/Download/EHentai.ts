@@ -29,7 +29,8 @@ class EHentaiDownloadPlugin extends BasePlugin {
         { name: "forceresampled", type: "bool", desc: "Force resampled archive download", default_value: "0" }
       ],
       url_regex: "https?://e(-|x)hentai.org/g/.*/.*",
-      permissions: ["net=e-hentai.org", "net=exhentai.org", "net=ehgt.org", "net=*.hath.network", "net=jsr.io"]
+      permissions: ["net=e-hentai.org", "net=exhentai.org", "net=ehgt.org", "net=*.hath.network", "net=jsr.io"],
+      update_url: "https://git.copur.xyz/copur/lanlu/raw/branch/main/plugins/Download/EHentai.ts"
     };
   }
 
@@ -114,7 +115,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
     forceresampled: boolean
   ): Promise<PluginResult> {
     try {
-      const pluginDir = './data/plugins/ehdl';
+      const pluginDir = this.input?.pluginDir || './data/cache/plugins/ehdl';
       await Deno.mkdir(pluginDir, { recursive: true });
 
       const cookieHeader = this.buildCookieHeader(domain, loginCookies);

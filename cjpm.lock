@@ -1,7 +1,7 @@
 version = 0
 
 [requires]
-  cjoy = {git = "https://gitcode.com/Cangjie-SIG/cjoy.git", commitId = "b066d00f7f425829abb1d307c921a750fcaf0a48", branch = "main"}
+  cjoy = {git = "https://gitcode.com/Cangjie-SIG/cjoy.git", commitId = "8baa34ff7d27bc9e47c97b916975a0e9db274198", branch = "main"}
   opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", commitId = "62a5f245dfa3073638dd47cce47cb76b49545f26", branch = "master", output-type = "static"}
   cjdotenv = {git = "https://gitcode.com/Cangjie-SIG/cjdotenv.git", commitId = "b49bf5a0981baa83195f51cc05bac1f603ae2c82", tag = "master"}
   ahash = {git = "https://gitcode.com/OpenCangjieCommunity/ahash.git", commitId = "23443433d0fdab7d8ccf3b31e58184667db6351f", tag = "master"}
@@ -9,3 +9,4 @@ version = 0
   getrandom = {git = "https://gitcode.com/OpenCangjieCommunity/getrandom", commitId = "3e932c9899ea6a4c0a316ce19a98688524c821d2", branch = "master"}
   i128 = {git = "https://gitcode.com/OpenCangjieCommunity/i128", commitId = "74e2557d1cd09e33a37d9e286f27693dc9ec1f12", branch = "master"}
   hash2 = {git = "https://gitcode.com/OpenCangjieCommunity/hash2", commitId = "ff6eb8429adf582822652059bbcba082f54b7630", branch = "master"}
+  linderHttp = {git = "https://gitcode.com/LiquidStudio/LinderHttp.git", commitId = "62e2cb7932faa4bc8782b9be805bb4a0b7f6867a"}

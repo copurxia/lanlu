@@ -7,13 +7,15 @@ import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Settings as SettingsIcon, Package, User, Calendar, Shield } from 'lucide-react';
+import { Settings as SettingsIcon, Package, User, Calendar, Shield, Trash2, RefreshCw } from 'lucide-react';
 import Image from 'next/image';
 
 interface PluginCardProps {
   plugin: Plugin;
   onToggleStatus: (namespace: string, enabled: boolean) => void;
   onOpenConfig: (plugin: Plugin) => void;
+  onDelete: (plugin: Plugin) => void;
+  onUpdate: (plugin: Plugin) => void;
   getPluginTypeColor: (type: string) => string;
   getPluginTypeLabel: (type: string) => string;
 }
@@ -22,6 +24,8 @@ export function PluginCard({
   plugin,
   onToggleStatus,
   onOpenConfig,
+  onDelete,
+  onUpdate,
   getPluginTypeColor,
   getPluginTypeLabel
 }: PluginCardProps) {
@@ -142,12 +146,27 @@ export function PluginCard({
         </div>
 
         <div className="flex items-center justify-between pt-4 border-t border-border mt-4">
-          <div className="text-sm text-muted-foreground">
-            {plugin.installed ? (
-              <span className="text-green-600 dark:text-green-400">{t('settings.enabled')}</span>
-            ) : (
-              <span className="text-red-600 dark:text-red-400">{t('settings.disabled')}</span>
-            )}
+          <div className="flex items-center space-x-2">
+            {plugin.update_url?.trim() ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onUpdate(plugin)}
+                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+                title={t('settings.pluginUpdate')}
+              >
+                <RefreshCw className="w-4 h-4" />
+              </Button>
+            ) : null}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onDelete(plugin)}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+              title={t('settings.pluginDelete')}
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
           </div>
 
           <Button

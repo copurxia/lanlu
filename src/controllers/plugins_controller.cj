@@ -3,8 +3,10 @@ package lrr4cj.controllers
 import cjoy.*
 import std.collection.*
 import std.convert.*
+import stdx.encoding.json.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
+import lrr4cj.services.*
 import lrr4cj.utils.*
 
 /**
@@ -258,9 +260,11 @@ public class PluginsController {
         json += "\"icon\":\"${escapeJsonString(plugin.icon)}\","
         json += "\"enabled\":${plugin.enabled},"
         json += "\"installed\":${plugin.installed},"
+        json += "\"update_url\":\"${escapeJsonString(plugin.update_url)}\","
 
         // 添加has_schema字段（指示是否有配置参数）
         json += "\"has_schema\":${plugin.has_schema},"
+        json += "\"parameters\":${plugin.parameters},"
 
         json += "\"created_at\":\"${escapeJsonString(plugin.created_at)}\","
         json += "\"updated_at\":\"${escapeJsonString(plugin.updated_at)}\""
@@ -320,4 +324,122 @@ public class PluginsController {
         ctx.header("Content-Type", "application/json; charset=utf-8").string(jsonResponse)
     }
 
+    /**
+     * 删除插件
+     * DELETE /api/plugins/:namespace
+     */
+    public static func deletePlugin(ctx: JoyContext) {
+        let logger = getLogger("plugins_controller")
+        let namespace = ctx.getParam("namespace") ?? ""
+
+        if (namespace.size == 0) {
+            ResponseView.errorJson(ctx, "Plugin namespace is required")
+            return
+        }
+
+        let err = PluginManagerService.deletePlugin(namespace)
+        if (err.size > 0) {
+            logger.error("删除插件失败", [("namespace", namespace), ("error", err)])
+            ResponseView.errorJson(ctx, err)
+            return
+        }
+        logger.info("删除插件成功", [("namespace", namespace)])
+        ResponseView.successJson(ctx, "Plugin deleted successfully")
     }
+
+    /**
+     * 安装插件
+     * POST /api/plugins/install
+     * 只需要提供 URL，类型从插件元数据中自动获取
+     */
+    public static func installPlugin(ctx: JoyContext) {
+        let logger = getLogger("plugins_controller")
+
+        // 解析请求体
+        var url: String = ""
+
+        try {
+            let requestMap = ctx.readJson<HashMap<String, String>>()
+            match (requestMap) {
+                case Some(data) =>
+                    url = data.get("url") ?? ""
+                case None =>
+                    ResponseView.errorJson(ctx, "Invalid JSON in request body")
+                    return
+            }
+        } catch (e: Exception) {
+            logger.error("解析请求体失败", [("error", e.message)])
+            ResponseView.errorJson(ctx, "Failed to parse request body")
+            return
+        }
+
+        // 验证参数
+        if (url.size == 0) {
+            ResponseView.errorJson(ctx, "URL is required")
+            return
+        }
+
+        // 验证 URL 格式（必须是 .ts 文件）
+        if (!url.endsWith(".ts")) {
+            ResponseView.errorJson(ctx, "URL must point to a .ts file")
+            return
+        }
+
+        logger.info("开始下载/安装插件", [("url", url)])
+        let r = PluginManagerService.installFromUrl(url)
+        if (!r.success) {
+            logger.error("安装插件失败", [("url", url), ("error", r.message)])
+            ResponseView.errorJson(ctx, r.message)
+            return
+        }
+
+        var response2 = "{"
+        response2 += "\"success\": true,"
+        response2 += "\"message\": \"${escapeJsonString(r.message)}\","
+        response2 += "\"filename\": \"${escapeJsonString(r.filename)}\","
+        response2 += "\"plugin_type\": \"${escapeJsonString(r.plugin_type)}\","
+        response2 += "\"namespace\": \"${escapeJsonString(r.namespace)}\","
+        response2 += "\"old_version\": \"${escapeJsonString(r.old_version)}\","
+        response2 += "\"new_version\": \"${escapeJsonString(r.new_version)}\","
+        response2 += "\"clear_parameters\": ${r.clear_parameters},"
+        response2 += "\"reason\": \"${escapeJsonString(r.reason)}\","
+        response2 += "\"scan_task_id\": ${r.scan_task_id}"
+        response2 += "}"
+        ctx.json(response2)
+    }
+
+    /**
+     * 更新插件
+     * POST /api/plugins/:namespace/update
+     * 使用插件声明的 update_url 更新
+     */
+    public static func updatePlugin(ctx: JoyContext) {
+        let logger = getLogger("plugins_controller")
+        let namespace = ctx.getParam("namespace") ?? ""
+
+        if (namespace.size == 0) {
+            ResponseView.errorJson(ctx, "Plugin namespace is required")
+            return
+        }
+
+        logger.info("开始更新插件", [("namespace", namespace)])
+        let r = PluginManagerService.updateFromDatabase(namespace)
+        if (!r.success) {
+            logger.error("更新插件失败", [("namespace", namespace), ("error", r.message)])
+            ResponseView.errorJson(ctx, r.message)
+            return
+        }
+
+        var response2 = "{"
+        response2 += "\"success\": true,"
+        response2 += "\"message\": \"${escapeJsonString(r.message)}\","
+        response2 += "\"namespace\": \"${escapeJsonString(r.namespace)}\","
+        response2 += "\"old_version\": \"${escapeJsonString(r.old_version)}\","
+        response2 += "\"new_version\": \"${escapeJsonString(r.new_version)}\","
+        response2 += "\"clear_parameters\": ${r.clear_parameters},"
+        response2 += "\"reason\": \"${escapeJsonString(r.reason)}\","
+        response2 += "\"scan_task_id\": ${r.scan_task_id}"
+        response2 += "}"
+        ctx.json(response2)
+    }
+}

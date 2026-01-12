@@ -162,6 +162,7 @@ public class V001_InitialSchema <: Migration {
                 ("installed", "BOOLEAN DEFAULT false"),
                 ("has_schema", "BOOLEAN DEFAULT false"),
                 ("parameters", "TEXT DEFAULT '[]'"),
+                ("update_url", "TEXT DEFAULT ''"),
                 ("created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
                 ("updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             ]
@@ -191,6 +192,7 @@ public class V001_InitialSchema <: Migration {
                 installed BOOLEAN DEFAULT false,
                 has_schema BOOLEAN DEFAULT false,
                 parameters TEXT DEFAULT '[]',
+                update_url TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
