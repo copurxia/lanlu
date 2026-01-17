@@ -102,7 +102,7 @@ public class DownloadUrlTaskRunner {
             let output = denoResult.output
             TaskIO.appendLog(taskId, "plugin output: ${output}")
 
-            // 插件自行下载并回传 relative_path（相对于 ./data）
+            // 插件自行下载并回传 relative_path（相对于缓存目录）
             let downloadedRelativePaths = parseDownloadedRelativePath(output)
             let downloadedSource = parseDownloadedSource(output)
 
@@ -130,7 +130,7 @@ public class DownloadUrlTaskRunner {
                 return
             }
 
-            let pluginTarget = Path("./data/${downloadedRelativePath}")
+            let pluginTarget = Path("${cachePath}/${downloadedRelativePath}")
             if (!exists(pluginTarget)) {
                 fail(taskId, "Plugin downloaded file not found")
                 return

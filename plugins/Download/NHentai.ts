@@ -144,6 +144,10 @@ class NHentaiDownloadPlugin extends BasePlugin {
       const fileName = `${i}.${ext}`;
       const filePath = `${pluginDir}/${fileName}`;
 
+      // 输出当前下载进度
+      const progress = Math.round(((i - 1) / doujinshi.pages) * 100);
+      this.reportProgress(progress, `Downloading page ${i}/${doujinshi.pages}...`);
+
       // 检查文件是否已存在（断点续传）
       try {
         await Deno.lstat(filePath);
@@ -162,6 +166,9 @@ class NHentaiDownloadPlugin extends BasePlugin {
         await this.logWarn('Failed to download image', { page: i });
       }
     }
+
+    // 输出完成进度
+    this.reportProgress(100, `Download complete: ${downloadedCount} succeeded, ${failedCount} failed`);
 
     if (downloadedCount === 0) {
       return { success: false, error: `No images were downloaded for gallery: ${galleryId}` };
