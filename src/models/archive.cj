@@ -282,6 +282,24 @@ public class ArchiveModel {
     }
 
     /**
+     * 删除归档缩略图文件（不影响数据库）
+     */
+    public static func deleteThumbnailFile(id: String): Bool {
+        let thumbnailDir = DatabaseConfig.getThumbnailPath()
+        let thumbPath = "${thumbnailDir}/${id}.avif"
+        try {
+            let filePath = Path(thumbPath)
+            if (!exists(filePath)) { return true }
+            let fileInfo = FileInfo(filePath)
+            if (!fileInfo.isRegular()) { return true }
+            remove(filePath)
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    /**
      * 获取归档文件
      */
     public static func getArchiveFile(id: String): String {

@@ -4,6 +4,7 @@ import std.database.sql.*
 import lrr4cj.config.*
 import lrr4cj.utils.*
 import std.collection.*
+import std.fs.*
 import stdx.log.*
 
 /**
@@ -355,56 +356,91 @@ public class CategoryDao {
     }
 
     /**
-     * 删除分类（仅当分类下没有档案时）
+     * 删除分类（同时从数据库删除该分类下的档案记录；不删除原始档案文件，仅清理缩略图缓存）
      */
-    public static func deleteCategory(catid: String): Bool {
+    public static func deleteCategory(catid: String): (Bool, Int64, String) {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 
                 try {
-                    // 先检查是否有档案
-                    let checkStmt = conn.prepareStatement("""
-                        SELECT COUNT(*) FROM archives a
-                        JOIN categories c ON c.id = a.category_id
-                        WHERE c.catid = ?
-                    """)
+                    // 先获取分类内部ID
+                    let getStmt = conn.prepareStatement("SELECT id FROM categories WHERE catid = ?")
+                    var categoryInternalId: Int64 = 0
                     try {
-                        checkStmt.set(0, catid)
-                        let checkRs = checkStmt.query()
+                        getStmt.set(0, catid)
+                        let rs = getStmt.query()
                         try {
-                            if (checkRs.next()) {
-                                let count = checkRs.getOrNull<Int64>(0) ?? 0
-                                if (count > 0) {
-                                    getLogger("category_dao").warn("无法删除分类，存在关联档案", ("catid", catid), ("count", count.toString()))
-                                    return false
+                            if (!rs.next()) {
+                                return (false, 0, "Category not found")
+                            }
+                            categoryInternalId = rs.getOrNull<Int64>(0) ?? 0
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        getStmt.close()
+                    }
+
+                    // 预取该分类下的 arcid，用于后续清理缩略图缓存（不影响原始档案文件）
+                    let arcids = ArrayList<String>()
+                    let listStmt = conn.prepareStatement("SELECT arcid FROM archives WHERE category_id = ?")
+                    try {
+                        listStmt.set(0, categoryInternalId)
+                        let rs = listStmt.query()
+                        try {
+                            while (rs.next()) {
+                                let arcid = rs.getOrNull<String>(0) ?? ""
+                                if (arcid.size > 0) {
+                                    arcids.add(arcid)
                                 }
                             }
                         } finally {
-                            checkRs.close()
+                            rs.close()
                         }
                     } finally {
-                        checkStmt.close()
+                        listStmt.close()
                     }
 
-                    // 删除分类
-                    let stmt = conn.prepareStatement("DELETE FROM categories WHERE catid = ?")
+                    // 先删除该分类下的档案记录（依赖 DB 约束级联清理关联表：收藏/状态/标签/合集关联等）
+                    var deletedArchives: Int64 = 0
+                    let delArchivesStmt = conn.prepareStatement("DELETE FROM archives WHERE category_id = ?")
                     try {
-                        stmt.set(0, catid)
-                        let result = stmt.update()
-                        return result.rowCount > 0
+                        delArchivesStmt.set(0, categoryInternalId)
+                        let result = delArchivesStmt.update()
+                        deletedArchives = result.rowCount
                     } finally {
-                        stmt.close()
+                        delArchivesStmt.close()
+                    }
+
+                    // 删除分类本身（不删除磁盘文件）
+                    let delCatStmt = conn.prepareStatement("DELETE FROM categories WHERE id = ?")
+                    try {
+                        delCatStmt.set(0, categoryInternalId)
+                        let result = delCatStmt.update()
+                        if (result.rowCount <= 0) {
+                            return (false, deletedArchives, "Failed to delete category")
+                        }
+
+                        // 删除成功后，清理本次被删除档案的缩略图缓存
+                        let thumbnailDir = DatabaseConfig.getThumbnailPath()
+                        for (arcid in arcids) {
+                            let thumbPath = Path("${thumbnailDir}/${arcid}.avif")
+                            try { remove(thumbPath) } catch (_: Exception) {}
+                        }
+                        return (true, deletedArchives, "")
+                    } finally {
+                        delCatStmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("category_dao").error("删除分类失败", ("error", e.message))
-                    return false
+                    return (false, 0, e.message)
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("category_dao").error("无法连接到数据库")
-                return false
+                return (false, 0, "Unable to connect to database")
         }
     }
 

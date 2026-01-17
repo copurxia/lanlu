@@ -282,12 +282,21 @@ public class CategoryController {
     public static func deleteCategory(ctx: JoyContext) {
         let catid = ctx.getParam("id") ?? ""
 
-        if (CategoryDao.deleteCategory(catid)) {
-            ctx.json("{\"operation\":\"delete_category\",\"success\":1}")
-        } else {
-            ctx.status(400)
-            ctx.json("{\"success\":0,\"error\":\"Cannot delete category with archives\"}")
+        let (ok, deletedArchives, err) = CategoryDao.deleteCategory(catid)
+        if (ok) {
+            ctx.json("{\"operation\":\"delete_category\",\"success\":1,\"deleted_archives\":${deletedArchives.toString()}}")
+            return
         }
+
+        if (err == "Category not found") {
+            ctx.status(404)
+            ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
+            return
+        }
+
+        ctx.status(500)
+        let msg = if (err.size > 0) { escapeJson(err) } else { "Failed to delete category" }
+        ctx.json("{\"success\":0,\"error\":\"${msg}\"}")
     }
 
     /**

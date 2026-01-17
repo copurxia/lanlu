@@ -106,6 +106,10 @@ public class CheckDatabaseTaskRunner {
                     logger.warn("Archive path not found, will delete from database", ("path", fullFilePath), ("archive_id", archive.id.toString()), ("type", archive.archive_type))
                     if (ArchiveDao.delete(archive.id)) {
                         deletedCount++
+                        // DB 删除后清理缩略图（原始文件已不存在/不可用；缩略图属于缓存，可安全删除）
+                        if (!ArchiveModel.deleteThumbnailFile(archive.id)) {
+                            logger.debug("Failed to delete thumbnail file", ("arcid", archive.id))
+                        }
                         logger.debug("Successfully deleted database record", ("id", archive.id.toString()), ("title", archive.title))
                     } else {
                         logger.error("Failed to delete database record", ("id", archive.id.toString()), ("title", archive.title))

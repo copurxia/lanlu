@@ -608,31 +608,29 @@ public class ArchiveController {
                 let deleteSuccess = ArchiveDao.delete(id)
 
                 // 5. 删除相关文件（缩略图和原始档案）
-                // 删除缩略图文件（以 archiveId 命名）
-                let thumbnailDir = DatabaseConfig.getThumbnailPath()
-                let thumbPath = "${thumbnailDir}/${id}.avif"
-                try {
-                    remove(Path(thumbPath))
-                    getLogger("archive_controller").info("Deleted thumbnail file", ("path", thumbPath), ("arcid", id))
-                } catch (_: Exception) {
-                    // 忽略删除失败（文件可能不存在）
-                    getLogger("archive_controller").debug("Thumbnail file not found or delete failed", ("path", thumbPath), ("arcid", id))
-                }
-
-                // 删除原始档案文件
-                try {
-                    let archivePath = getArchiveBasePath(archive.id)
-                    if (archivePath.size > 0) {
-                        let fullArchivePath = if (archive.relative_path.size > 0) {
-                            "${archivePath}/${archive.relative_path}/${archive.filename}"
-                        } else {
-                            "${archivePath}/${archive.filename}"
-                        }
-                        remove(Path(fullArchivePath))
-                        getLogger("archive_controller").info("Deleted archive file", ("path", fullArchivePath), ("arcid", id))
+                if (deleteSuccess) {
+                    // 删除缩略图文件（以 archiveId 命名）
+                    if (ArchiveModel.deleteThumbnailFile(id)) {
+                        getLogger("archive_controller").info("Deleted thumbnail file", ("arcid", id))
+                    } else {
+                        getLogger("archive_controller").debug("Thumbnail file not found or delete failed", ("arcid", id))
                     }
-                } catch (e: Exception) {
-                    getLogger("archive_controller").warn("Failed to delete archive file", ("arcid", id), ("error", e.message))
+
+                    // 删除原始档案文件
+                    try {
+                        let archivePath = getArchiveBasePath(archive.id)
+                        if (archivePath.size > 0) {
+                            let fullArchivePath = if (archive.relative_path.size > 0) {
+                                "${archivePath}/${archive.relative_path}/${archive.filename}"
+                            } else {
+                                "${archivePath}/${archive.filename}"
+                            }
+                            remove(Path(fullArchivePath))
+                            getLogger("archive_controller").info("Deleted archive file", ("path", fullArchivePath), ("arcid", id))
+                        }
+                    } catch (e: Exception) {
+                        getLogger("archive_controller").warn("Failed to delete archive file", ("arcid", id), ("error", e.message))
+                    }
                 }
 
                 if (deleteSuccess) {
