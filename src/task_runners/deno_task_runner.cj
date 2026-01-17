@@ -200,12 +200,15 @@ public class DenoTaskRunner {
 
             // 复制共享基础插件
             let sharedBase = Path("${pluginsRoot.toString()}/base_plugin.ts")
-            let sharedSource = Path("./plugins/base_plugin.ts")
+            let sharedSource = Path("./data/cache/plugins/base_plugin.ts")
             if (!exists(sharedSource)) {
                 getLogger("deno_task").error("缺少共享基础插件文件", ("path", sharedSource.toString()))
                 return false
             }
-            copy(sharedSource, to: sharedBase, overwrite: true)
+            // 如果源文件和目标文件是同一个路径，则无需复制
+            if (sharedSource.toString() != sharedBase.toString()) {
+                copy(sharedSource, to: sharedBase, overwrite: true)
+            }
 
             // 复制插件文件
             let pluginDir = Path("${pluginsRoot.toString()}/${plugin.namespace}")
@@ -344,35 +347,27 @@ public class DenoTaskRunner {
         denoArgs.add("--allow-write=${pluginDir}")
         denoArgs.add("--allow-read=${PluginPaths.getPluginRuntimeRoot()}")
 
-        // 解析插件声明的权限
+        // 解析插件声明的权限（逗号分隔的键值对格式：net=e-hentai.org,read=./data/thumb）
         let permissionsStr = plugin.permissions.trimAscii()
-        if (permissionsStr.size > 0 && permissionsStr.startsWith("[")) {
-            try {
-                let jsonVal = JsonValue.fromStr(permissionsStr)
-                match (jsonVal) {
-                    case arr: JsonArray =>
-                        var netHosts = ArrayList<String>()
-                        var allowNetAll = false
+        if (permissionsStr.size > 0) {
+            var netHosts = ArrayList<String>()
+            var allowNetAll = false
 
-                        for (i in 0..arr.size()) {
-                            match (arr[i]) {
-                                case s: JsonString =>
-                                    let perm = normalizePermission(s.getValue())
-                                    allowNetAll = processPermission(perm, denoArgs, netHosts, allowNetAll)
-                                case _ => ()
-                            }
-                        }
-
-                        // 汇总网络权限
-                        if (allowNetAll) {
-                            denoArgs.add("--allow-net")
-                        } else if (netHosts.size > 0) {
-                            let joinedHosts = String.join(netHosts.toArray(), delimiter: ",")
-                            denoArgs.add("--allow-net=${joinedHosts}")
-                        }
-                    case _ => ()
+            let parts = permissionsStr.split(",")
+            for (perm in parts) {
+                let trimmed = perm.trimAscii()
+                if (trimmed.size > 0) {
+                    allowNetAll = processPermission(trimmed, denoArgs, netHosts, allowNetAll)
                 }
-            } catch (_: Exception) {}
+            }
+
+            // 汇总网络权限
+            if (allowNetAll) {
+                denoArgs.add("--allow-net")
+            } else if (netHosts.size > 0) {
+                let joinedHosts = String.join(netHosts.toArray(), delimiter: ",")
+                denoArgs.add("--allow-net=${joinedHosts}")
+            }
         }
 
         return denoArgs

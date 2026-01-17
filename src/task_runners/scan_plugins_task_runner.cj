@@ -598,7 +598,7 @@ public class ScanPluginsTaskRunner {
             Directory.create(tempTypeDir, recursive: true)
 
             // 复制 base_plugin.ts
-            let baseSource = Path("./plugins/base_plugin.ts")
+            let baseSource = Path("./data/cache/plugins/base_plugin.ts")
             let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
             if (exists(baseSource)) {
                 copy(baseSource, to: baseTarget, overwrite: true)
@@ -609,7 +609,7 @@ public class ScanPluginsTaskRunner {
             copy(Path(filePath), to: tempPluginFile, overwrite: true)
 
             // 构建 deno 命令
-            let cmd = "deno run --allow-read '${pluginsRoot.toString()}' '${tempPluginFile.toString()}'"
+            let cmd = "deno run --allow-read '${tempPluginFile.toString()}'"
             TaskIO.appendLog(taskId, "Executing: ${cmd}")
 
             // 启动进程

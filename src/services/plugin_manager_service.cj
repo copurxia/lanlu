@@ -331,7 +331,7 @@ public class PluginManagerService {
             let tempTypeDir = Path("${pluginsRoot.toString()}/${typeDir}")
             Directory.create(tempTypeDir, recursive: true)
 
-            let baseSource = Path("./plugins/base_plugin.ts")
+            let baseSource = Path("./data/cache/plugins/base_plugin.ts")
             let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
             if (exists(baseSource)) {
                 copy(baseSource, to: baseTarget, overwrite: true)
@@ -342,7 +342,7 @@ public class PluginManagerService {
             copy(Path(filePath), to: tempPluginFile, overwrite: true)
 
             let inputJson = "{\"action\":\"plugin_info\",\"pluginType\":\"\"}"
-            let cmd = "echo '${inputJson}' | deno run --allow-read='${pluginsRoot.toString()}' '${tempPluginFile.toString()}'"
+            let cmd = "echo '${inputJson}' | deno run --allow-read '${tempPluginFile.toString()}'"
             let process = launch("sh", "-c", cmd,
                 stdIn: ProcessRedirect.Pipe,
                 stdOut: ProcessRedirect.Pipe,
