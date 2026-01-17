@@ -86,11 +86,21 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       });
       const enabled = cats.filter((c) => c.enabled);
       let nextSettings = settings;
-      if (!settings.categoryId && enabled.length > 0) {
+
+      // If categoryId is empty OR no longer valid after a refresh (server changed,
+      // permissions changed, category disabled, etc.), pick a safe default.
+      const currentValid = !!settings.categoryId && enabled.some((c) => c.catid === settings.categoryId);
+      if ((!settings.categoryId || !currentValid) && enabled.length > 0) {
         nextSettings = { ...settings, categoryId: enabled[0].catid };
         set({ settings: nextSettings });
         await saveSettings(nextSettings);
+      } else if (!enabled.length && settings.categoryId) {
+        // No available categories -> clear selection to avoid stale/invalid ids.
+        nextSettings = { ...settings, categoryId: "" };
+        set({ settings: nextSettings });
+        await saveSettings(nextSettings);
       }
+
       set({ categories: enabled });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "加载分类失败";

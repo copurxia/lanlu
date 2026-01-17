@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSettingsStore } from "@/store/settings";
 
 export default function SettingsPage() {
-  const { settings, setSettings, save, saving, categories, loadingCategories, error } = useSettingsStore();
+  const { settings, setSettings, setCategoryId, save, saving, categories, loadingCategories, error } = useSettingsStore();
 
   const canConnect = useMemo(() => {
     return !!settings.serverUrl.trim() && !!settings.token.trim();
@@ -49,7 +49,7 @@ export default function SettingsPage() {
           <select
             className="w-full h-9 rounded-md border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring"
             value={settings.categoryId}
-            onChange={(e) => setSettings({ ...settings, categoryId: e.target.value })}
+            onChange={(e) => void setCategoryId(e.target.value)}
             disabled={!canConnect || loadingCategories || saving}
           >
             {loadingCategories ? (
