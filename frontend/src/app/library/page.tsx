@@ -199,12 +199,35 @@ function LibraryPageContent() {
             {activeError && <div className="text-red-500 mb-4">{activeError}</div>}
 
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ActiveTab)}>
-              <TabsList className="grid w-full grid-cols-2 mb-6">
-                <TabsTrigger value="favorites">{t('library.tabs.favorites')}</TabsTrigger>
-                <TabsTrigger value="history">{t('library.tabs.history')}</TabsTrigger>
-              </TabsList>
+              <div className="grid gap-6 md:grid-cols-[220px_1fr]">
+                {/* Desktop: vertical tabs */}
+                <aside className="hidden md:block md:sticky md:top-20 h-fit">
+                  <TabsList className="flex h-auto w-full flex-col items-stretch gap-1 bg-transparent p-0">
+                    <TabsTrigger
+                      value="favorites"
+                      className="w-full justify-start rounded-md px-3 py-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+                    >
+                      {t('library.tabs.favorites')}
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="history"
+                      className="w-full justify-start rounded-md px-3 py-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
+                    >
+                      {t('library.tabs.history')}
+                    </TabsTrigger>
+                  </TabsList>
+                </aside>
 
-              <TabsContent value="favorites">
+                <div>
+                  {/* Mobile: horizontal tabs */}
+                  <div className="md:hidden">
+                    <TabsList className="grid w-full grid-cols-2 mb-6">
+                      <TabsTrigger value="favorites">{t('library.tabs.favorites')}</TabsTrigger>
+                      <TabsTrigger value="history">{t('library.tabs.history')}</TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  <TabsContent value="favorites">
                   {favoritesLoading ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
                     {Array.from({ length: 10 }).map((_, i) => (
@@ -234,9 +257,9 @@ function LibraryPageContent() {
                     ))}
                   </div>
                 )}
-              </TabsContent>
+                  </TabsContent>
 
-              <TabsContent value="history">
+                  <TabsContent value="history">
                 {historyLoading ? (
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
                     {Array.from({ length: 10 }).map((_, i) => (
@@ -266,7 +289,9 @@ function LibraryPageContent() {
                     ))}
                   </div>
                 )}
-              </TabsContent>
+                  </TabsContent>
+                </div>
+              </div>
             </Tabs>
           </div>
 	        )}
