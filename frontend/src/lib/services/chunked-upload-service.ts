@@ -52,7 +52,6 @@ export class ChunkedUploadService {
   private static readonly CHUNK_SIZE = 1.5 * 1024 * 1024; // 1.5MB (小于2MB限制)
   private static readonly MAX_RETRIES = 3;
   private static readonly UPLOAD_TIMEOUT = 60000; // 60秒
-  private static readonly MAX_FILE_SIZE = 500 * 1024 * 1024; // 500MB
   private static readonly SUPPORTED_EXTENSIONS = ['zip', 'rar', '7z', 'tar', 'gz', 'pdf', 'epub', 'mobi', 'cbz', 'cbr', 'cb7', 'cbt'];
   private static readonly MAX_CONCURRENT_CHUNKS = 3; // 最大并发上传数
 
@@ -183,12 +182,9 @@ export class ChunkedUploadService {
    * 文件验证
    */
   static validateFile(file: File): ValidationResult {
-    // 检查文件大小
-    if (file.size > this.MAX_FILE_SIZE) {
-      return {
-        valid: false,
-        error: `文件大小不能超过 ${this.MAX_FILE_SIZE / 1024 / 1024}MB`
-      };
+    // 分片上传已实现，这里不再限制总文件大小；仅确保文件非空。
+    if (file.size <= 0) {
+      return { valid: false, error: '文件不能为空' };
     }
 
     // 检查文件扩展名
