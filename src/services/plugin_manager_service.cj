@@ -77,6 +77,7 @@ public class PluginManagerService {
         // 1) LinderHttp
         var lastStatus: Int64 = -1
         var lastErr: String = ""
+        var lastBodySnippet: String = ""
         try {
             var http = LinderHttp(url: RequestUrl.from(url))
             let response = http.send()
@@ -88,14 +89,22 @@ public class PluginManagerService {
                 file.close()
                 return (true, "")
             }
+            // 非 200：尽可能带上响应片段，避免只有状态码不利排查
+            try {
+                let body = response.getBodyString()
+                lastBodySnippet = truncateForLog(body.trimAscii(), 512)
+            } catch (_: Exception) {}
             lastErr = "HTTP ${response.status.toString()}"
+            logger.error("LinderHttp download failed", ("url", url), ("status", response.status.toString()), ("body_snippet", lastBodySnippet))
         } catch (e: Exception) {
             lastErr = e.message
+            logger.error("LinderHttp download exception", ("url", url), ("error", lastErr))
         }
 
         // 2) 仅在 “HTTP 0 / 异常” 这类典型网络/握手失败场景下兜底，避免掩盖真实 4xx/5xx。
         if (lastStatus != 0 && lastErr.startsWith("HTTP ")) {
-            return (false, "Failed to download plugin: ${lastErr}")
+            let detail = if (lastBodySnippet.size > 0) { " body=${lastBodySnippet}" } else { "" }
+            return (false, "Failed to download plugin: ${lastErr}${detail}")
         }
 
         let (ok, err) = downloadUrlToFileWithDeno(url, outFile)
@@ -107,6 +116,13 @@ public class PluginManagerService {
         let linderPart = if (lastErr.size > 0) { lastErr } else { "unknown" }
         let denoPart = if (err.size > 0) { err } else { "unknown" }
         return (false, "Failed to download plugin: HTTP 0 (linder=${linderPart}; deno=${denoPart})")
+    }
+
+    private static func truncateForLog(s: String, maxLen: Int64): String {
+        let trimmed = s.trimAscii()
+        if (maxLen <= 0 || trimmed.size == 0) { return "" }
+        if (trimmed.size <= maxLen) { return trimmed }
+        return trimmed[0..maxLen] + "...(truncated,len=${trimmed.size.toString()})"
     }
 
     private static func downloadUrlToFileWithDeno(url: String, outFile: Path): (Bool, String) {
