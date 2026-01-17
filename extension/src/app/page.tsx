@@ -204,6 +204,7 @@ export default function AddPage() {
       for (const tab of toSubmit) {
         const tabUrl = tab.url!;
         const tabTitle = tab.title || undefined;
+        const tabId = typeof tab.id === "number" ? tab.id : undefined;
 
         // 进入页面即可判断是否存在；这里仍做一次检查，避免重复入队。
         let existing: { arcid: string; title?: string } | null = null;
@@ -225,6 +226,7 @@ export default function AddPage() {
           addEntry({
             url: tabUrl,
             title: tabTitle,
+            tabId,
             status: "exists",
             archiveId: existing.arcid,
           });
@@ -239,6 +241,7 @@ export default function AddPage() {
           addEntry({
             url: tabUrl,
             title: tabTitle,
+            tabId,
             status: "queued",
             downloadTaskId: jobId,
             downloadProgress: 0,
@@ -247,6 +250,7 @@ export default function AddPage() {
           addEntry({
             url: tabUrl,
             title: tabTitle,
+            tabId,
             status: "failed",
             error: getErrorMessage(e, "添加失败"),
           });

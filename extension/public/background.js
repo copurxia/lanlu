@@ -10,6 +10,8 @@ const QUEUE_KEY = "lanlu_download_queue";
 const SETTINGS_KEY = "lanlu_settings";
 const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
 const REMOTE_CHECK_MIN_INTERVAL_MS = 60 * 1000;
+const TASK_POLL_ALARM = "lanlu_task_poll_alarm";
+const TASK_POLL_INTERVAL_MINUTES = 1;
 
 const STATUS = {
   NOT_FOUND: "not_found",
@@ -91,12 +93,36 @@ async function getAuth() {
   return { serverUrl, token };
 }
 
+async function getAutoCloseEnabled() {
+  const items = await chromeGet("sync", SETTINGS_KEY);
+  const v = items[SETTINGS_KEY];
+  if (!v || typeof v !== "object") return false;
+  return !!v.autoCloseTabOnComplete;
+}
+
 async function readQueueEntries() {
   const items = await chromeGet("local", QUEUE_KEY);
   const raw = items[QUEUE_KEY];
   const parsed = typeof raw === "string" ? safeJsonParse(raw) : raw;
   const entries = parsed && parsed.state && Array.isArray(parsed.state.entries) ? parsed.state.entries : [];
   return entries;
+}
+
+async function readQueueState() {
+  const items = await chromeGet("local", QUEUE_KEY);
+  const raw = items[QUEUE_KEY];
+  const parsed = typeof raw === "string" ? safeJsonParse(raw) : raw;
+  if (parsed && typeof parsed === "object" && parsed.state && typeof parsed.state === "object") return parsed;
+  return { state: { entries: [] }, version: 1 };
+}
+
+async function writeQueueState(nextState) {
+  try {
+    // Match zustand's persisted format: a JSON string.
+    await new Promise((resolve) => chrome.storage.local.set({ [QUEUE_KEY]: JSON.stringify(nextState) }, resolve));
+  } catch {
+    // ignore
+  }
 }
 
 async function readStatusCache() {
@@ -154,6 +180,38 @@ function isRecord(value) {
   return typeof value === "object" && value !== null;
 }
 
+function clampProgress(value) {
+  const n = typeof value === "number" ? value : 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function normalizeQueueStatus(raw) {
+  switch (raw) {
+    case "pending":
+      return "queued";
+    case "running":
+      return "running";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "stopped":
+      return "stopped";
+    default:
+      return "running";
+  }
+}
+
+function parseArchiveIdFromScanResult(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj.archive_id === "string" && obj.archive_id.trim() ? obj.archive_id : null;
+  } catch {
+    return null;
+  }
+}
+
 async function requestJson(auth, path) {
   const url = `${auth.serverUrl}${path}`;
   const resp = await fetch(url, {
@@ -187,6 +245,176 @@ async function searchArchives(auth, params) {
   const data = await requestJson(auth, `/api/search?${searchParams.toString()}`);
   if (!isRecord(data)) return {};
   return { data: Array.isArray(data.data) ? data.data : [] };
+}
+
+async function getTaskById(auth, id) {
+  return requestJson(auth, `/api/taskpool/${id}`);
+}
+
+async function getTasksByGroup(auth, groupId) {
+  return requestJson(auth, `/api/taskpool/group/${encodeURIComponent(groupId)}`);
+}
+
+function ensureTaskPollerAlarm() {
+  try {
+    if (!chrome.alarms?.create) return;
+    chrome.alarms.create(TASK_POLL_ALARM, { periodInMinutes: TASK_POLL_INTERVAL_MINUTES });
+  } catch {
+    // ignore
+  }
+}
+
+let taskPollInFlight = false;
+async function pollTasksOnce() {
+  if (taskPollInFlight) return;
+  taskPollInFlight = true;
+
+  try {
+    const auth = await getAuth();
+    if (!auth) return;
+
+    const autoClose = await getAutoCloseEnabled();
+    const queueState = await readQueueState();
+    const entries = queueState?.state?.entries;
+    const list = Array.isArray(entries) ? entries : [];
+
+    // If tasks already completed while popup was open (or before the worker got a chance
+    // to poll), close them here as a catch-up pass.
+    if (autoClose) {
+      const completed = list.filter((e) => e && typeof e.tabId === "number" && e.status === "completed");
+      if (completed.length > 0) {
+        for (const e of completed) {
+          try {
+            await new Promise((resolve) => chrome.tabs.remove(e.tabId, () => resolve()));
+          } catch {
+            // ignore
+          } finally {
+            // Prevent repeated close attempts.
+            const latest = await readQueueState();
+            const latestEntries = Array.isArray(latest?.state?.entries) ? latest.state.entries : [];
+            const nextEntries = latestEntries.map((row) => {
+              if (!row || row.id !== e.id) return row;
+              return { ...row, tabId: undefined, updatedAt: Date.now() };
+            });
+            await writeQueueState({ ...latest, state: { ...(latest.state || {}), entries: nextEntries } });
+          }
+        }
+      }
+    }
+
+    const active = list.filter((entry) => {
+      if (!entry || typeof entry !== "object") return false;
+      if (entry.status === "queued" || entry.status === "running") return true;
+      if (entry.status === "completed" && entry.downloadTaskId && !entry.scanTaskId && !entry.archiveId) return true;
+      return false;
+    });
+    if (active.length === 0) return;
+
+    const patchesById = new Map();
+    const closeCandidates = [];
+    const now = () => Date.now();
+
+    for (const entry of active) {
+      if (!entry || typeof entry.id !== "string") continue;
+      const id = entry.id;
+      const patch = { updatedAt: now() };
+      let effectiveStatus = entry.status;
+
+      try {
+        // 1) poll download task
+        if (entry.downloadTaskId && (entry.status === "queued" || entry.status === "running")) {
+          const task = await getTaskById(auth, entry.downloadTaskId);
+          const status = task && typeof task.status === "string" ? normalizeQueueStatus(task.status) : "running";
+          patch.status = status;
+          effectiveStatus = status;
+          patch.downloadProgress = clampProgress(task?.progress);
+          patch.downloadMessage = typeof task?.message === "string" ? task.message : "";
+          if (status === "failed") patch.error = patch.downloadMessage || "任务失败";
+        }
+
+        // 2) poll scan task
+        if (entry.scanTaskId && (entry.status === "queued" || entry.status === "running")) {
+          const scanTask = await getTaskById(auth, entry.scanTaskId);
+          const scanStatus =
+            scanTask && typeof scanTask.status === "string" ? normalizeQueueStatus(scanTask.status) : "running";
+          const archiveId = scanTask?.status === "completed" ? parseArchiveIdFromScanResult(scanTask.result) : null;
+
+          patch.scanProgress = clampProgress(scanTask?.progress);
+          patch.scanMessage = typeof scanTask?.message === "string" ? scanTask.message : "";
+          patch.status = scanStatus;
+          effectiveStatus = scanStatus;
+          if (archiveId) patch.archiveId = archiveId;
+          if (scanStatus === "failed") patch.error = patch.scanMessage || "扫描失败";
+
+          if (scanStatus === "completed" && archiveId) {
+            patch.status = "completed";
+            effectiveStatus = "completed";
+            if (autoClose && typeof entry.tabId === "number") {
+              closeCandidates.push({ id, tabId: entry.tabId });
+            }
+          }
+        }
+
+        // If the download just completed in this tick, try discovering scan task immediately.
+        if (
+          entry.downloadTaskId &&
+          effectiveStatus === "completed" &&
+          !entry.scanTaskId &&
+          !entry.archiveId
+        ) {
+          const groupId = `download_url:${entry.downloadTaskId}`;
+          const tasks = await getTasksByGroup(auth, groupId);
+          const listTasks = Array.isArray(tasks) ? tasks : [];
+          const scan = listTasks.find((t) => t && t.task_type === "scan_archive" && typeof t.id === "number");
+          if (scan) {
+            patch.scanTaskId = scan.id;
+            patch.scanProgress = clampProgress(scan.progress);
+            patch.scanMessage = typeof scan.message === "string" ? scan.message : "";
+            const scanStatus = typeof scan.status === "string" ? normalizeQueueStatus(scan.status) : "running";
+            patch.status = scanStatus;
+            effectiveStatus = scanStatus;
+          }
+        }
+      } catch (e) {
+        patch.status = "failed";
+        patch.error = getErrorMessage(e, "任务查询失败");
+      }
+
+      patchesById.set(id, patch);
+    }
+
+    if (patchesById.size > 0) {
+      const latest = await readQueueState();
+      const latestEntries = Array.isArray(latest?.state?.entries) ? latest.state.entries : [];
+      const nextEntries = latestEntries.map((e) => {
+        if (!e || typeof e.id !== "string") return e;
+        const patch = patchesById.get(e.id);
+        return patch ? { ...e, ...patch } : e;
+      });
+      await writeQueueState({ ...latest, state: { ...(latest.state || {}), entries: nextEntries } });
+    }
+
+    if (autoClose && closeCandidates.length > 0) {
+      for (const c of closeCandidates) {
+        try {
+          await new Promise((resolve) => chrome.tabs.remove(c.tabId, () => resolve()));
+        } catch {
+          // ignore
+        } finally {
+          // Prevent repeated close attempts.
+          const latest = await readQueueState();
+          const latestEntries = Array.isArray(latest?.state?.entries) ? latest.state.entries : [];
+          const nextEntries = latestEntries.map((e) => {
+            if (!e || e.id !== c.id) return e;
+            return { ...e, tabId: undefined, updatedAt: Date.now() };
+          });
+          await writeQueueState({ ...latest, state: { ...(latest.state || {}), entries: nextEntries } });
+        }
+      }
+    }
+  } finally {
+    taskPollInFlight = false;
+  }
 }
 
 async function writeStatusCache(url, entry) {
@@ -330,11 +558,21 @@ async function updateBadgeForActiveTab() {
 // --- Event wiring ---
 
 chrome.runtime.onInstalled.addListener(() => {
+  ensureTaskPollerAlarm();
   updateBadgeForActiveTab();
+  pollTasksOnce();
 });
 
 chrome.runtime.onStartup?.addListener(() => {
+  ensureTaskPollerAlarm();
   updateBadgeForActiveTab();
+  pollTasksOnce();
+});
+
+chrome.alarms?.onAlarm?.addListener((alarm) => {
+  if (alarm && alarm.name === TASK_POLL_ALARM) {
+    pollTasksOnce();
+  }
 });
 
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
@@ -361,4 +599,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     (areaName === "local" && (changes[QUEUE_KEY] || changes[STATUS_CACHE_KEY])) ||
     (areaName === "sync" && changes[SETTINGS_KEY]);
   if (isRelevant) updateBadgeForActiveTab();
+
+  // Keep task progress up-to-date even when popup is closed.
+  const taskRelevant = (areaName === "local" && changes[QUEUE_KEY]) || (areaName === "sync" && changes[SETTINGS_KEY]);
+  if (taskRelevant) pollTasksOnce();
 });
+
+// Ensure the alarm exists even if the worker starts from other events.
+ensureTaskPollerAlarm();

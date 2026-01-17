@@ -16,13 +16,14 @@ type SettingsState = {
   hydrate: () => Promise<void>;
   setSettings: (next: ExtensionSettings) => void;
   setCategoryId: (categoryId: string) => Promise<void>;
+  setAutoCloseTabOnComplete: (enabled: boolean) => Promise<void>;
   save: () => Promise<void>;
   refreshCategories: () => Promise<void>;
   clearError: () => void;
 };
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
-  settings: { serverUrl: "", token: "", categoryId: "" },
+  settings: { serverUrl: "", token: "", categoryId: "", autoCloseTabOnComplete: false },
   hydrated: false,
   saving: false,
   categories: [],
@@ -43,6 +44,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   setCategoryId: async (categoryId) => {
     const { settings } = get();
     const next = { ...settings, categoryId };
+    set({ settings: next, saving: true, error: null });
+    try {
+      await saveSettings(next);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "保存失败";
+      set({ error: message });
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  setAutoCloseTabOnComplete: async (enabled) => {
+    const { settings } = get();
+    const next = { ...settings, autoCloseTabOnComplete: enabled };
     set({ settings: next, saving: true, error: null });
     try {
       await saveSettings(next);

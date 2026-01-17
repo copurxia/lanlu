@@ -2,6 +2,7 @@ export type ExtensionSettings = {
   serverUrl: string;
   token: string;
   categoryId: string;
+  autoCloseTabOnComplete: boolean;
 };
 
 const STORAGE_KEY = "lanlu_settings";
@@ -10,6 +11,7 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
   serverUrl: "",
   token: "",
   categoryId: "",
+  autoCloseTabOnComplete: false,
 };
 
 function hasChromeStorage(): boolean {
@@ -34,6 +36,7 @@ export async function loadSettings(): Promise<ExtensionSettings> {
     serverUrl: raw?.serverUrl || "",
     token: raw?.token || "",
     categoryId: raw?.categoryId || "",
+    autoCloseTabOnComplete: !!raw?.autoCloseTabOnComplete,
   };
 }
 

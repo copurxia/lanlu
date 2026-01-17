@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSettingsStore } from "@/store/settings";
 
 export default function SettingsPage() {
-  const { settings, setSettings, setCategoryId, save, saving, categories, loadingCategories, error } = useSettingsStore();
+  const { settings, setSettings, setCategoryId, setAutoCloseTabOnComplete, save, saving, categories, loadingCategories, error } = useSettingsStore();
 
   const canConnect = useMemo(() => {
     return !!settings.serverUrl.trim() && !!settings.token.trim();
@@ -82,6 +82,20 @@ export default function SettingsPage() {
               {saving ? "保存中..." : "保存/刷新"}
             </button>
           </div>
+        </div>
+
+        <div className="flex items-start justify-between gap-3 pt-1">
+          <div className="space-y-1">
+            <div className="text-xs font-medium">下载完成自动关闭标签页</div>
+            <div className="text-[11px] text-muted-foreground">扫描完成并写入归档后，自动关闭发起下载的标签页</div>
+          </div>
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4"
+            checked={!!settings.autoCloseTabOnComplete}
+            onChange={(e) => void setAutoCloseTabOnComplete(e.target.checked)}
+            disabled={saving}
+          />
         </div>
       </div>
 

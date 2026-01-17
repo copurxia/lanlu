@@ -18,6 +18,7 @@ export type DownloadEntry = {
   id: string;
   url: string;
   title?: string;
+  tabId?: number;
   createdAt: number;
   updatedAt: number;
 
@@ -57,6 +58,7 @@ export const useDownloadQueueStore = create<QueueState>()(
           updatedAt: now,
           url: entry.url,
           title: entry.title,
+          tabId: entry.tabId,
           status: entry.status,
           error: entry.error,
           downloadTaskId: entry.downloadTaskId,
