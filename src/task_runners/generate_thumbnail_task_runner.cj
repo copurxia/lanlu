@@ -84,8 +84,10 @@ public class GenerateThumbnailTaskRunner {
 
         TaskIO.appendLog(taskId, "Cover image extracted, size: ${imageData.size} bytes")
 
-        // 将图片/视频数据写入临时文件（FFmpeg 会自动检测实际格式）
-        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.tmp")
+        // FFmpeg/ffprobe may mis-detect some formats when the file has no extension (e.g. ".tmp").
+        // Prefer inferring the extension from the bytes; fallback to the first media entry's extension.
+        let inferredExt = inferMediaExtension(imageData, handler, actualArchivePath)
+        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${inferredExt}")
         TaskIO.appendLog(taskId, "Writing cover image to: ${tempImagePath}")
 
         try {
@@ -187,6 +189,120 @@ public class GenerateThumbnailTaskRunner {
         logger.debug("Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
         TaskIO.appendLog(taskId, "Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
         return ProcessResultData(true, finalThumbnailPath, thumbHash)
+    }
+
+    /**
+     * Infer a file extension for ffprobe/ffmpeg based on the cover bytes.
+     * If detection fails, fallback to the first media entry name.
+     */
+    private static func inferMediaExtension(imageData: Array<UInt8>, handler: ArchiveHandler, archivePath: String): String {
+        // 1) Magic-number detection (best effort)
+        let magicExt = inferExtensionFromMagic(imageData)
+        if (magicExt.size > 0) {
+            return magicExt
+        }
+
+        // 2) Fallback: use the first media entry's extension (if available)
+        let (entryName, _) = handler.getFirstImage(archivePath)
+        let nameExt = inferExtensionFromName(entryName)
+        if (nameExt.size > 0) {
+            return nameExt
+        }
+
+        // 3) Last resort
+        return "tmp"
+    }
+
+    /**
+     * Infer extension from filename.
+     */
+    private static func inferExtensionFromName(name: String): String {
+        if (name.size == 0) {
+            return ""
+        }
+        let parts = name.split(".")
+        if (parts.size <= 1) {
+            return ""
+        }
+        return parts[parts.size - 1].toAsciiLower()
+    }
+
+    /**
+     * Infer extension from common file signatures.
+     */
+    private static func inferExtensionFromMagic(data: Array<UInt8>): String {
+        if (data.size < 12) {
+            return ""
+        }
+
+        // JPEG: FF D8 FF
+        if (data.size >= 3 && data[0] == 0xFFu8 && data[1] == 0xD8u8 && data[2] == 0xFFu8) {
+            return "jpg"
+        }
+
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        if (data.size >= 8 &&
+            data[0] == 0x89u8 && data[1] == 0x50u8 && data[2] == 0x4Eu8 && data[3] == 0x47u8 &&
+            data[4] == 0x0Du8 && data[5] == 0x0Au8 && data[6] == 0x1Au8 && data[7] == 0x0Au8) {
+            return "png"
+        }
+
+        // GIF: "GIF8"
+        if (data.size >= 4 &&
+            data[0] == 0x47u8 && data[1] == 0x49u8 && data[2] == 0x46u8 && data[3] == 0x38u8) {
+            return "gif"
+        }
+
+        // WEBP: "RIFF" .... "WEBP"
+        if (data.size >= 12 &&
+            data[0] == 0x52u8 && data[1] == 0x49u8 && data[2] == 0x46u8 && data[3] == 0x46u8 &&
+            data[8] == 0x57u8 && data[9] == 0x45u8 && data[10] == 0x42u8 && data[11] == 0x50u8) {
+            return "webp"
+        }
+
+        // EBML (Matroska/WebM): 1A 45 DF A3
+        if (data.size >= 4 && data[0] == 0x1Au8 && data[1] == 0x45u8 && data[2] == 0xDFu8 && data[3] == 0xA3u8) {
+            return "mkv"
+        }
+
+        // ISO BMFF (MP4/AVIF/HEIF): "....ftyp" + major brand
+        if (data.size >= 12 &&
+            data[4] == 0x66u8 && data[5] == 0x74u8 && data[6] == 0x79u8 && data[7] == 0x70u8) {
+            // Read major brand as ASCII
+            let b0 = data[8]
+            let b1 = data[9]
+            let b2 = data[10]
+            let b3 = data[11]
+
+            // avif/avis
+            if (b0 == 0x61u8 && b1 == 0x76u8 && b2 == 0x69u8 && b3 == 0x66u8) { // "avif"
+                return "avif"
+            }
+            if (b0 == 0x61u8 && b1 == 0x76u8 && b2 == 0x69u8 && b3 == 0x73u8) { // "avis"
+                return "avif"
+            }
+
+            // heic/heif variants
+            if (b0 == 0x68u8 && b1 == 0x65u8 && b2 == 0x69u8 && b3 == 0x63u8) { // "heic"
+                return "heic"
+            }
+            if (b0 == 0x6Du8 && b1 == 0x69u8 && b2 == 0x66u8 && b3 == 0x31u8) { // "mif1"
+                return "avif"
+            }
+
+            // mp4 family (best-effort)
+            if (b0 == 0x69u8 && b1 == 0x73u8 && b2 == 0x6Fu8 && b3 == 0x6Du8) { // "isom"
+                return "mp4"
+            }
+            if (b0 == 0x6Du8 && b1 == 0x70u8 && b2 == 0x34u8 && b3 == 0x32u8) { // "mp42"
+                return "mp4"
+            }
+            if (b0 == 0x71u8 && b1 == 0x74u8 && b2 == 0x20u8 && b3 == 0x20u8) { // "qt  "
+                return "mov"
+            }
+        }
+
+        return ""
     }
 
     private static func parseParameters(parameters: String): (String, String, String) {

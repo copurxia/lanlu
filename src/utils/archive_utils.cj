@@ -316,38 +316,44 @@ public class ArchiveUtils {
                 Directory.create(outputDir, recursive: true)
             }
 
-            // 使用 ffprobe 获取图片尺寸，然后动态构建滤镜
-            let (vfFilter, shouldProcess) = buildFilter(inputPath)
-            if (!shouldProcess) {
-                return ProcessResultData(false, "", "Failed to get image dimensions")
-            }
+            // Always use a dimension-free filter graph so we don't depend on ffprobe,
+            // which can fail on some inputs even if other decoders could read them.
+            //
+            // After scaling to width=500, crop height to at most 1000 (top-aligned).
+            // The comma in min() must be escaped for FFmpeg filter parsing.
+            let vfFilter = "scale=500:-1,crop=500:min(ih\\,1000):0:0"
 
-            // 使用FFmpeg进行转换，-frames:v 1 确保只取一帧（对视频有效，对图片无影响）
-            // -q:v 设置质量（1-31，越小质量越高，2约等于85%质量）
-            let process = launch(
-                "ffmpeg",
-                "-y",                    // 覆盖输出文件
-                "-threads", "1",
-                "-i", inputPath,         // 输入文件
-                "-vf", vfFilter,
-                "-frames:v", "1",        // 只输出一帧
-                "-q:v", "2",             // 质量设置
-                "-map_metadata", "-1",   // 过滤元数据
-                outputPath,
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe
-            )
-            let (exitCode, _, stderr) = process.waitOutput()
-
+            // First try FFmpeg directly.
+            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
-            } else {
-                let error = String.fromUtf8(stderr)
-                return ProcessResultData(false, "", error)
             }
+            return ProcessResultData(false, "", stderrStr)
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Exception: ${e.message}")
         }
+    }
+
+    /**
+     * Run FFmpeg to convert a single image/video frame to AVIF.
+     */
+    private static func runFfmpegToAvif(inputPath: String, outputPath: String, vfFilter: String): (Int64, String) {
+        let process = launch(
+            "ffmpeg",
+            "-y",                    // 覆盖输出文件
+            "-threads", "1",
+            "-i", inputPath,         // 输入文件
+            "-vf", vfFilter,
+            "-frames:v", "1",        // 只输出一帧
+            "-q:v", "2",             // 质量设置
+            "-map_metadata", "-1",   // 过滤元数据
+            outputPath,
+            stdOut: ProcessRedirect.Pipe,
+            stdErr: ProcessRedirect.Pipe
+        )
+        let (exitCode, _, stderr) = process.waitOutput()
+        let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
+        return (exitCode, stderrStr)
     }
 
     /**
