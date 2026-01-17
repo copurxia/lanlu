@@ -29,6 +29,7 @@ export function ReaderWebtoonModeView({
   onImageLoaded,
   onImageError,
   onCacheImage,
+  onMeasureImageHeight,
   onDoubleClick,
   onImageDragStart,
   t,
@@ -56,6 +57,7 @@ export function ReaderWebtoonModeView({
   onImageLoaded: (pageIndex: number) => void;
   onImageError: (pageIndex: number) => void;
   onCacheImage: (url: string, pageIndex: number) => void;
+  onMeasureImageHeight?: (pageIndex: number, naturalWidth: number, naturalHeight: number) => void;
   onDoubleClick: (e: React.MouseEvent) => void;
   onImageDragStart: (e: React.DragEvent) => void;
   t: (key: string) => string;
@@ -181,12 +183,6 @@ export function ReaderWebtoonModeView({
                           fill
                           className="object-contain select-none"
                           style={{
-                            maxWidth: '100%',
-                            maxHeight: '100%',
-                            width: 'auto',
-                            height: 'auto',
-                            display: 'block',
-                            margin: '0 auto',
                             opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
                             transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
                             transition: 'transform 0.1s ease-out',
@@ -195,6 +191,9 @@ export function ReaderWebtoonModeView({
                           onLoadingComplete={(img) => {
                             imageRefs.current[actualIndex] = img;
                             imageRequestUrls.current[actualIndex] = img.currentSrc || img.src;
+                            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+                              onMeasureImageHeight?.(actualIndex, img.naturalWidth, img.naturalHeight);
+                            }
                             onImageLoaded(actualIndex);
                             if (!cachedPages[actualIndex]) {
                               onCacheImage(page.url, actualIndex);

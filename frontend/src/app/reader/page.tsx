@@ -149,6 +149,20 @@ function ReaderContent() {
     htmlContents,
   });
 
+  const handleMeasureWebtoonImageHeight = useCallback(
+    (pageIndex: number, naturalWidth: number, naturalHeight: number) => {
+      const measuredHeight = getImageHeight(naturalWidth, naturalHeight);
+      webtoonVirtualization.setImageHeights((prev) => {
+        const current = prev[pageIndex];
+        if (current && Math.abs(current - measuredHeight) <= 2) return prev;
+        const next = [...prev];
+        next[pageIndex] = measuredHeight;
+        return next;
+      });
+    },
+    [getImageHeight, webtoonVirtualization]
+  );
+
   const imageLoading = useReaderImageLoading({
     pages,
     readingMode,
@@ -884,6 +898,7 @@ function ReaderContent() {
 	          videoRefs={videoRefs}
 	          htmlContainerRefs={htmlContainerRefs}
 	          imageRequestUrls={imageRequestUrls}
+            onMeasureImageHeight={handleMeasureWebtoonImageHeight}
 	          onImageLoaded={imageLoading.handleImageLoad}
 	          onImageError={imageLoading.handleImageError}
 	          onCacheImage={imageLoading.cacheImage}

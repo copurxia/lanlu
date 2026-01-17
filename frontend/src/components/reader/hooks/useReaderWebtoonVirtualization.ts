@@ -159,15 +159,17 @@ export function useReaderWebtoonVirtualization({
     if (readingMode !== 'webtoon') return;
 
     imageRefs.current.forEach((img, index) => {
-      if (img && img.complete && img.naturalHeight > 0 && !imageHeights[index]) {
-        const imageHeight = getImageHeight(img.naturalWidth, img.naturalHeight);
+      if (!img || !img.complete || img.naturalHeight <= 0) return;
 
-        setImageHeights((prev) => {
-          const newHeights = [...prev];
-          newHeights[index] = imageHeight;
-          return newHeights;
-        });
-      }
+      const measuredHeight = getImageHeight(img.naturalWidth, img.naturalHeight);
+      setImageHeights((prev) => {
+        const current = prev[index];
+        // Avoid noisy re-renders; only update when it actually changes.
+        if (current && Math.abs(current - measuredHeight) <= 2) return prev;
+        const next = [...prev];
+        next[index] = measuredHeight;
+        return next;
+      });
     });
   }, [readingMode, imageHeights, getImageHeight, imageRefs]);
 
@@ -181,4 +183,3 @@ export function useReaderWebtoonVirtualization({
     setContainerHeight,
   } as const;
 }
-
