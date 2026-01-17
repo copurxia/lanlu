@@ -123,25 +123,35 @@ class EhdbMetadataPlugin extends BasePlugin {
     try {
       let gID = "";
       let gToken = "";
+      let sourceDomain = "e-hentai.org"; // 默认为 e-hentai.org
 
-      // 从 oneshot 参数提取 GID/Token
+      // 从 oneshot 参数提取 GID/Token 和域名
       if (lrrInfo.oneshot_param && lrrInfo.oneshot_param.match(/.*\/g\/([0-9]*)\/([0-z]*)\/*.*/)) {
         const match = lrrInfo.oneshot_param.match(/.*\/g\/([0-9]*)\/([0-z]*)\/*.*/);
         if (match) {
           gID = match[1];
           gToken = match[2];
-          await this.logInfo("search:use_oneshot", { gID, gToken: `${gToken.slice(0, 6)}…` });
+          // 检查是否是 exhentai.org
+          if (lrrInfo.oneshot_param.includes('exhentai.org')) {
+            sourceDomain = 'exhentai.org';
+          }
+          await this.logInfo("search:use_oneshot", { gID, gToken: `${gToken.slice(0, 6)}…`, domain: sourceDomain });
         }
       }
-      // 从 existing_tags 的 source 标签提取 GID/Token
+      // 从 existing_tags 的 source 标签提取 GID/Token 和域名
       else if (lrrInfo.existing_tags && lrrInfo.existing_tags.match(/.*source:\s*(?:https?:\/\/)?e(?:x|-)hentai\.org\/g\/([0-9]*)\/([0-z]*)\/*.*/gi)) {
         const match = lrrInfo.existing_tags.match(/.*source:\s*(?:https?:\/\/)?e(?:x|-)hentai\.org\/g\/([0-9]*)\/([0-z]*)\/*.*/gi);
         if (match) {
           const srcMatch = match[0].match(/g\/([0-9]*)\/([0-z]*)/);
+          const domainMatch = match[0].match(/e(?:x|-)hentai\.org/);
           if (srcMatch) {
             gID = srcMatch[1];
             gToken = srcMatch[2];
-            await this.logInfo("search:use_source_tag", { gID, gToken: `${gToken.slice(0, 6)}…` });
+            // 检查是否是 exhentai.org
+            if (domainMatch && domainMatch[0].startsWith('ex')) {
+              sourceDomain = 'exhentai.org';
+            }
+            await this.logInfo("search:use_source_tag", { gID, gToken: `${gToken.slice(0, 6)}…`, domain: sourceDomain });
           }
         }
       }
@@ -176,10 +186,11 @@ class EhdbMetadataPlugin extends BasePlugin {
 
       const hashData: any = { tags: tagsResult.data.tags };
 
-      // 添加 source URL
+      // 添加 source URL（同时添加两个域名）
       if (hashData.tags) {
-        const sourceUrl = `https://e-hentai.org/g/${gID}/${gToken}`;
-        hashData.tags += `, source:${sourceUrl}`;
+        const sourceUrlEx = `https://exhentai.org/g/${gID}/${gToken}`;
+        const sourceUrlE = `https://e-hentai.org/g/${gID}/${gToken}`;
+        hashData.tags += `, source:${sourceUrlEx}, source:${sourceUrlE}`;
         hashData.title = tagsResult.data.title;
       }
 

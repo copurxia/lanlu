@@ -173,10 +173,11 @@ class EHentaiMetadataPlugin extends BasePlugin {
 
     const hashData: any = { tags: tagsResult.data.tags };
 
-    // 添加source URL和title
+    // 添加source URL和title（同时添加两个域名）
     if (hashData.tags) {
-      const sourceUrl = `${domain}/g/${gID}/${gToken}`;
-      hashData.tags += `, source:${sourceUrl}`;
+      const sourceUrlEx = `https://exhentai.org/g/${gID}/${gToken}`;
+      const sourceUrlE = `https://e-hentai.org/g/${gID}/${gToken}`;
+      hashData.tags += `, source:${sourceUrlEx}, source:${sourceUrlE}`;
       hashData.title = tagsResult.data.title;
     }
 
