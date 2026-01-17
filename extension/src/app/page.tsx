@@ -23,7 +23,13 @@ function getErrorMessage(error: unknown, fallback: string) {
 
 const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
 
-type TabStatusCacheEntry = { status: "saved" | "not_saved" | "error"; updatedAt: number; arcid?: string; error?: string };
+type TabStatusCacheEntry = {
+  status: "saved" | "not_saved" | "error";
+  updatedAt: number;
+  arcid?: string;
+  title?: string;
+  error?: string;
+};
 
 export default function AddPage() {
   const { settings, categories, hydrated, loadingCategories, saving, setCategoryId, refreshCategories } =
@@ -88,9 +94,52 @@ export default function AddPage() {
   }, [hydrated]);
 
   useEffect(() => {
-    if (!auth || !currentTab?.url) return;
-    void runCurrentCheck();
-  }, [auth, currentTab?.url, runCurrentCheck]);
+    // Popup opening should not trigger network checks. We only reflect what the
+    // background service worker already detected and stored in local cache.
+    if (!auth || !currentTab?.url || !/^https?:\/\//.test(currentTab.url)) {
+      setCheck({ status: "idle" });
+      return;
+    }
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+
+    const url = currentTab.url;
+    let cancelled = false;
+
+    const applyCache = (cache: unknown) => {
+      if (cancelled) return;
+      const entry = (cache as Record<string, TabStatusCacheEntry> | undefined)?.[url];
+      if (!entry) {
+        setCheck({ status: "idle" });
+        return;
+      }
+      if (entry.status === "saved" && entry.arcid) {
+        setCheck({ status: "saved", arcid: entry.arcid, title: entry.title });
+      } else if (entry.status === "not_saved") {
+        setCheck({ status: "not_saved" });
+      } else if (entry.status === "error") {
+        setCheck({ status: "error", error: entry.error || "检查失败" });
+      } else {
+        setCheck({ status: "checking" });
+      }
+    };
+
+    chrome.storage.local.get(STATUS_CACHE_KEY, (items) => {
+      applyCache(items?.[STATUS_CACHE_KEY]);
+    });
+
+    const onChanged = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (cancelled) return;
+      if (areaName !== "local") return;
+      if (!changes[STATUS_CACHE_KEY]) return;
+      applyCache(changes[STATUS_CACHE_KEY].newValue);
+    };
+    chrome.storage.onChanged.addListener(onChanged);
+
+    return () => {
+      cancelled = true;
+      chrome.storage.onChanged.removeListener(onChanged);
+    };
+  }, [auth, currentTab?.url]);
 
   // Persist the last known "saved/not_saved/error" result for this URL so the
   // background service worker can show a badge even when the popup is closed.
@@ -117,6 +166,7 @@ export default function AddPage() {
         [url]: { status: nextStatus as TabStatusCacheEntry["status"], updatedAt: now },
       };
       if (check.status === "saved") next[url].arcid = check.arcid;
+      if (check.status === "saved" && check.title) next[url].title = check.title;
       if (check.status === "error") next[url].error = check.error;
 
       // Keep the cache bounded to avoid unbounded growth.

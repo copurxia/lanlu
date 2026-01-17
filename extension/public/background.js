@@ -9,6 +9,7 @@
 const QUEUE_KEY = "lanlu_download_queue";
 const SETTINGS_KEY = "lanlu_settings";
 const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
+const REMOTE_CHECK_MIN_INTERVAL_MS = 60 * 1000;
 
 const STATUS = {
   NOT_FOUND: "not_found",
@@ -43,13 +44,51 @@ function safeJsonParse(raw) {
   }
 }
 
+function normalizeServerUrl(input) {
+  if (typeof input !== "string") return "";
+  const trimmed = input.trim();
+  if (!trimmed) return "";
+  return trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+}
+
+function getSourceSearchCandidates(input) {
+  try {
+    const url = new URL(input);
+    const base = `${url.protocol}//${url.host}${url.pathname}${url.search}`;
+    const trimmed = base.endsWith("/") ? base.slice(0, -1) : base;
+
+    const candidates = [base];
+    if (trimmed !== base) candidates.push(trimmed);
+
+    const withoutProtocol = `${url.host}${url.pathname}${url.search}`;
+    const withoutProtocolTrimmed = withoutProtocol.endsWith("/") ? withoutProtocol.slice(0, -1) : withoutProtocol;
+    if (!candidates.includes(withoutProtocol)) candidates.push(withoutProtocol);
+    if (!candidates.includes(withoutProtocolTrimmed) && withoutProtocolTrimmed !== withoutProtocol) {
+      candidates.push(withoutProtocolTrimmed);
+    }
+    return candidates;
+  } catch {
+    return [];
+  }
+}
+
 async function getAuthConfigured() {
   const items = await chromeGet("sync", SETTINGS_KEY);
   const v = items[SETTINGS_KEY];
   if (!v || typeof v !== "object") return false;
-  const serverUrl = typeof v.serverUrl === "string" ? v.serverUrl.trim() : "";
+  const serverUrl = normalizeServerUrl(v.serverUrl);
   const token = typeof v.token === "string" ? v.token.trim() : "";
   return !!(serverUrl && token);
+}
+
+async function getAuth() {
+  const items = await chromeGet("sync", SETTINGS_KEY);
+  const v = items[SETTINGS_KEY];
+  if (!v || typeof v !== "object") return null;
+  const serverUrl = normalizeServerUrl(v.serverUrl);
+  const token = typeof v.token === "string" ? v.token.trim() : "";
+  if (!serverUrl || !token) return null;
+  return { serverUrl, token };
 }
 
 async function readQueueEntries() {
@@ -105,6 +144,112 @@ function statusFromCache(cache, url) {
   }
 }
 
+function getErrorMessage(error, fallback) {
+  if (error instanceof Error) return error.message || fallback;
+  if (typeof error === "string") return error || fallback;
+  return fallback;
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null;
+}
+
+async function requestJson(auth, path) {
+  const url = `${auth.serverUrl}${path}`;
+  const resp = await fetch(url, {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${auth.token}`,
+    },
+  });
+  const text = await resp.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  if (!resp.ok) {
+    const message =
+      (isRecord(data) && (data.error || data.message) ? String(data.error || data.message) : null) ||
+      `HTTP ${resp.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+async function searchArchives(auth, params) {
+  const searchParams = new URLSearchParams();
+  searchParams.set("filter", params.filter);
+  searchParams.set("start", String(params.start ?? 0));
+  searchParams.set("count", String(params.count ?? 20));
+  const data = await requestJson(auth, `/api/search?${searchParams.toString()}`);
+  if (!isRecord(data)) return {};
+  return { data: Array.isArray(data.data) ? data.data : [] };
+}
+
+async function writeStatusCache(url, entry) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(STATUS_CACHE_KEY, (items) => {
+      const prev = items && typeof items[STATUS_CACHE_KEY] === "object" ? items[STATUS_CACHE_KEY] : {};
+      const next = { ...prev, [url]: entry };
+
+      // Keep the cache bounded to avoid unbounded growth.
+      const keys = Object.keys(next);
+      if (keys.length > 200) {
+        keys
+          .sort((a, b) => ((next[a] && next[a].updatedAt) || 0) - ((next[b] && next[b].updatedAt) || 0))
+          .slice(0, keys.length - 200)
+          .forEach((k) => {
+            delete next[k];
+          });
+      }
+
+      chrome.storage.local.set({ [STATUS_CACHE_KEY]: next }, () => resolve());
+    });
+  });
+}
+
+async function ensureRemoteStatusForUrl(tabId, url) {
+  if (typeof tabId !== "number") return;
+  if (!/^https?:\/\//.test(url || "")) return;
+
+  const auth = await getAuth();
+  if (!auth) return;
+
+  // Skip noisy repeat checks for the same URL.
+  const cache = await readStatusCache();
+  const prev = cache && cache[url];
+  if (prev && typeof prev === "object" && typeof prev.updatedAt === "number") {
+    if (Date.now() - prev.updatedAt < REMOTE_CHECK_MIN_INTERVAL_MS) return;
+  }
+
+  try {
+    const candidates = getSourceSearchCandidates(url);
+    for (const candidate of candidates) {
+      const resp = await searchArchives(auth, { filter: `source:${candidate}$`, start: 0, count: 1 });
+      const hit = resp && Array.isArray(resp.data) ? resp.data[0] : null;
+      if (hit && typeof hit.arcid === "string") {
+        await writeStatusCache(url, {
+          status: "saved",
+          updatedAt: Date.now(),
+          arcid: hit.arcid,
+          title: typeof hit.title === "string" ? hit.title : undefined,
+        });
+        return;
+      }
+    }
+    await writeStatusCache(url, { status: "not_saved", updatedAt: Date.now() });
+  } catch (e) {
+    await writeStatusCache(url, {
+      status: "error",
+      updatedAt: Date.now(),
+      error: getErrorMessage(e, "检查失败"),
+    });
+  }
+}
+
 async function setBadge(tabId, status) {
   const conf = BADGE[status];
   if (!conf) {
@@ -123,6 +268,15 @@ async function setBadge(tabId, status) {
   }
 }
 
+async function getTabById(tabId) {
+  try {
+    const tab = await new Promise((resolve) => chrome.tabs.get(tabId, resolve));
+    return tab || null;
+  } catch {
+    return null;
+  }
+}
+
 async function getActiveTab() {
   try {
     const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
@@ -133,8 +287,8 @@ async function getActiveTab() {
   }
 }
 
-async function updateBadgeForActiveTab() {
-  const tab = await getActiveTab();
+async function updateBadgeForTab(tabId, tabUrl) {
+  const tab = tabUrl ? { id: tabId, url: tabUrl } : await getTabById(tabId);
   if (!tab || typeof tab.id !== "number") return;
 
   const url = typeof tab.url === "string" ? tab.url : "";
@@ -167,6 +321,12 @@ async function updateBadgeForActiveTab() {
   await setBadge(tab.id, STATUS.NOT_FOUND);
 }
 
+async function updateBadgeForActiveTab() {
+  const tab = await getActiveTab();
+  if (!tab || typeof tab.id !== "number") return;
+  await updateBadgeForTab(tab.id, typeof tab.url === "string" ? tab.url : "");
+}
+
 // --- Event wiring ---
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -177,14 +337,22 @@ chrome.runtime.onStartup?.addListener(() => {
   updateBadgeForActiveTab();
 });
 
-chrome.tabs.onActivated.addListener(() => {
-  updateBadgeForActiveTab();
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  const tabId = activeInfo && typeof activeInfo.tabId === "number" ? activeInfo.tabId : null;
+  if (tabId == null) return;
+  const tab = await getTabById(tabId);
+  if (tab && typeof tab.url === "string") {
+    await ensureRemoteStatusForUrl(tabId, tab.url);
+  }
+  await updateBadgeForTab(tabId, tab && typeof tab.url === "string" ? tab.url : "");
 });
 
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Only refresh when URL changes or load finishes, otherwise this can be noisy.
   if (changeInfo.url || changeInfo.status === "complete") {
-    updateBadgeForActiveTab();
+    const url = typeof changeInfo.url === "string" ? changeInfo.url : typeof tab?.url === "string" ? tab.url : "";
+    await ensureRemoteStatusForUrl(tabId, url);
+    await updateBadgeForTab(tabId, url);
   }
 });
 
