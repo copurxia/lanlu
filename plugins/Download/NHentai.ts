@@ -131,7 +131,7 @@ class NHentaiDownloadPlugin extends BasePlugin {
 
     // 创建下载目录
     const sanitizedName = this.sanitizeFilename(doujinshi.pretty_name || doujinshi.name);
-    const folderName = `${doujinshi.id}_${sanitizedName}`;
+    const folderName = `${doujinshi.id} ${sanitizedName}`;
     const pluginDir = `${this.input?.pluginDir || './data/cache/plugins/nhentai'}/${folderName}`;
     await Deno.mkdir(pluginDir, { recursive: true });
 
@@ -309,7 +309,7 @@ class NHentaiDownloadPlugin extends BasePlugin {
   }
 
   /**
-   * 解码 HTML 实体
+   * 解码 HTML 实体（支持十进制和十六进制）
    */
   private decodeHtmlEntities(text: string): string {
     return text
@@ -318,18 +318,38 @@ class NHentaiDownloadPlugin extends BasePlugin {
       .replace(/&gt;/g, '>')
       .replace(/&quot;/g, '"')
       .replace(/&#39;/g, "'")
-      .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)));
+      // 十进制 HTML 实体（如 &#1234;）
+      .replace(/&#(\d+);/g, (_, num) => String.fromCharCode(parseInt(num, 10)))
+      // 十六进制 HTML 实体（如 &#x4F60; 或 &#X4F60;）
+      .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
   }
 
   /**
-   * 安全化文件名
+   * 安全化文件名（保留中文字符，只替换不安全字符）
    */
   private sanitizeFilename(name: string): string {
     return name
-      .replace(/[<>:"/\\|?*]/g, '_')
-      .replace(/\s+/g, ' ')
+      // 解码URL编码序列（u前缀格式，如 u97e9）
+      .split(/([uU][0-9a-fA-F]{4}|[0-9a-fA-F]{4})/)
+      .map(part => {
+        // 处理 u 前缀的格式（如 u97e9）
+        if (part.match(/^[uU][0-9a-fA-F]{4}$/)) {
+          const hex = part.substring(1);
+          return String.fromCharCode(parseInt(hex, 16));
+        }
+        // 处理纯4位十六进制数字（如 4e61）
+        else if (part.match(/^[0-9a-fA-F]{4}$/)) {
+          return String.fromCharCode(parseInt(part, 16));
+        }
+        return part;
+      })
+      .join('')
+      // 替换不安全字符（包括Windows保留字符、控制字符和全角括号）
+      .replace(/[<>:"/\\|?*\[\]「」]/g, '')
+      // 去除首尾空格
       .trim()
-      .substring(0, 100);
+      // 截断到合理长度（留出ID和分隔符的空间）
+      .substring(0, 80);
   }
 
   /**
