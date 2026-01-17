@@ -69,8 +69,13 @@
     --modal-size-xl: 36rem;  /* 576px */
 
     /* Modal Z-Index Stack - 层级管理 */
-    --z-modal-overlay: 50;
-    --z-modal-content: 51;
+    /*
+     * Keep modals above fixed UI like the mobile bottom nav (`z-50`).
+     * Note: dialog overlay/content live inside the same stacking context,
+     * so the outer overlay z-index must exceed the nav to avoid being covered.
+     */
+    --z-modal-overlay: 70;
+    --z-modal-content: 71;
     --z-toast: 100;
     --z-tooltip: 110;
   }
