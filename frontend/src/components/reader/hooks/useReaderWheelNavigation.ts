@@ -30,6 +30,39 @@ export function useReaderWheelNavigation({
   const countdownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownToastId = useRef<string | number | null>(null);
 
+  const scrollLongPageContainer = useCallback((target: 'top' | 'bottom') => {
+    const startedAt = performance.now();
+    let lastScrollHeight = 0;
+
+    const tick = () => {
+      const el = document.querySelector('.long-page-scroll-container') as HTMLElement | null;
+      if (!el) {
+        if (performance.now() - startedAt < 2000) requestAnimationFrame(tick);
+        return;
+      }
+
+      if (target === 'top') {
+        el.scrollTop = 0;
+        return;
+      }
+
+      // For long images, scrollHeight often grows after the image finishes decoding.
+      // Keep nudging to bottom until scrollHeight stabilizes (or timeout).
+      const { scrollHeight, clientHeight } = el;
+      el.scrollTop = scrollHeight;
+
+      const canScroll = scrollHeight > clientHeight + 1;
+      const changed = scrollHeight !== lastScrollHeight;
+      lastScrollHeight = scrollHeight;
+
+      if ((changed || !canScroll) && performance.now() - startedAt < 2000) {
+        requestAnimationFrame(tick);
+      }
+    };
+
+    requestAnimationFrame(tick);
+  }, []);
+
   const clearCountdown = useCallback(() => {
     if (countdownTimeoutRef.current) {
       clearInterval(countdownTimeoutRef.current);
@@ -70,14 +103,87 @@ export function useReaderWheelNavigation({
         return;
       }
 
-      // Long image page uses an internal scroll container; allow normal scrolling (don't wheel-flip).
-      // We intentionally don't start countdown at edges here to avoid surprising "page flips" on PCs.
       const targetEl = e.target as HTMLElement | null;
+
+      // Long image page uses an internal scroll container. Like HTML pages, when the user keeps scrolling
+      // near the top/bottom edges, start a countdown to flip pages.
       const longPageContainer = targetEl?.closest?.('.long-page-scroll-container') as HTMLElement | null;
       if (longPageContainer) {
+        const scrollTop = longPageContainer.scrollTop;
+        const scrollHeight = longPageContainer.scrollHeight;
+        const clientHeight = longPageContainer.clientHeight;
+        const isAtTop = scrollTop <= 5;
+        const isNearTop = scrollTop <= 150;
+        const isNearBottom = scrollTop >= scrollHeight - clientHeight - 150;
+        const isAtBottom = scrollTop >= scrollHeight - clientHeight - 5;
+
+        const deltaY = e.deltaY;
+
         if (showAutoNextCountdown) {
-          clearCountdown();
+          e.preventDefault();
+          if (!((isAtTop && deltaY < 0) || (isAtBottom && deltaY > 0))) {
+            clearCountdown();
+          }
+          return;
         }
+
+        if (isNearTop && deltaY < 0) {
+          e.preventDefault();
+          setShowAutoNextCountdown(true);
+          countdownSecondsRef.current = COUNTDOWN_DURATION;
+
+          countdownToastId.current = toast.loading(`即将跳转到上一页（${COUNTDOWN_DURATION}秒后）`, {
+            duration: COUNTDOWN_DURATION * 1000,
+            action: { label: '取消', onClick: () => clearCountdown() },
+          });
+
+          countdownTimeoutRef.current = setInterval(() => {
+                countdownSecondsRef.current -= 1;
+              if (countdownSecondsRef.current <= 0) {
+                clearCountdown();
+                onPrevPage();
+                scrollLongPageContainer('bottom');
+                return;
+              }
+
+              if (countdownToastId.current !== null) {
+                toast.loading(`即将跳转到上一页（${countdownSecondsRef.current}秒后）`, {
+                id: countdownToastId.current,
+                duration: countdownSecondsRef.current * 1000,
+                action: { label: '取消', onClick: () => clearCountdown() },
+              });
+            }
+          }, 1000);
+        } else if (isNearBottom && deltaY > 0) {
+          e.preventDefault();
+          setShowAutoNextCountdown(true);
+          countdownSecondsRef.current = COUNTDOWN_DURATION;
+
+          countdownToastId.current = toast.loading(`即将跳转到下一页（${COUNTDOWN_DURATION}秒后）`, {
+            duration: COUNTDOWN_DURATION * 1000,
+            action: { label: '取消', onClick: () => clearCountdown() },
+          });
+
+          countdownTimeoutRef.current = setInterval(() => {
+            countdownSecondsRef.current -= 1;
+            if (countdownSecondsRef.current <= 0) {
+              clearCountdown();
+              onNextPage();
+              scrollLongPageContainer('top');
+              return;
+            }
+
+            if (countdownToastId.current !== null) {
+              toast.loading(`即将跳转到下一页（${countdownSecondsRef.current}秒后）`, {
+                id: countdownToastId.current,
+                duration: countdownSecondsRef.current * 1000,
+                action: { label: '取消', onClick: () => clearCountdown() },
+              });
+            }
+          }, 1000);
+        }
+
+        // Not at edges: allow normal scrolling inside the container (no wheel-flip).
         return;
       }
 
@@ -201,6 +307,7 @@ export function useReaderWheelNavigation({
       readingMode,
       showAutoNextCountdown,
       clearCountdown,
+      scrollLongPageContainer,
       pages,
       currentPage,
       onPrevPage,
