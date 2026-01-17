@@ -9,7 +9,7 @@ import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn } from 'lucide-react';
+import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -157,6 +157,20 @@ export function Header() {
                 </Link>
               );
             })}
+            {/* md~lg: no sidebar, so expose filter entry point in the top bar */}
+            {pathname === '/' && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="lg:hidden"
+                onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
+                aria-label={t('common.filter')}
+                title={t('common.filter')}
+              >
+                <Filter className="h-4 w-4" />
+              </Button>
+            )}
             <UserMenu />
             <LanguageButton />
             <ThemeToggle />
@@ -164,6 +178,18 @@ export function Header() {
 
           {/* 移动端右侧按钮组 - 用户头像、主题、语言 */}
           <div className="md:hidden flex items-center space-x-1">
+            {pathname === '/' && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
+                aria-label={t('common.filter')}
+                title={t('common.filter')}
+              >
+                <Filter className="h-5 w-5" />
+              </Button>
+            )}
             <UserMenu />
             <ThemeButton />
             <LanguageButton />

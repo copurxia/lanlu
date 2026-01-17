@@ -14,7 +14,7 @@ import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
-import { RefreshCw, Filter } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useGridColumnCount } from '@/hooks/common-hooks';
@@ -220,6 +220,13 @@ function HomePageContent() {
     };
   }, [currentPage, fetchArchives, fetchRandomArchives]);
 
+  // Open mobile filter dialog from the global header action.
+  useEffect(() => {
+    const handleFilterOpen = () => setFilterDialogOpen(true);
+    appEvents.on(AppEvents.FILTER_OPEN, handleFilterOpen);
+    return () => appEvents.off(AppEvents.FILTER_OPEN, handleFilterOpen);
+  }, []);
+
   const handleSearch = (params: {
     query?: string;
     sortBy?: string;
@@ -256,6 +263,10 @@ function HomePageContent() {
 
   // 搜索模式检测
   const isSearchMode = searchQuery;
+  const statsText = t('home.archivesCount')
+    .replace('{count}', String(totalRecords))
+    .replace('{page}', String(currentPage + 1))
+    .replace('{totalPages}', String(totalPages));
 
   return (
     <div className="min-h-screen bg-background">
@@ -303,65 +314,47 @@ function HomePageContent() {
           {/* 档案列表 */}
           <section>
             <div className="flex flex-col gap-4 mb-6">
-              {/* PC端：标题、档案数量和排序控件在一行；移动端：分行显示 */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h2 className="text-2xl font-semibold">
+              {/* 标题栏 + 排序控件同一行（移动端/桌面端统一） */}
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-2xl font-semibold min-w-0 flex-1 truncate">
                   {searchQuery ? t('home.searchResults') : t('home.allArchives')}
                 </h2>
 
-                <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="text-sm text-muted-foreground">
-                      {t('home.archivesCount').replace('{count}', String(totalRecords)).replace('{page}', String(currentPage + 1)).replace('{totalPages}', String(totalPages))}
-                    </div>
-                    {/* 移动端筛选按钮 */}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="lg:hidden ml-auto"
-                      onClick={() => setFilterDialogOpen(true)}
-                    >
-                      <Filter className="w-4 h-4 mr-2" />
-                      {t('common.filter')}
-                    </Button>
-                  </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="hidden sm:inline text-sm text-muted-foreground">{t('home.sortBy')}</span>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="w-[120px] sm:w-[140px] h-8">
+                      <SelectValue>
+                        {sortBy === 'lastread' && t('home.lastRead')}
+                        {sortBy === 'date_added' && t('home.dateAdded')}
+                        {sortBy === 'title' && t('home.titleSort')}
+                        {sortBy === 'relevance' && t('home.relevance')}
+                        {sortBy === 'pagecount' && t('home.pageCount')}
+                        {sortBy === '_default' && t('settings.smartFilterDefault')}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="relevance">{t('home.relevance')}</SelectItem>
+                      <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
+                      <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+                      <SelectItem value="title">{t('home.titleSort')}</SelectItem>
+                      <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
+                      <SelectItem value="_default">{t('settings.smartFilterDefault')}</SelectItem>
+                    </SelectContent>
+                  </Select>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">{t('home.sortBy')}</span>
-                    <Select value={sortBy} onValueChange={setSortBy}>
-                      <SelectTrigger className="w-[140px] h-8">
-                        <SelectValue>
-                          {sortBy === 'lastread' && t('home.lastRead')}
-                          {sortBy === 'date_added' && t('home.dateAdded')}
-                          {sortBy === 'title' && t('home.titleSort')}
-                          {sortBy === 'relevance' && t('home.relevance')}
-                          {sortBy === 'pagecount' && t('home.pageCount')}
-                          {sortBy === '_default' && t('settings.smartFilterDefault')}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="relevance">{t('home.relevance')}</SelectItem>
-                        <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
-                        <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
-                        <SelectItem value="title">{t('home.titleSort')}</SelectItem>
-                        <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
-                        <SelectItem value="_default">{t('settings.smartFilterDefault')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-
-                    <Select value={sortOrder} onValueChange={setSortOrder}>
-                      <SelectTrigger className="w-[100px] h-8">
-                        <SelectValue>
-                          {sortOrder === 'asc' && t('common.asc')}
-                          {sortOrder === 'desc' && t('common.desc')}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asc">{t('common.asc')}</SelectItem>
-                        <SelectItem value="desc">{t('common.desc')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <Select value={sortOrder} onValueChange={setSortOrder}>
+                    <SelectTrigger className="w-[88px] sm:w-[100px] h-8">
+                      <SelectValue>
+                        {sortOrder === 'asc' && t('common.asc')}
+                        {sortOrder === 'desc' && t('common.desc')}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="asc">{t('common.asc')}</SelectItem>
+                      <SelectItem value="desc">{t('common.desc')}</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
             </div>
@@ -382,15 +375,22 @@ function HomePageContent() {
               <>
                 <ArchiveGrid archives={archives} variant="home" />
 
-                {totalPages > 1 && (
-                  <div className="mt-8">
+                <div className="mt-8 flex items-center justify-between gap-3">
+                  <div
+                    className="text-xs sm:text-sm text-muted-foreground min-w-0 flex-1 truncate"
+                    title={statsText}
+                  >
+                    {statsText}
+                  </div>
+                  {totalPages > 1 && (
                     <Pagination
                       currentPage={currentPage}
                       totalPages={totalPages}
                       onPageChange={handlePageChange}
+                      className="justify-end py-0"
                     />
-                  </div>
-                )}
+                  )}
+                </div>
               </>
             ) : !loading ? (
               <div className="text-center py-12">

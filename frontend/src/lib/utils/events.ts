@@ -40,4 +40,5 @@ export const AppEvents = {
   UPLOAD_COMPLETED: 'upload:completed',
   ARCHIVES_REFRESH: 'archives:refresh',
   SEARCH_RESET: 'search:reset',
+  FILTER_OPEN: 'filter:open',
 } as const;
