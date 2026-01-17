@@ -820,14 +820,16 @@ function ReaderContent() {
         />
 
         {/* 单页模式 */}
-	        <ReaderSingleModeView
-	          enabled={readingMode !== 'webtoon'}
-	          sidebarOpen={sidebar.sidebarOpen}
+ 	        <ReaderSingleModeView
+ 	          enabled={readingMode !== 'webtoon'}
+ 	          sidebarOpen={sidebar.sidebarOpen}
+            readerAreaRef={readerAreaRef}
+            tapTurnPageEnabled={tapTurnPageEnabled}
             longPageEnabled={longPageEnabled}
-	          pages={pages}
-	          cachedPages={imageLoading.cachedPages}
-	          currentPage={currentPage}
-	          doublePageMode={doublePageMode}
+ 	          pages={pages}
+ 	          cachedPages={imageLoading.cachedPages}
+ 	          currentPage={currentPage}
+ 	          doublePageMode={doublePageMode}
 	          splitCoverMode={splitCoverMode}
 	          imagesLoading={imageLoading.imagesLoading}
 	          loadedImages={imageLoading.loadedImages}

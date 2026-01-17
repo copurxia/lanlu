@@ -2,15 +2,19 @@
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { getTapTurnAction } from '@/components/reader/hooks/useReaderInteractionHandlers';
 import type { PageInfo } from '@/lib/services/archive-service';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type React from 'react';
 
 const LONG_PAGE_ASPECT_RATIO = 2.2;
+const DRAG_SCROLL_THRESHOLD_PX = 6;
 
 export function ReaderSingleModeView({
   enabled,
   sidebarOpen,
+  readerAreaRef,
+  tapTurnPageEnabled,
   longPageEnabled,
   pages,
   cachedPages,
@@ -36,6 +40,8 @@ export function ReaderSingleModeView({
 }: {
   enabled: boolean;
   sidebarOpen: boolean;
+  readerAreaRef: React.RefObject<HTMLDivElement | null>;
+  tapTurnPageEnabled: boolean;
   longPageEnabled: boolean;
   pages: PageInfo[];
   cachedPages: string[];
@@ -78,7 +84,97 @@ export function ReaderSingleModeView({
   const currentMeta = imageMeta[currentPage];
   const useLongPageScroll = Boolean(longPageEnabled && isSingleImageLayout && currentMeta?.isLong);
 
+  const dragStateRef = useRef<{
+    active: boolean;
+    dragging: boolean;
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    startScrollTop: number;
+    startScrollLeft: number;
+    suppressClick: boolean;
+  }>({
+    active: false,
+    dragging: false,
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    startScrollTop: 0,
+    startScrollLeft: 0,
+    suppressClick: false,
+  });
+
   if (!enabled) return null;
+
+  const handleLongPagePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!useLongPageScroll) return;
+    if (e.pointerType === 'touch') return; // touch uses native scrolling; don't fight it
+    if (e.button !== 0) return;
+
+    if (tapTurnPageEnabled) {
+      const action = getTapTurnAction(readerAreaRef.current, e.clientX, e.clientY);
+      if (action === 'prev' || action === 'next') return; // edges are reserved for page turning
+    }
+
+    const el = e.currentTarget;
+    dragStateRef.current.active = true;
+    dragStateRef.current.dragging = false;
+    dragStateRef.current.pointerId = e.pointerId;
+    dragStateRef.current.startX = e.clientX;
+    dragStateRef.current.startY = e.clientY;
+    dragStateRef.current.startScrollTop = el.scrollTop;
+    dragStateRef.current.startScrollLeft = el.scrollLeft;
+    dragStateRef.current.suppressClick = false;
+
+    // Capture so we keep getting move/up even if pointer leaves the container.
+    el.setPointerCapture(e.pointerId);
+  };
+
+  const handleLongPagePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!useLongPageScroll) return;
+    const state = dragStateRef.current;
+    if (!state.active || state.pointerId !== e.pointerId) return;
+
+    const dx = e.clientX - state.startX;
+    const dy = e.clientY - state.startY;
+
+    if (!state.dragging) {
+      if (Math.abs(dx) < DRAG_SCROLL_THRESHOLD_PX && Math.abs(dy) < DRAG_SCROLL_THRESHOLD_PX) return;
+      state.dragging = true;
+      state.suppressClick = true;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const el = e.currentTarget;
+    el.scrollTop = state.startScrollTop - dy;
+    el.scrollLeft = state.startScrollLeft - dx;
+  };
+
+  const finishLongPageDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!useLongPageScroll) return;
+    const state = dragStateRef.current;
+    if (!state.active || state.pointerId !== e.pointerId) return;
+
+    if (state.dragging) {
+      // Prevent the drag from becoming a click that toggles UI / turns page.
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    state.active = false;
+    state.dragging = false;
+    state.pointerId = null;
+  };
+
+  const handleLongPageClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!useLongPageScroll) return;
+    if (!dragStateRef.current.suppressClick) return;
+    dragStateRef.current.suppressClick = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
 
   return (
     <div
@@ -155,9 +251,15 @@ export function ReaderSingleModeView({
                 <div
                   className={
                     useLongPageScroll
-                      ? 'long-page-scroll-container w-full h-full overflow-y-auto overflow-x-hidden flex justify-center'
+                      ? 'long-page-scroll-container w-full h-full overflow-y-auto overflow-x-hidden flex justify-center cursor-grab active:cursor-grabbing'
                       : 'w-full h-full'
                   }
+                  onPointerDown={handleLongPagePointerDown}
+                  onPointerMove={handleLongPagePointerMove}
+                  onPointerUp={finishLongPageDrag}
+                  onPointerCancel={finishLongPageDrag}
+                  onPointerLeave={finishLongPageDrag}
+                  onClickCapture={handleLongPageClickCapture}
                 >
                   <div className={useLongPageScroll ? 'w-full lg:max-w-[800px] lg:px-4' : 'w-full h-full'}>
                     <MemoizedImage
