@@ -69,6 +69,102 @@ public class PluginManagerService {
     public static func ensurePluginDirs(): Unit { PluginPaths.ensurePluginDirs() }
     public static func buildPluginFilePath(pluginType: String, entry: String): String { PluginPaths.buildPluginFilePath(pluginType, entry) }
 
+    /**
+     * 下载 URL 到指定文件。
+     * 先尝试 LinderHttp；若返回 HTTP 0 或抛异常，则用 deno+fetch 兜底（deno 在运行时已内置/打包）。
+     */
+    private static func downloadUrlToFile(url: String, outFile: Path): (Bool, String) {
+        // 1) LinderHttp
+        var lastStatus: Int64 = -1
+        var lastErr: String = ""
+        try {
+            var http = LinderHttp(url: RequestUrl.from(url))
+            let response = http.send()
+            lastStatus = Int64(response.status)
+            if (response.status == 200) {
+                let content = response.getBodyString()
+                let file = File(outFile, OpenMode.Write)
+                file.write(content.toArray())
+                file.close()
+                return (true, "")
+            }
+            lastErr = "HTTP ${response.status.toString()}"
+        } catch (e: Exception) {
+            lastErr = e.message
+        }
+
+        // 2) 仅在 “HTTP 0 / 异常” 这类典型网络/握手失败场景下兜底，避免掩盖真实 4xx/5xx。
+        if (lastStatus != 0 && lastErr.startsWith("HTTP ")) {
+            return (false, "Failed to download plugin: ${lastErr}")
+        }
+
+        let (ok, err) = downloadUrlToFileWithDeno(url, outFile)
+        if (ok) {
+            logger.warn("LinderHttp download failed, but deno fetch succeeded", ("url", url), ("linder_err", lastErr))
+            return (true, "")
+        }
+
+        let linderPart = if (lastErr.size > 0) { lastErr } else { "unknown" }
+        let denoPart = if (err.size > 0) { err } else { "unknown" }
+        return (false, "Failed to download plugin: HTTP 0 (linder=${linderPart}; deno=${denoPart})")
+    }
+
+    private static func downloadUrlToFileWithDeno(url: String, outFile: Path): (Bool, String) {
+        // 生成临时脚本：避免依赖 curl/wget，且 Deno 的 TLS/证书处理通常更健壮。
+        let tempDir = Path(getPluginTempRoot())
+        FileUtils.ensureDirectoryExists(tempDir)
+        let ts = DateTime.now().toUnixTimeStamp().toSeconds().toString()
+        let scriptPath = Path("${tempDir.toString()}/deno_fetch_${ts}.ts")
+
+        // 注意：这里不引入复杂依赖，直接 fetch 并写文件；失败时把 HTTP 状态输出到 stderr。
+        let script = """
+const url = Deno.args[0];
+const out = Deno.args[1];
+const res = await fetch(url);
+if (!res.ok) {
+  console.error('HTTP ' + res.status);
+  Deno.exit(2);
+}
+const buf = new Uint8Array(await res.arrayBuffer());
+await Deno.writeFile(out, buf);
+"""
+
+        try {
+            let f = File(scriptPath, OpenMode.Write)
+            f.write(script.toArray())
+            f.close()
+
+            let process = launch("deno", [
+                "run",
+                "--allow-net",
+                "--allow-write=${tempDir.toString()}",
+                scriptPath.toString(),
+                url,
+                outFile.toString()
+            ],
+                stdIn: ProcessRedirect.Pipe,
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe)
+
+            let (exitCode, stdoutBytes, stderrBytes) = process.waitOutput()
+
+            let stderrStr = if (stderrBytes.size > 0) { String.fromUtf8(stderrBytes).trimAscii() } else { "" }
+            let stdoutStr = if (stdoutBytes.size > 0) { String.fromUtf8(stdoutBytes).trimAscii() } else { "" }
+
+            try { remove(scriptPath) } catch (_: Exception) {}
+
+            if (exitCode == 0 && exists(outFile)) {
+                return (true, "")
+            }
+            if (stderrStr.size > 0) { return (false, stderrStr) }
+            if (stdoutStr.size > 0) { return (false, stdoutStr) }
+            return (false, "deno fetch failed (exitCode=${exitCode.toString()})")
+        } catch (e: Exception) {
+            try { remove(scriptPath) } catch (_: Exception) {}
+            return (false, e.message)
+        }
+    }
+
     public static func installFromUrl(url: String): PluginInstallResult {
         ensurePluginDirs()
         var result = PluginInstallResult()
@@ -93,20 +189,9 @@ public class PluginManagerService {
         FileUtils.ensureDirectoryExists(tempDir)
         let tempFile = Path("${tempDir.toString()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${filename}")
 
-        try {
-            var http = LinderHttp(url: RequestUrl.from(trimmedUrl))
-            let response = http.send()
-            if (response.status != 200) {
-                result.message = "Failed to download plugin: HTTP ${response.status.toString()}"
-                return result
-            }
-
-            let content = response.getBodyString()
-            let file = File(tempFile, OpenMode.Write)
-            file.write(content.toArray())
-            file.close()
-        } catch (e: Exception) {
-            result.message = "Failed to download plugin: ${e.message}"
+        let (downloadOk, downloadErr) = downloadUrlToFile(trimmedUrl, tempFile)
+        if (!downloadOk) {
+            result.message = downloadErr
             return result
         }
 
@@ -182,20 +267,9 @@ public class PluginManagerService {
         FileUtils.ensureDirectoryExists(tempDir)
         let tempFile = Path("${tempDir.toString()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${existing.entry}")
 
-        try {
-            var http = LinderHttp(url: RequestUrl.from(updateUrl))
-            let response = http.send()
-            if (response.status != 200) {
-                result.message = "Failed to download plugin: HTTP ${response.status.toString()}"
-                return result
-            }
-
-            let content = response.getBodyString()
-            let file = File(tempFile, OpenMode.Write)
-            file.write(content.toArray())
-            file.close()
-        } catch (e: Exception) {
-            result.message = "Failed to download plugin: ${e.message}"
+        let (downloadOk, downloadErr) = downloadUrlToFile(updateUrl, tempFile)
+        if (!downloadOk) {
+            result.message = downloadErr
             return result
         }
 
