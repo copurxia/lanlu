@@ -325,7 +325,10 @@ public class PluginManagerService {
         var result = ParsedPluginInfo()
 
         try {
-            let tempRoot = Path("${getPluginInfoTempRoot()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}")
+            // 秒级时间戳可能在并发场景下冲突，这里加入 typeDir + fileName 提升唯一性
+            let fileName = Path(filePath).fileName.toString()
+            let safeFileName = fileName.replace(".", "_")
+            let tempRoot = Path("${getPluginInfoTempRoot()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${typeDir}_${safeFileName}")
             let pluginsRoot = Path("${tempRoot.toString()}/plugins")
             let tempTypeDir = Path("${pluginsRoot.toString()}/${typeDir}")
             Directory.create(tempTypeDir, recursive: true)
@@ -336,24 +339,20 @@ public class PluginManagerService {
                 copy(baseSource, to: baseTarget, overwrite: true)
             }
 
-            let fileName = Path(filePath).fileName.toString()
             let tempPluginFile = Path("${tempTypeDir.toString()}/${fileName}")
             copy(Path(filePath), to: tempPluginFile, overwrite: true)
 
-            let inputJson = "{\"action\":\"plugin_info\",\"pluginType\":\"\"}"
-            let cmd = "echo '${inputJson}' | deno run --allow-read '${tempPluginFile.toString()}'"
-            let process = launch("sh", "-c", cmd,
+            let process = launch("deno", ["run", "--allow-read", tempPluginFile.toString()],
                 stdIn: ProcessRedirect.Pipe,
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe)
 
-            let reader = StringReader<InputStream>(process.stdOutPipe)
-            var output = ""
-            for (line in reader.lines()) {
-                output += line
-            }
+            let inputJson = "{\"action\":\"plugin_info\",\"pluginType\":\"\"}\n"
+            process.stdInPipe.write(inputJson.toArray())
+            process.stdInPipe.flush()
 
-            let _ = process.wait()
+            let (_, stdoutBytes, _) = process.waitOutput()
+            let output = String.fromUtf8(stdoutBytes)
 
             result = parsePluginInfoOutput(output, sourceUrl)
 

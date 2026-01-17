@@ -328,8 +328,16 @@ public class ScanPluginsTaskRunner {
                 }
             } else {
                 // 执行失败
-                let stderrStr = String.fromUtf8(stderr)
-                TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stderr=${stderrStr}")
+                let stderrStr = String.fromUtf8(stderr).trimAscii()
+                let stdoutStr = if (stdout.size > 0) { String.fromUtf8(stdout).trimAscii() } else { "" }
+                if (stderrStr.size > 0) {
+                    TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stderr=${stderrStr}")
+                } else if (stdoutStr.size > 0) {
+                    // 某些情况下 Deno 的错误/提示会混在 stdout，保留以便排查
+                    TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stdout=${stdoutStr}")
+                } else {
+                    TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, no output")
+                }
             }
         } catch (e: Exception) {
             TaskIO.appendLog(taskId, "ERROR: Error parsing plugin metadata for ${filePath}: ${e.message}")
@@ -611,7 +619,11 @@ public class ScanPluginsTaskRunner {
             let fileName = Path(filePath).fileName.toString()
             let pluginTypeDir = if (pathParts.size >= 2) { pathParts[pathParts.size - 2] } else { "Temp" }
 
-            let tempRoot = Path("${PluginPaths.getPluginInfoTempRoot()}/${getCurrentTimeMillis().toString()}")
+            // 注意：getCurrentTimeMillis() 的分辨率只有秒级（末尾通常为 000），
+            // 若多次调用落在同一秒内会产生相同路径，导致临时目录互相覆盖/清理。
+            // 这里加入 taskId + pluginTypeDir + fileName 以保证稳定唯一性。
+            let safeFileName = fileName.replace(".", "_")
+            let tempRoot = Path("${PluginPaths.getPluginInfoTempRoot()}/${taskId.toString()}/${getCurrentTimeMillis().toString()}_${pluginTypeDir}_${safeFileName}")
             let pluginsRoot = Path("${tempRoot.toString()}/plugins")
             let tempTypeDir = Path("${pluginsRoot.toString()}/${pluginTypeDir}")
             Directory.create(tempTypeDir, recursive: true)
@@ -627,12 +639,9 @@ public class ScanPluginsTaskRunner {
             let tempPluginFile = Path("${tempTypeDir.toString()}/${fileName}")
             copy(Path(filePath), to: tempPluginFile, overwrite: true)
 
-            // 构建 deno 命令
-            let cmd = "deno run --allow-read '${tempPluginFile.toString()}'"
-            TaskIO.appendLog(taskId, "Executing: ${cmd}")
-
-            // 启动进程
-            let process = launch("sh", "-c", cmd,
+            // 启动 Deno 进程（避免通过 shell 运行，减少引号/路径问题）
+            TaskIO.appendLog(taskId, "Executing: deno run --allow-read ${tempPluginFile.toString()}")
+            let process = launch("deno", ["run", "--allow-read", tempPluginFile.toString()],
                 stdIn: ProcessRedirect.Pipe,
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe)
@@ -642,26 +651,15 @@ public class ScanPluginsTaskRunner {
             process.stdInPipe.write(inputJson.toArray())
             process.stdInPipe.flush()
 
-            // 读取 stdout
-            let reader = StringReader<InputStream>(process.stdOutPipe)
-            var output = ""
-            for (line in reader.lines()) {
-                output += line + "\n"
-            }
-
-            // 等待进程完成
-            let exitCode = process.wait()
-
-            // 读取 stderr
-            let stderrReader = StringReader<InputStream>(process.stdErrPipe)
-            let stderrContent = stderrReader.readToEnd()
+            // 使用 waitOutput 可靠地获取 stdout/stderr，避免在 wait() 后丢失管道内容
+            let (exitCode, stdoutBytes, stderrBytes) = process.waitOutput()
 
             // 清理临时目录
             try {
                 remove(tempRoot, recursive: true)
             } catch (_: Exception) {}
 
-            return (Int32(exitCode), output.toArray(), stderrContent.toArray())
+            return (Int32(exitCode), stdoutBytes, stderrBytes)
         } catch (e: Exception) {
             TaskIO.appendLog(taskId, "ERROR: executePluginInfoWithStdio failed: ${e.message}")
             return (1, Array<UInt8>(), Array<UInt8>())
