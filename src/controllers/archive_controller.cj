@@ -860,42 +860,6 @@ public class ArchiveController {
     }
 
     /**
-     * 发送页面数据，大文件使用 chunked 分块传输
-     */
-    private static func sendPageData(ctx: JoyContext, id: String, path: String, data: Array<UInt8>): Unit {
-        let contentSize = data.size
-        let etag = CacheUtils.generateETag("${id}-${path}-${contentSize}")
-
-        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
-            CacheUtils.sendNotModifiedDynamic(ctx, etag)
-            return
-        }
-
-        let contentType = getContentTypeFromPath(path)
-
-        // 统一使用流式传输，避免大缓冲区占用内存
-        // 即使数据已经在内存中，使用 chunked 传输也能避免一次性写入大量数据
-        sendPageDataChunked(ctx, data, contentType, etag)
-    }
-
-    /**
-     * 小文件：一次性返回
-     */
-    private static func sendPageDataSmall(
-        ctx: JoyContext,
-        data: Array<UInt8>,
-        contentType: String,
-        etag: String
-    ): Unit {
-        CacheUtils.setDynamicCacheHeaders(ctx, etag)
-        ctx.header("Content-Type", contentType)
-        ctx.header("Content-Length", "${data.size}")
-        ctx.status(HttpStatusCode.STATUS_OK)
-        let byteData = Array<Byte>(data.size, { i => data[i] })
-        ctx.data(byteData)
-    }
-
-    /**
      * 大文件：使用 chunked 分块传输
      */
     private static func sendPageDataChunked(
@@ -964,28 +928,6 @@ public class ArchiveController {
         // 统一使用流式传输，避免大缓冲区占用内存
         // 小文件也可以使用流式传输，性能影响可忽略，但能避免内存峰值问题
         sendWithReaderChunked(ctx, reader, contentType, etag)
-    }
-
-    /**
-     * 小文件（< 1MB）：一次读取后返回
-     */
-    private static func sendWithReaderSmall(
-        ctx: JoyContext,
-        reader: EntryReader,
-        fileSize: Int64,
-        contentType: String,
-        etag: String
-    ): Unit {
-        // 小文件 < 1MB，缓冲区 = 1MB，一次 read 即可读完
-        let buffer = Array<Byte>(fileSize, {_ => 0})
-        let bytesRead = reader.read(buffer)
-        reader.close()
-
-        CacheUtils.setDynamicCacheHeaders(ctx, etag)
-        ctx.header("Content-Type", contentType)
-        ctx.header("Content-Length", "${bytesRead}")
-        ctx.status(HttpStatusCode.STATUS_OK)
-        ctx.data(Array<Byte>(bytesRead, { i => buffer[i] }))
     }
 
     /**
