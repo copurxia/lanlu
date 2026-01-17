@@ -116,7 +116,8 @@ function LoginForm() {
 
       {/* Right Side: Login Form */}
       <div className="flex items-center justify-center p-8 bg-background relative">
-        <div className="absolute top-4 right-4 flex items-center gap-2">
+        {/* Align with left panel padding on desktop */}
+        <div className="absolute top-4 right-4 lg:top-12 lg:right-12 flex items-center gap-2">
           <LanguageButton />
           <ThemeButton />
         </div>
@@ -127,14 +128,16 @@ function LoginForm() {
             <h1 className="text-2xl font-bold">{serverName}</h1>
           </div>
 
-          <div className="hidden lg:block space-y-2 text-center lg:text-left">
+          {/* Match CardContent padding on desktop so the header aligns with form fields */}
+          <div className="hidden lg:block space-y-2 text-center lg:text-left lg:px-6">
             <h2 className="text-3xl font-bold tracking-tight">{t('auth.login')}</h2>
             <p className="text-muted-foreground">
               {t('auth.loginDescription')}
             </p>
           </div>
 
-          <Card className="border-none shadow-none lg:border lg:shadow-sm">
+          {/* Mobile: avoid the "card" backdrop (looks like an extra wrapper in dark mode). */}
+          <Card className="border-none shadow-none bg-transparent lg:bg-card lg:border lg:shadow-sm">
             <CardContent className="pt-6 px-0 lg:px-6">
               <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
                 <TabsList className="grid w-full grid-cols-2 mb-8">
