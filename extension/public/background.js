@@ -455,10 +455,31 @@ async function ensureRemoteStatusForUrl(tabId, url) {
 
   try {
     const candidates = getSourceSearchCandidates(url);
+    // 1) Exact tag token match (fast-path; matches normalized tags).
     for (const candidate of candidates) {
       const resp = await searchArchives(auth, { filter: `source:${candidate}$`, start: 0, count: 1 });
       const hit = resp && Array.isArray(resp.data) ? resp.data[0] : null;
       if (hit && typeof hit.arcid === "string") {
+        await writeStatusCache(url, {
+          status: "saved",
+          updatedAt: Date.now(),
+          arcid: hit.arcid,
+          title: typeof hit.title === "string" ? hit.title : undefined,
+        });
+        return;
+      }
+    }
+
+    // 2) Fuzzy fallback: cover older/non-normalized tags like ", source:xxx" with whitespace.
+    for (const candidate of candidates) {
+      const resp = await searchArchives(auth, { filter: `source:${candidate}`, start: 0, count: 1 });
+      const hit = resp && Array.isArray(resp.data) ? resp.data[0] : null;
+      if (
+        hit &&
+        typeof hit.arcid === "string" &&
+        typeof hit.tags === "string" &&
+        hit.tags.includes(`source:${candidate}`)
+      ) {
         await writeStatusCache(url, {
           status: "saved",
           updatedAt: Date.now(),

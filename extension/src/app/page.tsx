@@ -60,26 +60,124 @@ export default function AddPage() {
 
   const canSubmit = !!auth && !!selectedCategory && !busy;
 
+  const readStatusCache = useCallback(async (): Promise<Record<string, TabStatusCacheEntry>> => {
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return {};
+    return await new Promise((resolve) => {
+      chrome.storage.local.get(STATUS_CACHE_KEY, (items) => {
+        const cache = items?.[STATUS_CACHE_KEY];
+        resolve(cache && typeof cache === "object" ? (cache as Record<string, TabStatusCacheEntry>) : {});
+      });
+    });
+  }, []);
+
+  const writeStatusCache = useCallback(async (url: string, entry: TabStatusCacheEntry): Promise<void> => {
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+    await new Promise((resolve) => {
+      chrome.storage.local.get(STATUS_CACHE_KEY, (items) => {
+        const prev = (items?.[STATUS_CACHE_KEY] ?? {}) as Record<string, TabStatusCacheEntry>;
+        const next: Record<string, TabStatusCacheEntry> = { ...prev, [url]: entry };
+
+        // Keep the cache bounded to avoid unbounded growth.
+        const keys = Object.keys(next);
+        if (keys.length > 200) {
+          keys
+            .sort((a, b) => (next[a]?.updatedAt ?? 0) - (next[b]?.updatedAt ?? 0))
+            .slice(0, keys.length - 200)
+            .forEach((k) => {
+              delete next[k];
+            });
+        }
+
+        chrome.storage.local.set({ [STATUS_CACHE_KEY]: next }, () => resolve(undefined));
+      });
+    });
+  }, []);
+
+  const findExistingArchive = useCallback(
+    async (
+      cache: Record<string, TabStatusCacheEntry>,
+      url: string
+    ): Promise<{ arcid: string; title?: string } | null> => {
+      // 1) Prefer the background service worker's cached result.
+      const cached = cache[url];
+      if (cached?.status === "saved" && cached.arcid) {
+        return { arcid: cached.arcid, title: cached.title };
+      }
+
+      // 2) Fallback: query server. Try exact tag match first, then a fuzzy contains match
+      // (covers older/non-normalized tags like ", source:xxx" with whitespace).
+      const candidates = getSourceSearchCandidates(url);
+      for (const candidate of candidates) {
+        const resp = await searchArchives(auth!, { filter: `source:${candidate}$`, start: 0, count: 1 });
+        const hit = resp.data?.[0];
+        if (hit?.arcid) {
+          return { arcid: hit.arcid, title: hit.title };
+        }
+      }
+      for (const candidate of candidates) {
+        const resp = await searchArchives(auth!, { filter: `source:${candidate}`, start: 0, count: 1 });
+        const hit = resp.data?.[0];
+        if (hit?.arcid && typeof hit.tags === "string" && hit.tags.includes(`source:${candidate}`)) {
+          return { arcid: hit.arcid, title: hit.title };
+        }
+      }
+      return null;
+    },
+    [auth]
+  );
+
   const runCurrentCheck = useCallback(async () => {
     if (!auth) return;
     if (!currentTab?.url || !/^https?:\/\//.test(currentTab.url)) return;
 
     setCheck({ status: "checking" });
     try {
+      const cache = await readStatusCache();
+      const cached = cache[currentTab.url];
+      if (cached?.status === "saved" && cached.arcid) {
+        setCheck({ status: "saved", arcid: cached.arcid, title: cached.title });
+        return;
+      }
+
       const candidates = getSourceSearchCandidates(currentTab.url);
       for (const candidate of candidates) {
         const resp = await searchArchives(auth, { filter: `source:${candidate}$`, start: 0, count: 1 });
         const hit = resp.data?.[0];
         if (hit) {
           setCheck({ status: "saved", arcid: hit.arcid, title: hit.title });
+          void writeStatusCache(currentTab.url, {
+            status: "saved",
+            updatedAt: Date.now(),
+            arcid: hit.arcid,
+            title: hit.title,
+          });
+          return;
+        }
+      }
+
+      // Fuzzy fallback for older/non-normalized tag storage (e.g. comma+space).
+      for (const candidate of candidates) {
+        const resp = await searchArchives(auth, { filter: `source:${candidate}`, start: 0, count: 1 });
+        const hit = resp.data?.[0];
+        if (hit?.arcid && typeof hit.tags === "string" && hit.tags.includes(`source:${candidate}`)) {
+          setCheck({ status: "saved", arcid: hit.arcid, title: hit.title });
+          void writeStatusCache(currentTab.url, {
+            status: "saved",
+            updatedAt: Date.now(),
+            arcid: hit.arcid,
+            title: hit.title,
+          });
           return;
         }
       }
       setCheck({ status: "not_saved" });
+      void writeStatusCache(currentTab.url, { status: "not_saved", updatedAt: Date.now() });
     } catch (e: unknown) {
-      setCheck({ status: "error", error: getErrorMessage(e, "检查失败") });
+      const msg = getErrorMessage(e, "检查失败");
+      setCheck({ status: "error", error: msg });
+      void writeStatusCache(currentTab.url, { status: "error", updatedAt: Date.now(), error: msg });
     }
-  }, [auth, currentTab?.url]);
+  }, [auth, currentTab?.url, readStatusCache, writeStatusCache]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -201,25 +299,19 @@ export default function AddPage() {
         return;
       }
 
+      const cache = await readStatusCache();
+
       for (const tab of toSubmit) {
         const tabUrl = tab.url!;
         const tabTitle = tab.title || undefined;
         const tabId = typeof tab.id === "number" ? tab.id : undefined;
 
-        // 进入页面即可判断是否存在；这里仍做一次检查，避免重复入队。
+        // 跳过已经在库里的页面：优先读 background 的缓存，没有的话再查服务器。
         let existing: { arcid: string; title?: string } | null = null;
         try {
-          const candidates = getSourceSearchCandidates(tabUrl);
-          for (const candidate of candidates) {
-            const resp = await searchArchives(auth, { filter: `source:${candidate}$`, start: 0, count: 1 });
-            const hit = resp.data?.[0];
-            if (hit) {
-              existing = { arcid: hit.arcid, title: hit.title };
-              break;
-            }
-          }
+          existing = await findExistingArchive(cache, tabUrl);
         } catch {
-          // ignore search errors; fallback to enqueue
+          // ignore; fallback to enqueue
         }
 
         if (existing) {
@@ -229,6 +321,12 @@ export default function AddPage() {
             tabId,
             status: "exists",
             archiveId: existing.arcid,
+          });
+          void writeStatusCache(tabUrl, {
+            status: "saved",
+            updatedAt: Date.now(),
+            arcid: existing.arcid,
+            title: existing.title,
           });
           continue;
         }
@@ -259,7 +357,7 @@ export default function AddPage() {
     } finally {
       setBusy(null);
     }
-  }, [canSubmit, auth, selectedCategory, addEntry]);
+  }, [canSubmit, auth, selectedCategory, addEntry, readStatusCache, findExistingArchive, writeStatusCache]);
 
   return (
     <div className="p-4 space-y-3">
