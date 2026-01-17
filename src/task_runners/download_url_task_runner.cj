@@ -146,7 +146,25 @@ public class DownloadUrlTaskRunner {
             let finalArchivePathStr = finalArchivePath.toString()
 
             try {
-                rename(pluginTarget, to: finalArchivePath)
+                // 移动文件到归档目录（支持跨设备：rename 失败时 fallback 到 copy+remove）
+                try {
+                    rename(pluginTarget, to: finalArchivePath)
+                } catch (e: Exception) {
+                    if (e.message.contains("cross-device") || e.message.contains("Invalid cross-device link")) {
+                        copy(pluginTarget, to: finalArchivePath, overwrite: false)
+                        // copy 成功后尽力删除源文件（避免缓存目录堆积）
+                        try {
+                            remove(pluginTarget)
+                        } catch (_: Exception) {}
+                    } else {
+                        throw e
+                    }
+                }
+
+                // 验证移动结果
+                if (!exists(finalArchivePath)) {
+                    throw Exception("文件移动失败：目标文件不存在")
+                }
             } catch (e: Exception) {
                 fail(taskId, "Failed to move file to archive: ${e.message}")
                 return
