@@ -8,8 +8,6 @@ import std.process.*
 import std.time.*
 import stdx.encoding.json.*
 import stdx.log.*
-import linderHttp.*
-import linderHttp.commons.*
 import semver.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -71,51 +69,12 @@ public class PluginManagerService {
 
     /**
      * 下载 URL 到指定文件。
-     * 先尝试 LinderHttp；若返回 HTTP 0 或抛异常，则用 deno+fetch 兜底（deno 在运行时已内置/打包）。
+     * 统一使用 deno+fetch（避免容器/发行版环境下 HTTP 客户端行为不一致导致的 HTTP 0）。
      */
     private static func downloadUrlToFile(url: String, outFile: Path): (Bool, String) {
-        // 1) LinderHttp
-        var lastStatus: Int64 = -1
-        var lastErr: String = ""
-        var lastBodySnippet: String = ""
-        try {
-            var http = LinderHttp(url: RequestUrl.from(url))
-            let response = http.send()
-            lastStatus = Int64(response.status)
-            if (response.status == 200) {
-                let content = response.getBodyString()
-                let file = File(outFile, OpenMode.Write)
-                file.write(content.toArray())
-                file.close()
-                return (true, "")
-            }
-            // 非 200：尽可能带上响应片段，避免只有状态码不利排查
-            try {
-                let body = response.getBodyString()
-                lastBodySnippet = truncateForLog(body.trimAscii(), 512)
-            } catch (_: Exception) {}
-            lastErr = "HTTP ${response.status.toString()}"
-            logger.error("LinderHttp download failed", ("url", url), ("status", response.status.toString()), ("body_snippet", lastBodySnippet))
-        } catch (e: Exception) {
-            lastErr = e.message
-            logger.error("LinderHttp download exception", ("url", url), ("error", lastErr))
-        }
-
-        // 2) 仅在 “HTTP 0 / 异常” 这类典型网络/握手失败场景下兜底，避免掩盖真实 4xx/5xx。
-        if (lastStatus != 0 && lastErr.startsWith("HTTP ")) {
-            let detail = if (lastBodySnippet.size > 0) { " body=${lastBodySnippet}" } else { "" }
-            return (false, "Failed to download plugin: ${lastErr}${detail}")
-        }
-
         let (ok, err) = downloadUrlToFileWithDeno(url, outFile)
-        if (ok) {
-            logger.warn("LinderHttp download failed, but deno fetch succeeded", ("url", url), ("linder_err", lastErr))
-            return (true, "")
-        }
-
-        let linderPart = if (lastErr.size > 0) { lastErr } else { "unknown" }
-        let denoPart = if (err.size > 0) { err } else { "unknown" }
-        return (false, "Failed to download plugin: HTTP 0 (linder=${linderPart}; deno=${denoPart})")
+        if (ok) { return (true, "") }
+        return (false, "Failed to download plugin: ${err}")
     }
 
     private static func truncateForLog(s: String, maxLen: Int64): String {
@@ -126,30 +85,16 @@ public class PluginManagerService {
     }
 
     private static func downloadUrlToFileWithDeno(url: String, outFile: Path): (Bool, String) {
-        // 生成临时脚本：避免依赖 curl/wget，且 Deno 的 TLS/证书处理通常更健壮。
+        // 使用仓库内置脚本，避免运行时创建临时脚本文件。
+        let scriptPath = Path("./plugins/deno_fetch.ts")
+        if (!exists(scriptPath)) {
+            return (false, "missing ./plugins/deno_fetch.ts")
+        }
+
         let tempDir = Path(getPluginTempRoot())
         FileUtils.ensureDirectoryExists(tempDir)
-        let ts = DateTime.now().toUnixTimeStamp().toSeconds().toString()
-        let scriptPath = Path("${tempDir.toString()}/deno_fetch_${ts}.ts")
-
-        // 注意：这里不引入复杂依赖，直接 fetch 并写文件；失败时把 HTTP 状态输出到 stderr。
-        let script = """
-const url = Deno.args[0];
-const out = Deno.args[1];
-const res = await fetch(url);
-if (!res.ok) {
-  console.error('HTTP ' + res.status);
-  Deno.exit(2);
-}
-const buf = new Uint8Array(await res.arrayBuffer());
-await Deno.writeFile(out, buf);
-"""
 
         try {
-            let f = File(scriptPath, OpenMode.Write)
-            f.write(script.toArray())
-            f.close()
-
             let process = launch("deno", [
                 "run",
                 "--allow-net",
@@ -167,16 +112,20 @@ await Deno.writeFile(out, buf);
             let stderrStr = if (stderrBytes.size > 0) { String.fromUtf8(stderrBytes).trimAscii() } else { "" }
             let stdoutStr = if (stdoutBytes.size > 0) { String.fromUtf8(stdoutBytes).trimAscii() } else { "" }
 
-            try { remove(scriptPath) } catch (_: Exception) {}
-
             if (exitCode == 0 && exists(outFile)) {
                 return (true, "")
             }
-            if (stderrStr.size > 0) { return (false, stderrStr) }
-            if (stdoutStr.size > 0) { return (false, stdoutStr) }
+            // deno_fetch.ts 会把可诊断信息写到 stderr
+            if (stderrStr.size > 0) {
+                logger.error("deno fetch failed", ("url", url), ("stderr", truncateForLog(stderrStr, 1024)))
+                return (false, stderrStr)
+            }
+            if (stdoutStr.size > 0) {
+                logger.error("deno fetch failed (stdout)", ("url", url), ("stdout", truncateForLog(stdoutStr, 1024)))
+                return (false, stdoutStr)
+            }
             return (false, "deno fetch failed (exitCode=${exitCode.toString()})")
         } catch (e: Exception) {
-            try { remove(scriptPath) } catch (_: Exception) {}
             return (false, e.message)
         }
     }
