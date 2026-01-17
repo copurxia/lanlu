@@ -58,6 +58,8 @@
     "home": "Home",
     "search": "Search",
     "random": "Random",
+    "library": "Library",
+    "settings": "Settings",
     "themeToggle": "Theme Toggle",
     "language": "Language"
   },
@@ -449,6 +451,14 @@
     "noHistory": "No reading history",
     "noHistoryHint": "Start reading archives and your history will appear here",
     "count": "{count} records"
+  },
+  "library": {
+    "title": "My Library",
+    "loginRequired": "Log in to view your favorites and reading history.",
+    "tabs": {
+      "favorites": "Favorites",
+      "history": "History"
+    }
   },
   "settings": {
     "title": "Settings",

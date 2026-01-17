@@ -58,6 +58,7 @@
     "home": "首页",
     "search": "搜索",
     "random": "随便看看",
+    "library": "书架",
     "settings": "设置",
     "themeToggle": "主题切换",
     "language": "语言"
@@ -455,6 +456,14 @@
     "noHistory": "暂无阅读记录",
     "noHistoryHint": "开始阅读档案后，记录将显示在这里",
     "count": "共 {count} 条记录"
+  },
+  "library": {
+    "title": "我的书架",
+    "loginRequired": "登录后可查看收藏与阅读历史",
+    "tabs": {
+      "favorites": "收藏",
+      "history": "阅读历史"
+    }
   },
   "settings": {
     "title": "设置",

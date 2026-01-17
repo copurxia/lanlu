@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Home, Settings, Shuffle } from 'lucide-react';
+import { Heart, Home, Settings, Shuffle } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -15,6 +15,7 @@ export function MobileBottomNav() {
   const [randomLoading, setRandomLoading] = useState(false);
 
   const isActiveHome = pathname === '/';
+  const isActiveLibrary = pathname === '/library';
   const isActiveSettings = pathname === '/settings' || pathname.startsWith('/settings/');
 
   const handleRandomRead = useCallback(async () => {
@@ -40,7 +41,7 @@ export function MobileBottomNav() {
       }}
       aria-label={t('common.menu')}
     >
-      <div className="mx-auto grid h-16 max-w-md grid-cols-3">
+      <div className="mx-auto grid h-16 max-w-md grid-cols-4">
         <Link
           href="/"
           className={cn(
@@ -51,6 +52,18 @@ export function MobileBottomNav() {
         >
           <Home className="h-5 w-5" />
           <span>{t('navigation.home')}</span>
+        </Link>
+
+        <Link
+          href="/library?tab=favorites"
+          className={cn(
+            'flex flex-col items-center justify-center gap-1 text-xs transition-colors',
+            isActiveLibrary ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+          )}
+          aria-current={isActiveLibrary ? 'page' : undefined}
+        >
+          <Heart className="h-5 w-5" />
+          <span>{t('navigation.library')}</span>
         </Link>
 
         <button
