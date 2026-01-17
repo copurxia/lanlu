@@ -11,6 +11,8 @@ services:
       - ./data/archive:/app/data/archive
       - ./data/thumb:/app/data/thumb
       - ./data/logs:/app/data/logs
+      - ./data/plugins:/app/data/plugins
+      - ./data/cache:/app/data/cache
     depends_on:
       postgres:
         condition: service_healthy
