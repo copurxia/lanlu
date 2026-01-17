@@ -16,7 +16,7 @@ public class PluginData {
     public var version: String = ""
     public var description: String = ""
     public var author: String = ""
-    public var entry: String = ""
+    public var entry: String = ""                  // 插件文件路径（相对于存储根目录，支持子目录）
     public var plugin_type: String = ""
     public var tags: String = ""
     public var url_regex: String = ""

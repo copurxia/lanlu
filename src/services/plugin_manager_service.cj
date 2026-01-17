@@ -121,9 +121,8 @@ public class PluginManagerService {
         // 写入到存储目录
         result.plugin_type = info.pluginType
         result.namespace = info.namespace
-        let targetDir = Path(FileUtils.joinPath(getPluginStorageRoot(), info.pluginType))
-        FileUtils.ensureDirectoryExists(targetDir)
-        let targetFile = Path("${targetDir.toString()}/${filename}")
+        // 所有插件统一存放在 PLUGIN_PATH 根目录，不再按类型分子目录
+        let targetFile = Path("${getPluginStorageRoot()}/${filename}")
 
         let writeOk = atomicReplaceFile(targetFile, tempFile)
         if (!writeOk) {
@@ -331,7 +330,7 @@ public class PluginManagerService {
             let tempTypeDir = Path("${pluginsRoot.toString()}/${typeDir}")
             Directory.create(tempTypeDir, recursive: true)
 
-            let baseSource = Path("./data/cache/plugins/base_plugin.ts")
+            let baseSource = Path("./plugins/base_plugin.ts")
             let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
             if (exists(baseSource)) {
                 copy(baseSource, to: baseTarget, overwrite: true)
@@ -508,6 +507,7 @@ public class PluginManagerService {
         pluginData.version = if (info.version.trimAscii().size > 0) { info.version } else { "1.0" }
         pluginData.description = info.description
         pluginData.author = info.author
+        // 下载的插件文件直接放在根目录，所以 entry 就是文件名
         pluginData.entry = fileName
         pluginData.plugin_type = info.pluginType
         pluginData.tags = info.tags

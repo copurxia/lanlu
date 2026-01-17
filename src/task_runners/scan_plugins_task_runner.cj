@@ -179,6 +179,20 @@ public class ScanPluginsTaskRunner {
 
             TaskIO.appendLog(taskId, "Processing plugin file: ${fileName}")
 
+            // 计算相对于插件根目录的路径，直接作为 entry 存储
+            // filePath 格式: /path/to/data/plugins/subfolder/plugin.ts
+            // pluginPath 格式: /path/to/data/plugins
+            // entryPath 应该是: subfolder/plugin.ts 或 plugin.ts
+            let pluginPath = PluginPaths.getPluginStorageRoot()
+            let entryPath = if (filePath.startsWith(pluginPath)) {
+                filePath[(pluginPath.size + 1)..]  // +1 to skip the leading '/'
+            } else {
+                // 如果不在标准路径下，使用文件名
+                fileName
+            }
+
+            TaskIO.appendLog(taskId, "Plugin entry path: ${entryPath}")
+
             // 使用Deno解析插件元数据，类型从元数据获取
             let pluginMetadata = parsePluginMetadataWithDeno(taskId, filePath)
 
@@ -205,10 +219,10 @@ public class ScanPluginsTaskRunner {
                         return ProcessResultData(true, pluginMetadata.namespace, "")
                     case MajorUpgrade =>
                         TaskIO.appendLog(taskId, "Major upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, clearing parameters")
-                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, pluginType, true)
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, true)
                     case MinorUpgrade | PatchUpgrade =>
                         TaskIO.appendLog(taskId, "Upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, preserving parameters")
-                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, pluginType, false)
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, false)
                     case Downgrade =>
                         TaskIO.appendLog(taskId, "Version downgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, skipping")
                         return ProcessResultData(true, pluginMetadata.namespace, "")
@@ -225,7 +239,8 @@ public class ScanPluginsTaskRunner {
             pluginData.version = pluginMetadata.version
             pluginData.description = pluginMetadata.description
             pluginData.author = pluginMetadata.author
-            pluginData.entry = fileName
+            // entry 存储完整的相对路径，支持子目录
+            pluginData.entry = entryPath
             pluginData.plugin_type = pluginType
             pluginData.tags = pluginMetadata.tags
             pluginData.permissions = pluginMetadata.permissions
@@ -446,6 +461,7 @@ public class ScanPluginsTaskRunner {
         existingPlugin: PluginData,
         newMetadata: PluginMetadata,
         fileName: String,
+        entryPath: String,
         pluginType: String,
         clearParameters: Bool
     ): ProcessResultData {
@@ -456,7 +472,8 @@ public class ScanPluginsTaskRunner {
         pluginData.version = newMetadata.version
         pluginData.description = newMetadata.description
         pluginData.author = newMetadata.author
-        pluginData.entry = fileName
+        // entry 存储完整的相对路径，支持子目录
+        pluginData.entry = entryPath
         pluginData.plugin_type = pluginType
         pluginData.tags = newMetadata.tags
         pluginData.permissions = newMetadata.permissions
@@ -500,6 +517,7 @@ public class ScanPluginsTaskRunner {
         TaskIO.appendLog(taskId, "Checking ${allPlugins.size} plugins in database for removed files")
 
         for (plugin in allPlugins) {
+            // 直接使用 entry 构建完整路径（支持子目录）
             let expectedPath = buildPluginPath(pluginPath, plugin.plugin_type, plugin.entry)
 
             if (!existingFiles.contains(expectedPath) && !fileExists(expectedPath)) {
@@ -522,9 +540,10 @@ public class ScanPluginsTaskRunner {
 
     /**
      * 构建插件文件路径
+     * 所有插件统一存放在 basePath 根目录，不再按类型分子目录
      */
     private static func buildPluginPath(basePath: String, pluginType: String, entry: String): String {
-        joinPath(joinPath(basePath, pluginType), entry)
+        joinPath(basePath, entry)
     }
 
     /**
@@ -598,7 +617,7 @@ public class ScanPluginsTaskRunner {
             Directory.create(tempTypeDir, recursive: true)
 
             // 复制 base_plugin.ts
-            let baseSource = Path("./data/cache/plugins/base_plugin.ts")
+            let baseSource = Path("./plugins/base_plugin.ts")
             let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
             if (exists(baseSource)) {
                 copy(baseSource, to: baseTarget, overwrite: true)

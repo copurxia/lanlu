@@ -29,7 +29,11 @@ public class PluginPaths {
     }
 
     public static func buildPluginFilePath(pluginType: String, entry: String): String {
-        FileUtils.joinPath(FileUtils.joinPath(getPluginStorageRoot(), pluginType), entry)
+        // 所有插件统一存放在 PLUGIN_PATH 根目录
+        // entry 可以是：
+        // - 文件名：plugin.ts
+        // - 相对路径：subfolder/plugin.ts
+        FileUtils.joinPath(getPluginStorageRoot(), entry)
     }
 
     public static func ensurePluginDirs(): Unit {

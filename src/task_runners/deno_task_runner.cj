@@ -198,23 +198,24 @@ public class DenoTaskRunner {
             let pluginsRoot = Path(PluginPaths.getPluginRuntimeRoot())
             FileUtils.ensureDirectoryExists(pluginsRoot)
 
-            // 复制共享基础插件
-            let sharedBase = Path("${pluginsRoot.toString()}/base_plugin.ts")
-            let sharedSource = Path("./data/cache/plugins/base_plugin.ts")
-            if (!exists(sharedSource)) {
-                getLogger("deno_task").error("缺少共享基础插件文件", ("path", sharedSource.toString()))
+            // 确保根目录有 base_plugin.ts（从 plugins 目录复制到缓存目录）
+            let basePluginSource = Path("./plugins/base_plugin.ts")
+            let basePluginTarget = Path("./data/cache/plugins/base_plugin.ts")
+            if (!exists(basePluginSource)) {
+                getLogger("deno_task").error("缺少基础插件文件", ("path", basePluginSource.toString()))
                 return false
             }
-            // 如果源文件和目标文件是同一个路径，则无需复制
-            if (sharedSource.toString() != sharedBase.toString()) {
-                copy(sharedSource, to: sharedBase, overwrite: true)
+            if (!exists(basePluginTarget)) {
+                copy(basePluginSource, to: basePluginTarget, overwrite: false)
             }
 
-            // 复制插件文件
+            // 创建插件运行时目录（按命名空间）
             let pluginDir = Path("${pluginsRoot.toString()}/${plugin.namespace}")
             FileUtils.ensureDirectoryExists(pluginDir)
 
+            // 复制插件文件到运行时目录
             let targetFile = Path("${pluginDir.toString()}/${scriptName}.ts")
+            // 直接使用 entry 构建源路径（支持子目录）
             let sourcePath = Path(PluginPaths.buildPluginFilePath(plugin.plugin_type, plugin.entry))
             if (!exists(sourcePath)) {
                 getLogger("deno_task").error("源插件文件不存在", ("path", sourcePath.toString()))
