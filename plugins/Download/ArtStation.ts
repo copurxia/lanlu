@@ -136,7 +136,13 @@ class ArtStationDownloadPlugin extends BasePlugin {
     let downloadedCount = 0;
     let failedCount = 0;
 
-    for (const hashId of projectHashIds) {
+    for (let i = 0; i < projectHashIds.length; i++) {
+      const hashId = projectHashIds[i];
+
+      // 输出当前下载进度
+      const progress = Math.round((i / projectHashIds.length) * 100);
+      this.reportProgress(progress, `Downloading project ${i + 1}/${projectHashIds.length}...`);
+
       try {
         const projectResult = await this.downloadProject(hashId, pluginDir, params.quality);
         if (projectResult.success) {
@@ -150,6 +156,9 @@ class ArtStationDownloadPlugin extends BasePlugin {
         await this.logError('Error downloading project', { hashId, error: String(error) });
       }
     }
+
+    // 输出完成进度
+    this.reportProgress(100, `Download complete: ${downloadedCount} succeeded, ${failedCount} failed`);
 
     if (downloadedCount === 0) {
       return { success: false, error: `No images were downloaded for user: ${username}` };
@@ -272,7 +281,13 @@ class ArtStationDownloadPlugin extends BasePlugin {
 
       let downloadedCount = 0;
 
-      for (const asset of assets) {
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+
+        // 输出图片下载进度
+        const progress = Math.round((i / assets.length) * 100);
+        this.reportProgress(progress, `Downloading image ${i + 1}/${assets.length}...`);
+
         if (asset.has_image && asset.image_url) {
           let imageUrl = asset.image_url;
 
