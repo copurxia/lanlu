@@ -78,7 +78,7 @@ public class DownloadUrlTaskRunner {
                 "deno_task",
                 denoParams,
                 50,
-                groupId,
+                "download_url:${taskId}",
                 "download_url:${taskId}"
             )
 
@@ -90,129 +90,47 @@ public class DownloadUrlTaskRunner {
             // 通知 TaskPool
             context.notifyTaskAvailable()
 
-            TaskModel.updateTaskProgress(taskId, 15, "等待插件执行")
+            // 创建回调任务（等待 deno_task 完成后自动触发）
+            //
+            // 这里不再同步等待 deno_task，避免 worker 被占满导致 deno_task 无法被调度的死锁风险。
+            TaskModel.updateTaskProgress(taskId, 15, "创建回调任务")
+            let callbackParams = buildCallbackParams(taskId, denoTask.id, categoryId, plugin.namespace)
+            let callbackTask = TaskModel.createWaitingTask(
+                "下载后处理",
+                "download_url_callback",
+                callbackParams,
+                denoTask.id,
+                "download_url:${taskId}",
+                "download_url:${taskId}"
+            )
 
-            // 等待 deno_task 完成
-            let denoResult = waitForTaskCompletion(denoTask.id, 300)
-            if (!denoResult.success) {
-                fail(taskId, "Deno task failed: ${denoResult.error}")
+            if (callbackTask.id <= 0) {
+                fail(taskId, "Failed to create callback task")
                 return
             }
 
-            let output = denoResult.output
-            TaskIO.appendLog(taskId, "plugin output: ${output}")
+            TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for deno_task: ${denoTask.id}")
 
-            // 插件自行下载并回传 relative_path（相对于缓存目录）
-            let downloadedRelativePaths = parseDownloadedRelativePath(output)
-            let downloadedSource = parseDownloadedSource(output)
-
-            // 检查是否返回了档案
-            if (downloadedRelativePaths.size == 0) {
-                fail(taskId, "Plugin did not return relative_path")
-                return
-            }
-
-            // 检查是否返回了多个档案
-            if (downloadedRelativePaths.size > 1) {
-                fail(taskId, "Multiple archives not yet supported in this version")
-                return
-            }
-
-            TaskModel.updateTaskProgress(taskId, 35, "处理下载文件")
-
-            // 处理数组中的第一个（也是唯一的）档案
-            let downloadedRelativePath = downloadedRelativePaths.get(0).getOrThrow()
-
-            // 安全检查：防止路径遍历
-            if (downloadedRelativePath.contains("..") || downloadedRelativePath.startsWith("/") ||
-                !downloadedRelativePath.startsWith("plugins/${plugin.namespace}/")) {
-                fail(taskId, "Plugin returned invalid relative_path")
-                return
-            }
-
-            let pluginTarget = Path("${cachePath}/${downloadedRelativePath}")
-            if (!exists(pluginTarget)) {
-                fail(taskId, "Plugin downloaded file not found")
-                return
-            }
-            let fileName = pluginTarget.fileName
-
-            TaskModel.updateTaskProgress(taskId, 60, "移动到archive")
-
-            let archiveDir = Path(categoryPath)
-            FileUtils.ensureDirectoryExists(archiveDir)
-
-            let finalArchivePath = Path("${categoryPath}/${fileName}")
-            let finalArchivePathStr = finalArchivePath.toString()
-
-            try {
-                // 移动文件到归档目录（支持跨设备：rename 失败时 fallback 到 copy+remove）
-                try {
-                    rename(pluginTarget, to: finalArchivePath)
-                } catch (e: Exception) {
-                    if (e.message.contains("cross-device") || e.message.contains("Invalid cross-device link")) {
-                        copy(pluginTarget, to: finalArchivePath, overwrite: false)
-                        // copy 成功后尽力删除源文件（避免缓存目录堆积）
-                        try {
-                            remove(pluginTarget)
-                        } catch (_: Exception) {}
-                    } else {
-                        throw e
-                    }
-                }
-
-                // 验证移动结果
-                if (!exists(finalArchivePath)) {
-                    throw Exception("文件移动失败：目标文件不存在")
-                }
-            } catch (e: Exception) {
-                fail(taskId, "Failed to move file to archive: ${e.message}")
-                return
-            }
-
-            TaskModel.updateTaskProgress(taskId, 80, "创建扫描任务")
-
-            // 获取配置
-            let cachePathStr = cachePath.toString()
-            let thumbnailPathStr = thumbnailPath.toString()
-
-            // 解析插件返回的 archive_type
-            let archiveType = parseArchiveTypeFromPlugin(output)
-
-            // 构建包含source的tags
-            var tags = ""
-            if (downloadedSource.size > 0) {
-                tags = "source:${downloadedSource}"
-            }
-
-            // 创建 scan_archive 任务
-            let params = """
-                {
-                    "archive_path":"${escapeJson(finalArchivePathStr)}",
-                    "category_id":${categoryId},
-                    "cache_path":"${escapeJson(cachePathStr)}",
-                    "thumbnail_path":"${escapeJson(thumbnailPathStr)}",
-                    "archive_type":"${archiveType}",
-                    "tags":"${escapeJson(tags)}"
-                }
-            """
-            let task = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "download_url:${taskId}", "upload")
-            if (task.id <= 0) {
-                let errorJson = "{\"success\":0,\"error\":\"Failed to create scan_archive task\"}"
-                TaskModel.failTask(taskId, "Failed to create scan_archive task")
-                TaskIO.writeOutput(taskId, errorJson)
-                return
-            }
-
-            let resultJson = "{\"success\":1,\"archives\":[{\"filename\":\"${escapeJson(fileName)}\"}],\"task_id\":\"${task.id}\"}"
-
-            TaskModel.updateTaskProgress(taskId, 100, "下载完成")
-            TaskModel.completeTask(taskId, "download_url completed")
-            TaskIO.writeOutput(taskId, resultJson)
-            TaskIO.appendLog(taskId, "download_url task completed: scan_task_id=${task.id}")
+            // 将当前任务置为 waiting：后续由 callback 负责将本任务标记为 completed/failed 并写回输出
+            TaskDao.updateTaskStatus(taskId, "waiting", "等待下载插件执行", 20)
+            let submittedJson = "{\"success\":1,\"deno_task_id\":${denoTask.id},\"callback_task_id\":${callbackTask.id}}"
+            TaskIO.writeOutput(taskId, submittedJson)
         } catch (e: Exception) {
             fail(taskId, e.message)
         }
+    }
+
+    /**
+     * 构建回调任务参数
+     */
+    private static func buildCallbackParams(downloadTaskId: Int64, denoTaskId: Int64, categoryId: Int64, pluginNamespace: String): String {
+        var paramsObj = JsonObject()
+        let fields = paramsObj.getFields()
+        fields["downloadTaskId"] = JsonInt(downloadTaskId)
+        fields["denoTaskId"] = JsonInt(denoTaskId)
+        fields["categoryId"] = JsonInt(categoryId)
+        fields["pluginNamespace"] = JsonString(pluginNamespace)
+        return paramsObj.toString()
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
@@ -220,35 +138,6 @@ public class DownloadUrlTaskRunner {
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
-    }
-
-    /**
-     * 等待任务完成（轮询 + 指数退避）
-     */
-    private static func waitForTaskCompletion(taskId: Int64, timeoutSeconds: Int32): TaskWaitResult {
-        let startTime = DateTime.now().toUnixTimeStamp().toSeconds()
-        var sleepMs: Int64 = 100
-
-        while (true) {
-            let task = TaskDao.getTaskDataById(taskId)
-            if (task.status == "completed") {
-                let output = TaskIO.readOutput(taskId)
-                return TaskWaitResult(true, "", output)
-            }
-            if (task.status == "failed" || task.status == "stopped") {
-                return TaskWaitResult(false, task.message, "")
-            }
-
-            let elapsed = DateTime.now().toUnixTimeStamp().toSeconds() - startTime
-            if (elapsed > Int64(timeoutSeconds)) {
-                return TaskWaitResult(false, "Timeout waiting for task", "")
-            }
-
-            sleep(Duration.millisecond * sleepMs)
-            sleepMs = if (sleepMs * 2 > 2000) { 2000 } else { sleepMs * 2 }
-        }
-        // This line should never be reached but satisfies the compiler
-        return TaskWaitResult(false, "Unexpected error", "")
     }
 
     private static func parseUrl(parameters: String): String {

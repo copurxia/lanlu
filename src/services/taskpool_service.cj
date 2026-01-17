@@ -172,16 +172,17 @@ public class TaskPoolService {
         logger.debug("触发依赖任务", ("completed_id", completedTaskId.toString()), ("waiting_count", waitingTasks.size.toString()))
 
         for (waitingTask in waitingTasks) {
-            if (completedTask.status == "completed") {
-                // 依赖任务成功完成，激活等待任务
-                TaskDao.activateWaitingTask(waitingTask.id)
-                logger.debug("激活等待任务", ("id", waitingTask.id.toString()))
-            } else {
-                // 依赖任务失败或停止，级联失败
-                let errorMsg = "依赖任务失败: ${completedTask.status} - ${completedTask.message}"
-                TaskDao.failWaitingTask(waitingTask.id, errorMsg)
-                logger.debug("等待任务级联失败", ("id", waitingTask.id.toString()))
-            }
+            // 激活等待任务（无论依赖任务成功/失败）
+            //
+            // 原先的语义是：依赖失败则级联失败 waiting 任务。
+            // 但像 download_url / metadata_plugin 这类“回调任务”需要在依赖失败时也能运行，
+            // 以便读取 deno_task 输出并把失败结果写回到父任务/做清理。
+            TaskDao.activateWaitingTask(waitingTask.id)
+            logger.debug(
+                "激活等待任务",
+                ("id", waitingTask.id.toString()),
+                ("wait_for_status", completedTask.status)
+            )
         }
 
         // 通知有新任务可用
@@ -202,6 +203,8 @@ public class TaskPoolService {
                 UploadProcessTaskRunner.run(task.id, task.parameters, context)
             case "metadata_plugin" =>
                 MetadataPluginTaskRunner.run(task.id, task.parameters, context)
+            case "download_url_callback" =>
+                DownloadUrlCallbackRunner.run(task.id, task.parameters, context)
             case "tag_import" =>
                 TagI18nImportTaskRunner.run(task.id, task.parameters, context)
             case "scan_all_categories" =>
