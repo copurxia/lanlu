@@ -21,6 +21,10 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
+
+type TabStatusCacheEntry = { status: "saved" | "not_saved" | "error"; updatedAt: number; arcid?: string; error?: string };
+
 export default function AddPage() {
   const { settings, categories, hydrated, loadingCategories, saving, setCategoryId, refreshCategories } =
     useSettingsStore();
@@ -87,6 +91,48 @@ export default function AddPage() {
     if (!auth || !currentTab?.url) return;
     void runCurrentCheck();
   }, [auth, currentTab?.url, runCurrentCheck]);
+
+  // Persist the last known "saved/not_saved/error" result for this URL so the
+  // background service worker can show a badge even when the popup is closed.
+  useEffect(() => {
+    const url = currentTab?.url;
+    if (!url || !/^https?:\/\//.test(url)) return;
+    if (typeof chrome === "undefined" || !chrome.storage?.local) return;
+
+    const nextStatus =
+      check.status === "saved"
+        ? "saved"
+        : check.status === "not_saved"
+          ? "not_saved"
+          : check.status === "error"
+            ? "error"
+            : null;
+    if (!nextStatus) return;
+
+    const now = Date.now();
+    chrome.storage.local.get(STATUS_CACHE_KEY, (items) => {
+      const prev = (items?.[STATUS_CACHE_KEY] ?? {}) as Record<string, TabStatusCacheEntry>;
+      const next: Record<string, TabStatusCacheEntry> = {
+        ...prev,
+        [url]: { status: nextStatus as TabStatusCacheEntry["status"], updatedAt: now },
+      };
+      if (check.status === "saved") next[url].arcid = check.arcid;
+      if (check.status === "error") next[url].error = check.error;
+
+      // Keep the cache bounded to avoid unbounded growth.
+      const keys = Object.keys(next);
+      if (keys.length > 200) {
+        keys
+          .sort((a, b) => (next[a]?.updatedAt ?? 0) - (next[b]?.updatedAt ?? 0))
+          .slice(0, keys.length - 200)
+          .forEach((k) => {
+            delete next[k];
+          });
+      }
+
+      chrome.storage.local.set({ [STATUS_CACHE_KEY]: next });
+    });
+  }, [check, currentTab?.url]);
 
   const submit = useCallback(async (scope: TabScope) => {
     if (!canSubmit || !auth || !selectedCategory) return;

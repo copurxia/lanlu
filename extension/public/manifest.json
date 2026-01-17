@@ -12,6 +12,9 @@
       "32": "extension_32.png"
     }
   },
+  "background": {
+    "service_worker": "background.js"
+  },
   "icons": {
     "16": "extension_16.png",
     "32": "extension_32.png",
