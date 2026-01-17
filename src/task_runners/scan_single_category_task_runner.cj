@@ -5,6 +5,7 @@ import stdx.log.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
+import lrr4cj.archivehandler.*
 
 /**
  * 扫描单个分类任务运行器
@@ -123,20 +124,35 @@ public class ScanSingleCategoryTaskRunner {
     }
 
     private static func enqueueScanArchiveTask(filePath: String, ctx: ScanContext): Bool {
+        // 首先检查是否有处理器能处理该文件，如果没有则直接跳过
+        let factory = ArchiveHandlerFactory.getInstance()
+        let handlerOpt = factory.getHandlerByPath(filePath)
+        match (handlerOpt) {
+            case None =>
+                getLogger("scan_single_category").debug("No handler can handle this path, skipping: ${filePath}")
+                return false
+            case Some(_) => ()
+        }
+
         let relativePath = ArchiveUtils.calculateRelativePath(filePath, ctx.basePath)
         let fileName = ArchiveUtils.getFullFileName(filePath)
 
         let existingArchive = ArchiveDao.getByPathAndFilename(relativePath, fileName)
         match (existingArchive) {
             case Some(archive) =>
+                // 档案已存在
                 if (archive.thumbhash.size > 0) {
+                    // 已有缩略图，完全跳过
                     getLogger("scan_single_category").debug("Archive already exists with thumbnail, skipping: ${filePath}")
                     return false
                 } else {
-                    getLogger("scan_single_category").debug("Archive exists but no thumbnail, will process: ${filePath}")
+                    // 档案存在但缺少缩略图，直接提交缩略图生成任务
+                    getLogger("scan_single_category").debug("Archive exists but no thumbnail, submitting thumbnail task: ${filePath}")
+                    return submitThumbnailTaskDirectly(filePath, archive.id, ctx)
                 }
             case None =>
-                getLogger("scan_single_category").debug("Archive not found in database, will process: ${filePath}")
+                // 档案不存在，创建 scan_archive 任务进行完整处理
+                getLogger("scan_single_category").debug("Archive not found, creating scan_archive task: ${filePath}")
         }
 
         let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"category_id\":${ctx.categoryId}}"
@@ -181,6 +197,43 @@ public class ScanSingleCategoryTaskRunner {
             }
         } catch (_: Exception) {}
         return (catid, triggerSource, childPriority)
+    }
+
+    /**
+     * 直接提交缩略图生成任务（用于已存在但缺少缩略图的档案）
+     */
+    private static func submitThumbnailTaskDirectly(filePath: String, archiveId: String, ctx: ScanContext): Bool {
+        try {
+            // 获取文件类型以传递给缩略图生成器
+            let factory = ArchiveHandlerFactory.getInstance()
+            let handlerOpt = factory.getHandlerByPath(filePath)
+            let archiveType = match (handlerOpt) {
+                case Some(handler) => handler.getType()
+                case None => "archive"  // 默认类型
+            }
+
+            let parameters = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\",\"type\":\"${archiveType}\"}"
+            let task = TaskModel.createTaskWithOptions(
+                "生成封面",
+                "generate_thumbnail",
+                parameters,
+                10i32,
+                archiveId,
+                "scan_single_category"
+            )
+
+            if (task.id > 0) {
+                ctx.notifier()
+                getLogger("scan_single_category").debug("Submitted thumbnail generation task for existing archive")
+                return true
+            } else {
+                getLogger("scan_single_category").error("Failed to submit thumbnail generation task")
+                return false
+            }
+        } catch (e: Exception) {
+            getLogger("scan_single_category").error("Exception submitting thumbnail task")
+            return false
+        }
     }
 
     private static func escapeJson(s: String): String {

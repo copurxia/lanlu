@@ -375,11 +375,8 @@ public class ChunkedUploadController {
             try {
                 getLogger("chunked_upload").info("Moving file", ("from", finalFile.toString()), ("to", finalArchivePath.toString()))
 
-                // 优先尝试直接重命名（同一设备时更快）
-                var moveSuccess = false
                 try {
                     rename(finalFile, to: finalArchivePath)
-                    moveSuccess = true
                     getLogger("chunked_upload").info("File renamed successfully (same device)")
                 } catch (e: Exception) {
                     // 检查是否是跨设备错误
@@ -391,7 +388,6 @@ public class ChunkedUploadController {
 
                         // 复制成功后删除源文件
                         remove(finalFile)
-                        moveSuccess = true
                         getLogger("chunked_upload").info("File moved successfully (跨设备)")
                     } else {
                         // 其他错误，重新抛出
