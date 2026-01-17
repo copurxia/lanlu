@@ -132,7 +132,7 @@ public class ArchiveDao {
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -149,6 +149,7 @@ public class ArchiveDao {
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
                                 archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
+                                archive.category_id = rs.getOrNull<Int64>(11) ?? 0
                                 archives.add(archive)
                             }
                         } finally {
@@ -180,7 +181,7 @@ public class ArchiveDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives WHERE arcid = ?")
+                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives WHERE arcid = ?")
                     try {
                         stmt.set(0, id)
                         let rs = stmt.query()
@@ -198,6 +199,7 @@ public class ArchiveDao {
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
                                 archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
+                                archive.category_id = rs.getOrNull<Int64>(11) ?? 0
                                 return archive
                             }
                         } finally {
@@ -1014,7 +1016,7 @@ public class ArchiveDao {
                 try {
                     var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives WHERE thumbhash = '' OR thumbhash IS NULL ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE thumbhash = '' OR thumbhash IS NULL ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -1030,6 +1032,7 @@ public class ArchiveDao {
                                 archive.relative_path = rs.getOrNull<String>(7) ?? ""
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archive.category_id = rs.getOrNull<Int64>(10) ?? 0
                                 archives.add(archive)
                             }
                         } finally {
@@ -1091,7 +1094,7 @@ public class ArchiveDao {
             case Some(conn) =>
                 
                 try {
-                let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives WHERE relative_path = ?")
+                let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE relative_path = ?")
                 stmt.set(0, filePath)
                 let rs = stmt.query()
 
@@ -1107,6 +1110,7 @@ public class ArchiveDao {
                     archive.relative_path = rs.getOrNull<String>(7) ?? ""
                     archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                     archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                    archive.category_id = rs.getOrNull<Int64>(10) ?? 0
 
                     conn.close()
                     return Some(archive)
@@ -1134,7 +1138,7 @@ public class ArchiveDao {
             case Some(conn) =>
                 
                 try {
-                    let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount FROM archives WHERE relative_path = ? AND filename = ?")
+                    let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE relative_path = ? AND filename = ?")
                     try {
                         stmt.set(0, relativePath)
                         stmt.set(1, filename)
@@ -1152,6 +1156,7 @@ public class ArchiveDao {
                                 archive.relative_path = rs.getOrNull<String>(7) ?? ""
                                 archive.file_size = rs.getOrNull<Int64>(8) ?? 0
                                 archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
+                                archive.category_id = rs.getOrNull<Int64>(10) ?? 0
                                 return Some(archive)
                             }
                             return None
