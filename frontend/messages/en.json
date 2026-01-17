@@ -240,6 +240,8 @@
     "fullscreenTooltip": "Fullscreen Mode",
     "doubleTap": "Double Tap Zoom",
     "doubleTapTooltip": "Double Tap Zoom",
+    "longPage": "Long Page Scroll",
+    "longPageTooltip": "Fit long images to width and enable scrolling (mouse wheel scrolls on PC)",
     "favorite": "Favorite"
   },
   "login": {

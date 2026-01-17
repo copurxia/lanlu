@@ -37,6 +37,7 @@ import {
   useAutoHideEnabled,
   useTapTurnPageEnabled,
   useMediaInfoEnabled,
+  useLongPageEnabled,
   } from '@/hooks/use-reader-settings';
 import {
   ArrowLeft,
@@ -49,6 +50,7 @@ import {
   Maximize,
   Minimize,
   ZoomIn,
+  ScrollText,
   Eye,
   Info,
   MousePointerClick
@@ -122,6 +124,7 @@ function ReaderContent() {
   const [autoHideEnabled, setAutoHideEnabled] = useAutoHideEnabled();
   const [tapTurnPageEnabled, setTapTurnPageEnabled] = useTapTurnPageEnabled();
   const [mediaInfoEnabled, setMediaInfoEnabled] = useMediaInfoEnabled();
+  const [longPageEnabled, setLongPageEnabled] = useLongPageEnabled();
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
   const htmlContainerRefs = useRef<(HTMLDivElement | null)[]>([]);
   const imageRequestUrls = useRef<(string | null)[]>([]);
@@ -328,6 +331,15 @@ function ReaderContent() {
         tooltip: t('reader.doubleTapTooltip'),
       },
       {
+        key: 'longPage',
+        label: t('reader.longPage'),
+        icon: ScrollText,
+        active: longPageEnabled,
+        disabled: readingMode === 'webtoon',
+        onClick: () => setLongPageEnabled((prev) => !prev),
+        tooltip: t('reader.longPageTooltip'),
+      },
+      {
         key: 'autoHide',
         label: t('reader.autoHide'),
         icon: Eye,
@@ -374,6 +386,8 @@ function ReaderContent() {
       mediaInfoEnabled,
       toggleFullscreen,
       setMediaInfoEnabled,
+      longPageEnabled,
+      setLongPageEnabled,
     ]
   );
 
@@ -809,6 +823,7 @@ function ReaderContent() {
 	        <ReaderSingleModeView
 	          enabled={readingMode !== 'webtoon'}
 	          sidebarOpen={sidebar.sidebarOpen}
+            longPageEnabled={longPageEnabled}
 	          pages={pages}
 	          cachedPages={imageLoading.cachedPages}
 	          currentPage={currentPage}

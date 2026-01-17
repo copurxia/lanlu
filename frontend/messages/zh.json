@@ -246,6 +246,8 @@
     "fullscreenTooltip": "全屏模式",
     "doubleTap": "双击放大",
     "doubleTapTooltip": "双击放大",
+    "longPage": "长图滚动",
+    "longPageTooltip": "长图按宽度适配并允许滚动（PC滚轮优先滚动）",
     "favorite": "收藏"
   },
   "login": {

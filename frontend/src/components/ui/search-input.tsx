@@ -86,7 +86,7 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     isProcessingRef.current = true
 
     try {
-      let currentValue = inputValue.replace(/[+\s\t]+$/g, '')
+      const currentValue = inputValue.replace(/[+\s\t]+$/g, '')
       const formattedValue = suggestion.value
       const words = currentValue.trim().split(/\s+/).filter(w => w.trim())
 

@@ -70,11 +70,21 @@ export function useReaderWheelNavigation({
         return;
       }
 
+      // Long image page uses an internal scroll container; allow normal scrolling (don't wheel-flip).
+      // We intentionally don't start countdown at edges here to avoid surprising "page flips" on PCs.
+      const targetEl = e.target as HTMLElement | null;
+      const longPageContainer = targetEl?.closest?.('.long-page-scroll-container') as HTMLElement | null;
+      if (longPageContainer) {
+        if (showAutoNextCountdown) {
+          clearCountdown();
+        }
+        return;
+      }
+
       const isHtmlPage = pages[currentPage]?.type === 'html';
 
       if (isHtmlPage) {
-        const target = e.target as HTMLElement;
-        const htmlContainer = target.closest('.html-content-container') as HTMLElement | null;
+        const htmlContainer = targetEl?.closest?.('.html-content-container') as HTMLElement | null;
 
         if (htmlContainer) {
           const scrollTop = htmlContainer.scrollTop;

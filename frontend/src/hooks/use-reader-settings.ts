@@ -43,3 +43,4 @@ export const useDoubleTapZoom = () => useLocalStorage<boolean>('reader-double-ta
 export const useAutoHideEnabled = () => useLocalStorage<boolean>('reader-auto-hide-enabled', false);
 export const useTapTurnPageEnabled = () => useLocalStorage<boolean>('reader-tap-turn-page-enabled', false);
 export const useMediaInfoEnabled = () => useLocalStorage<boolean>('reader-media-info-enabled', false);
+export const useLongPageEnabled = () => useLocalStorage<boolean>('reader-long-page-enabled', true);

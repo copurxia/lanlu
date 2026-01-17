@@ -3,11 +3,15 @@ import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
+import { useCallback, useState } from 'react';
 import type React from 'react';
+
+const LONG_PAGE_ASPECT_RATIO = 2.2;
 
 export function ReaderSingleModeView({
   enabled,
   sidebarOpen,
+  longPageEnabled,
   pages,
   cachedPages,
   currentPage,
@@ -32,6 +36,7 @@ export function ReaderSingleModeView({
 }: {
   enabled: boolean;
   sidebarOpen: boolean;
+  longPageEnabled: boolean;
   pages: PageInfo[];
   cachedPages: string[];
   currentPage: number;
@@ -54,6 +59,25 @@ export function ReaderSingleModeView({
   onImageDragStart: (e: React.DragEvent) => void;
   t: (key: string) => string;
 }) {
+  const [imageMeta, setImageMeta] = useState<Record<number, { w: number; h: number; isLong: boolean }>>({});
+
+  const registerImageMeta = useCallback((pageIndex: number, img: HTMLImageElement) => {
+    const w = img.naturalWidth || img.width;
+    const h = img.naturalHeight || img.height;
+    if (!w || !h) return;
+
+    const isLong = h / w >= LONG_PAGE_ASPECT_RATIO;
+    setImageMeta((prev) => {
+      const existing = prev[pageIndex];
+      if (existing && existing.w === w && existing.h === h && existing.isLong === isLong) return prev;
+      return { ...prev, [pageIndex]: { w, h, isLong } };
+    });
+  }, []);
+
+  const isSingleImageLayout = !doublePageMode || (doublePageMode && splitCoverMode && currentPage === 0);
+  const currentMeta = imageMeta[currentPage];
+  const useLongPageScroll = Boolean(longPageEnabled && isSingleImageLayout && currentMeta?.isLong);
+
   if (!enabled) return null;
 
   return (
@@ -81,9 +105,10 @@ export function ReaderSingleModeView({
           style={{
             maxHeight: '100%',
             height: '100%',
-            transform: doublePageMode ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : 'none',
+            transform:
+              doublePageMode && !useLongPageScroll ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : 'none',
             transition: 'all 300ms ease-in-out',
-            cursor: doublePageMode && scale > 1 ? 'grab' : 'default',
+            cursor: doublePageMode && !useLongPageScroll && scale > 1 ? 'grab' : 'default',
           }}
         >
           <div className="relative w-full h-full flex">
@@ -127,40 +152,67 @@ export function ReaderSingleModeView({
                   <HtmlRenderer html={htmlContents[currentPage] || ''} className="max-w-4xl mx-auto p-4" />
                 </div>
               ) : (
-                <MemoizedImage
-                  key={`page-${currentPage}`}
-                  src={cachedPages[currentPage] || pages[currentPage]?.url}
-                  alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
-                  fill
-                  className={`
-                    ${
-                      doublePageMode && !(splitCoverMode && currentPage === 0) ? 'object-cover' : 'object-contain'
-                    } select-none touch-none
-                    w-full h-full
-                    transition-opacity duration-300 ease-in-out
-                    ${doublePageMode ? 'max-h-full' : ''}
-                  `}
-                  style={{
-                    maxHeight: '100%',
-                    height: '100%',
-                    opacity: loadedImages.has(currentPage) ? 1 : 0.3,
-                    transform: doublePageMode ? 'none' : `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                    transition: doublePageMode ? 'none' : 'transform 0.1s ease-out',
-                    cursor: doublePageMode ? 'pointer' : scale > 1 ? 'grab' : 'default',
-                  }}
-                  onLoadingComplete={(img) => {
-                    imageRefs.current[currentPage] = img;
-                    imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
-                    onImageLoaded(currentPage);
-                    if (!cachedPages[currentPage] && pages[currentPage]) {
-                      onCacheImage(pages[currentPage].url, currentPage);
-                    }
-                  }}
-                  onError={() => onImageError(currentPage)}
-                  onDoubleClick={onDoubleClick}
-                  onDragStart={onImageDragStart}
-                  draggable={false}
-                />
+                <div
+                  className={
+                    useLongPageScroll
+                      ? 'long-page-scroll-container w-full h-full overflow-y-auto overflow-x-hidden flex justify-center'
+                      : 'w-full h-full'
+                  }
+                >
+                  <div className={useLongPageScroll ? 'w-full lg:max-w-[800px] lg:px-4' : 'w-full h-full'}>
+                    <MemoizedImage
+                      key={`page-${currentPage}`}
+                      src={cachedPages[currentPage] || pages[currentPage]?.url}
+                      alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
+                      {...(useLongPageScroll && currentMeta
+                        ? { width: currentMeta.w, height: currentMeta.h }
+                        : { fill: true })}
+                      sizes={useLongPageScroll ? '(max-width: 1024px) 95vw, 800px' : undefined}
+                      className={`
+                        ${
+                          useLongPageScroll
+                            ? 'w-full h-auto'
+                            : doublePageMode && !(splitCoverMode && currentPage === 0)
+                              ? 'object-cover'
+                              : 'object-contain'
+                        }
+                        select-none ${useLongPageScroll ? 'touch-pan-y' : 'touch-none'}
+                        transition-opacity duration-300 ease-in-out
+                        ${useLongPageScroll ? '' : 'w-full h-full'}
+                        ${doublePageMode && !useLongPageScroll ? 'max-h-full' : ''}
+                      `}
+                      style={{
+                        maxHeight: useLongPageScroll ? undefined : '100%',
+                        height: useLongPageScroll ? 'auto' : '100%',
+                        opacity: loadedImages.has(currentPage) ? 1 : 0.3,
+                        // For long pages, scrolling is the primary navigation; keep transforms minimal.
+                        transform: useLongPageScroll
+                          ? scale === 1
+                            ? 'none'
+                            : `scale(${scale})`
+                          : doublePageMode
+                            ? 'none'
+                            : `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
+                        transformOrigin: useLongPageScroll ? 'top center' : undefined,
+                        transition: doublePageMode && !useLongPageScroll ? 'none' : 'transform 0.1s ease-out',
+                        cursor: doublePageMode ? 'pointer' : scale > 1 ? 'grab' : 'default',
+                      }}
+                      onLoadingComplete={(img) => {
+                        imageRefs.current[currentPage] = img;
+                        imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
+                        registerImageMeta(currentPage, img);
+                        onImageLoaded(currentPage);
+                        if (!cachedPages[currentPage] && pages[currentPage]) {
+                          onCacheImage(pages[currentPage].url, currentPage);
+                        }
+                      }}
+                      onError={() => onImageError(currentPage)}
+                      onDoubleClick={onDoubleClick}
+                      onDragStart={onImageDragStart}
+                      draggable={false}
+                    />
+                  </div>
+                </div>
               )}
             </div>
 
