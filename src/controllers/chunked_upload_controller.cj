@@ -371,14 +371,50 @@ public class ChunkedUploadController {
                 }
             }
 
-            // 移动文件到归档目录
+            // 移动文件到归档目录（支持跨设备）
             try {
                 getLogger("chunked_upload").info("Moving file", ("from", finalFile.toString()), ("to", finalArchivePath.toString()))
-                rename(finalFile, to: finalArchivePath)
-                getLogger("chunked_upload").info("File move operation completed successfully")
+
+                // 优先尝试直接重命名（同一设备时更快）
+                var moveSuccess = false
+                try {
+                    rename(finalFile, to: finalArchivePath)
+                    moveSuccess = true
+                    getLogger("chunked_upload").info("File renamed successfully (same device)")
+                } catch (e: Exception) {
+                    // 检查是否是跨设备错误
+                    if (e.message.contains("cross-device") || e.message.contains("Invalid cross-device link")) {
+                        getLogger("chunked_upload").info("Cross-device detected, using copy+remove strategy")
+
+                        // 跨设备：先复制再删除
+                        copy(finalFile, to: finalArchivePath, overwrite: false)
+
+                        // 复制成功后删除源文件
+                        remove(finalFile)
+                        moveSuccess = true
+                        getLogger("chunked_upload").info("File moved successfully (跨设备)")
+                    } else {
+                        // 其他错误，重新抛出
+                        throw e
+                    }
+                }
+
+                // 验证移动结果
+                if (!exists(finalArchivePath)) {
+                    throw Exception("文件移动失败：目标文件不存在")
+                }
+
             } catch (e: Exception) {
-                getLogger("chunked_upload").error("Failed to move file to archive directory", ("from", finalFile.toString()), ("to", finalArchivePath.toString()), ("error", e.message))
-                let errorResponse = "{\"success\":0,\"error\":\"Failed to move file to archive directory: ${e.message}\"}"
+                getLogger("chunked_upload").error("Failed to move file", ("from", finalFile.toString()), ("to", finalArchivePath.toString()), ("error", e.message))
+
+                // 清理可能已创建的残缺文件
+                if (exists(finalArchivePath)) {
+                    try {
+                        remove(finalArchivePath)
+                    } catch (_) { }
+                }
+
+                let errorResponse = "{\"success\":0,\"error\":\"Failed to move file: ${e.message}\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                 ctx.json(errorResponse)
                 return
