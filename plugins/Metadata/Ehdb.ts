@@ -492,7 +492,8 @@ class EhdbMetadataPlugin extends BasePlugin {
    * 相似度低于阈值的结果会被抛弃
    * 注意：对日文标题降低阈值以提高匹配成功率
    */
-  private static readonly MIN_SIMILARITY_SCORE = 20;
+  // Higher threshold to reduce false-positive matches when only generic tokens overlap.
+  private static readonly MIN_SIMILARITY_SCORE = 35;
 
   private selectBestMatch(rows: any[], input: string): PluginResult {
     if (!rows || rows.length === 0) {
