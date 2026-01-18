@@ -15,6 +15,8 @@ export function ReaderWebtoonModeView({
   visibleRange,
   imageHeights,
   containerHeight,
+  prefixHeights,
+  totalHeight,
   imagesLoading,
   loadedImages,
   scale,
@@ -43,6 +45,8 @@ export function ReaderWebtoonModeView({
   visibleRange: { start: number; end: number };
   imageHeights: number[];
   containerHeight: number;
+  prefixHeights: number[];
+  totalHeight: number;
   imagesLoading: Set<number>;
   loadedImages: Set<number>;
   scale: number;
@@ -64,6 +68,15 @@ export function ReaderWebtoonModeView({
 }) {
   if (!enabled) return null;
 
+  const shouldTransform = scale !== 1 || translateX !== 0 || translateY !== 0;
+  const transform = shouldTransform ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : undefined;
+  const transformTransition = shouldTransform ? 'transform 0.1s ease-out' : undefined;
+
+  const estimatedTotalHeight = totalHeight || pages.length * (containerHeight || window.innerHeight * 0.7);
+  const topSpacerHeight = prefixHeights[visibleRange.start] || 0;
+  const afterEndOffset = prefixHeights[visibleRange.end + 1] ?? estimatedTotalHeight;
+  const bottomSpacerHeight = Math.max(0, estimatedTotalHeight - afterEndOffset);
+
   return (
     <div
       ref={webtoonContainerRef}
@@ -75,9 +88,7 @@ export function ReaderWebtoonModeView({
       <div
         className="flex flex-col items-center mx-auto relative"
         style={{
-          height: `${Array.from({ length: pages.length }, (_, i) => {
-            return imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-          }).reduce((sum, height) => sum + height, 0)}px`,
+          height: `${estimatedTotalHeight}px`,
           maxWidth: window.innerWidth >= 1024 ? '800px' : '1200px',
           width: '100%',
           padding: window.innerWidth >= 1024 ? '0 1rem' : '0',
@@ -86,9 +97,7 @@ export function ReaderWebtoonModeView({
         {visibleRange.start > 0 && (
           <div
             style={{
-              height: `${Array.from({ length: visibleRange.start }, (_, i) => {
-                return imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-              }).reduce((sum, height) => sum + height, 0)}px`,
+              height: `${topSpacerHeight}px`,
               minHeight: '1px',
             }}
             className="w-full"
@@ -182,10 +191,12 @@ export function ReaderWebtoonModeView({
                           alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
                           fill
                           className="object-contain select-none"
+                          sizes="(max-width: 1024px) 95vw, 800px"
+                          decoding="async"
                           style={{
                             opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
-                            transform: `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                            transition: 'transform 0.1s ease-out',
+                            transform,
+                            transition: transformTransition,
                             cursor: scale > 1 ? 'grab' : 'default',
                           }}
                           onLoadingComplete={(img) => {
@@ -219,10 +230,7 @@ export function ReaderWebtoonModeView({
         {visibleRange.end < pages.length - 1 && (
           <div
             style={{
-              height: `${Array.from({ length: pages.length - visibleRange.end - 1 }, (_, i) => {
-                const index = visibleRange.end + 1 + i;
-                return imageHeights[index] || containerHeight || window.innerHeight * 0.7;
-              }).reduce((sum, height) => sum + height, 0)}px`,
+              height: `${bottomSpacerHeight}px`,
               minHeight: '1px',
             }}
             className="w-full"

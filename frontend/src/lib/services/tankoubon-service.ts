@@ -14,8 +14,8 @@ export class TankoubonService {
   /**
    * Get all tankoubons
    */
-  static async getAllTankoubons(): Promise<Tankoubon[]> {
-    const response = await apiClient.get<TankoubonResponse>(this.baseUrl);
+  static async getAllTankoubons(options?: { signal?: AbortSignal }): Promise<Tankoubon[]> {
+    const response = await apiClient.get<TankoubonResponse>(this.baseUrl, { signal: options?.signal });
     return this.normalizeResult(response.data);
   }
 

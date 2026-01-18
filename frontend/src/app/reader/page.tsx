@@ -887,6 +887,8 @@ function ReaderContent() {
 	          visibleRange={webtoonVirtualization.visibleRange}
 	          imageHeights={webtoonVirtualization.imageHeights}
 	          containerHeight={webtoonVirtualization.containerHeight}
+	          prefixHeights={webtoonVirtualization.prefixHeights}
+	          totalHeight={webtoonVirtualization.totalHeight}
 	          imagesLoading={imageLoading.imagesLoading}
 	          loadedImages={imageLoading.loadedImages}
 	          scale={scale}

@@ -43,8 +43,8 @@ export interface PageInfo {
 }
 
 export class ArchiveService {
-  static async search(params: SearchParams): Promise<SearchResponse> {
-    const response = await apiClient.get('/api/search', { params });
+  static async search(params: SearchParams, options?: { signal?: AbortSignal }): Promise<SearchResponse> {
+    const response = await apiClient.get('/api/search', { params, signal: options?.signal });
     return response.data;
   }
 

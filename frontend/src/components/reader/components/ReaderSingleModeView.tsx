@@ -83,6 +83,7 @@ export function ReaderSingleModeView({
   const isSingleImageLayout = !doublePageMode || (doublePageMode && splitCoverMode && currentPage === 0);
   const currentMeta = imageMeta[currentPage];
   const useLongPageScroll = Boolean(longPageEnabled && isSingleImageLayout && currentMeta?.isLong);
+  const shouldTransform = scale !== 1 || translateX !== 0 || translateY !== 0;
 
   const dragStateRef = useRef<{
     active: boolean;
@@ -202,8 +203,10 @@ export function ReaderSingleModeView({
             maxHeight: '100%',
             height: '100%',
             transform:
-              doublePageMode && !useLongPageScroll ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : 'none',
-            transition: 'all 300ms ease-in-out',
+              doublePageMode && !useLongPageScroll && shouldTransform
+                ? `scale(${scale}) translate(${translateX}px, ${translateY}px)`
+                : 'none',
+            transition: doublePageMode && !useLongPageScroll && shouldTransform ? 'transform 300ms ease-in-out' : 'none',
             cursor: doublePageMode && !useLongPageScroll && scale > 1 ? 'grab' : 'default',
           }}
         >
@@ -232,8 +235,8 @@ export function ReaderSingleModeView({
                     maxHeight: '100%',
                     height: '100%',
                     opacity: loadedImages.has(currentPage) ? 1 : 0.3,
-                    transform: doublePageMode ? 'none' : `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
-                    transition: doublePageMode ? 'none' : 'transform 0.1s ease-out',
+                    transform: !doublePageMode && shouldTransform ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : undefined,
+                    transition: !doublePageMode && shouldTransform ? 'transform 0.1s ease-out' : undefined,
                   }}
                   onLoadedData={() => onImageLoaded(currentPage)}
                   onError={() => onImageError(currentPage)}
@@ -269,7 +272,8 @@ export function ReaderSingleModeView({
                       {...(useLongPageScroll && currentMeta
                         ? { width: currentMeta.w, height: currentMeta.h }
                         : { fill: true })}
-                      sizes={useLongPageScroll ? '(max-width: 1024px) 95vw, 800px' : undefined}
+                      sizes="(max-width: 1024px) 95vw, 800px"
+                      decoding="async"
                       className={`
                         ${
                           useLongPageScroll
@@ -289,14 +293,14 @@ export function ReaderSingleModeView({
                         opacity: loadedImages.has(currentPage) ? 1 : 0.3,
                         // For long pages, scrolling is the primary navigation; keep transforms minimal.
                         transform: useLongPageScroll
-                          ? scale === 1
-                            ? 'none'
-                            : `scale(${scale})`
-                          : doublePageMode
-                            ? 'none'
-                            : `scale(${scale}) translate(${translateX}px, ${translateY}px)`,
+                          ? shouldTransform
+                            ? `scale(${scale})`
+                            : undefined
+                          : !doublePageMode && shouldTransform
+                            ? `scale(${scale}) translate(${translateX}px, ${translateY}px)`
+                            : undefined,
                         transformOrigin: useLongPageScroll ? 'top center' : undefined,
-                        transition: doublePageMode && !useLongPageScroll ? 'none' : 'transform 0.1s ease-out',
+                        transition: !doublePageMode && shouldTransform ? 'transform 0.1s ease-out' : undefined,
                         cursor: doublePageMode ? 'pointer' : scale > 1 ? 'grab' : 'default',
                       }}
                       onLoadingComplete={(img) => {
@@ -356,6 +360,8 @@ export function ReaderSingleModeView({
                     src={cachedPages[currentPage + 1] || pages[currentPage + 1]?.url}
                     alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
                     fill
+                    sizes="(max-width: 1024px) 95vw, 800px"
+                    decoding="async"
                     className={`
                       object-cover select-none touch-none
                       w-full h-full

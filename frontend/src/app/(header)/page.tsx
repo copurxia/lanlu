@@ -14,11 +14,20 @@ import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { RefreshCw } from 'lucide-react';
-import { useState, useEffect, useCallback, Suspense, useRef } from 'react';
+import { useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useGridColumnCount } from '@/hooks/common-hooks';
+import { useDebounce, useGridColumnCount } from '@/hooks/common-hooks';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/utils/logger';
+
+function isAbortLikeError(err: any) {
+  return (
+    err?.name === 'AbortError' ||
+    err?.name === 'CanceledError' ||
+    err?.code === 'ERR_CANCELED' ||
+    err?.message === 'canceled'
+  );
+}
 
 function HomePageContent() {
   const { t, language } = useLanguage();
@@ -47,6 +56,8 @@ function HomePageContent() {
   const pageSize = 20;
   const randomKey = `${gridColumnCount}:${language}`;
   const lastRandomKeyRef = useRef<string | null>(null);
+  const archivesAbortRef = useRef<AbortController | null>(null);
+  const archivesRequestIdRef = useRef(0);
 
   // 读取URL参数
   const urlQuery = searchParams?.get('q') || '';
@@ -60,35 +71,62 @@ function HomePageContent() {
   const urlGroupByTanks = searchParams?.get('groupby_tanks') !== 'false'; // 默认为true
   const urlPage = parseInt(searchParams?.get('page') || '0', 10); // 从URL读取页码
 
-  const fetchArchives = useCallback(async (page: number = 0) => {
+  const fetchInput = useMemo(() => ({
+    page: currentPage,
+    sortBy,
+    sortOrder,
+    searchQuery,
+    newonly,
+    untaggedonly,
+    favoriteonly,
+    dateFrom,
+    dateTo,
+    groupByTanks,
+    language,
+  }), [currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, language, newonly, searchQuery, sortBy, sortOrder, untaggedonly]);
+  const fetchInputRef = useRef(fetchInput);
+  useEffect(() => {
+    fetchInputRef.current = fetchInput;
+  }, [fetchInput]);
+
+  const debouncedFetchInput = useDebounce(fetchInput, 250);
+
+  const fetchArchives = useCallback(async (input: typeof fetchInput) => {
+    const requestId = (archivesRequestIdRef.current += 1);
+    archivesAbortRef.current?.abort();
+    const controller = new AbortController();
+    archivesAbortRef.current = controller;
+
     try {
       setLoading(true);
       const params: any = {
-        start: page * pageSize,
+        start: input.page * pageSize,
         count: pageSize,
-        sortby: sortBy,
-        order: sortOrder
+        sortby: input.sortBy,
+        order: input.sortOrder
       };
 
-      if (searchQuery) params.filter = searchQuery;
-      if (newonly) params.newonly = true;
-      if (untaggedonly) params.untaggedonly = true;
-      if (favoriteonly) params.favoriteonly = true;
-      if (dateFrom) params.date_from = dateFrom;
-      if (dateTo) params.date_to = dateTo;
-      params.groupby_tanks = groupByTanks; // 添加Tankoubon分组参数
-      params.lang = language; // 添加语言参数用于标签翻译
+      if (input.searchQuery) params.filter = input.searchQuery;
+      if (input.newonly) params.newonly = true;
+      if (input.untaggedonly) params.untaggedonly = true;
+      if (input.favoriteonly) params.favoriteonly = true;
+      if (input.dateFrom) params.date_from = input.dateFrom;
+      if (input.dateTo) params.date_to = input.dateTo;
+      params.groupby_tanks = input.groupByTanks; // 添加Tankoubon分组参数
+      params.lang = input.language; // 添加语言参数用于标签翻译
 
-      const result = await ArchiveService.search(params);
+      const result = await ArchiveService.search(params, { signal: controller.signal });
+      if (requestId !== archivesRequestIdRef.current) return;
       let data: (Archive | Tankoubon)[] = [...result.data];
       let totalRecordsAdjusted = result.recordsTotal;
 
       // 如果是搜索模式且启用了合集分组，手动搜索匹配的合集
-      if (searchQuery && groupByTanks) {
+      if (input.searchQuery && input.groupByTanks) {
         try {
           // 获取所有合集并过滤
-          const allTanks = await TankoubonService.getAllTankoubons();
-          const queryLower = searchQuery.toLowerCase();
+          const allTanks = await TankoubonService.getAllTankoubons({ signal: controller.signal });
+          if (requestId !== archivesRequestIdRef.current) return;
+          const queryLower = input.searchQuery.toLowerCase();
           const matchingTanks = allTanks.filter(tank => 
             tank.name.toLowerCase().includes(queryLower) || 
             (tank.tags && tank.tags.toLowerCase().includes(queryLower))
@@ -105,24 +143,26 @@ function HomePageContent() {
           totalRecordsAdjusted += newTanks.length;
 
           // 仅在第一页将匹配的合集插入到结果前面
-          if (page === 0) {
+          if (input.page === 0) {
             data = [...newTanks, ...data];
           }
         } catch (err) {
+          if (isAbortLikeError(err)) return;
           logger.apiError('fetch matching tankoubons', err);
         }
       }
 
+      if (requestId !== archivesRequestIdRef.current) return;
       setArchives(data);
       setTotalRecords(totalRecordsAdjusted);
       setTotalPages(Math.ceil(totalRecordsAdjusted / pageSize));
     } catch (error) {
+      if (isAbortLikeError(error)) return;
       logger.apiError('fetch archives', error);
-      setArchives([]);
     } finally {
-      setLoading(false);
+      if (requestId === archivesRequestIdRef.current) setLoading(false);
     }
-  }, [pageSize, sortBy, sortOrder, searchQuery, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, language]);
+  }, [pageSize]);
 
   const fetchRandomArchives = useCallback(async () => {
     try {
@@ -136,6 +176,11 @@ function HomePageContent() {
       setRandomLoading(false);
     }
   }, [gridColumnCount, language]);
+
+  // Cancel in-flight list request on unmount.
+  useEffect(() => {
+    return () => archivesAbortRef.current?.abort();
+  }, []);
 
   // 设置初始状态（从URL参数）
   useEffect(() => {
@@ -186,25 +231,28 @@ function HomePageContent() {
     // 只在客户端执行数据获取，避免静态生成时的API调用
     // 确保只在初始化完成后才获取数据，避免使用未同步的初始状态
     if (typeof window !== 'undefined' && isInitialized) {
-      fetchArchives(currentPage);
-      // Random recommendations are hidden during search, and they don't need
-      // to refresh on every filter/sort/page change.
-      if (!searchQuery && lastRandomKeyRef.current !== randomKey) {
-        lastRandomKeyRef.current = randomKey;
-        fetchRandomArchives();
-      }
+      fetchArchives(debouncedFetchInput);
     }
-  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, isInitialized, randomKey, searchQuery]);
+  }, [debouncedFetchInput, fetchArchives, isInitialized]);
+
+  // Random recommendations are hidden during search, and they don't need to refresh on every filter/sort/page change.
+  useEffect(() => {
+    if (typeof window === 'undefined' || !isInitialized) return;
+    if (searchQuery) return;
+    if (lastRandomKeyRef.current === randomKey) return;
+    lastRandomKeyRef.current = randomKey;
+    fetchRandomArchives();
+  }, [fetchRandomArchives, isInitialized, randomKey, searchQuery]);
 
   // 监听上传完成事件，刷新首页数据
   useEffect(() => {
     const handleUploadCompleted = () => {
-      fetchArchives(currentPage);
+      fetchArchives(fetchInputRef.current);
       if (!searchQuery) fetchRandomArchives();
     };
 
     const handleArchivesRefresh = () => {
-      fetchArchives(currentPage);
+      fetchArchives(fetchInputRef.current);
       if (!searchQuery) fetchRandomArchives();
     };
 
@@ -231,7 +279,7 @@ function HomePageContent() {
       appEvents.off(AppEvents.ARCHIVES_REFRESH, handleArchivesRefresh);
       appEvents.off(AppEvents.SEARCH_RESET, handleSearchReset);
     };
-  }, [currentPage, fetchArchives, fetchRandomArchives, searchQuery]);
+  }, [fetchArchives, fetchRandomArchives, searchQuery]);
 
   // Open mobile filter dialog from the global header action.
   useEffect(() => {

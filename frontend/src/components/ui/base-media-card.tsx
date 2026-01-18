@@ -94,14 +94,24 @@ export function BaseMediaCard({
     }
   }
 
-  const animationDelay = Math.min(index * 50, 500)
+  // Avoid promoting hundreds of cards into animation/compositor work during scroll.
+  const shouldEntranceAnimate = index < 24
+  const animationDelay = shouldEntranceAnimate ? Math.min(index * 50, 500) : 0
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
   const readerPath = `/reader?id=${thumbnailId}`
 
   return (
     <Card
-      className="group overflow-hidden cursor-pointer transition-shadow hover:shadow-lg motion-safe:animate-archive-card-in motion-reduce:animate-none will-change-transform"
-      style={{ animationDelay: `${animationDelay}ms` }}
+      className={[
+        "group overflow-hidden cursor-pointer transition-shadow hover:shadow-lg motion-reduce:animate-none",
+        shouldEntranceAnimate ? "motion-safe:animate-archive-card-in" : "",
+      ].filter(Boolean).join(" ")}
+      // `content-visibility` acts like browser-level virtualization for large grids.
+      style={{
+        animationDelay: shouldEntranceAnimate ? `${animationDelay}ms` : undefined,
+        contentVisibility: 'auto',
+        containIntrinsicSize: '220px 360px',
+      }}
       title={hoverTitleParts.length > 0 ? `${title}\n${hoverTitleParts.join('\n')}` : title}
       onClick={() => router.push(readerPath)}
     >
@@ -113,6 +123,8 @@ export function BaseMediaCard({
             fill
             className="object-cover"
             priority={priority}
+            sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+            decoding="async"
             onError={() => setImageError(true)}
           />
         ) : (

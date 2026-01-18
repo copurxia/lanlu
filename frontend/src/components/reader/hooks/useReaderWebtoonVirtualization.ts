@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type { ReadingMode } from '@/hooks/use-reader-settings';
@@ -32,7 +32,53 @@ export function useReaderWebtoonVirtualization({
   const [imageHeights, setImageHeights] = useState<number[]>([]);
   const [containerHeight, setContainerHeight] = useState(0);
 
-  const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastVisibleRangeRef = useRef<VisibleRange>(visibleRange);
+  const currentPageRef = useRef(currentPage);
+  const containerHeightRef = useRef(containerHeight);
+
+  useEffect(() => {
+    lastVisibleRangeRef.current = visibleRange;
+  }, [visibleRange]);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  useEffect(() => {
+    containerHeightRef.current = containerHeight;
+  }, [containerHeight]);
+
+  const prefixHeights = useMemo(() => {
+    const out = new Array(imageHeights.length + 1);
+    out[0] = 0;
+    for (let i = 0; i < imageHeights.length; i += 1) {
+      out[i + 1] = out[i] + (imageHeights[i] || 0);
+    }
+    return out;
+  }, [imageHeights]);
+
+  const totalHeight = prefixHeights[prefixHeights.length - 1] || 0;
+
+  const findIndexAtOffset = useCallback(
+    (offset: number) => {
+      const n = pages.length;
+      if (n <= 0) return 0;
+      if (offset <= 0) return 0;
+      if (offset >= totalHeight) return n - 1;
+
+      // Binary search for the greatest i such that prefixHeights[i] <= offset.
+      let lo = 0;
+      let hi = n;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (prefixHeights[mid] <= offset) lo = mid + 1;
+        else hi = mid;
+      }
+      return Math.max(0, Math.min(n - 1, lo - 1));
+    },
+    [pages.length, prefixHeights, totalHeight]
+  );
 
   const calculateVisibleRange = useCallback(
     (scrollTop: number, containerHeightInput: number) => {
@@ -40,83 +86,56 @@ export function useReaderWebtoonVirtualization({
         return { start: 0, end: Math.min(2, pages.length - 1) };
       }
 
-      let accumulatedHeight = 0;
-      let startIndex = 0;
-      let endIndex = pages.length - 1;
       const bufferHeight = containerHeightInput * 3;
-
-      for (let i = 0; i < pages.length; i++) {
-        const imageHeight = imageHeights[i] || containerHeightInput || window.innerHeight * 0.7;
-
-        if (accumulatedHeight + imageHeight > scrollTop - bufferHeight) {
-          startIndex = Math.max(0, i - 4);
-          break;
-        }
-        accumulatedHeight += imageHeight;
-      }
-
-      accumulatedHeight = 0;
-      for (let i = 0; i < pages.length; i++) {
-        const imageHeight = imageHeights[i] || containerHeightInput || window.innerHeight * 0.7;
-        accumulatedHeight += imageHeight;
-        if (accumulatedHeight > scrollTop + containerHeightInput + bufferHeight) {
-          endIndex = Math.min(pages.length - 1, i + 4);
-          break;
-        }
-      }
-
-      startIndex = Math.max(0, startIndex);
-      endIndex = Math.min(pages.length - 1, endIndex);
+      const startIndex = Math.max(0, findIndexAtOffset(scrollTop - bufferHeight) - 4);
+      const endIndex = Math.min(pages.length - 1, findIndexAtOffset(scrollTop + containerHeightInput + bufferHeight) + 4);
 
       if (endIndex - startIndex < 2 && pages.length > 2) {
         const center = Math.floor((startIndex + endIndex) / 2);
-        startIndex = Math.max(0, center - 1);
-        endIndex = Math.min(pages.length - 1, center + 1);
+        return {
+          start: Math.max(0, center - 1),
+          end: Math.min(pages.length - 1, center + 1),
+        };
       }
 
-      return { start: startIndex, end: endIndex };
+      return { start: Math.max(0, startIndex), end: Math.min(pages.length - 1, endIndex) };
     },
-    [pages.length, imageHeights]
+    [findIndexAtOffset, imageHeights.length, pages.length]
   );
 
   const handleWebtoonScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const container = e.currentTarget;
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
 
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
+        const scrollTop = container.scrollTop;
+        const clientHeight = container.clientHeight;
+        const threshold = scrollTop + clientHeight * 0.3;
+        const newPageIndex = findIndexAtOffset(threshold);
 
-      scrollTimeoutRef.current = setTimeout(() => {
-        let accumulatedHeight = 0;
-        let newPageIndex = 0;
-
-        for (let i = 0; i < pages.length; i++) {
-          const imageHeight = imageHeights[i] || containerHeight || window.innerHeight * 0.7;
-          accumulatedHeight += imageHeight;
-          if (accumulatedHeight > container.scrollTop + container.clientHeight * 0.3) {
-            newPageIndex = i;
-            break;
-          }
-        }
-
-        if (newPageIndex !== currentPage && newPageIndex >= 0 && newPageIndex < pages.length) {
+        if (newPageIndex !== currentPageRef.current && newPageIndex >= 0 && newPageIndex < pages.length) {
           setCurrentPage(newPageIndex);
         }
 
-        const newVisibleRange = calculateVisibleRange(container.scrollTop, container.clientHeight);
-        setVisibleRange(newVisibleRange);
-        setContainerHeight(container.clientHeight);
-      }, 16);
+        const newVisibleRange = calculateVisibleRange(scrollTop, clientHeight);
+        const prevRange = lastVisibleRangeRef.current;
+        if (newVisibleRange.start !== prevRange.start || newVisibleRange.end !== prevRange.end) {
+          setVisibleRange(newVisibleRange);
+        }
+
+        if (Math.abs(clientHeight - containerHeightRef.current) > 1) {
+          setContainerHeight(clientHeight);
+        }
+      });
     },
-    [calculateVisibleRange, containerHeight, currentPage, imageHeights, pages.length, setCurrentPage]
+    [calculateVisibleRange, findIndexAtOffset, pages.length, setCurrentPage]
   );
 
   useEffect(() => {
     return () => {
-      if (scrollTimeoutRef.current) {
-        clearTimeout(scrollTimeoutRef.current);
-      }
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
@@ -178,6 +197,8 @@ export function useReaderWebtoonVirtualization({
     imageHeights,
     setImageHeights,
     containerHeight,
+    prefixHeights,
+    totalHeight,
     handleWebtoonScroll,
     setVisibleRange,
     setContainerHeight,
