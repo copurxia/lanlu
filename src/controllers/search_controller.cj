@@ -30,6 +30,24 @@ public class SearchController {
     }
 
     /**
+     * 从逗号分隔的 tags 字符串中提取并去重标签（namespace:name），用于批量翻译。
+     */
+    private static func collectUniqueTags(tagsString: String, seen: HashMap<String, Bool>, out: ArrayList<String>) {
+        if (tagsString.size == 0) { return }
+        let parts = tagsString.split(",")
+        for (p in parts) {
+            let t = p.trimAscii()
+            if (t.size == 0) { continue }
+            match (seen.get(t)) {
+                case Some(_) => ()
+                case None =>
+                    seen[t] = true
+                    out.add(t)
+            }
+        }
+    }
+
+    /**
      * 搜索归档
      */
     public static func searchArchives(ctx: JoyContext) {
@@ -88,25 +106,45 @@ public class SearchController {
             // 批量获取收藏时间
             let tankFavoriteTimeMap = UserTankoubonFavoriteDao.getBatchFavoriteTime(userId, tankoubonIds)
 
+            // 批量获取合集聚合元数据 + 归档列表，避免逐个查询
+            let aggMap = TankoubonDao.getBatchAggregatedMetadata(tankoubonIds, userId)
+            let tankArchivesCache = TankoubonDao.getBatchArchivesInTankoubon(tankoubonIds)
+
+            // 批量获取标签翻译映射（按请求维度一次查询）
+            var tagTranslations: HashMap<String, String> = HashMap<String, String>()
+            if (lang.size > 0) {
+                var uniqueTags = ArrayList<String>()
+                var seenTags: HashMap<String, Bool> = HashMap<String, Bool>()
+                for ((_, agg) in aggMap) {
+                    collectUniqueTags(agg.tags, seenTags, uniqueTags)
+                }
+                if (uniqueTags.size > 0) {
+                    tagTranslations = TagDao.batchGetTranslations(uniqueTags.toArray(), lang)
+                }
+            }
+
             var tanksJson = "["
             var isFirstTank = true
             for (tid in tankoubonIds) {
-                match (TankoubonDao.getAggregatedMetadata(tid, userId)) {
+                match (aggMap.get(tid)) {
                     case Some(agg) =>
                         if (!isFirstTank) {
                             tanksJson += ","
                         }
                         isFirstTank = false
 
-                        let archives = TankoubonDao.getArchivesInTankoubon(tid)
                         var archivesJson = "["
-                        var isFirstArchive = true
-                        for (archiveId in archives) {
-                            if (!isFirstArchive) {
-                                archivesJson += ","
-                            }
-                            archivesJson += "\"${escapeJson(archiveId)}\""
-                            isFirstArchive = false
+                        match (tankArchivesCache.get(tid)) {
+                            case Some(archives) =>
+                                var isFirstArchive = true
+                                for (archiveId in archives) {
+                                    if (!isFirstArchive) {
+                                        archivesJson += ","
+                                    }
+                                    archivesJson += "\"${escapeJson(archiveId)}\""
+                                    isFirstArchive = false
+                                }
+                            case None => ()
                         }
                         archivesJson += "]"
 
@@ -118,7 +156,7 @@ public class SearchController {
 
                         // 翻译标签
                         let translatedTags = if (lang.size > 0) {
-                            TagDao.translateTagsString(agg.tags, lang)
+                            TagDao.translateTagsString(agg.tags, lang, tagTranslations)
                         } else {
                             agg.tags
                         }
@@ -216,6 +254,24 @@ public class SearchController {
         // 批量获取所有 Tankoubon 的归档列表
         let tankoubonArchivesCache = TankoubonDao.getBatchArchivesInTankoubon(tankoubonIdsList.toArray())
 
+        // 批量获取标签翻译映射（按请求维度一次查询）
+        var tagTranslations: HashMap<String, String> = HashMap<String, String>()
+        if (lang.size > 0) {
+            var uniqueTags = ArrayList<String>()
+            var seenTags: HashMap<String, Bool> = HashMap<String, Bool>()
+            for (archive in archives) {
+                collectUniqueTags(archive.tags, seenTags, uniqueTags)
+            }
+            if (groupByTanks) {
+                for ((_, tank) in tankoubonDataCache) {
+                    collectUniqueTags(tank.tags, seenTags, uniqueTags)
+                }
+            }
+            if (uniqueTags.size > 0) {
+                tagTranslations = TagDao.batchGetTranslations(uniqueTags.toArray(), lang)
+            }
+        }
+
         for (archive in archives) {
             // 检查此归档是否属于某个Tankoubon
             var belongsToTankoubon = false
@@ -266,7 +322,7 @@ public class SearchController {
 
                         // 翻译标签
                         let translatedTankTags = if (lang.size > 0) {
-                            TagDao.translateTagsString(tankoubon.tags, lang)
+                            TagDao.translateTagsString(tankoubon.tags, lang, tagTranslations)
                         } else {
                             tankoubon.tags
                         }
@@ -355,7 +411,7 @@ public class SearchController {
 
             // 翻译标签
             let translatedArchiveTags = if (lang.size > 0) {
-                TagDao.translateTagsString(archive.tags, lang)
+                TagDao.translateTagsString(archive.tags, lang, tagTranslations)
             } else {
                 archive.tags
             }

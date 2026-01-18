@@ -6,6 +6,7 @@ import lrr4cj.utils.*
 import std.collection.*
 import stdx.log.*
 import stdx.encoding.json.*
+import std.sync.*
 
 /**
  * 标签翻译数据结构
@@ -69,6 +70,11 @@ public class TagData {
  * 标签数据访问对象
  */
 public class TagDao {
+    // Cache for translation-text lookup used by ArchiveDao search expansion.
+    // This avoids repeated DB scans of tags.translations on common terms.
+    private static var translationSearchCache: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
+    private static var translationSearchCacheMutex: Mutex = Mutex()
+    private static let translationSearchCacheMaxSize: Int64 = 1024i64
 
     /**
      * 解析 namespace:name 格式的标签
@@ -605,36 +611,52 @@ public class TagDao {
             case Some(conn) =>
                 
                 try {
-                    // 构建查询条件
-                    var conditions: ArrayList<String> = ArrayList<String>()
+                    // Use row-wise IN to avoid long OR chains and keep it index-friendly.
+                    // WHERE (namespace, name) IN ((?, ?), (?, ?), ...)
+                    var tuples: ArrayList<String> = ArrayList<String>()
+                    var namespaces: ArrayList<String> = ArrayList<String>()
+                    var names: ArrayList<String> = ArrayList<String>()
                     for (tag in tags) {
                         let (namespace, name) = parseTagName(tag)
-                        conditions.add("(namespace = '${escapeSQL(namespace)}' AND name = '${escapeSQL(name)}')")
+                        tuples.add("(?, ?)")
+                        namespaces.add(namespace)
+                        names.add(name)
                     }
 
-                    let conditionsStr = String.join(conditions.toArray(), delimiter: " OR ")
-                    let sql = "SELECT namespace, name, translations FROM tags WHERE " + conditionsStr
+                    let tuplesStr = String.join(tuples.toArray(), delimiter: ", ")
+                    let sql = "SELECT namespace, name, translations FROM tags WHERE (namespace, name) IN (" + tuplesStr + ")"
                     let stmt = conn.prepareStatement(sql)
-                    let rs = stmt.query()
                     try {
-                        while (rs.next()) {
-                            let namespace = rs.getOrNull<String>(0) ?? ""
-                            let name = rs.getOrNull<String>(1) ?? ""
-                            let translationsJson = rs.getOrNull<String>(2) ?? "{}"
-                            let translations = parseTranslationsJson(translationsJson)
+                        // 绑定 (namespace, name) 参数对
+                        var paramIndex = 0
+                        for (i in 0..namespaces.size) {
+                            stmt.set(paramIndex, namespaces[i])
+                            stmt.set(paramIndex + 1, names[i])
+                            paramIndex += 2
+                        }
 
-                            let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let namespace = rs.getOrNull<String>(0) ?? ""
+                                let name = rs.getOrNull<String>(1) ?? ""
+                                let translationsJson = rs.getOrNull<String>(2) ?? "{}"
+                                let translations = parseTranslationsJson(translationsJson)
 
-                            match (translations.get(lang)) {
-                                case Some(t) =>
-                                    if (t.text.size > 0) {
-                                        result[fullName] = t.text
-                                    }
-                                case None => ()
+                                let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+
+                                match (translations.get(lang)) {
+                                    case Some(t) =>
+                                        if (t.text.size > 0) {
+                                            result[fullName] = t.text
+                                        }
+                                    case None => ()
+                                }
                             }
+                        } finally {
+                            rs.close()
                         }
                     } finally {
-                        rs.close()
                         stmt.close()
                     }
                 } catch (e: Exception) {
@@ -851,6 +873,39 @@ public class TagDao {
     }
 
     /**
+     * 翻译标签字符串（使用外部提供的翻译映射，避免重复查询数据库）
+     * @param tagsString 原始标签字符串（逗号分隔，namespace:name 格式）
+     * @param lang 语言代码
+     * @param translationsMap 标签全名 -> 翻译文本 的映射（由 batchGetTranslations 生成）
+     */
+    public static func translateTagsString(tagsString: String, lang: String, translationsMap: HashMap<String, String>): String {
+        if (tagsString.size == 0 || lang.size == 0) {
+            return tagsString
+        }
+
+        let tags = parseTagsString(tagsString)
+        if (tags.size == 0) {
+            return tagsString
+        }
+
+        var translatedTags: ArrayList<String> = ArrayList<String>()
+        for (tag in tags) {
+            let (namespace, _) = parseTagName(tag)
+            match (translationsMap.get(tag)) {
+                case Some(translatedText) =>
+                    if (namespace.size > 0) {
+                        translatedTags.add("${namespace}:${translatedText}")
+                    } else {
+                        translatedTags.add(translatedText)
+                    }
+                case None => translatedTags.add(tag)
+            }
+        }
+
+        return String.join(translatedTags.toArray(), delimiter: ", ")
+    }
+
+    /**
      * 反向翻译标签字符串（用于后端存储）
      * 将翻译后的标签字符串还原为原始标签字符串，格式为 "namespace:原始name"
      * @param translatedTagsString 翻译后的标签字符串（逗号分隔，namespace:翻译文本 或 namespace:原始name）
@@ -922,6 +977,16 @@ public class TagDao {
             return result
         }
 
+        // Fast path: serve from cache to avoid repeated translations::text scans.
+        translationSearchCacheMutex.lock()
+        match (translationSearchCache.get(searchTerm)) {
+            case Some(cached) =>
+                translationSearchCacheMutex.unlock()
+                return cached
+            case None => ()
+        }
+        translationSearchCacheMutex.unlock()
+
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
@@ -958,6 +1023,15 @@ public class TagDao {
                 }
             case None => ()
         }
+
+        // Store into cache (best-effort). If cache grows too much, drop it.
+        translationSearchCacheMutex.lock()
+        if (translationSearchCache.size >= translationSearchCacheMaxSize) {
+            translationSearchCache = HashMap<String, ArrayList<String>>()
+        }
+        translationSearchCache[searchTerm] = result
+        translationSearchCacheMutex.unlock()
+
         return result
     }
 
@@ -1038,13 +1112,6 @@ public class TagDao {
         result = result.replace("\r", "\\r")
         result = result.replace("\t", "\\t")
         return result
-    }
-
-    /**
-     * 转义 SQL 字符串（防止 SQL 注入）
-     */
-    private static func escapeSQL(s: String): String {
-        return s.replace("'", "''")
     }
 
     // ============ 自动补全搜索方法 ============
