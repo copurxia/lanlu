@@ -21,6 +21,7 @@ import { appEvents, AppEvents } from '@/lib/utils/events';
 export function Header() {
   const { t } = useLanguage();
   const { serverName, serverInfo } = useServerInfo();
+  const headerRef = useRef<HTMLElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const mobileSearchRef = useRef<SearchBarHandle>(null);
@@ -36,6 +37,33 @@ export function Header() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Expose the header height as a CSS variable so pages can size their scroll containers
+  // without hard-coding a pixel/rem value. This prevents the "white strip" body scroll.
+  useEffect(() => {
+    if (!mounted) return;
+    if (typeof window === 'undefined') return;
+    if (!headerRef.current) return;
+
+    const el = headerRef.current;
+    const root = document.documentElement;
+
+    const update = () => {
+      // offsetHeight is stable for sticky elements and includes padding/borders.
+      root.style.setProperty('--app-header-height', `${el.offsetHeight}px`);
+    };
+
+    update();
+
+    const ro = new ResizeObserver(() => update());
+    ro.observe(el);
+    window.addEventListener('resize', update);
+
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [mounted]);
 
   // Close the mobile search mode on navigation.
   useEffect(() => {
@@ -74,7 +102,7 @@ export function Header() {
   ];
 
   return (
-    <header className="bg-background border-b border-border sticky top-0 z-50">
+    <header ref={headerRef} className="bg-background border-b border-border sticky top-0 z-50">
       <div className="mx-auto px-4 py-3">
         <div className="relative flex items-center justify-between">
           {/* Logo和标题 */}

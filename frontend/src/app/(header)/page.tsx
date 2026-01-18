@@ -340,11 +340,11 @@ function HomePageContent() {
     .replace('{totalPages}', String(totalPages));
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* 固定高度容器，减去Header高度（约64px）；移动端不再减去底部栏高度，让内容滚动经过底部栏以呈现毛玻璃效果 */}
-      <div className="flex h-[calc(100vh-4rem)]">
+    <div className="bg-background h-[calc(100dvh-var(--app-header-height,4rem))] overflow-hidden">
+      {/* Use the real header height (CSS var) so the document never exceeds the viewport. */}
+      <div className="flex h-full min-h-0">
         {/* 侧栏 - 桌面端显示 */}
-        <div className="hidden lg:block flex-shrink-0 border-r border-border w-80">
+        <div className="hidden lg:block flex-shrink-0 border-r border-border w-80 min-h-0">
           <SearchSidebar
             onSearch={handleSearch}
             loading={loading}
@@ -363,7 +363,7 @@ function HomePageContent() {
         </div>
 
         {/* 主内容区 - 独立滚动 */}
-        <main className="flex-1 min-w-0 overflow-y-auto pb-24 lg:pb-0">
+        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto pb-24 lg:pb-0">
           <div className="px-4 py-8">
           {/* 随机推荐 - 搜索模式下隐藏 */}
           {!isSearchMode && (
