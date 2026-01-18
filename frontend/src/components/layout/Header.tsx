@@ -29,8 +29,9 @@ export function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const { token } = useAuth();
-  const showBackButton = pathname !== '/';
   const isSettingsPage = pathname?.startsWith('/settings');
+  const isLibraryPage = pathname?.startsWith('/library');
+  const showBackButton = pathname !== '/' && !isSettingsPage && !isLibraryPage;
 
   useEffect(() => {
     setMounted(true);
