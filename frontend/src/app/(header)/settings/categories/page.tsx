@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Folder, Plus, Search, Edit2, Trash2, Play, FolderOpen } from 'lucide-react';
+import { Folder, Plus, Search, Edit2, Trash2, Play, FolderOpen, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { CategoryService, type Category, type CategoryCreateRequest, type CategoryUpdateRequest } from '@/lib/services/category-service';
@@ -281,8 +281,8 @@ export default function CategoriesSettingsPage() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={t('settings.categorySearchPlaceholder')}
@@ -291,32 +291,70 @@ export default function CategoriesSettingsPage() {
             className="pl-8"
           />
         </div>
-        <Select value={enabledFilter} onValueChange={setEnabledFilter}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue placeholder={t('settings.categoryAllStatuses')} />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('settings.categoryAllStatuses')}</SelectItem>
-            <SelectItem value="enabled">{t('settings.categoryEnabled')}</SelectItem>
-            <SelectItem value="disabled">{t('settings.categoryDisabled')}</SelectItem>
-          </SelectContent>
-        </Select>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setSearchQuery('');
-            setEnabledFilter('all');
-          }}
-        >
-          {t('common.clear')}
-        </Button>
-        <Button
-          onClick={() => setCreateDialogOpen(true)}
-          className="flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          {t('settings.categoryCreate')}
-        </Button>
+
+        {/* Keep the search field readable on mobile by collapsing actions into icons. */}
+        <div className="flex gap-2">
+          <Select value={enabledFilter} onValueChange={setEnabledFilter}>
+            <SelectTrigger className="flex-1 min-w-0 sm:flex-none sm:w-[180px]">
+              <SelectValue placeholder={t('settings.categoryAllStatuses')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('settings.categoryAllStatuses')}</SelectItem>
+              <SelectItem value="enabled">{t('settings.categoryEnabled')}</SelectItem>
+              <SelectItem value="disabled">{t('settings.categoryDisabled')}</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Mobile: icon-only clear */}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="sm:hidden"
+            aria-label={t('common.reset')}
+            title={t('common.reset')}
+            onClick={() => {
+              setSearchQuery('');
+              setEnabledFilter('all');
+            }}
+          >
+            <RotateCcw className="h-4 w-4" />
+          </Button>
+          {/* Desktop: normal reset */}
+          <Button
+            type="button"
+            variant="outline"
+            className="hidden sm:inline-flex items-center gap-2"
+            onClick={() => {
+              setSearchQuery('');
+              setEnabledFilter('all');
+            }}
+          >
+            <RotateCcw className="h-4 w-4" />
+            {t('common.reset')}
+          </Button>
+
+          {/* Mobile: icon-only create */}
+          <Button
+            type="button"
+            size="icon"
+            className="sm:hidden"
+            aria-label={t('settings.categoryCreate')}
+            title={t('settings.categoryCreate')}
+            onClick={() => setCreateDialogOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+          </Button>
+          {/* Desktop: normal create */}
+          <Button
+            type="button"
+            className="hidden sm:inline-flex items-center gap-2"
+            onClick={() => setCreateDialogOpen(true)}
+          >
+            <Plus className="h-4 w-4" />
+            {t('settings.categoryCreate')}
+          </Button>
+        </div>
       </div>
 
       {categoriesLoading ? (
