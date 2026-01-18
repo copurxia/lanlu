@@ -9,7 +9,7 @@ import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter } from 'lucide-react';
+import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -22,6 +22,7 @@ export function Header() {
   const { t } = useLanguage();
   const { serverName, serverInfo } = useServerInfo();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [randomLoading, setRandomLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
@@ -33,6 +34,11 @@ export function Header() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Close the mobile search mode on navigation.
+  useEffect(() => {
+    setMobileSearchOpen(false);
+  }, [pathname]);
 
   const handleBack = () => {
     if (!mounted) return;
@@ -70,7 +76,7 @@ export function Header() {
       <div className="mx-auto px-4 py-3">
         <div className="flex items-center justify-between">
           {/* Logo和标题 */}
-          <div className="flex items-center gap-3">
+          <div className={`flex items-center gap-3 ${mobileSearchOpen ? 'hidden md:flex' : ''}`}>
             {isSettingsPage && (
               <Button
                 variant="ghost"
@@ -112,6 +118,24 @@ export function Header() {
                 · {serverInfo.motd}
               </span>
             )}
+          </div>
+
+          {/* 移动端：搜索模式（点击图标后独占顶栏） */}
+          <div className={`md:hidden ${mobileSearchOpen ? 'flex flex-1 items-center gap-2 min-w-0' : 'hidden'}`}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-10 w-10 flex-shrink-0"
+              onClick={() => setMobileSearchOpen(false)}
+              aria-label={t('common.back')}
+              title={t('common.back')}
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <div className="flex-1 min-w-0">
+              <SearchBar autoFocus compact={false} onSubmitted={() => setMobileSearchOpen(false)} />
+            </div>
           </div>
 
           {/* 搜索栏 - 桌面端显示 */}
@@ -177,7 +201,17 @@ export function Header() {
           </nav>
 
           {/* 移动端右侧按钮组 - 用户头像、主题、语言 */}
-          <div className="md:hidden flex items-center space-x-1">
+          <div className={`md:hidden flex items-center space-x-1 ${mobileSearchOpen ? 'hidden' : ''}`}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setMobileSearchOpen(true)}
+              aria-label={t('common.search')}
+              title={t('common.search')}
+            >
+              <Search className="h-5 w-5" />
+            </Button>
             {pathname === '/' && (
               <Button
                 type="button"
@@ -195,7 +229,6 @@ export function Header() {
             <LanguageButton />
           </div>
         </div>
-
       </div>
 
       {/* 移动端：侧边栏菜单仅出现在 settings */}

@@ -7,6 +7,11 @@ import { Input } from "@/components/ui/input"
 import { useAutocomplete, TagSuggestion } from "@/hooks/use-autocomplete"
 import { useLanguage } from "@/contexts/LanguageContext"
 
+export type SearchInputHandle = {
+  getInputValue: () => string
+  focus: () => void
+}
+
 interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
   value: string
   onChange: (value: string) => void
@@ -15,7 +20,7 @@ interface SearchInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEleme
   compact?: boolean
 }
 
-export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, SearchInputProps>(({
+export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>(({
   value = "",
   onChange,
   placeholder = "输入搜索关键词或标签",
@@ -131,7 +136,14 @@ export const SearchInput = React.forwardRef<{ getInputValue?: () => string }, Se
     }
   }, [autocomplete.selectedIndex, mounted])
 
-  React.useImperativeHandle(ref, () => ({ getInputValue: () => inputValue }), [inputValue])
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      getInputValue: () => inputValue,
+      focus: () => inputRef.current?.focus(),
+    }),
+    [inputValue]
+  )
 
   const dropdownContent = mounted && autocomplete.showSuggestions && autocomplete.suggestions.length > 0 && (
     <div
