@@ -75,9 +75,15 @@ export function Header() {
   return (
     <header className="bg-background border-b border-border sticky top-0 z-50">
       <div className="mx-auto px-4 py-3">
-        <div className="flex items-center justify-between">
+        <div className="relative flex items-center justify-between">
           {/* Logo和标题 */}
-          <div className={`flex items-center gap-3 ${mobileSearchOpen ? 'hidden md:flex' : ''}`}>
+          <div
+            className={`
+              flex items-center gap-3
+              transition-opacity duration-200
+              ${mobileSearchOpen ? 'opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto' : 'opacity-100'}
+            `}
+          >
             {isSettingsPage && (
               <Button
                 variant="ghost"
@@ -125,7 +131,11 @@ export function Header() {
           <div
             className={`
               md:hidden
-              ${mobileSearchOpen ? 'flex flex-1 items-center gap-2 min-w-0' : 'absolute left-0 right-0 top-0 opacity-0 pointer-events-none'}
+              absolute inset-0
+              flex items-center gap-2 min-w-0
+              bg-background
+              transition-all duration-200 ease-out
+              ${mobileSearchOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-2 pointer-events-none'}
             `}
             onBlurCapture={(e) => {
               // Auto-hide when the search input loses focus (tap outside).
@@ -221,7 +231,13 @@ export function Header() {
           </nav>
 
           {/* 移动端右侧按钮组 - 用户头像、主题、语言 */}
-          <div className={`md:hidden flex items-center space-x-1 ${mobileSearchOpen ? 'hidden' : ''}`}>
+          <div
+            className={`
+              md:hidden flex items-center space-x-1
+              transition-opacity duration-200
+              ${mobileSearchOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'}
+            `}
+          >
             <Button
               type="button"
               variant="ghost"
