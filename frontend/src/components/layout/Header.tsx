@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { SearchBar } from '@/components/search/SearchBar';
+import { SearchBar, type SearchBarHandle } from '@/components/search/SearchBar';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
@@ -23,6 +23,7 @@ export function Header() {
   const { serverName, serverInfo } = useServerInfo();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const mobileSearchRef = useRef<SearchBarHandle>(null);
   const [randomLoading, setRandomLoading] = useState(false);
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
@@ -121,20 +122,26 @@ export function Header() {
           </div>
 
           {/* 移动端：搜索模式（点击图标后独占顶栏） */}
-          <div className={`md:hidden ${mobileSearchOpen ? 'flex flex-1 items-center gap-2 min-w-0' : 'hidden'}`}>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-10 w-10 flex-shrink-0"
-              onClick={() => setMobileSearchOpen(false)}
-              aria-label={t('common.back')}
-              title={t('common.back')}
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
+          <div
+            className={`
+              md:hidden
+              ${mobileSearchOpen ? 'flex flex-1 items-center gap-2 min-w-0' : 'absolute left-0 right-0 top-0 opacity-0 pointer-events-none'}
+            `}
+            onBlurCapture={(e) => {
+              // Auto-hide when the search input loses focus (tap outside).
+              if (!mobileSearchOpen) return;
+              const next = e.relatedTarget as Node | null;
+              if (next && e.currentTarget.contains(next)) return;
+              setMobileSearchOpen(false);
+            }}
+          >
             <div className="flex-1 min-w-0">
-              <SearchBar autoFocus compact={false} onSubmitted={() => setMobileSearchOpen(false)} />
+              <SearchBar
+                ref={mobileSearchRef}
+                autoFocus={mobileSearchOpen}
+                compact={false}
+                onSubmitted={() => setMobileSearchOpen(false)}
+              />
             </div>
             {pathname === '/' && (
               <Button
@@ -219,7 +226,11 @@ export function Header() {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => setMobileSearchOpen(true)}
+              onClick={() => {
+                // Focus must happen in the same user gesture on some mobile browsers.
+                mobileSearchRef.current?.focus();
+                setMobileSearchOpen(true);
+              }}
               aria-label={t('common.search')}
               title={t('common.search')}
             >

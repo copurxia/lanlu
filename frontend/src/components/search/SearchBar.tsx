@@ -7,13 +7,20 @@ import { Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 
+export type SearchBarHandle = {
+  focus: () => void;
+};
+
 type SearchBarProps = {
   autoFocus?: boolean;
   onSubmitted?: () => void;
   compact?: boolean;
 };
 
-function SearchBarContent({ autoFocus, onSubmitted, compact = true }: SearchBarProps) {
+function SearchBarContent(
+  { autoFocus, onSubmitted, compact = true }: SearchBarProps,
+  ref: React.Ref<SearchBarHandle>
+) {
   const { t } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -39,6 +46,14 @@ function SearchBarContent({ autoFocus, onSubmitted, compact = true }: SearchBarP
     const id = window.setTimeout(() => searchInputRef.current?.focus?.(), 0);
     return () => window.clearTimeout(id);
   }, [autoFocus, mounted]);
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => searchInputRef.current?.focus?.(),
+    }),
+    []
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     if (!mounted) return;
@@ -91,7 +106,9 @@ function SearchBarContent({ autoFocus, onSubmitted, compact = true }: SearchBarP
   );
 }
 
-export function SearchBar(props: SearchBarProps) {
+const SearchBarContentWithRef = React.forwardRef<SearchBarHandle, SearchBarProps>(SearchBarContent);
+
+export const SearchBar = React.forwardRef<SearchBarHandle, SearchBarProps>((props, ref) => {
   return (
     <Suspense fallback={
       <form className="w-full">
@@ -103,7 +120,9 @@ export function SearchBar(props: SearchBarProps) {
         </div>
       </form>
     }>
-      <SearchBarContent {...props} />
+      <SearchBarContentWithRef ref={ref} {...props} />
     </Suspense>
   );
-}
+});
+
+SearchBar.displayName = 'SearchBar';
