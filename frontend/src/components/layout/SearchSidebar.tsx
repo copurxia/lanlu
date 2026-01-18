@@ -49,6 +49,17 @@ interface SearchSidebarProps {
     category_id?: string;
   }) => void;
   loading?: boolean;
+  filters: {
+    sortBy: string;
+    sortOrder: string;
+    dateFrom: string;
+    dateTo: string;
+    newonly: boolean;
+    untaggedonly: boolean;
+    favoriteonly: boolean;
+    groupByTanks: boolean;
+    categoryId: string;
+  };
 }
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -61,17 +72,17 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Search,
 };
 
-export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps) {
+export function SearchSidebar({ onSearch, loading = false, filters }: SearchSidebarProps) {
   const { t, language } = useLanguage();
-  const [sortBy, setSortBy] = useState('date_added');
-  const [sortOrder, setSortOrder] = useState('desc');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
-  const [newonly, setNewonly] = useState(false);
-  const [untaggedonly, setUntaggedonly] = useState(false);
-  const [favoriteonly, setFavoriteonly] = useState(false);
-  const [groupbyTanks, setGroupbyTanks] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [sortBy, setSortBy] = useState(filters.sortBy);
+  const [sortOrder, setSortOrder] = useState(filters.sortOrder);
+  const [dateFrom, setDateFrom] = useState(filters.dateFrom);
+  const [dateTo, setDateTo] = useState(filters.dateTo);
+  const [newonly, setNewonly] = useState(filters.newonly);
+  const [untaggedonly, setUntaggedonly] = useState(filters.untaggedonly);
+  const [favoriteonly, setFavoriteonly] = useState(filters.favoriteonly);
+  const [groupbyTanks, setGroupbyTanks] = useState(filters.groupByTanks);
+  const [selectedCategory, setSelectedCategory] = useState<string>(filters.categoryId || 'all');
   const [categories, setCategories] = useState<Category[]>([]);
   const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
   // 添加mounted状态以避免水合错误
@@ -81,6 +92,31 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Keep the form in sync with URL-driven filter state (e.g. on refresh/back/forward).
+  useEffect(() => {
+    if (!mounted) return;
+    setSortBy(filters.sortBy);
+    setSortOrder(filters.sortOrder);
+    setDateFrom(filters.dateFrom);
+    setDateTo(filters.dateTo);
+    setNewonly(filters.newonly);
+    setUntaggedonly(filters.untaggedonly);
+    setFavoriteonly(filters.favoriteonly);
+    setGroupbyTanks(filters.groupByTanks);
+    setSelectedCategory(filters.categoryId || 'all');
+  }, [
+    mounted,
+    filters.categoryId,
+    filters.dateFrom,
+    filters.dateTo,
+    filters.favoriteonly,
+    filters.groupByTanks,
+    filters.newonly,
+    filters.sortBy,
+    filters.sortOrder,
+    filters.untaggedonly,
+  ]);
 
   // Load smart filters from API
   useEffect(() => {
@@ -142,10 +178,13 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
     onSearch({
       sortBy: 'date_added',
       sortOrder: 'desc',
+      dateFrom: '',
+      dateTo: '',
       newonly: false,
       untaggedonly: false,
       favoriteonly: false,
-      groupby_tanks: true
+      groupby_tanks: true,
+      category_id: undefined
     });
   };
 

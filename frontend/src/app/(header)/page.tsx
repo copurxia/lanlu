@@ -51,6 +51,7 @@ function HomePageContent() {
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [groupByTanks, setGroupByTanks] = useState(true); // 默认启用Tankoubon分组
+  const [categoryId, setCategoryId] = useState<string>('all');
   const [isInitialized, setIsInitialized] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const pageSize = 20;
@@ -69,6 +70,7 @@ function HomePageContent() {
   const urlDateFrom = searchParams?.get('date_from') || '';
   const urlDateTo = searchParams?.get('date_to') || '';
   const urlGroupByTanks = searchParams?.get('groupby_tanks') !== 'false'; // 默认为true
+  const urlCategoryId = searchParams?.get('category_id') || 'all';
   const urlPage = parseInt(searchParams?.get('page') || '0', 10); // 从URL读取页码
 
   const fetchInput = useMemo(() => ({
@@ -82,8 +84,9 @@ function HomePageContent() {
     dateFrom,
     dateTo,
     groupByTanks,
+    categoryId,
     language,
-  }), [currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, language, newonly, searchQuery, sortBy, sortOrder, untaggedonly]);
+  }), [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, language, newonly, searchQuery, sortBy, sortOrder, untaggedonly]);
   const fetchInputRef = useRef(fetchInput);
   useEffect(() => {
     fetchInputRef.current = fetchInput;
@@ -112,6 +115,7 @@ function HomePageContent() {
       if (input.favoriteonly) params.favoriteonly = true;
       if (input.dateFrom) params.date_from = input.dateFrom;
       if (input.dateTo) params.date_to = input.dateTo;
+      if (input.categoryId && input.categoryId !== 'all') params.category_id = input.categoryId;
       params.groupby_tanks = input.groupByTanks; // 添加Tankoubon分组参数
       params.lang = input.language; // 添加语言参数用于标签翻译
 
@@ -184,7 +188,7 @@ function HomePageContent() {
 
   // 设置初始状态（从URL参数）
   useEffect(() => {
-    if (urlQuery) setSearchQuery(urlQuery);
+    setSearchQuery(urlQuery);
     if (urlSortBy) setSortBy(urlSortBy);
     if (urlSortOrder) setSortOrder(urlSortOrder);
     setNewonly(urlNewonly);
@@ -193,11 +197,12 @@ function HomePageContent() {
     setDateFrom(urlDateFrom);
     setDateTo(urlDateTo);
     setGroupByTanks(urlGroupByTanks);
+    setCategoryId(urlCategoryId);
     setCurrentPage(urlPage); // 从URL恢复页码
 
     // 标记为已初始化，避免在初始化期间同步URL
     setIsInitialized(true);
-  }, [urlQuery, urlSortBy, urlSortOrder, urlNewonly, urlUntaggedonly, urlFavoriteonly, urlDateFrom, urlDateTo, urlGroupByTanks, urlPage]);
+  }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly, urlPage]);
 
   // 同步状态到URL（仅在初始化完成后执行）
   useEffect(() => {
@@ -212,7 +217,9 @@ function HomePageContent() {
     if (favoriteonly) params.set('favoriteonly', 'true');
     if (dateFrom) params.set('date_from', dateFrom);
     if (dateTo) params.set('date_to', dateTo);
-    if (!groupByTanks) params.set('groupby_tanks', 'false'); // 只在禁用时添加参数
+    if (categoryId && categoryId !== 'all') params.set('category_id', categoryId);
+    // Always reflect this in the URL so it's shareable/reproducible.
+    params.set('groupby_tanks', groupByTanks ? 'true' : 'false');
     if (currentPage > 0) params.set('page', currentPage.toString()); // 只在非第一页时添加页码参数
 
     const queryString = params.toString();
@@ -225,7 +232,7 @@ function HomePageContent() {
       return;
     }
     router.replace(newUrl);
-  }, [searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, currentPage, router, isInitialized]);
+  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly]);
 
   useEffect(() => {
     // 只在客户端执行数据获取，避免静态生成时的API调用
@@ -298,6 +305,7 @@ function HomePageContent() {
     untaggedonly?: boolean;
     favoriteonly?: boolean;
     groupby_tanks?: boolean;
+    category_id?: string;
   }) => {
     // Search query is controlled by the global header search bar. Only update it when explicitly provided.
     if (typeof params.query === 'string') setSearchQuery(params.query);
@@ -314,6 +322,7 @@ function HomePageContent() {
     if (typeof params.untaggedonly === 'boolean') setUntaggedonly(params.untaggedonly);
     if (typeof params.favoriteonly === 'boolean') setFavoriteonly(params.favoriteonly);
     if (typeof params.groupby_tanks === 'boolean') setGroupByTanks(params.groupby_tanks);
+    if ('category_id' in params) setCategoryId(params.category_id || 'all');
     setCurrentPage(0);
     // 移动端：应用筛选后自动关闭对话框
     setFilterDialogOpen(false);
@@ -336,7 +345,21 @@ function HomePageContent() {
       <div className="flex h-[calc(100vh-4rem)]">
         {/* 侧栏 - 桌面端显示 */}
         <div className="hidden lg:block flex-shrink-0 border-r border-border w-80">
-          <SearchSidebar onSearch={handleSearch} loading={loading} />
+          <SearchSidebar
+            onSearch={handleSearch}
+            loading={loading}
+            filters={{
+              sortBy,
+              sortOrder,
+              dateFrom,
+              dateTo,
+              newonly,
+              untaggedonly,
+              favoriteonly,
+              groupByTanks,
+              categoryId,
+            }}
+          />
         </div>
 
         {/* 主内容区 - 独立滚动 */}
@@ -426,7 +449,21 @@ function HomePageContent() {
                   <DialogTitle>{t('home.advancedFilter')}</DialogTitle>
                 </DialogHeader>
                 <DialogBody className="px-0 py-0">
-                  <SearchSidebar onSearch={handleSearch} loading={loading} />
+                  <SearchSidebar
+                    onSearch={handleSearch}
+                    loading={loading}
+                    filters={{
+                      sortBy,
+                      sortOrder,
+                      dateFrom,
+                      dateTo,
+                      newonly,
+                      untaggedonly,
+                      favoriteonly,
+                      groupByTanks,
+                      categoryId,
+                    }}
+                  />
                 </DialogBody>
               </DialogContent>
             </Dialog>

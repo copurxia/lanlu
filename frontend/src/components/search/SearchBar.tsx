@@ -6,7 +6,6 @@ import { SearchInput, type SearchInputHandle } from '@/components/ui/search-inpu
 import { Search } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { appEvents, AppEvents } from '@/lib/utils/events';
 
 type SearchBarProps = {
   autoFocus?: boolean;
@@ -30,9 +29,7 @@ function SearchBarContent({ autoFocus, onSubmitted, compact = true }: SearchBarP
   useEffect(() => {
     if (!mounted) return;
     const urlQuery = searchParams?.get('q');
-    if (urlQuery) {
-      setQuery(urlQuery);
-    }
+    setQuery(urlQuery || '');
   }, [searchParams, mounted]);
 
   useEffect(() => {
@@ -53,12 +50,18 @@ function SearchBarContent({ autoFocus, onSubmitted, compact = true }: SearchBarP
     // 使用当前输入值，如果为空则使用状态中的query
     const searchQuery = currentInputValue.trim() || query.trim();
 
+    // Keep existing filter params when searching so global search works together with filters.
+    const params = new URLSearchParams(searchParams?.toString() || '');
     if (searchQuery) {
-      router.push(`/?q=${encodeURIComponent(searchQuery)}`);
+      params.set('q', searchQuery);
     } else {
-      appEvents.emit(AppEvents.SEARCH_RESET);
-      router.push('/');
+      params.delete('q');
+      // Relevance sorting only makes sense with a query.
+      if (params.get('sortby') === 'relevance') params.delete('sortby');
     }
+
+    const queryString = params.toString();
+    router.push(queryString ? `/?${queryString}` : '/');
 
     onSubmitted?.();
   };
