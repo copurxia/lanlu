@@ -4,11 +4,10 @@ import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { SearchInput } from '@/components/ui/search-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Search, Filter, SortAsc, SortDesc, BookOpen, Tag, Calendar, Clock, Star, FolderOpen } from 'lucide-react';
+import { Search, Filter, SortAsc, SortDesc, BookOpen, Tag, Calendar, Clock, Star } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getApiUrl } from '@/lib/api';
 import { CategoryService, type Category } from '@/lib/services/category-service';
@@ -64,7 +63,6 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
 
 export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps) {
   const { t, language } = useLanguage();
-  const [query, setQuery] = useState('');
   const [sortBy, setSortBy] = useState('date_added');
   const [sortOrder, setSortOrder] = useState('desc');
   const [dateFrom, setDateFrom] = useState('');
@@ -118,7 +116,6 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
   const handleSearch = () => {
     if (!mounted) return;
     onSearch({
-      query,
       sortBy,
       sortOrder,
       dateFrom,
@@ -133,7 +130,6 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
 
   const handleReset = () => {
     if (!mounted) return;
-    setQuery('');
     setSortBy('date_added');
     setSortOrder('desc');
     setDateFrom('');
@@ -144,7 +140,6 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
     setGroupbyTanks(true);
     setSelectedCategory('all');
     onSearch({
-      query: '',
       sortBy: 'date_added',
       sortOrder: 'desc',
       newonly: false,
@@ -179,7 +174,6 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
     }
 
     // Update local state
-    setQuery(filter.query || '');
     if (filter.sort_by) setSortBy(filter.sort_by);
     if (filter.sort_order) setSortOrder(filter.sort_order);
     setDateFrom(calculatedDateFrom);
@@ -292,28 +286,17 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
           </CardContent>
         </Card>
 
-        {/* 搜索框 */}
+        {/* 筛选条件（搜索关键词由全局搜索框控制） */}
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-lg flex items-center gap-2">
-              <Search className="w-5 h-5" />
-              {t('search.title')}
+              <Filter className="w-5 h-5" />
+              {t('search.searchConditions')}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <SearchInput
-              placeholder={t('search.keywordPlaceholder')}
-              value={query}
-              onChange={setQuery}
-            />
-
             {/* 日期范围 */}
-            <div className="space-y-3">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-muted-foreground" />
-                {t('search.dateRange')}
-              </label>
-
+            <div className="space-y-2">
               <DateRangePicker
                 value={{ from: dateFrom, to: dateTo }}
                 onChange={(next) => {
@@ -326,12 +309,8 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
 
             {/* 分类筛选 */}
             <div className="space-y-2">
-              <label className="text-sm font-medium flex items-center gap-2">
-                <FolderOpen className="w-4 h-4 text-muted-foreground" />
-                {t('search.categoryFilter')}
-              </label>
               <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-                <SelectTrigger>
+                <SelectTrigger aria-label={t('search.categoryFilter')} title={t('search.categoryFilter')}>
                   <SelectValue placeholder={t('search.categoryFilter')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -347,9 +326,8 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
 
             {/* 排序 */}
             <div className="space-y-2">
-              <label className="text-sm font-medium">{t('search.sortBy')}</label>
               <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger>
+                <SelectTrigger aria-label={t('search.sortBy')} title={t('search.sortBy')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -437,7 +415,7 @@ export function SearchSidebar({ onSearch, loading = false }: SearchSidebarProps)
             {/* 操作按钮 */}
             <div className="flex gap-2">
               <Button onClick={handleSearch} disabled={loading} className="flex-1">
-                {loading ? t('common.loading') : t('common.search')}
+                {loading ? t('common.loading') : t('common.filter')}
               </Button>
               <Button variant="outline" onClick={handleReset} disabled={loading}>
                 {t('common.reset')}

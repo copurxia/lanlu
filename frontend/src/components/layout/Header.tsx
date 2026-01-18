@@ -136,6 +136,19 @@ export function Header() {
             <div className="flex-1 min-w-0">
               <SearchBar autoFocus compact={false} onSubmitted={() => setMobileSearchOpen(false)} />
             </div>
+            {pathname === '/' && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+                onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
+                aria-label={t('common.filter')}
+                title={t('common.filter')}
+              >
+                <Filter className="h-5 w-5" />
+              </Button>
+            )}
           </div>
 
           {/* 搜索栏 - 桌面端显示 */}

@@ -299,7 +299,8 @@ function HomePageContent() {
     favoriteonly?: boolean;
     groupby_tanks?: boolean;
   }) => {
-    setSearchQuery(params.query || '');
+    // Search query is controlled by the global header search bar. Only update it when explicitly provided.
+    if (typeof params.query === 'string') setSearchQuery(params.query);
     // 当有搜索查询且没有指定排序时，默认使用相关度排序
     if (params.sortBy) {
       setSortBy(params.sortBy);
