@@ -4,6 +4,7 @@ import std.sync.*
 import std.convert.*
 import stdx.log.*
 import lrr4cj.dao.*
+import lrr4cj.kv.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.task_runners.*

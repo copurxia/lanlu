@@ -8,6 +8,7 @@ import std.convert.*
 import stdx.encoding.json.*
 import stdx.log.*
 import lrr4cj.dao.*
+import lrr4cj.kv.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 
@@ -237,7 +238,7 @@ public class DenoTaskRunner {
         taskId: Int64,
         loginNamespace: String,
         groupId: String,
-        kvStore: TaskGroupKVStore
+        kvStore: TaskKVStore
     ): DenoExecutionResult {
         let logger = getLogger("deno_task")
 
@@ -276,7 +277,7 @@ public class DenoTaskRunner {
 
         // 缓存到 KV store
         if (groupId.size > 0 && cookiesJson.size > 0) {
-            kvStore.set(groupId, "login_cookies_${loginNamespace}", cookiesJson, ttlSeconds: 3600)
+            kvStore.set(groupId, "login_cookies_${loginNamespace}", cookiesJson, 3600)
         }
 
         return DenoExecutionResult(true, "", loginResult.output, cookiesJson, 0)
