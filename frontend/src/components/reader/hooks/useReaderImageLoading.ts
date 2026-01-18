@@ -36,6 +36,7 @@ export function useReaderImageLoading({
   const [loadedImages, setLoadedImages] = useState<Set<number>>(new Set());
 
   const observerRef = useRef<IntersectionObserver | null>(null);
+  const pagesRef = useRef<PageInfo[]>(pages);
   const loadedImagesRef = useRef<Set<number>>(loadedImages);
   const imagesLoadingRef = useRef<Set<number>>(imagesLoading);
   const retryStateRef = useRef<Map<number, { attempts: number; nextRetryAt: number }>>(new Map());
@@ -45,6 +46,10 @@ export function useReaderImageLoading({
   const visibleRangeRef = useRef(visibleRange);
   const readingModeRef = useRef(readingMode);
   const pagesLengthRef = useRef(pages.length);
+
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
 
   useEffect(() => {
     loadedImagesRef.current = loadedImages;
@@ -112,6 +117,10 @@ export function useReaderImageLoading({
     const length = pagesLengthRef.current;
     if (pageIndex < 0 || pageIndex >= length) return false;
     if (loadedImagesRef.current.has(pageIndex)) return false;
+
+    const page = pagesRef.current[pageIndex];
+    // HTML pages are loaded by useReaderHtmlPages (fetch + parse); keep them out of image/video preloading.
+    if (page?.type === 'html') return false;
 
     const mode = readingModeRef.current;
     const cp = currentPageRef.current;
@@ -229,15 +238,20 @@ export function useReaderImageLoading({
         for (let i = Math.max(0, currentPage - preloadRange); i <= Math.min(pages.length - 1, currentPage + preloadRange); i++) {
           if (!loadedImages.has(i)) {
             if (!shouldLoadIndexNow(i)) continue;
-            updated.add(i);
+            if (pages[i]?.type !== 'html') updated.add(i);
           }
         }
 
         for (let i = visibleRange.start; i <= visibleRange.end; i++) {
           if (i >= 0 && i < pages.length && !loadedImages.has(i)) {
             if (!shouldLoadIndexNow(i)) continue;
-            updated.add(i);
+            if (pages[i]?.type !== 'html') updated.add(i);
           }
+        }
+
+        // Prevent unbounded growth when rapidly scrolling/jumping.
+        for (const idx of Array.from(updated)) {
+          if (!isIndexDesiredNow(idx)) updated.delete(idx);
         }
 
         return updated;
@@ -255,14 +269,18 @@ export function useReaderImageLoading({
         ) {
           if (!loadedImages.has(i)) {
             if (!shouldLoadIndexNow(i)) continue;
-            updated.add(i);
+            if (pages[i]?.type !== 'html') updated.add(i);
           }
+        }
+
+        for (const idx of Array.from(updated)) {
+          if (!isIndexDesiredNow(idx)) updated.delete(idx);
         }
 
         return updated;
       });
     }
-  }, [currentPage, readingMode, pages.length, loadedImages, visibleRange.start, visibleRange.end, shouldLoadIndexNow]);
+  }, [currentPage, readingMode, pages, loadedImages, visibleRange.start, visibleRange.end, shouldLoadIndexNow, isIndexDesiredNow]);
 
   useEffect(() => {
     if (readingMode !== 'webtoon') return;

@@ -31,6 +31,8 @@ export function ReaderPreloadArea({
         if (doublePageMode && pageIndex === currentPage + 1) return null;
         const page = pages[pageIndex];
         if (!page) return null;
+        // HTML pages (e.g. EPUB) are fetched via useReaderHtmlPages; don't try to preload with <img>.
+        if (page.type === 'html') return null;
 
         if (page.type === 'video') {
           return (

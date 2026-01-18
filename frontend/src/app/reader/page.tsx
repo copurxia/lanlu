@@ -233,8 +233,8 @@ function ReaderContent() {
         setPages(data.pages);
         setCurrentPage(initialPage);
 
-        // 如果有进度且需要预加载图片，添加到加载队列
-        if (initialPage > 0) {
+        // 如果有进度且需要预加载图片，添加到加载队列（跳过 HTML 页，HTML 由 useReaderHtmlPages 加载）
+        if (initialPage > 0 && data.pages[initialPage]?.type !== 'html') {
           setImagesLoading(new Set([initialPage]));
         }
       } catch (err) {
