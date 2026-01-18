@@ -351,7 +351,7 @@ class EhdbMetadataPlugin extends BasePlugin {
    */
   private async searchByFullText(core: string, artist: string): Promise<PluginResult> {
     // 构建 tsquery
-    const words = core.split(/\s+/).filter(w => w.length >= 2);
+    const words = core.split(/[\s\-_]+/).filter(w => w.length >= 2);
 
     // 检查是否包含日文字符（包含日文则跳过全文搜索）
     const hasJapanese = /[あ-んア-ン一-龯]/.test(core);
