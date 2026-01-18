@@ -75,6 +75,8 @@ const DialogContent: React.FC<{
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
   const [isMobile, setIsMobile] = React.useState(false)
+  const [present, setPresent] = React.useState(false)
+  const [active, setActive] = React.useState(false)
 
   React.useEffect(() => {
     setMounted(true)
@@ -89,6 +91,22 @@ const DialogContent: React.FC<{
     return () => mql.removeEventListener("change", onChange)
   }, [mounted])
 
+  // Keep the dialog mounted long enough for open/close animations.
+  React.useEffect(() => {
+    if (!mounted) return
+    if (open) {
+      setPresent(true)
+      // Activate animation on next frame so transitions run.
+      const raf = window.requestAnimationFrame(() => setActive(true))
+      return () => window.cancelAnimationFrame(raf)
+    }
+
+    if (!present) return
+    setActive(false)
+    const t = window.setTimeout(() => setPresent(false), 200)
+    return () => window.clearTimeout(t)
+  }, [mounted, open, present])
+
   React.useEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
@@ -98,8 +116,8 @@ const DialogContent: React.FC<{
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [open, onOpenChange])
 
-  // 在未挂载或未打开时不渲染任何内容，避免水合不匹配
-  if (!mounted || !open) return null
+  // 在未挂载时不渲染任何内容，避免水合不匹配
+  if (!mounted || !present) return null
 
   // 尺寸映射
   const sizeClasses = {
@@ -113,12 +131,15 @@ const DialogContent: React.FC<{
   return (
     <div
       className={cn(
-        "fixed inset-0 z-modal-overlay flex",
+        "fixed inset-0 z-modal-overlay flex motion-reduce:transition-none",
         isMobile ? "items-end justify-center" : "items-center justify-center p-4"
       )}
     >
       <div
-        className="fixed inset-0 bg-black/50"
+        className={cn(
+          "fixed inset-0 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          active ? "opacity-100" : "opacity-0 pointer-events-none"
+        )}
         onClick={() => onOpenChange?.(false)}
       />
       <div
@@ -126,9 +147,14 @@ const DialogContent: React.FC<{
         aria-modal="true"
         className={cn(
           "relative z-modal-content w-full border bg-background shadow-lg overflow-hidden flex flex-col",
+          "transition-[transform,opacity] duration-200 ease-out will-change-transform motion-reduce:transition-none",
           isMobile
-            ? "max-h-[85vh] rounded-t-xl rounded-b-none border-x-0"
+            ? cn(
+                "max-h-[85vh] rounded-t-xl rounded-b-none border-x-0",
+                active ? "translate-y-0 opacity-100" : "translate-y-4 opacity-0 pointer-events-none"
+              )
             : cn("max-h-[90vh] rounded-lg", sizeClasses[size]),
+          !isMobile && (active ? "scale-100 opacity-100" : "scale-[0.98] opacity-0 pointer-events-none"),
           className
         )}
         onClick={(e) => e.stopPropagation()}
