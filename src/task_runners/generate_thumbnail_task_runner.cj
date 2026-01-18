@@ -105,7 +105,7 @@ public class GenerateThumbnailTaskRunner {
         let tempAvifPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.avif")
         let convertResult = ArchiveUtils.convertImageToAvif(tempImagePath, tempAvifPath, taskTempDir)
 
-        // 清理临时文件和目录
+        // 清理输入临时文件（无论转换成功或失败）
         try {
             if (fileExists(tempImagePath)) {
                 let exitCode = try {
@@ -122,20 +122,6 @@ public class GenerateThumbnailTaskRunner {
                     TaskIO.appendLog(taskId, "Deleted temp file: ${tempImagePath}")
                 }
             }
-            // 尝试删除空的临时目录
-            let rmDirExitCode = try {
-                let process = launch("rmdir", [taskTempDir], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                process.wait()
-            } catch (e: Exception) {
-                1
-            }
-            if (rmDirExitCode != 0) {
-                let debugMsg = "Task temp directory not empty or cannot be removed: ${taskTempDir}"
-                TaskIO.appendLog(taskId, "DEBUG: ${debugMsg}")
-                logger.debug(debugMsg)
-            } else {
-                TaskIO.appendLog(taskId, "Removed task temp directory: ${taskTempDir}")
-            }
         } catch (e: Exception) {
             let warnMsg = "Failed to cleanup temp files for task: ${taskId}, error: ${e.message}"
             TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
@@ -143,6 +129,12 @@ public class GenerateThumbnailTaskRunner {
         }
 
         if (!convertResult.success) {
+            // 转换失败时，清理输出和临时目录（包括可能生成的 fallback 文件）
+            try {
+                let _ = launch("rm", ["-f", tempAvifPath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe).wait()
+                let _ = launch("rm", ["-rf", taskTempDir], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe).wait()
+            } catch (_: Exception) {}
+
             let errorMsg = "Image conversion failed: ${convertResult.error}"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
@@ -173,6 +165,11 @@ public class GenerateThumbnailTaskRunner {
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
+
+        // 移动完成后清理任务临时目录（输出文件已移走）
+        try {
+            let _ = launch("rm", ["-rf", taskTempDir], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe).wait()
+        } catch (_: Exception) {}
 
         // 将thumbhash存储到数据库
         TaskIO.appendLog(taskId, "Saving thumbhash to database for archive: ${archiveId}")

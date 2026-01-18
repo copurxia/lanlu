@@ -328,7 +328,21 @@ public class ArchiveUtils {
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
-            return ProcessResultData(false, "", stderrStr)
+            logger.warn("ffmpeg convert failed; trying ImageMagick fallback", ("inputPath", inputPath))
+
+            // Fallback: use ImageMagick to extract a still frame (works for animated WEBP/GIF),
+            // then run FFmpeg again on the still image.
+            let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
+            let (imExitCode, imStderrStr) = runImageMagickToPng(inputPath, fallbackPngPath)
+            if (imExitCode == 0) {
+                let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
+                if (exitCode2 == 0) {
+                    return ProcessResultData(true, outputPath, "")
+                }
+                return ProcessResultData(false, "", "${stderrStr}\n---\nImageMagick ok; ffmpeg retry failed:\n${stderrStr2}")
+            }
+
+            return ProcessResultData(false, "", "${stderrStr}\n---\nImageMagick fallback failed:\n${imStderrStr}")
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Exception: ${e.message}")
         }
@@ -348,6 +362,25 @@ public class ArchiveUtils {
             "-q:v", "2",             // 质量设置
             "-map_metadata", "-1",   // 过滤元数据
             outputPath,
+            stdOut: ProcessRedirect.Pipe,
+            stdErr: ProcessRedirect.Pipe
+        )
+        let (exitCode, _, stderr) = process.waitOutput()
+        let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
+        return (exitCode, stderrStr)
+    }
+
+    /**
+     * Use ImageMagick to render the first frame of an image to a PNG file.
+     * This is a best-effort fallback for animated formats that FFmpeg can't decode (e.g. some animated WEBP).
+     */
+    private static func runImageMagickToPng(inputPath: String, outputPngPath: String): (Int64, String) {
+        let firstFrameInput = "${inputPath}[0]"
+        let process = launch(
+            "convert",
+            firstFrameInput,
+            "-strip",
+            outputPngPath,
             stdOut: ProcessRedirect.Pipe,
             stdErr: ProcessRedirect.Pipe
         )
