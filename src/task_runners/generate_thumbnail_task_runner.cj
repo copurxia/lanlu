@@ -3,7 +3,6 @@ package lrr4cj.task_runners
 import stdx.encoding.json.*
 import stdx.log.*
 import std.fs.*
-import std.process.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
@@ -61,6 +60,29 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Resolved archive path: ${actualArchivePath}")
         logger.debug("Resolved archive path: ${actualArchivePath}")
 
+        // Fast-path: if thumbnail already exists, avoid repeating expensive work.
+        // This helps when tasks are retried or scheduled redundantly.
+        let finalThumbnailPath = FileUtils.joinPath(thumbnailPath, "${archiveId}.avif")
+        try {
+            if (exists(Path(finalThumbnailPath))) {
+                let existingHash = ArchiveDao.getThumbnailHash(archiveId)
+                if (existingHash.size > 0) {
+                    TaskIO.appendLog(taskId, "Thumbnail already exists and thumbhash present; skipping regeneration.")
+                    return ProcessResultData(true, finalThumbnailPath, existingHash)
+                }
+
+                TaskIO.appendLog(taskId, "Thumbnail exists but thumbhash missing; calculating from existing file...")
+                let thumbHash = calculateThumbHash(finalThumbnailPath)
+                if (ArchiveDao.updateThumbHash(archiveId, thumbHash)) {
+                    TaskIO.appendLog(taskId, "Thumbhash saved to database successfully (no regeneration needed)")
+                    return ProcessResultData(true, finalThumbnailPath, thumbHash)
+                }
+                TaskIO.appendLog(taskId, "WARN: Failed to save thumbhash; will continue to regenerate thumbnail.")
+            }
+        } catch (_: Exception) {
+            // Best-effort: continue with regeneration on any error.
+        }
+
         // 使用任务ID创建独立的临时目录
         let taskTempDir = FileUtils.joinPath(cachePath, "task/${taskId}")
         let taskTempPath = Path(taskTempDir)
@@ -108,19 +130,8 @@ public class GenerateThumbnailTaskRunner {
         // 清理输入临时文件（无论转换成功或失败）
         try {
             if (fileExists(tempImagePath)) {
-                let exitCode = try {
-                    let process = launch("rm", ["-f", tempImagePath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-                    process.wait()
-                } catch (e: Exception) {
-                    1
-                }
-                if (exitCode != 0) {
-                    let warnMsg = "Failed to delete temp file: ${tempImagePath}"
-                    TaskIO.appendLog(taskId, "WARN: ${warnMsg}")
-                    logger.warn(warnMsg)
-                } else {
-                    TaskIO.appendLog(taskId, "Deleted temp file: ${tempImagePath}")
-                }
+                remove(Path(tempImagePath))
+                TaskIO.appendLog(taskId, "Deleted temp file: ${tempImagePath}")
             }
         } catch (e: Exception) {
             let warnMsg = "Failed to cleanup temp files for task: ${taskId}, error: ${e.message}"
@@ -131,8 +142,8 @@ public class GenerateThumbnailTaskRunner {
         if (!convertResult.success) {
             // 转换失败时，清理输出和临时目录（包括可能生成的 fallback 文件）
             try {
-                let _ = launch("rm", ["-f", tempAvifPath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe).wait()
-                let _ = launch("rm", ["-rf", taskTempDir], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe).wait()
+                try { remove(Path(tempAvifPath)) } catch (_: Exception) {}
+                let _ = removeFileOrDirectory(taskTempDir)
             } catch (_: Exception) {}
 
             let errorMsg = "Image conversion failed: ${convertResult.error}"
@@ -149,26 +160,19 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
         logger.debug("Calculated thumbhash: ${thumbHash}")
 
-        // 使用 archiveId 作为文件名（thumbhash 仅存入数据库）
-        let finalThumbnailPath = FileUtils.joinPath(thumbnailPath, "${archiveId}.avif")
-
         // 移动文件到最终位置
         TaskIO.appendLog(taskId, "Moving thumbnail to final location: ${finalThumbnailPath}")
-        let mvExitCode = try {
-            let process = launch("mv", ["-f", tempAvifPath, finalThumbnailPath], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
-            process.wait()
+        try {
+            safeReplaceFile(Path(finalThumbnailPath), Path(tempAvifPath))
         } catch (e: Exception) {
-            1
-        }
-        if (mvExitCode != 0) {
-            let errorMsg = "Failed to move thumbnail to final location"
+            let errorMsg = "Failed to move thumbnail to final location: ${e.message}"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
 
         // 移动完成后清理任务临时目录（输出文件已移走）
         try {
-            let _ = launch("rm", ["-rf", taskTempDir], stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe).wait()
+            let _ = removeFileOrDirectory(taskTempDir)
         } catch (_: Exception) {}
 
         // 将thumbhash存储到数据库
@@ -186,6 +190,53 @@ public class GenerateThumbnailTaskRunner {
         logger.debug("Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
         TaskIO.appendLog(taskId, "Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
         return ProcessResultData(true, finalThumbnailPath, thumbHash)
+    }
+
+    /**
+     * Remove a file or directory recursively (best-effort).
+     * Returns true if the path does not exist or was removed successfully.
+     */
+    private static func removeFileOrDirectory(path: String): Bool {
+        try {
+            let p = Path(path)
+            if (!exists(p)) {
+                return true
+            }
+            let info = FileInfo(p)
+            if (info.isDirectory()) {
+                let entries = DirectoryScanner.listDirectory(path)
+                for (entry in entries) {
+                    let fullPath = FileUtils.joinPath(path, entry)
+                    if (!removeFileOrDirectory(fullPath)) {
+                        return false
+                    }
+                }
+                remove(p)
+                return true
+            }
+            remove(p)
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    /**
+     * Atomically replace a file by first removing the target (if present) and then renaming.
+     * Falls back to copy+remove if rename fails (e.g. cross-device).
+     */
+    private static func safeReplaceFile(target: Path, from: Path): Unit {
+        if (exists(target)) {
+            remove(target)
+        }
+        try {
+            rename(from, to: target)
+            return
+        } catch (_: Exception) {
+            // Fallback for cross-device moves.
+        }
+        copy(from, to: target, overwrite: true)
+        remove(from)
     }
 
     /**

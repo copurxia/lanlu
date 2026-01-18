@@ -352,11 +352,55 @@ public class ArchiveUtils {
      * Run FFmpeg to convert a single image/video frame to AVIF.
      */
     private static func runFfmpegToAvif(inputPath: String, outputPath: String, vfFilter: String): (Int64, String) {
-        let process = launch(
-            "ffmpeg",
+        // Encoding AVIF can be extremely expensive with default encoder settings.
+        // We try a "fast thumbnail" profile first (lower CPU, good-enough quality),
+        // then fall back to the previous generic invocation for maximum compatibility.
+        //
+        // Notes:
+        // - `libaom-av1` is widely available and supports `-cpu-used` / `-row-mt`.
+        // - `-crf`+`-b:v 0` is the recommended quality control for AV1.
+        // - `fast_bilinear` is cheaper for scaling and is fine for thumbnails.
+        let fastArgs = [
+            "-hide_banner",
+            "-loglevel", "error",
             "-y",                    // 覆盖输出文件
             "-threads", "1",
             "-i", inputPath,         // 输入文件
+            "-sws_flags", "fast_bilinear",
+            "-vf", vfFilter,
+            "-frames:v", "1",        // 只输出一帧
+            "-pix_fmt", "yuv420p",
+            "-c:v", "libaom-av1",
+            "-still-picture", "1",
+            "-row-mt", "1",
+            "-cpu-used", "6",
+            "-crf", "35",
+            "-b:v", "0",
+            "-map_metadata", "-1",   // 过滤元数据
+            outputPath
+        ]
+
+        let processFast = launch(
+            "ffmpeg",
+            fastArgs,
+            stdOut: ProcessRedirect.Pipe,
+            stdErr: ProcessRedirect.Pipe
+        )
+        let (fastExitCode, _, fastStderr) = processFast.waitOutput()
+        let fastStderrStr = try { String.fromUtf8(fastStderr) } catch (_: Exception) { "" }
+        if (fastExitCode == 0) {
+            return (0, fastStderrStr)
+        }
+
+        // Fallback: previous behavior.
+        let process = launch(
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",                    // 覆盖输出文件
+            "-threads", "1",
+            "-i", inputPath,         // 输入文件
+            "-sws_flags", "fast_bilinear",
             "-vf", vfFilter,
             "-frames:v", "1",        // 只输出一帧
             "-q:v", "2",             // 质量设置
@@ -367,7 +411,10 @@ public class ArchiveUtils {
         )
         let (exitCode, _, stderr) = process.waitOutput()
         let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
-        return (exitCode, stderrStr)
+
+        // Preserve the fast attempt stderr as context for debugging.
+        let combined = if (fastStderrStr.size > 0) { "fast profile failed:\n${fastStderrStr}\n---\n${stderrStr}" } else { stderrStr }
+        return (exitCode, combined)
     }
 
     /**
