@@ -9,6 +9,7 @@ import lrr4cj.dao.*
 import lrr4cj.services.*
 import std.fs.*
 import std.convert.*
+import std.io.*
 import stdx.log.*
 import stdx.encoding.json.stream.*
 
@@ -20,6 +21,10 @@ public class ChunkedUploadController {
 
     // 缓存目录
     private static let CACHE_DIR = "./data/cache"
+    // upload 元信息文件名（放在 task 上传目录下）
+    private static let UPLOAD_META_FILE = "upload_meta.json"
+    // 临时大文件名（放在 task 上传目录下）
+    private static let UPLOAD_PART_FILE = "final.part"
 
     /**
      * 初始化上传会话
@@ -36,6 +41,10 @@ public class ChunkedUploadController {
             var filename = ""
             var categoryId = ""
             var overwrite = false
+            // 分片上传元信息（用于写入临时大文件、校验分片）
+            var fileSize: Int64 = 0
+            var chunkSize: Int64 = 0
+            var totalChunks: Int64 = 0
 
             if (requestBody.size > 0) {
                 try {
@@ -51,6 +60,39 @@ public class ChunkedUploadController {
                                     let name = reader.readName()
                                     match (name) {
                                         case "filename" => filename = reader.readValue<String>()
+                                        case "filesize" =>
+                                            // 兼容 number/string
+                                            try {
+                                                fileSize = reader.readValue<Int64>()
+                                            } catch (_: Exception) {
+                                                try {
+                                                    fileSize = Int64.parse(reader.readValue<String>())
+                                                } catch (_: Exception) {
+                                                    let _ = reader.skip()
+                                                }
+                                            }
+                                        case "chunk_size" =>
+                                            // 兼容 number/string
+                                            try {
+                                                chunkSize = reader.readValue<Int64>()
+                                            } catch (_: Exception) {
+                                                try {
+                                                    chunkSize = Int64.parse(reader.readValue<String>())
+                                                } catch (_: Exception) {
+                                                    let _ = reader.skip()
+                                                }
+                                            }
+                                        case "total_chunks" =>
+                                            // 兼容 number/string
+                                            try {
+                                                totalChunks = reader.readValue<Int64>()
+                                            } catch (_: Exception) {
+                                                try {
+                                                    totalChunks = Int64.parse(reader.readValue<String>())
+                                                } catch (_: Exception) {
+                                                    let _ = reader.skip()
+                                                }
+                                            }
                                         case "category_id" =>
                                             // 兼容 number/string
                                             try {
@@ -127,6 +169,33 @@ public class ChunkedUploadController {
                 getLogger("chunked_upload").debug("创建上传目录", ("taskId", task.id.toString()))
             }
 
+            // 写入 upload meta，供 uploadChunk/completeUpload 使用，避免每个分片都查 DB
+            // 注意：chunkSize/totalChunks/fileSize 可能为 0（旧前端或异常请求），此时后续会报错
+            try {
+                let metaPath = Path("${uploadDir.toString()}/${UPLOAD_META_FILE}")
+                let metaJson =
+                    "{" +
+                    "\"filesize\":${fileSize.toString()}," +
+                    "\"chunk_size\":${chunkSize.toString()}," +
+                    "\"total_chunks\":${totalChunks.toString()}" +
+                    "}"
+                let metaFile = File(metaPath, Write)
+                unsafe { metaFile.write(metaJson.rawData()) }
+                metaFile.flush()
+                metaFile.close()
+
+                // 确保临时大文件存在（分片写入时使用随机写入/定位写入）
+                let partPath = Path("${uploadDir.toString()}/${UPLOAD_PART_FILE}")
+                if (!exists(partPath)) {
+                    let partFile = File(partPath, Write)
+                    partFile.flush()
+                    partFile.close()
+                }
+            } catch (e: Exception) {
+                // meta/part 文件创建失败不应影响 task 创建，但会导致后续上传失败；记录日志便于排查
+                getLogger("chunked_upload").warn("初始化上传文件失败", ("taskId", task.id.toString()), ("error", e.message))
+            }
+
             let response = "{\"success\":1,\"taskId\":\"${task.id}\"}"
             ctx.json(response)
         } catch (e: Exception) {
@@ -156,6 +225,7 @@ public class ChunkedUploadController {
             }
 
             let chunkIndex = Int64.parse(chunkIndexStr)
+            let totalChunksFromQuery = Int64.parse(totalChunksStr)
 
             // 创建上传目录，使用taskId作为目录名
             let uploadDir = Path("${CACHE_DIR}/task/${taskIdStr}")
@@ -166,14 +236,154 @@ public class ChunkedUploadController {
                 return
             }
 
-            // 保存分片文件
-            let chunkFile = Path("${uploadDir}/chunk_${chunkIndex}.bin")
+            // 读取 upload meta
+            let metaPath = Path("${uploadDir.toString()}/${UPLOAD_META_FILE}")
+            if (!exists(metaPath)) {
+                let errorResponse = "{\"success\":0,\"error\":\"Upload meta not found for taskId ${taskIdStr}\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+
+            var fileSize: Int64 = 0
+            var chunkSize: Int64 = 0
+            var totalChunks: Int64 = 0
+            try {
+                let metaFile = File(metaPath, Read)
+                let metaSize = metaFile.info.size
+                let buffer = Array<Byte>(metaSize, {_ => 0})
+                let bytesRead = metaFile.read(buffer)
+                metaFile.close()
+                let metaStr = if (bytesRead > 0) { String.fromUtf8(buffer.slice(0, bytesRead)) } else { "" }
+
+                var bas = ByteBuffer()
+                unsafe { bas.write(metaStr.rawData()) }
+                var reader = JsonReader(bas)
+                while (let Some(v) <- reader.peek()) {
+                    match (v) {
+                        case BeginObject =>
+                            reader.startObject()
+                            while (reader.peek() != EndObject) {
+                                let name = reader.readName()
+                                match (name) {
+                                    case "filesize" =>
+                                        try { fileSize = reader.readValue<Int64>() } catch (_: Exception) {
+                                            try { fileSize = Int64.parse(reader.readValue<String>()) } catch (_: Exception) { let _ = reader.skip() }
+                                        }
+                                    case "chunk_size" =>
+                                        try { chunkSize = reader.readValue<Int64>() } catch (_: Exception) {
+                                            try { chunkSize = Int64.parse(reader.readValue<String>()) } catch (_: Exception) { let _ = reader.skip() }
+                                        }
+                                    case "total_chunks" =>
+                                        try { totalChunks = reader.readValue<Int64>() } catch (_: Exception) {
+                                            try { totalChunks = Int64.parse(reader.readValue<String>()) } catch (_: Exception) { let _ = reader.skip() }
+                                        }
+                                    case _ => let _ = reader.skip()
+                                }
+                            }
+                            reader.endObject()
+                            break
+                        case _ => throw Exception("Invalid JSON format")
+                    }
+                }
+            } catch (e: Exception) {
+                let errorResponse = "{\"success\":0,\"error\":\"Failed to read upload meta: ${e.message}\"}"
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.json(errorResponse)
+                return
+            }
+
+            if (fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0) {
+                let errorResponse = "{\"success\":0,\"error\":\"Invalid upload meta: filesize/chunk_size/total_chunks\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+            if (totalChunksFromQuery != totalChunks) {
+                let errorResponse = "{\"success\":0,\"error\":\"totalChunks mismatch\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+            if (chunkIndex < 0 || chunkIndex >= totalChunks) {
+                let errorResponse = "{\"success\":0,\"error\":\"Invalid chunkIndex\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+
+            // 读取请求体
             let fileData = ctx.readRawData()
 
-            try (file = File(chunkFile, Write)) {
-                file.write(fileData)
-                getLogger("chunked_upload").info("Chunk saved successfully", ("taskId", taskIdStr), ("chunkIndex", chunkIndexStr), ("size", fileData.size.toString()))
+            if (fileData.size <= 0) {
+                let errorResponse = "{\"success\":0,\"error\":\"Empty body\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
             }
+
+            // 校验 chunk 长度与范围（最后一块可以小于 chunkSize）
+            let expectedOffset = chunkIndex * chunkSize
+            if (expectedOffset < 0 || expectedOffset >= fileSize) {
+                let errorResponse = "{\"success\":0,\"error\":\"Invalid chunk offset\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+            if (expectedOffset + fileData.size > fileSize) {
+                let errorResponse = "{\"success\":0,\"error\":\"Chunk exceeds file size\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+            if (chunkIndex != totalChunks - 1 && fileData.size != chunkSize) {
+                let errorResponse = "{\"success\":0,\"error\":\"Invalid chunk size\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+
+            // 写入临时大文件：按 chunkIndex * chunkSize 定位写入
+            let partPath = Path("${uploadDir.toString()}/${UPLOAD_PART_FILE}")
+            if (!exists(partPath)) {
+                let errorResponse = "{\"success\":0,\"error\":\"Upload part file not found\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+
+            // NOTE: 这里必须使用“不会 truncate”的打开方式 + 定位写入，否则并发会破坏文件。
+            // 具体 seek/open mode 由 std.fs.File/OpenMode 提供。
+            try {
+                let partFile = File(partPath, OpenMode.ReadWrite)
+                partFile.seek(SeekPosition.Begin(expectedOffset))
+                partFile.write(fileData)
+                partFile.flush()
+                partFile.close()
+            } catch (e: Exception) {
+                let errorResponse = "{\"success\":0,\"error\":\"Failed to write chunk: ${e.message}\"}"
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ctx.json(errorResponse)
+                return
+            }
+
+            // 写一个轻量级 marker 文件，complete 时用来校验缺块（避免扫描 chunk_*.bin）
+            try {
+                let donePath = Path("${uploadDir.toString()}/chunk_${chunkIndexStr}.done")
+                let doneFile = File(donePath, Write)
+                doneFile.flush()
+                doneFile.close()
+            } catch (e: Exception) {
+                // marker 创建失败不影响数据写入，但会导致 complete 校验失败；记录日志
+                getLogger("chunked_upload").warn("Failed to write chunk marker", ("taskId", taskIdStr), ("chunkIndex", chunkIndexStr), ("error", e.message))
+            }
+
+            getLogger("chunked_upload").info(
+                "Chunk written successfully",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndexStr),
+                ("size", fileData.size.toString())
+            )
 
             // 返回成功响应
             let response = "{\"success\":1,\"message\":\"Chunk uploaded successfully\"}"
@@ -281,9 +491,8 @@ public class ChunkedUploadController {
 
             getLogger("chunked_upload").info("Using taskId as directory", ("taskId", taskIdStr), ("originalFileName", originalFileName))
 
-            // 合并分片，先存储为final.bin
             let chunkDir = Path("${CACHE_DIR}/task/${taskIdStr}")
-            let finalFile = Path("${chunkDir}/final.bin")
+            let finalFile = Path("${chunkDir.toString()}/${UPLOAD_PART_FILE}")
 
             if (!exists(chunkDir)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Upload directory not found for taskId ${taskIdStr}\"}"
@@ -292,30 +501,93 @@ public class ChunkedUploadController {
                 return
             }
 
-            // 执行分片合并
+            // 校验分片是否齐全：读取 meta 的 total_chunks，然后检查 chunk_i.done
+            let metaPath = Path("${chunkDir.toString()}/${UPLOAD_META_FILE}")
+            if (!exists(metaPath)) {
+                let errorResponse = "{\"success\":0,\"error\":\"Upload meta not found for taskId ${taskIdStr}\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+
+            var totalChunks: Int64 = 0
+            var fileSize: Int64 = 0
             try {
-                mergeChunks(chunkDir.toString(), finalFile.toString())
-                getLogger("chunked_upload").info("Chunk merging completed successfully")
+                let metaFile = File(metaPath, Read)
+                let metaSize = metaFile.info.size
+                let buffer = Array<Byte>(metaSize, {_ => 0})
+                let bytesRead = metaFile.read(buffer)
+                metaFile.close()
+                let metaStr = if (bytesRead > 0) { String.fromUtf8(buffer.slice(0, bytesRead)) } else { "" }
 
-                // 更新任务进度
-                TaskModel.updateTaskProgress(taskId, 70, "分片合并完成，开始处理文件")
+                var bas = ByteBuffer()
+                unsafe { bas.write(metaStr.rawData()) }
+                var reader = JsonReader(bas)
+                while (let Some(v) <- reader.peek()) {
+                    match (v) {
+                        case BeginObject =>
+                            reader.startObject()
+                            while (reader.peek() != EndObject) {
+                                let name = reader.readName()
+                                match (name) {
+                                    case "total_chunks" =>
+                                        try { totalChunks = reader.readValue<Int64>() } catch (_: Exception) {
+                                            try { totalChunks = Int64.parse(reader.readValue<String>()) } catch (_: Exception) { let _ = reader.skip() }
+                                        }
+                                    case "filesize" =>
+                                        try { fileSize = reader.readValue<Int64>() } catch (_: Exception) {
+                                            try { fileSize = Int64.parse(reader.readValue<String>()) } catch (_: Exception) { let _ = reader.skip() }
+                                        }
+                                    case _ => let _ = reader.skip()
+                                }
+                            }
+                            reader.endObject()
+                            break
+                        case _ => throw Exception("Invalid JSON format")
+                    }
+                }
             } catch (e: Exception) {
-                // 标记任务失败
-                getLogger("chunked_upload").error("Failed to merge chunks", ("error", e.message))
-                TaskModel.failTask(taskId, "分片合并失败: ${e.message}")
-
-                let errorResponse = "{\"success\":0,\"error\":\"Failed to merge chunks: ${e.message}\"}"
+                let errorResponse = "{\"success\":0,\"error\":\"Failed to read upload meta: ${e.message}\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                 ctx.json(errorResponse)
                 return
             }
 
-            // 检查合并后的文件是否存在
-            if (!exists(finalFile)) {
-                let errorResponse = "{\"success\":0,\"error\":\"Merged file not found at ${chunkDir}/final.bin\"}"
+            if (totalChunks <= 0) {
+                let errorResponse = "{\"success\":0,\"error\":\"Invalid total_chunks\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ctx.json(errorResponse)
                 return
+            }
+
+            for (i in 0..totalChunks) {
+                let donePath = Path("${chunkDir.toString()}/chunk_${Int64(i).toString()}.done")
+                if (!exists(donePath)) {
+                    let errorResponse = "{\"success\":0,\"error\":\"missing chunk ${Int64(i).toString()}\"}"
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.json(errorResponse)
+                    return
+                }
+            }
+
+            // 更新任务进度（不再进行 merge，直接进入文件处理阶段）
+            TaskModel.updateTaskProgress(taskId, 70, "分片上传完成，开始处理文件")
+
+            // 检查合并后的文件是否存在
+            if (!exists(finalFile)) {
+                let errorResponse = "{\"success\":0,\"error\":\"Uploaded file not found at ${chunkDir.toString()}/${UPLOAD_PART_FILE}\"}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ctx.json(errorResponse)
+                return
+            }
+            if (fileSize > 0) {
+                let actualSize = FileInfo(finalFile).size
+                if (actualSize != fileSize) {
+                    let errorResponse = "{\"success\":0,\"error\":\"file size mismatch\"}"
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ctx.json(errorResponse)
+                    return
+                }
             }
 
             // 验证 category_id 必须存在
@@ -419,7 +691,7 @@ public class ChunkedUploadController {
             // // 清理临时目录
             try {
                 getLogger("chunked_upload").info("开始清理临时目录", ("directory", chunkDir.toString()))
-                remove(chunkDir)
+                remove(chunkDir, recursive: true)
                 getLogger("chunked_upload").info("临时文件清理完成", ("directory", chunkDir.toString()))
             } catch (e: Exception) {
                 getLogger("chunked_upload").warn("清理临时目录失败，但不影响主流程", ("directory", chunkDir.toString()), ("error", e.message))
@@ -584,91 +856,7 @@ public class ChunkedUploadController {
 
 
     
-    /**
-     * 合并分片文件
-     */
-    private static func mergeChunks(chunkDir: String, outputFile: String): Unit {
-        // 获取所有分片文件并按序号排序
-        let chunkFiles = ArrayList<Path>()
-        let dir = Path(chunkDir)
-
-        // 检查目录是否存在
-        if (!exists(dir)) {
-            throw Exception("Chunk directory does not exist: ${chunkDir}")
-        }
-
-        // 遍历目录中的所有文件
-        for (entry in Directory.readFrom(dir)) {
-            if (!entry.isDirectory()) {
-                let fileName = entry.path.fileName.toString()
-                // 检查文件名是否匹配分片模式 (chunk_0.bin, chunk_1.bin, etc.)
-                if (fileName.startsWith("chunk_") && fileName.endsWith(".bin")) {
-                    chunkFiles.add(entry.path)
-                }
-            }
-        }
-
-        // 检查是否找到了分片文件
-        if (chunkFiles.size == 0) {
-            throw Exception("No chunk files found in directory: ${chunkDir}")
-        }
-
-        println("Found ${chunkFiles.size} chunk files to merge")
-
-        // 简单排序：转换为数组进行排序
-        let chunkArray = Array<Path>(chunkFiles.size, {i => chunkFiles[i]})
-
-        // 冒泡排序按分片序号排序
-        for (i in 0..chunkArray.size - 1) {
-            for (j in 0..chunkArray.size - i - 1) {
-                let aName = chunkArray[j].fileName.toString()
-                let bName = chunkArray[j + 1].fileName.toString()
-
-                try {
-                    let aIndex = Int64.parse(aName.removePrefix("chunk_").removeSuffix(".bin"))
-                    let bIndex = Int64.parse(bName.removePrefix("chunk_").removeSuffix(".bin"))
-                    if (aIndex > bIndex) {
-                        // 交换
-                        let temp = chunkArray[j]
-                        chunkArray[j] = chunkArray[j + 1]
-                        chunkArray[j + 1] = temp
-                    }
-                } catch (e: Exception) {
-                    println("Failed to parse chunk index from filename: ${aName} or ${bName}")
-                    throw Exception("Invalid chunk filename format: ${e.message}")
-                }
-            }
-        }
-
-        // 创建输出文件
-        try (outputFileStream = File(Path(outputFile), Write)) {
-            // 使用固定大小的缓冲区
-            let bufferSize = 1024 * 1024  // 1MB
-            let buffer = Array<Byte>(bufferSize, {_ => 0})
-
-            // 逐个读取分片并写入输出文件
-            for (chunkFile in chunkArray) {
-                getLogger("chunked_upload").info("Merging chunk", ("chunk", chunkFile.fileName.toString()))
-
-                // 检查分片文件是否存在
-                if (!exists(chunkFile)) {
-                    throw Exception("Chunk file does not exist: ${chunkFile}")
-                }
-
-                try (chunkFileStream = File(chunkFile, Read)) {
-                    var bytesRead = chunkFileStream.read(buffer)
-                    while (bytesRead > 0) {
-                        // 创建只包含实际读取字节的子数组
-                        let writeBuffer = buffer[0..bytesRead]
-                        outputFileStream.write(writeBuffer)
-                        bytesRead = chunkFileStream.read(buffer)
-                    }
-                }
-            }
-        }
-
-        println("Successfully merged ${chunkArray.size} chunks into ${outputFile}")
-
-        // 不在这里清理分片目录，让调用方负责清理
-    }
+    // mergeChunks 已被“临时大文件 + 按 offset 写入”方案替代：
+    // - uploadChunk 直接写入 final.part
+    // - completeUpload 只做缺块校验与后续移动/入库
 }
