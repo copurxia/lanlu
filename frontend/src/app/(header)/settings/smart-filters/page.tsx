@@ -342,61 +342,119 @@ export default function SmartFiltersPage() {
                 onDragLeave={handleDragLeave}
                 onDrop={(e) => handleDrop(e, index)}
                 onDragEnd={handleDragEnd}
-                className={`flex items-center gap-4 p-3 border rounded-lg transition-all
+                className={`p-3 border rounded-lg transition-all
                   ${dragIndex === index ? 'opacity-50 scale-[0.98]' : ''}
                   ${dropIndex === index ? 'border-primary border-2 bg-primary/5' : 'hover:bg-muted/50'}
                   cursor-grab active:cursor-grabbing
                 `}
               >
-                <div className="flex items-center text-muted-foreground">
-                  <GripVertical className="h-5 w-5" />
+                {/* Mobile layout (multi-line details to avoid information loss). */}
+                <div className="flex flex-col gap-3 sm:hidden">
+                  <div className="flex w-full items-center gap-3 min-w-0">
+                    <div className="flex items-center text-muted-foreground flex-shrink-0">
+                      <GripVertical className="h-5 w-5" />
+                    </div>
+
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {getIconComponent(filter.icon)}
+                      <span className="font-medium truncate">
+                        {language !== 'zh' && filter.translations?.[language]?.text ? filter.translations[language].text : filter.name}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {index === 0 && filters.length > 1 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleMoveDown(index)}
+                          className="h-8 w-8"
+                        >
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {index > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => handleMoveUp(index)}
+                          className="h-8 w-8"
+                        >
+                          <ChevronUp className="h-4 w-4" />
+                        </Button>
+                      )}
+                      <Switch checked={filter.enabled} onCheckedChange={() => handleToggle(filter.id)} />
+                      <Button variant="ghost" size="icon" onClick={() => handleEdit(filter)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(filter.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="w-full text-xs text-muted-foreground leading-relaxed break-words">
+                    <div className="flex flex-wrap gap-x-2 gap-y-1">
+                      {filter.query && <span>Q: {filter.query}</span>}
+                      {filter.newonly && <span className="text-blue-500">{t('search.newOnly')}</span>}
+                      {filter.untaggedonly && <span className="text-orange-500">{t('search.untaggedOnly')}</span>}
+                      {filter.date_from && <span>{t('settings.smartFilterDateFrom')}: {filter.date_from}</span>}
+                      <span>
+                        {t('search.sortBy')}: {getSortByLabel(filter.sort_by)} {getSortOrderLabel(filter.sort_order)}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2 min-w-[120px]">
-                  {getIconComponent(filter.icon)}
-                  <span className="font-medium">
-                    {language !== 'zh' && filter.translations?.[language]?.text ? filter.translations[language].text : filter.name}
-                  </span>
-                </div>
-                <div className="flex-1 text-sm text-muted-foreground truncate">
-                  {filter.query && <span className="mr-2">Q: {filter.query}</span>}
-                  {filter.newonly && <span className="mr-2 text-blue-500">{t('search.newOnly')}</span>}
-                  {filter.untaggedonly && <span className="mr-2 text-orange-500">{t('search.untaggedOnly')}</span>}
-                  {filter.date_from && <span className="mr-2">{t('settings.smartFilterDateFrom')}: {filter.date_from}</span>}
-                  <span>{t('search.sortBy')}: {getSortByLabel(filter.sort_by)} {getSortOrderLabel(filter.sort_order)}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {/* 第一项显示下移按钮 */}
-                  {index === 0 && filters.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleMoveDown(index)}
-                      className="h-8 w-8"
-                    >
-                      <ChevronDown className="h-4 w-4" />
+
+                {/* Desktop layout (single-line compact summary). */}
+                <div className="hidden sm:flex items-center gap-4">
+                  <div className="flex items-center text-muted-foreground">
+                    <GripVertical className="h-5 w-5" />
+                  </div>
+                  <div className="flex items-center gap-2 min-w-[180px]">
+                    {getIconComponent(filter.icon)}
+                    <span className="font-medium">
+                      {language !== 'zh' && filter.translations?.[language]?.text ? filter.translations[language].text : filter.name}
+                    </span>
+                  </div>
+                  <div className="flex-1 text-sm text-muted-foreground truncate">
+                    {filter.query && <span className="mr-2">Q: {filter.query}</span>}
+                    {filter.newonly && <span className="mr-2 text-blue-500">{t('search.newOnly')}</span>}
+                    {filter.untaggedonly && <span className="mr-2 text-orange-500">{t('search.untaggedOnly')}</span>}
+                    {filter.date_from && <span className="mr-2">{t('settings.smartFilterDateFrom')}: {filter.date_from}</span>}
+                    <span>
+                      {t('search.sortBy')}: {getSortByLabel(filter.sort_by)} {getSortOrderLabel(filter.sort_order)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {index === 0 && filters.length > 1 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleMoveDown(index)}
+                        className="h-8 w-8"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {index > 0 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => handleMoveUp(index)}
+                        className="h-8 w-8"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Switch checked={filter.enabled} onCheckedChange={() => handleToggle(filter.id)} />
+                    <Button variant="ghost" size="icon" onClick={() => handleEdit(filter)}>
+                      <Pencil className="h-4 w-4" />
                     </Button>
-                  )}
-                  {/* 其他项显示上移按钮 */}
-                  {index > 0 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleMoveUp(index)}
-                      className="h-8 w-8"
-                    >
-                      <ChevronUp className="h-4 w-4" />
+                    <Button variant="ghost" size="icon" onClick={() => handleDelete(filter.id)}>
+                      <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
-                  )}
-                  <Switch
-                    checked={filter.enabled}
-                    onCheckedChange={() => handleToggle(filter.id)}
-                  />
-                  <Button variant="ghost" size="icon" onClick={() => handleEdit(filter)}>
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => handleDelete(filter.id)}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
+                  </div>
                 </div>
               </div>
             ))}
