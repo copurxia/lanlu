@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Heart, Home, Settings, Shuffle } from 'lucide-react';
+import { BookOpen, Home, Settings, Shuffle } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -62,7 +62,7 @@ export function MobileBottomNav() {
           )}
           aria-current={isActiveLibrary ? 'page' : undefined}
         >
-          <Heart className="h-5 w-5" />
+          <BookOpen className="h-5 w-5" />
           <span>{t('navigation.library')}</span>
         </Link>
 

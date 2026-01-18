@@ -12,12 +12,10 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Upload, User, Settings, LogOut } from "lucide-react"
+import { Upload, User, Settings, LogOut, BookOpen } from "lucide-react"
 import { UploadDrawer } from "@/components/upload/UploadDrawer"
 import { useAuth } from "@/contexts/AuthContext"
 import { appEvents, AppEvents } from "@/lib/utils/events"
-import { Heart } from "lucide-react"
-
 export function UserMenu() {
   const { t } = useLanguage()
   const router = useRouter()
@@ -69,7 +67,7 @@ export function UserMenu() {
             <span>{t("upload.title")}</span>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => router.push('/library?tab=favorites')}>
-            <Heart className="mr-2 h-4 w-4" />
+            <BookOpen className="mr-2 h-4 w-4" />
             <span>{t("navigation.library")}</span>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => router.push('/settings')}>
