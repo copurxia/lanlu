@@ -379,7 +379,7 @@ export default function TagsSettingsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold flex items-center gap-2">
             <Tag className="w-5 h-5" />
@@ -387,12 +387,12 @@ export default function TagsSettingsPage() {
           </h2>
           <p className="text-sm text-muted-foreground">{t('settings.tagsDescription')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full sm:w-auto">
           <Button
             variant="outline"
             onClick={handleExport}
             disabled={loading}
-            className="flex items-center gap-2"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2"
           >
             <Download className="w-4 h-4" />
             {t('common.export')}
@@ -401,7 +401,7 @@ export default function TagsSettingsPage() {
             variant="outline"
             onClick={handleImportClick}
             disabled={loading}
-            className="flex items-center gap-2"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2"
           >
             <Upload className="w-4 h-4" />
             {t('common.import')}
@@ -409,8 +409,8 @@ export default function TagsSettingsPage() {
         </div>
       </div>
 
-      <div className="flex gap-2">
-        <div className="relative flex-1">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="relative flex-1 min-w-0">
           <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={t('settings.tagSearchPlaceholder')}
@@ -426,7 +426,7 @@ export default function TagsSettingsPage() {
           setSelectedNamespace(value);
           setCurrentPage(1);
         }}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-full sm:w-[180px]">
             <SelectValue placeholder={t('settings.tagAllNamespaces')} />
           </SelectTrigger>
           <SelectContent>
@@ -445,6 +445,7 @@ export default function TagsSettingsPage() {
             setSelectedNamespace('all');
             setCurrentPage(1);
           }}
+          className="w-full sm:w-auto"
         >
           {t('common.clear')}
         </Button>
@@ -459,44 +460,43 @@ export default function TagsSettingsPage() {
           {tags.map((tag) => (
             <div
               key={tag.id}
-              className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-start sm:justify-between"
+              className="rounded-md border p-3"
             >
-              <div className="min-w-0 space-y-1 flex-1">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {tag.namespace && (
-                    <Badge variant="secondary">{tag.namespace}</Badge>
-                  )}
-                  <span className="font-medium">{tag.name}</span>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {tag.namespace && <Badge variant="secondary">{tag.namespace}</Badge>}
+                    <span className="font-medium truncate">{tag.name}</span>
+                  </div>
                 </div>
-                <div className="text-xs text-muted-foreground space-y-1">
-                  {tag.translations.zh?.text && (
-                    <div>中文: {tag.translations.zh.text}</div>
-                  )}
-                  {tag.translations.en?.text && (
-                    <div>English: {tag.translations.en.text}</div>
-                  )}
-                  {tag.links && (
-                    <div>Links: {tag.links}</div>
-                  )}
+                <div className="flex gap-2 flex-shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleEditTag(tag)}
+                    disabled={loading}
+                    aria-label={t('common.edit')}
+                    title={t('common.edit')}
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => handleDeleteTag(tag.id)}
+                    disabled={loading}
+                    aria-label={t('common.delete')}
+                    title={t('common.delete')}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleEditTag(tag)}
-                  disabled={loading}
-                >
-                  <Edit2 className="w-4 h-4" />
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => handleDeleteTag(tag.id)}
-                  disabled={loading}
-                >
-                  <Trash2 className="w-4 h-4" />
-                </Button>
+
+              <div className="mt-2 text-xs text-muted-foreground space-y-1 break-words">
+                {tag.translations.zh?.text && <div>中文: {tag.translations.zh.text}</div>}
+                {tag.translations.en?.text && <div>English: {tag.translations.en.text}</div>}
+                {tag.links && <div>Links: {tag.links}</div>}
               </div>
             </div>
           ))}
