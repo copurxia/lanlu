@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils/utils"
 
 interface DialogProps {
@@ -70,7 +71,9 @@ const DialogContent: React.FC<{
   className?: string
   children: React.ReactNode
   size?: DialogSize
-}> = ({ className, children, size = 'md' }) => {
+  overlayClassName?: string
+  showOverlay?: boolean
+}> = ({ className, children, size = 'md', overlayClassName, showOverlay = true }) => {
   const { open, onOpenChange } = useDialogContext()
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
@@ -128,20 +131,24 @@ const DialogContent: React.FC<{
     fluid: 'w-[92vw] max-w-modal-xl'
   }
 
-  return (
+  // Portal to body so nested dialogs still cover the full viewport.
+  const content = (
     <div
       className={cn(
         "fixed inset-0 z-modal-overlay flex motion-reduce:transition-none",
         isMobile ? "items-end justify-center" : "items-center justify-center p-4"
       )}
     >
-      <div
-        className={cn(
-          "fixed inset-0 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none",
-          active ? "opacity-100" : "opacity-0 pointer-events-none"
-        )}
-        onClick={() => onOpenChange?.(false)}
-      />
+      {showOverlay ? (
+        <div
+          className={cn(
+            "fixed inset-0 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none",
+            active ? "opacity-100" : "opacity-0 pointer-events-none",
+            overlayClassName
+          )}
+          onClick={() => onOpenChange?.(false)}
+        />
+      ) : null}
       <div
         role="dialog"
         aria-modal="true"
@@ -164,6 +171,9 @@ const DialogContent: React.FC<{
       </div>
     </div>
   )
+
+  if (typeof document === "undefined") return null
+  return createPortal(content, document.body)
 }
 
 const DialogBody: React.FC<{ className?: string; children: React.ReactNode }> = ({
