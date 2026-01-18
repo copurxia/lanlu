@@ -4,7 +4,6 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, BookOpen, Heart, RefreshCw, Search, History } from 'lucide-react';
 
-import { Header } from '@/components/layout/Header';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -219,8 +218,6 @@ function LibraryPageContent() {
 
   return (
     <div className="min-h-screen bg-background pb-20 lg:pb-0">
-      <Header />
-
       <div className="container mx-auto px-4 py-6 md:py-10">
         {!token ? (
           <Card className="mx-auto max-w-xl overflow-hidden">

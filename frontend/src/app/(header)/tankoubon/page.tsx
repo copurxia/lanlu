@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Header } from '@/components/layout/Header';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 import { Button } from '@/components/ui/button';
@@ -315,7 +314,6 @@ function TankoubonDetailContent() {
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
-        <Header />
         <main className="container mx-auto px-4 py-8">
           <div className="flex justify-center items-center h-64">
             <Spinner size="lg" />
@@ -328,7 +326,6 @@ function TankoubonDetailContent() {
   if (!tankoubon) {
     return (
       <div className="min-h-screen bg-background">
-        <Header />
         <main className="container mx-auto px-4 py-8">
           <div className="text-center py-12">
             <p className="text-muted-foreground">{t('tankoubon.notFound')}</p>
@@ -352,7 +349,6 @@ function TankoubonDetailContent() {
 
   return (
     <div className="min-h-screen bg-background pb-20 lg:pb-0">
-      <Header />
       <main className="container mx-auto px-4 py-8">
         {/* Header / hero */}
         <div className="relative mb-8">
@@ -668,7 +664,6 @@ export default function TankoubonDetailPage() {
   return (
     <Suspense fallback={
       <div className="min-h-screen bg-background pb-20 lg:pb-0">
-        <Header />
         <main className="container mx-auto px-4 py-8">
           <div className="flex items-center justify-center py-12">
             <Spinner size="lg" />

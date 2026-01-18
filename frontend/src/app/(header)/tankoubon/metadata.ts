@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
-import zhMessages from '../../../messages/zh.json';
-import enMessages from '../../../messages/en.json';
+import zhMessages from '../../../../messages/zh.json';
+import enMessages from '../../../../messages/en.json';
 
 type Locale = 'zh' | 'en';
 

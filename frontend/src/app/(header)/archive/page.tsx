@@ -1,7 +1,6 @@
 'use client';
 
 import { Suspense } from 'react';
-import { Header } from '@/components/layout/Header';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { ArchiveDetailContent } from './ArchiveDetailContent';
 
@@ -10,8 +9,6 @@ export default function ArchiveDetailPage() {
 
   return (
     <div className="min-h-screen">
-      <Header />
-
       <Suspense
         fallback={
           <div className="container mx-auto px-4 py-8">

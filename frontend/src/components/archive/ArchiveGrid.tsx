@@ -32,12 +32,34 @@ export function ArchiveGrid({
 
     const tankoubonIds = archives
       .filter(isTankoubon)
-      .map(t => t.tankoubon_id);
+      .map(t => t.tankoubon_id)
+      // Prevent overfetching when a page contains many collections.
+      .slice(0, 50);
 
     if (tankoubonIds.length > 0) {
-      // 在后台预加载数据，但不影响渲染
-      TankoubonService.getTankoubonsWithArchives(tankoubonIds)
-        .catch(err => console.warn('预加载 tankoubon 详情失败:', err));
+      let cancelled = false;
+      const run = () => {
+        if (cancelled) return;
+        // 在后台预加载数据，但不影响首屏交互
+        TankoubonService.getTankoubonsWithArchives(tankoubonIds).catch((err) =>
+          console.warn('预加载 tankoubon 详情失败:', err)
+        );
+      };
+
+      // Prefer idle time so this doesn't compete with first paint / input.
+      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+        const handle = (window as any).requestIdleCallback(run, { timeout: 2000 });
+        return () => {
+          cancelled = true;
+          (window as any).cancelIdleCallback?.(handle);
+        };
+      }
+
+      const t = setTimeout(run, 0);
+      return () => {
+        cancelled = true;
+        clearTimeout(t);
+      };
     }
   }, [archives, preloadTankoubonDetails]);
 

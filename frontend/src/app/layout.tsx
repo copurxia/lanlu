@@ -4,7 +4,6 @@ import { ThemeProvider } from '@/components/theme/theme-provider';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ServerInfoProvider } from '@/contexts/ServerInfoContext';
-import { StaticGenerationProvider } from '@/contexts/StaticGenerationContext';
 import { ConfirmProvider } from '@/contexts/ConfirmProvider';
 import { Toaster } from 'sonner';
 
@@ -30,22 +29,18 @@ export default function RootLayout({
   return (
     <html suppressHydrationWarning>
       <body className="font-sans">
-        <StaticGenerationProvider>
-          <LanguageProvider>
-            <AuthProvider>
-              <ServerInfoProvider>
-                <ConfirmProvider>
-                  <ThemeProvider
-                    defaultTheme="system"
-                  >
-                    {children}
-                    <Toaster position="top-center" richColors />
-                  </ThemeProvider>
-                </ConfirmProvider>
-              </ServerInfoProvider>
-            </AuthProvider>
-          </LanguageProvider>
-        </StaticGenerationProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <ServerInfoProvider>
+              <ConfirmProvider>
+                <ThemeProvider defaultTheme="system">
+                  {children}
+                  <Toaster position="top-center" richColors />
+                </ThemeProvider>
+              </ConfirmProvider>
+            </ServerInfoProvider>
+          </AuthProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

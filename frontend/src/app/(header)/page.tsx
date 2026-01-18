@@ -6,7 +6,6 @@ import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Header } from '@/components/layout/Header';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { ArchiveService } from '@/lib/services/archive-service';
@@ -15,7 +14,7 @@ import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { RefreshCw } from 'lucide-react';
-import { useState, useEffect, useCallback, Suspense } from 'react';
+import { useState, useEffect, useCallback, Suspense, useRef } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useGridColumnCount } from '@/hooks/common-hooks';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -46,6 +45,8 @@ function HomePageContent() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const pageSize = 20;
+  const randomKey = `${gridColumnCount}:${language}`;
+  const lastRandomKeyRef = useRef<string | null>(null);
 
   // 读取URL参数
   const urlQuery = searchParams?.get('q') || '';
@@ -171,6 +172,13 @@ function HomePageContent() {
 
     const queryString = params.toString();
     const newUrl = queryString ? `/?${queryString}` : '/';
+    if (typeof window !== 'undefined') {
+      const currentUrl = `${window.location.pathname}${window.location.search}`;
+      if (currentUrl !== newUrl) {
+        router.replace(newUrl);
+      }
+      return;
+    }
     router.replace(newUrl);
   }, [searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, currentPage, router, isInitialized]);
 
@@ -179,20 +187,25 @@ function HomePageContent() {
     // 确保只在初始化完成后才获取数据，避免使用未同步的初始状态
     if (typeof window !== 'undefined' && isInitialized) {
       fetchArchives(currentPage);
-      fetchRandomArchives();
+      // Random recommendations are hidden during search, and they don't need
+      // to refresh on every filter/sort/page change.
+      if (!searchQuery && lastRandomKeyRef.current !== randomKey) {
+        lastRandomKeyRef.current = randomKey;
+        fetchRandomArchives();
+      }
     }
-  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, isInitialized]);
+  }, [currentPage, fetchArchives, fetchRandomArchives, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, isInitialized, randomKey, searchQuery]);
 
   // 监听上传完成事件，刷新首页数据
   useEffect(() => {
     const handleUploadCompleted = () => {
       fetchArchives(currentPage);
-      fetchRandomArchives();
+      if (!searchQuery) fetchRandomArchives();
     };
 
     const handleArchivesRefresh = () => {
       fetchArchives(currentPage);
-      fetchRandomArchives();
+      if (!searchQuery) fetchRandomArchives();
     };
 
     const handleSearchReset = () => {
@@ -218,7 +231,7 @@ function HomePageContent() {
       appEvents.off(AppEvents.ARCHIVES_REFRESH, handleArchivesRefresh);
       appEvents.off(AppEvents.SEARCH_RESET, handleSearchReset);
     };
-  }, [currentPage, fetchArchives, fetchRandomArchives]);
+  }, [currentPage, fetchArchives, fetchRandomArchives, searchQuery]);
 
   // Open mobile filter dialog from the global header action.
   useEffect(() => {
@@ -270,8 +283,6 @@ function HomePageContent() {
 
   return (
     <div className="min-h-screen bg-background">
-      <Header />
-
       {/* 固定高度容器，减去Header高度（约64px）；移动端不再减去底部栏高度，让内容滚动经过底部栏以呈现毛玻璃效果 */}
       <div className="flex h-[calc(100vh-4rem)]">
         {/* 侧栏 - 桌面端显示 */}

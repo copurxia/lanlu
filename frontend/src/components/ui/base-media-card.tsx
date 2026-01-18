@@ -9,7 +9,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Eye, Heart } from 'lucide-react'
 import { ArchiveService } from '@/lib/services/archive-service'
-import { FavoriteService } from '@/lib/services/favorite-service'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
 
@@ -176,7 +175,8 @@ export function BaseMediaCard({
           className="flex-1"
           onClick={(e) => e.stopPropagation()}
         >
-          <Link href={detailPath}>
+          {/* Avoid prefetching N distinct URLs like `/archive?id=...` for large grids. */}
+          <Link href={detailPath} prefetch={false}>
             <Eye className="w-4 h-4 mr-2" />
             {detailsLabel || t('archive.details')}
           </Link>

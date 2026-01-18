@@ -1,6 +1,5 @@
 'use client';
 
-import { Header } from '@/components/layout/Header';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Settings } from 'lucide-react';
@@ -11,8 +10,6 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="min-h-screen bg-background pb-20 lg:pb-0">
-      <Header />
-
       <div className="container mx-auto px-4 py-8">
         {/* 标题区域 - 移动端隐藏 */}
         <div className="hidden md:flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between mb-4">
