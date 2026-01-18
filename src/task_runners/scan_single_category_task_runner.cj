@@ -98,22 +98,52 @@ public class ScanSingleCategoryTaskRunner {
         }
 
         let entries = DirectoryScanner.listDirectory(dirPath)
+
+        // Optimization: leaf media folders are treated as a single "folder archive".
+        // Avoid scanning each contained media file (which would be skipped anyway) and
+        // avoid redundant DirectoryScanner.listDirectory() calls inside FolderHandler.canHandle().
+        if (dirPath != ctx.basePath && entries.size > 0) {
+            var leafOk = true
+            for (entry in entries) {
+                let fullPath = DirectoryScanner.joinPath(dirPath, entry)
+                if (DirectoryScanner.isDirectory(fullPath)) {
+                    leafOk = false
+                    break
+                }
+                if (!DirectoryScanner.fileExists(fullPath)) {
+                    leafOk = false
+                    break
+                }
+                if (!FolderHandler.isAllowedMediaFileName(entry)) {
+                    leafOk = false
+                    break
+                }
+            }
+
+            if (leafOk) {
+                total = Int64(entries.size)
+                if (enqueueScanArchiveTask(dirPath, ctx)) {
+                    created = 1
+                }
+                return (total, created)
+            }
+        }
+
         for (entry in entries) {
             try {
                 let fullPath = DirectoryScanner.joinPath(dirPath, entry)
                 total++
 
-                // 对于每个路径（无论是文件还是目录），都尝试提交任务
-                // 由 scan_archive 的 ArchiveHandler.canHandle 决定是否处理
-                if (enqueueScanArchiveTask(fullPath, ctx)) {
-                    created++
-                }
-
-                // 如果是目录，递归扫描子目录
                 if (DirectoryScanner.isDirectory(fullPath)) {
+                    // Directory handling is done by recursion; folder archives are detected in the callee.
                     let (subTotal, subCreated) = scanDirectoryRecursive(fullPath, ctx)
                     total += subTotal
                     created += subCreated
+                } else {
+                    // Only files can be handled here (pdf/epub/archive files).
+                    if (enqueueScanArchiveTask(fullPath, ctx)) {
+                        created++
+                    }
                 }
             } catch (e: Exception) {
                 logger.warn("Failed to process entry '${entry}' in ${dirPath}: ${e.message}, skipping")

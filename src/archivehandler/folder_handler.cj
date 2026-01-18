@@ -58,6 +58,30 @@ public class FolderHandler <: ArchiveHandler {
         "mp4", "webm", "mkv", "avi", "mov", "m4v", "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V"
     ]
 
+    /**
+     * Cheap filename-only check for whether a single entry could be treated as media.
+     * Used by scanners to avoid re-reading directories just to know if a folder can be handled.
+     */
+    public static func isAllowedMediaFileName(entryName: String): Bool {
+        let parts = entryName.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let extension = parts[parts.size - 1]
+
+        for (allowedExt in ALLOWED_IMAGE_EXTENSIONS) {
+            if (extension == allowedExt) {
+                return true
+            }
+        }
+        for (allowedExt in ALLOWED_VIDEO_EXTENSIONS) {
+            if (extension == allowedExt) {
+                return true
+            }
+        }
+        return false
+    }
+
     public func listEntries(archivePath: String): Array<String> {
         return DirectoryScanner.listDirectory(archivePath)
     }
@@ -197,32 +221,7 @@ public class FolderHandler <: ArchiveHandler {
             }
 
             // 获取文件扩展名
-            let parts = entry.split(".")
-            if (parts.size <= 1) {
-                // 没有扩展名的文件，不允许
-                return false
-            }
-
-            let extension = parts[parts.size - 1]
-
-            // 检查扩展名是否在允许列表中（大小写敏感）
-            var isAllowed = false
-            for (allowedExt in ALLOWED_IMAGE_EXTENSIONS) {
-                if (extension == allowedExt) {
-                    isAllowed = true
-                    break
-                }
-            }
-            if (!isAllowed) {
-                for (allowedExt in ALLOWED_VIDEO_EXTENSIONS) {
-                    if (extension == allowedExt) {
-                        isAllowed = true
-                        break
-                    }
-                }
-            }
-
-            if (!isAllowed) {
+            if (!FolderHandler.isAllowedMediaFileName(entry)) {
                 return false
             }
         }

@@ -1,6 +1,7 @@
 package lrr4cj.utils
 
 import std.fs.*
+import std.collection.*
 import stdx.log.*
 
 /**
@@ -109,71 +110,48 @@ public class DirectoryScanner {
      * 列出目录内容（支持软链接）
      */
     public static func listDirectory(path: String): Array<String> {
+        // NOTE: This is hot code during scans. Avoid O(n^2) array growth and excessive string logging.
         try {
             let dirPath = Path(path)
-            var files = Array<String>()
+            if (!exists(dirPath)) {
+                return Array<String>()
+            }
 
-            logger.debug("listDirectory: Checking path ${path}")
+            let fileInfo = FileInfo(dirPath)
+            var targetPath = ""
 
-            if (exists(dirPath)) {
-                let fileInfo = FileInfo(dirPath)
-                var isDirectory = false
-                var isSymlink = false
-
-                if (fileInfo.isDirectory()) {
-                    isDirectory = true
-                    logger.debug("listDirectory: ${path} is a regular directory")
-                } else if (fileInfo.isSymbolicLink()) {
-                    isSymlink = true
-                    logger.debug("listDirectory: ${path} is a symbolic link")
-
-                    try {
-                        let targetPath = SymbolicLink.readFrom(path, recursive: false)
-                        logger.debug("listDirectory: Symlink ${path} points to ${targetPath.toString()}")
-                        if (exists(targetPath)) {
-                            let targetFileInfo = FileInfo(targetPath)
-                            isDirectory = targetFileInfo.isDirectory()
-                            logger.debug("listDirectory: Symlink target is ${if (isDirectory) {"directory"} else {"NOT a directory"}}")
-                        }
-                    } catch (_: FSException) {
-                        isDirectory = false
-                        logger.warn("listDirectory: Failed to read symlink ${path}")
+            if (fileInfo.isDirectory()) {
+                targetPath = path
+            } else if (fileInfo.isSymbolicLink()) {
+                try {
+                    let linkTarget = SymbolicLink.readFrom(path, recursive: false)
+                    if (!exists(linkTarget)) {
+                        return Array<String>()
                     }
-                } else {
-                    logger.warn("listDirectory: ${path} is neither directory nor symlink")
-                }
-
-                if (isDirectory) {
-                    let targetPath: String
-                    if (isSymlink) {
-                        targetPath = SymbolicLink.readFrom(path, recursive: false).toString()
-                        logger.debug("listDirectory: Using symlink target path for listing: ${targetPath}")
-                    } else {
-                        targetPath = path
+                    let targetInfo = FileInfo(linkTarget)
+                    if (!targetInfo.isDirectory()) {
+                        return Array<String>()
                     }
-
-                    let entries = Directory.readFrom(Path(targetPath))
-                    logger.debug("listDirectory: Found ${entries.size} entries in ${targetPath}")
-
-                    for (entry in entries) {
-                        try {
-                            if (entry.isRegular() || entry.isDirectory() || entry.isSymbolicLink()) {
-                                let entryName = entry.name.toString()
-                                files = addFileToArray(files, entryName)
-                            }
-                        } catch (e: Exception) {
-                            logger.warn("Failed to process entry with invalid name in ${path}: ${e.message}, skipping this entry")
-                        }
-                    }
-                    logger.debug("listDirectory: Returning ${files.size} files/dirs/symlinks")
-                    return files
-                } else {
-                    logger.warn("listDirectory: ${path} is not a directory, returning empty array")
+                    targetPath = linkTarget.toString()
+                } catch (_: FSException) {
+                    return Array<String>()
                 }
             } else {
-                logger.error("listDirectory: Path ${path} does not exist")
+                return Array<String>()
             }
-            return Array<String>()
+
+            let entries = Directory.readFrom(Path(targetPath))
+            let files = ArrayList<String>()
+            for (entry in entries) {
+                try {
+                    if (entry.isRegular() || entry.isDirectory() || entry.isSymbolicLink()) {
+                        files.add(entry.name.toString())
+                    }
+                } catch (_: Exception) {
+                    // Skip entries with invalid names or permissions.
+                }
+            }
+            return files.toArray()
         } catch (e: Exception) {
             logger.error("listDirectory: Exception listing directory ${path}: ${e.message}")
             return Array<String>()
@@ -184,32 +162,30 @@ public class DirectoryScanner {
      * 拼接路径
      */
     public static func joinPath(base: String, part: String): String {
-        let cleanBase = if (base.endsWith("/")) {
-            let parts = base.split("")
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                result += parts[i]
-            }
-            result
-        } else {
-            base
+        if (base.size == 0) {
+            return part
         }
-        let cleanPart = if (part.startsWith("/")) {
-            let parts = part.split("")
-            var result = ""
-            for (i in 1..parts.size) {
-                result += parts[i]
-            }
-            result
+        if (part.size == 0) {
+            return base
+        }
+
+        let cleanBase = if (base.endsWith("/") && base.size > 1) { base[0..base.size - 1] } else { base }
+        // Treat "/" as an empty part; avoid creating "base//".
+        let cleanPart = if (part == "/") {
+            ""
+        } else if (part.startsWith("/") && part.size > 1) {
+            part[1..part.size]
         } else {
             part
         }
 
-        if (cleanPart.size > 0) {
-            return "${cleanBase}/${cleanPart}"
-        } else {
+        if (cleanPart.size == 0) {
             return cleanBase
         }
+        if (cleanBase == "/") {
+            return "/${cleanPart}"
+        }
+        return "${cleanBase}/${cleanPart}"
     }
 
     /**
