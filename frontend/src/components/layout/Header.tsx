@@ -204,42 +204,45 @@ export function Header() {
 
           {/* 导航菜单 - 桌面端显示 */}
           <nav className="hidden md:flex items-center space-x-2">
-            {navigation.map((item) => {
-              const Icon = item.icon;
-              if (item.action) {
+            {/* Hide duplicated "Home/Random" actions when the mobile bottom nav is visible (<lg). */}
+            <div className="hidden lg:flex items-center space-x-2">
+              {navigation.map((item) => {
+                const Icon = item.icon;
+                if (item.action) {
+                  return (
+                    <Button
+                      key={item.name}
+                      variant="ghost"
+                      size="sm"
+                      onClick={item.action}
+                      disabled={randomLoading}
+                      className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                        randomLoading
+                          ? 'text-muted-foreground'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                      }`}
+                    >
+                      <Icon className={`h-4 w-4 ${randomLoading ? 'animate-spin' : ''}`} />
+                      <span>{item.name}</span>
+                    </Button>
+                  );
+                }
                 return (
-                  <Button
+                  <Link
                     key={item.name}
-                    variant="ghost"
-                    size="sm"
-                    onClick={item.action}
-                    disabled={randomLoading}
+                    href={item.href}
                     className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                      randomLoading
-                        ? 'text-muted-foreground'
+                      pathname === item.href
+                        ? 'bg-primary text-primary-foreground'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                     }`}
                   >
-                    <Icon className={`h-4 w-4 ${randomLoading ? 'animate-spin' : ''}`} />
+                    <Icon className="h-4 w-4" />
                     <span>{item.name}</span>
-                  </Button>
+                  </Link>
                 );
-              }
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                    pathname === item.href
-                      ? 'bg-primary text-primary-foreground'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>{item.name}</span>
-                </Link>
-              );
-            })}
+              })}
+            </div>
             {/* md~lg: no sidebar, so expose filter entry point in the top bar */}
             {pathname === '/' && (
               <Button
