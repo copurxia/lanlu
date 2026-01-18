@@ -4,9 +4,10 @@ import * as React from 'react';
 import { type DateRange } from 'react-day-picker';
 import { Calendar as CalendarIcon, X } from 'lucide-react';
 
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { cn } from '@/lib/utils/utils';
 
@@ -46,6 +47,8 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
   const { t, language } = useLanguage();
   const ariaLabel = placeholder || t('search.dateRange');
   const [open, setOpen] = React.useState(false);
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const [isMobile, setIsMobile] = React.useState(false);
   const [range, setRange] = React.useState<DateRange | undefined>(() => {
     const from = parseYmd(value?.from);
     const to = parseYmd(value?.to);
@@ -62,6 +65,21 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
     }
     setRange({ from, to });
   }, [value?.from, value?.to]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(max-width: 639px)');
+    const onMediaChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    setIsMobile(mql.matches);
+    mql.addEventListener('change', onMediaChange);
+    return () => mql.removeEventListener('change', onMediaChange);
+  }, []);
+
+  const [draftRange, setDraftRange] = React.useState<DateRange | undefined>(range);
+  React.useEffect(() => {
+    if (!drawerOpen) return;
+    setDraftRange(range);
+  }, [drawerOpen, range]);
 
   const formatDate = (date: Date) => {
     if (language === 'zh') {
@@ -86,19 +104,107 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
 
   const hasValue = Boolean(value?.from || value?.to);
 
+  const triggerButton = (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      title={ariaLabel}
+      onClick={() => (isMobile ? setDrawerOpen(true) : setOpen(true))}
+      className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start font-normal pr-14')}
+    >
+      <span className={cn('min-w-0 truncate', !range?.from && 'text-muted-foreground')}>{labelText}</span>
+    </button>
+  );
+
+  const trigger = (
+    <div className={cn('relative w-full', className)}>
+      {triggerButton}
+
+      {hasValue ? (
+        <button
+          type="button"
+          className="absolute right-9 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t('common.reset')}
+          title={t('common.reset')}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setRange(undefined);
+            onChange({ from: '', to: '' });
+            setOpen(false);
+            setDrawerOpen(false);
+          }}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      ) : null}
+
+      <CalendarIcon
+        className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+        aria-hidden="true"
+      />
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <>
+        {trigger}
+        <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <DialogContent className="w-full">
+            <DialogHeader className="px-4 py-3 border-b">
+              <DialogTitle className="text-center">{t('search.dateRange')}</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="px-4 py-4">
+              <div className="flex flex-col gap-3">
+                <Calendar
+                  mode="range"
+                  defaultMonth={draftRange?.from}
+                  selected={draftRange}
+                  onSelect={(next) => setDraftRange(next)}
+                  numberOfMonths={1}
+                  initialFocus
+                  className="rounded-lg border shadow-sm"
+                />
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      onChange({ from: '', to: '' });
+                      setDrawerOpen(false);
+                    }}
+                  >
+                    {t('common.reset')}
+                  </Button>
+                  <Button
+                    type="button"
+                    className="flex-1"
+                    onClick={() => {
+                      onChange({
+                        from: draftRange?.from ? toYmd(draftRange.from) : '',
+                        to: draftRange?.to ? toYmd(draftRange.to) : '',
+                      });
+                      setDrawerOpen(false);
+                    }}
+                  >
+                    {t('common.confirm')}
+                  </Button>
+                </div>
+              </div>
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <div className={cn('relative w-full', className)}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            aria-label={ariaLabel}
-            title={ariaLabel}
-            className={cn(buttonVariants({ variant: 'outline' }), 'w-full justify-start font-normal pr-14')}
-          >
-            <span className={cn('min-w-0 truncate', !range?.from && 'text-muted-foreground')}>{labelText}</span>
-          </button>
-        </PopoverTrigger>
+        <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
 
         {hasValue ? (
           <button
@@ -111,6 +217,7 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
               e.stopPropagation();
               setRange(undefined);
               onChange({ from: '', to: '' });
+              setOpen(false);
             }}
           >
             <X className="h-4 w-4" />
