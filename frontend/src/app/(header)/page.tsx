@@ -34,6 +34,8 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const gridColumnCount = useGridColumnCount();
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const lastPageRef = useRef<number | null>(null);
 
   const [archives, setArchives] = useState<any[]>([]);
   const [randomArchives, setRandomArchives] = useState<any[]>([]);
@@ -332,6 +334,22 @@ function HomePageContent() {
     setCurrentPage(page);
   };
 
+  // Homepage uses an independently scrollable <main>; reset its scroll position when the page changes.
+  // This covers pagination clicks and history navigation (back/forward) that updates `page` via URL.
+  useEffect(() => {
+    if (!isInitialized) return;
+    const prev = lastPageRef.current;
+    lastPageRef.current = currentPage;
+    if (prev === null || prev === currentPage) return;
+
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    mainScrollRef.current?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+  }, [currentPage, isInitialized]);
+
   // 搜索模式检测
   const isSearchMode = searchQuery;
   const statsText = t('home.archivesCount')
@@ -363,7 +381,7 @@ function HomePageContent() {
         </div>
 
         {/* 主内容区 - 独立滚动 */}
-        <main className="flex-1 min-w-0 min-h-0 overflow-y-auto pb-24 lg:pb-0">
+        <main ref={mainScrollRef} className="flex-1 min-w-0 min-h-0 overflow-y-auto pb-24 lg:pb-0">
           <div className="px-4 py-8">
           {/* 随机推荐 - 搜索模式下隐藏 */}
           {!isSearchMode && (
