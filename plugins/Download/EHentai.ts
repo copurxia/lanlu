@@ -45,6 +45,9 @@ class EHentaiDownloadPlugin extends BasePlugin {
         return;
       }
 
+      this.reportProgress(1, 'Starting E-Hentai download...');
+      await this.logInfo('EHentai download plugin started', { url });
+
       const result = await this.provideUrl(url, {
         forceresampled: params.forceresampled || false
       }, loginCookies);
@@ -61,6 +64,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
    */
   private async provideUrl(url: string, params: { forceresampled: boolean }, loginCookies: LoginCookie[]): Promise<PluginResult> {
     try {
+      this.reportProgress(5, 'Validating gallery URL...');
       // 验证URL格式
       const urlMatch = url.match(/https?:\/\/e(-|x)hentai\.org\/g\/([0-9]*)\/([0-z]*)\/*.*/);
       if (!urlMatch) {
@@ -72,20 +76,24 @@ class EHentaiDownloadPlugin extends BasePlugin {
 
       // 生成archiver URL
       const archiverUrl = `${domain}/archiver.php?gid=${gID}&token=${gToken}`;
+      await this.logInfo('Resolved gallery', { gid: gID, token: gToken, archiverUrl, forceresampled: params.forceresampled });
 
       // 检查archiver URL是否有效
       const targetHost = this.getHostname(archiverUrl);
+      this.reportProgress(15, 'Checking archiver page...');
       const checkResult = await this.checkArchiverUrl(archiverUrl, targetHost, loginCookies);
       if (!checkResult.success) {
         return checkResult;
       }
 
       // 获取下载URL
+      this.reportProgress(25, 'Requesting archive download link...');
       const downloadResult = await this.getDownloadUrl(archiverUrl, params.forceresampled, targetHost, loginCookies);
       if (!downloadResult.success) {
         return downloadResult;
       }
 
+      this.reportProgress(30, 'Downloading archive...');
       const downloaded = await this.downloadArchive(downloadResult.data.finalUrl, targetHost, loginCookies, gID, gToken, params.forceresampled);
       if (!downloaded.success) {
         return downloaded;
@@ -130,10 +138,15 @@ class EHentaiDownloadPlugin extends BasePlugin {
         headers.set('Cookie', cookieHeader);
       }
 
+      await this.logInfo('Fetching archive stream', { finalUrl, domain, forceresampled });
       const { readable, headers: respHeaders } = await download(finalUrl, { headers });
 
       const contentDisposition =
         respHeaders.get('content-disposition') || respHeaders.get('Content-Disposition') || '';
+      const contentLengthHeader =
+        respHeaders.get('content-length') || respHeaders.get('Content-Length') || '';
+      const contentLength = Number.parseInt(contentLengthHeader || '0', 10);
+
       const derived = this.deriveFilenameFromContentDisposition(contentDisposition);
       const fixed = this.maybeFixMojibakeUtf8(derived);
 
@@ -142,8 +155,9 @@ class EHentaiDownloadPlugin extends BasePlugin {
       const safeName = chosen.replace(/[\\/]/g, '_');
       const finalPath = await this.allocateUniquePath(`${pluginDir}/${safeName}`);
 
-      await this.logInfo('download finished', {
+      await this.logInfo('Archive download started', {
         contentDisposition,
+        contentLength,
         derivedFilename: derived,
         fixedFilename: fixed,
         finalPath
@@ -151,7 +165,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
 
       const file = await Deno.open(finalPath, { create: true, write: true, truncate: true });
       try {
-        await readable.pipeTo(file.writable);
+        await this.pipeWithProgress(readable, file, contentLength);
       } finally {
         try {
           file.close();
@@ -160,12 +174,72 @@ class EHentaiDownloadPlugin extends BasePlugin {
         }
       }
 
+      this.reportProgress(100, 'Download complete');
+      await this.logInfo('Archive download completed', { finalPath });
+
       const filename = finalPath.split('/').pop() ?? safeName;
       const relativePath = `plugins/ehdl/${filename}`;
       return { success: true, data: { relativePath, filename } };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       return { success: false, error: `Archive download failed: ${errorMessage}` };
+    }
+  }
+
+  private async pipeWithProgress(
+    readable: ReadableStream<Uint8Array>,
+    file: Deno.FsFile,
+    contentLength: number
+  ): Promise<void> {
+    const reader = readable.getReader();
+    let received = 0;
+    let lastReportedPercent = -1;
+    let lastReportAt = 0;
+    const start = Date.now();
+
+    // Keep the pre-download phases (validate/link generation) within 0-30.
+    const base = 30;
+    const span = 70;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.length === 0) continue;
+
+      // Write chunk to disk.
+      let offset = 0;
+      while (offset < value.length) {
+        const n = await file.write(value.subarray(offset));
+        if (n <= 0) break;
+        offset += n;
+      }
+      received += offset;
+
+      // Throttle progress updates to avoid spamming logs.
+      const now = Date.now();
+      if (now - lastReportAt < 400) continue;
+      lastReportAt = now;
+
+      if (contentLength > 0) {
+        const ratio = Math.min(1, received / contentLength);
+        const percent = Math.min(99, base + Math.floor(ratio * span));
+        if (percent !== lastReportedPercent) {
+          lastReportedPercent = percent;
+          const mb = (received / 1024 / 1024).toFixed(1);
+          const totalMb = (contentLength / 1024 / 1024).toFixed(1);
+          this.reportProgress(percent, `Downloading... ${mb}MiB / ${totalMb}MiB`);
+        }
+      } else {
+        // Unknown length; emit periodic byte-based updates.
+        const elapsed = Math.max(1, (now - start) / 1000);
+        const mib = received / 1024 / 1024;
+        const speed = (mib / elapsed).toFixed(2);
+        const percent = Math.min(99, base + Math.min(span - 1, Math.floor(mib)));
+        if (percent !== lastReportedPercent) {
+          lastReportedPercent = percent;
+          this.reportProgress(percent, `Downloading... ${mib.toFixed(1)}MiB (${speed} MiB/s)`);
+        }
+      }
     }
   }
 
@@ -345,6 +419,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
    */
   private async checkArchiverUrl(archiverUrl: string, domain: string, loginCookies: LoginCookie[]): Promise<PluginResult> {
     try {
+      await this.logDebug('Checking archiver URL', { archiverUrl, domain });
       const headers = this.buildRequestHeaders(domain, loginCookies);
       const response = await fetch(archiverUrl, {
         headers
@@ -376,6 +451,7 @@ class EHentaiDownloadPlugin extends BasePlugin {
    */
   private async getDownloadUrl(archiverUrl: string, forceresampled: boolean, domain: string, loginCookies: LoginCookie[]): Promise<PluginResult> {
     try {
+      await this.logDebug('Generating download URL', { archiverUrl, domain, forceresampled });
       const dltype = forceresampled ? 'res' : 'org';
       const dlcheck = forceresampled ? 'Download+Resample+Archive' : 'Download+Original+Archive';
 

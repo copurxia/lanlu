@@ -70,7 +70,8 @@ public class DownloadUrlTaskRunner {
             TaskModel.updateTaskProgress(taskId, 10, "创建 Deno 任务")
 
             // 创建 deno_task 参数
-            let denoParams = "{\"pluginNamespace\":\"${escapeJson(plugin.namespace)}\",\"pluginType\":\"Download\",\"action\":\"run\",\"groupId\":\"${escapeJson(groupId)}\",\"url\":\"${escapeJson(url)}\"}"
+            // parentTaskId allows deno_task to mirror plugin logs/progress back to this download_url task.
+            let denoParams = "{\"pluginNamespace\":\"${escapeJson(plugin.namespace)}\",\"pluginType\":\"Download\",\"action\":\"run\",\"groupId\":\"${escapeJson(groupId)}\",\"parentTaskId\":${taskId},\"url\":\"${escapeJson(url)}\"}"
 
             // 创建并提交 deno_task
             let denoTask = TaskModel.createTaskWithOptions(

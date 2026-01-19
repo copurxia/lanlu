@@ -51,7 +51,8 @@ public class DenoTaskRunner {
         TaskModel.updateTaskProgress(taskId, 1, "Deno任务开始")
 
         // 解析参数
-        let (pluginNamespace, pluginType, _, groupId, archiveId, oneshotParam, extraParams, url) = parseParameters(parameters)
+        let (pluginNamespace, pluginType, _, groupId, archiveId, oneshotParam, extraParams, url, parentTaskIdRaw) = parseParameters(parameters)
+        let parentTaskId = parseInt64OrZero(parentTaskIdRaw)
 
         if (pluginNamespace.size == 0 || pluginType.size == 0) {
             fail(taskId, "pluginNamespace and pluginType are required")
@@ -99,7 +100,7 @@ public class DenoTaskRunner {
             // 根据类型执行插件
             let result = match (pluginType) {
                 case "Metadata" => executeMetadataPlugin(taskId, plugin, archiveId, oneshotParam, extraParams, loginCookiesJson)
-                case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson)
+                case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson, parentTaskId)
                 case "Login" => executeLoginPluginDirect(taskId, plugin)
                 case _ =>
                     fail(taskId, "Unknown plugin type: ${pluginType}")
@@ -132,7 +133,7 @@ public class DenoTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String) {
         var pluginNamespace = ""
         var pluginType = ""
         var action = "run"
@@ -141,10 +142,11 @@ public class DenoTaskRunner {
         var oneshotParam = ""
         var extraParams = ""
         var url = ""
+        var parentTaskId = ""
 
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url)
+            return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url, parentTaskId)
         }
 
         try {
@@ -161,11 +163,22 @@ public class DenoTaskRunner {
                     oneshotParam = getJsonStringValue(fields, "oneshotParam")
                     extraParams = getJsonStringValue(fields, "extraParams")
                     url = getJsonStringValue(fields, "url")
+                    parentTaskId = getJsonStringValue(fields, "parentTaskId")
                 case _ => ()
             }
         } catch (_: Exception) {}
 
-        return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url)
+        return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url, parentTaskId)
+    }
+
+    private static func parseInt64OrZero(s: String): Int64 {
+        let trimmed = s.trimAscii()
+        if (trimmed.size == 0) { return 0 }
+        try {
+            return Int64.parse(trimmed)
+        } catch (_: Exception) {
+            return 0
+        }
     }
 
     private static func getJsonStringValue(fields: HashMap<String, JsonValue>, key: String): String {
@@ -558,7 +571,8 @@ public class DenoTaskRunner {
         taskId: Int64,
         command: String,
         args: ArrayList<String>,
-        inputJson: String
+        inputJson: String,
+        parentTaskId: Int64
     ): DenoExecutionResult {
         let logger = getLogger("deno_task")
 
@@ -600,11 +614,14 @@ public class DenoTaskRunner {
                     case "progress" =>
                         TaskModel.updateTaskProgress(taskId, progress, message)
                         TaskIO.appendLog(taskId, "[PROGRESS] ${progress}% - ${message}")
+                        mirrorParentProgress(parentTaskId, taskId, progress, message)
                     case "log" =>
                         TaskIO.appendLog(taskId, message)
+                        mirrorParentLog(parentTaskId, taskId, message)
                     case "data" =>
                         // message 是 key，data 是 value
                         TaskIO.appendLog(taskId, "[DATA] ${message}")
+                        mirrorParentLog(parentTaskId, taskId, "[DATA] ${message}")
                         dataCollector.add(data)
                     case "result" =>
                         finalSuccess = success
@@ -681,7 +698,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        return executeWithStdio(taskId, "deno", denoArgs, inputJson)
+        return executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
     }
 
     /**
@@ -799,7 +816,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
         // 保留 loginCookiesJson 用于后续处理
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
@@ -851,7 +868,8 @@ public class DenoTaskRunner {
         taskId: Int64,
         plugin: PluginData,
         url: String,
-        loginCookiesJson: String
+        loginCookiesJson: String,
+        parentTaskId: Int64
     ): DenoExecutionResult {
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
         let pluginFile = "${pluginDir}/Download.ts"
@@ -879,7 +897,38 @@ public class DenoTaskRunner {
             url
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, parentTaskId)
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
+    }
+
+    private static func mirrorParentLog(parentTaskId: Int64, denoTaskId: Int64, message: String): Unit {
+        if (parentTaskId <= 0) {
+            return
+        }
+        TaskIO.appendLog(parentTaskId, "[deno_task ${denoTaskId}] ${message}")
+    }
+
+    private static func mirrorParentProgress(parentTaskId: Int64, denoTaskId: Int64, progress: Int32, message: String): Unit {
+        if (parentTaskId <= 0) {
+            return
+        }
+
+        // Map plugin progress (0-100) onto a conservative window for the parent task.
+        // This keeps room for any callback steps that happen after the plugin finishes.
+        var mapped = 20i32 + Int32((Int64(progress) * 75i64) / 100i64) // 20..95
+        if (mapped < 20i32) { mapped = 20i32 }
+        if (mapped > 95i32) { mapped = 95i32 }
+
+        let parent = TaskDao.getTaskDataById(parentTaskId)
+        if (parent.id == 0) {
+            return
+        }
+
+        // Keep parent status unchanged (e.g., "waiting") but ensure progress is monotonic.
+        if (mapped > parent.progress) {
+            TaskDao.updateTaskStatus(parentTaskId, parent.status, message, mapped)
+        }
+
+        TaskIO.appendLog(parentTaskId, "[deno_task ${denoTaskId}] [PROGRESS] ${progress}% - ${message}")
     }
 }
