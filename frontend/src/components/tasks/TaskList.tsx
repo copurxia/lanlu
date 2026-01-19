@@ -42,6 +42,7 @@ export function TaskList({ className }: TaskListProps) {
   const [pageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
+  const [totalAll, setTotalAll] = useState<number | null>(null);
 
   // Filter state
   const [activeFilter, setActiveFilter] = useState('all');
@@ -55,17 +56,15 @@ export function TaskList({ className }: TaskListProps) {
           setLoading(true);
         }
 
-        const result: TaskPageResult = await TaskPoolService.getTasks(page + 1, pageSize);
+        const result: TaskPageResult = await TaskPoolService.getTasks(
+          page + 1,
+          pageSize,
+          activeFilter !== 'all' ? activeFilter : undefined
+        );
 
-        const tasksArray = Array.isArray(result.tasks) ? result.tasks : [];
-
-        let filteredTasks = tasksArray;
-        if (activeFilter !== 'all') {
-          filteredTasks = tasksArray.filter((task) => task?.status === activeFilter);
-        }
-
-        setTasks(filteredTasks);
+        setTasks(Array.isArray(result.tasks) ? result.tasks : []);
         setTotal(typeof result.total === 'number' ? result.total : 0);
+        setTotalAll(typeof result.totalAll === 'number' ? result.totalAll : null);
         setTotalPages(typeof result.totalPages === 'number' ? result.totalPages : 0);
         setCurrentPage(page);
       } catch (err) {
@@ -73,6 +72,7 @@ export function TaskList({ className }: TaskListProps) {
         setError(err instanceof Error ? err.message : 'Failed to fetch tasks');
         setTasks([]);
         setTotal(0);
+        setTotalAll(null);
         setTotalPages(0);
       } finally {
         setLoading(false);
@@ -82,21 +82,10 @@ export function TaskList({ className }: TaskListProps) {
     [activeFilter, pageSize] 
   );
 
-  // Track previous filter to detect changes
-  const [prevFilter, setPrevFilter] = useState(activeFilter);
-
-  // Combined effect: handle filter change (reset page) and fetch data
+  // Fetch data when page/filter changes.
   useEffect(() => {
-    if (activeFilter !== prevFilter) {
-      // Filter changed: reset to page 0 and fetch
-      setPrevFilter(activeFilter);
-      setCurrentPage(0);
-      fetchTasks(0);
-    } else {
-      // Normal page change or initial load
-      fetchTasks(currentPage);
-    }
-  }, [currentPage, activeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchTasks(currentPage);
+  }, [currentPage, activeFilter, fetchTasks]);
 
   // Auto-refresh when there are active tasks
   useEffect(() => {
@@ -113,6 +102,11 @@ export function TaskList({ className }: TaskListProps) {
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchTasks(currentPage);
+  };
+
+  const handleFilterChange = (value: string) => {
+    setActiveFilter(value);
+    setCurrentPage(0); // keep pagination consistent when switching tabs
   };
 
   const handleCancelTask = async (taskId: number) => {
@@ -240,11 +234,13 @@ export function TaskList({ className }: TaskListProps) {
       )}
 
       {/* Filters */}
-      <Tabs value={activeFilter} onValueChange={setActiveFilter}>
+      <Tabs value={activeFilter} onValueChange={handleFilterChange}>
         <TabsList className="w-full justify-start overflow-x-auto">
           <TabsTrigger value="all" className="flex items-center gap-2 flex-none px-2 sm:px-3">
             <span className="whitespace-nowrap">{t('settings.taskManagement.all')}</span>
-            <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5 flex items-center justify-center">{total}</Badge>
+            <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5 flex items-center justify-center">
+              {totalAll ?? total}
+            </Badge>
           </TabsTrigger>
           <TabsTrigger value="pending" className="flex items-center gap-2 flex-none px-2 sm:px-3">
             <Clock className="w-4 h-4 shrink-0" />

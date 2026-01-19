@@ -23,6 +23,8 @@ export interface Task {
 export interface TaskPageResult {
   tasks: Task[];
   total: number;
+  /** Total tasks across all statuses (for "All" badge while filtered). */
+  totalAll?: number;
   page: number;
   pageSize: number;
   totalPages: number;

@@ -12,11 +12,12 @@ import lrr4cj.services.*
 public class TaskPoolController {
     /**
      * 分页获取任务列表
-     * GET /api/taskpool/tasks?page=1&pageSize=10
+     * GET /api/taskpool/tasks?page=1&pageSize=10&status=pending
      */
     public static func getTasks(ctx: JoyContext) {
         let pageStr = ctx.getQuery("page") ?? "1"
         let pageSizeStr = ctx.getQuery("pageSize") ?? "10"
+        let statusRaw = ctx.getQuery("status") ?? ""
 
         let page = try {
             Int32.parse(pageStr)
@@ -33,9 +34,32 @@ public class TaskPoolController {
         // 计算偏移量
         let offset = (page - 1) * pageSize
 
+        // 可选状态过滤（用于前端 tabs + 正确分页）
+        // Frontend sends lowercase; keep strict matching to avoid relying on extra String APIs.
+        let status = statusRaw
+        let hasStatusFilter = status.size > 0 && status != "all"
+        if (hasStatusFilter) {
+            // Only allow known statuses to avoid unexpected DB usage/typos.
+            if (status != "pending" && status != "running" && status != "completed" && status != "failed" && status != "stopped") {
+                ctx.status(400)
+                ctx.json("{\"error\":\"Invalid status\"}")
+                return
+            }
+        }
+
         // 获取任务列表和总数
-        let tasks = TaskDao.getTasksWithPagination(offset, pageSize)
-        let total = TaskDao.getTaskCount()
+        let tasks = if (hasStatusFilter) {
+            TaskDao.getTasksWithPaginationByStatus(offset, pageSize, status)
+        } else {
+            TaskDao.getTasksWithPagination(offset, pageSize)
+        }
+        let total = if (hasStatusFilter) {
+            TaskDao.getTaskCountByStatus(status)
+        } else {
+            TaskDao.getTaskCount()
+        }
+        // 用于前端 “全部” 标签的徽章显示（即使当前在筛选状态下也可显示总量）
+        let totalAll = TaskDao.getTaskCount()
         let totalPages = (total + pageSize - 1) / pageSize
 
         // 构建响应
@@ -49,6 +73,7 @@ public class TaskPoolController {
         }
         json += "],"
         json += "\"total\":${total},"
+        json += "\"totalAll\":${totalAll},"
         json += "\"page\":${page},"
         json += "\"pageSize\":${pageSize},"
         json += "\"totalPages\":${totalPages}"

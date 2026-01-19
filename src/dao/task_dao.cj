@@ -511,6 +511,49 @@ public class TaskDao {
     }
 
     /**
+     * 获取指定状态的任务总数
+     */
+    public static func getTaskCountByStatus(status: String): Int32 {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                
+                try {
+                    let stmt = conn.prepareStatement("SELECT COUNT(*) FROM tasks WHERE status = ?")
+                    stmt.set(0, status)
+                    let rs = stmt.query()
+
+                    try {
+                        if (rs.next()) {
+                            return rs.getOrNull<Int32>(0) ?? 0
+                        } else {
+                            return 0
+                        }
+                    } finally {
+                        try {
+                            rs.close()
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            getLogger("task_dao").warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    getLogger("task_dao").error("获取指定状态任务总数失败", ("status", status), ("error", e.message))
+                    return 0
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                getLogger("task_dao").error("无法创建数据库连接")
+                return 0
+        }
+    }
+
+    /**
      * 分页获取任务列表
      * @param offset 偏移量
      * @param limit 每页数量
@@ -585,6 +628,96 @@ public class TaskDao {
                     }
                 } catch (e: Exception) {
                     getLogger("task_dao").error("分页查询任务失败", ("error", e.message))
+                    return Array<TaskData>()
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                getLogger("task_dao").error("无法创建数据库连接")
+                return Array<TaskData>()
+        }
+    }
+
+    /**
+     * 分页获取指定状态的任务列表
+     * @param offset 偏移量
+     * @param limit 每页数量
+     * @param status 任务状态
+     */
+    public static func getTasksWithPaginationByStatus(offset: Int32, limit: Int32, status: String): Array<TaskData> {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at
+                        FROM tasks
+                        WHERE status = ?
+                        ORDER BY id DESC
+                        LIMIT ? OFFSET ?
+                    """)
+                    try {
+                        stmt.set(0, status)
+                        stmt.set(1, limit)
+                        stmt.set(2, offset)
+                        let rs = stmt.query()
+
+                        var taskList = ArrayList<TaskData>()
+                        try {
+                            while (rs.next()) {
+                                let data = TaskData()
+                                data.id = rs.getOrNull<Int64>(0) ?? 0
+                                data.name = rs.getOrNull<String>(1) ?? ""
+                                data.taskType = rs.getOrNull<String>(2) ?? ""
+                                data.status = rs.getOrNull<String>(3) ?? ""
+                                data.progress = rs.getOrNull<Int32>(4) ?? 0
+                                data.message = rs.getOrNull<String>(5) ?? ""
+                                data.pluginNamespace = rs.getOrNull<String>(6) ?? ""
+                                data.parameters = rs.getOrNull<String>(7) ?? ""
+                                data.result = rs.getOrNull<String>(8) ?? ""
+                                data.priority = rs.getOrNull<Int32>(9) ?? 50
+                                data.groupId = rs.getOrNull<String>(10) ?? ""
+                                data.timeoutAt = rs.getOrNull<String>(11) ?? ""
+                                data.triggerSource = rs.getOrNull<String>(12) ?? ""
+                                data.createdAt = rs.getOrNull<String>(13) ?? ""
+                                data.startedAt = rs.getOrNull<String>(14) ?? ""
+                                data.completedAt = rs.getOrNull<String>(15) ?? ""
+
+                                taskList.add(data)
+                            }
+
+                            let size = taskList.size
+                            if (size > 0) {
+                                var result = Array<TaskData>(size, { _ => TaskData() })
+                                for (i in 0..size) {
+                                    result[i] = taskList[i]
+                                }
+                                return result
+                            } else {
+                                return Array<TaskData>()
+                            }
+                        } catch (e: Exception) {
+                            getLogger("task_dao").error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
+                            return Array<TaskData>()
+                        } finally {
+                            try {
+                                rs.close()
+                                stmt.close()
+                            } catch (closeError: Exception) {
+                                getLogger("task_dao").warn("关闭ResultSet或PreparedStatement失败: ${closeError.message}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        getLogger("task_dao").error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
+                        return Array<TaskData>()
+                    }
+                } catch (e: Exception) {
+                    getLogger("task_dao").error("分页查询指定状态任务失败", ("status", status), ("error", e.message))
                     return Array<TaskData>()
                 } finally {
                     try {

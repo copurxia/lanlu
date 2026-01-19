@@ -10,9 +10,15 @@ export class TaskPoolService {
   /**
    * Get tasks with pagination
    */
-  static async getTasks(page: number = 1, pageSize: number = 10): Promise<TaskPageResult> {
+  static async getTasks(page: number = 1, pageSize: number = 10, status?: string): Promise<TaskPageResult> {
     try {
-      const response = await api.get(`${this.BASE_URL}/tasks?page=${page}&pageSize=${pageSize}`);
+      const qs = new URLSearchParams({
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      if (status && status !== 'all') qs.set('status', status);
+
+      const response = await api.get(`${this.BASE_URL}/tasks?${qs.toString()}`);
 
       if (response.success) {
         let data = response.data;
@@ -35,6 +41,7 @@ export class TaskPoolService {
         const result = {
           tasks,
           total: typeof data.total === 'number' ? data.total : 0,
+          totalAll: typeof data.totalAll === 'number' ? data.totalAll : undefined,
           page: typeof data.page === 'number' ? data.page : page,
           pageSize: typeof data.pageSize === 'number' ? data.pageSize : pageSize,
           totalPages: typeof data.totalPages === 'number' ? data.totalPages : 0
