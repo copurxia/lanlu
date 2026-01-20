@@ -4,6 +4,7 @@ import std.fs.*
 import std.process.*
 import std.convert.*
 import std.time.*
+import std.collection.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
 import stdx.log.*
@@ -323,26 +324,34 @@ public class ArchiveUtils {
             // The comma in min() must be escaped for FFmpeg filter parsing.
             let vfFilter = "scale=500:-1,crop=500:min(ih\\,1000):0:0"
 
-            // First try FFmpeg directly.
+            // Prefer ImageMagick first (decode+resize+crop), then fall back to FFmpeg.
+            // This helps with some images that FFmpeg/ffprobe struggles to decode reliably.
+            let (imExitCode, imStderrStr) = runImageMagickToAvif(inputPath, outputPath, 500i64, 1000i64)
+            if (imExitCode == 0) {
+                return ProcessResultData(true, outputPath, "")
+            }
+            logger.warn("ImageMagick convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath))
+
+            // Then try FFmpeg directly.
             let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
-            logger.warn("ffmpeg convert failed; trying ImageMagick fallback", ("inputPath", inputPath))
 
-            // Fallback: use ImageMagick to extract a still frame (works for animated WEBP/GIF),
-            // then run FFmpeg again on the still image.
+            // Last resort: ImageMagick renders a still PNG (first frame), then FFmpeg encodes AVIF.
+            // This covers cases where IM can decode, but cannot encode AVIF (missing delegate),
+            // or where FFmpeg can't decode animated formats that IM can read.
             let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
-            let (imExitCode, imStderrStr) = runImageMagickToPng(inputPath, fallbackPngPath)
-            if (imExitCode == 0) {
+            let (imExitCode2, imStderrStr2) = runImageMagickToPng(inputPath, fallbackPngPath)
+            if (imExitCode2 == 0) {
                 let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
                 if (exitCode2 == 0) {
                     return ProcessResultData(true, outputPath, "")
                 }
-                return ProcessResultData(false, "", "${stderrStr}\n---\nImageMagick ok; ffmpeg retry failed:\n${stderrStr2}")
+                return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png ok; ffmpeg retry failed:\n${stderrStr2}")
             }
 
-            return ProcessResultData(false, "", "${stderrStr}\n---\nImageMagick fallback failed:\n${imStderrStr}")
+            return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png fallback failed:\n${imStderrStr2}")
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Exception: ${e.message}")
         }
@@ -434,6 +443,67 @@ public class ArchiveUtils {
         let (exitCode, _, stderr) = process.waitOutput()
         let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
         return (exitCode, stderrStr)
+    }
+
+    /**
+     * Use ImageMagick to render the first frame to an AVIF file.
+     * Mirrors the thumbnail policy used by FFmpeg: scale to width, then crop height to at most maxHeight (top-aligned).
+     */
+    private static func runImageMagickToAvif(inputPath: String, outputAvifPath: String, width: Int64, maxHeight: Int64): (Int64, String) {
+        let firstFrameInput = "${inputPath}[0]"
+
+        // Best-effort: compute scaled height so we only crop when needed (avoid padding).
+        var shouldCrop = false
+        var probeStderr = ""
+        try {
+            let probe = launch(
+                "identify",
+                "-ping",
+                "-format", "%w,%h",
+                firstFrameInput,
+                stdOut: ProcessRedirect.Pipe,
+                stdErr: ProcessRedirect.Pipe
+            )
+            let (probeExitCode, probeStdout, probeStderrBytes) = probe.waitOutput()
+            probeStderr = try { String.fromUtf8(probeStderrBytes) } catch (_: Exception) { "" }
+            if (probeExitCode == 0) {
+                let dims = String.fromUtf8(probeStdout).trimAscii()
+                let parts = dims.split(",")
+                if (parts.size >= 2) {
+                    let w = try { Int64.parse(parts[0].trimAscii()) } catch (_: Exception) { 0i64 }
+                    let h = try { Int64.parse(parts[1].trimAscii()) } catch (_: Exception) { 0i64 }
+                    if (w > 0 && h > 0) {
+                        let scaledHeight = h * width / w
+                        shouldCrop = (scaledHeight > maxHeight)
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            // Ignore probe errors; we'll just skip conditional cropping.
+        }
+
+        var args = ArrayList<String>()
+        args.add(firstFrameInput)
+        args.add("-auto-orient")
+        args.add("-strip")
+        args.add("-resize"); args.add("${width.toString()}x")
+        if (shouldCrop) {
+            args.add("-gravity"); args.add("North")
+            args.add("-crop"); args.add("${width.toString()}x${maxHeight.toString()}+0+0")
+            args.add("+repage")
+        }
+        args.add(outputAvifPath)
+
+        let process = launch(
+            "convert",
+            args.toArray(),
+            stdOut: ProcessRedirect.Pipe,
+            stdErr: ProcessRedirect.Pipe
+        )
+        let (exitCode, _, stderr) = process.waitOutput()
+        let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
+        let combined = if (probeStderr.size > 0) { "identify:\n${probeStderr}\n---\nconvert:\n${stderrStr}" } else { stderrStr }
+        return (exitCode, combined)
     }
 
     /**

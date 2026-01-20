@@ -31,6 +31,8 @@ public class GenerateThumbnailTaskRunner {
             fail(taskId, "archive_id and archive_path are required")
             return
         }
+        TaskIO.appendLog(taskId, "Parameters: archive_id=${archiveId}, type=${archiveType}, archive_path=${archivePath}")
+        logger.debug("Parameters parsed", ("archive_id", archiveId), ("type", archiveType), ("archive_path", archivePath))
 
         TaskModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId} (type: ${archiveType})")
 
@@ -91,12 +93,15 @@ public class GenerateThumbnailTaskRunner {
 
         // 使用 getCoverImage 直接获取封面图片数据
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
-        TaskIO.appendLog(taskId, "Extracting cover image using getCoverImage...")
+        TaskIO.appendLog(taskId, "Extracting cover image using getCoverImage (type: ${archiveType})...")
         let (exitCode, imageData, errorData) = handler.getCoverImage(actualArchivePath)
 
         if (exitCode != 0 || imageData.size == 0) {
+            TaskIO.appendLog(taskId, "Cover extraction failed (exit_code=${exitCode}, image_bytes=${imageData.size}, err_bytes=${errorData.size})")
             let errorMsg = if (errorData.size > 0) {
-                String.fromUtf8(errorData)
+                let previewBytes = if (errorData.size > 1024) { errorData.slice(0, 1024) } else { errorData }
+                let previewStr = try { String.fromUtf8(previewBytes) } catch (_: Exception) { "" }
+                if (errorData.size > 1024) { "${previewStr}\n...(truncated)" } else { previewStr }
             } else {
                 "No cover image found in ${archiveType} archive"
             }
@@ -104,18 +109,23 @@ public class GenerateThumbnailTaskRunner {
             return ProcessResultData(false, "", errorMsg)
         }
 
-        TaskIO.appendLog(taskId, "Cover image extracted, size: ${imageData.size} bytes")
+        TaskIO.appendLog(taskId, "Cover image extracted (exit_code=${exitCode}), size: ${imageData.size} bytes")
 
         // FFmpeg/ffprobe may mis-detect some formats when the file has no extension (e.g. ".tmp").
         // Prefer inferring the extension from the bytes; fallback to the first media entry's extension.
         let inferredExt = inferMediaExtension(imageData, handler, actualArchivePath)
         let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${inferredExt}")
+        TaskIO.appendLog(taskId, "Inferred cover extension: ${inferredExt}")
         TaskIO.appendLog(taskId, "Writing cover image to: ${tempImagePath}")
 
         try {
             let tempFile = File(Path(tempImagePath), Write)
             tempFile.write(imageData)
             tempFile.close()
+            try {
+                let tmpSize = FileInfo(Path(tempImagePath)).size
+                TaskIO.appendLog(taskId, "Wrote temp cover file (size=${tmpSize} bytes)")
+            } catch (_: Exception) {}
         } catch (e: Exception) {
             let errorMsg = "Failed to write cover image to temp file: ${e.message}"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
@@ -123,7 +133,7 @@ public class GenerateThumbnailTaskRunner {
         }
 
         // 先转换图片为 AVIF 格式（临时路径）
-        TaskIO.appendLog(taskId, "Converting image to AVIF format...")
+        TaskIO.appendLog(taskId, "Converting image to AVIF format (prefer ImageMagick, fallback FFmpeg)...")
         let tempAvifPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.avif")
         let convertResult = ArchiveUtils.convertImageToAvif(tempImagePath, tempAvifPath, taskTempDir)
 
@@ -140,6 +150,16 @@ public class GenerateThumbnailTaskRunner {
         }
 
         if (!convertResult.success) {
+            if (convertResult.error.size > 0) {
+                let errBytes = convertResult.error.toArray()
+                let previewBytes = if (errBytes.size > 4096) { errBytes.slice(0, 4096) } else { errBytes }
+                let previewStr = try { String.fromUtf8(previewBytes) } catch (_: Exception) { convertResult.error }
+                var truncatedSuffix = ""
+                if (errBytes.size > 4096) {
+                    truncatedSuffix = "\n...(truncated)"
+                }
+                TaskIO.appendLog(taskId, "Conversion error detail:\n${previewStr}${truncatedSuffix}")
+            }
             // 转换失败时，清理输出和临时目录（包括可能生成的 fallback 文件）
             try {
                 try { remove(Path(tempAvifPath)) } catch (_: Exception) {}
@@ -151,7 +171,11 @@ public class GenerateThumbnailTaskRunner {
             return ProcessResultData(false, "", errorMsg)
         }
 
-        TaskIO.appendLog(taskId, "Image conversion successful")
+        TaskIO.appendLog(taskId, "Image conversion successful: ${tempAvifPath}")
+        try {
+            let avifSize = FileInfo(Path(tempAvifPath)).size
+            TaskIO.appendLog(taskId, "Temp AVIF size: ${avifSize} bytes")
+        } catch (_: Exception) {}
 
         // 计算 thumbhash（基于转换后的 AVIF，仅用于数据库记录）
         TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
@@ -169,6 +193,7 @@ public class GenerateThumbnailTaskRunner {
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
+        TaskIO.appendLog(taskId, "Thumbnail moved to final location successfully")
 
         // 移动完成后清理任务临时目录（输出文件已移走）
         try {
