@@ -365,7 +365,7 @@ export default function AuthSettingsPage() {
         </div>
 
       <Card>
-        <CardContent className="pt-6 space-y-4">
+        <CardContent className="py-4 space-y-3">
           {/* Hidden file input for avatar selection; triggered by "Change Avatar" buttons. */}
           <input
             ref={setFileInputEl}
