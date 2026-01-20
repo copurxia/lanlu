@@ -13,6 +13,7 @@ export type Tag = {
   name: string;
   translations: Record<string, TagTranslation>;
   links: string;
+  iconAssetId?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -141,6 +142,18 @@ export class TagService {
    */
   static async adminUpdate(id: number, updates: { translations?: Record<string, TagTranslation>; links?: string }): Promise<void> {
     await apiClient.put(`/api/admin/tags/${id}`, updates);
+  }
+
+  static async adminUploadIcon(id: number, file: File): Promise<{ iconAssetId: number }> {
+    const body = await file.arrayBuffer();
+    const resp = await apiClient.put(`/api/admin/tags/${id}/icon`, body, {
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Filename': file.name || 'tag_icon',
+      },
+    });
+    const data = resp.data?.data;
+    return { iconAssetId: Number(data?.iconAssetId ?? 0) };
   }
 
   /**

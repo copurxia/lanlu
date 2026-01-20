@@ -9,6 +9,7 @@ import std.convert.*
 import std.fs.*
 import lrr4cj.services.*
 import lrr4cj.dao.*
+import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.views.*
 
@@ -183,6 +184,7 @@ public class TagController {
 
             itemsJson = itemsJson + "\"translations\":${translationsJson},"
             itemsJson = itemsJson + "\"links\":\"${escapeJsonString(row.links)}\","
+            itemsJson = itemsJson + "\"iconAssetId\":${row.iconAssetId.toString()},"
             itemsJson = itemsJson + "\"created_at\":\"${escapeJsonString(row.created_at)}\","
             itemsJson = itemsJson + "\"updated_at\":\"${escapeJsonString(row.updated_at)}\""
             itemsJson = itemsJson + "}"
@@ -227,6 +229,7 @@ public class TagController {
                 data = data + "\"name\":\"${escapeJsonString(tag.name)}\","
                 data = data + "\"translations\":${translationsJson},"
                 data = data + "\"links\":\"${escapeJsonString(tag.links)}\","
+                data = data + "\"iconAssetId\":${tag.iconAssetId.toString()},"
                 data = data + "\"created_at\":\"${escapeJsonString(tag.created_at)}\","
                 data = data + "\"updated_at\":\"${escapeJsonString(tag.updated_at)}\""
                 data = data + "}"
@@ -234,6 +237,109 @@ public class TagController {
             case None =>
                 ctx.status(404)
                 ResponseView.errorJson(ctx, "tag not found", 404)
+        }
+    }
+
+    /**
+     * PUT /api/admin/tags/{id}/icon
+     * Body: raw image bytes
+     */
+    public static func adminUploadIcon(ctx: JoyContext, adminUserId: Int64): Unit {
+        let idStr = (ctx.getParam("id") ?? "").trimAscii()
+        var id: Int64 = 0
+        try { id = Int64.parse(idStr) } catch (_: Exception) {
+            ctx.status(400)
+            ResponseView.errorJson(ctx, "invalid id", 400)
+            return
+        }
+
+        let raw = ctx.readRawData()
+        if (raw.size <= 0) {
+            ctx.status(400)
+            ResponseView.errorJson(ctx, "empty body", 400)
+            return
+        }
+
+        // Validate tag exists
+        let tagOpt = TagDao.getById(id)
+        if (tagOpt.isNone()) {
+            ctx.status(404)
+            ResponseView.errorJson(ctx, "tag not found", 404)
+            return
+        }
+        let tag = tagOpt.getOrThrow()
+
+        let cacheRoot = SystemSettingsService.getPath("CACHE_PATH")
+        let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
+        FileUtils.ensureDirectoryExists(Path(cacheRoot))
+        FileUtils.ensureDirectoryExists(Path(assetRoot))
+
+        let filename = (ctx.getHeader("X-Filename") ?? "tag_icon").trimAscii()
+        let inferredExt = ArchiveUtils.getFileExtension(filename)
+
+        let ts = DateTime.now().toUnixTimeStamp().toSeconds()
+        let tempDir = FileUtils.joinPath(cacheRoot, "tag_icon/${id.toString()}_${ts.toString()}")
+        FileUtils.ensureDirectoryExists(Path(tempDir))
+        let inputPath = FileUtils.joinPath(tempDir, "input.${inferredExt}")
+        let outputAvifPath = FileUtils.joinPath(tempDir, "icon.avif")
+
+        try {
+            let f = File(Path(inputPath), Write)
+            f.write(raw)
+            f.close()
+        } catch (e: Exception) {
+            let _ = FileUtils.removeFileOrDirectory(tempDir)
+            ctx.status(500)
+            ResponseView.errorJson(ctx, "failed to write temp file", 500)
+            return
+        }
+
+        // Reuse avatar policy: center-crop square 256x256 then server stores AVIF.
+        let convertRes = ArchiveUtils.convertAvatarToAvif(inputPath, outputAvifPath, tempDir)
+        if (!convertRes.success) {
+            let _ = FileUtils.removeFileOrDirectory(tempDir)
+            ctx.status(422)
+            ResponseView.errorJson(ctx, "icon conversion failed", 422)
+            return
+        }
+
+        let thumbHash = try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" }
+        let byteSize = try { Int64(FileInfo(Path(outputAvifPath)).size) } catch (_: Exception) { 0 }
+
+        // Delete previous icon asset (best-effort)
+        if (tag.iconAssetId > 0) {
+            try {
+                let oldPath = FileUtils.joinPath(assetRoot, "${tag.iconAssetId}.avif")
+                try { remove(Path(oldPath)) } catch (_: Exception) {}
+                let _ = AssetDao.deleteById(tag.iconAssetId)
+            } catch (_: Exception) {}
+        }
+
+        match (AssetDao.create(Some(adminUserId), "tag_icon", filename, "image/avif", "avif", byteSize, thumbHash)) {
+            case Some(assetId) =>
+                let finalPath = FileUtils.joinPath(assetRoot, "${assetId}.avif")
+                try {
+                    FileUtils.safeReplaceFile(Path(finalPath), Path(outputAvifPath))
+                } catch (e: Exception) {
+                    let _ = FileUtils.removeFileOrDirectory(tempDir)
+                    ctx.status(500)
+                    ResponseView.errorJson(ctx, "failed to store icon", 500)
+                    return
+                }
+
+                if (!TagDao.updateIconAssetId(id, assetId)) {
+                    let _ = FileUtils.removeFileOrDirectory(tempDir)
+                    ctx.status(500)
+                    ResponseView.errorJson(ctx, "failed to update tag icon", 500)
+                    return
+                }
+
+                let _ = FileUtils.removeFileOrDirectory(tempDir)
+                ResponseView.successJson(ctx, "{\"success\":1,\"iconAssetId\":${assetId.toString()}}", "更新成功")
+            case None =>
+                let _ = FileUtils.removeFileOrDirectory(tempDir)
+                ctx.status(500)
+                ResponseView.errorJson(ctx, "failed to create asset record", 500)
         }
     }
 

@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogBody, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tag, Plus, Search, Download, Upload, Edit2, Trash2 } from 'lucide-react';
+import { Tag, Plus, Search, Download, Upload, Edit2, Trash2, Image } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { TagService } from '@/lib/services/tag-service';
@@ -23,6 +23,7 @@ interface TagItem {
   name: string;
   translations: Record<string, { text: string; intro: string }>;
   links: string;
+  iconAssetId?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -62,6 +63,7 @@ export default function TagsSettingsPage() {
   const [totalTags, setTotalTags] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
+  const [iconUploadingTagId, setIconUploadingTagId] = useState<number | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -267,6 +269,38 @@ export default function TagsSettingsPage() {
     }
   };
 
+  const handleUploadTagIconClick = (tag: TagItem) => {
+    // Create a new file input each time to avoid browser "remembering" previous selections.
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+
+    input.onchange = async (e) => {
+      const event = e as unknown as React.ChangeEvent<HTMLInputElement>;
+      const file = event.target.files?.[0];
+      if (!file) {
+        document.body.removeChild(input);
+        return;
+      }
+
+      setIconUploadingTagId(tag.id);
+      try {
+        await TagService.adminUploadIcon(tag.id, file);
+        await loadTags();
+        success(t('settings.tagIconUpdatedSuccess'));
+      } catch (err: any) {
+        showError(err?.response?.data?.message || err?.message || t('settings.tagIconUpdateFailed'));
+      } finally {
+        setIconUploadingTagId(null);
+        document.body.removeChild(input);
+      }
+    };
+
+    document.body.appendChild(input);
+    input.click();
+  };
+
   const handleExport = async () => {
     try {
       const data = await TagService.adminExport();
@@ -463,13 +497,45 @@ export default function TagsSettingsPage() {
               className="rounded-md border p-3"
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {tag.namespace && <Badge variant="secondary">{tag.namespace}</Badge>}
-                    <span className="font-medium truncate">{tag.name}</span>
+                <div className="flex items-start gap-3 min-w-0">
+                  <button
+                    type="button"
+                    className="h-10 w-10 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center flex-shrink-0"
+                    onClick={() => handleUploadTagIconClick(tag)}
+                    disabled={loading || iconUploadingTagId === tag.id}
+                    aria-label={t('settings.tagChangeIcon')}
+                    title={t('settings.tagChangeIcon')}
+                  >
+                    {tag.iconAssetId ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`/api/assets/${tag.iconAssetId}`}
+                        alt={`${tag.namespace}:${tag.name}`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <Image className="h-5 w-5 text-muted-foreground" />
+                    )}
+                  </button>
+
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {tag.namespace && <Badge variant="secondary">{tag.namespace}</Badge>}
+                      <span className="font-medium truncate">{tag.name}</span>
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleUploadTagIconClick(tag)}
+                    disabled={loading || iconUploadingTagId === tag.id}
+                    aria-label={t('settings.tagChangeIcon')}
+                    title={t('settings.tagChangeIcon')}
+                  >
+                    <Image className="w-4 h-4" />
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
