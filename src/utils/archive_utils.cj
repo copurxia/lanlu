@@ -358,6 +358,49 @@ public class ArchiveUtils {
     }
 
     /**
+     * Convert an image to an AVIF avatar.
+     * Policy: scale to cover 256x256, then center-crop to 256x256.
+     */
+    public static func convertAvatarToAvif(inputPath: String, outputPath: String, tempPath: String): ProcessResultData {
+        try {
+            let outputDir = FileUtils.getParentDirectory(outputPath)
+            if (!directoryExists(outputDir)) {
+                Directory.create(outputDir, recursive: true)
+            }
+
+            // Scale to fill then center-crop.
+            let vfFilter = "scale=256:256:force_original_aspect_ratio=increase,crop=256:256"
+
+            // Prefer ImageMagick first.
+            let (imExitCode, imStderrStr) = runImageMagickToAvifSquare(inputPath, outputPath, 256i64)
+            if (imExitCode == 0) {
+                return ProcessResultData(true, outputPath, "")
+            }
+            logger.warn("ImageMagick avatar convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath))
+
+            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
+            if (exitCode == 0) {
+                return ProcessResultData(true, outputPath, "")
+            }
+
+            // Fallback: render first frame to PNG then FFmpeg encode.
+            let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
+            let (imExitCode2, imStderrStr2) = runImageMagickToPng(inputPath, fallbackPngPath)
+            if (imExitCode2 == 0) {
+                let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
+                if (exitCode2 == 0) {
+                    return ProcessResultData(true, outputPath, "")
+                }
+                return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png ok; ffmpeg retry failed:\n${stderrStr2}")
+            }
+
+            return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png fallback failed:\n${imStderrStr2}")
+        } catch (e: Exception) {
+            return ProcessResultData(false, "", "Exception: ${e.message}")
+        }
+    }
+
+    /**
      * Run FFmpeg to convert a single image/video frame to AVIF.
      */
     private static func runFfmpegToAvif(inputPath: String, outputPath: String, vfFilter: String): (Int64, String) {
@@ -504,6 +547,33 @@ public class ArchiveUtils {
         let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
         let combined = if (probeStderr.size > 0) { "identify:\n${probeStderr}\n---\nconvert:\n${stderrStr}" } else { stderrStr }
         return (exitCode, combined)
+    }
+
+    /**
+     * Use ImageMagick to generate a square avatar AVIF (center-crop).
+     */
+    private static func runImageMagickToAvifSquare(inputPath: String, outputAvifPath: String, size: Int64): (Int64, String) {
+        let firstFrameInput = "${inputPath}[0]"
+
+        var args = ArrayList<String>()
+        args.add(firstFrameInput)
+        args.add("-auto-orient")
+        args.add("-strip")
+        // Resize to cover the square, then crop centered.
+        args.add("-resize"); args.add("${size.toString()}x${size.toString()}^")
+        args.add("-gravity"); args.add("Center")
+        args.add("-extent"); args.add("${size.toString()}x${size.toString()}")
+        args.add(outputAvifPath)
+
+        let process = launch(
+            "convert",
+            args.toArray(),
+            stdOut: ProcessRedirect.Pipe,
+            stdErr: ProcessRedirect.Pipe
+        )
+        let (exitCode, _, stderr) = process.waitOutput()
+        let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
+        return (exitCode, stderrStr)
     }
 
     /**

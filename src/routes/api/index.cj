@@ -12,6 +12,7 @@ import lrr4cj.routes.api.shinobu.*
 import lrr4cj.routes.api.auth.*
 import lrr4cj.routes.api.tags.*
 import lrr4cj.routes.api.user.*
+import lrr4cj.routes.api.assets.*
 import lrr4cj.routes.api.smart_filters.*
 import lrr4cj.routes.api.cron.*
 import lrr4cj.controllers.*
@@ -61,6 +62,9 @@ public func registerApiRoutes(router: JoyRouters) {
 
     // 注册用户统计路由
     UserRoutes.configure(router)
+
+    // 注册资源文件路由
+    AssetsRoutes.configure(router)
 
     // 注册服务器信息路由
     router.get("/api/info", { ctx =>

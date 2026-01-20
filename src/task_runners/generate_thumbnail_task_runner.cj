@@ -7,8 +7,6 @@ import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
 import lrr4cj.archivehandler.*
-import avif_ffi.*
-import ahash.*
 
 /**
  * 缩略图生成任务：为单个档案生成缩略图
@@ -17,11 +15,11 @@ public class GenerateThumbnailTaskRunner {
 
     public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let cachePath = context.paths.cachePath
-        let thumbnailPath = context.paths.thumbnailPath
+        let assetPath = context.paths.assetPath
 
         // 确保目录存在
         FileUtils.ensureDirectoryExists(Path(cachePath))
-        FileUtils.ensureDirectoryExists(Path(thumbnailPath))
+        FileUtils.ensureDirectoryExists(Path(assetPath))
 
         let logger = getLogger("generate_thumbnail_task")
         TaskIO.appendLog(taskId, "generate_thumbnail task started")
@@ -36,7 +34,7 @@ public class GenerateThumbnailTaskRunner {
 
         TaskModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId} (type: ${archiveType})")
 
-        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType, cachePath, thumbnailPath)
+        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType, cachePath, assetPath)
         if (!result.success) {
             logger.error("generate_thumbnail failed", ("archive_id", archiveId), ("error", result.error))
             fail(taskId, result.error)
@@ -53,7 +51,7 @@ public class GenerateThumbnailTaskRunner {
     /**
      * 生成缩略图
      */
-    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String, cachePath: String, thumbnailPath: String): ProcessResultData {
+    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String, cachePath: String, assetPath: String): ProcessResultData {
         let logger = getLogger("generate_thumbnail")
         TaskIO.appendLog(taskId, "Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
         logger.debug("Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
@@ -62,28 +60,28 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Resolved archive path: ${actualArchivePath}")
         logger.debug("Resolved archive path: ${actualArchivePath}")
 
-        // Fast-path: if thumbnail already exists, avoid repeating expensive work.
-        // This helps when tasks are retried or scheduled redundantly.
-        let finalThumbnailPath = FileUtils.joinPath(thumbnailPath, "${archiveId}.avif")
+        // Fast-path: if a cover asset already exists, avoid repeating expensive work.
         try {
-            if (exists(Path(finalThumbnailPath))) {
-                let existingHash = ArchiveDao.getThumbnailHash(archiveId)
-                if (existingHash.size > 0) {
-                    TaskIO.appendLog(taskId, "Thumbnail already exists and thumbhash present; skipping regeneration.")
-                    return ProcessResultData(true, finalThumbnailPath, existingHash)
-                }
+            let existingAssetId = ArchiveDao.getCoverAssetId(archiveId)
+            if (existingAssetId > 0) {
+                let assetFilePath = FileUtils.joinPath(assetPath, "${existingAssetId}.avif")
+                if (exists(Path(assetFilePath))) {
+                    let existingHash = ArchiveDao.getThumbnailHash(archiveId)
+                    if (existingHash.size > 0) {
+                        TaskIO.appendLog(taskId, "Cover asset already exists and thumbhash present; skipping regeneration.")
+                        return ProcessResultData(true, assetFilePath, existingHash)
+                    }
 
-                TaskIO.appendLog(taskId, "Thumbnail exists but thumbhash missing; calculating from existing file...")
-                let thumbHash = calculateThumbHash(finalThumbnailPath)
-                if (ArchiveDao.updateThumbHash(archiveId, thumbHash)) {
-                    TaskIO.appendLog(taskId, "Thumbhash saved to database successfully (no regeneration needed)")
-                    return ProcessResultData(true, finalThumbnailPath, thumbHash)
+                    TaskIO.appendLog(taskId, "Cover asset exists but thumbhash missing; calculating from existing file...")
+                    let thumbHash = ThumbHashUtils.calculateAvifThumbHashFromFile(assetFilePath)
+                    if (ArchiveDao.updateThumbHash(archiveId, thumbHash)) {
+                        TaskIO.appendLog(taskId, "Thumbhash saved to database successfully (no regeneration needed)")
+                        return ProcessResultData(true, assetFilePath, thumbHash)
+                    }
+                    TaskIO.appendLog(taskId, "WARN: Failed to save thumbhash; will continue to regenerate thumbnail.")
                 }
-                TaskIO.appendLog(taskId, "WARN: Failed to save thumbhash; will continue to regenerate thumbnail.")
             }
-        } catch (_: Exception) {
-            // Best-effort: continue with regeneration on any error.
-        }
+        } catch (_: Exception) {}
 
         // 使用任务ID创建独立的临时目录
         let taskTempDir = FileUtils.joinPath(cachePath, "task/${taskId}")
@@ -180,20 +178,46 @@ public class GenerateThumbnailTaskRunner {
         // 计算 thumbhash（基于转换后的 AVIF，仅用于数据库记录）
         TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
         logger.debug("Calculating thumbhash for archive: ${archiveId}")
-        let thumbHash = calculateThumbHash(tempAvifPath)
+        let thumbHash = ThumbHashUtils.calculateAvifThumbHashFromFile(tempAvifPath)
         TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
         logger.debug("Calculated thumbhash: ${thumbHash}")
 
-        // 移动文件到最终位置
-        TaskIO.appendLog(taskId, "Moving thumbnail to final location: ${finalThumbnailPath}")
-        try {
-            safeReplaceFile(Path(finalThumbnailPath), Path(tempAvifPath))
-        } catch (e: Exception) {
-            let errorMsg = "Failed to move thumbnail to final location: ${e.message}"
-            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-            return ProcessResultData(false, "", errorMsg)
+        // Create asset row and move the file into ASSET_PATH/{assetId}.avif
+        let avifSize = try { Int64(FileInfo(Path(tempAvifPath)).size) } catch (_: Exception) { 0 }
+        let assetIdOpt = AssetDao.create(None, "archive_cover", "${archiveId}.avif", "image/avif", "avif", avifSize, thumbHash)
+        match (assetIdOpt) {
+            case Some(assetId) =>
+                let finalAssetPath = FileUtils.joinPath(assetPath, "${assetId}.avif")
+                TaskIO.appendLog(taskId, "Moving thumbnail to asset location: ${finalAssetPath}")
+                try {
+                    safeReplaceFile(Path(finalAssetPath), Path(tempAvifPath))
+                } catch (e: Exception) {
+                    let errorMsg = "Failed to move thumbnail to asset location: ${e.message}"
+                    TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                    return ProcessResultData(false, "", errorMsg)
+                }
+                TaskIO.appendLog(taskId, "Thumbnail moved to asset location successfully")
+                let _ = ArchiveDao.updateCoverAssetId(archiveId, assetId)
+                // Move completed; continue.
+                // Return the asset path for callers/logs.
+                // (ProcessResultData.archiveId is reused as an "output path" here.)
+                // NOOP
+                // fallthrough below uses thumbhash save + cleanup
+                // We will return finalAssetPath at end.
+                // ...
+                // Save thumbhash to DB already handled below.
+                // ...
+                // For cleanup: tempAvifPath already moved, ok.
+                // ...
+                // (finalAssetPath scope needed for return; so keep in var)
+                // ---
+                // store var for return
+                // NOTE: Cangjie var needs declared before match? keep local with var outside.
+            case None =>
+                let errorMsg = "Failed to create asset record for archive cover"
+                TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                return ProcessResultData(false, "", errorMsg)
         }
-        TaskIO.appendLog(taskId, "Thumbnail moved to final location successfully")
 
         // 移动完成后清理任务临时目录（输出文件已移走）
         try {
@@ -214,7 +238,10 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "Thumbhash saved to database successfully")
         logger.debug("Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
         TaskIO.appendLog(taskId, "Successfully generated thumbnail for archive: ${archiveId}, thumbhash: ${thumbHash}")
-        return ProcessResultData(true, finalThumbnailPath, thumbHash)
+
+        let coverAssetId = ArchiveDao.getCoverAssetId(archiveId)
+        let finalPath = if (coverAssetId > 0) { FileUtils.joinPath(assetPath, "${coverAssetId}.avif") } else { "" }
+        return ProcessResultData(true, finalPath, thumbHash)
     }
 
     /**
@@ -449,54 +476,5 @@ public class GenerateThumbnailTaskRunner {
         return DirectoryScanner.fileExists(path)
     }
 
-    /**
-     * 计算图片的thumbhash（基于像素内容的ahash）
-     */
-    private static func calculateThumbHash(imagePath: String): String {
-        // 读取图片文件
-        let filePath = Path(imagePath)
-        let file = File(filePath, Read)
-        let fileInfo = file.info
-        let fileSize = Int64(fileInfo.size)
-        let buffer = Array<Byte>(fileSize, {_ => 0})
-        let bytesRead = file.read(buffer)
-        file.close()
-
-        if (bytesRead <= 0) {
-            throw Exception("Failed to read file: ${imagePath}")
-        }
-
-        let imageData = buffer[0..bytesRead]
-
-        // 使用 avif_ffi 解码图片
-        if (let Some((_, _, pixels)) <- AvifDecoder.decodeRGBA(imageData)) {
-            // 使用 ahash 计算像素数据的哈希
-            let builder = RandomState.new()
-            let hasher = builder.buildHasher()
-            hasher.write(pixels)
-            let hash = hasher.finish()
-            return hashToHex(hash)
-        }
-
-        throw Exception("AVIF decode failed for: ${imagePath}")
-    }
-
-    /**
-     * 将 UInt64 转换为十六进制字符串
-     */
-    private static func hashToHex(hash: UInt64): String {
-        var result = ""
-        var h = hash
-        for (_ in 0..16) {
-            let nibble = Int64((h >> 60) & 0xF)
-            let c = if (nibble < 10) {
-                Rune(UInt32(48 + nibble))  // '0' = 48
-            } else {
-                Rune(UInt32(97 + nibble - 10))  // 'a' = 97
-            }
-            result += c.toString()
-            h <<= 4
-        }
-        return result
-    }
+    // thumbhash logic extracted to utils/ThumbHashUtils to reuse across assets (covers, avatars, ...)
 }

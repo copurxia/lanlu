@@ -146,9 +146,7 @@ public class DownloadUrlCallbackRunner {
         // 创建 scan_archive 任务
         TaskModel.updateTaskProgress(taskId, 80, "创建扫描任务")
 
-        let thumbnailPath = context.paths.thumbnailPath
         let cachePathStr = cachePath.toString()
-        let thumbnailPathStr = thumbnailPath.toString()
 
         // 解析插件返回的 archive_type
         let archiveType = parseArchiveTypeFromPlugin(pluginOutput)
@@ -164,7 +162,6 @@ public class DownloadUrlCallbackRunner {
                 "archive_path":"${escapeJson(finalArchivePathStr)}",
                 "category_id":${categoryId},
                 "cache_path":"${escapeJson(cachePathStr)}",
-                "thumbnail_path":"${escapeJson(thumbnailPathStr)}",
                 "archive_type":"${archiveType}",
                 "tags":"${escapeJson(tags)}"
             }

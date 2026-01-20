@@ -132,5 +132,51 @@ public class FileUtils {
         }
         return ""
     }
-}
 
+    /**
+     * Remove a file or directory recursively (best-effort).
+     * Returns true if the path does not exist or was removed successfully.
+     */
+    public static func removeFileOrDirectory(path: String): Bool {
+        try {
+            let p = Path(path)
+            if (!exists(p)) {
+                return true
+            }
+            let info = FileInfo(p)
+            if (info.isDirectory()) {
+                let entries = DirectoryScanner.listDirectory(path)
+                for (entry in entries) {
+                    let fullPath = joinPath(path, entry)
+                    if (!removeFileOrDirectory(fullPath)) {
+                        return false
+                    }
+                }
+                remove(p)
+                return true
+            }
+            remove(p)
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    /**
+     * Atomically replace a file by first removing the target (if present) and then renaming.
+     * Falls back to copy+remove if rename fails (e.g. cross-device).
+     */
+    public static func safeReplaceFile(target: Path, from: Path): Unit {
+        if (exists(target)) {
+            remove(target)
+        }
+        try {
+            rename(from, to: target)
+            return
+        } catch (_: Exception) {
+            // Fallback for cross-device moves.
+        }
+        copy(from, to: target, overwrite: true)
+        remove(from)
+    }
+}

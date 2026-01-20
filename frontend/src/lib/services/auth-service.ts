@@ -65,5 +65,15 @@ export class AuthService {
     });
     return res.data;
   }
-}
 
+  static async uploadAvatar(file: File) {
+    const body = await file.arrayBuffer();
+    const res = await apiClient.put<ApiEnvelope<{ avatarAssetId: number }>>('/api/user/avatar', body, {
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Filename': file.name || 'avatar',
+      },
+    });
+    return res.data;
+  }
+}

@@ -6,6 +6,7 @@ import lrr4cj.config.*
 import std.collection.*
 import std.fs.*
 import lrr4cj.dao.*
+import lrr4cj.utils.*
 
 /**
  * 归档数据模型
@@ -241,13 +242,13 @@ public class ArchiveModel {
 
     /**
      * 获取归档缩略图的文件系统路径
-     * 缩略图文件以 archiveId 命名：{thumbnailDir}/{archiveId}.avif
+     * 缩略图文件存储在 assets：{ASSET_PATH}/{assetId}.avif
      */
     public static func getThumbnailFilePath(id: String, _: Int32): String {
-        let thumbnailDir = DatabaseConfig.getThumbnailPath()
-
-        // 使用 archiveId 作为文件名查找缩略图
-        let thumbPath = "${thumbnailDir}/${id}.avif"
+        let coverAssetId = ArchiveDao.getCoverAssetId(id)
+        if (coverAssetId <= 0) { return "" }
+        let assetDir = SystemSettingsService.getPath("ASSET_PATH")
+        let thumbPath = FileUtils.joinPath(assetDir, "${coverAssetId}.avif")
         try {
             let filePath = Path(thumbPath)
             if (exists(filePath)) {
@@ -264,11 +265,13 @@ public class ArchiveModel {
 
     /**
      * 检查缩略图文件是否存在
-     * 缩略图文件以 archiveId 命名：{thumbnailDir}/{archiveId}.avif
+     * 缩略图文件存储在 assets：{ASSET_PATH}/{assetId}.avif
      */
     public static func thumbnailExists(id: String, _: Int32): Bool {
-        let thumbnailDir = DatabaseConfig.getThumbnailPath()
-        let thumbPath = "${thumbnailDir}/${id}.avif"
+        let coverAssetId = ArchiveDao.getCoverAssetId(id)
+        if (coverAssetId <= 0) { return false }
+        let assetDir = SystemSettingsService.getPath("ASSET_PATH")
+        let thumbPath = FileUtils.joinPath(assetDir, "${coverAssetId}.avif")
 
         try {
             let filePath = Path(thumbPath)
@@ -285,8 +288,10 @@ public class ArchiveModel {
      * 删除归档缩略图文件（不影响数据库）
      */
     public static func deleteThumbnailFile(id: String): Bool {
-        let thumbnailDir = DatabaseConfig.getThumbnailPath()
-        let thumbPath = "${thumbnailDir}/${id}.avif"
+        let coverAssetId = ArchiveDao.getCoverAssetId(id)
+        if (coverAssetId <= 0) { return true }
+        let assetDir = SystemSettingsService.getPath("ASSET_PATH")
+        let thumbPath = FileUtils.joinPath(assetDir, "${coverAssetId}.avif")
         try {
             let filePath = Path(thumbPath)
             if (!exists(filePath)) { return true }

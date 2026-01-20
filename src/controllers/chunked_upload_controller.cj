@@ -735,9 +735,7 @@ public class ChunkedUploadController {
 
             // 异步模式：创建 scan_archive 任务处理归档文件
             let cachePath = SystemSettingsService.getPath("CACHE_PATH")
-            let thumbnailPath = SystemSettingsService.getPath("THUMBNAIL_PATH")
-
-            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"category_id\":${categoryInternalId},\"cache_path\":\"${escapeJsonString(cachePath)}\",\"thumbnail_path\":\"${escapeJsonString(thumbnailPath)}\"}"
+            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"category_id\":${categoryInternalId},\"cache_path\":\"${escapeJsonString(cachePath)}\"}"
             let scanTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "chunked_upload:${taskId}", "upload")
             if (scanTask.id > 0) {
                 TaskPoolService.getInstance().notifyTaskAvailable()

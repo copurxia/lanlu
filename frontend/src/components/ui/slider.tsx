@@ -15,7 +15,7 @@ interface SliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 
 const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
   ({ className, value = [0], onValueChange, max = 100, min = 0, step = 1, ...props }, ref) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newValue = [parseInt(e.target.value)];
+      const newValue = [parseFloat(e.target.value)];
       onValueChange?.(newValue);
     };
 

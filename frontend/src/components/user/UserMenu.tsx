@@ -45,7 +45,10 @@ export function UserMenu() {
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-10 w-10 rounded-full">
             <Avatar className="h-10 w-10">
-              <AvatarImage src="" alt={t("user.menu")} />
+              <AvatarImage
+                src={user?.avatarAssetId ? `/api/assets/${user.avatarAssetId}` : ""}
+                alt={t("user.menu")}
+              />
               <AvatarFallback>
                 <User className="h-5 w-5" />
               </AvatarFallback>

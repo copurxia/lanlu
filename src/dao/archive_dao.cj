@@ -1213,6 +1213,105 @@ public class ArchiveDao {
                 return ""
         }
     }
+
+    /**
+     * 获取归档的封面资源 ID（assets.id）
+     */
+    public static func getCoverAssetId(archiveId: String): Int64 {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("SELECT cover_asset_id FROM archives WHERE arcid = ?")
+                    try {
+                        stmt.set(0, archiveId)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<Int64>(0) ?? 0
+                            }
+                            return 0
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("获取封面资源ID失败", ("error", e.message))
+                    return 0
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return 0
+        }
+    }
+
+    /**
+     * 更新归档封面资源 ID（assets.id）
+     */
+    public static func updateCoverAssetId(archiveId: String, assetId: Int64): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("UPDATE archives SET cover_asset_id = ? WHERE arcid = ?")
+                    try {
+                        if (assetId > 0) {
+                            stmt.set(0, assetId)
+                        } else {
+                            stmt.setNull(0)
+                        }
+                        stmt.set(1, archiveId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("更新封面资源ID失败", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return false
+        }
+    }
+
+    /**
+     * Check if an archive exists by arcid.
+     */
+    public static func archiveExists(archiveId: String): Bool {
+        let trimmed = archiveId.trimAscii()
+        if (trimmed.size == 0) { return false }
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("SELECT 1 FROM archives WHERE arcid = ? LIMIT 1")
+                    try {
+                        stmt.set(0, trimmed)
+                        let rs = stmt.query()
+                        try {
+                            return rs.next()
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
     
     /**
      * 根据 ID 获取归档元数据（包含标签）

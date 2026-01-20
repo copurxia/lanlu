@@ -4,6 +4,7 @@ export type AuthUser = {
   id: number;
   username: string;
   isAdmin?: boolean;
+  avatarAssetId?: number;
 };
 
 export type AdminUser = {
@@ -29,4 +30,3 @@ export type AuthSession = {
   createdAt?: string;
   lastUsedAt?: string;
 };
-

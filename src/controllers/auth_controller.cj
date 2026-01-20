@@ -74,7 +74,9 @@ public class AuthController {
                     match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
                         case Some(tokenRes) =>
                             ctx.status(HttpStatusCode.STATUS_CREATED)
-                            ctx.json("{\"code\":201,\"message\":\"created\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username.trimAscii())}\"},\"token\":{\"id\":${tokenRes.tokenId},\"name\":\"${escapeJsonString(tokenName)}\",\"prefix\":\"${escapeJsonString(tokenRes.prefix)}\",\"token\":\"${escapeJsonString(tokenRes.token)}\"}}}")
+                            let row = UserDao.getById(userId)
+                            let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
+                            ctx.json("{\"code\":201,\"message\":\"created\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username.trimAscii())}\",\"avatarAssetId\":${avatarAssetId}},\"token\":{\"id\":${tokenRes.tokenId},\"name\":\"${escapeJsonString(tokenName)}\",\"prefix\":\"${escapeJsonString(tokenRes.prefix)}\",\"token\":\"${escapeJsonString(tokenRes.token)}\"}}}")
                         case None =>
                             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                             ctx.json("{\"code\":500,\"message\":\"failed to create token\",\"data\":null}")
@@ -133,7 +135,9 @@ public class AuthController {
                     match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
                         case Some(tokenRes) =>
                             ctx.status(HttpStatusCode.STATUS_OK)
-                            ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username.trimAscii())}\"},\"token\":{\"id\":${tokenRes.tokenId},\"name\":\"${escapeJsonString(tokenName)}\",\"prefix\":\"${escapeJsonString(tokenRes.prefix)}\",\"token\":\"${escapeJsonString(tokenRes.token)}\"}}}")
+                            let row = UserDao.getById(userId)
+                            let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
+                            ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username.trimAscii())}\",\"avatarAssetId\":${avatarAssetId}},\"token\":{\"id\":${tokenRes.tokenId},\"name\":\"${escapeJsonString(tokenName)}\",\"prefix\":\"${escapeJsonString(tokenRes.prefix)}\",\"token\":\"${escapeJsonString(tokenRes.token)}\"}}}")
                         case None =>
                             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                             ctx.json("{\"code\":500,\"message\":\"failed to create token\",\"data\":null}")
@@ -154,7 +158,8 @@ public class AuthController {
         let username = if (row.id > 0) { row.username } else { "" }
         let isAdmin = if (row.id > 0) { row.isAdmin } else { false }
         ctx.status(HttpStatusCode.STATUS_OK)
-        ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username)}\",\"isAdmin\":${isAdmin}}}}")
+        let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
+        ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"user\":{\"id\":${userId},\"username\":\"${escapeJsonString(username)}\",\"isAdmin\":${isAdmin},\"avatarAssetId\":${avatarAssetId}}}}")
     }
 
     public static func listTokens(ctx: JoyContext, userId: Int64): Unit {

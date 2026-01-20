@@ -13,6 +13,14 @@ public class UserRoutes {
      * 配置用户统计相关路由
      */
     public static func configure(router: JoyRouters) {
+        // 上传当前用户头像
+        router.put("/api/user/avatar", { ctx =>
+            match (AuthMiddleware.requireUser(ctx)) {
+                case Some(uid) => UserController.uploadAvatar(ctx, uid)
+                case None => ()
+            }
+        })
+
         // 获取用户统计数据
         router.get("/api/user/stats", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }

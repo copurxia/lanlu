@@ -131,13 +131,6 @@ public class DatabaseConfig {
     }
 
     /**
-     * 读取缩略图路径
-     */
-    public static func getThumbnailPath(): String {
-        return readConfigWithDefault("THUMBNAIL_PATH", "./data/thumb")
-    }
-
-    /**
      * 读取缓存路径
      */
     public static func getCachePath(): String {

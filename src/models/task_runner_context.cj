@@ -10,16 +10,16 @@ public type TaskNotifier = () -> Unit
  */
 public class TaskRunnerPaths {
     public let cachePath: String
-    public let thumbnailPath: String
+    public let assetPath: String
     public let pluginPath: String
 
     public init(
         cachePath!: String = "",
-        thumbnailPath!: String = "",
+        assetPath!: String = "",
         pluginPath!: String = ""
     ) {
         this.cachePath = cachePath
-        this.thumbnailPath = thumbnailPath
+        this.assetPath = assetPath
         this.pluginPath = pluginPath
     }
 }

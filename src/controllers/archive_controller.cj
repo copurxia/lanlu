@@ -371,10 +371,18 @@ public class ArchiveController {
         }
         
         println("About to check if thumbnail exists for archive: ${id}, page: ${page}")
-        // 检查缩略图是否存在
-        if (ArchiveModel.thumbnailExists(id, page)) {
-            // 缩略图存在，直接返回图片
-            let thumbnailPath = ArchiveModel.getThumbnailFilePath(id, page)
+
+        // Prefer serving cover from assets table.
+        let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
+        var coverAssetId = ArchiveDao.getCoverAssetId(id)
+        var thumbnailPath = ""
+
+        if (coverAssetId > 0) {
+            thumbnailPath = FileUtils.joinPath(assetRoot, "${coverAssetId}.avif")
+        }
+
+        // Serve thumbnail if file exists.
+        if (thumbnailPath.size > 0 && exists(Path(thumbnailPath))) {
             println("Thumbnail exists, reading from: ${thumbnailPath}")
             try {
                 // 生成 ETag（使用 thumbhash）
@@ -604,17 +612,24 @@ public class ArchiveController {
                 // 3. 删除标签关联（通过更新空标签实现）
                 TagDao.updateArchiveTags(id, "")
 
+                // Keep cover asset id before deleting the archive row.
+                let coverAssetId = ArchiveDao.getCoverAssetId(id)
+
                 // 4. 删除档案记录
                 let deleteSuccess = ArchiveDao.delete(id)
 
                 // 5. 删除相关文件（缩略图和原始档案）
                 if (deleteSuccess) {
-                    // 删除缩略图文件（以 archiveId 命名）
-                    if (ArchiveModel.deleteThumbnailFile(id)) {
-                        getLogger("archive_controller").info("Deleted thumbnail file", ("arcid", id))
-                    } else {
-                        getLogger("archive_controller").debug("Thumbnail file not found or delete failed", ("arcid", id))
-                    }
+                    // 删除封面资源文件（assets）
+                    try {
+                        if (coverAssetId > 0) {
+                            let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
+                            let assetPath = FileUtils.joinPath(assetRoot, "${coverAssetId}.avif")
+                            try { remove(Path(assetPath)) } catch (_: Exception) {}
+                            let _ = AssetDao.deleteById(coverAssetId)
+                            getLogger("archive_controller").info("Deleted cover asset", ("asset_id", coverAssetId.toString()), ("arcid", id))
+                        }
+                    } catch (_: Exception) {}
 
                     // 删除原始档案文件
                     try {

@@ -18,11 +18,9 @@ public class DownloadUrlTaskRunner {
 
     public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let cachePath = context.paths.cachePath
-        let thumbnailPath = context.paths.thumbnailPath
 
         // 确保目录存在
         FileUtils.ensureDirectoryExists(Path(cachePath))
-        FileUtils.ensureDirectoryExists(Path(thumbnailPath))
 
         let _ = getLogger("download_url_task")
         TaskIO.appendLog(taskId, "download_url task started")

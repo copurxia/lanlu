@@ -12,6 +12,7 @@ public class UserRow {
     public var passwordSalt: String = ""
     public var passwordHash: String = ""
     public var isAdmin: Bool = false
+    public var avatarAssetId: Int64 = 0
     public var createdAt: String = ""
 
     public init() {}
@@ -26,7 +27,7 @@ public class UserDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, username, password_salt, password_hash, is_admin, created_at
+                        SELECT id, username, password_salt, password_hash, is_admin, avatar_asset_id, created_at
                         FROM users
                         WHERE username = ?
                     """)
@@ -41,7 +42,8 @@ public class UserDao {
                                 row.passwordSalt = rs.getOrNull<String>(2) ?? ""
                                 row.passwordHash = rs.getOrNull<String>(3) ?? ""
                                 row.isAdmin = rs.getOrNull<Bool>(4) ?? false
-                                row.createdAt = rs.getOrNull<String>(5) ?? ""
+                                row.avatarAssetId = rs.getOrNull<Int64>(5) ?? 0
+                                row.createdAt = rs.getOrNull<String>(6) ?? ""
                                 return row
                             }
                         } finally {
@@ -66,7 +68,7 @@ public class UserDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, username, password_salt, password_hash, is_admin, created_at
+                        SELECT id, username, password_salt, password_hash, is_admin, avatar_asset_id, created_at
                         FROM users
                         WHERE id = ?
                     """)
@@ -81,7 +83,8 @@ public class UserDao {
                                 row.passwordSalt = rs.getOrNull<String>(2) ?? ""
                                 row.passwordHash = rs.getOrNull<String>(3) ?? ""
                                 row.isAdmin = rs.getOrNull<Bool>(4) ?? false
-                                row.createdAt = rs.getOrNull<String>(5) ?? ""
+                                row.avatarAssetId = rs.getOrNull<Int64>(5) ?? 0
+                                row.createdAt = rs.getOrNull<String>(6) ?? ""
                                 return row
                             }
                         } finally {
@@ -479,6 +482,35 @@ public class UserDao {
                     }
                 } catch (e: Exception) {
                     logger.error("重置用户密码失败", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    public static func updateAvatarAssetId(userId: Int64, avatarAssetId: Int64): Bool {
+        if (userId <= 0) { return false }
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("UPDATE users SET avatar_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                    try {
+                        if (avatarAssetId > 0) {
+                            stmt.set(0, avatarAssetId)
+                        } else {
+                            stmt.setNull(0)
+                        }
+                        stmt.set(1, userId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("user_dao").error("updateAvatarAssetId failed", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}

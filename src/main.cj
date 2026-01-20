@@ -53,6 +53,8 @@ main(): Int64 {
     logger.debug("Application starting... step 8: running database migrations")
     MigrationRegistry.register(V001_InitialSchema())
     MigrationRegistry.register(V002_TaskGroupKV())
+    MigrationRegistry.register(V003_Assets())
+    MigrationRegistry.register(V004_RemoveThumbnailSetting())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {
@@ -91,6 +93,12 @@ main(): Int64 {
         logger.error("Failed to initialize system settings")
         return 1
     }
+
+    // Migrate legacy thumbnails (./data/thumb) into assets storage, then cleanup legacy directory.
+    // Best-effort and non-fatal.
+    try {
+        LegacyThumbnailCleanupService.migrateAndCleanup()
+    } catch (_: Exception) {}
 
     // 启动 TaskPool（从tasks表领取pending任务执行）
     logger.info("Application starting... step 10: starting taskpool service")

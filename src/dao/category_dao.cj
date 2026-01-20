@@ -382,26 +382,6 @@ public class CategoryDao {
                         getStmt.close()
                     }
 
-                    // 预取该分类下的 arcid，用于后续清理缩略图缓存（不影响原始档案文件）
-                    let arcids = ArrayList<String>()
-                    let listStmt = conn.prepareStatement("SELECT arcid FROM archives WHERE category_id = ?")
-                    try {
-                        listStmt.set(0, categoryInternalId)
-                        let rs = listStmt.query()
-                        try {
-                            while (rs.next()) {
-                                let arcid = rs.getOrNull<String>(0) ?? ""
-                                if (arcid.size > 0) {
-                                    arcids.add(arcid)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        listStmt.close()
-                    }
-
                     // 先删除该分类下的档案记录（依赖 DB 约束级联清理关联表：收藏/状态/标签/合集关联等）
                     var deletedArchives: Int64 = 0
                     let delArchivesStmt = conn.prepareStatement("DELETE FROM archives WHERE category_id = ?")
@@ -420,13 +400,6 @@ public class CategoryDao {
                         let result = delCatStmt.update()
                         if (result.rowCount <= 0) {
                             return (false, deletedArchives, "Failed to delete category")
-                        }
-
-                        // 删除成功后，清理本次被删除档案的缩略图缓存
-                        let thumbnailDir = DatabaseConfig.getThumbnailPath()
-                        for (arcid in arcids) {
-                            let thumbPath = Path("${thumbnailDir}/${arcid}.avif")
-                            try { remove(thumbPath) } catch (_: Exception) {}
                         }
                         return (true, deletedArchives, "")
                     } finally {

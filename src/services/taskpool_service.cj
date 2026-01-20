@@ -300,7 +300,7 @@ public class TaskPoolService {
     private func createTaskRunnerContext(): TaskRunnerContext {
         let paths = TaskRunnerPaths(
             cachePath: SystemSettingsService.getPath("CACHE_PATH"),
-            thumbnailPath: SystemSettingsService.getPath("THUMBNAIL_PATH"),
+            assetPath: SystemSettingsService.getPath("ASSET_PATH"),
             pluginPath: SystemSettingsService.getPath("PLUGIN_PATH")
         )
         let notifier: TaskNotifier = { => this.notifyTaskAvailable() }
