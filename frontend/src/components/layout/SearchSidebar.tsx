@@ -370,6 +370,7 @@ export function SearchSidebar({ onSearch, loading = false, filters }: SearchSide
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="relevance">{t('home.relevance')}</SelectItem>
                   <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
                   <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
                   <SelectItem value="title">{t('home.titleSort')}</SelectItem>
