@@ -14,6 +14,7 @@ export interface UseAutocompleteOptions {
   maxResults?: number;
   debounceMs?: number;
   minQueryLength?: number;
+  requireBoundTags?: boolean;
   filterFn?: (suggestion: TagSuggestion) => boolean;
 }
 
@@ -35,6 +36,7 @@ export function useAutocomplete(options: UseAutocompleteOptions): UseAutocomplet
     maxResults = 10,
     debounceMs = 200,
     minQueryLength = 1,
+    requireBoundTags = true,
     filterFn,
   } = options;
 
@@ -62,7 +64,7 @@ export function useAutocomplete(options: UseAutocompleteOptions): UseAutocomplet
 
     setLoading(true);
     try {
-      const results = await TagService.autocomplete(query, language, maxResults);
+      const results = await TagService.autocomplete(query, language, maxResults, requireBoundTags);
       const filtered = filterFn ? results.filter(filterFn) : results;
       setSuggestions(filtered);
       setShowSuggestions(filtered.length > 0);

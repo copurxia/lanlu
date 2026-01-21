@@ -100,10 +100,15 @@ export class TagService {
    * @param lang 语言代码
    * @param limit 返回数量限制
    */
-  static async autocomplete(q: string, lang: string, limit: number = 10): Promise<{ value: string; label: string; display: string }[]> {
+  static async autocomplete(
+    q: string,
+    lang: string,
+    limit: number = 10,
+    requireBound: boolean = true
+  ): Promise<{ value: string; label: string; display: string }[]> {
     if (!q) return [];
     const resp = await apiClient.get('/api/tags/autocomplete', {
-      params: { q, lang, limit }
+      params: { q, lang, limit, require_bound: requireBound ? 1 : 0 }
     });
     const data = resp.data?.data;
     return (data?.suggestions ?? []) as { value: string; label: string; display: string }[];

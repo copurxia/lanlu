@@ -1132,7 +1132,7 @@ public class TagDao {
      * @param limit 返回数量限制
      * @return 匹配的标签列表 [(fullName, translatedText)]
      */
-    public static func autocompleteSearch(query: String, lang: String, limit: Int64): ArrayList<(String, String)> {
+    public static func autocompleteSearch(query: String, lang: String, limit: Int64, requireBound: Bool): ArrayList<(String, String)> {
         var result: ArrayList<(String, String)> = ArrayList<(String, String)>()
 
         if (query.size == 0) {
@@ -1144,11 +1144,13 @@ public class TagDao {
             case Some(conn) =>
                 
                 try {
-                    // 搜索标签名(namespace:name)和翻译文本，只返回有档案关联的标签
-                    // 使用 JSONB 提取指定语言的翻译文本进行搜索
-                    // 使用 INNER JOIN archive_tags 过滤，只保留在数据库中有档案关联的标签
+                    // 搜索标签名(namespace:name)和翻译文本。
+                    // 默认只返回“已绑定档案”的标签，供全局搜索框等场景使用；
+                    // 但编辑档案标签时需要可选到“未绑定任何档案”的标签，因此支持关闭该约束。
+                    // 使用 JSONB 提取指定语言的翻译文本进行搜索。
                     // 优先级：1=name精确匹配, 2=name前缀匹配, 3=翻译精确匹配, 4=翻译前缀匹配, 5=模糊匹配
-                    let sql = """
+                    let sql = if (requireBound) {
+                        """
                         SELECT DISTINCT t.namespace, t.name, t.translations,
                                CASE
                                    WHEN t.name ILIKE ? THEN 1
@@ -1165,7 +1167,26 @@ public class TagDao {
                            OR t.translations::text ILIKE ?
                         ORDER BY match_priority, t.name
                         LIMIT ?
-                    """
+                        """
+                    } else {
+                        """
+                        SELECT DISTINCT t.namespace, t.name, t.translations,
+                               CASE
+                                   WHEN t.name ILIKE ? THEN 1
+                                   WHEN t.name ILIKE ? THEN 2
+                                   WHEN t.translations->?->>'text' ILIKE ? THEN 3
+                                   WHEN t.translations->?->>'text' ILIKE ? THEN 4
+                                   ELSE 5
+                               END as match_priority
+                        FROM tags t
+                        WHERE t.name ILIKE ?
+                           OR (t.namespace != '' AND t.namespace || ':' || t.name ILIKE ?)
+                           OR t.translations->?->>'text' ILIKE ?
+                           OR t.translations::text ILIKE ?
+                        ORDER BY match_priority, t.name
+                        LIMIT ?
+                        """
+                    }
                     let stmt = conn.prepareStatement(sql)
                     try {
                         let exactPattern = query

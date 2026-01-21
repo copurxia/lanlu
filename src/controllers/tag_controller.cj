@@ -515,13 +515,14 @@ public class TagController {
     }
 
     /**
-     * GET /api/tags/autocomplete?q=...&lang=zh|en&limit=10
+     * GET /api/tags/autocomplete?q=...&lang=zh|en&limit=10[&require_bound=0|1]
      * 返回自动补全建议列表
      */
     public static func autocomplete(ctx: JoyContext): Unit {
         let query = (ctx.getQuery("q") ?? "").trimAscii()
         let lang = langFromQuery(ctx)
         let limitStr = (ctx.getQuery("limit") ?? "10").trimAscii()
+        let requireBoundStr = (ctx.getQuery("require_bound") ?? "1").trimAscii()
 
         var limit: Int64 = 10
         try { limit = Int64.parse(limitStr) } catch (_: Exception) {}
@@ -533,7 +534,10 @@ public class TagController {
             return
         }
 
-        let results = TagDao.autocompleteSearch(query, lang, limit)
+        // Default behavior keeps search suggestions "in use" (bound to archives).
+        // Some UIs (e.g. archive tag editor) need to suggest all tags, including unbound ones.
+        let requireBound: Bool = !(requireBoundStr == "0" || requireBoundStr == "false")
+        let results = TagDao.autocompleteSearch(query, lang, limit, requireBound)
 
         var suggestionsJson = "["
         var first = true

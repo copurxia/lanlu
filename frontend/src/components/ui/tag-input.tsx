@@ -35,6 +35,8 @@ export function TagInput({
   const autocomplete = useAutocomplete({
     language,
     maxResults: 10,
+    // Archive tag editor needs to suggest all tags, not just those already bound to archives.
+    requireBoundTags: false,
     filterFn: enableAutocomplete ? (s) => !value.includes(s.display) : undefined,
   })
 
