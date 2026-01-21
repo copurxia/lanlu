@@ -52,12 +52,6 @@ main(): Int64 {
     // 注册并运行数据库迁移
     logger.debug("Application starting... step 8: running database migrations")
     MigrationRegistry.register(V001_InitialSchema())
-    MigrationRegistry.register(V002_TaskGroupKV())
-    MigrationRegistry.register(V003_Assets())
-    MigrationRegistry.register(V004_RemoveThumbnailSetting())
-    MigrationRegistry.register(V005_TagIcons())
-    MigrationRegistry.register(V006_TagBackgrounds())
-    MigrationRegistry.register(V007_UpdateCronTasks())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {

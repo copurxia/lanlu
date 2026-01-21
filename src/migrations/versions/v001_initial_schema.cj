@@ -70,10 +70,16 @@ public class V001_InitialSchema <: Migration {
         // 16. scheduled_tasks 表
         if (!createScheduledTasksTable(conn)) { return false }
 
-        // 17. system_settings 表
+        // 17. task_group_kv 表（任务组 KV 持久化）
+        if (!createTaskGroupKvTable(conn)) { return false }
+
+        // 18. assets 表（通用资源表）
+        if (!createAssetsTable(conn)) { return false }
+
+        // 19. system_settings 表
         if (!createSystemSettingsTable(conn)) { return false }
 
-        // 18. archives_with_tags 视图
+        // 20. archives_with_tags 视图
         if (!createArchivesWithTagsView(conn)) { return false }
 
         return true
@@ -86,6 +92,8 @@ public class V001_InitialSchema <: Migration {
             logger.debug("users table already exists, checking columns")
             MigrationHelpers.addColumnIfNotExists(conn, "users", "password_salt", "VARCHAR(64) NOT NULL DEFAULT ''")
             MigrationHelpers.addColumnIfNotExists(conn, "users", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            MigrationHelpers.addColumnIfNotExists(conn, "users", "avatar_asset_id", "BIGINT")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
             return true
         }
 
@@ -96,6 +104,7 @@ public class V001_InitialSchema <: Migration {
                 username VARCHAR(64) NOT NULL UNIQUE,
                 password_salt VARCHAR(64) NOT NULL,
                 password_hash VARCHAR(64) NOT NULL,
+                avatar_asset_id BIGINT,
                 is_admin BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -103,6 +112,7 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
         return true
     }
 
@@ -239,6 +249,7 @@ public class V001_InitialSchema <: Migration {
     private func createArchivesTable(conn: Connection): Bool {
         if (MigrationHelpers.tableExists(conn, "archives")) {
             logger.debug("archives table already exists, checking columns and indexes")
+            MigrationHelpers.addColumnIfNotExists(conn, "archives", "cover_asset_id", "BIGINT")
             // 添加 title_tsv 列（全文搜索）
             if (!MigrationHelpers.columnExists(conn, "archives", "title_tsv")) {
                 try {
@@ -253,6 +264,7 @@ public class V001_InitialSchema <: Migration {
             }
             // 创建索引
             MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_category_id", "archives", "category_id")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_cover_asset_id", "archives", "cover_asset_id")
             if (!MigrationHelpers.indexExists(conn, "idx_archives_title_tsv")) {
                 try {
                     MigrationHelpers.execUpdate(conn, "CREATE INDEX idx_archives_title_tsv ON archives USING GIN (title_tsv)")
@@ -270,6 +282,7 @@ public class V001_InitialSchema <: Migration {
                 filename VARCHAR(1024) NOT NULL,
                 summary TEXT DEFAULT '',
                 thumbhash TEXT DEFAULT '',
+                cover_asset_id BIGINT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 relative_path TEXT DEFAULT '',
@@ -296,6 +309,7 @@ public class V001_InitialSchema <: Migration {
 
         // 创建索引
         MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_category_id", "archives", "category_id")
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_archives_cover_asset_id", "archives", "cover_asset_id")
         try {
             MigrationHelpers.execUpdate(conn, "CREATE INDEX idx_archives_title_tsv ON archives USING GIN (title_tsv)")
         } catch (_: Exception) {}
@@ -306,8 +320,12 @@ public class V001_InitialSchema <: Migration {
     private func createTagsTable(conn: Connection): Bool {
         if (MigrationHelpers.tableExists(conn, "tags")) {
             logger.debug("tags table already exists")
+            MigrationHelpers.addColumnIfNotExists(conn, "tags", "icon_asset_id", "BIGINT")
+            MigrationHelpers.addColumnIfNotExists(conn, "tags", "background_asset_id", "BIGINT")
             MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_namespace", "tags", "namespace")
             MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_name", "tags", "name")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_icon_asset_id", "tags", "icon_asset_id")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_background_asset_id", "tags", "background_asset_id")
             return true
         }
 
@@ -318,6 +336,8 @@ public class V001_InitialSchema <: Migration {
                 namespace VARCHAR(64) NOT NULL DEFAULT '',
                 name VARCHAR(255) NOT NULL,
                 translations JSONB NOT NULL DEFAULT '{}',
+                icon_asset_id BIGINT,
+                background_asset_id BIGINT,
                 links TEXT DEFAULT '',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -328,6 +348,8 @@ public class V001_InitialSchema <: Migration {
         }
         MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_namespace", "tags", "namespace")
         MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_name", "tags", "name")
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_icon_asset_id", "tags", "icon_asset_id")
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_tags_background_asset_id", "tags", "background_asset_id")
         return true
     }
 
@@ -678,6 +700,72 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
+        return true
+    }
+
+    private func createTaskGroupKvTable(conn: Connection): Bool {
+        if (MigrationHelpers.tableExists(conn, "task_group_kv")) {
+            logger.debug("task_group_kv table already exists, checking columns")
+            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "group_id", "VARCHAR(255) NOT NULL")
+            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "k", "VARCHAR(255) NOT NULL")
+            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "v", "TEXT NOT NULL")
+            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "created_at", "BIGINT NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "ttl_seconds", "BIGINT NOT NULL DEFAULT 0")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_task_group_kv_group_id", "task_group_kv", "group_id")
+            return true
+        }
+
+        logger.debug("Creating task_group_kv table")
+        if (!MigrationHelpers.execUpdate(conn, """
+            CREATE TABLE task_group_kv (
+                group_id VARCHAR(255) NOT NULL,
+                k VARCHAR(255) NOT NULL,
+                v TEXT NOT NULL,
+                created_at BIGINT NOT NULL,
+                ttl_seconds BIGINT NOT NULL DEFAULT 0,
+                PRIMARY KEY (group_id, k)
+            )
+        """)) {
+            return false
+        }
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_task_group_kv_group_id", "task_group_kv", "group_id")
+        return true
+    }
+
+    private func createAssetsTable(conn: Connection): Bool {
+        if (MigrationHelpers.tableExists(conn, "assets")) {
+            logger.debug("assets table already exists, checking columns")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "owner_user_id", "BIGINT")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "kind", "VARCHAR(50) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "original_filename", "VARCHAR(1024) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "content_type", "VARCHAR(255) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "file_ext", "VARCHAR(32) NOT NULL DEFAULT 'bin'")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "byte_size", "BIGINT NOT NULL DEFAULT 0")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "thumbhash", "TEXT NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(conn, "assets", "created_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_owner_user_id", "assets", "owner_user_id")
+            MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_kind", "assets", "kind")
+            return true
+        }
+
+        logger.debug("Creating assets table")
+        if (!MigrationHelpers.execUpdate(conn, """
+            CREATE TABLE assets (
+                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                owner_user_id BIGINT,
+                kind VARCHAR(50) NOT NULL DEFAULT '',
+                original_filename VARCHAR(1024) NOT NULL DEFAULT '',
+                content_type VARCHAR(255) NOT NULL DEFAULT '',
+                file_ext VARCHAR(32) NOT NULL DEFAULT 'bin',
+                byte_size BIGINT NOT NULL DEFAULT 0,
+                thumbhash TEXT NOT NULL DEFAULT '',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)) {
+            return false
+        }
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_owner_user_id", "assets", "owner_user_id")
+        MigrationHelpers.createIndexIfNotExists(conn, "idx_assets_kind", "assets", "kind")
         return true
     }
 
