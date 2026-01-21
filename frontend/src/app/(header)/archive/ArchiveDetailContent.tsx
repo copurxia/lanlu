@@ -170,9 +170,9 @@ export function ArchiveDetailContent() {
     setFormData({
       title: metadata.title || '',
       summary: metadata.summary || '',
-      tags,
+      tags: tags.map(toCanonicalTag),
     });
-  }, [isEditing, metadata, tags]);
+  }, [isEditing, metadata, tags, toCanonicalTag]);
 
   const startEdit = useCallback(() => {
     if (!metadata) return;
@@ -180,10 +180,10 @@ export function ArchiveDetailContent() {
     setFormData({
       title: metadata.title || '',
       summary: metadata.summary || '',
-      tags,
+      tags: tags.map(toCanonicalTag),
     });
     setIsEditing(true);
-  }, [isAuthenticated, metadata, tags]);
+  }, [isAuthenticated, metadata, tags, toCanonicalTag]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -191,17 +191,18 @@ export function ArchiveDetailContent() {
     setFormData({
       title: metadata.title || '',
       summary: metadata.summary || '',
-      tags,
+      tags: tags.map(toCanonicalTag),
     });
-  }, [metadata, tags]);
+  }, [metadata, tags, toCanonicalTag]);
 
   const saveEdit = useCallback(async () => {
     if (!metadata) return;
     setIsSaving(true);
     try {
+      const canonicalTags = formData.tags.map((t) => toCanonicalTag(t));
       await ArchiveService.updateMetadata(
         metadata.arcid,
-        { title: formData.title, summary: formData.summary, tags: formData.tags.join(', ') },
+        { title: formData.title, summary: formData.summary, tags: canonicalTags.join(', ') },
         language
       );
       setIsEditing(false);
@@ -212,7 +213,7 @@ export function ArchiveDetailContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [formData.summary, formData.tags, formData.title, language, metadata, refetch, showError, t]);
+  }, [formData.summary, formData.tags, formData.title, language, metadata, refetch, showError, t, toCanonicalTag]);
 
   const runMetadataPlugin = useCallback(async () => {
     if (!metadata) return;
@@ -245,7 +246,13 @@ export function ArchiveDetailContent() {
         setFormData({
           title: updated.title || '',
           summary: updated.summary || '',
-          tags: updated.tags ? updated.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag) : [],
+          tags: updated.tags
+            ? updated.tags
+                .split(',')
+                .map((tag) => tag.trim())
+                .filter((tag) => tag)
+                .map((tag) => toCanonicalTag(tag))
+            : [],
         });
       }
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'));

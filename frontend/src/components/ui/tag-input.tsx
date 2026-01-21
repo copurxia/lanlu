@@ -37,7 +37,7 @@ export function TagInput({
     maxResults: 10,
     // Archive tag editor needs to suggest all tags, not just those already bound to archives.
     requireBoundTags: false,
-    filterFn: enableAutocomplete ? (s) => !value.includes(s.display) : undefined,
+    filterFn: enableAutocomplete ? (s) => !value.includes(s.value) : undefined,
   })
 
   const updateDropdownPosition = React.useCallback(() => {
@@ -82,7 +82,8 @@ export function TagInput({
   }
 
   const handleSelectSuggestion = (suggestion: TagSuggestion) => {
-    addTag(suggestion.display)
+    // Store canonical tag (namespace:name) so we don't persist translated text into DB.
+    addTag(suggestion.value)
     inputRef.current?.focus()
   }
 
