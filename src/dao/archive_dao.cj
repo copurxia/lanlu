@@ -56,6 +56,31 @@ public class ArchiveData {
 }
 
 /**
+ * Maintenance helper row: archive + category scan path + cover info.
+ */
+public class ArchiveCoverRegenerationRow {
+    public var archiveInternalId: Int64 = 0  // archives.id
+    public var archiveId: String = ""       // arcid
+    public var filename: String = ""
+    public var relativePath: String = ""
+    public var archiveType: String = "archive"
+    public var categoryId: Int64 = 0
+    public var categoryScanPath: String = ""
+    public var coverAssetId: Int64 = 0
+    public var thumbhash: String = ""
+}
+
+/**
+ * Maintenance helper row: archive + category plugins config (JSON array string).
+ */
+public class ArchiveMetadataBackfillRow {
+    public var archiveInternalId: Int64 = 0  // archives.id
+    public var archiveId: String = ""   // arcid
+    public var categoryId: Int64 = 0
+    public var categoryPlugins: String = "[]"
+}
+
+/**
  * 归档数据访问对象 (DAO)
  * 负责处理所有与归档相关的数据库操作
  */
@@ -1455,5 +1480,160 @@ public class ArchiveDao {
                 getLogger("archive_dao").error("无法连接到数据库")
                 return false
         }
+    }
+
+    /**
+     * 获取需要重生成封面的档案列表（用于批量任务派发）
+     *
+     * mode:
+     * - "missing"           : cover_asset_id 缺失或 thumbhash 缺失
+     * - "thumbhash_missing" : thumbhash 缺失
+     * - "cover_missing"     : cover_asset_id 缺失
+     * - "all"               : 全部
+     */
+    public static func getArchivesForCoverRegeneration(mode: String, limit: Int32): ArrayList<ArchiveCoverRegenerationRow> {
+        return getArchivesForCoverRegeneration(mode, limit, 0)
+    }
+
+    /**
+     * Cursor-based pagination for cover regeneration.
+     * Fetches archives with internal id > afterInternalId ordered by id asc.
+     */
+    public static func getArchivesForCoverRegeneration(mode: String, limit: Int32, afterInternalId: Int64): ArrayList<ArchiveCoverRegenerationRow> {
+        var result = ArrayList<ArchiveCoverRegenerationRow>()
+        if (limit <= 0) { return result }
+
+        let trimmedMode = mode.trimAscii()
+        var whereSql = ""
+        if (trimmedMode == "all") {
+            whereSql = "TRUE"
+        } else if (trimmedMode == "thumbhash_missing") {
+            whereSql = "(a.thumbhash IS NULL OR a.thumbhash = '')"
+        } else if (trimmedMode == "cover_missing") {
+            whereSql = "(a.cover_asset_id IS NULL OR a.cover_asset_id = 0)"
+        } else {
+            // default: "missing"
+            whereSql = "((a.cover_asset_id IS NULL OR a.cover_asset_id = 0) OR (a.thumbhash IS NULL OR a.thumbhash = ''))"
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let sql = """
+                        SELECT a.id, a.arcid, a.filename, a.relative_path, a.archive_type, a.category_id,
+                               COALESCE(a.cover_asset_id, 0) AS cover_asset_id,
+                               COALESCE(a.thumbhash, '') AS thumbhash,
+                               COALESCE(c.scan_path, '') AS scan_path
+                        FROM archives a
+                        LEFT JOIN categories c ON c.id = a.category_id
+                        WHERE ${whereSql}
+                          AND a.id > ?
+                        ORDER BY a.id ASC
+                        LIMIT ?
+                    """
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        stmt.set(0, afterInternalId)
+                        stmt.set(1, Int64(limit))
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let row = ArchiveCoverRegenerationRow()
+                                row.archiveInternalId = rs.getOrNull<Int64>(0) ?? 0
+                                row.archiveId = rs.getOrNull<String>(1) ?? ""
+                                row.filename = rs.getOrNull<String>(2) ?? ""
+                                row.relativePath = rs.getOrNull<String>(3) ?? ""
+                                row.archiveType = rs.getOrNull<String>(4) ?? "archive"
+                                row.categoryId = rs.getOrNull<Int64>(5) ?? 0
+                                row.coverAssetId = rs.getOrNull<Int64>(6) ?? 0
+                                row.thumbhash = rs.getOrNull<String>(7) ?? ""
+                                row.categoryScanPath = rs.getOrNull<String>(8) ?? ""
+                                result.add(row)
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("getArchivesForCoverRegeneration failed", ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+        }
+        return result
+    }
+
+    /**
+     * 获取需要补全元数据的档案列表：
+     * - 没有任何非 source 命名空间的标签（即“只有source标签”或“完全无标签”）
+     */
+    public static func getArchivesNeedingMetadataBackfill(limit: Int32): ArrayList<ArchiveMetadataBackfillRow> {
+        return getArchivesNeedingMetadataBackfill(limit, 0)
+    }
+
+    /**
+     * Cursor-based pagination for metadata backfill.
+     * Fetches archives with internal id > afterInternalId ordered by id asc.
+     */
+    public static func getArchivesNeedingMetadataBackfill(limit: Int32, afterInternalId: Int64): ArrayList<ArchiveMetadataBackfillRow> {
+        var result = ArrayList<ArchiveMetadataBackfillRow>()
+        if (limit <= 0) { return result }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let sql = """
+                        SELECT a.id,
+                               a.arcid,
+                               a.category_id,
+                               COALESCE(c.plugins, '[]') AS plugins_json
+                        FROM archives a
+                        LEFT JOIN categories c ON c.id = a.category_id
+                        WHERE NOT EXISTS (
+                            SELECT 1
+                            FROM archive_tags atg
+                            JOIN tags t ON t.id = atg.tag_id
+                            WHERE atg.archive_id = a.id
+                              AND COALESCE(LOWER(t.namespace), '') != 'source'
+                        )
+                          AND a.id > ?
+                        ORDER BY a.id ASC
+                        LIMIT ?
+                    """
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        stmt.set(0, afterInternalId)
+                        stmt.set(1, Int64(limit))
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let row = ArchiveMetadataBackfillRow()
+                                row.archiveInternalId = rs.getOrNull<Int64>(0) ?? 0
+                                row.archiveId = rs.getOrNull<String>(1) ?? ""
+                                row.categoryId = rs.getOrNull<Int64>(2) ?? 0
+                                row.categoryPlugins = rs.getOrNull<String>(3) ?? "[]"
+                                result.add(row)
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("getArchivesNeedingMetadataBackfill failed", ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+        }
+        return result
     }
 }

@@ -663,20 +663,36 @@ public class CronService {
                 logger.error("Failed to create default clear_log task")
         }
 
-        // 清理所有缩略图哈希（手动触发，默认禁用）
-        let clearThumbhashTask = createScheduledTask(
-            "清理缩略图哈希",
+        // 批量重生成封面（默认禁用，属于维护/重建操作）
+        let regenerateCoverTask = createScheduledTask(
+            "重生成封面",
             "0 5 * * *",
-            "clear_thumbhash",
-            taskParameters: "",  // 不需要参数
-            enabled: false,  // 默认禁用，需要手动触发
+            "regenerate_cover",
+            taskParameters: "{\"mode\":\"all\",\"deleteOldCover\":true,\"batchSize\":200}",  // 点击执行=全量重建，使用 batchSize 分页派发
+            enabled: false,
             priority: 50
         )
-        match (clearThumbhashTask) {
+        match (regenerateCoverTask) {
             case Some(t) =>
-                logger.debug("Created default clear_thumbhash task", ("id", t.id.toString()))
+                logger.debug("Created default regenerate_cover task", ("id", t.id.toString()))
             case None =>
-                logger.error("Failed to create default clear_thumbhash task")
+                logger.error("Failed to create default regenerate_cover task")
+        }
+
+        // 批量补全元数据（默认禁用，可能触发大量插件调用）
+        let backfillMetadataTask = createScheduledTask(
+            "补全元数据",
+            "30 5 * * *",
+            "backfill_metadata",
+            taskParameters: "{\"batchSize\":200}",  // 点击执行=全量扫描（按 batchSize 分页），对每个档案跑分类勾选的所有 plugins
+            enabled: false,
+            priority: 50
+        )
+        match (backfillMetadataTask) {
+            case Some(t) =>
+                logger.debug("Created default backfill_metadata task", ("id", t.id.toString()))
+            case None =>
+                logger.error("Failed to create default backfill_metadata task")
         }
 
         logger.debug("Default scheduled tasks created")
