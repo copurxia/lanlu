@@ -5,6 +5,7 @@ import { BookOpen, CheckCircle, Download, Edit, ExternalLink, Heart, Play, Rotat
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { TagInput } from '@/components/ui/tag-input';
@@ -13,8 +14,151 @@ import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialo
 import type { ArchiveMetadata } from '@/types/archive';
 import type { Plugin } from '@/lib/services/plugin-service';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { TagService } from '@/lib/services/tag-service';
 import { formatDate } from '@/lib/utils/utils';
 import { stripNamespace } from '@/lib/utils/tag-utils';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+
+function TagHoverBadge({
+  fullTag,
+  canonicalTag,
+  label,
+  title,
+  onClick,
+  children,
+}: {
+  fullTag: string;
+  canonicalTag: string;
+  label: string;
+  title: string;
+  onClick: () => void;
+  children?: ReactNode;
+}) {
+  const { language, t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [tag, setTag] = useState<Awaited<ReturnType<typeof TagService.getByName>>>(null);
+  const [loadError, setLoadError] = useState<string>('');
+  const closeTimerRef = useRef<number | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimerRef.current) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  };
+
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => setOpen(false), 120);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    if (tag || loading || loadError) return;
+
+    setLoading(true);
+    void TagService.getByName(canonicalTag)
+      .then((data) => {
+        setTag(data);
+        setLoadError('');
+      })
+      .catch((e: any) => {
+        setLoadError(e?.response?.data?.message || e?.message || t('common.failed'));
+      })
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, canonicalTag]);
+
+  const translatedText =
+    (tag?.translations as any)?.[language]?.text ||
+    (tag?.translations as any)?.zh?.text ||
+    (tag?.translations as any)?.en?.text ||
+    '';
+  const translatedIntro =
+    (tag?.translations as any)?.[language]?.intro ||
+    (tag?.translations as any)?.zh?.intro ||
+    (tag?.translations as any)?.en?.intro ||
+    '';
+
+  const canonicalFullTag = tag ? (tag.namespace ? `${tag.namespace}:${tag.name}` : tag.name) : canonicalTag;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Badge
+          variant="secondary"
+          className="px-2.5 py-1 text-sm cursor-pointer select-none transition-colors hover:bg-secondary/80 flex items-center gap-1"
+          title={title}
+          onClick={onClick}
+          onMouseEnter={() => {
+            cancelClose();
+            setOpen(true);
+          }}
+          onMouseLeave={scheduleClose}
+        >
+          <span>{label}</span>
+          {children}
+        </Badge>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-80 p-0 overflow-hidden"
+        onMouseEnter={cancelClose}
+        onMouseLeave={scheduleClose}
+      >
+        <div className="relative">
+          {tag?.backgroundAssetId ? (
+            <div
+              className="absolute inset-0 bg-cover bg-center"
+              style={{ backgroundImage: `url(/api/assets/${tag.backgroundAssetId})` }}
+            />
+          ) : null}
+          {tag?.backgroundAssetId ? (
+            <div className="absolute inset-0 bg-background/80" />
+          ) : null}
+
+          <div className="relative p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <div className="h-9 w-9 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center flex-shrink-0">
+              {tag?.iconAssetId ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={`/api/assets/${tag.iconAssetId}`}
+                  alt={fullTag}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground">TAG</span>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="font-medium truncate">{translatedText || label}</div>
+              <div className="text-xs text-muted-foreground truncate">{canonicalFullTag}</div>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="text-xs text-muted-foreground">{t('common.loading')}</div>
+          ) : loadError ? (
+            <div className="text-xs text-muted-foreground">{loadError}</div>
+          ) : (
+            <>
+              {translatedIntro ? (
+                <div className="text-sm leading-relaxed text-muted-foreground whitespace-pre-wrap">{translatedIntro}</div>
+              ) : null}
+              {tag?.links ? (
+                <div className="text-xs text-muted-foreground break-words whitespace-pre-wrap">{tag.links}</div>
+              ) : null}
+            </>
+          )}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 type FormData = {
   title: string;
@@ -26,6 +170,7 @@ type Props = {
   metadata: ArchiveMetadata;
   t: (key: string) => string;
   tags: string[];
+  toCanonicalTag: (displayFullTag: string) => string;
   isEditing: boolean;
   isSaving: boolean;
   formData: FormData;
@@ -59,6 +204,7 @@ export function ArchiveMainCard({
   metadata,
   t,
   tags,
+  toCanonicalTag,
   isEditing,
   isSaving,
   formData,
@@ -198,20 +344,21 @@ export function ArchiveMainCard({
             <div className="flex flex-wrap gap-2">
               {tags.map((fullTag) => {
                 const label = stripNamespace(fullTag);
+                const canonicalTag = toCanonicalTag(fullTag);
                 const colonIdx = fullTag.indexOf(':');
                 const namespace = colonIdx > 0 ? fullTag.slice(0, colonIdx).trim().toLowerCase() : '';
                 const isSource = namespace === 'source';
                 const sourceUrl = isSource ? (label.startsWith('http') ? label : `https://${label}`) : '';
 
                 return (
-                  <Badge
+                  <TagHoverBadge
                     key={fullTag}
-                    variant="secondary"
-                    className="px-2.5 py-1 text-sm cursor-pointer select-none transition-colors hover:bg-secondary/80 flex items-center gap-1"
+                    fullTag={fullTag}
+                    canonicalTag={canonicalTag}
+                    label={label}
                     title={fullTag}
-                    onClick={() => onTagClick(fullTag)}
+                    onClick={() => onTagClick(canonicalTag)}
                   >
-                    <span>{label}</span>
                     {isSource && sourceUrl && (
                       <a
                         href={sourceUrl}
@@ -224,7 +371,7 @@ export function ArchiveMainCard({
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     )}
-                  </Badge>
+                  </TagHoverBadge>
                 );
               })}
             </div>

@@ -14,6 +14,7 @@ export type Tag = {
   translations: Record<string, TagTranslation>;
   links: string;
   iconAssetId?: number;
+  backgroundAssetId?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -74,6 +75,12 @@ export class TagService {
    */
   static async getById(id: number): Promise<Tag | null> {
     const resp = await apiClient.get(`/api/tags/${id}`);
+    const data = resp.data?.data;
+    return data as Tag | null;
+  }
+
+  static async getByName(tag: string): Promise<Tag | null> {
+    const resp = await apiClient.get('/api/tags/by-name', { params: { tag } });
     const data = resp.data?.data;
     return data as Tag | null;
   }
@@ -154,6 +161,18 @@ export class TagService {
     });
     const data = resp.data?.data;
     return { iconAssetId: Number(data?.iconAssetId ?? 0) };
+  }
+
+  static async adminUploadBackground(id: number, file: File): Promise<{ backgroundAssetId: number }> {
+    const body = await file.arrayBuffer();
+    const resp = await apiClient.put(`/api/admin/tags/${id}/background`, body, {
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Filename': file.name || 'tag_background',
+      },
+    });
+    const data = resp.data?.data;
+    return { backgroundAssetId: Number(data?.backgroundAssetId ?? 0) };
   }
 
   /**

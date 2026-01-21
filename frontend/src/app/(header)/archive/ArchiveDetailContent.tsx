@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
+import { TagService } from '@/lib/services/tag-service';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -59,11 +60,55 @@ export function ArchiveDetailContent() {
       .filter((tag) => tag);
   }, [metadata?.tags]);
 
+  // metadata.tags can be translated by backend (via ?lang=).
+  // Build a reverse map so hover/click can still target the canonical tag stored in DB.
+  const [tagTranslationMap, setTagTranslationMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    void TagService.getTranslations(language, id)
+      .then((map) => {
+        if (!cancelled) setTagTranslationMap(map || {});
+      })
+      .catch(() => {
+        if (!cancelled) setTagTranslationMap({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, language]);
+
+  const tagReverseMap = useMemo(() => {
+    const rev: Record<string, string> = {};
+    for (const [canonical, translated] of Object.entries(tagTranslationMap || {})) {
+      const t2 = (translated || '').trim();
+      if (!t2) continue;
+      const idx = canonical.indexOf(':');
+      if (idx > 0) {
+        const ns = canonical.slice(0, idx);
+        rev[`${ns}:${t2}`] = canonical;
+      } else {
+        rev[t2] = canonical;
+      }
+    }
+    return rev;
+  }, [tagTranslationMap]);
+
+  const toCanonicalTag = useCallback(
+    (displayFullTag: string) => {
+      return tagReverseMap[displayFullTag] || displayFullTag;
+    },
+    [tagReverseMap]
+  );
+
   const handleTagClick = useCallback(
     (fullTag: string) => {
-      router.push(`/?q=${encodeURIComponent(stripNamespace(fullTag))}`);
+      const canonical = toCanonicalTag(fullTag);
+      // Preserve namespace for precise matching (e.g. "artist:kyockcho").
+      const q = canonical.includes(':') ? canonical : stripNamespace(canonical);
+      router.push(`/?q=${encodeURIComponent(q)}`);
     },
-    [router]
+    [router, toCanonicalTag]
   );
 
   const [favoriteLoading, setFavoriteLoading] = useState(false);
@@ -333,6 +378,7 @@ export function ArchiveDetailContent() {
                 onMarkAsNew={handleMarkAsNew}
                 onDeleteArchive={handleDeleteArchive}
                 onTagClick={handleTagClick}
+                toCanonicalTag={toCanonicalTag}
                 metadataPlugins={metadataPlugins}
                 selectedMetadataPlugin={selectedMetadataPlugin}
                 setSelectedMetadataPlugin={setSelectedMetadataPlugin}

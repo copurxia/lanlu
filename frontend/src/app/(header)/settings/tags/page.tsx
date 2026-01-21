@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogBody, DialogContent, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tag, Plus, Search, Download, Upload, Edit2, Trash2, Image } from 'lucide-react';
+import { Tag, Plus, Search, Download, Upload, Edit2, Trash2, Image as ImageIcon, ImagePlus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { TagService } from '@/lib/services/tag-service';
@@ -24,6 +24,7 @@ interface TagItem {
   translations: Record<string, { text: string; intro: string }>;
   links: string;
   iconAssetId?: number;
+  backgroundAssetId?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -64,6 +65,7 @@ export default function TagsSettingsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
   const [iconUploadingTagId, setIconUploadingTagId] = useState<number | null>(null);
+  const [backgroundUploadingTagId, setBackgroundUploadingTagId] = useState<number | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -288,11 +290,52 @@ export default function TagsSettingsPage() {
       try {
         await TagService.adminUploadIcon(tag.id, file);
         await loadTags();
+        // Keep the edit dialog preview in sync.
+        const updated = await TagService.getById(tag.id);
+        if (updated) {
+          setEditingTag((prev) => (prev && prev.id === tag.id ? ({ ...prev, ...updated } as any) : prev));
+        }
         success(t('settings.tagIconUpdatedSuccess'));
       } catch (err: any) {
         showError(err?.response?.data?.message || err?.message || t('settings.tagIconUpdateFailed'));
       } finally {
         setIconUploadingTagId(null);
+        document.body.removeChild(input);
+      }
+    };
+
+    document.body.appendChild(input);
+    input.click();
+  };
+
+  const handleUploadTagBackgroundClick = (tag: TagItem) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+
+    input.onchange = async (e) => {
+      const event = e as unknown as React.ChangeEvent<HTMLInputElement>;
+      const file = event.target.files?.[0];
+      if (!file) {
+        document.body.removeChild(input);
+        return;
+      }
+
+      setBackgroundUploadingTagId(tag.id);
+      try {
+        await TagService.adminUploadBackground(tag.id, file);
+        await loadTags();
+        // Keep the edit dialog preview in sync.
+        const updated = await TagService.getById(tag.id);
+        if (updated) {
+          setEditingTag((prev) => (prev && prev.id === tag.id ? ({ ...prev, ...updated } as any) : prev));
+        }
+        success(t('settings.tagBackgroundUpdatedSuccess'));
+      } catch (err: any) {
+        showError(err?.response?.data?.message || err?.message || t('settings.tagBackgroundUpdateFailed'));
+      } finally {
+        setBackgroundUploadingTagId(null);
         document.body.removeChild(input);
       }
     };
@@ -494,29 +537,38 @@ export default function TagsSettingsPage() {
           {tags.map((tag) => (
             <div
               key={tag.id}
-              className="rounded-md border p-3"
+              className="relative overflow-hidden rounded-md border"
             >
-              <div className="flex items-start justify-between gap-3">
+              {tag.backgroundAssetId ? (
+                <div
+                  className="absolute inset-0 bg-cover bg-center"
+                  style={{ backgroundImage: `url(/api/assets/${tag.backgroundAssetId})` }}
+                />
+              ) : null}
+              {tag.backgroundAssetId ? (
+                <div className="absolute inset-0 bg-gradient-to-r from-background/95 via-background/85 to-background/70" />
+              ) : null}
+
+              <div className="relative p-3 flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 min-w-0">
-                  <button
-                    type="button"
-                    className="h-10 w-10 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center flex-shrink-0"
-                    onClick={() => handleUploadTagIconClick(tag)}
-                    disabled={loading || iconUploadingTagId === tag.id}
-                    aria-label={t('settings.tagChangeIcon')}
-                    title={t('settings.tagChangeIcon')}
-                  >
-                    {tag.iconAssetId ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={`/api/assets/${tag.iconAssetId}`}
-                        alt={`${tag.namespace}:${tag.name}`}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      <Image className="h-5 w-5 text-muted-foreground" />
-                    )}
-                  </button>
+                  <div className="flex items-start gap-2 flex-shrink-0">
+                    <div
+                      className="h-10 w-10 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center"
+                      aria-label={t('settings.tagChangeIcon')}
+                      title={t('settings.tagChangeIcon')}
+                    >
+                      {tag.iconAssetId ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/assets/${tag.iconAssetId}`}
+                          alt={`${tag.namespace}:${tag.name}`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
 
                   <div className="min-w-0 space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -526,16 +578,6 @@ export default function TagsSettingsPage() {
                   </div>
                 </div>
                 <div className="flex gap-2 flex-shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleUploadTagIconClick(tag)}
-                    disabled={loading || iconUploadingTagId === tag.id}
-                    aria-label={t('settings.tagChangeIcon')}
-                    title={t('settings.tagChangeIcon')}
-                  >
-                    <Image className="w-4 h-4" />
-                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -559,7 +601,7 @@ export default function TagsSettingsPage() {
                 </div>
               </div>
 
-              <div className="mt-2 text-xs text-muted-foreground space-y-1 break-words">
+              <div className="relative px-3 pb-3 text-xs text-muted-foreground space-y-1 break-words">
                 {tag.translations.zh?.text && <div>中文: {tag.translations.zh.text}</div>}
                 {tag.translations.en?.text && <div>English: {tag.translations.en.text}</div>}
                 {tag.links && <div>Links: {tag.links}</div>}
@@ -670,6 +712,10 @@ export default function TagsSettingsPage() {
         form={editForm}
         setForm={setEditForm as any}
         editingTag={editingTag}
+        iconUploading={!!editingTag && iconUploadingTagId === editingTag.id}
+        backgroundUploading={!!editingTag && backgroundUploadingTagId === editingTag.id}
+        onUploadIcon={() => editingTag && handleUploadTagIconClick(editingTag)}
+        onUploadBackground={() => editingTag && handleUploadTagBackgroundClick(editingTag)}
         loading={loading}
         onSubmit={handleUpdateTag}
         onCreate={handleCreateTag}
@@ -687,13 +733,32 @@ interface TagDialogProps {
   form: CreateTagForm | EditTagForm;
   setForm: React.Dispatch<React.SetStateAction<CreateTagForm | EditTagForm>>;
   editingTag?: TagItem | null;
+  onUploadIcon?: () => void;
+  onUploadBackground?: () => void;
+  iconUploading?: boolean;
+  backgroundUploading?: boolean;
   loading: boolean;
   onSubmit?: () => Promise<void>;
   onCreate?: () => Promise<void>;
   t: (key: string) => string;
 }
 
-function TagDialog({ open, onOpenChange, mode, form, setForm, editingTag, loading, onSubmit, onCreate, t }: TagDialogProps) {
+function TagDialog({
+  open,
+  onOpenChange,
+  mode,
+  form,
+  setForm,
+  editingTag,
+  onUploadIcon,
+  onUploadBackground,
+  iconUploading,
+  backgroundUploading,
+  loading,
+  onSubmit,
+  onCreate,
+  t,
+}: TagDialogProps) {
   const handleSubmit = async () => {
     if (mode === 'create') {
       await onCreate?.();
@@ -744,13 +809,85 @@ function TagDialog({ open, onOpenChange, mode, form, setForm, editingTag, loadin
           {t('settings.createNewTag')}
         </Button>
       )}
-      <Dialog open={open} onOpenChange={handleClose}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            handleClose();
+          } else {
+            onOpenChange(true);
+          }
+        }}
+      >
         <DialogContent>
-          <DialogBody className="space-y-4">
-            {mode === 'create' ? (
-              <p className="text-sm text-muted-foreground">{t('settings.createNewTagDescription')}</p>
-            ) : editingTag ? (
-              <p className="text-sm text-muted-foreground">{editingTag.namespace}:{editingTag.name}</p>
+	          <DialogBody className="space-y-4">
+	            {mode === 'create' ? (
+	              <p className="text-sm text-muted-foreground">{t('settings.createNewTagDescription')}</p>
+	            ) : null}
+
+            {mode === 'edit' && editingTag ? (
+              <div className="rounded-md border overflow-hidden">
+                <div
+                  className="relative h-28 bg-muted/30 bg-cover bg-center"
+                  style={{
+                    backgroundImage: editingTag.backgroundAssetId
+                      ? `url(/api/assets/${editingTag.backgroundAssetId})`
+                      : undefined,
+                  }}
+                >
+                  {/* Improve legibility on busy backgrounds */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent" />
+
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={onUploadBackground}
+                    disabled={loading || backgroundUploading}
+                    className="absolute top-2 right-2 flex items-center gap-2"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                    {t('settings.tagChangeBackground')}
+                  </Button>
+
+                  <div className="absolute -bottom-6 left-3">
+                    <div className="h-12 w-12 rounded-md border-2 border-background bg-muted/30 overflow-hidden shadow flex items-center justify-center">
+                      {editingTag.iconAssetId ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`/api/assets/${editingTag.iconAssetId}`}
+                          alt={`${editingTag.namespace}:${editingTag.name}`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <ImageIcon className="h-5 w-5 text-muted-foreground" />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-8 pb-3 px-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">
+                      {editingTag.namespace}:{editingTag.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {t('settings.tagChangeIcon')}
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={onUploadIcon}
+                    disabled={loading || iconUploading}
+                    className="flex items-center gap-2 flex-shrink-0"
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                    {t('settings.tagChangeIcon')}
+                  </Button>
+                </div>
+              </div>
             ) : null}
 
             <div className="grid gap-3 sm:grid-cols-2">

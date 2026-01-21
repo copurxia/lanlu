@@ -56,6 +56,7 @@ main(): Int64 {
     MigrationRegistry.register(V003_Assets())
     MigrationRegistry.register(V004_RemoveThumbnailSetting())
     MigrationRegistry.register(V005_TagIcons())
+    MigrationRegistry.register(V006_TagBackgrounds())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {

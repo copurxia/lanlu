@@ -185,6 +185,7 @@ public class TagController {
             itemsJson = itemsJson + "\"translations\":${translationsJson},"
             itemsJson = itemsJson + "\"links\":\"${escapeJsonString(row.links)}\","
             itemsJson = itemsJson + "\"iconAssetId\":${row.iconAssetId.toString()},"
+            itemsJson = itemsJson + "\"backgroundAssetId\":${row.backgroundAssetId.toString()},"
             itemsJson = itemsJson + "\"created_at\":\"${escapeJsonString(row.created_at)}\","
             itemsJson = itemsJson + "\"updated_at\":\"${escapeJsonString(row.updated_at)}\""
             itemsJson = itemsJson + "}"
@@ -230,6 +231,58 @@ public class TagController {
                 data = data + "\"translations\":${translationsJson},"
                 data = data + "\"links\":\"${escapeJsonString(tag.links)}\","
                 data = data + "\"iconAssetId\":${tag.iconAssetId.toString()},"
+                data = data + "\"backgroundAssetId\":${tag.backgroundAssetId.toString()},"
+                data = data + "\"created_at\":\"${escapeJsonString(tag.created_at)}\","
+                data = data + "\"updated_at\":\"${escapeJsonString(tag.updated_at)}\""
+                data = data + "}"
+                ResponseView.successJson(ctx, data, "获取标签成功")
+            case None =>
+                ctx.status(404)
+                ResponseView.errorJson(ctx, "tag not found", 404)
+        }
+    }
+
+    /**
+     * GET /api/tags/by-name?tag=namespace:name
+     * 也支持: ?namespace=...&name=...
+     */
+    public static func getByName(ctx: JoyContext): Unit {
+        let tagStr = (ctx.getQuery("tag") ?? "").trimAscii()
+        let namespaceQ = (ctx.getQuery("namespace") ?? "").trimAscii()
+        let nameQ = (ctx.getQuery("name") ?? "").trimAscii()
+
+        var namespace = namespaceQ
+        var name = nameQ
+        if (tagStr.size > 0) {
+            let (ns, nm) = TagDao.parseTagName(tagStr)
+            namespace = ns
+            name = nm
+        }
+
+        if (name.trimAscii().size == 0) {
+            ctx.status(400)
+            ResponseView.errorJson(ctx, "tag/name is required", 400)
+            return
+        }
+
+        match (TagDao.getByNamespaceName(namespace, name)) {
+            case Some(tag) =>
+                var translationsJson = "{"
+                var tFirst = true
+                for ((lang, t) in tag.translations) {
+                    if (!tFirst) { translationsJson = translationsJson + "," } else { tFirst = false }
+                    translationsJson = translationsJson + "\"${escapeJsonString(lang)}\":{\"text\":\"${escapeJsonString(t.text)}\",\"intro\":\"${escapeJsonString(t.intro)}\"}"
+                }
+                translationsJson = translationsJson + "}"
+
+                var data = "{"
+                data = data + "\"id\":${tag.id.toString()},"
+                data = data + "\"namespace\":\"${escapeJsonString(tag.namespace)}\","
+                data = data + "\"name\":\"${escapeJsonString(tag.name)}\","
+                data = data + "\"translations\":${translationsJson},"
+                data = data + "\"links\":\"${escapeJsonString(tag.links)}\","
+                data = data + "\"iconAssetId\":${tag.iconAssetId.toString()},"
+                data = data + "\"backgroundAssetId\":${tag.backgroundAssetId.toString()},"
                 data = data + "\"created_at\":\"${escapeJsonString(tag.created_at)}\","
                 data = data + "\"updated_at\":\"${escapeJsonString(tag.updated_at)}\""
                 data = data + "}"
@@ -336,6 +389,108 @@ public class TagController {
 
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
                 ResponseView.successJson(ctx, "{\"success\":1,\"iconAssetId\":${assetId.toString()}}", "更新成功")
+            case None =>
+                let _ = FileUtils.removeFileOrDirectory(tempDir)
+                ctx.status(500)
+                ResponseView.errorJson(ctx, "failed to create asset record", 500)
+        }
+    }
+
+    /**
+     * PUT /api/admin/tags/{id}/background
+     * Body: raw image bytes
+     */
+    public static func adminUploadBackground(ctx: JoyContext, adminUserId: Int64): Unit {
+        let idStr = (ctx.getParam("id") ?? "").trimAscii()
+        var id: Int64 = 0
+        try { id = Int64.parse(idStr) } catch (_: Exception) {
+            ctx.status(400)
+            ResponseView.errorJson(ctx, "invalid id", 400)
+            return
+        }
+
+        let raw = ctx.readRawData()
+        if (raw.size <= 0) {
+            ctx.status(400)
+            ResponseView.errorJson(ctx, "empty body", 400)
+            return
+        }
+
+        // Validate tag exists
+        let tagOpt = TagDao.getById(id)
+        if (tagOpt.isNone()) {
+            ctx.status(404)
+            ResponseView.errorJson(ctx, "tag not found", 404)
+            return
+        }
+        let tag = tagOpt.getOrThrow()
+
+        let cacheRoot = SystemSettingsService.getPath("CACHE_PATH")
+        let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
+        FileUtils.ensureDirectoryExists(Path(cacheRoot))
+        FileUtils.ensureDirectoryExists(Path(assetRoot))
+
+        let filename = (ctx.getHeader("X-Filename") ?? "tag_background").trimAscii()
+        let inferredExt = ArchiveUtils.getFileExtension(filename)
+
+        let ts = DateTime.now().toUnixTimeStamp().toSeconds()
+        let tempDir = FileUtils.joinPath(cacheRoot, "tag_background/${id.toString()}_${ts.toString()}")
+        FileUtils.ensureDirectoryExists(Path(tempDir))
+        let inputPath = FileUtils.joinPath(tempDir, "input.${inferredExt}")
+        let outputAvifPath = FileUtils.joinPath(tempDir, "background.avif")
+
+        try {
+            let f = File(Path(inputPath), Write)
+            f.write(raw)
+            f.close()
+        } catch (_: Exception) {
+            let _ = FileUtils.removeFileOrDirectory(tempDir)
+            ctx.status(500)
+            ResponseView.errorJson(ctx, "failed to write temp file", 500)
+            return
+        }
+
+        let convertRes = ArchiveUtils.convertTagBackgroundToAvif(inputPath, outputAvifPath, tempDir)
+        if (!convertRes.success) {
+            let _ = FileUtils.removeFileOrDirectory(tempDir)
+            ctx.status(422)
+            ResponseView.errorJson(ctx, "background conversion failed", 422)
+            return
+        }
+
+        let thumbHash = try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" }
+        let byteSize = try { Int64(FileInfo(Path(outputAvifPath)).size) } catch (_: Exception) { 0 }
+
+        // Delete previous background asset (best-effort)
+        if (tag.backgroundAssetId > 0) {
+            try {
+                let oldPath = FileUtils.joinPath(assetRoot, "${tag.backgroundAssetId}.avif")
+                try { remove(Path(oldPath)) } catch (_: Exception) {}
+                let _ = AssetDao.deleteById(tag.backgroundAssetId)
+            } catch (_: Exception) {}
+        }
+
+        match (AssetDao.create(Some(adminUserId), "tag_background", filename, "image/avif", "avif", byteSize, thumbHash)) {
+            case Some(assetId) =>
+                let finalPath = FileUtils.joinPath(assetRoot, "${assetId}.avif")
+                try {
+                    FileUtils.safeReplaceFile(Path(finalPath), Path(outputAvifPath))
+                } catch (_: Exception) {
+                    let _ = FileUtils.removeFileOrDirectory(tempDir)
+                    ctx.status(500)
+                    ResponseView.errorJson(ctx, "failed to store background", 500)
+                    return
+                }
+
+                if (!TagDao.updateBackgroundAssetId(id, assetId)) {
+                    let _ = FileUtils.removeFileOrDirectory(tempDir)
+                    ctx.status(500)
+                    ResponseView.errorJson(ctx, "failed to update tag background", 500)
+                    return
+                }
+
+                let _ = FileUtils.removeFileOrDirectory(tempDir)
+                ResponseView.successJson(ctx, "{\"success\":1,\"backgroundAssetId\":${assetId.toString()}}", "更新成功")
             case None =>
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
                 ctx.status(500)

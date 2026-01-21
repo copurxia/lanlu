@@ -33,6 +33,11 @@ public func registerTagRoutes(router: JoyRouters): Unit {
         TagController.cloud(ctx)
     })
 
+    // 公开接口：按 name 获取标签详情
+    router.get("/api/tags/by-name", { ctx =>
+        TagController.getByName(ctx)
+    })
+
     // 公开接口：获取标签详情
     router.get("/api/tags/{id}", { ctx =>
         TagController.getById(ctx)
@@ -66,6 +71,14 @@ public func registerTagRoutes(router: JoyRouters): Unit {
     router.put("/api/admin/tags/{id}/icon", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(uid) => TagController.adminUploadIcon(ctx, uid)
+            case None => return
+        }
+    })
+
+    // 管理员接口：上传标签背景图
+    router.put("/api/admin/tags/{id}/background", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(uid) => TagController.adminUploadBackground(ctx, uid)
             case None => return
         }
     })

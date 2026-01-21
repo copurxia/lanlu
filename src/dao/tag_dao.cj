@@ -33,6 +33,7 @@ public class TagData {
     public var translations: HashMap<String, TagTranslation> = HashMap<String, TagTranslation>()
     public var links: String = ""
     public var iconAssetId: Int64 = 0
+    public var backgroundAssetId: Int64 = 0
     public var created_at: String = ""
     public var updated_at: String = ""
 
@@ -282,7 +283,7 @@ public class TagDao {
             case Some(conn) =>
                 
                 try {
-                    var sql = "SELECT id, namespace, name, translations, links, icon_asset_id, created_at, updated_at FROM tags WHERE 1=1"
+                    var sql = "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE 1=1"
                     var params: ArrayList<String> = ArrayList<String>()
 
                     match (namespace) {
@@ -326,8 +327,9 @@ public class TagDao {
                             tag.translations = parseTranslationsJson(translationsJson)
                             tag.links = rs.getOrNull<String>(4) ?? ""
                             tag.iconAssetId = rs.getOrNull<Int64>(5) ?? 0
-                            tag.created_at = rs.getOrNull<String>(6) ?? ""
-                            tag.updated_at = rs.getOrNull<String>(7) ?? ""
+                            tag.backgroundAssetId = rs.getOrNull<Int64>(6) ?? 0
+                            tag.created_at = rs.getOrNull<String>(7) ?? ""
+                            tag.updated_at = rs.getOrNull<String>(8) ?? ""
                             list.add(tag)
                         }
                     } finally {
@@ -415,7 +417,7 @@ public class TagDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, namespace, name, translations, links, icon_asset_id, created_at, updated_at FROM tags WHERE id = ?")
+                        "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE id = ?")
                     try {
                         stmt.set(0, id)
                         let rs = stmt.query()
@@ -429,8 +431,9 @@ public class TagDao {
                                 tag.translations = parseTranslationsJson(translationsJson)
                                 tag.links = rs.getOrNull<String>(4) ?? ""
                                 tag.iconAssetId = rs.getOrNull<Int64>(5) ?? 0
-                                tag.created_at = rs.getOrNull<String>(6) ?? ""
-                                tag.updated_at = rs.getOrNull<String>(7) ?? ""
+                                tag.backgroundAssetId = rs.getOrNull<Int64>(6) ?? 0
+                                tag.created_at = rs.getOrNull<String>(7) ?? ""
+                                tag.updated_at = rs.getOrNull<String>(8) ?? ""
                                 return Some(tag)
                             }
                         } finally {
@@ -461,7 +464,7 @@ public class TagDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, namespace, name, translations, links, icon_asset_id, created_at, updated_at FROM tags WHERE namespace = ? AND name = ?")
+                        "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE namespace = ? AND name = ?")
                     try {
                         stmt.set(0, namespace)
                         stmt.set(1, name)
@@ -476,8 +479,9 @@ public class TagDao {
                                 tag.translations = parseTranslationsJson(translationsJson)
                                 tag.links = rs.getOrNull<String>(4) ?? ""
                                 tag.iconAssetId = rs.getOrNull<Int64>(5) ?? 0
-                                tag.created_at = rs.getOrNull<String>(6) ?? ""
-                                tag.updated_at = rs.getOrNull<String>(7) ?? ""
+                                tag.backgroundAssetId = rs.getOrNull<Int64>(6) ?? 0
+                                tag.created_at = rs.getOrNull<String>(7) ?? ""
+                                tag.updated_at = rs.getOrNull<String>(8) ?? ""
                                 return Some(tag)
                             }
                         } finally {
@@ -1294,6 +1298,35 @@ public class TagDao {
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("updateIconAssetId failed", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    public static func updateBackgroundAssetId(id: Int64, backgroundAssetId: Int64): Bool {
+        if (id <= 0) { return false }
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("UPDATE tags SET background_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                    try {
+                        if (backgroundAssetId > 0) {
+                            stmt.set(0, backgroundAssetId)
+                        } else {
+                            stmt.setNull(0)
+                        }
+                        stmt.set(1, id)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("updateBackgroundAssetId failed", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}

@@ -401,6 +401,49 @@ public class ArchiveUtils {
     }
 
     /**
+     * Convert an image to a tag background AVIF.
+     * Policy: scale to width=1200, then crop height to at most 400 (top-aligned).
+     * This keeps the output lightweight for UI hover-cards while still being crisp.
+     */
+    public static func convertTagBackgroundToAvif(inputPath: String, outputPath: String, tempPath: String): ProcessResultData {
+        try {
+            let outputDir = FileUtils.getParentDirectory(outputPath)
+            if (!directoryExists(outputDir)) {
+                Directory.create(outputDir, recursive: true)
+            }
+
+            let vfFilter = "scale=1200:-1,crop=1200:min(ih\\,400):0:0"
+
+            // Prefer ImageMagick first.
+            let (imExitCode, imStderrStr) = runImageMagickToAvif(inputPath, outputPath, 1200i64, 400i64)
+            if (imExitCode == 0) {
+                return ProcessResultData(true, outputPath, "")
+            }
+            logger.warn("ImageMagick tag background convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath))
+
+            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
+            if (exitCode == 0) {
+                return ProcessResultData(true, outputPath, "")
+            }
+
+            // Fallback: render first frame to PNG then FFmpeg encode.
+            let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
+            let (imExitCode2, imStderrStr2) = runImageMagickToPng(inputPath, fallbackPngPath)
+            if (imExitCode2 == 0) {
+                let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
+                if (exitCode2 == 0) {
+                    return ProcessResultData(true, outputPath, "")
+                }
+                return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png ok; ffmpeg retry failed:\n${stderrStr2}")
+            }
+
+            return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png fallback failed:\n${imStderrStr2}")
+        } catch (e: Exception) {
+            return ProcessResultData(false, "", "Exception: ${e.message}")
+        }
+    }
+
+    /**
      * Run FFmpeg to convert a single image/video frame to AVIF.
      */
     private static func runFfmpegToAvif(inputPath: String, outputPath: String, vfFilter: String): (Int64, String) {
