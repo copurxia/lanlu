@@ -261,10 +261,33 @@ function ReaderContent() {
   const toggleFullscreen = useCallback(async () => {
     if (!document.fullscreenElement) {
       try {
+        // On some mobile browsers, entering fullscreen may auto-rotate to landscape.
+        // If supported, lock the orientation to whatever the user currently has.
+        const currentOrientation =
+          typeof window !== 'undefined' ? window.screen?.orientation?.type : undefined;
+
         await document.documentElement.requestFullscreen();
         setIsFullscreen(true);
         if (typeof window !== 'undefined') {
           localStorage.setItem('reader-fullscreen-mode', 'true');
+        }
+
+        if (typeof window !== 'undefined') {
+          // TS/lib.dom types vary; treat Screen Orientation API as optional/best-effort.
+          const orientation: any = (window.screen as any)?.orientation;
+          const canLock = typeof orientation?.lock === 'function';
+          // Only try on touch/coarse-pointer devices to avoid noisy errors on desktop.
+          const isCoarsePointer =
+            typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+          if (canLock && isCoarsePointer) {
+            const lockTarget =
+              currentOrientation?.startsWith('landscape') ? 'landscape' : 'portrait';
+            try {
+              await orientation.lock(lockTarget);
+            } catch {
+              // Ignore: orientation lock is best-effort and may be blocked by the browser/OS.
+            }
+          }
         }
       } catch (err) {
         logger.operationFailed('enter fullscreen', err);
@@ -275,6 +298,15 @@ function ReaderContent() {
         setIsFullscreen(false);
         if (typeof window !== 'undefined') {
           localStorage.setItem('reader-fullscreen-mode', 'false');
+        }
+
+        if (typeof window !== 'undefined') {
+          try {
+            const orientation: any = (window.screen as any)?.orientation;
+            orientation?.unlock?.();
+          } catch {
+            // Ignore: unlock may be unsupported.
+          }
         }
       } catch (err) {
         logger.operationFailed('exit fullscreen', err);
