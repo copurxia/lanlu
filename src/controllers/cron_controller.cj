@@ -12,6 +12,24 @@ import lrr4cj.services.*
 public class CronController {
 
     /**
+     * 获取 TaskRunner 支持的任务类型列表
+     * GET /api/cron/task-types
+     */
+    public static func getTaskTypes(ctx: JoyContext) {
+        let types = TaskPoolService.getSupportedTaskTypes()
+
+        var json = "{\"success\":true,\"types\":["
+        let size = types.size
+        for (i in 0..size) {
+            if (i > 0) { json += "," }
+            json += "\"${escapeJsonString(types[i])}\""
+        }
+        json += "]}"
+
+        ctx.json(json)
+    }
+
+    /**
      * 获取定时任务列表（分页）
      * GET /api/cron/tasks?page=1&pageSize=10
      */
@@ -371,6 +389,16 @@ public class CronController {
     }
 
     // ========== JSON解析辅助函数 ==========
+
+    private static func escapeJsonString(str: String): String {
+        var escaped = str
+        escaped = escaped.replace("\\", "\\\\")
+        escaped = escaped.replace("\"", "\\\"")
+        escaped = escaped.replace("\n", "\\n")
+        escaped = escaped.replace("\r", "\\r")
+        escaped = escaped.replace("\t", "\\t")
+        return escaped
+    }
 
     private static func extractJsonString(json: String, key: String): String {
         let keyIndexOpt = json.indexOf("\"${key}\"")

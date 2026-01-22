@@ -50,6 +50,10 @@ export interface CronValidationResult {
   nextRuns: string[];
 }
 
+export interface CronTaskTypeOption {
+  value: string;
+}
+
 /**
  * 创建/更新定时任务的参数
  */
@@ -68,6 +72,9 @@ export interface ScheduledTaskInput {
  */
 export class CronService {
   private static BASE_URL = '/api/cron';
+  private static taskTypesCache: CronTaskTypeOption[] | null = null;
+
+  static readonly CUSTOM_TASK_TYPE_VALUE = '__custom__';
 
   /**
    * 获取 CronService 状态
@@ -141,6 +148,31 @@ export class CronService {
       console.error('Error validating cron expression:', error);
       return { valid: false, error: 'Validation request failed', nextRuns: [] };
     }
+  }
+
+  /**
+   * 获取后端支持的任务类型列表（与 TaskRunner 保持一致）
+   */
+  static async getTaskTypes(): Promise<CronTaskTypeOption[]> {
+    if (this.taskTypesCache) return this.taskTypesCache;
+    try {
+      const response = await api.get(`${this.BASE_URL}/task-types`);
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        const rawTypes = (data?.types ?? data) as any;
+        const values = Array.isArray(rawTypes) ? rawTypes.filter((t) => typeof t === 'string') : [];
+        this.taskTypesCache = values.map((value) => ({ value }));
+        return this.taskTypesCache;
+      }
+    } catch (error) {
+      console.error('Error fetching task types:', error);
+    }
+    // Fallback for older backends or transient failures.
+    this.taskTypesCache = this.TASK_TYPES;
+    return this.taskTypesCache;
   }
 
   /**
@@ -314,16 +346,40 @@ export class CronService {
    */
   static getTaskTypeLabel(taskType: string): string {
     switch (taskType) {
+      case 'download_url':
+        return '下载URL';
+      case 'upload_process':
+        return '上传处理';
+      case 'metadata_plugin':
+        return '元数据插件';
+      case 'download_url_callback':
+        return '下载回调';
+      case 'tag_import':
+        return '标签导入';
       case 'scan_all_categories':
         return '扫描所有分类';
       case 'scan_single_category':
         return '扫描分类';
+      case 'scan_archive':
+        return '扫描档案';
+      case 'generate_thumbnail':
+        return '生成缩略图';
       case 'check_database':
         return '数据库检查';
       case 'scan_plugins':
         return '插件扫描';
-      case 'generate_thumbnail':
-        return '生成缩略图';
+      case 'deno_task':
+        return 'Deno任务';
+      case 'metadata_plugin_callback':
+        return '元数据回调';
+      case 'clear_cache':
+        return '清理缓存';
+      case 'clear_log':
+        return '清理日志';
+      case 'regenerate_cover':
+        return '重建封面';
+      case 'backfill_metadata':
+        return '回填元数据';
       default:
         return taskType;
     }
@@ -334,6 +390,14 @@ export class CronService {
    */
   static getTaskTypeColor(taskType: string): string {
     switch (taskType) {
+      case 'download_url':
+      case 'upload_process':
+        return 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200';
+      case 'metadata_plugin':
+      case 'metadata_plugin_callback':
+        return 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200';
+      case 'tag_import':
+        return 'bg-lime-100 text-lime-800 dark:bg-lime-900 dark:text-lime-200';
       case 'scan_all_categories':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
       case 'scan_single_category':
@@ -346,6 +410,11 @@ export class CronService {
         return 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200';
       case 'generate_thumbnail':
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+      case 'deno_task':
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
+      case 'clear_cache':
+      case 'clear_log':
+        return 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
       default:
         return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
     }
@@ -369,9 +438,22 @@ export class CronService {
    * 可用的任务类型
    */
   static readonly TASK_TYPES = [
-    { value: 'scan_all_categories', label: '扫描所有分类', description: '扫描所有启用的分类，发现新文件' },
-    { value: 'scan_single_category', label: '扫描单个分类', description: '扫描指定分类的目录，发现新文件' },
-    { value: 'check_database', label: '数据库检查', description: '检查数据库一致性，清理无效记录' },
-    { value: 'scan_plugins', label: '插件扫描', description: '扫描并加载插件' },
+    { value: 'download_url' },
+    { value: 'upload_process' },
+    { value: 'metadata_plugin' },
+    { value: 'download_url_callback' },
+    { value: 'tag_import' },
+    { value: 'scan_all_categories' },
+    { value: 'scan_single_category' },
+    { value: 'scan_archive' },
+    { value: 'generate_thumbnail' },
+    { value: 'check_database' },
+    { value: 'scan_plugins' },
+    { value: 'deno_task' },
+    { value: 'metadata_plugin_callback' },
+    { value: 'clear_cache' },
+    { value: 'clear_log' },
+    { value: 'regenerate_cover' },
+    { value: 'backfill_metadata' },
   ];
 }

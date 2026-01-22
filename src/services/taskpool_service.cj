@@ -16,6 +16,29 @@ public class TaskPoolService {
     private static var instance: Option<TaskPoolService> = Option<TaskPoolService>.None
     private static let instanceMutex: Mutex = Mutex()
 
+    // Keep in sync with `executeTask()` match arms.
+    public static func getSupportedTaskTypes(): Array<String> {
+        return [
+            "download_url",
+            "upload_process",
+            "metadata_plugin",
+            "download_url_callback",
+            "tag_import",
+            "scan_all_categories",
+            "scan_single_category",
+            "scan_archive",
+            "generate_thumbnail",
+            "check_database",
+            "scan_plugins",
+            "deno_task",
+            "metadata_plugin_callback",
+            "clear_cache",
+            "clear_log",
+            "regenerate_cover",
+            "backfill_metadata"
+        ]
+    }
+
     private var isRunning: Bool = false
     private let runningMutex: Mutex = Mutex()
     private var tickStarted: Bool = false

@@ -32,6 +32,12 @@ public func registerCronRoutes(router: JoyRouters) {
         CronController.validateExpression(ctx)
     })
 
+    // 获取可用的任务类型（与 TaskRunner 保持一致）
+    router.get("/api/cron/task-types", { ctx =>
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
+        CronController.getTaskTypes(ctx)
+    })
+
     // 获取定时任务列表（分页）
     router.get("/api/cron/tasks", { ctx =>
         if (!AuthMiddleware.requiredAuth(ctx)) { return }

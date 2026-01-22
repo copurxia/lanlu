@@ -30,7 +30,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import { CronService, ScheduledTaskInput, CronValidationResult } from '@/lib/services/cron-service';
+import { CronService, ScheduledTaskInput, CronValidationResult, CronTaskTypeOption } from '@/lib/services/cron-service';
 import { useToast } from '@/hooks/use-toast';
 
 interface ScheduledTaskDialogProps {
@@ -53,6 +53,9 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
   const [name, setName] = useState('');
   const [cronExpression, setCronExpression] = useState('');
   const [taskType, setTaskType] = useState('');
+  const [taskTypeSelect, setTaskTypeSelect] = useState('');
+  const [customTaskType, setCustomTaskType] = useState('');
+  const [taskTypes, setTaskTypes] = useState<CronTaskTypeOption[]>(CronService.TASK_TYPES);
   const [taskParameters, setTaskParameters] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [priority, setPriority] = useState(50);
@@ -70,10 +73,36 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
     }
   }, [open, taskId]);
 
+  // Load task types (from backend) when dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const types = await CronService.getTaskTypes();
+      if (!cancelled) setTaskTypes(types);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  // Keep select state in sync when editing/when task types arrive.
+  useEffect(() => {
+    if (!open) return;
+    const known = taskTypes.some((t) => t.value === taskType);
+    if (taskType && !known) {
+      setTaskTypeSelect(CronService.CUSTOM_TASK_TYPE_VALUE);
+      setCustomTaskType(taskType);
+    } else {
+      setTaskTypeSelect(taskType);
+      setCustomTaskType('');
+    }
+  }, [open, taskType, taskTypes]);
+
   const resetForm = () => {
     setName('');
     setCronExpression('');
     setTaskType('');
+    setTaskTypeSelect('');
+    setCustomTaskType('');
     setTaskParameters('');
     setEnabled(true);
     setPriority(50);
@@ -127,7 +156,8 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
   };
 
   const handleSave = async () => {
-    if (!name.trim() || !cronExpression.trim() || !taskType) {
+    const finalTaskType = taskTypeSelect === CronService.CUSTOM_TASK_TYPE_VALUE ? customTaskType.trim() : taskType;
+    if (!name.trim() || !cronExpression.trim() || !finalTaskType) {
       toastError(t('common.required'));
       return;
     }
@@ -137,7 +167,7 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
       const input: ScheduledTaskInput = {
         name: name.trim(),
         cronExpression: cronExpression.trim(),
-        taskType,
+        taskType: finalTaskType,
         taskParameters: taskParameters.trim() || undefined,
         enabled,
         priority,
@@ -181,6 +211,30 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
     return translated !== key ? translated : '';
   };
 
+  const handleTaskTypeSelect = (value: string) => {
+    setTaskTypeSelect(value);
+    if (value === CronService.CUSTOM_TASK_TYPE_VALUE) {
+      // Preserve current value for editing, or start blank.
+      const initial = customTaskType || taskType;
+      setCustomTaskType(initial);
+      setTaskType(initial);
+    } else {
+      setTaskType(value);
+      setCustomTaskType('');
+    }
+  };
+
+  const handleFormatParams = () => {
+    const raw = taskParameters.trim();
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      setTaskParameters(JSON.stringify(parsed, null, 2));
+    } catch (e: any) {
+      toastError(e?.message || t('settings.cronManagement.taskParametersInvalidJson'));
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent size="md">
@@ -214,12 +268,12 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
               {/* Task Type */}
               <div className="space-y-2">
                 <Label htmlFor="taskType">{t('settings.cronManagement.taskType')} *</Label>
-                <Select value={taskType} onValueChange={setTaskType}>
+                <Select value={taskTypeSelect} onValueChange={handleTaskTypeSelect}>
                   <SelectTrigger>
                     <SelectValue placeholder={t('settings.cronManagement.taskTypePlaceholder')} />
                   </SelectTrigger>
                   <SelectContent>
-                    {CronService.TASK_TYPES.map((type) => (
+                    {taskTypes.map((type) => (
                       <SelectItem key={type.value} value={type.value}>
                         <div>
                           <div>{getTaskTypeLabel(type.value)}</div>
@@ -227,8 +281,24 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
                         </div>
                       </SelectItem>
                     ))}
+                    <SelectItem value={CronService.CUSTOM_TASK_TYPE_VALUE}>
+                      <div>
+                        <div>{t('settings.cronManagement.taskTypes.custom')}</div>
+                        <div className="text-xs text-muted-foreground">{t('settings.cronManagement.taskTypes.customDesc')}</div>
+                      </div>
+                    </SelectItem>
                   </SelectContent>
                 </Select>
+                {taskTypeSelect === CronService.CUSTOM_TASK_TYPE_VALUE && (
+                  <Input
+                    value={customTaskType}
+                    onChange={(e) => {
+                      setCustomTaskType(e.target.value);
+                      setTaskType(e.target.value);
+                    }}
+                    placeholder={t('settings.cronManagement.taskTypeCustomPlaceholder')}
+                  />
+                )}
               </div>
 
               {/* Cron Expression */}
@@ -312,13 +382,18 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
 
               {/* Task Parameters */}
               <div className="space-y-2">
-                <Label htmlFor="taskParameters">{t('settings.cronManagement.taskParameters')}</Label>
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="taskParameters">{t('settings.cronManagement.taskParameters')}</Label>
+                  <Button type="button" variant="ghost" size="sm" onClick={handleFormatParams}>
+                    {t('settings.cronManagement.formatJson')}
+                  </Button>
+                </div>
                 <Textarea
                   id="taskParameters"
                   value={taskParameters}
                   onChange={(e) => setTaskParameters(e.target.value)}
                   placeholder={t('settings.cronManagement.taskParametersPlaceholder')}
-                  rows={2}
+                  rows={6}
                 />
               </div>
 
