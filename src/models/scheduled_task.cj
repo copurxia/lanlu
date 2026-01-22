@@ -261,6 +261,17 @@ public class ScheduledTaskModel {
     }
 
     /**
+     * 根据名称获取定时任务
+     */
+    public static func getByName(name: String): Option<ScheduledTask> {
+        let data = ScheduledTaskDao.getByName(name)
+        if (data.id == 0) {
+            return None
+        }
+        return Some(ScheduledTask.fromData(data))
+    }
+
+    /**
      * 获取所有启用的定时任务
      */
     public static func getEnabledTasks(): Array<ScheduledTask> {
@@ -361,6 +372,13 @@ public class ScheduledTaskModel {
      */
     public static func delete(id: Int64): Bool {
         return ScheduledTaskDao.delete(id)
+    }
+
+    /**
+     * 根据名称删除定时任务
+     */
+    public static func deleteByName(name: String): Bool {
+        return ScheduledTaskDao.deleteByName(name)
     }
 
     /**

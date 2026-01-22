@@ -102,6 +102,7 @@ public class DenoTaskRunner {
                 case "Metadata" => executeMetadataPlugin(taskId, plugin, archiveId, oneshotParam, extraParams, loginCookiesJson)
                 case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson, parentTaskId)
                 case "Login" => executeLoginPluginDirect(taskId, plugin)
+                case "Script" => executeScriptPlugin(taskId, plugin, oneshotParam, extraParams, loginCookiesJson)
                 case _ =>
                     fail(taskId, "Unknown plugin type: ${pluginType}")
                     return
@@ -699,6 +700,49 @@ public class DenoTaskRunner {
         )
 
         return executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
+    }
+
+    /**
+     * 执行脚本插件（手动触发/cron）
+     */
+    private static func executeScriptPlugin(
+        taskId: Int64,
+        plugin: PluginData,
+        oneshotParam: String,
+        extraParams: String,
+        loginCookiesJson: String
+    ): DenoExecutionResult {
+        let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
+        let pluginFile = "${pluginDir}/Script.ts"
+
+        if (!exists(pluginFile)) {
+            return DenoExecutionResult(false, "Plugin file not found", "", loginCookiesJson, 1)
+        }
+
+        let denoArgs = buildDenoPermissions(plugin, pluginFile)
+        denoArgs.add(pluginFile)
+
+        // 合并参数（插件配置参数 + 任务额外参数）
+        let baseParams = buildPluginParametersJson(plugin)
+        let mergedParams = mergeParamsJson(baseParams, extraParams)
+
+        // 构建 stdin JSON
+        let inputJson = buildStdinJson(
+            "run",
+            "Script",
+            pluginDir,
+            "",
+            "",
+            "",
+            "",
+            oneshotParam,
+            mergedParams,
+            loginCookiesJson,
+            ""
+        )
+
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
+        return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
 
     /**

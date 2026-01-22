@@ -216,6 +216,7 @@ public class ScanPluginsTaskRunner {
                 match (compareResult) {
                     case Equal =>
                         TaskIO.appendLog(taskId, "Plugin version unchanged: ${pluginMetadata.namespace} (${existingPlugin.version})")
+                        syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
                         return ProcessResultData(true, pluginMetadata.namespace, "")
                     case MajorUpgrade =>
                         TaskIO.appendLog(taskId, "Major upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, clearing parameters")
@@ -225,9 +226,11 @@ public class ScanPluginsTaskRunner {
                         return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, false)
                     case Downgrade =>
                         TaskIO.appendLog(taskId, "Version downgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, skipping")
+                        syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
                         return ProcessResultData(true, pluginMetadata.namespace, "")
                     case Invalid =>
                         TaskIO.appendLog(taskId, "Invalid version format for ${pluginMetadata.namespace}, skipping")
+                        syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
                         return ProcessResultData(true, pluginMetadata.namespace, "")
                 }
             }
@@ -258,6 +261,7 @@ public class ScanPluginsTaskRunner {
             // 保存到数据库
             if (PluginDao.create(pluginData)) {
                 TaskIO.appendLog(taskId, "Successfully registered plugin: ${pluginData.namespace} (${pluginData.name})")
+                syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
                 return ProcessResultData(true, pluginData.namespace, "")
             } else {
                 TaskIO.appendLog(taskId, "ERROR: Failed to save plugin to database")
@@ -318,6 +322,10 @@ public class ScanPluginsTaskRunner {
                             metadata.login_from = getJsonString(jsonObj, "login_from")
                             metadata.icon = getJsonString(jsonObj, "icon")
                             metadata.plugin_type = getJsonString(jsonObj, "type")
+                            metadata.cron_expression = getJsonString(jsonObj, "cron_expression")
+                            metadata.cron_enabled = getJsonBool(jsonObj, "cron_enabled", false)
+                            metadata.cron_priority = getJsonInt32(jsonObj, "cron_priority", 50)
+                            metadata.cron_timeout_seconds = getJsonInt32(jsonObj, "cron_timeout_seconds", 3600)
 
                             TaskIO.appendLog(taskId, "Successfully parsed plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, type=${metadata.plugin_type}")
                         case _ =>
@@ -377,6 +385,45 @@ public class ScanPluginsTaskRunner {
         return ""
     }
 
+    private static func getJsonBool(jsonObj: JsonObject, key: String, defaultValue: Bool): Bool {
+        let fields = jsonObj.getFields()
+        if (!fields.contains(key)) { return defaultValue }
+        let value = fields[key]
+        match (value) {
+            case b: JsonBool => return b.getValue()
+            case s: JsonString =>
+                let v = s.getValue().trimAscii().toAsciiLower()
+                if (v == "true" || v == "1" || v == "yes" || v == "y" || v == "on") { return true }
+                if (v == "false" || v == "0" || v == "no" || v == "n" || v == "off") { return false }
+                return defaultValue
+            case _ =>
+                let v = value.toString().trimAscii().toAsciiLower()
+                if (v == "true" || v == "1") { return true }
+                if (v == "false" || v == "0") { return false }
+                return defaultValue
+        }
+    }
+
+    private static func getJsonInt32(jsonObj: JsonObject, key: String, defaultValue: Int32): Int32 {
+        let fields = jsonObj.getFields()
+        if (!fields.contains(key)) { return defaultValue }
+        let value = fields[key]
+        match (value) {
+            case n: JsonInt =>
+                return Int32(n.getValue())
+            case n: JsonFloat =>
+                return Int32(n.getValue())
+            case s: JsonString =>
+                let v = s.getValue().trimAscii()
+                if (v.size == 0) { return defaultValue }
+                return try { Int32.parse(v) } catch (_: Exception) { defaultValue }
+            case _ =>
+                let v = value.toString().trimAscii()
+                if (v.size == 0) { return defaultValue }
+                return try { Int32.parse(v) } catch (_: Exception) { defaultValue }
+        }
+    }
+
     private static func getJsonCommaSeparated(jsonObj: JsonObject, key: String): String {
         let fields = jsonObj.getFields()
         if (!fields.contains(key)) {
@@ -408,6 +455,75 @@ public class ScanPluginsTaskRunner {
                 return jsonStr.getValue()
             case _ =>
                 return value.toString()
+        }
+    }
+
+    private static func buildScriptScheduledTaskName(namespace: String): String {
+        // Stable, namespaced identifier to avoid colliding with user-created scheduled tasks.
+        return "plugin_script:${namespace}"
+    }
+
+    private static func escapeJson(value: String): String {
+        var escaped = value
+        escaped = escaped.replace("\\", "\\\\")
+        escaped = escaped.replace("\"", "\\\"")
+        escaped = escaped.replace("\b", "\\b")
+        escaped = escaped.replace("\f", "\\f")
+        escaped = escaped.replace("\n", "\\n")
+        escaped = escaped.replace("\r", "\\r")
+        escaped = escaped.replace("\t", "\\t")
+        return escaped
+    }
+
+    private static func buildScriptDenoTaskParameters(namespace: String): String {
+        // deno_task parameters is a JSON string parsed by DenoTaskRunner.parseParameters().
+        // extraParams is expected to be a JSON *string* (merged into plugin params at runtime).
+        let groupId = "cron:script:${namespace}"
+        return "{\"pluginNamespace\":\"${escapeJson(namespace)}\",\"pluginType\":\"Script\",\"action\":\"run\",\"groupId\":\"${escapeJson(groupId)}\",\"oneshotParam\":\"\",\"extraParams\":\"{}\"}"
+    }
+
+    private static func syncScriptScheduledTask(taskId: Int64, metadata: PluginMetadata, pluginType: String): Unit {
+        if (pluginType != "Script") { return }
+        let ns = metadata.namespace.trimAscii()
+        if (ns.size == 0) { return }
+
+        let name = buildScriptScheduledTaskName(ns)
+        let denoParams = buildScriptDenoTaskParameters(ns)
+
+        match (ScheduledTaskModel.getByName(name)) {
+            case Some(existing) =>
+                // Preserve user edits (cronExpression/enabled/priority/timeout); only keep wiring correct.
+                var updated = existing
+                updated.taskType = "deno_task"
+                updated.taskParameters = denoParams
+                if (ScheduledTaskModel.update(updated)) {
+                    TaskIO.appendLog(taskId, "Updated cron task for script plugin: ${name}")
+                } else {
+                    TaskIO.appendLog(taskId, "WARN: Failed to update cron task for script plugin: ${name}")
+                }
+            case None =>
+                // Script plugins should "show up" in cron even without a provided expression.
+                // Use a safe default expression and default to disabled so it won't run until user enables it.
+                let cronExpr = if (metadata.cron_expression.trimAscii().size > 0) { metadata.cron_expression } else { "0 0 * * *" }
+                let enabled = metadata.cron_enabled
+                let priority = metadata.cron_priority
+                let timeout = metadata.cron_timeout_seconds
+
+                let task = ScheduledTask(
+                    name: name,
+                    cronExpression: cronExpr,
+                    taskType: "deno_task",
+                    taskParameters: denoParams,
+                    enabled: enabled,
+                    priority: priority,
+                    timeoutSeconds: timeout
+                )
+                match (ScheduledTaskModel.create(task)) {
+                    case Some(created) =>
+                        TaskIO.appendLog(taskId, "Created cron task for script plugin: ${name} (id=${created.id.toString()})")
+                    case None =>
+                        TaskIO.appendLog(taskId, "WARN: Failed to create cron task for script plugin: ${name}")
+                }
         }
     }
 
@@ -456,6 +572,7 @@ public class ScanPluginsTaskRunner {
             case "metadata" => return "Metadata"
             case "login" => return "Login"
             case "download" => return "Download"
+            case "script" => return "Script"
             case _ => return s
         }
     }
@@ -503,6 +620,13 @@ public class ScanPluginsTaskRunner {
         if (PluginDao.update(pluginData)) {
             let action = if (clearParameters) { "updated (parameters cleared)" } else { "updated" }
             TaskIO.appendLog(taskId, "Plugin ${action}: ${pluginData.namespace} (${pluginData.name})")
+            syncScriptScheduledTask(taskId, newMetadata, pluginType)
+            if (existingPlugin.plugin_type == "Script" && pluginType != "Script") {
+                let cronName = buildScriptScheduledTaskName(existingPlugin.namespace)
+                if (ScheduledTaskModel.deleteByName(cronName)) {
+                    TaskIO.appendLog(taskId, "Removed cron task (type changed) for plugin: ${cronName}")
+                }
+            }
             return ProcessResultData(true, pluginData.namespace, "")
         } else {
             TaskIO.appendLog(taskId, "ERROR: Failed to update plugin in database")
@@ -533,6 +657,12 @@ public class ScanPluginsTaskRunner {
                 if (PluginDao.delete(plugin.namespace)) {
                     removedCount++
                     TaskIO.appendLog(taskId, "Removed plugin: ${plugin.namespace}")
+                    if (plugin.plugin_type == "Script") {
+                        let cronName = buildScriptScheduledTaskName(plugin.namespace)
+                        if (ScheduledTaskModel.deleteByName(cronName)) {
+                            TaskIO.appendLog(taskId, "Removed cron task for script plugin: ${cronName}")
+                        }
+                    }
                 } else {
                     TaskIO.appendLog(taskId, "ERROR: Failed to remove plugin: ${plugin.namespace}")
                 }

@@ -276,6 +276,60 @@ public class ScheduledTaskDao {
     }
 
     /**
+     * 根据名称获取定时任务（name 唯一性由调用方保证）
+     */
+    public static func getByName(name: String): ScheduledTaskData {
+        let logger = getLogger("scheduled_task_dao")
+        let trimmed = name.trimAscii()
+        if (trimmed.size == 0) { return ScheduledTaskData() }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT id, name, cron_expression, task_type, task_parameters, enabled,
+                               priority, timeout_seconds,
+                               last_run_at, last_run_status, last_error, next_run_at,
+                               run_count, success_count, failure_count,
+                               created_at, updated_at, created_by, updated_by
+                        FROM scheduled_tasks
+                        WHERE name = ?
+                        ORDER BY id ASC
+                        LIMIT 1
+                    """)
+                    try {
+                        stmt.set(0, trimmed)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return mapResultSetToData(rs)
+                            } else {
+                                return ScheduledTaskData()
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.error("按名称查询定时任务失败", ("name", trimmed), ("error", e.message))
+                    return ScheduledTaskData()
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return ScheduledTaskData()
+        }
+    }
+
+    /**
      * 获取所有启用的定时任务
      */
     public static func getEnabledTasks(): Array<ScheduledTaskData> {
@@ -530,6 +584,46 @@ public class ScheduledTaskDao {
                     }
                 } catch (e: Exception) {
                     logger.error("删除定时任务失败", ("id", id), ("error", e.message))
+                    return false
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        logger.warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 根据名称删除定时任务
+     */
+    public static func deleteByName(name: String): Bool {
+        let logger = getLogger("scheduled_task_dao")
+        let trimmed = name.trimAscii()
+        if (trimmed.size == 0) { return false }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("DELETE FROM scheduled_tasks WHERE name = ?")
+                    try {
+                        stmt.set(0, trimmed)
+                        let affected = stmt.update()
+                        if (affected.rowCount > 0) {
+                            logger.debug("按名称删除定时任务成功", [("name", trimmed), ("affected", affected.rowCount.toString())])
+                            return true
+                        }
+                        return false
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.error("按名称删除定时任务失败", ("name", trimmed), ("error", e.message))
                     return false
                 } finally {
                     try {

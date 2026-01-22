@@ -524,6 +524,7 @@ public class PluginManagerService {
             case "metadata" => return "Metadata"
             case "login" => return "Login"
             case "download" => return "Download"
+            case "script" => return "Script"
             case _ => return s
         }
     }

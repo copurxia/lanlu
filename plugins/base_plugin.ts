@@ -14,7 +14,7 @@ export interface PluginParameter {
  */
 export interface PluginInfo {
   name: string;
-  type: 'metadata' | 'login' | 'download';
+  type: 'metadata' | 'login' | 'download' | 'script';
   namespace: string;
   login_from?: string;
   author: string;
@@ -27,6 +27,12 @@ export interface PluginInfo {
   icon?: string;
   permissions?: string[];
   update_url?: string;  // 插件更新地址
+  // Script plugins can optionally declare a default cron registration.
+  // If omitted, backend may create a disabled scheduled task with a safe default cron expression.
+  cron_expression?: string;
+  cron_enabled?: boolean;
+  cron_priority?: number;
+  cron_timeout_seconds?: number;
 }
 
 /**

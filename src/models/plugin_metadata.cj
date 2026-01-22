@@ -18,6 +18,11 @@ public class PluginMetadata {
     public var icon: String = ""
     public var has_schema: Bool = false
     public var plugin_type: String = ""  // 从元数据获取的插件类型
+    // Script plugin cron registration hints (optional).
+    public var cron_expression: String = ""
+    public var cron_enabled: Bool = false
+    public var cron_priority: Int32 = 50
+    public var cron_timeout_seconds: Int32 = 3600
 
     public init() {}
 }
