@@ -211,6 +211,11 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
     return translated !== key ? translated : '';
   };
 
+  const selectedTaskTypeLabel = (() => {
+    const type = taskTypeSelect === CronService.CUSTOM_TASK_TYPE_VALUE ? customTaskType.trim() : taskType;
+    return type ? getTaskTypeLabel(type) : '';
+  })();
+
   const handleTaskTypeSelect = (value: string) => {
     setTaskTypeSelect(value);
     if (value === CronService.CUSTOM_TASK_TYPE_VALUE) {
@@ -270,7 +275,9 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
                 <Label htmlFor="taskType">{t('settings.cronManagement.taskType')} *</Label>
                 <Select value={taskTypeSelect} onValueChange={handleTaskTypeSelect}>
                   <SelectTrigger>
-                    <SelectValue placeholder={t('settings.cronManagement.taskTypePlaceholder')} />
+                    <SelectValue placeholder={t('settings.cronManagement.taskTypePlaceholder')}>
+                      {selectedTaskTypeLabel || undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {taskTypes.map((type) => (
