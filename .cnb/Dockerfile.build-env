@@ -2,6 +2,8 @@ FROM ubuntu:latest
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
+# xmake refuses to run as root unless explicitly allowed. CNB build containers run as root by default.
+ENV XMAKE_ROOT=y
 
 SHELL ["/bin/bash", "-lc"]
 
@@ -53,4 +55,3 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
   fi; \
   xmake --version
-
