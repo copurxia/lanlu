@@ -115,13 +115,15 @@ $:
               chmod +x ./app/main ./app/bin/deno
             '
 
-        - name: Package runtime bundle (tar.gz)
+        - name: Package runtime bundle (zip)
           script: |
             bash -lc '
               set -eux
+              command -v zip >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*)
               mkdir -p dist
               # Put the whole runtime bundle into a single archive for attachments upload.
-              tar -czf "dist/app-${CNB_COMMIT_SHORT:-latest}.tar.gz" app
+              rm -f "dist/app-${CNB_COMMIT_SHORT:-latest}.zip"
+              (cd app && zip -qr "../dist/app-${CNB_COMMIT_SHORT:-latest}.zip" .)
               ls -lah dist
             '
 
@@ -129,7 +131,7 @@ $:
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - dist/app-*.tar.gz
+              - dist/app-*.zip
 
         - name: Set CNB Docker image tag
           # Avoid pushing images from non-main branches / PR builds.
@@ -185,12 +187,14 @@ $:
               pnpm run lint
             '
 
-        - name: Package extension artifacts (tar.gz)
+        - name: Package extension artifacts (zip)
           script: |
             bash -lc '
               set -eux
+              command -v zip >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*)
               mkdir -p dist
-              tar -czf "dist/extension-${CNB_COMMIT_SHORT:-latest}.tar.gz" -C extension out
+              rm -f "dist/extension-${CNB_COMMIT_SHORT:-latest}.zip"
+              (cd extension/out && zip -qr "../../dist/extension-${CNB_COMMIT_SHORT:-latest}.zip" .)
               ls -lah dist
             '
 
@@ -198,7 +202,7 @@ $:
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - dist/extension-*.tar.gz
+              - dist/extension-*.zip
 
   pull_request:
     - *build_pipeline
