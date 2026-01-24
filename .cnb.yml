@@ -10,8 +10,13 @@ $:
       runner:
         tags: cnb:arch:amd64
       docker:
-        # Use Ubuntu as the pipeline environment; Node/pnpm will be installed in stages.
-        image: ubuntu:latest
+        # Build a custom Ubuntu-based environment image first, then use it for all script jobs in this pipeline.
+        build:
+          dockerfile: .cnb/Dockerfile.build-env
+          by:
+            - .cnb/Dockerfile.build-env
+          versionBy:
+            - .cnb/Dockerfile.build-env
         volumes:
           # pnpm store cache
           - main:/root/.local/share/pnpm:copy-on-write
@@ -28,48 +33,15 @@ $:
         # Avoid Next.js analytics/telemetry in CI.
         NEXT_TELEMETRY_DISABLED: "1"
       stages:
-        - name: Install system dependencies
+        - name: Show build environment versions
           script: |
             set -eux
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y --no-install-recommends \
-              ca-certificates curl git wget unzip \
-              build-essential clang ninja-build \
-              libarchive-dev libavif-dev \
-              gnupg dirmngr
-
-            # Node.js 20 (for frontend/extension builds). Ubuntu's default repo may be too old.
-            if ! command -v node >/dev/null 2>&1; then
-              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-              apt-get install -y --no-install-recommends nodejs
-            fi
-
-            # xmake is required by Cangjie/CJPM builds.
-            # Install via apt. If the base repo doesn't include it, add the official xmake PPA (still apt-based).
-            if ! command -v xmake >/dev/null 2>&1; then
-              if ! apt-get install -y --no-install-recommends xmake; then
-                codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
-                : "${codename:=jammy}"
-
-                mkdir -p /etc/apt/keyrings
-                curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xC8CA50B566BFBA052B13B9A770AF26A4DCBD1EB4" \
-                  | gpg --dearmor -o /etc/apt/keyrings/xmake-io-xmake.gpg
-
-                echo "deb [signed-by=/etc/apt/keyrings/xmake-io-xmake.gpg] http://ppa.launchpad.net/xmake-io/xmake/ubuntu ${codename} main" \
-                  > /etc/apt/sources.list.d/xmake-io-xmake.list
-
-                apt-get update
-                apt-get install -y --no-install-recommends xmake
-              fi
-            fi
+            cat /etc/os-release || true
+            bash --version | head -n 1
+            node -v
+            pnpm -v
             xmake --version
-
-            rm -rf /var/lib/apt/lists/*
-
-            # Prefer corepack (bundled with Node) to avoid global npm installs.
-            corepack enable
-            corepack prepare pnpm@10.27.0 --activate
+            clang --version | head -n 1
 
         - name: Download Cangjie SDK + stdx
           script: |
@@ -164,25 +136,17 @@ $:
       ifModify:
         - extension/**
       docker:
-        image: ubuntu:latest
+        build:
+          dockerfile: .cnb/Dockerfile.build-env
+          by:
+            - .cnb/Dockerfile.build-env
+          versionBy:
+            - .cnb/Dockerfile.build-env
         volumes:
           - main:/root/.local/share/pnpm:copy-on-write
       env:
         NEXT_TELEMETRY_DISABLED: "1"
       stages:
-        - name: Install Node.js + pnpm (extension)
-          script: |
-            set -eux
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get update
-            apt-get install -y --no-install-recommends ca-certificates curl git
-            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-            apt-get install -y --no-install-recommends nodejs
-            rm -rf /var/lib/apt/lists/*
-
-            corepack enable
-            corepack prepare pnpm@10.27.0 --activate
-
         - name: Build & lint extension
           script: |
             set -eux
