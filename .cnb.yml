@@ -1,0 +1,157 @@
+$:
+  # Backend + frontend build, then (optionally) build & push Docker image.
+  push:
+    - &build_pipeline
+      name: build
+      # Import shared environment variables (e.g. CANGJIE_URL, STDX_URL).
+      # CNB will fetch it with built-in credentials (CNB_TOKEN) during pipeline execution.
+      imports:
+        - https://cnb.cool/copurx/cangjie/-/blob/main/envs.yml
+      runner:
+        tags: cnb:arch:amd64
+      docker:
+        # Use a Node image so frontend build is straightforward; install system deps for Cangjie build in stages.
+        image: node:20-bullseye
+        volumes:
+          # pnpm store cache
+          - main:/root/.local/share/pnpm:copy-on-write
+          # cjpm / general caches
+          - main:/root/.cache:copy-on-write
+          - main:/root/.cjpm:copy-on-write
+          # cache large downloaded SDK archives across builds
+          - main:./build-script-cache:copy-on-write
+      services:
+        # Enable docker daemon (dind) + inject docker cli tools for docker build/push.
+        - docker
+      env:
+        TZ: Asia/Shanghai
+        # Avoid Next.js analytics/telemetry in CI.
+        NEXT_TELEMETRY_DISABLED: "1"
+      stages:
+        - name: Install system dependencies
+          script: |
+            set -eux
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip \
+              build-essential clang ninja-build xmake \
+              libarchive-dev libavif-dev
+            rm -rf /var/lib/apt/lists/*
+
+            # Prefer corepack (bundled with Node) to avoid global npm installs.
+            corepack enable
+            corepack prepare pnpm@10.27.0 --activate
+
+        - name: Download Cangjie SDK + stdx
+          script: |
+            set -eux
+            : "${CANGJIE_URL:?Missing env CANGJIE_URL (configure in CNB project variables)}"
+            : "${STDX_URL:?Missing env STDX_URL (configure in CNB project variables)}"
+
+            mkdir -p build-script-cache
+
+            # Cangjie SDK
+            if [ ! -d "./cangjie" ]; then
+              wget -O build-script-cache/cangjie.tar.gz "$CANGJIE_URL"
+              tar -xzf build-script-cache/cangjie.tar.gz
+            fi
+
+            # stdx
+            if [ ! -d "./stdx" ]; then
+              wget -O build-script-cache/stdx.zip "$STDX_URL"
+              unzip -q build-script-cache/stdx.zip -d stdx
+            fi
+
+        - name: Build backend (cjpm)
+          script: |
+            set -eux
+            export XMAKE_ROOT=y
+            export CANGJIE_STDX_PATH="$PWD/stdx"
+            export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
+            . ./cangjie/envsetup.sh
+
+            cjc -v
+            cjpm build -V
+
+        - name: Build frontend (pnpm)
+          script: |
+            set -eux
+            cd frontend
+            pnpm install --frozen-lockfile
+            pnpm run build
+
+        - name: Prepare runtime bundle (./app)
+          script: |
+            set -eux
+            rm -rf app
+            mkdir -p app/frontend app/plugins app/bin
+
+            cp target/release/bin/main app/
+            cp -r plugins app/plugins
+            cp -r frontend/out app/frontend/out
+
+        - name: Bundle deno binary into ./app/bin
+          script: |
+            set -eux
+            curl -fsSL https://deno.land/install.sh | sh
+            cp ~/.deno/bin/deno ./app/bin/deno
+            chmod +x ./app/main ./app/bin/deno
+
+        - name: Upload build artifacts (attachments)
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - app/**
+
+        - name: Set CNB Docker image tag
+          # Avoid pushing images from non-main branches / PR builds.
+          if: test "$CNB_BRANCH" = "main"
+          script: |
+            set -eu
+            # CNB provides built-in credentials; with `services: [docker]` we can push directly.
+            printf "%s" "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
+          exports:
+            stdout: IMAGE_TAG
+
+        - name: Docker build
+          if: test "$CNB_BRANCH" = "main"
+          script: |
+            set -eux
+            docker build -t "$IMAGE_TAG" .
+
+        - name: Docker push (CNB Docker registry)
+          if: test "$CNB_BRANCH" = "main"
+          script: |
+            set -eux
+            docker push "$IMAGE_TAG"
+
+    - &extension_pipeline
+      name: extension
+      ifModify:
+        - extension/**
+      docker:
+        image: node:20-bullseye
+        volumes:
+          - main:/root/.local/share/pnpm:copy-on-write
+      env:
+        NEXT_TELEMETRY_DISABLED: "1"
+      stages:
+        - name: Build & lint extension
+          script: |
+            set -eux
+            corepack enable
+            corepack prepare pnpm@10.27.0 --activate
+            cd extension
+            pnpm install --frozen-lockfile
+            pnpm run build
+            pnpm run lint
+
+        - name: Upload extension artifacts (attachments)
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - extension/out/**
+
+  pull_request:
+    - *build_pipeline
+    - *extension_pipeline
