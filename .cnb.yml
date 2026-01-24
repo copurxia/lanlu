@@ -99,10 +99,11 @@ $:
             bash -lc '
               set -eux
               rm -rf app
-              mkdir -p app/frontend app/plugins app/bin
+              mkdir -p app/frontend app/bin
 
               cp target/release/bin/main app/
-              cp -r plugins app/plugins
+              # Copy plugins dir to app/plugins (avoid app/plugins/plugins/* nesting).
+              cp -r plugins app/
               cp -r frontend/out app/frontend/out
             '
 
