@@ -72,13 +72,18 @@ $:
         - name: Build backend (cjpm)
           script: |
             set -eux
-            export XMAKE_ROOT=y
-            export CANGJIE_STDX_PATH="$PWD/stdx"
-            export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
-            . ./cangjie/envsetup.sh
+            # CNB runs scripts with /bin/sh (may be dash). Cangjie's envsetup.sh refuses dash,
+            # so run the build inside bash explicitly.
+            bash -lc '
+              set -eux
+              export XMAKE_ROOT=y
+              export CANGJIE_STDX_PATH="$PWD/stdx"
+              export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
+              source ./cangjie/envsetup.sh
 
-            cjc -v
-            cjpm build -V
+              cjc -v
+              cjpm build -V
+            '
 
         - name: Build frontend (pnpm)
           script: |
