@@ -35,69 +35,85 @@ $:
       stages:
         - name: Show build environment versions
           script: |
-            set -eux
-            cat /etc/os-release || true
-            bash --version | head -n 1
-            node -v
-            pnpm -v
-            xmake --version
-            clang --version | head -n 1
+            bash -lc '
+              set -eux
+              cat /etc/os-release || true
+              bash --version | head -n 1
+              node -v
+              pnpm -v
+              xmake --version
+              clang --version | head -n 1
+            '
 
         - name: Download Cangjie SDK + stdx
           script: |
-            set -eux
-            : "${CANGJIE_URL:?Missing env CANGJIE_URL (configure in CNB project variables)}"
-            : "${STDX_URL:?Missing env STDX_URL (configure in CNB project variables)}"
+            bash -lc '
+              set -eux
+              : "${CANGJIE_URL:?Missing env CANGJIE_URL (configure in CNB project variables)}"
+              : "${STDX_URL:?Missing env STDX_URL (configure in CNB project variables)}"
 
-            mkdir -p build-script-cache
+              mkdir -p build-script-cache
 
-            # Cangjie SDK
-            if [ ! -d "./cangjie" ]; then
-              wget -O build-script-cache/cangjie.tar.gz "$CANGJIE_URL"
-              tar -xzf build-script-cache/cangjie.tar.gz
-            fi
+              # Cangjie SDK
+              if [ ! -d "./cangjie" ]; then
+                wget -O build-script-cache/cangjie.tar.gz "$CANGJIE_URL"
+                tar -xzf build-script-cache/cangjie.tar.gz
+              fi
 
-            # stdx
-            if [ ! -d "./stdx" ]; then
-              wget -O build-script-cache/stdx.zip "$STDX_URL"
-              unzip -q build-script-cache/stdx.zip -d stdx
-            fi
+              # stdx
+              if [ ! -d "./stdx" ]; then
+                wget -O build-script-cache/stdx.zip "$STDX_URL"
+                unzip -q build-script-cache/stdx.zip -d stdx
+              fi
+            '
 
         - name: Build backend (cjpm)
           script: |
-            set -eux
-            # CNB runs scripts with /bin/sh (may be dash). Cangjie's envsetup.sh refuses dash,
-            # so run the build inside bash explicitly.
-            export XMAKE_ROOT=y
-            export CANGJIE_STDX_PATH="$PWD/stdx"
-            export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
-            source ./cangjie/envsetup.sh
-            cjc -v
-            cjpm build -V
+            bash -lc '
+              set -eux
+              export XMAKE_ROOT=y
+              export CANGJIE_STDX_PATH="$PWD/stdx"
+              export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
+
+              # envsetup.sh references LD_LIBRARY_PATH and may fail under `set -u` if it is unset.
+              export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+              set +u
+              source ./cangjie/envsetup.sh
+              set -u
+
+              cjc -v
+              cjpm build -V
+            '
 
         - name: Build frontend (pnpm)
           script: |
-            set -eux
-            cd frontend
-            pnpm install --frozen-lockfile
-            pnpm run build
+            bash -lc '
+              set -eux
+              cd frontend
+              pnpm install --frozen-lockfile
+              pnpm run build
+            '
 
         - name: Prepare runtime bundle (./app)
           script: |
-            set -eux
-            rm -rf app
-            mkdir -p app/frontend app/plugins app/bin
+            bash -lc '
+              set -eux
+              rm -rf app
+              mkdir -p app/frontend app/plugins app/bin
 
-            cp target/release/bin/main app/
-            cp -r plugins app/plugins
-            cp -r frontend/out app/frontend/out
+              cp target/release/bin/main app/
+              cp -r plugins app/plugins
+              cp -r frontend/out app/frontend/out
+            '
 
         - name: Bundle deno binary into ./app/bin
           script: |
-            set -eux
-            curl -fsSL https://deno.land/install.sh | sh
-            cp ~/.deno/bin/deno ./app/bin/deno
-            chmod +x ./app/main ./app/bin/deno
+            bash -lc '
+              set -eux
+              curl -fsSL https://deno.land/install.sh | sh
+              cp ~/.deno/bin/deno ./app/bin/deno
+              chmod +x ./app/main ./app/bin/deno
+            '
 
         - name: Upload build artifacts (attachments)
           image: cnbcool/attachments:latest
@@ -109,23 +125,29 @@ $:
           # Avoid pushing images from non-main branches / PR builds.
           if: test "$CNB_BRANCH" = "main"
           script: |
-            set -eu
-            # CNB provides built-in credentials; with `services: [docker]` we can push directly.
-            printf "%s" "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
+            bash -lc '
+              set -eu
+              # CNB provides built-in credentials; with `services: [docker]` we can push directly.
+              printf "%s" "${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}:latest"
+            '
           exports:
             stdout: IMAGE_TAG
 
         - name: Docker build
           if: test "$CNB_BRANCH" = "main"
           script: |
-            set -eux
-            docker build -t "$IMAGE_TAG" .
+            bash -lc '
+              set -eux
+              docker build -t "$IMAGE_TAG" .
+            '
 
         - name: Docker push (CNB Docker registry)
           if: test "$CNB_BRANCH" = "main"
           script: |
-            set -eux
-            docker push "$IMAGE_TAG"
+            bash -lc '
+              set -eux
+              docker push "$IMAGE_TAG"
+            '
 
     - &extension_pipeline
       name: extension
@@ -145,11 +167,13 @@ $:
       stages:
         - name: Build & lint extension
           script: |
-            set -eux
-            cd extension
-            pnpm install --frozen-lockfile
-            pnpm run build
-            pnpm run lint
+            bash -lc '
+              set -eux
+              cd extension
+              pnpm install --frozen-lockfile
+              pnpm run build
+              pnpm run lint
+            '
 
         - name: Upload extension artifacts (attachments)
           image: cnbcool/attachments:latest
