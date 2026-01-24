@@ -62,14 +62,14 @@ public class ArchiveController {
             isFirst = false
             
             archivesJson += "{"
-            archivesJson += "\"arcid\":\"${archive.id}\","
-            archivesJson += "\"title\":\"${archive.title}\","
-            archivesJson += "\"filename\":\"${archive.filename}\","
-            archivesJson += "\"summary\":\"${archive.summary}\","
-            archivesJson += "\"thumbhash\":\"${archive.thumbhash}\","
-            archivesJson += "\"created_at\":\"${archive.created_at}\","
-            archivesJson += "\"updated_at\":\"${archive.updated_at}\","
-            archivesJson += "\"relative_path\":\"${archive.relative_path}\","
+            archivesJson += "\"arcid\":\"${escapeJson(archive.id)}\","
+            archivesJson += "\"title\":\"${escapeJson(archive.title)}\","
+            archivesJson += "\"filename\":\"${escapeJson(archive.filename)}\","
+            archivesJson += "\"summary\":\"${escapeJson(archive.summary)}\","
+            archivesJson += "\"thumbhash\":\"${escapeJson(archive.thumbhash)}\","
+            archivesJson += "\"created_at\":\"${escapeJson(archive.created_at)}\","
+            archivesJson += "\"updated_at\":\"${escapeJson(archive.updated_at)}\","
+            archivesJson += "\"relative_path\":\"${escapeJson(archive.relative_path)}\","
             archivesJson += "\"file_size\":${archive.file_size},"
             archivesJson += "\"isnew\":${archive.isNew},"  // 返回布尔值
             archivesJson += "\"pagecount\":${archive.pagecount}"
@@ -182,10 +182,10 @@ public class ArchiveController {
 
         // 手动构建JSON响应，符合API文档规范
         var metadataJson = "{"
-        metadataJson += "\"arcid\":\"${archive.id}\","
-        metadataJson += "\"title\":\"${archive.title}\","
-        metadataJson += "\"filename\":\"${archive.filename}\","
-        metadataJson += "\"summary\":\"${archive.summary}\","
+        metadataJson += "\"arcid\":\"${escapeJson(archive.id)}\","
+        metadataJson += "\"title\":\"${escapeJson(archive.title)}\","
+        metadataJson += "\"filename\":\"${escapeJson(archive.filename)}\","
+        metadataJson += "\"summary\":\"${escapeJson(archive.summary)}\","
         // 从标签关联表获取实际标签数据，并根据lang参数翻译
         let tagsString = TagDao.getArchiveTags(archive.id)
         let translatedTags = if (lang.size > 0) {
@@ -193,7 +193,7 @@ public class ArchiveController {
         } else {
             tagsString
         }
-        metadataJson += "\"tags\":\"${translatedTags}\","
+        metadataJson += "\"tags\":\"${escapeJson(translatedTags)}\","
         metadataJson += "\"isnew\":${isNew},"  // 查询用户级别的 isNew 状态
         metadataJson += "\"isfavorite\":${isFavorite},"  // 查询用户级别的收藏状态
         metadataJson += "\"pagecount\":${archive.pagecount},"
@@ -201,10 +201,10 @@ public class ArchiveController {
         metadataJson += "\"lastreadtime\":${lastreadtime},"
         metadataJson += "\"file_size\":${archive.file_size},"
         metadataJson += "\"size\":${archive.file_size},"
-        metadataJson += "\"archivetype\":\"${archive.archive_type}\","
-        metadataJson += "\"created_at\":\"${archive.created_at}\","
-        metadataJson += "\"updated_at\":\"${archive.updated_at}\","
-        metadataJson += "\"relative_path\":\"${archive.relative_path}\""
+        metadataJson += "\"archivetype\":\"${escapeJson(archive.archive_type)}\","
+        metadataJson += "\"created_at\":\"${escapeJson(archive.created_at)}\","
+        metadataJson += "\"updated_at\":\"${escapeJson(archive.updated_at)}\","
+        metadataJson += "\"relative_path\":\"${escapeJson(archive.relative_path)}\""
         metadataJson += "}"
         
         ctx.json(metadataJson)
