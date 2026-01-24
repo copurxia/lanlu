@@ -31,12 +31,13 @@ $:
         - name: Install system dependencies
           script: |
             set -eux
+            export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y --no-install-recommends \
               ca-certificates curl git wget unzip \
               build-essential clang ninja-build \
-              software-properties-common \
-              libarchive-dev libavif-dev
+              libarchive-dev libavif-dev \
+              gnupg dirmngr
 
             # Node.js 20 (for frontend/extension builds). Ubuntu's default repo may be too old.
             if ! command -v node >/dev/null 2>&1; then
@@ -45,10 +46,19 @@ $:
             fi
 
             # xmake is required by Cangjie/CJPM builds.
-            # Prefer apt-based install; if not available in the base repo, add xmake PPA then install.
+            # Install via apt. If the base repo doesn't include it, add the official xmake PPA (still apt-based).
             if ! command -v xmake >/dev/null 2>&1; then
               if ! apt-get install -y --no-install-recommends xmake; then
-                add-apt-repository -y ppa:xmake-io/xmake
+                codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
+                : "${codename:=jammy}"
+
+                mkdir -p /etc/apt/keyrings
+                curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xC8CA50B566BFBA052B13B9A770AF26A4DCBD1EB4" \
+                  | gpg --dearmor -o /etc/apt/keyrings/xmake-io-xmake.gpg
+
+                echo "deb [signed-by=/etc/apt/keyrings/xmake-io-xmake.gpg] http://ppa.launchpad.net/xmake-io/xmake/ubuntu ${codename} main" \
+                  > /etc/apt/sources.list.d/xmake-io-xmake.list
+
                 apt-get update
                 apt-get install -y --no-install-recommends xmake
               fi
@@ -163,6 +173,7 @@ $:
         - name: Install Node.js + pnpm (extension)
           script: |
             set -eux
+            export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y --no-install-recommends ca-certificates curl git
             curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
