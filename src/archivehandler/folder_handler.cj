@@ -82,6 +82,19 @@ public class FolderHandler <: ArchiveHandler {
         return false
     }
 
+    /**
+     * Allow non-media auxiliary files inside a folder archive.
+     *
+     * Motivation: some downloaders (e.g. Pixiv) may drop a meta.json alongside images.
+     * We should not reject the whole folder because of it, but a folder with only JSON
+     * is still not a valid "folder archive".
+     */
+    public static func isAllowedAuxFileName(entryName: String): Bool {
+        let lower = entryName.toAsciiLower()
+        // Keep it narrow: allow JSON metadata files.
+        return lower.endsWith(".json")
+    }
+
     public func listEntries(archivePath: String): Array<String> {
         return DirectoryScanner.listDirectory(archivePath)
     }
@@ -207,6 +220,7 @@ public class FolderHandler <: ArchiveHandler {
         }
 
         // 检查每个条目
+        var hasMedia = false
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(filePath, entry)
 
@@ -220,14 +234,18 @@ public class FolderHandler <: ArchiveHandler {
                 return false
             }
 
-            // 获取文件扩展名
-            if (!FolderHandler.isAllowedMediaFileName(entry)) {
+            // Allow aux files like meta.json; require at least one media file overall.
+            if (FolderHandler.isAllowedMediaFileName(entry)) {
+                hasMedia = true
+            } else if (FolderHandler.isAllowedAuxFileName(entry)) {
+                // ignore
+            } else {
                 return false
             }
         }
 
-        // 所有检查通过，可以处理
-        return true
+        // 所有检查通过：必须至少有一个媒体文件，不能只有 json
+        return hasMedia
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {

@@ -104,6 +104,7 @@ public class ScanSingleCategoryTaskRunner {
         // avoid redundant DirectoryScanner.listDirectory() calls inside FolderHandler.canHandle().
         if (dirPath != ctx.basePath && entries.size > 0) {
             var leafOk = true
+            var hasMedia = false
             for (entry in entries) {
                 let fullPath = DirectoryScanner.joinPath(dirPath, entry)
                 if (DirectoryScanner.isDirectory(fullPath)) {
@@ -114,13 +115,17 @@ public class ScanSingleCategoryTaskRunner {
                     leafOk = false
                     break
                 }
-                if (!FolderHandler.isAllowedMediaFileName(entry)) {
+                if (FolderHandler.isAllowedMediaFileName(entry)) {
+                    hasMedia = true
+                } else if (FolderHandler.isAllowedAuxFileName(entry)) {
+                    // Allow aux files (e.g. meta.json) in leaf media folders.
+                } else {
                     leafOk = false
                     break
                 }
             }
 
-            if (leafOk) {
+            if (leafOk && hasMedia) {
                 total = Int64(entries.size)
                 if (enqueueScanArchiveTask(dirPath, ctx)) {
                     created = 1
