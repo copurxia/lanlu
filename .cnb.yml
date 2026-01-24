@@ -115,11 +115,21 @@ $:
               chmod +x ./app/main ./app/bin/deno
             '
 
+        - name: Package runtime bundle (tar.gz)
+          script: |
+            bash -lc '
+              set -eux
+              mkdir -p dist
+              # Put the whole runtime bundle into a single archive for attachments upload.
+              tar -czf "dist/app-${CNB_COMMIT_SHORT:-latest}.tar.gz" app
+              ls -lah dist
+            '
+
         - name: Upload build artifacts (attachments)
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - app/**
+              - dist/app-*.tar.gz
 
         - name: Set CNB Docker image tag
           # Avoid pushing images from non-main branches / PR builds.
@@ -175,11 +185,20 @@ $:
               pnpm run lint
             '
 
+        - name: Package extension artifacts (tar.gz)
+          script: |
+            bash -lc '
+              set -eux
+              mkdir -p dist
+              tar -czf "dist/extension-${CNB_COMMIT_SHORT:-latest}.tar.gz" -C extension out
+              ls -lah dist
+            '
+
         - name: Upload extension artifacts (attachments)
           image: cnbcool/attachments:latest
           settings:
             attachments:
-              - extension/out/**
+              - dist/extension-*.tar.gz
 
   pull_request:
     - *build_pipeline
