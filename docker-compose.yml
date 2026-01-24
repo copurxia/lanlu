@@ -1,6 +1,6 @@
 services:
   lanlu:
-    image: copurx/lanlu:latest
+    image: docker.cnb.cool/copurx/lanlu:latest
     container_name: lanlu
     ports:
       - "8082:8082"
