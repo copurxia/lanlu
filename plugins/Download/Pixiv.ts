@@ -64,6 +64,7 @@ class PixivDownloadPlugin extends BasePlugin {
         { name: 'lang', type: 'string', desc: 'Pixiv ajax lang parameter (e.g. en, ja, zh)', default_value: 'en' },
         { name: 'concurrency', type: 'int', desc: 'Max concurrent downloads for multi-page works', default_value: '4' },
         { name: 'save_meta_json', type: 'bool', desc: 'Write meta.json into the download folder', default_value: '1' },
+        { name: 'prefix_id', type: 'bool', desc: 'Prefix folder name with illustId', default_value: '0' },
       ],
       url_regex:
         'https?://(www\\.)?pixiv\\.net/(?:[a-z]{2}/)?artworks/\\d+.*|https?://(www\\.)?pixiv\\.net/member_illust\\.php\\?illust_id=\\d+.*',
@@ -90,10 +91,11 @@ class PixivDownloadPlugin extends BasePlugin {
       const lang = String(params.lang || 'en').trim() || 'en';
       const concurrency = this.clampInt(Number(params.concurrency ?? 4), 1, 16);
       const saveMetaJson = !!params.save_meta_json;
+      const prefixId = !!params.prefix_id;
 
       const loginCookies = (input.loginCookies || []) as LoginCookie[];
 
-      const result = await this.downloadIllust(illustId, { lang, concurrency, saveMetaJson }, loginCookies);
+      const result = await this.downloadIllust(illustId, { lang, concurrency, saveMetaJson, prefixId }, loginCookies);
       this.outputResult(result);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -103,7 +105,7 @@ class PixivDownloadPlugin extends BasePlugin {
 
   private async downloadIllust(
     illustId: string,
-    opts: { lang: string; concurrency: number; saveMetaJson: boolean },
+    opts: { lang: string; concurrency: number; saveMetaJson: boolean; prefixId: boolean },
     loginCookies: LoginCookie[]
   ): Promise<PluginResult> {
     this.reportProgress(5, 'Fetching Pixiv artwork info...');
@@ -113,8 +115,9 @@ class PixivDownloadPlugin extends BasePlugin {
     if (!illust.success) return illust;
     const body = illust.data as PixivIllustBody;
 
-    const title = body.illustTitle || `Pixiv ${illustId}`;
-    const folderName = `${illustId} ${this.sanitizeFilename(title)}`.trim();
+    const title = (body.illustTitle || '').trim();
+    const safeTitle = this.sanitizeFilename(title) || illustId;
+    const folderName = (opts.prefixId ? `${illustId} ${safeTitle}` : safeTitle).trim();
 
     const baseDir = this.input?.pluginDir || './data/cache/plugins/pixivdl';
     const outDir = `${baseDir}/${folderName}`;
@@ -457,4 +460,3 @@ if (import.meta.main) {
   const plugin = new PixivDownloadPlugin();
   await plugin.handleCommand();
 }
-

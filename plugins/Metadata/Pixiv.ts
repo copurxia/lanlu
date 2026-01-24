@@ -43,7 +43,7 @@ class PixivMetadataPlugin extends BasePlugin {
       parameters: [
         { name: 'lang', type: 'string', desc: 'Pixiv ajax lang parameter (e.g. en, ja, zh)', default_value: 'en' },
         { name: 'merge_existing', type: 'bool', desc: 'Merge new tags with existing archive tags', default_value: '1' },
-        { name: 'prefix_id', type: 'bool', desc: 'Prefix title with illustId', default_value: '1' },
+        { name: 'prefix_id', type: 'bool', desc: 'Prefix title with illustId', default_value: '0' },
         { name: 'strip_html', type: 'bool', desc: 'Strip HTML tags from Pixiv caption', default_value: '1' },
         { name: 'include_translations', type: 'bool', desc: 'Also add translated tag names when available', default_value: '0' },
       ],
@@ -86,7 +86,8 @@ class PixivMetadataPlugin extends BasePlugin {
       }
 
       const body = illust.data as PixivIllustBody;
-      const title = prefixId ? `${illustId} ${body.illustTitle || ''}`.trim() : (body.illustTitle || '').trim();
+      const rawTitle = (body.illustTitle || '').trim();
+      const title = prefixId ? `${illustId} ${rawTitle}`.trim() : (rawTitle || illustId);
       const summary = stripHtml ? this.stripHtml(body.illustComment || '') : (body.illustComment || '');
 
       const tags = this.buildTags(body, { lang, includeTranslations });
