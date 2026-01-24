@@ -5,6 +5,7 @@ import std.convert.*
 import lrr4cj.models.*
 import lrr4cj.dao.*
 import lrr4cj.services.*
+import lrr4cj.utils.*
 
 /**
  * TaskPool控制器 - 提供任务管理API
@@ -100,6 +101,13 @@ public class TaskPoolController {
             ctx.status(404)
             ctx.json("{\"error\":\"Task not found\"}")
             return
+        }
+
+        // For detail polling, prefer TaskIO output over the DB `result` field.
+        // Many runners write the final JSON result to TaskIO to keep DB rows small.
+        let out = TaskIO.readOutput(taskId)
+        if (out.trimAscii().size > 0) {
+            task.result = out
         }
 
         let json = taskDataToJson(task)

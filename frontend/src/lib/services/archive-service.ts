@@ -331,12 +331,15 @@ export class ArchiveService {
     archiveId: string,
     namespace: string,
     param?: string,
-    callbacks?: MetadataPluginRunCallbacks
+    callbacks?: MetadataPluginRunCallbacks,
+    options?: { writeBack?: boolean }
   ): Promise<Task> {
     const response = await apiClient.post('/api/metadata_plugin', {
       archive_id: archiveId,
       namespace,
-      param: param || ''
+      param: param || '',
+      // Default is preview/query (no persistence). Explicitly pass the flag so behavior is stable.
+      write_back: options?.writeBack ? 1 : 0,
     });
 
     const rawSuccess = response.data?.success;
@@ -352,12 +355,17 @@ export class ArchiveService {
       throw new Error('No job id returned');
     }
 
-    // The API enqueues a parent `metadata_plugin` task which immediately creates:
-    // - a `deno_task` (runs the plugin)
-    // - a `metadata_plugin_callback` task (writes metadata back after deno_task completes)
-    //
-    // The parent task typically completes quickly, but metadata isn't persisted until
-    // the callback task completes. Wait for the callback task when available.
+    // Two modes:
+    // - Preview/query (default): API returns a `deno_task` job. Frontend reads plugin output from that task.
+    // - Write-back: API returns a `metadata_plugin` job which spawns a callback that persists data.
+    const taskType = String(response.data?.task_type || response.data?.taskType || '').trim();
+    const writeBack = Boolean(response.data?.write_back ?? response.data?.writeBack ?? options?.writeBack);
+    if (!writeBack || taskType === 'deno_task') {
+      return await this.waitForTaskCompletion(Number(jobId), (task) => {
+        callbacks?.onUpdate?.(task);
+      });
+    }
+
     const enqueueTask = await this.waitForTaskCompletion(Number(jobId), (task) => {
       callbacks?.onUpdate?.(task);
     });

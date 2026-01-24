@@ -228,12 +228,19 @@ export function ArchiveDetailContent() {
     setMetadataPluginMessage(t('archive.metadataPluginEnqueued'));
 
     try {
-      const finalTask = await ArchiveService.runMetadataPlugin(metadata.arcid, selectedMetadataPlugin, metadataPluginParam, {
-        onUpdate: (task) => {
-          setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0);
-          setMetadataPluginMessage(task.message || '');
+      const finalTask = await ArchiveService.runMetadataPlugin(
+        metadata.arcid,
+        selectedMetadataPlugin,
+        metadataPluginParam,
+        {
+          onUpdate: (task) => {
+            setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0);
+            setMetadataPluginMessage(task.message || '');
+          },
         },
-      });
+        // Frontend "run metadata plugin" is preview by default: show plugin result, don't persist automatically.
+        { writeBack: false }
+      );
 
       if (finalTask.status !== 'completed') {
         const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
@@ -241,19 +248,35 @@ export function ArchiveDetailContent() {
         return;
       }
 
-      const updated = await refetch();
-      if (updated) {
-        setFormData({
-          title: updated.title || '',
-          summary: updated.summary || '',
-          tags: updated.tags
-            ? updated.tags
+      // Preview mode: parse plugin output and fill the edit form (no DB write-back).
+      try {
+        const out = finalTask.result ? JSON.parse(finalTask.result) : null;
+        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true';
+        if (!ok) {
+          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+          showError(err);
+          return;
+        }
+
+        const data = out?.data || {};
+        const nextTitle = typeof data.title === 'string' ? data.title : '';
+        const nextSummary = typeof data.summary === 'string' ? data.summary : '';
+        const nextTags = typeof data.tags === 'string' ? data.tags : '';
+
+        setFormData((prev) => ({
+          title: nextTitle.trim() ? nextTitle : prev.title,
+          summary: nextSummary.trim() ? nextSummary : prev.summary,
+          tags: nextTags.trim()
+            ? nextTags
                 .split(',')
-                .map((tag) => tag.trim())
-                .filter((tag) => tag)
-                .map((tag) => toCanonicalTag(tag))
-            : [],
-        });
+                .map((tag: string) => tag.trim())
+                .filter((tag: string) => tag)
+                .map((tag: string) => toCanonicalTag(tag))
+            : prev.tags,
+        }));
+        setIsEditing(true);
+      } catch {
+        // If output isn't JSON, still mark as completed and let user view logs/result.
       }
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'));
       setMetadataPluginProgress(100);
