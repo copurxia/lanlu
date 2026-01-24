@@ -281,15 +281,15 @@ public class ScanPluginsTaskRunner {
         try {
             TaskIO.appendLog(taskId, "Parsing plugin metadata: ${filePath}")
 
-            // 使用 stdio 方式运行插件获取信息
-            let (exitCode, stdout, stderr) = executePluginInfoWithStdio(taskId, filePath)
+            // Use the shared runner so allow-read is scoped to the sandbox temp root.
+            let (exitCode, stdoutStr, stderrStr) = DenoPluginInfoRunner.runPluginInfo(filePath, taskId.toString())
 
-            if (exitCode == 0 && stdout.size > 0) {
-                let jsonStr = String.fromUtf8(stdout).trimAscii()
+            if (exitCode == 0 && stdoutStr.trimAscii().size > 0) {
+                let jsonStr = stdoutStr.trimAscii()
                 TaskIO.appendLog(taskId, "Plugin metadata raw output: ${jsonStr}")
 
                 // 解析 NDJSON 格式的输出，查找 result 类型的消息
-                let pluginInfo = parsePluginInfoFromNdjson(jsonStr)
+                let pluginInfo = DenoPluginInfoRunner.extractPluginInfoDataFromNdjson(jsonStr)
                 if (pluginInfo.size > 0) {
                     let json = JsonValue.fromStr(pluginInfo)
                     match (json) {
@@ -336,8 +336,6 @@ public class ScanPluginsTaskRunner {
                 }
             } else {
                 // 执行失败
-                let stderrStr = String.fromUtf8(stderr).trimAscii()
-                let stdoutStr = if (stdout.size > 0) { String.fromUtf8(stdout).trimAscii() } else { "" }
                 if (stderrStr.size > 0) {
                     TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stderr=${stderrStr}")
                 } else if (stdoutStr.size > 0) {
@@ -684,115 +682,5 @@ public class ScanPluginsTaskRunner {
         joinPath(basePath, entry)
     }
 
-    /**
-     * 从 NDJSON 输出中解析 plugin info
-     * 查找 type=result 且 success=true 的消息，返回其 data 字段
-     */
-    private static func parsePluginInfoFromNdjson(ndjsonOutput: String): String {
-        let lines = ndjsonOutput.split("\n")
-        for (line in lines) {
-            let trimmed = line.trimAscii()
-            if (trimmed.size == 0) {
-                continue
-            }
-
-            try {
-                let jsonVal = JsonValue.fromStr(trimmed)
-                match (jsonVal) {
-                    case obj: JsonObject =>
-                        let fields = obj.getFields()
-                        // 检查是否是 result 类型
-                        match (fields.get("type")) {
-                            case Some(typeVal) =>
-                                match (typeVal) {
-                                    case typeStr: JsonString =>
-                                        if (typeStr.getValue() == "result") {
-                                            // 检查 success 字段
-                                            match (fields.get("success")) {
-                                                case Some(successVal) =>
-                                                    match (successVal) {
-                                                        case successBool: JsonBool =>
-                                                            if (successBool.getValue()) {
-                                                                // 返回 data 字段
-                                                                match (fields.get("data")) {
-                                                                    case Some(dataVal) =>
-                                                                        return dataVal.toString()
-                                                                    case None => ()
-                                                                }
-                                                            }
-                                                        case _ => ()
-                                                    }
-                                                case None => ()
-                                            }
-                                        }
-                                    case _ => ()
-                                }
-                            case None => ()
-                        }
-                    case _ => ()
-                }
-            } catch (_: Exception) {
-                // 解析失败，跳过这一行
-            }
-        }
-        return ""
-    }
-
-    /**
-     * 使用 stdio 方式执行插件获取 plugin_info
-     */
-    private static func executePluginInfoWithStdio(taskId: Int64, filePath: String): (Int32, Array<UInt8>, Array<UInt8>) {
-        try {
-            // 构建一个临时目录，模拟 ./plugins/<Type>/X.ts 与 ./plugins/base_plugin.ts 的相对结构，
-            // 以兼容插件里常见的 `../base_plugin.ts` 引用。
-            let pathParts = filePath.split("/")
-            let fileName = Path(filePath).fileName.toString()
-            let pluginTypeDir = if (pathParts.size >= 2) { pathParts[pathParts.size - 2] } else { "Temp" }
-
-            // 注意：getCurrentTimeMillis() 的分辨率只有秒级（末尾通常为 000），
-            // 若多次调用落在同一秒内会产生相同路径，导致临时目录互相覆盖/清理。
-            // 这里加入 taskId + pluginTypeDir + fileName 以保证稳定唯一性。
-            let safeFileName = fileName.replace(".", "_")
-            let tempRoot = Path("${PluginPaths.getPluginInfoTempRoot()}/${taskId.toString()}/${getCurrentTimeMillis().toString()}_${pluginTypeDir}_${safeFileName}")
-            let pluginsRoot = Path("${tempRoot.toString()}/plugins")
-            let tempTypeDir = Path("${pluginsRoot.toString()}/${pluginTypeDir}")
-            Directory.create(tempTypeDir, recursive: true)
-
-            // 复制 base_plugin.ts
-            let baseSource = Path("./plugins/base_plugin.ts")
-            let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
-            if (exists(baseSource)) {
-                copy(baseSource, to: baseTarget, overwrite: true)
-            }
-
-            // 复制插件文件
-            let tempPluginFile = Path("${tempTypeDir.toString()}/${fileName}")
-            copy(Path(filePath), to: tempPluginFile, overwrite: true)
-
-            // 启动 Deno 进程（避免通过 shell 运行，减少引号/路径问题）
-            TaskIO.appendLog(taskId, "Executing: deno run --allow-read ${tempPluginFile.toString()}")
-            let process = launch("deno", ["run", "--allow-read", tempPluginFile.toString()],
-                stdIn: ProcessRedirect.Pipe,
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe)
-
-            // 写入 plugin_info 请求到 stdin
-            let inputJson = "{\"action\":\"plugin_info\",\"pluginType\":\"\"}\n"
-            process.stdInPipe.write(inputJson.toArray())
-            process.stdInPipe.flush()
-
-            // 使用 waitOutput 可靠地获取 stdout/stderr，避免在 wait() 后丢失管道内容
-            let (exitCode, stdoutBytes, stderrBytes) = process.waitOutput()
-
-            // 清理临时目录
-            try {
-                remove(tempRoot, recursive: true)
-            } catch (_: Exception) {}
-
-            return (Int32(exitCode), stdoutBytes, stderrBytes)
-        } catch (e: Exception) {
-            TaskIO.appendLog(taskId, "ERROR: executePluginInfoWithStdio failed: ${e.message}")
-            return (1, Array<UInt8>(), Array<UInt8>())
-        }
-    }
+    // NOTE: plugin_info execution + NDJSON parsing are now centralized in DenoPluginInfoRunner.
 }

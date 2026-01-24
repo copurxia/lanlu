@@ -364,40 +364,24 @@ public class PluginManagerService {
         var result = ParsedPluginInfo()
 
         try {
-            // 秒级时间戳可能在并发场景下冲突，这里加入 typeDir + fileName 提升唯一性
             let fileName = Path(filePath).fileName.toString()
             let safeFileName = fileName.replace(".", "_")
-            let tempRoot = Path("${getPluginInfoTempRoot()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${typeDir}_${safeFileName}")
-            let pluginsRoot = Path("${tempRoot.toString()}/plugins")
-            let tempTypeDir = Path("${pluginsRoot.toString()}/${typeDir}")
-            Directory.create(tempTypeDir, recursive: true)
+            let uniqueId = "plugin_manager_${typeDir}_${safeFileName}_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}"
 
-            let baseSource = Path("./plugins/base_plugin.ts")
-            let baseTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
-            if (exists(baseSource)) {
-                copy(baseSource, to: baseTarget, overwrite: true)
+            let (exitCode, stdoutStr, stderrStr) = DenoPluginInfoRunner.runPluginInfo(filePath, uniqueId)
+            if (exitCode != 0) {
+                if (stderrStr.trimAscii().size > 0) {
+                    logger.warn("plugin_info failed", ("file", filePath), ("stderr", truncateForLog(stderrStr, 1024)))
+                }
+                return result
             }
 
-            let tempPluginFile = Path("${tempTypeDir.toString()}/${fileName}")
-            copy(Path(filePath), to: tempPluginFile, overwrite: true)
-
-            let process = launch("deno", ["run", "--allow-read", tempPluginFile.toString()],
-                stdIn: ProcessRedirect.Pipe,
-                stdOut: ProcessRedirect.Pipe,
-                stdErr: ProcessRedirect.Pipe)
-
-            let inputJson = "{\"action\":\"plugin_info\",\"pluginType\":\"\"}\n"
-            process.stdInPipe.write(inputJson.toArray())
-            process.stdInPipe.flush()
-
-            let (_, stdoutBytes, _) = process.waitOutput()
-            let output = String.fromUtf8(stdoutBytes)
-
-            result = parsePluginInfoOutput(output, sourceUrl)
-
-            try {
-                remove(tempRoot, recursive: true)
-            } catch (_: Exception) {}
+            // Prefer parsing NDJSON result->data; fall back to raw stdout if it looks like a single JSON object.
+            var infoJson = DenoPluginInfoRunner.extractPluginInfoDataFromNdjson(stdoutStr)
+            if (infoJson.trimAscii().size == 0) {
+                infoJson = stdoutStr
+            }
+            result = parsePluginInfoOutput(infoJson, sourceUrl)
         } catch (_: Exception) {}
 
         return result
@@ -407,42 +391,43 @@ public class PluginManagerService {
         var result = ParsedPluginInfo()
 
         try {
+            // Accept either:
+            // - full NDJSON "result" object: {type:"result",success:true,data:{...}}
+            // - direct plugin_info data object: {...}
             let jsonVal = JsonValue.fromStr(output.trimAscii())
             match (jsonVal) {
                 case obj: JsonObject =>
                     let fields = obj.getFields()
-                    if (!getJsonBoolValue(fields, "success")) {
-                        return result
-                    }
-                    match (fields.get("data")) {
-                        case Some(dataVal) =>
-                            match (dataVal) {
-                                case dataObj: JsonObject =>
-                                    let dataFields = dataObj.getFields()
-                                    let pluginType = getJsonStrValue(dataFields, "type")
-                                    result.pluginType = capitalizeFirst(pluginType)
-                                    result.updateUrl = getJsonStrValue(dataFields, "update_url")
-                                    if (result.updateUrl.size == 0) {
-                                        result.updateUrl = sourceUrl
-                                    }
-                                    result.namespace = getJsonStrValue(dataFields, "namespace")
-                                    result.name = getJsonStrValue(dataFields, "name")
-                                    result.version = getJsonStrValue(dataFields, "version")
-                                    result.description = getJsonStrValue(dataFields, "description")
-                                    result.author = getJsonStrValue(dataFields, "author")
-                                    result.tags = getJsonStrValue(dataFields, "tags")
-                                    result.permissions = getJsonCommaSeparatedValue(dataFields, "permissions")
-                                    result.url_regex = getJsonStrValue(dataFields, "url_regex")
-                                    result.login_from = getJsonStrValue(dataFields, "login_from")
-                                    result.icon = getJsonStrValue(dataFields, "icon")
-
-                                    let (paramsJson, hasSchema) = getJsonArrayStringValue(dataFields, "parameters")
-                                    result.parameters = paramsJson
-                                    result.has_schema = hasSchema
-                                case _ => ()
+                    // If this looks like a wrapper object with a "data" field, prefer that.
+                    // Otherwise treat the object itself as the plugin_info payload.
+                    let dataFields = match (fields.get("data")) {
+                        case Some(v) =>
+                            match (v) {
+                                case dataObj: JsonObject => dataObj.getFields()
+                                case _ => fields
                             }
-                        case None => ()
+                        case None => fields
                     }
+                    let pluginType = getJsonStrValue(dataFields, "type")
+                    result.pluginType = capitalizeFirst(pluginType)
+                    result.updateUrl = getJsonStrValue(dataFields, "update_url")
+                    if (result.updateUrl.size == 0) {
+                        result.updateUrl = sourceUrl
+                    }
+                    result.namespace = getJsonStrValue(dataFields, "namespace")
+                    result.name = getJsonStrValue(dataFields, "name")
+                    result.version = getJsonStrValue(dataFields, "version")
+                    result.description = getJsonStrValue(dataFields, "description")
+                    result.author = getJsonStrValue(dataFields, "author")
+                    result.tags = getJsonStrValue(dataFields, "tags")
+                    result.permissions = getJsonCommaSeparatedValue(dataFields, "permissions")
+                    result.url_regex = getJsonStrValue(dataFields, "url_regex")
+                    result.login_from = getJsonStrValue(dataFields, "login_from")
+                    result.icon = getJsonStrValue(dataFields, "icon")
+
+                    let (paramsJson, hasSchema) = getJsonArrayStringValue(dataFields, "parameters")
+                    result.parameters = paramsJson
+                    result.has_schema = hasSchema
                 case _ => ()
             }
         } catch (_: Exception) {}

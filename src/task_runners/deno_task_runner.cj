@@ -5,6 +5,8 @@ import std.collection.*
 import std.fs.*
 import std.io.*
 import std.convert.*
+import std.sync.*
+import std.time.*
 import stdx.encoding.json.*
 import stdx.log.*
 import lrr4cj.dao.*
@@ -215,7 +217,7 @@ public class DenoTaskRunner {
 
             // 确保根目录有 base_plugin.ts（从 plugins 目录复制到缓存目录）
             let basePluginSource = Path("./plugins/base_plugin.ts")
-            let basePluginTarget = Path("./data/cache/plugins/base_plugin.ts")
+            let basePluginTarget = Path("${pluginsRoot.toString()}/base_plugin.ts")
             if (!exists(basePluginSource)) {
                 getLogger("deno_task").error("缺少基础插件文件", ("path", basePluginSource.toString()))
                 return false
@@ -578,17 +580,29 @@ public class DenoTaskRunner {
         let logger = getLogger("deno_task")
 
         try {
-            // 构建完整命令
-            var fullCmd = command
-            for (arg in args.toArray()) {
-                fullCmd += " " + escapeShellArg(arg)
-            }
-
-            // 启动进程，设置 stdin/stdout/stderr 为 Pipe
-            let process = launch("sh", "-c", fullCmd,
+            // Launch directly (avoid sh -c), and drain stderr concurrently to prevent pipe deadlocks.
+            let process = launch(command, args.toArray(),
                 stdIn: ProcessRedirect.Pipe,
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe)
+
+            let stderrDone: AtomicInt32 = AtomicInt32(0)
+            let stderrFile = Path("${PluginPaths.getPluginTempRoot()}/deno_stderr_${taskId.toString()}_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}.log")
+            spawn {
+                try {
+                    let stderrReader = StringReader<InputStream>(process.stdErrPipe)
+                    let content = stderrReader.readToEnd()
+                    try {
+                        FileUtils.ensureDirectoryExists(stderrFile.parent)
+                        let f = File(stderrFile, Write)
+                        f.write(content.toArray())
+                        f.close()
+                    } catch (_: Exception) {}
+                } catch (_: Exception) {
+                    // Best-effort.
+                }
+                stderrDone.store(1)
+            }
 
             // 写入 JSON 到 stdin 并刷新
             let inputBytes = inputJson.toArray()
@@ -640,13 +654,25 @@ public class DenoTaskRunner {
             // 等待进程完成
             let exitCode = process.wait()
 
-            // 读取 stderr
-            let stderrReader = StringReader<InputStream>(process.stdErrPipe)
-            let stderrContent = stderrReader.readToEnd()
-            if (stderrContent.trimAscii().size > 0) {
-                TaskIO.appendLog(taskId, "[STDERR] ${stderrContent}")
+            // Wait for stderr drain to finish.
+            while (stderrDone.load() == 0) {
+                sleep(Duration.millisecond * 10)
+            }
+            var capturedStderr = ""
+            try {
+                if (exists(stderrFile)) {
+                    let f = File(stderrFile, Read)
+                    let r = StringReader<InputStream>(f)
+                    capturedStderr = r.readToEnd()
+                    f.close()
+                    try { remove(stderrFile) } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+
+            if (capturedStderr.trimAscii().size > 0) {
+                TaskIO.appendLog(taskId, "[STDERR] ${capturedStderr}")
                 if (!finalSuccess && finalError.size == 0) {
-                    finalError = stderrContent
+                    finalError = capturedStderr
                 }
             }
 
