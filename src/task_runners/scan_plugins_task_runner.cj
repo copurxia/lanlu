@@ -5,6 +5,7 @@ import std.process.*
 import std.time.*
 import std.convert.*
 import std.io.*
+import std.collection.*
 import stdx.encoding.json.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -74,13 +75,16 @@ public class ScanPluginsTaskRunner {
 
         // 清理已删除的插件
         let removedCount = cleanupRemovedPlugins(taskId, pluginPath, pluginFiles)
+        if (removedCount > 0) {
+            TaskIO.appendLog(taskId, "Removed ${removedCount} plugins that no longer exist on filesystem")
+        }
 
         // 处理每个插件文件
         for (pluginFile in pluginFiles) {
             try {
                 TaskIO.appendLog(taskId, "Processing plugin: ${pluginFile}")
 
-                let result = processPluginFile(taskId, pluginFile)
+                let result = processPluginFile(taskId, pluginPath, pluginFile)
 
                 if (result.success) {
                     processedCount++
@@ -104,7 +108,7 @@ public class ScanPluginsTaskRunner {
 
         TaskIO.appendLog(taskId, "Plugin scan completed: processed=${processedCount}, errors=${errorCount}, duration=${duration}ms")
 
-        return ScanResultData(processedCount, pluginFiles.size, 0, errors)
+        return ScanResultData(processedCount, pluginFiles.size, errorCount, errors)
     }
 
     /**
@@ -172,24 +176,18 @@ public class ScanPluginsTaskRunner {
     /**
      * 处理插件文件
      */
-    private static func processPluginFile(taskId: Int64, filePath: String): ProcessResultData {
+    private static func processPluginFile(taskId: Int64, pluginRoot: String, filePath: String): ProcessResultData {
         try {
             let pathParts = filePath.split("/")
             let fileName = pathParts[pathParts.size - 1]
 
             TaskIO.appendLog(taskId, "Processing plugin file: ${fileName}")
 
-            // 计算相对于插件根目录的路径，直接作为 entry 存储
-            // filePath 格式: /path/to/data/plugins/subfolder/plugin.ts
-            // pluginPath 格式: /path/to/data/plugins
-            // entryPath 应该是: subfolder/plugin.ts 或 plugin.ts
-            let pluginPath = PluginPaths.getPluginStorageRoot()
-            let entryPath = if (filePath.startsWith(pluginPath)) {
-                filePath[(pluginPath.size + 1)..]  // +1 to skip the leading '/'
-            } else {
-                // 如果不在标准路径下，使用文件名
-                fileName
-            }
+            // 计算相对于本次扫描根目录的路径，直接作为 entry 存储：
+            // - pluginRoot: /path/to/plugins
+            // - filePath:   /path/to/plugins/subfolder/plugin.ts
+            // - entryPath:  subfolder/plugin.ts
+            let entryPath = computeEntryPath(pluginRoot, filePath)
 
             TaskIO.appendLog(taskId, "Plugin entry path: ${entryPath}")
 
@@ -643,14 +641,28 @@ public class ScanPluginsTaskRunner {
     ): Int64 {
         var removedCount: Int64 = 0
 
+        // Fast membership test for "what exists on disk right now".
+        // Use entryPath (relative to pluginPath) as the stable key.
+        let normalizedRoot = normalizeRootPath(pluginPath)
+        var existingEntries = HashSet<String>()
+        for (filePath in existingFiles) {
+            existingEntries.add(computeEntryPath(normalizedRoot, filePath))
+        }
+
         let allPlugins = PluginDao.getAllPlugins()
         TaskIO.appendLog(taskId, "Checking ${allPlugins.size} plugins in database for removed files")
 
         for (plugin in allPlugins) {
-            // 直接使用 entry 构建完整路径（支持子目录）
-            let expectedPath = buildPluginPath(pluginPath, plugin.plugin_type, plugin.entry)
+            let entryTrimmed = plugin.entry.trimAscii()
+            if (entryTrimmed.size == 0) {
+                TaskIO.appendLog(taskId, "WARN: Plugin entry is empty, skipping cleanup: ${plugin.namespace}")
+                continue
+            }
 
-            if (!existingFiles.contains(expectedPath) && !fileExists(expectedPath)) {
+            // Support older records where entry may be an absolute path.
+            let (entryKey, expectedPath) = resolveEntryAndPath(normalizedRoot, entryTrimmed)
+
+            if (!existingEntries.contains(entryKey) && !fileExists(expectedPath)) {
                 TaskIO.appendLog(taskId, "Plugin file not found, removing: ${plugin.namespace} (${expectedPath})")
                 if (PluginDao.delete(plugin.namespace)) {
                     removedCount++
@@ -675,11 +687,49 @@ public class ScanPluginsTaskRunner {
     }
 
     /**
-     * 构建插件文件路径
-     * 所有插件统一存放在 basePath 根目录，不再按类型分子目录
+     * Normalize root path so prefix checks are stable (trailing slashes removed).
      */
-    private static func buildPluginPath(basePath: String, pluginType: String, entry: String): String {
-        joinPath(basePath, entry)
+    private static func normalizeRootPath(root: String): String {
+        var out = root.trimAscii()
+        while (out.size > 1 && out.endsWith("/")) {
+            out = out[0..(out.size - 1)]
+        }
+        return out
+    }
+
+    /**
+     * Compute entry path (relative to pluginRoot) for a file on disk.
+     */
+    private static func computeEntryPath(pluginRoot: String, filePath: String): String {
+        let normalizedRoot = normalizeRootPath(pluginRoot)
+        let normalizedPrefix = "${normalizedRoot}/"
+
+        // Prefer stable relative entry for records and comparisons.
+        if (filePath.startsWith(normalizedPrefix)) {
+            return filePath[normalizedPrefix.size..]
+        }
+
+        // Fallback: keep just the filename if outside root.
+        let parts = filePath.split("/")
+        return parts[parts.size - 1]
+    }
+
+    /**
+     * Resolve a plugin entry to:
+     * - a stable key used for set comparison (relative when possible)
+     * - an absolute path used for file existence check
+     */
+    private static func resolveEntryAndPath(pluginRoot: String, entry: String): (String, String) {
+        let normalizedRoot = normalizeRootPath(pluginRoot)
+        let normalizedPrefix = "${normalizedRoot}/"
+
+        // Absolute path recorded in DB.
+        if (entry.startsWith("/")) {
+            let key = if (entry.startsWith(normalizedPrefix)) { entry[normalizedPrefix.size..] } else { entry }
+            return (key, entry)
+        }
+
+        return (entry, joinPath(normalizedRoot, entry))
     }
 
     // NOTE: plugin_info execution + NDJSON parsing are now centralized in DenoPluginInfoRunner.
