@@ -1,8 +1,7 @@
-FROM docker.1ms.run/ubuntu
+FROM ubuntu
 
 WORKDIR /app
 
-# 配置清华镜像源（兼容 Ubuntu 24.04+ 的 DEB822 格式）
 RUN apt-get update && \
     apt-get install -y ffmpeg ghostscript imagemagick tzdata libssl-dev libarchive13 libavif16 && \
     rm -rf /var/lib/apt/lists/*
