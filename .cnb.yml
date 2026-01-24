@@ -106,22 +106,11 @@ $:
               cp -r frontend/out app/frontend/out
             '
 
-        - name: Bundle deno binary into ./app/bin
-          script: |
-            bash -lc '
-              set -eux
-              curl -fsSL https://deno.land/install.sh | sh
-              cp ~/.deno/bin/deno ./app/bin/deno
-              chmod +x ./app/main ./app/bin/deno
-            '
-
         - name: Package runtime bundle (zip)
           script: |
             bash -lc '
               set -eux
-              command -v zip >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*)
               mkdir -p dist
-              # Put the whole runtime bundle into a single archive for attachments upload.
               rm -f "dist/app-${CNB_COMMIT_SHORT:-latest}.zip"
               (cd app && zip -qr "../dist/app-${CNB_COMMIT_SHORT:-latest}.zip" .)
               ls -lah dist
@@ -132,6 +121,15 @@ $:
           settings:
             attachments:
               - dist/app-*.zip
+
+        - name: Bundle deno binary into ./app/bin
+          script: |
+            bash -lc '
+              set -eux
+              curl -fsSL https://deno.land/install.sh | sh
+              cp ~/.deno/bin/deno ./app/bin/deno
+              chmod +x ./app/main ./app/bin/deno
+            '
 
         - name: Set CNB Docker image tag
           # Avoid pushing images from non-main branches / PR builds.
