@@ -34,9 +34,16 @@ $:
             apt-get update
             apt-get install -y --no-install-recommends \
               ca-certificates curl git wget unzip \
-              build-essential clang ninja-build xmake \
+              build-essential clang ninja-build \
               libarchive-dev libavif-dev
             rm -rf /var/lib/apt/lists/*
+
+            # xmake is required by Cangjie/CJPM builds but isn't available in all distro repos.
+            if ! command -v xmake >/dev/null 2>&1; then
+              curl -fsSL https://xmake.io/shget.text | bash
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
+            xmake --version
 
             # Prefer corepack (bundled with Node) to avoid global npm installs.
             corepack enable
