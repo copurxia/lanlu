@@ -358,6 +358,9 @@ public class DenoTaskRunner {
     private static func buildDenoPermissions(plugin: PluginData, _: String): ArrayList<String> {
         var denoArgs = ArrayList<String>()
         denoArgs.add("run")
+        // Avoid ANSI color codes in captured logs/messages; they can contain raw ESC
+        // control characters which break JSON if not escaped.
+        denoArgs.add("--no-color")
 
         // 默认给予插件目录的读写权限
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"

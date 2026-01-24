@@ -294,14 +294,35 @@ public class TaskPoolController {
      * JSON字符串转义
      */
     private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
+        // JSON strings cannot contain raw control characters (U+0000..U+001F).
+        // Some task messages include ANSI escape sequences (ESC = 0x1B), which would
+        // otherwise break the JSON response and make the frontend fail to parse.
+        func hexDigit(nibble: UInt32): String {
+            let code = if (nibble < 10u32) { 48u32 + nibble } else { 87u32 + (nibble - 10u32) } // '0' or 'a'
+            return Rune(code).toString()
+        }
+        func hex4(code: UInt32): String {
+            var res = ""
+            res += hexDigit((code >> 12) & 0xFu32)
+            res += hexDigit((code >> 8) & 0xFu32)
+            res += hexDigit((code >> 4) & 0xFu32)
+            res += hexDigit(code & 0xFu32)
+            return res
+        }
+
+        var out = ""
+        for (r in s.toRuneArray()) {
+            let code = UInt32(r)
+            if (code == 0x5Cu32) { out += "\\\\" }            // '\'
+            else if (code == 0x22u32) { out += "\\\"" }       // '"'
+            else if (code == 0x08u32) { out += "\\b" }        // backspace
+            else if (code == 0x0Cu32) { out += "\\f" }        // formfeed
+            else if (code == 0x0Au32) { out += "\\n" }        // newline
+            else if (code == 0x0Du32) { out += "\\r" }        // carriage return
+            else if (code == 0x09u32) { out += "\\t" }        // tab
+            else if (code < 0x20u32) { out += "\\u${hex4(code)}" }
+            else { out += r.toString() }
+        }
+        return out
     }
 }
