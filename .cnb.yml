@@ -10,8 +10,8 @@ $:
       runner:
         tags: cnb:arch:amd64
       docker:
-        # Use a Node image so frontend build is straightforward; install system deps for Cangjie build in stages.
-        image: node:20-bullseye
+        # Use Ubuntu as the pipeline environment; Node/pnpm will be installed in stages.
+        image: ubuntu:latest
         volumes:
           # pnpm store cache
           - main:/root/.local/share/pnpm:copy-on-write
@@ -35,15 +35,27 @@ $:
             apt-get install -y --no-install-recommends \
               ca-certificates curl git wget unzip \
               build-essential clang ninja-build \
+              software-properties-common \
               libarchive-dev libavif-dev
-            rm -rf /var/lib/apt/lists/*
 
-            # xmake is required by Cangjie/CJPM builds but isn't available in all distro repos.
+            # Node.js 20 (for frontend/extension builds). Ubuntu's default repo may be too old.
+            if ! command -v node >/dev/null 2>&1; then
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+              apt-get install -y --no-install-recommends nodejs
+            fi
+
+            # xmake is required by Cangjie/CJPM builds.
+            # Prefer apt-based install; if not available in the base repo, add xmake PPA then install.
             if ! command -v xmake >/dev/null 2>&1; then
-              curl -fsSL https://xmake.io/shget.text | bash
-              export PATH="$HOME/.local/bin:$PATH"
+              if ! apt-get install -y --no-install-recommends xmake; then
+                add-apt-repository -y ppa:xmake-io/xmake
+                apt-get update
+                apt-get install -y --no-install-recommends xmake
+              fi
             fi
             xmake --version
+
+            rm -rf /var/lib/apt/lists/*
 
             # Prefer corepack (bundled with Node) to avoid global npm installs.
             corepack enable
@@ -142,17 +154,27 @@ $:
       ifModify:
         - extension/**
       docker:
-        image: node:20-bullseye
+        image: ubuntu:latest
         volumes:
           - main:/root/.local/share/pnpm:copy-on-write
       env:
         NEXT_TELEMETRY_DISABLED: "1"
       stages:
+        - name: Install Node.js + pnpm (extension)
+          script: |
+            set -eux
+            apt-get update
+            apt-get install -y --no-install-recommends ca-certificates curl git
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y --no-install-recommends nodejs
+            rm -rf /var/lib/apt/lists/*
+
+            corepack enable
+            corepack prepare pnpm@10.27.0 --activate
+
         - name: Build & lint extension
           script: |
             set -eux
-            corepack enable
-            corepack prepare pnpm@10.27.0 --activate
             cd extension
             pnpm install --frozen-lockfile
             pnpm run build
