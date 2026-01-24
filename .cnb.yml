@@ -12,11 +12,11 @@ $:
       docker:
         # Build a custom Ubuntu-based environment image first, then use it for all script jobs in this pipeline.
         build:
-          dockerfile: .cnb/Dockerfile.build-env
+          dockerfile: .ide/Dockerfile
           by:
-            - .cnb/Dockerfile.build-env
+            - .ide/Dockerfile
           versionBy:
-            - .cnb/Dockerfile.build-env
+            - .ide/Dockerfile
         volumes:
           # pnpm store cache
           - main:/root/.local/share/pnpm:copy-on-write
@@ -165,11 +165,11 @@ $:
         - extension/**
       docker:
         build:
-          dockerfile: .cnb/Dockerfile.build-env
+          dockerfile: .ide/Dockerfile
           by:
-            - .cnb/Dockerfile.build-env
+            - .ide/Dockerfile
           versionBy:
-            - .cnb/Dockerfile.build-env
+            - .ide/Dockerfile
         volumes:
           - main:/root/.local/share/pnpm:copy-on-write
       env:
