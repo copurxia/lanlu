@@ -1,10 +1,13 @@
 // ==UserScript==
-// @name        ExHentai Lanraragi Checker 1.6
+// @name        ExHentai Lanlu Checker 1.6
 // @namespace   https://github.com/Putarku
 // @match       https://exhentai.org/*
 // @match       https://e-hentai.org/*
 // @grant       GM_xmlhttpRequest
 // @grant       GM_addStyle
+// @grant       GM_getValue
+// @grant       GM_setValue
+// @grant       GM_registerMenuCommand
 // @connect     *
 // @license MIT
 // @version     1.6
@@ -12,14 +15,96 @@
 // @description Checks if galleries on ExHentai/E-Hentai are already in your Lanraragi library and marks them by inserting a span at the beginning of the title.
 // ==/UserScript==
 
-(function() {
+(async function() {
     'use strict';
 
-    // --- 用户配置开始 ---
-    const LANLU_SERVER_URL = 'http://localhost:3005'; // 替换为您的 lanlu / lrr4cj / Lanraragi 服务器地址（不要以 / 结尾）
-    const LANLU_API_KEY = 'lanlu'; // Bearer token（如果启用了鉴权）
-    const MAX_CONCURRENT_REQUESTS = 5; // 最大并发请求数，避免服务器过载
-    // --- 用户配置结束 ---
+    // --- 配置（油猴菜单）---
+    const DEFAULT_SETTINGS = {
+        serverUrl: 'http://localhost:3005',
+        apiKey: 'lanlu',
+        maxConcurrentRequests: 5,
+        cacheDurationMs: 60 * 60 * 1000, // 1h
+    };
+
+    async function gmGetValue(key, defaultValue) {
+        try {
+            const v = GM_getValue(key, defaultValue);
+            return (v && typeof v.then === 'function') ? await v : v;
+        } catch {
+            return defaultValue;
+        }
+    }
+
+    async function gmSetValue(key, value) {
+        try {
+            const v = GM_setValue(key, value);
+            if (v && typeof v.then === 'function') await v;
+        } catch {
+            // ignore
+        }
+    }
+
+    function parsePositiveInt(v, fallback) {
+        const n = typeof v === 'number' ? v : parseInt(String(v ?? ''), 10);
+        return Number.isFinite(n) && n > 0 ? n : fallback;
+    }
+
+    async function loadSettings() {
+        const serverUrl = String(await gmGetValue('lanlu.serverUrl', DEFAULT_SETTINGS.serverUrl) || '').trim();
+        const apiKey = String(await gmGetValue('lanlu.apiKey', DEFAULT_SETTINGS.apiKey) || '').trim();
+        const maxConcurrentRequests = parsePositiveInt(
+            await gmGetValue('lanlu.maxConcurrentRequests', DEFAULT_SETTINGS.maxConcurrentRequests),
+            DEFAULT_SETTINGS.maxConcurrentRequests
+        );
+        const cacheDurationMs = parsePositiveInt(
+            await gmGetValue('lanlu.cacheDurationMs', DEFAULT_SETTINGS.cacheDurationMs),
+            DEFAULT_SETTINGS.cacheDurationMs
+        );
+        return { serverUrl, apiKey, maxConcurrentRequests, cacheDurationMs };
+    }
+
+    async function configureSettings() {
+        const current = await loadSettings();
+        const serverUrl = prompt('Lanlu Checker - SERVER_URL（不要以 / 结尾）', current.serverUrl);
+        if (serverUrl === null) return;
+        const apiKey = prompt('Lanlu Checker - API_KEY（Bearer token，可留空）', current.apiKey);
+        if (apiKey === null) return;
+        const maxConcurrent = prompt('Lanlu Checker - 最大并发请求数', String(current.maxConcurrentRequests));
+        if (maxConcurrent === null) return;
+        const cacheMs = prompt('Lanlu Checker - 缓存时长（毫秒）', String(current.cacheDurationMs));
+        if (cacheMs === null) return;
+
+        await gmSetValue('lanlu.serverUrl', String(serverUrl).trim());
+        await gmSetValue('lanlu.apiKey', String(apiKey).trim());
+        await gmSetValue('lanlu.maxConcurrentRequests', parsePositiveInt(maxConcurrent, current.maxConcurrentRequests));
+        await gmSetValue('lanlu.cacheDurationMs', parsePositiveInt(cacheMs, current.cacheDurationMs));
+
+        // 直接刷新，让新配置立即生效。
+        try { location.reload(); } catch { /* ignore */ }
+    }
+
+    try {
+        GM_registerMenuCommand('Lanlu Checker: 设置', () => { void configureSettings(); });
+        GM_registerMenuCommand('Lanlu Checker: 清空本页缓存', () => {
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith('lanlu-checker-')) {
+                        localStorage.removeItem(k);
+                        i--;
+                    }
+                }
+                alert('Lanlu Checker: 已清空缓存（请刷新页面）');
+            } catch {
+                alert('Lanlu Checker: 清空缓存失败');
+            }
+        });
+    } catch {
+        // ignore (some managers may not support menu commands)
+    }
+
+    const SETTINGS = await loadSettings();
+    const MAX_CONCURRENT_REQUESTS = SETTINGS.maxConcurrentRequests;
 
     GM_addStyle(`
         .lanlu-marker-span {
@@ -53,9 +138,9 @@
         return v.endsWith('/') ? v.slice(0, -1) : v;
     }
 
-    const SERVER_URL = normalizeServerUrl(LANLU_SERVER_URL);
+    const SERVER_URL = normalizeServerUrl(SETTINGS.serverUrl);
 
-    const CACHE_DURATION = 60 * 60 * 1000; // 1h in milliseconds
+    const CACHE_DURATION = SETTINGS.cacheDurationMs;
     const CLEANUP_INTERVAL = 7 * 24 * 60 * 60 * 1000; // 7 days cleanup interval
 
     function getCacheWithDuration(key, durationMs) {
@@ -152,8 +237,8 @@
 
     function getAuthHeaders() {
         const headers = {};
-        if (LANLU_API_KEY) {
-            headers['Authorization'] = `Bearer ${LANLU_API_KEY}`;
+        if (SETTINGS.apiKey) {
+            headers['Authorization'] = `Bearer ${SETTINGS.apiKey}`;
         }
         return headers;
     }
