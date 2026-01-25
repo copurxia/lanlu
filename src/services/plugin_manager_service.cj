@@ -346,11 +346,8 @@ public class PluginManagerService {
 
     private static func atomicReplaceFile(target: Path, tempFile: Path): Bool {
         try {
-            // 尽量使用 rename 完成替换；若目标存在则先删除
-            if (exists(target)) {
-                try { remove(target) } catch (_: Exception) {}
-            }
-            rename(tempFile, to: target)
+            // Delegate to FileUtils to keep file replacement semantics consistent across the codebase.
+            FileUtils.safeReplaceFile(target, tempFile)
             return true
         } catch (e: Exception) {
             logger.error("atomicReplaceFile failed", ("target", target.toString()), ("error", e.message))

@@ -175,10 +175,9 @@ public class ArchiveUtils {
         try {
             let actualPath = FileUtils.resolvePath(filePath)
             let path = Path(actualPath)
-            let file = File(path, Read)
-            file.close()
-
-            return getTimeMillis()
+            let info = FileInfo(path)
+            // Use filesystem metadata to keep ID/hash stable across runs.
+            return info.lastModificationTime.toUnixTimeStamp().toSeconds() * 1000
         } catch (_: Exception) {
             return getTimeMillis()
         }

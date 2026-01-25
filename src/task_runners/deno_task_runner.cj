@@ -173,17 +173,7 @@ public class DenoTaskRunner {
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
-        let msg = if (message.size == 0) { "Unknown error" } else { message }
-        TaskIO.appendLog(taskId, "FAILED: ${msg}")
-        TaskModel.failTask(taskId, msg)
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("success").writeValue(0)
-        w.writeName("error").writeValue(msg)
-        w.endObject()
-        w.flush()
-        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+        TaskRunnerOutput.fail(taskId, message)
     }
 
     private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String) {
@@ -384,9 +374,6 @@ public class DenoTaskRunner {
     private static func buildDenoPermissions(plugin: PluginData, _: String): ArrayList<String> {
         var denoArgs = ArrayList<String>()
         denoArgs.add("run")
-        // Avoid ANSI color codes in captured logs/messages; they can contain raw ESC
-        // control characters which break JSON if not escaped.
-        denoArgs.add("--no-color")
 
         // 默认给予插件目录的读写权限
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"

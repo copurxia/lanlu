@@ -322,45 +322,8 @@ public class ClearCacheTaskRunner {
         return totalSize
     }
 
-    /**
-     * 删除文件或目录（递归删除目录）
-     */
-    private static func removeFileOrDirectory(path: String): Bool {
-        try {
-            let fileInfo = FileInfo(Path(path))
-            if (fileInfo.isDirectory()) {
-                // 目录：先删除目录内容，再删除目录本身
-                let entries = listDirectory(path)
-                for (entry in entries) {
-                    let fullPath = joinPath(path, entry)
-                    if (!removeFileOrDirectory(fullPath)) {
-                        return false
-                    }
-                }
-                // 删除空目录
-                remove(Path(path))
-            } else {
-                // 文件：直接删除
-                remove(Path(path))
-            }
-            return true
-        } catch (_: Exception) {
-            return false
-        }
-    }
-
     private static func fail(taskId: Int64, message: String): Unit {
-        let msg = if (message.size == 0) { "Unknown error" } else { message }
-        TaskIO.appendLog(taskId, "FAILED: ${msg}")
-        TaskModel.failTask(taskId, msg)
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("success").writeValue(0)
-        w.writeName("error").writeValue(msg)
-        w.endObject()
-        w.flush()
-        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+        TaskRunnerOutput.fail(taskId, message)
     }
 
     private static func directoryExists(path: String): Bool {

@@ -28,6 +28,37 @@ public class CategoryData {
  * 分类数据访问对象 (DAO)
  */
 public class CategoryDao {
+    private static let logger = getLogger("category_dao")
+
+    private static let CATEGORY_SELECT_WITH_COUNT = """
+        SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
+               c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at,
+               COUNT(a.id) as archive_count
+        FROM categories c
+        LEFT JOIN archives a ON a.category_id = c.id
+    """
+
+    private static let CATEGORY_GROUP_BY = """
+        GROUP BY c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
+                 c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at
+    """
+
+    private static func readCategoryFromResultSet(rs: QueryResult): CategoryData {
+        let cat = CategoryData()
+        cat.id = rs.getOrNull<Int64>(0) ?? 0
+        cat.catid = rs.getOrNull<String>(1) ?? ""
+        cat.name = rs.getOrNull<String>(2) ?? ""
+        cat.scanPath = rs.getOrNull<String>(3) ?? ""
+        cat.description = rs.getOrNull<String>(4) ?? ""
+        cat.icon = rs.getOrNull<String>(5) ?? ""
+        cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
+        cat.enabled = rs.getOrNull<Bool>(7) ?? true
+        cat.plugins = rs.getOrNull<String>(8) ?? "[]"
+        cat.createdAt = rs.getOrNull<String>(9) ?? ""
+        cat.updatedAt = rs.getOrNull<String>(10) ?? ""
+        cat.archiveCount = rs.getOrNull<Int64>(11) ?? 0
+        return cat
+    }
 
     /**
      * 获取所有分类
@@ -39,34 +70,12 @@ public class CategoryDao {
                 
                 var categories = ArrayList<CategoryData>()
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                               c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at,
-                               COUNT(a.id) as archive_count
-                        FROM categories c
-                        LEFT JOIN archives a ON a.category_id = c.id
-                        GROUP BY c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                                 c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at
-                        ORDER BY c.sort_order, c.id
-                    """)
+                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_WITH_COUNT}\n${CATEGORY_GROUP_BY}\nORDER BY c.sort_order, c.id")
                     try {
                         let rs = stmt.query()
                         try {
                             while (rs.next()) {
-                                let cat = CategoryData()
-                                cat.id = rs.getOrNull<Int64>(0) ?? 0
-                                cat.catid = rs.getOrNull<String>(1) ?? ""
-                                cat.name = rs.getOrNull<String>(2) ?? ""
-                                cat.scanPath = rs.getOrNull<String>(3) ?? ""
-                                cat.description = rs.getOrNull<String>(4) ?? ""
-                                cat.icon = rs.getOrNull<String>(5) ?? ""
-                                cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
-                                cat.enabled = rs.getOrNull<Bool>(7) ?? true
-                                cat.plugins = rs.getOrNull<String>(8) ?? "[]"
-                                cat.createdAt = rs.getOrNull<String>(9) ?? ""
-                                cat.updatedAt = rs.getOrNull<String>(10) ?? ""
-                                cat.archiveCount = rs.getOrNull<Int64>(11) ?? 0
-                                categories.add(cat)
+                                categories.add(readCategoryFromResultSet(rs))
                             }
                         } finally {
                             rs.close()
@@ -76,13 +85,13 @@ public class CategoryDao {
                     }
                     return categories.toArray()
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("查询分类失败", ("error", e.message))
+                    logger.error("查询分类失败", ("error", e.message))
                     return Array<CategoryData>()
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return Array<CategoryData>()
         }
     }
@@ -97,35 +106,14 @@ public class CategoryDao {
                 
                 var categories = ArrayList<CategoryData>()
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                               c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at,
-                               COUNT(a.id) as archive_count
-                        FROM categories c
-                        LEFT JOIN archives a ON a.category_id = c.id
-                        WHERE c.enabled = true
-                        GROUP BY c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                                 c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at
-                        ORDER BY c.sort_order, c.id
-                    """)
+                    let stmt = conn.prepareStatement(
+                        "${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.enabled = true\n${CATEGORY_GROUP_BY}\nORDER BY c.sort_order, c.id"
+                    )
                     try {
                         let rs = stmt.query()
                         try {
                             while (rs.next()) {
-                                let cat = CategoryData()
-                                cat.id = rs.getOrNull<Int64>(0) ?? 0
-                                cat.catid = rs.getOrNull<String>(1) ?? ""
-                                cat.name = rs.getOrNull<String>(2) ?? ""
-                                cat.scanPath = rs.getOrNull<String>(3) ?? ""
-                                cat.description = rs.getOrNull<String>(4) ?? ""
-                                cat.icon = rs.getOrNull<String>(5) ?? ""
-                                cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
-                                cat.enabled = rs.getOrNull<Bool>(7) ?? true
-                                cat.plugins = rs.getOrNull<String>(8) ?? "[]"
-                                cat.createdAt = rs.getOrNull<String>(9) ?? ""
-                                cat.updatedAt = rs.getOrNull<String>(10) ?? ""
-                                cat.archiveCount = rs.getOrNull<Int64>(11) ?? 0
-                                categories.add(cat)
+                                categories.add(readCategoryFromResultSet(rs))
                             }
                         } finally {
                             rs.close()
@@ -135,13 +123,13 @@ public class CategoryDao {
                     }
                     return categories.toArray()
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("查询启用分类失败", ("error", e.message))
+                    logger.error("查询启用分类失败", ("error", e.message))
                     return Array<CategoryData>()
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return Array<CategoryData>()
         }
     }
@@ -155,35 +143,13 @@ public class CategoryDao {
             case Some(conn) =>
                 
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                               c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at,
-                               COUNT(a.id) as archive_count
-                        FROM categories c
-                        LEFT JOIN archives a ON a.category_id = c.id
-                        WHERE c.catid = ?
-                        GROUP BY c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                                 c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at
-                    """)
+                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.catid = ?\n${CATEGORY_GROUP_BY}")
                     try {
                         stmt.set(0, catid)
                         let rs = stmt.query()
                         try {
                             if (rs.next()) {
-                                let cat = CategoryData()
-                                cat.id = rs.getOrNull<Int64>(0) ?? 0
-                                cat.catid = rs.getOrNull<String>(1) ?? ""
-                                cat.name = rs.getOrNull<String>(2) ?? ""
-                                cat.scanPath = rs.getOrNull<String>(3) ?? ""
-                                cat.description = rs.getOrNull<String>(4) ?? ""
-                                cat.icon = rs.getOrNull<String>(5) ?? ""
-                                cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
-                                cat.enabled = rs.getOrNull<Bool>(7) ?? true
-                                cat.plugins = rs.getOrNull<String>(8) ?? "[]"
-                                cat.createdAt = rs.getOrNull<String>(9) ?? ""
-                                cat.updatedAt = rs.getOrNull<String>(10) ?? ""
-                                cat.archiveCount = rs.getOrNull<Int64>(11) ?? 0
-                                return Some(cat)
+                                return Some(readCategoryFromResultSet(rs))
                             }
                         } finally {
                             rs.close()
@@ -193,13 +159,13 @@ public class CategoryDao {
                     }
                     return None
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("查询分类失败", ("error", e.message))
+                    logger.error("查询分类失败", ("error", e.message))
                     return None
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return None
         }
     }
@@ -213,35 +179,13 @@ public class CategoryDao {
             case Some(conn) =>
                 
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                               c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at,
-                               COUNT(a.id) as archive_count
-                        FROM categories c
-                        LEFT JOIN archives a ON a.category_id = c.id
-                        WHERE c.id = ?
-                        GROUP BY c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                                 c.sort_order, c.enabled, c.plugins, c.created_at, c.updated_at
-                    """)
+                    let stmt = conn.prepareStatement("${CATEGORY_SELECT_WITH_COUNT}\nWHERE c.id = ?\n${CATEGORY_GROUP_BY}")
                     try {
                         stmt.set(0, id)
                         let rs = stmt.query()
                         try {
                             if (rs.next()) {
-                                let cat = CategoryData()
-                                cat.id = rs.getOrNull<Int64>(0) ?? 0
-                                cat.catid = rs.getOrNull<String>(1) ?? ""
-                                cat.name = rs.getOrNull<String>(2) ?? ""
-                                cat.scanPath = rs.getOrNull<String>(3) ?? ""
-                                cat.description = rs.getOrNull<String>(4) ?? ""
-                                cat.icon = rs.getOrNull<String>(5) ?? ""
-                                cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
-                                cat.enabled = rs.getOrNull<Bool>(7) ?? true
-                                cat.plugins = rs.getOrNull<String>(8) ?? "[]"
-                                cat.createdAt = rs.getOrNull<String>(9) ?? ""
-                                cat.updatedAt = rs.getOrNull<String>(10) ?? ""
-                                cat.archiveCount = rs.getOrNull<Int64>(11) ?? 0
-                                return Some(cat)
+                                return Some(readCategoryFromResultSet(rs))
                             }
                         } finally {
                             rs.close()
@@ -251,13 +195,13 @@ public class CategoryDao {
                     }
                     return None
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("查询分类失败", ("error", e.message))
+                    logger.error("查询分类失败", ("error", e.message))
                     return None
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return None
         }
     }
@@ -302,13 +246,13 @@ public class CategoryDao {
                     }
                     return None
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("创建分类失败", ("error", e.message))
+                    logger.error("创建分类失败", ("error", e.message))
                     return None
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return None
         }
     }
@@ -343,13 +287,13 @@ public class CategoryDao {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("更新分类失败", ("error", e.message))
+                    logger.error("更新分类失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -405,13 +349,13 @@ public class CategoryDao {
                         delCatStmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("删除分类失败", ("error", e.message))
+                    logger.error("删除分类失败", ("error", e.message))
                     return (false, 0, e.message)
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return (false, 0, "Unable to connect to database")
         }
     }
@@ -441,13 +385,13 @@ public class CategoryDao {
                     }
                     return 0
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("获取档案数量失败", ("error", e.message))
+                    logger.error("获取档案数量失败", ("error", e.message))
                     return 0
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return 0
         }
     }
@@ -479,13 +423,13 @@ public class CategoryDao {
                     }
                     return paths.toArray()
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("获取扫描路径失败", ("error", e.message))
+                    logger.error("获取扫描路径失败", ("error", e.message))
                     return Array<(Int64, String)>()
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return Array<(Int64, String)>()
         }
     }
@@ -515,13 +459,13 @@ public class CategoryDao {
                     }
                     return 0
                 } catch (e: Exception) {
-                    getLogger("category_dao").error("获取分类内部ID失败", ("error", e.message))
+                    logger.error("获取分类内部ID失败", ("error", e.message))
                     return 0
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("category_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return 0
         }
     }

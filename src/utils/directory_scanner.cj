@@ -162,30 +162,8 @@ public class DirectoryScanner {
      * 拼接路径
      */
     public static func joinPath(base: String, part: String): String {
-        if (base.size == 0) {
-            return part
-        }
-        if (part.size == 0) {
-            return base
-        }
-
-        let cleanBase = if (base.endsWith("/") && base.size > 1) { base[0..base.size - 1] } else { base }
-        // Treat "/" as an empty part; avoid creating "base//".
-        let cleanPart = if (part == "/") {
-            ""
-        } else if (part.startsWith("/") && part.size > 1) {
-            part[1..part.size]
-        } else {
-            part
-        }
-
-        if (cleanPart.size == 0) {
-            return cleanBase
-        }
-        if (cleanBase == "/") {
-            return "/${cleanPart}"
-        }
-        return "${cleanBase}/${cleanPart}"
+        // Keep a single source of truth for path joining semantics.
+        return FileUtils.joinPath(base, part)
     }
 
     /**

@@ -227,17 +227,7 @@ public class MetadataPluginTaskRunner {
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
-        let msg = if (message.size == 0) { "Unknown error" } else { message }
-        TaskIO.appendLog(taskId, "FAILED: ${msg}")
-        TaskModel.failTask(taskId, msg)
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("success").writeValue(0)
-        w.writeName("error").writeValue(msg)
-        w.endObject()
-        w.flush()
-        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+        TaskRunnerOutput.fail(taskId, message)
     }
 
 }

@@ -7,6 +7,9 @@ import stdx.log.*
  * 文件工具类
  */
 public class FileUtils {
+    private static let logger = getLogger("file_utils")
+    // Toggle for very verbose symlink resolution tracing.
+    private static var RESOLVE_PATH_DEBUG: Bool = false
 
     /**
      * 获取不包含点的文件扩展名
@@ -23,11 +26,30 @@ public class FileUtils {
      * 连接路径
      */
     public static func joinPath(base: String, part: String): String {
-        if (base.endsWith("/")) {
-            return base + part
-        } else {
-            return "${base}/${part}"
+        if (base.size == 0) {
+            return part
         }
+        if (part.size == 0) {
+            return base
+        }
+
+        // Normalize to avoid accidental double slashes and handle root path correctly.
+        let cleanBase = if (base.endsWith("/") && base.size > 1) { base[0..base.size - 1] } else { base }
+        let cleanPart = if (part == "/") {
+            ""
+        } else if (part.startsWith("/") && part.size > 1) {
+            part[1..part.size]
+        } else {
+            part
+        }
+
+        if (cleanPart.size == 0) {
+            return cleanBase
+        }
+        if (cleanBase == "/") {
+            return "/${cleanPart}"
+        }
+        return "${cleanBase}/${cleanPart}"
     }
     
     /**
@@ -38,10 +60,10 @@ public class FileUtils {
             if (!exists(path)) {
                 // 使用 Directory.create 创建目录
                 Directory.create(path, recursive: true)
-                getLogger("file_utils").info("Created directory", ("path", path.toString()))
+                logger.info("Created directory", ("path", path.toString()))
             }
         } catch (e: Exception) {
-            getLogger("file_utils").error("Failed to create directory", ("path", path.toString()), ("error", e.message))
+            logger.error("Failed to create directory", ("path", path.toString()), ("error", e.message))
         }
     }
     
@@ -50,7 +72,9 @@ public class FileUtils {
      * 支持递归解析软链接（最多10层，防止循环）
      */
     public static func resolvePath(path: String): String {
-        getLogger("file_utils").debug("=== RESOLVE PATH START ===", ("original_path", path))
+        if (RESOLVE_PATH_DEBUG) {
+            logger.debug("=== RESOLVE PATH START ===", ("original_path", path))
+        }
 
         const MAX_SYMLINK_DEPTH = 10
         var currentPath = path
@@ -58,59 +82,99 @@ public class FileUtils {
 
         try {
             while (depth < MAX_SYMLINK_DEPTH) {
-                getLogger("file_utils").debug("resolvePath: Level", ("depth", depth.toString()), ("current_path", currentPath.toString()))
+                if (RESOLVE_PATH_DEBUG) {
+                    logger.debug("resolvePath: Level", ("depth", depth.toString()), ("current_path", currentPath.toString()))
+                }
 
                 let filePath = Path(currentPath)
                 if (!exists(filePath)) {
-                    getLogger("file_utils").debug("resolvePath: Path does not exist", ("path", currentPath.toString()))
+                    if (RESOLVE_PATH_DEBUG) {
+                        logger.debug("resolvePath: Path does not exist", ("path", currentPath.toString()))
+                    }
                     break
                 }
 
                 let fileInfo = FileInfo(filePath)
-                getLogger("file_utils").debug("resolvePath: FileInfo", ("is_symbolic_link", fileInfo.isSymbolicLink().toString()), ("is_directory", fileInfo.isDirectory().toString()))
+                if (RESOLVE_PATH_DEBUG) {
+                    logger.debug(
+                        "resolvePath: FileInfo",
+                        ("is_symbolic_link", fileInfo.isSymbolicLink().toString()),
+                        ("is_directory", fileInfo.isDirectory().toString())
+                    )
+                }
 
                 // 如果是软链接，获取其目标路径
                 if (fileInfo.isSymbolicLink()) {
                     try {
                         let targetPath = SymbolicLink.readFrom(currentPath, recursive: false)
                         let newTarget = targetPath.toString()
-                        getLogger("file_utils").debug("resolvePath: Symlink target", ("target", newTarget.toString()))
+                        if (RESOLVE_PATH_DEBUG) {
+                            logger.debug("resolvePath: Symlink target", ("target", newTarget.toString()))
+                        }
 
                         // 检查是否为绝对路径
                         if (newTarget.startsWith("/")) {
                             currentPath = newTarget
-                            getLogger("file_utils").debug("resolvePath: Absolute target", ("new_path", currentPath.toString()))
+                            if (RESOLVE_PATH_DEBUG) {
+                                logger.debug("resolvePath: Absolute target", ("new_path", currentPath.toString()))
+                            }
                         } else {
                             // 相对路径需要基于当前目录的父目录进行解析
                             let parentDir = getParentDirectory(currentPath)
                             currentPath = joinPath(parentDir, newTarget)
-                            getLogger("file_utils").debug("resolvePath: Relative target", ("parent", parentDir.toString()), ("new_path", currentPath.toString()))
+                            if (RESOLVE_PATH_DEBUG) {
+                                logger.debug(
+                                    "resolvePath: Relative target",
+                                    ("parent", parentDir.toString()),
+                                    ("new_path", currentPath.toString())
+                                )
+                            }
                         }
 
                         depth++
-                        getLogger("file_utils").debug("resolvePath: Resolved symlink", ("depth", depth.toString()), ("path", currentPath.toString()))
+                        if (RESOLVE_PATH_DEBUG) {
+                            logger.debug(
+                                "resolvePath: Resolved symlink",
+                                ("depth", depth.toString()),
+                                ("path", currentPath.toString())
+                            )
+                        }
                     } catch (e: FSException) {
                         // 如果解析失败，返回当前路径
-                        getLogger("file_utils").warn("resolvePath: Failed to resolve symlink", ("path", currentPath.toString()), ("error", e.message))
+                        logger.warn(
+                            "resolvePath: Failed to resolve symlink",
+                            ("path", currentPath.toString()),
+                            ("error", e.message)
+                        )
                         break
                     }
                 } else {
                     // 不是软链接，停止解析
-                    getLogger("file_utils").debug("resolvePath: Not a symlink", ("final_path", currentPath.toString()))
+                    if (RESOLVE_PATH_DEBUG) {
+                        logger.debug("resolvePath: Not a symlink", ("final_path", currentPath.toString()))
+                    }
                     break
                 }
             }
 
             if (depth >= MAX_SYMLINK_DEPTH) {
-                getLogger("file_utils").warn("resolvePath: Maximum symlink depth reached", ("max_depth", MAX_SYMLINK_DEPTH.toString()), ("path", path))
+                logger.warn(
+                    "resolvePath: Maximum symlink depth reached",
+                    ("max_depth", MAX_SYMLINK_DEPTH.toString()),
+                    ("path", path)
+                )
             }
 
-            getLogger("file_utils").debug("=== RESOLVE PATH END ===", ("final_resolved_path", currentPath.toString()))
+            if (RESOLVE_PATH_DEBUG) {
+                logger.debug("=== RESOLVE PATH END ===", ("final_resolved_path", currentPath.toString()))
+            }
             return currentPath
         } catch (e: Exception) {
             // 如果出错，返回原路径
-            getLogger("file_utils").error("resolvePath: Error resolving path", ("path", path), ("error", e.message))
-            getLogger("file_utils").debug("=== RESOLVE PATH END ===")
+            logger.error("resolvePath: Error resolving path", ("path", path), ("error", e.message))
+            if (RESOLVE_PATH_DEBUG) {
+                logger.debug("=== RESOLVE PATH END ===")
+            }
             return path
         }
     }

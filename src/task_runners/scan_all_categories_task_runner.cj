@@ -71,15 +71,7 @@ public class ScanAllCategoriesTaskRunner {
             let errorMsg = "Unexpected error: ${e.message}"
             logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
             TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
-            TaskModel.failTask(taskId, errorMsg)
-            let out = ByteBuffer()
-            let w = JsonWriter(out)
-            w.startObject()
-            w.writeName("success").writeValue(0)
-            w.writeName("error").writeValue(errorMsg)
-            w.endObject()
-            w.flush()
-            TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+            TaskRunnerOutput.fail(taskId, errorMsg)
         }
     }
 

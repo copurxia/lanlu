@@ -2,7 +2,7 @@ package lanlu.task_runners
 
 import stdx.log.*
 import std.io.*
-import std.io.{ByteBuffer, readToEnd}
+import std.io.{ByteBuffer}
 import stdx.encoding.json.stream.*
 import std.fs.*
 import lanlu.models.*
@@ -163,7 +163,7 @@ public class GenerateThumbnailTaskRunner {
             // 转换失败时，清理输出和临时目录（包括可能生成的 fallback 文件）
             try {
                 try { remove(Path(tempAvifPath)) } catch (_: Exception) {}
-                let _ = removeFileOrDirectory(taskTempDir)
+                let _ = FileUtils.removeFileOrDirectory(taskTempDir)
             } catch (_: Exception) {}
 
             let errorMsg = "Image conversion failed: ${convertResult.error}"
@@ -192,7 +192,7 @@ public class GenerateThumbnailTaskRunner {
                 let finalAssetPath = FileUtils.joinPath(assetPath, "${assetId}.avif")
                 TaskIO.appendLog(taskId, "Moving thumbnail to asset location: ${finalAssetPath}")
                 try {
-                    safeReplaceFile(Path(finalAssetPath), Path(tempAvifPath))
+                    FileUtils.safeReplaceFile(Path(finalAssetPath), Path(tempAvifPath))
                 } catch (e: Exception) {
                     let errorMsg = "Failed to move thumbnail to asset location: ${e.message}"
                     TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
@@ -223,7 +223,7 @@ public class GenerateThumbnailTaskRunner {
 
         // 移动完成后清理任务临时目录（输出文件已移走）
         try {
-            let _ = removeFileOrDirectory(taskTempDir)
+            let _ = FileUtils.removeFileOrDirectory(taskTempDir)
         } catch (_: Exception) {}
 
         // 将thumbhash存储到数据库
@@ -246,52 +246,7 @@ public class GenerateThumbnailTaskRunner {
         return ProcessResultData(true, finalPath, thumbHash)
     }
 
-    /**
-     * Remove a file or directory recursively (best-effort).
-     * Returns true if the path does not exist or was removed successfully.
-     */
-    private static func removeFileOrDirectory(path: String): Bool {
-        try {
-            let p = Path(path)
-            if (!exists(p)) {
-                return true
-            }
-            let info = FileInfo(p)
-            if (info.isDirectory()) {
-                let entries = DirectoryScanner.listDirectory(path)
-                for (entry in entries) {
-                    let fullPath = FileUtils.joinPath(path, entry)
-                    if (!removeFileOrDirectory(fullPath)) {
-                        return false
-                    }
-                }
-                remove(p)
-                return true
-            }
-            remove(p)
-            return true
-        } catch (_: Exception) {
-            return false
-        }
-    }
-
-    /**
-     * Atomically replace a file by first removing the target (if present) and then renaming.
-     * Falls back to copy+remove if rename fails (e.g. cross-device).
-     */
-    private static func safeReplaceFile(target: Path, from: Path): Unit {
-        if (exists(target)) {
-            remove(target)
-        }
-        try {
-            rename(from, to: target)
-            return
-        } catch (_: Exception) {
-            // Fallback for cross-device moves.
-        }
-        copy(from, to: target, overwrite: true)
-        remove(from)
-    }
+    // NOTE: removeFileOrDirectory/safeReplaceFile are provided by FileUtils.
 
     /**
      * Infer a file extension for ffprobe/ffmpeg based on the cover bytes.
@@ -442,17 +397,7 @@ public class GenerateThumbnailTaskRunner {
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
-        let msg = if (message.size == 0) { "Unknown error" } else { message }
-        TaskIO.appendLog(taskId, "FAILED: ${msg}")
-        TaskModel.failTask(taskId, msg)
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("success").writeValue(0)
-        w.writeName("error").writeValue(msg)
-        w.endObject()
-        w.flush()
-        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+        TaskRunnerOutput.fail(taskId, message)
     }
 
     /**

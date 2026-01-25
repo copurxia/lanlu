@@ -3,7 +3,6 @@ package lanlu.task_runners
 import std.fs.*
 import stdx.encoding.json.stream.*
 import stdx.log.*
-import std.io.{ByteBuffer, readToEnd}
 import lanlu.config.*
 import lanlu.models.*
 import lanlu.utils.*
@@ -17,16 +16,7 @@ import lanlu.utils.*
  */
 public class TagI18nImportTaskRunner {
     private static func fail(taskId: Int64, message: String): Unit {
-        TaskIO.appendLog(taskId, "failed: ${message}")
-        TaskModel.failTask(taskId, message)
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("success").writeValue(0)
-        w.writeName("error").writeValue(message)
-        w.endObject()
-        w.flush()
-        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+        TaskRunnerOutput.fail(taskId, message)
     }
 
     public static func run(taskId: Int64, parameters: String, _: TaskRunnerContext): Unit {

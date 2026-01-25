@@ -14,17 +14,6 @@ import lanlu.archivehandler.*
  * 负责扫描一个具体分类的目录并创建 scan_archive 子任务
  */
 public class ScanSingleCategoryTaskRunner {
-    private static func errorJsonString(message: String): String {
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("success").writeValue(0)
-        w.writeName("error").writeValue(message)
-        w.endObject()
-        w.flush()
-        return String.fromUtf8(readToEnd(out))
-    }
-
     private static func summaryJsonString(created: Int64, total: Int64): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -47,8 +36,7 @@ public class ScanSingleCategoryTaskRunner {
             if (catidParam.size == 0) {
                 let errorMsg = "category_id is required"
                 TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-                TaskModel.failTask(taskId, errorMsg)
-                TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
+                TaskRunnerOutput.fail(taskId, errorMsg)
                 return
             }
 
@@ -61,8 +49,7 @@ public class ScanSingleCategoryTaskRunner {
                 case None =>
                     let errorMsg = "Category not found: ${catidParam}"
                     TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-                    TaskModel.failTask(taskId, errorMsg)
-                    TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
+                    TaskRunnerOutput.fail(taskId, errorMsg)
                     return
             }
 
@@ -72,8 +59,7 @@ public class ScanSingleCategoryTaskRunner {
             if (categoryInternalId <= 0) {
                 let errorMsg = "Category not found: ${catidParam}"
                 TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-                TaskModel.failTask(taskId, errorMsg)
-                TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
+                TaskRunnerOutput.fail(taskId, errorMsg)
                 return
             }
             let groupId = "scan_single_category:${taskId}"
@@ -102,8 +88,7 @@ public class ScanSingleCategoryTaskRunner {
             logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
             TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
             TaskIO.appendLog(taskId, "Stack trace: ${e.toString()}")
-            TaskModel.failTask(taskId, errorMsg)
-            TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
+            TaskRunnerOutput.fail(taskId, errorMsg)
         }
     }
 
