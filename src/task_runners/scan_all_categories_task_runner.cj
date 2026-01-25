@@ -2,6 +2,8 @@ package lrr4cj.task_runners
 
 import std.collection.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -50,7 +52,16 @@ public class ScanAllCategoriesTaskRunner {
                 }
             }
 
-            let summary = "{\"success\":1,\"created\":${created},\"total\":${categories.size},\"errors\":${errors.size}}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(1)
+            w.writeName("created").writeValue(created)
+            w.writeName("total").writeValue(categories.size)
+            w.writeName("errors").writeValue(errors.size)
+            w.endObject()
+            w.flush()
+            let summary = String.fromUtf8(readToEnd(out))
             TaskIO.appendLog(taskId, "Task creation completed: created=${created}, total=${categories.size}, errors=${errors.size}")
             TaskModel.updateTaskProgress(taskId, 100, "Created ${created} scan_single_category tasks")
             TaskModel.completeTask(taskId, summary)
@@ -61,12 +72,25 @@ public class ScanAllCategoriesTaskRunner {
             logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
             TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
             TaskModel.failTask(taskId, errorMsg)
-            TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(0)
+            w.writeName("error").writeValue(errorMsg)
+            w.endObject()
+            w.flush()
+            TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
         }
     }
 
     private static func enqueueSingleCategoryScan(category: CategoryData, groupId: String, notifier: TaskNotifier): Int64 {
-        let params = "{\"category_id\":\"${escapeJson(category.catid)}\"}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("category_id").writeValue(category.catid)
+        w.endObject()
+        w.flush()
+        let params = String.fromUtf8(readToEnd(out))
         let triggerSource = "scan_all_categories"
         let childTask = TaskModel.createTaskWithOptions(
             "扫描分类: ${category.name}",

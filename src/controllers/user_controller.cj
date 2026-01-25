@@ -4,9 +4,21 @@ import cjoy.*
 import stdx.net.http.HttpStatusCode
 import std.fs.*
 import std.time.*
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
+
+class AvatarAssetIdView <: JsonSerializable {
+    public let avatarAssetId: Int64
+    public init(avatarAssetId: Int64) { this.avatarAssetId = avatarAssetId }
+    public func toJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("avatarAssetId").writeValue(avatarAssetId)
+        w.endObject()
+    }
+}
 
 /**
  * User profile APIs (avatar, etc.)
@@ -20,14 +32,14 @@ public class UserController {
     public static func uploadAvatar(ctx: JoyContext, userId: Int64): Unit {
         if (userId <= 0) {
             ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
-            ctx.json("{\"code\":401,\"message\":\"unauthorized\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(401, "unauthorized", None))
             return
         }
 
         let raw = ctx.readRawData()
         if (raw.size <= 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json("{\"code\":400,\"message\":\"empty body\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(400, "empty body", None))
             return
         }
 
@@ -59,7 +71,7 @@ public class UserController {
         } catch (e: Exception) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json("{\"code\":500,\"message\":\"failed to write temp file: ${escapeJsonString(e.message)}\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(500, "failed to write temp file: ${e.message}", None))
             return
         }
 
@@ -67,7 +79,7 @@ public class UserController {
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(HttpStatusCode.STATUS_UNPROCESSABLE_ENTITY)
-            ctx.json("{\"code\":422,\"message\":\"avatar conversion failed: ${escapeJsonString(convertRes.error)}\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(422, "avatar conversion failed: ${convertRes.error}", None))
             return
         }
 
@@ -82,7 +94,7 @@ public class UserController {
                 } catch (e: Exception) {
                     let _ = FileUtils.removeFileOrDirectory(tempDir)
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json("{\"code\":500,\"message\":\"failed to store avatar: ${escapeJsonString(e.message)}\",\"data\":null}")
+                    ResponseView.json(ctx, ApiResponse<String>(500, "failed to store avatar: ${e.message}", None))
                     return
                 }
 
@@ -90,17 +102,17 @@ public class UserController {
                     // File is already written; keep it, but report DB error.
                     let _ = FileUtils.removeFileOrDirectory(tempDir)
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json("{\"code\":500,\"message\":\"failed to update user avatar\",\"data\":null}")
+                    ResponseView.json(ctx, ApiResponse<String>(500, "failed to update user avatar", None))
                     return
                 }
 
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
                 ctx.status(HttpStatusCode.STATUS_OK)
-                ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"avatarAssetId\":${assetId}}}")
+                ResponseView.json(ctx, ApiResponse<AvatarAssetIdView>(200, "ok", Some(AvatarAssetIdView(assetId))))
             case None =>
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json("{\"code\":500,\"message\":\"failed to create asset record\",\"data\":null}")
+                ResponseView.json(ctx, ApiResponse<String>(500, "failed to create asset record", None))
         }
     }
 

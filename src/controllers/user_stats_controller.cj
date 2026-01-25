@@ -2,6 +2,8 @@ package lrr4cj.controllers
 
 import cjoy.*
 import std.convert.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.middleware.*
 import lrr4cj.utils.*
@@ -143,21 +145,24 @@ public class UserStatsController {
      * 将 ArchiveData 转换为 JSON 字符串
      */
     private static func archiveToJson(archive: ArchiveData): String {
-        var json = "{"
-        json += "\"arcid\":\"${escapeJson(archive.id)}\","
-        json += "\"title\":\"${escapeJson(archive.title)}\","
-        json += "\"filename\":\"${escapeJson(archive.filename)}\","
-        json += "\"summary\":\"${escapeJson(archive.summary)}\","
-        json += "\"thumbhash\":\"${escapeJson(archive.thumbhash)}\","
-        json += "\"tags\":\"${escapeJson(archive.tags)}\","
-        json += "\"pagecount\":${archive.pagecount},"
-        json += "\"progress\":${archive.progress},"
-        json += "\"file_size\":${archive.file_size},"
-        json += "\"last_read_time\":\"${escapeJson(archive.last_read_time)}\","
-        json += "\"created_at\":\"${escapeJson(archive.created_at)}\","
-        json += "\"updated_at\":\"${escapeJson(archive.updated_at)}\""
-        json += "}"
-        return json
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("arcid").writeValue(archive.id)
+        w.writeName("title").writeValue(archive.title)
+        w.writeName("filename").writeValue(archive.filename)
+        w.writeName("summary").writeValue(archive.summary)
+        w.writeName("thumbhash").writeValue(archive.thumbhash)
+        w.writeName("tags").writeValue(archive.tags)
+        w.writeName("pagecount").writeValue(archive.pagecount)
+        w.writeName("progress").writeValue(archive.progress)
+        w.writeName("file_size").writeValue(archive.file_size)
+        w.writeName("last_read_time").writeValue(archive.last_read_time)
+        w.writeName("created_at").writeValue(archive.created_at)
+        w.writeName("updated_at").writeValue(archive.updated_at)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
 }

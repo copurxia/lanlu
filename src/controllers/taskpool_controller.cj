@@ -2,6 +2,8 @@ package lrr4cj.controllers
 
 import cjoy.*
 import std.convert.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.dao.*
 import lrr4cj.services.*
@@ -63,24 +65,23 @@ public class TaskPoolController {
         let totalAll = TaskDao.getTaskCount()
         let totalPages = (total + pageSize - 1) / pageSize
 
-        // 构建响应
-        var json = "{"
-        json += "\"tasks\":["
-        for (i in 0..tasks.size) {
-            if (i > 0) {
-                json += ","
-            }
-            json += taskDataToJson(tasks[i])
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("tasks")
+        w.startArray()
+        for (t in tasks) {
+            writeTaskDataJson(w, t)
         }
-        json += "],"
-        json += "\"total\":${total},"
-        json += "\"totalAll\":${totalAll},"
-        json += "\"page\":${page},"
-        json += "\"pageSize\":${pageSize},"
-        json += "\"totalPages\":${totalPages}"
-        json += "}"
-
-        ctx.json(json)
+        w.endArray()
+        w.writeName("total").writeValue(total)
+        w.writeName("totalAll").writeValue(totalAll)
+        w.writeName("page").writeValue(page)
+        w.writeName("pageSize").writeValue(pageSize)
+        w.writeName("totalPages").writeValue(totalPages)
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
     }
 
     /**
@@ -110,8 +111,11 @@ public class TaskPoolController {
             task.result = out
         }
 
-        let json = taskDataToJson(task)
-        ctx.json(json)
+        let out2 = ByteBuffer()
+        let w2 = JsonWriter(out2)
+        writeTaskDataJson(w2, task)
+        w2.flush()
+        ctx.json(String.fromUtf8(readToEnd(out2)))
     }
 
     /**
@@ -240,41 +244,40 @@ public class TaskPoolController {
     /**
      * 将任务数据转换为JSON
      */
-    private static func taskDataToJson(task: TaskData): String {
-        return """
-            {
-            "id":${task.id},
-            "name":"${escapeJson(task.name)}",
-            "task_type":"${escapeJson(task.taskType)}",
-            "status":"${escapeJson(task.status)}",
-            "progress":${task.progress},
-            "message":"${escapeJson(task.message)}",
-            "plugin_namespace":"${escapeJson(task.pluginNamespace)}",
-            "parameters":"${escapeJson(task.parameters)}",
-            "result":"${escapeJson(task.result)}",
-            "priority":${task.priority},
-            "group_id":"${escapeJson(task.groupId)}",
-            "timeout_at":"${escapeJson(task.timeoutAt)}",
-            "trigger_source":"${escapeJson(task.triggerSource)}",
-            "created_at":"${escapeJson(task.createdAt)}",
-            "started_at":"${escapeJson(task.startedAt)}",
-            "completed_at":"${escapeJson(task.completedAt)}"
-            }"""
+    private static func writeTaskDataJson(w: JsonWriter, task: TaskData): Unit {
+        w.startObject()
+        w.writeName("id").writeValue(task.id)
+        w.writeName("name").writeValue(task.name)
+        w.writeName("task_type").writeValue(task.taskType)
+        w.writeName("status").writeValue(task.status)
+        w.writeName("progress").writeValue(task.progress)
+        w.writeName("message").writeValue(task.message)
+        w.writeName("plugin_namespace").writeValue(task.pluginNamespace)
+        w.writeName("parameters").writeValue(task.parameters)
+        w.writeName("result").writeValue(task.result)
+        w.writeName("priority").writeValue(task.priority)
+        w.writeName("group_id").writeValue(task.groupId)
+        w.writeName("timeout_at").writeValue(task.timeoutAt)
+        w.writeName("trigger_source").writeValue(task.triggerSource)
+        w.writeName("created_at").writeValue(task.createdAt)
+        w.writeName("started_at").writeValue(task.startedAt)
+        w.writeName("completed_at").writeValue(task.completedAt)
+        w.endObject()
     }
 
     /**
      * 将任务数组转换为JSON
      */
     private static func tasksArrayToJson(tasks: Array<TaskData>): String {
-        var json = "["
-        for (i in 0..tasks.size) {
-            if (i > 0) {
-                json = json + ","
-            }
-            json = json + taskDataToJson(tasks[i])
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
+        for (t in tasks) {
+            writeTaskDataJson(w, t)
         }
-        json = json + "]"
-        return json
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**

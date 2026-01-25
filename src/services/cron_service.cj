@@ -4,6 +4,8 @@ import std.sync.*
 import std.time.*
 import std.collection.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -749,7 +751,13 @@ public class CronService {
      */
     public func triggerCategoryScan(catid: String, _: String, priority: Int32, triggerSource: String): Int64 {
         let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
-        let params = "{\"category_id\":\"${escapeJson(catid)}\"}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("category_id").writeValue(catid)
+        w.endObject()
+        w.flush()
+        let params = String.fromUtf8(readToEnd(out))
         let task = TaskModel.createTaskWithOptions("分类扫描", "scan_single_category", params, priority, "category_scan:${catid}", source)
         TaskPoolService.getInstance().notifyTaskAvailable()
         return task.id
@@ -786,7 +794,13 @@ public class CronService {
      */
     public func triggerClearCache(priority!: Int32 = 40, triggerSource!: String = "manual", maxAgeDays!: Int64 = 7): Int64 {
         let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
-        let params = "{\"maxAgeDays\":${maxAgeDays}}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("maxAgeDays").writeValue(maxAgeDays)
+        w.endObject()
+        w.flush()
+        let params = String.fromUtf8(readToEnd(out))
         let task = TaskModel.createTaskWithOptions("清理缓存", "clear_cache", params, priority, "", source)
         TaskPoolService.getInstance().notifyTaskAvailable()
         let logger = getLogger("cron_service")
@@ -799,7 +813,13 @@ public class CronService {
      */
     public func triggerClearLog(priority!: Int32 = 40, triggerSource!: String = "manual", maxAgeDays!: Int64 = 7): Int64 {
         let source = if (triggerSource.size > 0) { triggerSource } else { "manual" }
-        let params = "{\"maxAgeDays\":${maxAgeDays}}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("maxAgeDays").writeValue(maxAgeDays)
+        w.endObject()
+        w.flush()
+        let params = String.fromUtf8(readToEnd(out))
         let task = TaskModel.createTaskWithOptions("清理日志", "clear_log", params, priority, "", source)
         TaskPoolService.getInstance().notifyTaskAvailable()
         let logger = getLogger("cron_service")
@@ -837,16 +857,20 @@ public class CronValidationResult {
     }
 
     public func toJson(): String {
-        var json = "{"
-        json += "\"valid\":${valid},"
-        json += "\"error\":\"${escapeJsonString(error)}\","
-        json += "\"nextRuns\":["
-        for (i in 0..nextRuns.size) {
-            if (i > 0) { json += "," }
-            json += "\"${escapeJsonString(nextRuns[i])}\""
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("valid").writeValue(valid)
+        w.writeName("error").writeValue(error)
+        w.writeName("nextRuns")
+        w.startArray()
+        for (s in nextRuns) {
+            w.writeValue(s)
         }
-        json += "]}"
-        return json
+        w.endArray()
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
 }
@@ -866,6 +890,14 @@ public class CronServiceStatus {
     }
 
     public func toJson(): String {
-        return "{\"running\":${running},\"totalTasks\":${totalTasks},\"enabledTasks\":${enabledTasks}}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("running").writeValue(running)
+        w.writeName("totalTasks").writeValue(totalTasks)
+        w.writeName("enabledTasks").writeValue(enabledTasks)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 }

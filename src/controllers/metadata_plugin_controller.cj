@@ -161,12 +161,16 @@ public class MetadataPluginController {
                 let paramsJson = if (requestBody.trimAscii().size > 0) {
                     requestBody
                 } else {
-                    "{" +
-                    "\"archive_id\":\"${escapeJsonString(archiveId)}\"," +
-                    "\"namespace\":\"${escapeJsonString(namespace)}\"," +
-                    "\"param\":\"${escapeJsonString(param)}\"," +
-                    "\"write_back\":1" +
-                    "}"
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archive_id").writeValue(archiveId)
+                    w.writeName("namespace").writeValue(namespace)
+                    w.writeName("param").writeValue(param)
+                    w.writeName("write_back").writeValue(1)
+                    w.endObject()
+                    w.flush()
+                    String.fromUtf8(readToEnd(out))
                 }
 
                 TaskDao.updateTaskParameters(task.id, paramsJson)
@@ -174,17 +178,19 @@ public class MetadataPluginController {
 
                 TaskPoolService.getInstance().notifyTaskAvailable()
 
-                let response =
-                    "{" +
-                    "\"job\":${task.id}," +
-                    "\"operation\":\"metadata_plugin\"," +
-                    "\"task_type\":\"metadata_plugin\"," +
-                    "\"write_back\":1," +
-                    "\"success\":1," +
-                    "\"archive_id\":\"${escapeJsonString(archiveId)}\"," +
-                    "\"namespace\":\"${escapeJsonString(namespace)}\"" +
-                    "}"
-                ctx.json(response)
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("job").writeValue(task.id)
+                w.writeName("operation").writeValue("metadata_plugin")
+                w.writeName("task_type").writeValue("metadata_plugin")
+                w.writeName("write_back").writeValue(1)
+                w.writeName("success").writeValue(1)
+                w.writeName("archive_id").writeValue(archiveId)
+                w.writeName("namespace").writeValue(namespace)
+                w.endObject()
+                w.flush()
+                ctx.json(String.fromUtf8(readToEnd(out)))
                 return
             }
 
@@ -229,21 +235,30 @@ public class MetadataPluginController {
             TaskIO.appendLog(denoTask.id, "enqueued deno_task(metadata preview) archive_id=${archiveId} namespace=${namespace}")
             TaskPoolService.getInstance().notifyTaskAvailable()
 
-            let response =
-                "{" +
-                "\"job\":${denoTask.id}," +
-                "\"operation\":\"metadata_preview\"," +
-                "\"task_type\":\"deno_task\"," +
-                "\"write_back\":0," +
-                "\"success\":1," +
-                "\"archive_id\":\"${escapeJsonString(archiveId)}\"," +
-                "\"namespace\":\"${escapeJsonString(namespace)}\"" +
-                "}"
-            ctx.json(response)
+            let out2 = ByteBuffer()
+            let w2 = JsonWriter(out2)
+            w2.startObject()
+            w2.writeName("job").writeValue(denoTask.id)
+            w2.writeName("operation").writeValue("metadata_preview")
+            w2.writeName("task_type").writeValue("deno_task")
+            w2.writeName("write_back").writeValue(0)
+            w2.writeName("success").writeValue(1)
+            w2.writeName("archive_id").writeValue(archiveId)
+            w2.writeName("namespace").writeValue(namespace)
+            w2.endObject()
+            w2.flush()
+            ctx.json(String.fromUtf8(readToEnd(out2)))
         } catch (e: Exception) {
             logger.error("metadata_plugin 处理异常", ("error", e.message))
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"${escapeJsonString(e.message)}\"}")
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(0)
+            w.writeName("error").writeValue(e.message)
+            w.endObject()
+            w.flush()
+            ctx.json(String.fromUtf8(readToEnd(out)))
         }
     }
 }

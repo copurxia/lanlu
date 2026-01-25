@@ -2,14 +2,15 @@ package lrr4cj.controllers
 
 import stdx.net.http.HttpStatusCode
 import cjoy.*
-import cjoy.json.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
 import lrr4cj.services.*
+import lrr4cj.views.*
 import std.fs.*
 import std.convert.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.log.*
 import stdx.encoding.json.stream.*
 
@@ -135,8 +136,15 @@ public class ChunkedUploadController {
                         let targetPath = Path("${cat.scanPath}/${filename}")
                         if (exists(targetPath)) {
                             // 文件已存在，返回提示信息
-                            let response = "{\"success\":0,\"fileExists\":true,\"error\":\"文件已存在: ${escapeJsonString(filename)}\"}"
-                            ctx.json(response)
+                            let out = ByteBuffer()
+                            let w = JsonWriter(out)
+                            w.startObject()
+                            w.writeName("success").writeValue(0)
+                            w.writeName("fileExists").writeValue(true)
+                            w.writeName("error").writeValue("文件已存在: ${filename}")
+                            w.endObject()
+                            w.flush()
+                            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                             return
                         }
                     case None => ()
@@ -157,7 +165,7 @@ public class ChunkedUploadController {
             if (task.id == 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"创建任务失败\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -197,11 +205,11 @@ public class ChunkedUploadController {
             }
 
             let response = "{\"success\":1,\"taskId\":\"${task.id}\"}"
-            ctx.json(response)
+            ResponseView.json(ctx, response)
         } catch (e: Exception) {
             let errorResponse = "{\"success\":0,\"error\":\"${e.message}\"}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
         }
     }
 
@@ -220,7 +228,7 @@ public class ChunkedUploadController {
             if (taskIdStr.size == 0 || chunkIndexStr.size == 0 || totalChunksStr.size == 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"Missing required parameters: taskId, chunkIndex, totalChunks\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -232,7 +240,7 @@ public class ChunkedUploadController {
             if (!exists(uploadDir)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Upload directory not found for taskId ${taskIdStr}\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -241,7 +249,7 @@ public class ChunkedUploadController {
             if (!exists(metaPath)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Upload meta not found for taskId ${taskIdStr}\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -289,26 +297,26 @@ public class ChunkedUploadController {
             } catch (e: Exception) {
                 let errorResponse = "{\"success\":0,\"error\":\"Failed to read upload meta: ${e.message}\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
             if (fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"Invalid upload meta: filesize/chunk_size/total_chunks\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
             if (totalChunksFromQuery != totalChunks) {
                 let errorResponse = "{\"success\":0,\"error\":\"totalChunks mismatch\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
             if (chunkIndex < 0 || chunkIndex >= totalChunks) {
                 let errorResponse = "{\"success\":0,\"error\":\"Invalid chunkIndex\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -318,7 +326,7 @@ public class ChunkedUploadController {
             if (fileData.size <= 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"Empty body\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -327,19 +335,19 @@ public class ChunkedUploadController {
             if (expectedOffset < 0 || expectedOffset >= fileSize) {
                 let errorResponse = "{\"success\":0,\"error\":\"Invalid chunk offset\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
             if (expectedOffset + fileData.size > fileSize) {
                 let errorResponse = "{\"success\":0,\"error\":\"Chunk exceeds file size\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
             if (chunkIndex != totalChunks - 1 && fileData.size != chunkSize) {
                 let errorResponse = "{\"success\":0,\"error\":\"Invalid chunk size\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -348,7 +356,7 @@ public class ChunkedUploadController {
             if (!exists(partPath)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Upload part file not found\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -363,7 +371,7 @@ public class ChunkedUploadController {
             } catch (e: Exception) {
                 let errorResponse = "{\"success\":0,\"error\":\"Failed to write chunk: ${e.message}\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -387,11 +395,11 @@ public class ChunkedUploadController {
 
             // 返回成功响应
             let response = "{\"success\":1,\"message\":\"Chunk uploaded successfully\"}"
-            ctx.json(response)
+            ResponseView.json(ctx, response)
         } catch (e: Exception) {
             let errorResponse = "{\"success\":0,\"error\":\"${e.message}\"}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
         }
     }
 
@@ -408,7 +416,7 @@ public class ChunkedUploadController {
             if (taskIdStr.size == 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"taskId is required\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -417,7 +425,7 @@ public class ChunkedUploadController {
             } catch (e: Exception) {
                 let errorResponse = "{\"success\":0,\"error\":\"Invalid taskId format\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -428,7 +436,7 @@ public class ChunkedUploadController {
             if (task.status == "completed" || task.status == "failed") {
                 let errorResponse = "{\"success\":0,\"error\":\"Task already completed or failed\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -497,7 +505,7 @@ public class ChunkedUploadController {
             if (!exists(chunkDir)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Upload directory not found for taskId ${taskIdStr}\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -506,7 +514,7 @@ public class ChunkedUploadController {
             if (!exists(metaPath)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Upload meta not found for taskId ${taskIdStr}\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -549,14 +557,14 @@ public class ChunkedUploadController {
             } catch (e: Exception) {
                 let errorResponse = "{\"success\":0,\"error\":\"Failed to read upload meta: ${e.message}\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
             if (totalChunks <= 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"Invalid total_chunks\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -565,7 +573,7 @@ public class ChunkedUploadController {
                 if (!exists(donePath)) {
                     let errorResponse = "{\"success\":0,\"error\":\"missing chunk ${Int64(i).toString()}\"}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
             }
@@ -577,7 +585,7 @@ public class ChunkedUploadController {
             if (!exists(finalFile)) {
                 let errorResponse = "{\"success\":0,\"error\":\"Uploaded file not found at ${chunkDir.toString()}/${UPLOAD_PART_FILE}\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
             if (fileSize > 0) {
@@ -585,7 +593,7 @@ public class ChunkedUploadController {
                 if (actualSize != fileSize) {
                     let errorResponse = "{\"success\":0,\"error\":\"file size mismatch\"}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
             }
@@ -594,7 +602,7 @@ public class ChunkedUploadController {
             if (categoryId.size == 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"category_id is required\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -611,7 +619,7 @@ public class ChunkedUploadController {
                 case None =>
                     let errorResponse = "{\"success\":0,\"error\":\"Category not found\"}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
             }
 
@@ -632,13 +640,20 @@ public class ChunkedUploadController {
                         getLogger("chunked_upload").error("删除已存在文件失败", ("path", finalArchivePath.toString()), ("error", e.message))
                         let errorResponse = "{\"success\":0,\"error\":\"删除已存在文件失败: ${e.message}\"}"
                         ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ctx.json(errorResponse)
+                        ResponseView.json(ctx, errorResponse)
                         return
                     }
                 } else {
                     // 文件已存在但未设置覆盖，返回错误
-                    let errorResponse = "{\"success\":0,\"fileExists\":true,\"error\":\"文件已存在: ${escapeJsonString(originalFileName)}\"}"
-                    ctx.json(errorResponse)
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("success").writeValue(0)
+                    w.writeName("fileExists").writeValue(true)
+                    w.writeName("error").writeValue("文件已存在: ${originalFileName}")
+                    w.endObject()
+                    w.flush()
+                    ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                     return
                 }
             }
@@ -684,7 +699,7 @@ public class ChunkedUploadController {
 
                 let errorResponse = "{\"success\":0,\"error\":\"Failed to move file: ${e.message}\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -714,13 +729,16 @@ public class ChunkedUploadController {
             let asyncFlag = ctx.getQuery("async") ?? ""
             if (asyncFlag == "1" || asyncFlag == "true") {
                 // 更新任务类型并置为pending，等待TaskPool领取
-                let paramsJson =
-                    "{" +
-                    "\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\"," +
-                    "\"relative_path\":\"${escapeJsonString(finalArchivePath.toString())}\"," +
-                    "\"filename\":\"${escapeJsonString(originalFileName)}\"," +
-                    "\"category_id\":${categoryInternalId}" +
-                    "}"
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("archive_path").writeValue(absoluteArchivePath)
+                w.writeName("relative_path").writeValue(finalArchivePath.toString())
+                w.writeName("filename").writeValue(originalFileName)
+                w.writeName("category_id").writeValue(categoryInternalId)
+                w.endObject()
+                w.flush()
+                let paramsJson = String.fromUtf8(readToEnd(out))
                 TaskDao.updateTaskParameters(taskId, paramsJson)
                 TaskDao.updateTaskType(taskId, "upload_process")
                 TaskDao.updateTaskStatus(taskId, "pending", "等待处理", 70)
@@ -728,14 +746,30 @@ public class ChunkedUploadController {
                 TaskPoolService.getInstance().notifyTaskAvailable()
 
                 // 立刻返回job，前端通过 /api/taskpool/{id} 查询进度与最终输出
-                let response = "{\"success\":1,\"job\":${taskId},\"operation\":\"upload\",\"filename\":\"${escapeJsonString(originalFileName)}\"}"
-                ctx.json(response)
+                let out2 = ByteBuffer()
+                let w2 = JsonWriter(out2)
+                w2.startObject()
+                w2.writeName("success").writeValue(1)
+                w2.writeName("job").writeValue(taskId)
+                w2.writeName("operation").writeValue("upload")
+                w2.writeName("filename").writeValue(originalFileName)
+                w2.endObject()
+                w2.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out2)))
                 return
             }
 
             // 异步模式：创建 scan_archive 任务处理归档文件
             let cachePath = SystemSettingsService.getPath("CACHE_PATH")
-            let params = "{\"archive_path\":\"${escapeJsonString(absoluteArchivePath)}\",\"category_id\":${categoryInternalId},\"cache_path\":\"${escapeJsonString(cachePath)}\"}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archive_path").writeValue(absoluteArchivePath)
+            w.writeName("category_id").writeValue(categoryInternalId)
+            w.writeName("cache_path").writeValue(cachePath)
+            w.endObject()
+            w.flush()
+            let params = String.fromUtf8(readToEnd(out))
             let scanTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, 50, "chunked_upload:${taskId}", "upload")
             if (scanTask.id > 0) {
                 TaskPoolService.getInstance().notifyTaskAvailable()
@@ -749,7 +783,7 @@ public class ChunkedUploadController {
                 cleanupUploadDir(chunkDir)
 
                 let response = "{\"success\":1,\"taskId\":${scanTask.id}}"
-                ctx.json(response)
+                ResponseView.json(ctx, response)
             } else {
                 // 处理失败，标记任务失败
                 getLogger("chunked_upload").error("Failed to create file processing task")
@@ -763,12 +797,12 @@ public class ChunkedUploadController {
                 }
                 let errorResponse = "{\"success\":0,\"error\":\"Failed to create processing task\"}"
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
             }
         } catch (e: Exception) {
             let errorResponse = "{\"success\":0,\"error\":\"${e.message}\"}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
         }
     }
 
@@ -783,7 +817,7 @@ public class ChunkedUploadController {
             if (taskIdStr.size == 0) {
                 let errorResponse = "{\"success\":0,\"error\":\"Task ID is required\"}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
                 return
             }
 
@@ -796,11 +830,11 @@ public class ChunkedUploadController {
             }
 
             let response = "{\"success\":1}"
-            ctx.json(response)
+            ResponseView.json(ctx, response)
         } catch (e: Exception) {
             let errorResponse = "{\"success\":0,\"error\":\"${e.message}\"}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
         }
     }
 

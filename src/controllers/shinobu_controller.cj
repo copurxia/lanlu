@@ -2,10 +2,13 @@ package lrr4cj.controllers
 
 import cjoy.*
 import std.convert.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.services.*
 import lrr4cj.dao.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
 
 /**
  * Shinobu控制器（兼容旧API，实际调用CronService）
@@ -115,33 +118,29 @@ public class ShinobuController {
         // 查询启动任务
         let tasks = TaskDao.getTasksByTriggerSource("startup", limit)
 
-        // 构建JSON响应
-        var json = "{\"tasks\":["
-        for (i in 0..tasks.size) {
-            if (i > 0) {
-                json = json + ","
-            }
-            let task = tasks[i]
-
-            // 计算执行时长
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("tasks")
+        w.startArray()
+        for (task in tasks) {
             let durationMs = calculateDuration(task.startedAt, task.completedAt)
-
-            json = json + """
-                {
-                "id":${task.id},
-                "task_type":"${escapeJson(task.taskType)}",
-                "status":"${escapeJson(task.status)}",
-                "trigger_source":"${escapeJson(task.triggerSource)}",
-                "created_at":"${escapeJson(task.createdAt)}",
-                "started_at":"${escapeJson(task.startedAt)}",
-                "completed_at":"${escapeJson(task.completedAt)}",
-                "duration_ms":${durationMs},
-                "message":"${escapeJson(task.message)}"
-                }"""
+            w.startObject()
+            w.writeName("id").writeValue(task.id)
+            w.writeName("task_type").writeValue(task.taskType)
+            w.writeName("status").writeValue(task.status)
+            w.writeName("trigger_source").writeValue(task.triggerSource)
+            w.writeName("created_at").writeValue(task.createdAt)
+            w.writeName("started_at").writeValue(task.startedAt)
+            w.writeName("completed_at").writeValue(task.completedAt)
+            w.writeName("duration_ms").writeValue(durationMs)
+            w.writeName("message").writeValue(task.message)
+            w.endObject()
         }
-        json = json + "]}"
-
-        ctx.json(json)
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     /**

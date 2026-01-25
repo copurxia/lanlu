@@ -4,6 +4,7 @@ import std.collection.*
 import std.convert.*
 import std.time.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -198,19 +199,30 @@ public class MetadataPluginCallbackRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
     private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, output: String): String {
-        "{" +
-        "\"success\":1," +
-        "\"archive_id\":\"${escapeJson(archiveId)}\"," +
-        "\"namespace\":\"${escapeJson(namespace)}\"," +
-        "\"title\":\"${escapeJson(title)}\"," +
-        "\"summary\":\"${escapeJson(summary)}\"," +
-        "\"tags\":\"${escapeJson(tags)}\"," +
-        "\"plugin_output\":\"${escapeJson(output)}\"" +
-        "}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(1)
+        w.writeName("archive_id").writeValue(archiveId)
+        w.writeName("namespace").writeValue(namespace)
+        w.writeName("title").writeValue(title)
+        w.writeName("summary").writeValue(summary)
+        w.writeName("tags").writeValue(tags)
+        w.writeName("plugin_output").writeValue(output)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
 }

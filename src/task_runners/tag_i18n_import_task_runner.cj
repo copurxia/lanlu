@@ -3,6 +3,7 @@ package lrr4cj.task_runners
 import std.fs.*
 import stdx.encoding.json.stream.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
 import lrr4cj.config.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -18,7 +19,14 @@ public class TagI18nImportTaskRunner {
     private static func fail(taskId: Int64, message: String): Unit {
         TaskIO.appendLog(taskId, "failed: ${message}")
         TaskModel.failTask(taskId, message)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJsonString(message)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(message)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
     public static func run(taskId: Int64, parameters: String, _: TaskRunnerContext): Unit {

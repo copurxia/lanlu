@@ -2,9 +2,12 @@ package lrr4cj.controllers
 
 import cjoy.*
 import std.convert.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.services.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
 
 /**
  * 定时任务控制器
@@ -18,16 +21,19 @@ public class CronController {
      */
     public static func getTaskTypes(ctx: JoyContext) {
         let types = TaskPoolService.getSupportedTaskTypes()
-
-        var json = "{\"success\":true,\"types\":["
-        let size = types.size
-        for (i in 0..size) {
-            if (i > 0) { json += "," }
-            json += "\"${escapeJsonString(types[i])}\""
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(true)
+        w.writeName("types")
+        w.startArray()
+        for (t in types) {
+            w.writeValue(t)
         }
-        json += "]}"
-
-        ctx.json(json)
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     /**

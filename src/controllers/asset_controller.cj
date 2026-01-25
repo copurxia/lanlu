@@ -3,9 +3,21 @@ package lrr4cj.controllers
 import cjoy.*
 import stdx.net.http.HttpStatusCode
 import std.fs.*
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
+
+class AssetIdView <: JsonSerializable {
+    public let assetId: Int64
+    public init(assetId: Int64) { this.assetId = assetId }
+    public func toJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("assetId").writeValue(assetId)
+        w.endObject()
+    }
+}
 
 /**
  * Asset controller: serve files stored in ASSET_PATH by asset id.
@@ -17,14 +29,14 @@ public class AssetController {
         let id = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
         if (id <= 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json("{\"code\":400,\"message\":\"invalid asset id\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(400, "invalid asset id", None))
             return
         }
 
         let asset = AssetDao.getById(id)
         if (asset.id <= 0) {
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json("{\"code\":404,\"message\":\"asset not found\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(404, "asset not found", None))
             return
         }
 
@@ -34,7 +46,7 @@ public class AssetController {
 
         if (!exists(Path(filePath))) {
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json("{\"code\":404,\"message\":\"asset file missing\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(404, "asset file missing", None))
             return
         }
 
@@ -57,7 +69,7 @@ public class AssetController {
             ctx.data(bytes)
         } catch (e: Exception) {
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json("{\"code\":500,\"message\":\"${escapeJsonString(e.message)}\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(500, e.message, None))
         }
     }
 
@@ -68,14 +80,14 @@ public class AssetController {
     public static func uploadAsset(ctx: JoyContext, userId: Int64): Unit {
         if (userId <= 0) {
             ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
-            ctx.json("{\"code\":401,\"message\":\"unauthorized\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(401, "unauthorized", None))
             return
         }
 
         let raw = ctx.readRawData()
         if (raw.size <= 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json("{\"code\":400,\"message\":\"empty body\",\"data\":null}")
+            ResponseView.json(ctx, ApiResponse<String>(400, "empty body", None))
             return
         }
 
@@ -99,14 +111,14 @@ public class AssetController {
                 } catch (e: Exception) {
                     let _ = AssetDao.deleteById(assetId)
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json("{\"code\":500,\"message\":\"failed to store asset: ${escapeJsonString(e.message)}\",\"data\":null}")
+                    ResponseView.json(ctx, ApiResponse<String>(500, "failed to store asset: ${e.message}", None))
                     return
                 }
                 ctx.status(HttpStatusCode.STATUS_OK)
-                ctx.json("{\"code\":200,\"message\":\"ok\",\"data\":{\"assetId\":${assetId}}}")
+                ResponseView.json(ctx, ApiResponse<AssetIdView>(200, "ok", Some(AssetIdView(assetId))))
             case None =>
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json("{\"code\":500,\"message\":\"failed to create asset record\",\"data\":null}")
+                ResponseView.json(ctx, ApiResponse<String>(500, "failed to create asset record", None))
         }
     }
 

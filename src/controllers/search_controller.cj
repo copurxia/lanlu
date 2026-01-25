@@ -1,7 +1,6 @@
 package lrr4cj.controllers
 
 import cjoy.*
-import cjoy.json.*
 import lrr4cj.models.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
@@ -9,6 +8,8 @@ import lrr4cj.middleware.*
 import lrr4cj.utils.*
 import std.convert.*
 import std.collection.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 
 /**
  * 搜索控制器
@@ -109,66 +110,59 @@ public class SearchController {
                 }
             }
 
-            var tanksJson = "["
-            var isFirstTank = true
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("data")
+            w.startArray()
             for (tid in tankoubonIds) {
                 match (aggMap.get(tid)) {
                     case Some(agg) =>
-                        if (!isFirstTank) {
-                            tanksJson += ","
+                        let tankFavoriteTime = match (tankFavoriteTimeMap.get(tid)) {
+                            case Some(time) => time
+                            case None => 0
                         }
-                        isFirstTank = false
 
-                        var archivesJson = "["
-                        match (tankArchivesCache.get(tid)) {
-                            case Some(archives) =>
-                                var isFirstArchive = true
-                                for (archiveId in archives) {
-                                    if (!isFirstArchive) {
-                                        archivesJson += ","
-                                    }
-                                    archivesJson += "\"${escapeJson(archiveId)}\""
-                                    isFirstArchive = false
-                                }
-                            case None => ()
-                        }
-                        archivesJson += "]"
-
-                        var tankFavoriteTime = 0
-        match (tankFavoriteTimeMap.get(tid)) {
-            case Some(time) => tankFavoriteTime = time
-            case None => tankFavoriteTime = 0
-        }
-
-                        // 翻译标签
                         let translatedTags = if (lang.size > 0) {
                             TagDao.translateTagsString(agg.tags, lang, tagTranslations)
                         } else {
                             agg.tags
                         }
 
-                        tanksJson += "{"
-                        tanksJson += "\"type\":\"tankoubon\","
-                        tanksJson += "\"tankoubon_id\":\"${escapeJson(agg.tankoubon_id)}\","
-                        tanksJson += "\"name\":\"${escapeJson(agg.name)}\","
-                        tanksJson += "\"summary\":\"${escapeJson(agg.summary)}\","
-                        tanksJson += "\"tags\":\"${escapeJson(translatedTags)}\","
-                        tanksJson += "\"archives\":${archivesJson},"
-                        tanksJson += "\"pagecount\":${agg.pagecount},"
-                        tanksJson += "\"progress\":${agg.progress},"
-                        tanksJson += "\"lastreadtime\":\"${escapeJson(agg.last_read_time)}\","
-                        tanksJson += "\"isnew\":${agg.isnew},"
-                        tanksJson += "\"archive_count\":${agg.archive_count},"
-                        tanksJson += "\"isfavorite\":true,"
-                        tanksJson += "\"favoritetime\":${tankFavoriteTime}"
-                        tanksJson += "}"
+                        w.startObject()
+                        w.writeName("type").writeValue("tankoubon")
+                        w.writeName("tankoubon_id").writeValue(agg.tankoubon_id)
+                        w.writeName("name").writeValue(agg.name)
+                        w.writeName("summary").writeValue(agg.summary)
+                        w.writeName("tags").writeValue(translatedTags)
+                        w.writeName("archives")
+                        w.startArray()
+                        match (tankArchivesCache.get(tid)) {
+                            case Some(archives) =>
+                                for (archiveId in archives) {
+                                    w.writeValue(archiveId)
+                                }
+                            case None => ()
+                        }
+                        w.endArray()
+                        w.writeName("pagecount").writeValue(agg.pagecount)
+                        w.writeName("progress").writeValue(agg.progress)
+                        w.writeName("lastreadtime").writeValue(agg.last_read_time)
+                        w.writeName("isnew").writeValue(agg.isnew)
+                        w.writeName("archive_count").writeValue(agg.archive_count)
+                        w.writeName("isfavorite").writeValue(true)
+                        w.writeName("favoritetime").writeValue(tankFavoriteTime)
+                        w.endObject()
                     case None => ()
                 }
             }
-            tanksJson += "]"
-
-            let result = "{\"data\":${tanksJson},\"draw\":0,\"recordsFiltered\":${totalTankCount},\"recordsTotal\":${totalTankCount}}"
-            ctx.json(result)
+            w.endArray()
+            w.writeName("draw").writeValue(0)
+            w.writeName("recordsFiltered").writeValue(totalTankCount)
+            w.writeName("recordsTotal").writeValue(totalTankCount)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             return
         }
 
@@ -232,9 +226,7 @@ public class SearchController {
             }
         }
 
-        // 手动构建JSON数组，按照API文档要求的格式
-        var archivesJson = "["
-        var isFirst = true
+        // 使用 JsonWriter 构建响应，避免手写 JSON/转义。
         var alreadyAddedTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
 
         // 批量获取所有 Tankoubon 的归档列表
@@ -258,6 +250,11 @@ public class SearchController {
             }
         }
 
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("data")
+        w.startArray()
         for (archive in archives) {
             // 检查此归档是否属于某个Tankoubon
             var belongsToTankoubon = false
@@ -285,27 +282,6 @@ public class SearchController {
                 var tankoubonInserted = false
                 match (tankoubonDataCache.get(tankoubonId)) {
                     case Some(tankoubon) =>
-                        if (!isFirst) {
-                            archivesJson += ","
-                        }
-                        isFirst = false
-
-                        // 从缓存获取合集的archives列表
-                        var tankoubonArchivesJson = "["
-                        match (tankoubonArchivesCache.get(tankoubonId)) {
-                            case Some(tankoubonArchives) =>
-                                var isFirstArchive = true
-                                for (archiveId in tankoubonArchives) {
-                                    if (!isFirstArchive) {
-                                        tankoubonArchivesJson += ","
-                                    }
-                                    tankoubonArchivesJson += "\"${archiveId}\""
-                                    isFirstArchive = false
-                                }
-                            case None => ()
-                        }
-                        tankoubonArchivesJson += "]"
-
                         // 翻译标签
                         let translatedTankTags = if (lang.size > 0) {
                             TagDao.translateTagsString(tankoubon.tags, lang, tagTranslations)
@@ -313,19 +289,6 @@ public class SearchController {
                             tankoubon.tags
                         }
 
-                        // 添加Tankoubon条目
-                        archivesJson += "{"
-                        archivesJson = archivesJson + "\"type\":\"tankoubon\","
-                        archivesJson = archivesJson + "\"tankoubon_id\":\"${escapeJson(tankoubon.tankoubon_id)}\","
-                        archivesJson = archivesJson + "\"name\":\"${escapeJson(tankoubon.name)}\","
-                        archivesJson = archivesJson + "\"summary\":\"${escapeJson(tankoubon.summary)}\","
-                        archivesJson = archivesJson + "\"tags\":\"${escapeJson(translatedTankTags)}\","
-                        archivesJson = archivesJson + "\"archives\":${tankoubonArchivesJson},"
-                        archivesJson = archivesJson + "\"pagecount\":${tankoubon.pagecount},"
-                        archivesJson = archivesJson + "\"progress\":${tankoubon.progress},"
-                        archivesJson = archivesJson + "\"lastreadtime\":\"${escapeJson(tankoubon.last_read_time)}\","
-                        archivesJson = archivesJson + "\"isnew\":${tankoubon.isnew},"
-                        archivesJson = archivesJson + "\"archive_count\":${tankoubon.archive_count},"
                         var isTankFavorite = false
                         match (tankFavoriteMap.get(tankoubonId)) {
                             case Some(status) => isTankFavorite = status
@@ -336,9 +299,32 @@ public class SearchController {
                             case Some(time) => tankFavoriteTime = time
                             case None => tankFavoriteTime = 0
                         }
-                        archivesJson = archivesJson + "\"isfavorite\":${isTankFavorite},"
-                        archivesJson = archivesJson + "\"favoritetime\":${tankFavoriteTime}"
-                        archivesJson += "}"
+                        // 添加Tankoubon条目
+                        w.startObject()
+                        w.writeName("type").writeValue("tankoubon")
+                        w.writeName("tankoubon_id").writeValue(tankoubon.tankoubon_id)
+                        w.writeName("name").writeValue(tankoubon.name)
+                        w.writeName("summary").writeValue(tankoubon.summary)
+                        w.writeName("tags").writeValue(translatedTankTags)
+                        w.writeName("archives")
+                        w.startArray()
+                        match (tankoubonArchivesCache.get(tankoubonId)) {
+                            case Some(tankoubonArchives) =>
+                                for (archiveId in tankoubonArchives) {
+                                    w.writeValue(archiveId)
+                                }
+                            case None => ()
+                        }
+                        w.endArray()
+                        w.writeName("pagecount").writeValue(tankoubon.pagecount)
+                        w.writeName("progress").writeValue(tankoubon.progress)
+                        // Keep consistent with other endpoints: lastreadtime is a number.
+                        w.writeName("lastreadtime").writeValue(tankoubon.last_read_time)
+                        w.writeName("isnew").writeValue(tankoubon.isnew)
+                        w.writeName("archive_count").writeValue(tankoubon.archive_count)
+                        w.writeName("isfavorite").writeValue(isTankFavorite)
+                        w.writeName("favoritetime").writeValue(tankFavoriteTime)
+                        w.endObject()
 
                         alreadyAddedTankoubons[tankoubonId] = true
                         tankoubonInserted = true
@@ -354,12 +340,6 @@ public class SearchController {
             if (belongsToTankoubon && tankoubonAlreadyAdded) {
                 continue
             }
-
-            // 添加普通归档条目
-            if (!isFirst) {
-                archivesJson += ","
-            }
-            isFirst = false
 
             // 获取用户级别的 isNew 状态、收藏状态和收藏时间
             let internalId = archive.internalId
@@ -402,27 +382,30 @@ public class SearchController {
                 archive.tags
             }
 
-            archivesJson += "{"
-            archivesJson = archivesJson + "\"type\":\"archive\","
-            archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
-            archivesJson = archivesJson + "\"archivetype\":\"${escapeJson(archive.archive_type)}\","
-            archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
-            archivesJson = archivesJson + "\"isnew\":${isNew},"
-            archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
-            archivesJson = archivesJson + "\"favoritetime\":${favoriteTime},"
-            archivesJson = archivesJson + "\"lastreadtime\":${lastReadTime},"
-            archivesJson = archivesJson + "\"pagecount\":${archive.pagecount},"
-            archivesJson = archivesJson + "\"progress\":${progress},"
-            archivesJson = archivesJson + "\"size\":${archive.size()},"
-            archivesJson = archivesJson + "\"summary\":\"${escapeJson(archive.summary)}\","
-            archivesJson = archivesJson + "\"tags\":\"${escapeJson(translatedArchiveTags)}\","
-            archivesJson = archivesJson + "\"title\":\"${escapeJson(archive.title)}\""
-            archivesJson += "}"
+            w.startObject()
+            w.writeName("type").writeValue("archive")
+            w.writeName("arcid").writeValue(archive.id)
+            w.writeName("archivetype").writeValue(archive.archive_type)
+            w.writeName("filename").writeValue(archive.filename)
+            w.writeName("isnew").writeValue(isNew)
+            w.writeName("isfavorite").writeValue(isFavorite)
+            w.writeName("favoritetime").writeValue(favoriteTime)
+            w.writeName("lastreadtime").writeValue(lastReadTime)
+            w.writeName("pagecount").writeValue(archive.pagecount)
+            w.writeName("progress").writeValue(progress)
+            w.writeName("size").writeValue(archive.size())
+            w.writeName("summary").writeValue(archive.summary)
+            w.writeName("tags").writeValue(translatedArchiveTags)
+            w.writeName("title").writeValue(archive.title)
+            w.endObject()
         }
-        archivesJson += "]"
-
-        let result = "{\"data\":" + archivesJson + ",\"draw\":0,\"recordsFiltered\":" + totalCount.toString() + ",\"recordsTotal\":" + totalCount.toString() + "}"
-        ctx.json(result)
+        w.endArray()
+        w.writeName("draw").writeValue(0)
+        w.writeName("recordsFiltered").writeValue(totalCount)
+        w.writeName("recordsTotal").writeValue(totalCount)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     /**
@@ -475,15 +458,12 @@ public class SearchController {
             case None => ()
         }
 
-        // 手动构建JSON数组，按照API文档要求的格式
-        var archivesJson = "["
-        var isFirst = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("data")
+        w.startArray()
         for (archive in resultArchives) {
-            if (!isFirst) {
-                archivesJson += ","
-            }
-            isFirst = false
-
             // 获取用户级别的 isNew 状态和收藏状态
             let internalId = archive.internalId
             var isNew = true  // 默认为新
@@ -520,25 +500,26 @@ public class SearchController {
                 archive.tags
             }
 
-            archivesJson += "{"
-            archivesJson = archivesJson + "\"arcid\":\"${escapeJson(archive.id)}\","
-            archivesJson = archivesJson + "\"archivetype\":\"${escapeJson(archive.archive_type)}\","
-            archivesJson = archivesJson + "\"filename\":\"${escapeJson(archive.filename)}\","
-            archivesJson = archivesJson + "\"isnew\":${isNew},"
-            archivesJson = archivesJson + "\"isfavorite\":${isFavorite},"
-            archivesJson = archivesJson + "\"lastreadtime\":${lastReadTime},"
-            archivesJson = archivesJson + "\"pagecount\":${archive.pagecount},"
-            archivesJson = archivesJson + "\"progress\":${progress},"
-            archivesJson = archivesJson + "\"size\":${archive.size()},"
-            archivesJson = archivesJson + "\"summary\":\"${escapeJson(archive.summary)}\","
-            archivesJson = archivesJson + "\"tags\":\"${escapeJson(translatedRandomTags)}\","
-            archivesJson = archivesJson + "\"title\":\"${escapeJson(archive.title)}\""
-            archivesJson += "}"
+            w.startObject()
+            w.writeName("arcid").writeValue(archive.id)
+            w.writeName("archivetype").writeValue(archive.archive_type)
+            w.writeName("filename").writeValue(archive.filename)
+            w.writeName("isnew").writeValue(isNew)
+            w.writeName("isfavorite").writeValue(isFavorite)
+            w.writeName("lastreadtime").writeValue(lastReadTime)
+            w.writeName("pagecount").writeValue(archive.pagecount)
+            w.writeName("progress").writeValue(progress)
+            w.writeName("size").writeValue(archive.size())
+            w.writeName("summary").writeValue(archive.summary)
+            w.writeName("tags").writeValue(translatedRandomTags)
+            w.writeName("title").writeValue(archive.title)
+            w.endObject()
         }
-        archivesJson += "]"
-
-        let result = "{\"data\":" + archivesJson + ",\"recordsTotal\":" + count.toString() + "}"
-        ctx.json(result)
+        w.endArray()
+        w.writeName("recordsTotal").writeValue(count)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     /**

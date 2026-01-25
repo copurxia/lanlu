@@ -3,10 +3,12 @@ package lrr4cj.controllers
 import cjoy.*
 import std.time.*
 import std.fs.*
+import std.io.{ByteBuffer, readToEnd}
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.services.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
 import stdx.encoding.json.stream.*
 
 class CategoryUpsertReq <: JsonDeserializable<CategoryUpsertReq> {
@@ -73,22 +75,33 @@ class CategoryUpsertReq <: JsonDeserializable<CategoryUpsertReq> {
  * 每个分类对应一个扫描目录
  */
 public class CategoryController {
-    private static func categoryToJson(cat: CategoryData): String {
-        var json = "{"
-        json += "\"id\":${cat.id},"
-        json += "\"catid\":\"${escapeJson(cat.catid)}\","
-        json += "\"name\":\"${escapeJson(cat.name)}\","
-        json += "\"scan_path\":\"${escapeJson(cat.scanPath)}\","
-        json += "\"description\":\"${escapeJson(cat.description)}\","
-        json += "\"icon\":\"${escapeJson(cat.icon)}\","
-        json += "\"sort_order\":${cat.sortOrder},"
-        json += "\"enabled\":${cat.enabled},"
-        json += "\"plugins\":${cat.plugins},"
-        json += "\"archive_count\":${cat.archiveCount},"
-        json += "\"created_at\":\"${escapeJson(cat.createdAt)}\","
-        json += "\"updated_at\":\"${escapeJson(cat.updatedAt)}\""
-        json += "}"
-        return json
+    private static func writeCategoryJson(w: JsonWriter, cat: CategoryData): Unit {
+        w.startObject()
+        w.writeName("id").writeValue(cat.id)
+        w.writeName("catid").writeValue(cat.catid)
+        w.writeName("name").writeValue(cat.name)
+        w.writeName("scan_path").writeValue(cat.scanPath)
+        w.writeName("description").writeValue(cat.description)
+        w.writeName("icon").writeValue(cat.icon)
+        w.writeName("sort_order").writeValue(cat.sortOrder)
+        w.writeName("enabled").writeValue(cat.enabled)
+        // Stored as raw JSON (array/object) string.
+        let plugins = cat.plugins.trimAscii()
+        w.writeName("plugins").jsonValue(if (plugins.size > 0) { plugins } else { "[]" })
+        w.writeName("archive_count").writeValue(cat.archiveCount)
+        w.writeName("created_at").writeValue(cat.createdAt)
+        w.writeName("updated_at").writeValue(cat.updatedAt)
+        w.endObject()
+    }
+
+    private static func buildScanCategoryParams(catid: String): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("category_id").writeValue(catid)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**
@@ -97,19 +110,20 @@ public class CategoryController {
     public static func getCategories(ctx: JoyContext) {
         let categories = CategoryDao.getAllCategories()
 
-        var categoriesJson = "["
-        var isFirst = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("operation").writeValue("get_categories")
+        w.writeName("data")
+        w.startArray()
         for (cat in categories) {
-            if (!isFirst) {
-                categoriesJson += ","
-            }
-            isFirst = false
-            categoriesJson += categoryToJson(cat)
+            writeCategoryJson(w, cat)
         }
-        categoriesJson += "]"
-
-        let result = "{\"operation\":\"get_categories\",\"data\":${categoriesJson},\"success\":1}"
-        ctx.json(result)
+        w.endArray()
+        w.writeName("success").writeValue(1)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     /**
@@ -120,11 +134,19 @@ public class CategoryController {
 
         match (CategoryDao.getCategoryById(catid)) {
             case Some(cat) =>
-                let result = "{\"operation\":\"get_category\",\"data\":${categoryToJson(cat)},\"success\":1}"
-                ctx.json(result)
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("operation").writeValue("get_category")
+                w.writeName("data")
+                writeCategoryJson(w, cat)
+                w.writeName("success").writeValue(1)
+                w.endObject()
+                w.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             case None =>
                 ctx.status(404)
-                ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
+                ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
         }
     }
 
@@ -178,16 +200,31 @@ public class CategoryController {
 
             match (CategoryDao.createCategory(data)) {
                 case Some(created) =>
-                    let result = "{\"operation\":\"create_category\",\"data\":${categoryToJson(created)},\"success\":1}"
-                    ctx.json(result)
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("operation").writeValue("create_category")
+                    w.writeName("data")
+                    writeCategoryJson(w, created)
+                    w.writeName("success").writeValue(1)
+                    w.endObject()
+                    w.flush()
+                    ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                 case None =>
                     ctx.status(500)
-                    ctx.json("{\"success\":0,\"error\":\"Failed to create category\"}")
+                    ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to create category\"}")
             }
         } catch (e: Exception) {
             getLogger("category_controller").error("创建分类失败", ("error", e.message))
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"${escapeJson(e.message)}\"}")
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(0)
+            w.writeName("error").writeValue(e.message)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         }
     }
 
@@ -255,15 +292,22 @@ public class CategoryController {
             data.plugins = plugins
 
             if (CategoryDao.updateCategory(catid, data)) {
-                ctx.json("{\"operation\":\"update_category\",\"success\":1}")
+                ResponseView.json(ctx, "{\"operation\":\"update_category\",\"success\":1}")
             } else {
                 ctx.status(500)
-                ctx.json("{\"success\":0,\"error\":\"Failed to update category\"}")
+                ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to update category\"}")
             }
         } catch (e: Exception) {
             getLogger("category_controller").error("更新分类失败", ("error", e.message))
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"${escapeJson(e.message)}\"}")
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(0)
+            w.writeName("error").writeValue(e.message)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         }
     }
 
@@ -275,19 +319,33 @@ public class CategoryController {
 
         let (ok, deletedArchives, err) = CategoryDao.deleteCategory(catid)
         if (ok) {
-            ctx.json("{\"operation\":\"delete_category\",\"success\":1,\"deleted_archives\":${deletedArchives.toString()}}")
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("operation").writeValue("delete_category")
+            w.writeName("success").writeValue(1)
+            w.writeName("deleted_archives").writeValue(deletedArchives)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             return
         }
 
         if (err == "Category not found") {
             ctx.status(404)
-            ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
             return
         }
 
         ctx.status(500)
-        let msg = if (err.size > 0) { escapeJson(err) } else { "Failed to delete category" }
-        ctx.json("{\"success\":0,\"error\":\"${msg}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(if (err.size > 0) { err } else { "Failed to delete category" })
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     /**
@@ -299,7 +357,7 @@ public class CategoryController {
         match (CategoryDao.getCategoryById(catid)) {
             case Some(cat) =>
                 // 创建扫描任务
-                let params = "{\"category_id\":\"${escapeJson(cat.catid)}\"}"
+                let params = buildScanCategoryParams(cat.catid)
                 let task = TaskModel.createTaskWithOptions(
                     "扫描分类: ${cat.name}",
                     "scan_single_category",
@@ -312,14 +370,22 @@ public class CategoryController {
                 if (task.id > 0) {
                     TaskPoolService.getInstance().notifyTaskAvailable()
                     getLogger("category_controller").info("创建分类扫描任务", ("catid", catid), ("task_id", task.id.toString()))
-                    ctx.json("{\"operation\":\"scan_category\",\"success\":1,\"task_id\":${task.id}}")
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("operation").writeValue("scan_category")
+                    w.writeName("success").writeValue(1)
+                    w.writeName("task_id").writeValue(task.id)
+                    w.endObject()
+                    w.flush()
+                    ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                 } else {
                     ctx.status(500)
-                    ctx.json("{\"success\":0,\"error\":\"Failed to create scan task\"}")
+                    ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to create scan task\"}")
                 }
             case None =>
                 ctx.status(404)
-                ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
+                ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
         }
     }
 }

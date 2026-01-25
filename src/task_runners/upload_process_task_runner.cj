@@ -2,6 +2,7 @@ package lrr4cj.task_runners
 
 import stdx.log.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -33,7 +34,15 @@ public class UploadProcessTaskRunner {
             TaskModel.updateTaskProgress(taskId, 50, "创建档案扫描任务")
 
             // 创建 scan_archive 子任务（优先级 20，高于定时扫描）
-            let scanParams = "{\"archive_path\":\"${escapeJson(archivePath)}\",\"category_id\":${categoryId}}"
+            let scanOut = ByteBuffer()
+            let scanW = JsonWriter(scanOut)
+            scanW.startObject()
+            scanW.writeName("archive_path").writeValue(archivePath)
+            // category_id is passed as string sometimes; keep as raw string value.
+            scanW.writeName("category_id").writeValue(categoryId)
+            scanW.endObject()
+            scanW.flush()
+            let scanParams = String.fromUtf8(readToEnd(scanOut))
             let groupId = "upload:${taskId}"
             let scanTask = TaskModel.createTaskWithOptions(
                 "扫描上传档案",
@@ -48,8 +57,17 @@ public class UploadProcessTaskRunner {
                 context.notifyTaskAvailable()
                 logger.debug("Created scan_archive task for upload", ("scan_task_id", scanTask.id.toString()), ("archive_path", archivePath))
 
-                let okJson =
-                    "{\"success\":1,\"scan_task_id\":${scanTask.id},\"relative_path\":\"${escapeJson(relativePath)}\",\"filename\":\"${escapeJson(fileName)}\",\"message\":\"Archive scan task created\"}"
+                let okOut = ByteBuffer()
+                let okW = JsonWriter(okOut)
+                okW.startObject()
+                okW.writeName("success").writeValue(1)
+                okW.writeName("scan_task_id").writeValue(scanTask.id)
+                okW.writeName("relative_path").writeValue(relativePath)
+                okW.writeName("filename").writeValue(fileName)
+                okW.writeName("message").writeValue("Archive scan task created")
+                okW.endObject()
+                okW.flush()
+                let okJson = String.fromUtf8(readToEnd(okOut))
                 TaskModel.updateTaskProgress(taskId, 100, "档案扫描任务已创建")
                 TaskModel.completeTask(taskId, "upload_process completed, scan_archive task created")
                 TaskIO.writeOutput(taskId, okJson)
@@ -91,6 +109,13 @@ public class UploadProcessTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 }

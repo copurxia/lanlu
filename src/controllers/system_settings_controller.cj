@@ -4,6 +4,7 @@ import cjoy.*
 import std.collection.*
 import stdx.log.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lrr4cj.services.*
 import lrr4cj.models.*
@@ -150,15 +151,19 @@ public class SystemSettingsController {
         let logger = getLogger("system_settings_controller")
         try {
             let categories = SystemSettingsService.getCategories()
-            var json = "["
-            for (i in 0..categories.size) {
-                if (i > 0) {
-                    json += ","
-                }
-                json += "\"${escapeJson(categories[i])}\""
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(true)
+            w.writeName("data")
+            w.startArray()
+            for (c in categories) {
+                w.writeValue(c)
             }
-            json += "]"
-            ctx.json("{\"success\":true,\"data\":${json}}")
+            w.endArray()
+            w.endObject()
+            w.flush()
+            ctx.json(String.fromUtf8(readToEnd(out)))
         } catch (e: Exception) {
             logger.error("获取设置分类失败", ("error", e.message))
             ctx.status(500)
@@ -186,31 +191,25 @@ public class SystemSettingsController {
      * 辅助方法：设置列表转JSON
      */
     private static func settingsToJson(settings: Array<SystemSettingData>): String {
-        var jsonParts = ArrayList<String>()
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
         for (setting in settings) {
-            // description 已经是 JSONB 格式，直接使用
-            let part = """
-                {
-                    "id":${setting.id},
-                    "key":"${escapeJson(setting.key)}",
-                    "value":"${escapeJson(setting.value)}",
-                    "valueType":"${escapeJson(setting.valueType)}",
-                    "category":"${escapeJson(setting.category)}",
-                    "description":${setting.description},
-                    "isEncrypted":${setting.isEncrypted}
-                }
-            """
-            jsonParts.add(part)
+            w.startObject()
+            w.writeName("id").writeValue(setting.id)
+            w.writeName("key").writeValue(setting.key)
+            w.writeName("value").writeValue(setting.value)
+            w.writeName("valueType").writeValue(setting.valueType)
+            w.writeName("category").writeValue(setting.category)
+            // description is stored as JSONB; embed as raw JSON value.
+            let desc = setting.description.trimAscii()
+            w.writeName("description").jsonValue(if (desc.size > 0) { desc } else { "null" })
+            w.writeName("isEncrypted").writeValue(setting.isEncrypted)
+            w.endObject()
         }
-        var result = "["
-        for (i in 0..jsonParts.size) {
-            if (i > 0) {
-                result += ",\n"
-            }
-            result += jsonParts[i]
-        }
-        result += "\n]"
-        return result
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**

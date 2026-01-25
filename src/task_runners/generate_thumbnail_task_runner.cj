@@ -2,6 +2,7 @@ package lrr4cj.task_runners
 
 import stdx.log.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import std.fs.*
 import lrr4cj.models.*
@@ -444,7 +445,14 @@ public class GenerateThumbnailTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
     /**

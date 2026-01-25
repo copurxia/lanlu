@@ -5,6 +5,8 @@ import std.convert.*
 import std.time.*
 import std.collection.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 
@@ -351,7 +353,14 @@ public class ClearCacheTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
     private static func directoryExists(path: String): Bool {
@@ -370,13 +379,15 @@ public class ClearCacheTaskRunner {
         if (errors.size == 0) {
             return "[]"
         }
-        var json = "["
-        for (i in 0..errors.size) {
-            if (i > 0) { json += "," }
-            json += "\"${escapeJson(errors[i])}\""
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
+        for (e in errors) {
+            w.writeValue(e)
         }
-        json += "]"
-        return json
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 }
 

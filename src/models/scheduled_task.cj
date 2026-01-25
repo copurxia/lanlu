@@ -5,6 +5,8 @@ import lrr4cj.utils.*
 import std.collection.*
 import std.time.*
 import cjcron.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 
 /**
  * 定时任务数据模型
@@ -79,28 +81,31 @@ public class ScheduledTask {
      * 转换为JSON字符串
      */
     public func toJson(): String {
-        var json = "{"
-        json += "\"id\":${id},"
-        json += "\"name\":\"${escapeJsonString(name)}\","
-        json += "\"cronExpression\":\"${escapeJsonString(cronExpression)}\","
-        json += "\"taskType\":\"${escapeJsonString(taskType)}\","
-        json += "\"taskParameters\":\"${escapeJsonString(taskParameters)}\","
-        json += "\"enabled\":${enabled},"
-        json += "\"priority\":${priority},"
-        json += "\"timeoutSeconds\":${timeoutSeconds},"
-        json += "\"lastRunAt\":\"${escapeJsonString(lastRunAt)}\","
-        json += "\"lastRunStatus\":\"${escapeJsonString(lastRunStatus)}\","
-        json += "\"lastError\":\"${escapeJsonString(lastError)}\","
-        json += "\"nextRunAt\":\"${escapeJsonString(nextRunAt)}\","
-        json += "\"runCount\":${runCount},"
-        json += "\"successCount\":${successCount},"
-        json += "\"failureCount\":${failureCount},"
-        json += "\"createdAt\":\"${escapeJsonString(createdAt)}\","
-        json += "\"updatedAt\":\"${escapeJsonString(updatedAt)}\","
-        json += "\"createdBy\":\"${escapeJsonString(createdBy)}\","
-        json += "\"updatedBy\":\"${escapeJsonString(updatedBy)}\""
-        json += "}"
-        return json
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("id").writeValue(id)
+        w.writeName("name").writeValue(name)
+        w.writeName("cronExpression").writeValue(cronExpression)
+        w.writeName("taskType").writeValue(taskType)
+        w.writeName("taskParameters").writeValue(taskParameters)
+        w.writeName("enabled").writeValue(enabled)
+        w.writeName("priority").writeValue(priority)
+        w.writeName("timeoutSeconds").writeValue(timeoutSeconds)
+        w.writeName("lastRunAt").writeValue(lastRunAt)
+        w.writeName("lastRunStatus").writeValue(lastRunStatus)
+        w.writeName("lastError").writeValue(lastError)
+        w.writeName("nextRunAt").writeValue(nextRunAt)
+        w.writeName("runCount").writeValue(runCount)
+        w.writeName("successCount").writeValue(successCount)
+        w.writeName("failureCount").writeValue(failureCount)
+        w.writeName("createdAt").writeValue(createdAt)
+        w.writeName("updatedAt").writeValue(updatedAt)
+        w.writeName("createdBy").writeValue(createdBy)
+        w.writeName("updatedBy").writeValue(updatedBy)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**

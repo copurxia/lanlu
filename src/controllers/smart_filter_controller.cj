@@ -5,6 +5,7 @@ import stdx.log.*
 import std.collection.*
 import std.convert.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import lrr4cj.dao.*
 import lrr4cj.views.*
 import lrr4cj.utils.*
@@ -92,24 +93,29 @@ class SmartFilterUpsertReq <: JsonDeserializable<SmartFilterUpsertReq> {
 public class SmartFilterController {
 
     private static func filterToJson(filter: SmartFilterData): String {
-        var json = "{"
-        json += "\"id\":${filter.id.toString()},"
-        json += "\"name\":\"${escapeJsonString(filter.name)}\","
-        json += "\"translations\":${filter.translations},"
-        json += "\"icon\":\"${escapeJsonString(filter.icon)}\","
-        json += "\"query\":\"${escapeJsonString(filter.query)}\","
-        json += "\"sort_by\":\"${escapeJsonString(filter.sort_by)}\","
-        json += "\"sort_order\":\"${escapeJsonString(filter.sort_order)}\","
-        json += "\"date_from\":\"${escapeJsonString(filter.date_from)}\","
-        json += "\"date_to\":\"${escapeJsonString(filter.date_to)}\","
-        json += "\"newonly\":${filter.newonly.toString()},"
-        json += "\"untaggedonly\":${filter.untaggedonly.toString()},"
-        json += "\"sort_order_num\":${filter.sort_order_num.toString()},"
-        json += "\"enabled\":${filter.enabled.toString()},"
-        json += "\"created_at\":\"${escapeJsonString(filter.created_at)}\","
-        json += "\"updated_at\":\"${escapeJsonString(filter.updated_at)}\""
-        json += "}"
-        return json
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("id").writeValue(filter.id)
+        w.writeName("name").writeValue(filter.name)
+        // Stored as raw JSON object string.
+        let translations = filter.translations.trimAscii()
+        w.writeName("translations").jsonValue(if (translations.size > 0) { translations } else { "{}" })
+        w.writeName("icon").writeValue(filter.icon)
+        w.writeName("query").writeValue(filter.query)
+        w.writeName("sort_by").writeValue(filter.sort_by)
+        w.writeName("sort_order").writeValue(filter.sort_order)
+        w.writeName("date_from").writeValue(filter.date_from)
+        w.writeName("date_to").writeValue(filter.date_to)
+        w.writeName("newonly").writeValue(filter.newonly)
+        w.writeName("untaggedonly").writeValue(filter.untaggedonly)
+        w.writeName("sort_order_num").writeValue(filter.sort_order_num)
+        w.writeName("enabled").writeValue(filter.enabled)
+        w.writeName("created_at").writeValue(filter.created_at)
+        w.writeName("updated_at").writeValue(filter.updated_at)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**
@@ -118,16 +124,18 @@ public class SmartFilterController {
      */
     public static func getEnabledFilters(ctx: JoyContext): Unit {
         let filters = SmartFilterDao.getEnabledFilters()
-        var itemsJson = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("items")
+        w.startArray()
         for (filter in filters) {
-            if (!first) { itemsJson += "," } else { first = false }
-            itemsJson += filterToJson(filter)
+            w.jsonValue(filterToJson(filter))
         }
-        itemsJson += "]"
-
-        let data = "{\"items\":${itemsJson}}"
-        ResponseView.successJson(ctx, data, "获取智能分类成功")
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取智能分类成功")
     }
 
     /**
@@ -136,16 +144,18 @@ public class SmartFilterController {
      */
     public static func adminList(ctx: JoyContext): Unit {
         let filters = SmartFilterDao.getAllFilters()
-        var itemsJson = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("items")
+        w.startArray()
         for (filter in filters) {
-            if (!first) { itemsJson += "," } else { first = false }
-            itemsJson += filterToJson(filter)
+            w.jsonValue(filterToJson(filter))
         }
-        itemsJson += "]"
-
-        let data = "{\"items\":${itemsJson}}"
-        ResponseView.successJson(ctx, data, "获取智能分类列表成功")
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取智能分类列表成功")
     }
 
     /**

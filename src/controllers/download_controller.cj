@@ -3,12 +3,14 @@ package lrr4cj.controllers
 import std.collection.*
 import stdx.log.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import cjoy.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.services.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
 
 /**
  * 处理下载URL的控制器
@@ -55,7 +57,14 @@ public class DownloadController {
 
             if (url.size == 0) {
                 ctx.status(400)
-                ctx.json("{\"success\":0,\"error\":\"url is required\"}")
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("success").writeValue(0)
+                w.writeName("error").writeValue("url is required")
+                w.endObject()
+                w.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
                 return
             }
 
@@ -65,7 +74,13 @@ public class DownloadController {
             let paramsJson = if (requestBody.trimAscii().size > 0) {
                 requestBody
             } else {
-                "{\"url\":\"${escapeJsonString(url)}\"}"
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("url").writeValue(url)
+                w.endObject()
+                w.flush()
+                String.fromUtf8(readToEnd(out))
             }
             TaskDao.updateTaskParameters(task.id, paramsJson)
             TaskIO.appendLog(task.id, "enqueued download_url url=${url}")
@@ -73,12 +88,27 @@ public class DownloadController {
             // 唤醒 TaskPool 领取 pending（无轮询）
             TaskPoolService.getInstance().notifyTaskAvailable()
 
-            let response = "{\"job\":${task.id},\"operation\":\"download_url\",\"success\":1,\"url\":\"${escapeJsonString(url)}\"}"
-            ctx.json(response)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("job").writeValue(task.id)
+            w.writeName("operation").writeValue("download_url")
+            w.writeName("success").writeValue(1)
+            w.writeName("url").writeValue(url)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         } catch (e: Exception) {
             getLogger("download_controller").error("下载处理异常", ("error", e.message))
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"${e.message}\"}")
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(0)
+            w.writeName("error").writeValue(e.message)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         }
     }
 

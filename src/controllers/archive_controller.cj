@@ -2,9 +2,9 @@ package lrr4cj.controllers
 
 import stdx.net.http.HttpStatusCode
 import cjoy.*
-import cjoy.json.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
 import lrr4cj.dao.*
 import lrr4cj.config.*
 import lrr4cj.middleware.*
@@ -14,6 +14,8 @@ import std.fs.*
 import std.convert.*
 import std.collection.*
 import std.database.sql.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import stdx.encoding.url.Form
 
 public class ArchiveController {
@@ -36,36 +38,33 @@ public class ArchiveController {
     public static func getArchives(ctx: JoyContext): Unit {
         // 从数据库获取档案列表
         let archives = ArchiveModel.getAllArchives()
-        
-        // 手动构建JSON数组
-        var archivesJson = "["
-        var isFirst = true
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("operation").writeValue("get_archives")
+        w.writeName("data")
+        w.startArray()
         for (archive in archives) {
-            if (!isFirst) {
-                archivesJson += ","
-            }
-            isFirst = false
-            
-            archivesJson += "{"
-            archivesJson += "\"arcid\":\"${escapeJson(archive.id)}\","
-            archivesJson += "\"title\":\"${escapeJson(archive.title)}\","
-            archivesJson += "\"filename\":\"${escapeJson(archive.filename)}\","
-            archivesJson += "\"summary\":\"${escapeJson(archive.summary)}\","
-            archivesJson += "\"thumbhash\":\"${escapeJson(archive.thumbhash)}\","
-            archivesJson += "\"created_at\":\"${escapeJson(archive.created_at)}\","
-            archivesJson += "\"updated_at\":\"${escapeJson(archive.updated_at)}\","
-            archivesJson += "\"relative_path\":\"${escapeJson(archive.relative_path)}\","
-            archivesJson += "\"file_size\":${archive.file_size},"
-            archivesJson += "\"isnew\":${archive.isNew},"  // 返回布尔值
-            archivesJson += "\"pagecount\":${archive.pagecount}"
-            archivesJson += "}"
+            w.startObject()
+            w.writeName("arcid").writeValue(archive.id)
+            w.writeName("title").writeValue(archive.title)
+            w.writeName("filename").writeValue(archive.filename)
+            w.writeName("summary").writeValue(archive.summary)
+            w.writeName("thumbhash").writeValue(archive.thumbhash)
+            w.writeName("created_at").writeValue(archive.created_at)
+            w.writeName("updated_at").writeValue(archive.updated_at)
+            w.writeName("relative_path").writeValue(archive.relative_path)
+            w.writeName("file_size").writeValue(archive.file_size)
+            w.writeName("isnew").writeValue(archive.isNew)
+            w.writeName("pagecount").writeValue(archive.pagecount)
+            w.endObject()
         }
-        
-        archivesJson += "]"
-        
-        let result = "{\"operation\":\"get_archives\",\"data\":" + archivesJson + ",\"success\":1}"
-        
-        ctx.json(result)
+        w.endArray()
+        w.writeName("success").writeValue(1)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
     
     // GET /api/archives/{id}
@@ -76,7 +75,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"get_archive\",\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -98,24 +97,29 @@ public class ArchiveController {
                 isFavorite = false
         }
 
-        // 手动构建JSON对象
-        var archiveJson = "{"
-        archiveJson += "\"arcid\":\"${archive.id}\","
-        archiveJson += "\"title\":\"${escapeJson(archive.title)}\","
-        archiveJson += "\"filename\":\"${escapeJson(archive.filename)}\","
-        archiveJson += "\"summary\":\"${escapeJson(archive.summary)}\","
-        archiveJson += "\"thumbhash\":\"${archive.thumbhash}\","
-        archiveJson += "\"created_at\":\"${archive.created_at}\","
-        archiveJson += "\"updated_at\":\"${archive.updated_at}\","
-        archiveJson += "\"relative_path\":\"${escapeJson(archive.relative_path)}\","
-        archiveJson += "\"file_size\":${archive.file_size},"
-        archiveJson += "\"isnew\":${isNew},"
-        archiveJson += "\"isfavorite\":${isFavorite},"
-        archiveJson += "\"pagecount\":${archive.pagecount}"
-        archiveJson += "}"
-
-        let result = "{\"operation\":\"get_archive\",\"data\":" + archiveJson + ",\"success\":1}"
-        ctx.json(result)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("operation").writeValue("get_archive")
+        w.writeName("data")
+        w.startObject()
+        w.writeName("arcid").writeValue(archive.id)
+        w.writeName("title").writeValue(archive.title)
+        w.writeName("filename").writeValue(archive.filename)
+        w.writeName("summary").writeValue(archive.summary)
+        w.writeName("thumbhash").writeValue(archive.thumbhash)
+        w.writeName("created_at").writeValue(archive.created_at)
+        w.writeName("updated_at").writeValue(archive.updated_at)
+        w.writeName("relative_path").writeValue(archive.relative_path)
+        w.writeName("file_size").writeValue(archive.file_size)
+        w.writeName("isnew").writeValue(isNew)
+        w.writeName("isfavorite").writeValue(isFavorite)
+        w.writeName("pagecount").writeValue(archive.pagecount)
+        w.endObject()
+        w.writeName("success").writeValue(1)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
     
     // GET /api/archives/{id}/metadata
@@ -127,7 +131,7 @@ public class ArchiveController {
         if (id.size == 0) {
             let errorResponse = "{\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -136,7 +140,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -165,34 +169,36 @@ public class ArchiveController {
                 lastreadtime = 0
         }
 
-        // 手动构建JSON响应，符合API文档规范
-        var metadataJson = "{"
-        metadataJson += "\"arcid\":\"${escapeJson(archive.id)}\","
-        metadataJson += "\"title\":\"${escapeJson(archive.title)}\","
-        metadataJson += "\"filename\":\"${escapeJson(archive.filename)}\","
-        metadataJson += "\"summary\":\"${escapeJson(archive.summary)}\","
-        // 从标签关联表获取实际标签数据，并根据lang参数翻译
+        // JSON response via JsonWriter (avoid manual escaping).
         let tagsString = TagDao.getArchiveTags(archive.id)
         let translatedTags = if (lang.size > 0) {
             TagDao.translateTagsString(tagsString, lang)
         } else {
             tagsString
         }
-        metadataJson += "\"tags\":\"${escapeJson(translatedTags)}\","
-        metadataJson += "\"isnew\":${isNew},"  // 查询用户级别的 isNew 状态
-        metadataJson += "\"isfavorite\":${isFavorite},"  // 查询用户级别的收藏状态
-        metadataJson += "\"pagecount\":${archive.pagecount},"
-        metadataJson += "\"progress\":${userProgress},"  // 使用用户特定进度而非全局进度
-        metadataJson += "\"lastreadtime\":${lastreadtime},"
-        metadataJson += "\"file_size\":${archive.file_size},"
-        metadataJson += "\"size\":${archive.file_size},"
-        metadataJson += "\"archivetype\":\"${escapeJson(archive.archive_type)}\","
-        metadataJson += "\"created_at\":\"${escapeJson(archive.created_at)}\","
-        metadataJson += "\"updated_at\":\"${escapeJson(archive.updated_at)}\","
-        metadataJson += "\"relative_path\":\"${escapeJson(archive.relative_path)}\""
-        metadataJson += "}"
-        
-        ctx.json(metadataJson)
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("arcid").writeValue(archive.id)
+        w.writeName("title").writeValue(archive.title)
+        w.writeName("filename").writeValue(archive.filename)
+        w.writeName("summary").writeValue(archive.summary)
+        w.writeName("tags").writeValue(translatedTags)
+        w.writeName("isnew").writeValue(isNew)
+        w.writeName("isfavorite").writeValue(isFavorite)
+        w.writeName("pagecount").writeValue(archive.pagecount)
+        w.writeName("progress").writeValue(userProgress)
+        w.writeName("lastreadtime").writeValue(lastreadtime)
+        w.writeName("file_size").writeValue(archive.file_size)
+        w.writeName("size").writeValue(archive.file_size)
+        w.writeName("archivetype").writeValue(archive.archive_type)
+        w.writeName("created_at").writeValue(archive.created_at)
+        w.writeName("updated_at").writeValue(archive.updated_at)
+        w.writeName("relative_path").writeValue(archive.relative_path)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     // GET /api/archives/{id}/tankoubons
@@ -200,7 +206,7 @@ public class ArchiveController {
         let arcid = ctx.getParam("id").getOrThrow()
         if (arcid.size == 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json("{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
+            ResponseView.json(ctx, "{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
             return
         }
 
@@ -225,7 +231,7 @@ public class ArchiveController {
             result += tankoubons[i].toJson()
         }
         result += "],\"total\":${tankoubons.size}}"
-        ctx.json(result)
+        ResponseView.json(ctx, result)
     }
     
     // PUT /api/archives/{id}/metadata
@@ -237,7 +243,7 @@ public class ArchiveController {
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -251,7 +257,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
         
@@ -260,7 +266,7 @@ public class ArchiveController {
         if (existingArchive.id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Archive not found in database\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
         
@@ -299,18 +305,18 @@ public class ArchiveController {
                         // 返回错误响应给前端
                         let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update tags\",\"success\":0}"
                         ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ctx.json(errorResponse)
+                        ResponseView.json(ctx, errorResponse)
                         return
                     }
                 case None => () // 不更新标签
             }
             
             let result = "{\"operation\":\"update_metadata\",\"success\":1}"
-            ctx.json(result)
+            ResponseView.json(ctx, result)
         } else {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive metadata\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
         }
     }
     
@@ -322,7 +328,7 @@ public class ArchiveController {
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"serve_thumbnail\",\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
         
@@ -351,7 +357,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"serve_thumbnail\",\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
         
@@ -404,7 +410,7 @@ public class ArchiveController {
             let jobId = DateTime.now().toUnixTimeStamp().toSeconds() * 1000
             let response = "{\"job\":${jobId},\"operation\":\"serve_thumbnail\",\"success\":1}"
             ctx.status(HttpStatusCode.STATUS_ACCEPTED)
-            ctx.json(response)
+            ResponseView.json(ctx, response)
         } else {
             // 使用fallback，返回占位符图像（不缓存临时内容）
             let placeholderImage = getPlaceholderThumbnail()
@@ -451,7 +457,7 @@ public class ArchiveController {
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"get_file_list\",\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -467,7 +473,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"get_file_list\",\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -475,7 +481,7 @@ public class ArchiveController {
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"Category not found for archive\"}")
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
         let fullArchivePath = if (archive.relative_path.size > 0) {
@@ -508,18 +514,28 @@ public class ArchiveController {
             // 目前保持只返回媒体文件
         }
 
-        // 构建页面URL列表（包含类型和标题信息）
-        var pagesJson = "["
-        for (i in 0..pageFiles.size) {
-            if (i > 0) {
-                pagesJson = pagesJson + ","
-            }
-            let (href, title) = pageFiles[i]
-            // 使用查询参数格式，对 path 参数进行 URL 编码
+        // 获取用户的阅读进度（如果用户已登录）
+        var progress: Int32 = 0i32
+        match (AuthMiddleware.optionalUser(ctx)) {
+            case Some(userId) =>
+                let archiveIdInt = ArchiveModel.getArchiveIdByArcid(id)
+                if (archiveIdInt > 0) {
+                    let userProgress = UserArchiveStatusDao.getProgress(userId, archiveIdInt)
+                    progress = userProgress
+                }
+            case None => ()  // 用户未登录，使用默认进度
+        }
+
+        // 构建响应JSON（JsonWriter）
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("pages")
+        w.startArray()
+        for ((href, title) in pageFiles) {
             let form = Form()
             form.set("path", href)
             let pageUrl = "/api/archives/${id}/page?${form.toEncodeString()}"
-            // 判断文件类型 - handler已经过滤过了，EPUB返回HTML，其他返回媒体文件
             let fileType = if (archive.archive_type == ArchiveTypes.EPUB) {
                 "html"
             } else if (ArchiveUtils.isVideoFile(href)) {
@@ -527,31 +543,18 @@ public class ArchiveController {
             } else {
                 "image"
             }
-            // 转义标题中的特殊字符
-            let escapedTitle = escapeJson(title)
-            pagesJson = pagesJson + "{\"url\":\"${pageUrl}\",\"type\":\"${fileType}\",\"title\":\"${escapedTitle}\"}"
+
+            w.startObject()
+            w.writeName("url").writeValue(pageUrl)
+            w.writeName("type").writeValue(fileType)
+            w.writeName("title").writeValue(title)
+            w.endObject()
         }
-        pagesJson = pagesJson + "]"
-
-        // 获取用户的阅读进度（如果用户已登录）
-        var progressJson = "0"  // 默认进度为0
-        match (AuthMiddleware.optionalUser(ctx)) {
-            case Some(userId) =>
-                let archiveIdInt = ArchiveModel.getArchiveIdByArcid(id)
-                if (archiveIdInt > 0) {
-                    let userProgress = UserArchiveStatusDao.getProgress(userId, archiveIdInt)
-                    progressJson = userProgress.toString()
-                }
-            case None => ()  // 用户未登录，使用默认进度
-        }
-
-        // 构建响应JSON
-        var responseJson = "{"
-        responseJson = responseJson + "\"pages\":${pagesJson},"
-        responseJson = responseJson + "\"progress\":${progressJson}"
-        responseJson = responseJson + "}"
-
-        ctx.json(responseJson)
+        w.endArray()
+        w.writeName("progress").writeValue(progress)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
 
     // DELETE /api/archives/{id}
@@ -565,7 +568,7 @@ public class ArchiveController {
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -574,7 +577,7 @@ public class ArchiveController {
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -583,7 +586,7 @@ public class ArchiveController {
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -635,11 +638,11 @@ public class ArchiveController {
 
                 if (deleteSuccess) {
                     let result = "{\"operation\":\"delete_archive\",\"success\":1}"
-                    ctx.json(result)
+                    ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"delete_archive\",\"error\":\"Failed to delete archive\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                 }
             case None => return  // requireAdmin 已经设置了错误响应
         }
@@ -658,7 +661,7 @@ public class ArchiveController {
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -667,7 +670,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -675,7 +678,7 @@ public class ArchiveController {
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"Category not found for archive\"}")
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
         let fullArchivePath = if (archive.relative_path.size > 0) {
@@ -704,7 +707,7 @@ public class ArchiveController {
         } catch (e: Exception) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Failed to read archive file: ${e.message}\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
         }
     }
 
@@ -781,7 +784,7 @@ public class ArchiveController {
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -792,7 +795,7 @@ public class ArchiveController {
             case None =>
                 let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, errorResponse)
         }
     }
 
@@ -803,7 +806,7 @@ public class ArchiveController {
         if (path.size == 0) {
             let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -812,7 +815,7 @@ public class ArchiveController {
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Archive not found\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json(errorResponse)
+            ResponseView.json(ctx, errorResponse)
             return
         }
 
@@ -820,7 +823,7 @@ public class ArchiveController {
         let archivePath = getArchiveBasePath(archive.id)
         if (archivePath.size == 0) {
             ctx.status(500)
-            ctx.json("{\"success\":0,\"error\":\"Category not found for archive\"}")
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found for archive\"}")
             return
         }
         let fullArchivePath = if (archive.relative_path.size > 0) {
@@ -843,17 +846,17 @@ public class ArchiveController {
                     case None =>
                         CacheUtils.setNoCacheHeaders(ctx)
                         ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ctx.json("{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
+                        ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
                 }
             } else {
                 CacheUtils.setNoCacheHeaders(ctx)
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                ctx.json("{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}")
+                ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}")
             }
         } catch (e: Exception) {
             CacheUtils.setNoCacheHeaders(ctx)
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-            ctx.json("{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}")
+            ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}")
         }
     }
 
@@ -1057,7 +1060,7 @@ public class ArchiveController {
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"No archive ID specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1066,7 +1069,7 @@ public class ArchiveController {
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1075,7 +1078,7 @@ public class ArchiveController {
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1084,11 +1087,11 @@ public class ArchiveController {
 
                 if (updateSuccess) {
                     let result = "{\"operation\":\"set_isnew\",\"success\":1}"
-                    ctx.json(result)
+                    ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"set_isnew\",\"error\":\"Failed to set isNew flag\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                 }
             case None => return  // requireUser 已经设置了错误响应
         }
@@ -1108,7 +1111,7 @@ public class ArchiveController {
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"No archive ID specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1117,7 +1120,7 @@ public class ArchiveController {
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1126,7 +1129,7 @@ public class ArchiveController {
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1135,11 +1138,11 @@ public class ArchiveController {
 
                 if (updateSuccess) {
                     let result = "{\"operation\":\"clear_isnew\",\"success\":1}"
-                    ctx.json(result)
+                    ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"clear_isnew\",\"error\":\"Failed to clear isNew flag\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                 }
             case None => return  // requireUser 已经设置了错误响应
         }
@@ -1159,14 +1162,14 @@ public class ArchiveController {
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"No archive ID specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
                 if (pageParam.size == 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"No page specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1176,7 +1179,7 @@ public class ArchiveController {
                 } catch (e: Exception) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Invalid page number\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1185,7 +1188,7 @@ public class ArchiveController {
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1194,7 +1197,7 @@ public class ArchiveController {
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1211,11 +1214,11 @@ public class ArchiveController {
 
                 if (updateSuccess) {
                     let result = "{\"operation\":\"update_progress\",\"progress\":${progress},\"success\":1}"
-                    ctx.json(result)
+                    ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"update_progress\",\"error\":\"Failed to update progress\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                 }
             case None => return  // requireUser 已经设置了错误响应
         }
@@ -1234,7 +1237,7 @@ public class ArchiveController {
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"No archive ID specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1243,7 +1246,7 @@ public class ArchiveController {
                 if (archive.id.size == 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1252,7 +1255,7 @@ public class ArchiveController {
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1261,11 +1264,11 @@ public class ArchiveController {
 
                 if (addSuccess) {
                     let result = "{\"operation\":\"add_favorite\",\"success\":1}"
-                    ctx.json(result)
+                    ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"add_favorite\",\"error\":\"Failed to add favorite\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                 }
             case None => return  // requireUser 已经设置了错误响应
         }
@@ -1284,7 +1287,7 @@ public class ArchiveController {
                 if (id.size == 0) {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"No archive ID specified.\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1293,7 +1296,7 @@ public class ArchiveController {
                 if (archiveIdInt <= 0) {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Archive not found\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                     return
                 }
 
@@ -1302,11 +1305,11 @@ public class ArchiveController {
 
                 if (removeSuccess) {
                     let result = "{\"operation\":\"remove_favorite\",\"success\":1}"
-                    ctx.json(result)
+                    ResponseView.json(ctx, result)
                 } else {
                     let errorResponse = "{\"operation\":\"remove_favorite\",\"error\":\"Failed to remove favorite\",\"success\":0}"
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ctx.json(errorResponse)
+                    ResponseView.json(ctx, errorResponse)
                 }
             case None => return  // requireUser 已经设置了错误响应
         }
@@ -1334,7 +1337,7 @@ public class ArchiveController {
                 arcidsJson += "]"
 
                 let result = "{\"operation\":\"get_favorites\",\"favorites\":${arcidsJson},\"success\":1}"
-                ctx.json(result)
+                ResponseView.json(ctx, result)
             case None => return  // requireUser 已经设置了错误响应
         }
     }
@@ -1364,46 +1367,40 @@ public class ArchiveController {
                 // 获取收藏的档案详情
                 let (archives, totalCount) = UserFavoriteDao.getUserFavoriteArchives(userId, start, count)
 
-                // 构建JSON响应
-                var archivesJson = "["
-                for (i in 0..archives.size) {
-                    if (i >= archives.size) {
-                        break
-                    }
-                    if (i > 0) {
-                        archivesJson += ","
-                    }
-                    let archive = archives[i]
-
-                    // 查询用户级别的 isNew 状态
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("operation").writeValue("get_favorite_archives")
+                w.writeName("data")
+                w.startArray()
+                for (archive in archives) {
                     let archiveIdInt = getArchiveInternalId(archive.id)
-                    let isNew = if (archiveIdInt > 0) {
-                        UserArchiveStatusDao.isNew(userId, archiveIdInt)
-                    } else {
-                        true
-                    }
+                    let isNew = if (archiveIdInt > 0) { UserArchiveStatusDao.isNew(userId, archiveIdInt) } else { true }
 
-                    archivesJson += "{"
-                    archivesJson += "\"arcid\":\"${escapeJson(archive.id)}\","
-                    archivesJson += "\"title\":\"${escapeJson(archive.title)}\","
-                    archivesJson += "\"filename\":\"${escapeJson(archive.filename)}\","
-                    archivesJson += "\"summary\":\"${escapeJson(archive.summary)}\","
-                    archivesJson += "\"thumbhash\":\"${escapeJson(archive.thumbhash)}\","
-                    archivesJson += "\"tags\":\"${escapeJson(archive.tags)}\","
-                    archivesJson += "\"isnew\":${isNew},"
-                    archivesJson += "\"isfavorite\":true,"
-                    archivesJson += "\"pagecount\":${archive.pagecount},"
-                    archivesJson += "\"progress\":${archive.progress},"
-                    archivesJson += "\"file_size\":${archive.file_size},"
-                    archivesJson += "\"created_at\":\"${escapeJson(archive.created_at)}\","
-                    archivesJson += "\"updated_at\":\"${escapeJson(archive.updated_at)}\","
-                    archivesJson += "\"last_read_time\":\"${escapeJson(archive.last_read_time)}\""
-                    archivesJson += "}"
+                    w.startObject()
+                    w.writeName("arcid").writeValue(archive.id)
+                    w.writeName("title").writeValue(archive.title)
+                    w.writeName("filename").writeValue(archive.filename)
+                    w.writeName("summary").writeValue(archive.summary)
+                    w.writeName("thumbhash").writeValue(archive.thumbhash)
+                    w.writeName("tags").writeValue(archive.tags)
+                    w.writeName("isnew").writeValue(isNew)
+                    w.writeName("isfavorite").writeValue(true)
+                    w.writeName("pagecount").writeValue(archive.pagecount)
+                    w.writeName("progress").writeValue(archive.progress)
+                    w.writeName("file_size").writeValue(archive.file_size)
+                    w.writeName("created_at").writeValue(archive.created_at)
+                    w.writeName("updated_at").writeValue(archive.updated_at)
+                    w.writeName("last_read_time").writeValue(archive.last_read_time)
+                    w.endObject()
                 }
-                archivesJson += "]"
-
-                let result = "{\"operation\":\"get_favorite_archives\",\"data\":${archivesJson},\"recordsTotal\":${totalCount},\"recordsFiltered\":${totalCount},\"success\":1}"
-                ctx.json(result)
+                w.endArray()
+                w.writeName("recordsTotal").writeValue(totalCount)
+                w.writeName("recordsFiltered").writeValue(totalCount)
+                w.writeName("success").writeValue(1)
+                w.endObject()
+                w.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             case None => return  // requireUser 已经设置了错误响应
         }
     }
@@ -1433,46 +1430,40 @@ public class ArchiveController {
                 // 获取已读的档案详情
                 let (archives, totalCount) = UserArchiveStatusDao.getUserReadArchives(userId, start, count)
 
-                // 构建JSON响应
-                var archivesJson = "["
-                for (i in 0..archives.size) {
-                    if (i >= archives.size) {
-                        break
-                    }
-                    if (i > 0) {
-                        archivesJson += ","
-                    }
-                    let archive = archives[i]
-
-                    // 查询收藏状态
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("operation").writeValue("get_read_archives")
+                w.writeName("data")
+                w.startArray()
+                for (archive in archives) {
                     let archiveIdInt = getArchiveInternalId(archive.id)
-                    let isFavorite = if (archiveIdInt > 0) {
-                        UserFavoriteDao.isFavorite(userId, archiveIdInt)
-                    } else {
-                        false
-                    }
+                    let isFavorite = if (archiveIdInt > 0) { UserFavoriteDao.isFavorite(userId, archiveIdInt) } else { false }
 
-                    archivesJson += "{"
-                    archivesJson += "\"arcid\":\"${escapeJson(archive.id)}\","
-                    archivesJson += "\"title\":\"${escapeJson(archive.title)}\","
-                    archivesJson += "\"filename\":\"${escapeJson(archive.filename)}\","
-                    archivesJson += "\"summary\":\"${escapeJson(archive.summary)}\","
-                    archivesJson += "\"thumbhash\":\"${escapeJson(archive.thumbhash)}\","
-                    archivesJson += "\"tags\":\"${escapeJson(archive.tags)}\","
-                    archivesJson += "\"isnew\":false,"
-                    archivesJson += "\"isfavorite\":${isFavorite},"
-                    archivesJson += "\"pagecount\":${archive.pagecount},"
-                    archivesJson += "\"progress\":${archive.progress},"
-                    archivesJson += "\"file_size\":${archive.file_size},"
-                    archivesJson += "\"created_at\":\"${escapeJson(archive.created_at)}\","
-                    archivesJson += "\"updated_at\":\"${escapeJson(archive.updated_at)}\","
-                    archivesJson += "\"last_read_time\":\"${escapeJson(archive.last_read_time)}\""
-                    archivesJson += "}"
+                    w.startObject()
+                    w.writeName("arcid").writeValue(archive.id)
+                    w.writeName("title").writeValue(archive.title)
+                    w.writeName("filename").writeValue(archive.filename)
+                    w.writeName("summary").writeValue(archive.summary)
+                    w.writeName("thumbhash").writeValue(archive.thumbhash)
+                    w.writeName("tags").writeValue(archive.tags)
+                    w.writeName("isnew").writeValue(false)
+                    w.writeName("isfavorite").writeValue(isFavorite)
+                    w.writeName("pagecount").writeValue(archive.pagecount)
+                    w.writeName("progress").writeValue(archive.progress)
+                    w.writeName("file_size").writeValue(archive.file_size)
+                    w.writeName("created_at").writeValue(archive.created_at)
+                    w.writeName("updated_at").writeValue(archive.updated_at)
+                    w.writeName("last_read_time").writeValue(archive.last_read_time)
+                    w.endObject()
                 }
-                archivesJson += "]"
-
-                let result = "{\"operation\":\"get_read_archives\",\"data\":${archivesJson},\"recordsTotal\":${totalCount},\"recordsFiltered\":${totalCount},\"success\":1}"
-                ctx.json(result)
+                w.endArray()
+                w.writeName("recordsTotal").writeValue(totalCount)
+                w.writeName("recordsFiltered").writeValue(totalCount)
+                w.writeName("success").writeValue(1)
+                w.endObject()
+                w.flush()
+                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
             case None => return  // requireUser 已经设置了错误响应
         }
     }

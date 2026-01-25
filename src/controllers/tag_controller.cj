@@ -82,7 +82,16 @@ public class TagController {
         if (arcid.size > 0) {
             let archive = ArchiveDao.getArchiveMetadataById(arcid)
             if (archive.id.size == 0) {
-                ResponseView.successJson(ctx, "{\"lang\":\"${escapeJsonString(lang)}\",\"map\":{}}", "获取标签翻译成功")
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("lang").writeValue(lang)
+                w.writeName("map")
+                w.startObject()
+                w.endObject()
+                w.endObject()
+                w.flush()
+                ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签翻译成功")
                 return
             }
 
@@ -138,21 +147,33 @@ public class TagController {
                     translationsMap = filteredMap
                 case None =>
                     // tankoubon 不存在，返回空映射
-                    ResponseView.successJson(ctx, "{\"lang\":\"${escapeJsonString(lang)}\",\"map\":{}}", "获取标签翻译成功")
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("lang").writeValue(lang)
+                    w.writeName("map")
+                    w.startObject()
+                    w.endObject()
+                    w.endObject()
+                    w.flush()
+                    ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签翻译成功")
                     return
             }
         }
 
-        var mapJson = "{"
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("lang").writeValue(lang)
+        w.writeName("map")
+        w.startObject()
         for ((tag, text) in translationsMap) {
-            if (!first) { mapJson = mapJson + "," } else { first = false }
-            mapJson = mapJson + "\"" + escapeJsonString(tag) + "\":\"" + escapeJsonString(text) + "\""
+            w.writeName(tag).writeValue(text)
         }
-        mapJson = mapJson + "}"
-
-        let data = "{\"lang\":\"${escapeJsonString(lang)}\",\"map\":${mapJson}}"
-        ResponseView.successJson(ctx, data, "获取标签翻译成功")
+        w.endObject()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签翻译成功")
     }
 
     /**
@@ -180,36 +201,40 @@ public class TagController {
         let total = TagDao.count(namespace, query)
         let rows = TagDao.list(namespace, query, limit, offset)
 
-        var itemsJson = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("items")
+        w.startArray()
         for (row in rows) {
-            if (!first) { itemsJson = itemsJson + "," } else { first = false }
-            itemsJson = itemsJson + "{"
-            itemsJson = itemsJson + "\"id\":${row.id.toString()},"
-            itemsJson = itemsJson + "\"namespace\":\"${escapeJsonString(row.namespace)}\","
-            itemsJson = itemsJson + "\"name\":\"${escapeJsonString(row.name)}\","
-
-            // 序列化 translations
-            var translationsJson = "{"
-            var tFirst = true
+            w.startObject()
+            w.writeName("id").writeValue(row.id)
+            w.writeName("namespace").writeValue(row.namespace)
+            w.writeName("name").writeValue(row.name)
+            w.writeName("translations")
+            w.startObject()
             for ((lang, t) in row.translations) {
-                if (!tFirst) { translationsJson = translationsJson + "," } else { tFirst = false }
-                translationsJson = translationsJson + "\"${escapeJsonString(lang)}\":{\"text\":\"${escapeJsonString(t.text)}\",\"intro\":\"${escapeJsonString(t.intro)}\"}"
+                w.writeName(lang)
+                w.startObject()
+                w.writeName("text").writeValue(t.text)
+                w.writeName("intro").writeValue(t.intro)
+                w.endObject()
             }
-            translationsJson = translationsJson + "}"
-
-            itemsJson = itemsJson + "\"translations\":${translationsJson},"
-            itemsJson = itemsJson + "\"links\":\"${escapeJsonString(row.links)}\","
-            itemsJson = itemsJson + "\"iconAssetId\":${row.iconAssetId.toString()},"
-            itemsJson = itemsJson + "\"backgroundAssetId\":${row.backgroundAssetId.toString()},"
-            itemsJson = itemsJson + "\"created_at\":\"${escapeJsonString(row.created_at)}\","
-            itemsJson = itemsJson + "\"updated_at\":\"${escapeJsonString(row.updated_at)}\""
-            itemsJson = itemsJson + "}"
+            w.endObject()
+            w.writeName("links").writeValue(row.links)
+            w.writeName("iconAssetId").writeValue(row.iconAssetId)
+            w.writeName("backgroundAssetId").writeValue(row.backgroundAssetId)
+            w.writeName("created_at").writeValue(row.created_at)
+            w.writeName("updated_at").writeValue(row.updated_at)
+            w.endObject()
         }
-        itemsJson = itemsJson + "]"
-
-        let data = "{\"items\":${itemsJson},\"total\":${total.toString()},\"limit\":${limit.toString()},\"offset\":${offset.toString()}}"
-        ResponseView.successJson(ctx, data, "获取标签列表成功")
+        w.endArray()
+        w.writeName("total").writeValue(total)
+        w.writeName("limit").writeValue(limit)
+        w.writeName("offset").writeValue(offset)
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签列表成功")
     }
 
     /**
@@ -232,26 +257,30 @@ public class TagController {
 
         match (TagDao.getById(id)) {
             case Some(tag) =>
-                var translationsJson = "{"
-                var tFirst = true
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("id").writeValue(tag.id)
+                w.writeName("namespace").writeValue(tag.namespace)
+                w.writeName("name").writeValue(tag.name)
+                w.writeName("translations")
+                w.startObject()
                 for ((lang, t) in tag.translations) {
-                    if (!tFirst) { translationsJson = translationsJson + "," } else { tFirst = false }
-                    translationsJson = translationsJson + "\"${escapeJsonString(lang)}\":{\"text\":\"${escapeJsonString(t.text)}\",\"intro\":\"${escapeJsonString(t.intro)}\"}"
+                    w.writeName(lang)
+                    w.startObject()
+                    w.writeName("text").writeValue(t.text)
+                    w.writeName("intro").writeValue(t.intro)
+                    w.endObject()
                 }
-                translationsJson = translationsJson + "}"
-
-                var data = "{"
-                data = data + "\"id\":${tag.id.toString()},"
-                data = data + "\"namespace\":\"${escapeJsonString(tag.namespace)}\","
-                data = data + "\"name\":\"${escapeJsonString(tag.name)}\","
-                data = data + "\"translations\":${translationsJson},"
-                data = data + "\"links\":\"${escapeJsonString(tag.links)}\","
-                data = data + "\"iconAssetId\":${tag.iconAssetId.toString()},"
-                data = data + "\"backgroundAssetId\":${tag.backgroundAssetId.toString()},"
-                data = data + "\"created_at\":\"${escapeJsonString(tag.created_at)}\","
-                data = data + "\"updated_at\":\"${escapeJsonString(tag.updated_at)}\""
-                data = data + "}"
-                ResponseView.successJson(ctx, data, "获取标签成功")
+                w.endObject()
+                w.writeName("links").writeValue(tag.links)
+                w.writeName("iconAssetId").writeValue(tag.iconAssetId)
+                w.writeName("backgroundAssetId").writeValue(tag.backgroundAssetId)
+                w.writeName("created_at").writeValue(tag.created_at)
+                w.writeName("updated_at").writeValue(tag.updated_at)
+                w.endObject()
+                w.flush()
+                ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签成功")
             case None =>
                 ctx.status(404)
                 ResponseView.errorJson(ctx, "tag not found", 404)
@@ -283,26 +312,30 @@ public class TagController {
 
         match (TagDao.getByNamespaceName(namespace, name)) {
             case Some(tag) =>
-                var translationsJson = "{"
-                var tFirst = true
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("id").writeValue(tag.id)
+                w.writeName("namespace").writeValue(tag.namespace)
+                w.writeName("name").writeValue(tag.name)
+                w.writeName("translations")
+                w.startObject()
                 for ((lang, t) in tag.translations) {
-                    if (!tFirst) { translationsJson = translationsJson + "," } else { tFirst = false }
-                    translationsJson = translationsJson + "\"${escapeJsonString(lang)}\":{\"text\":\"${escapeJsonString(t.text)}\",\"intro\":\"${escapeJsonString(t.intro)}\"}"
+                    w.writeName(lang)
+                    w.startObject()
+                    w.writeName("text").writeValue(t.text)
+                    w.writeName("intro").writeValue(t.intro)
+                    w.endObject()
                 }
-                translationsJson = translationsJson + "}"
-
-                var data = "{"
-                data = data + "\"id\":${tag.id.toString()},"
-                data = data + "\"namespace\":\"${escapeJsonString(tag.namespace)}\","
-                data = data + "\"name\":\"${escapeJsonString(tag.name)}\","
-                data = data + "\"translations\":${translationsJson},"
-                data = data + "\"links\":\"${escapeJsonString(tag.links)}\","
-                data = data + "\"iconAssetId\":${tag.iconAssetId.toString()},"
-                data = data + "\"backgroundAssetId\":${tag.backgroundAssetId.toString()},"
-                data = data + "\"created_at\":\"${escapeJsonString(tag.created_at)}\","
-                data = data + "\"updated_at\":\"${escapeJsonString(tag.updated_at)}\""
-                data = data + "}"
-                ResponseView.successJson(ctx, data, "获取标签成功")
+                w.endObject()
+                w.writeName("links").writeValue(tag.links)
+                w.writeName("iconAssetId").writeValue(tag.iconAssetId)
+                w.writeName("backgroundAssetId").writeValue(tag.backgroundAssetId)
+                w.writeName("created_at").writeValue(tag.created_at)
+                w.writeName("updated_at").writeValue(tag.updated_at)
+                w.endObject()
+                w.flush()
+                ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签成功")
             case None =>
                 ctx.status(404)
                 ResponseView.errorJson(ctx, "tag not found", 404)
@@ -520,14 +553,18 @@ public class TagController {
      */
     public static func listNamespaces(ctx: JoyContext): Unit {
         let namespaces = TagDao.listNamespaces()
-        var json = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("namespaces")
+        w.startArray()
         for (ns in namespaces) {
-            if (!first) { json = json + "," } else { first = false }
-            json = json + "\"" + escapeJsonString(ns) + "\""
+            w.writeValue(ns)
         }
-        json = json + "]"
-        ResponseView.successJson(ctx, "{\"namespaces\":${json}}", "获取命名空间列表成功")
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取命名空间列表成功")
     }
 
     /**
@@ -555,10 +592,12 @@ public class TagController {
         let requireBound: Bool = !(requireBoundStr == "0" || requireBoundStr == "false")
         let results = TagDao.autocompleteSearch(query, lang, limit, requireBound)
 
-        var suggestionsJson = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("suggestions")
+        w.startArray()
         for ((fullName, translatedText) in results) {
-            if (!first) { suggestionsJson = suggestionsJson + "," } else { first = false }
             // 返回格式：{ value: "namespace:name", label: "翻译文本", display: "namespace:翻译文本" }
             let (namespace, _) = TagDao.parseTagName(fullName)
             let display = if (namespace.size > 0) {
@@ -566,15 +605,16 @@ public class TagController {
             } else {
                 translatedText
             }
-            suggestionsJson = suggestionsJson + "{"
-            suggestionsJson = suggestionsJson + "\"value\":\"${escapeJsonString(fullName)}\","
-            suggestionsJson = suggestionsJson + "\"label\":\"${escapeJsonString(translatedText)}\","
-            suggestionsJson = suggestionsJson + "\"display\":\"${escapeJsonString(display)}\""
-            suggestionsJson = suggestionsJson + "}"
+            w.startObject()
+            w.writeName("value").writeValue(fullName)
+            w.writeName("label").writeValue(translatedText)
+            w.writeName("display").writeValue(display)
+            w.endObject()
         }
-        suggestionsJson = suggestionsJson + "]"
-
-        ResponseView.successJson(ctx, "{\"suggestions\":${suggestionsJson}}", "获取自动补全建议成功")
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取自动补全建议成功")
     }
 
     /**
@@ -591,20 +631,23 @@ public class TagController {
 
         let rows = TagDao.getTagCloud(lang, limit)
 
-        var itemsJson = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("items")
+        w.startArray()
         for ((tag, display, count) in rows) {
-            if (!first) { itemsJson = itemsJson + "," } else { first = false }
-            itemsJson = itemsJson + "{"
-            itemsJson = itemsJson + "\"tag\":\"${escapeJsonString(tag)}\","
-            itemsJson = itemsJson + "\"display\":\"${escapeJsonString(display)}\","
-            itemsJson = itemsJson + "\"count\":${count.toString()}"
-            itemsJson = itemsJson + "}"
+            w.startObject()
+            w.writeName("tag").writeValue(tag)
+            w.writeName("display").writeValue(display)
+            w.writeName("count").writeValue(count)
+            w.endObject()
         }
-        itemsJson = itemsJson + "]"
-
-        let data = "{\"items\":${itemsJson},\"total\":${rows.size.toString()}}"
-        ResponseView.successJson(ctx, data, "获取标签词云成功")
+        w.endArray()
+        w.writeName("total").writeValue(rows.size)
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签词云成功")
     }
 
     /**
@@ -613,14 +656,18 @@ public class TagController {
      */
     public static func adminListTagNames(ctx: JoyContext): Unit {
         let tags = TagDao.listAllTagNames()
-        var tagsJson = "["
-        var first = true
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("tags")
+        w.startArray()
         for (tag in tags) {
-            if (!first) { tagsJson = tagsJson + "," } else { first = false }
-            tagsJson = tagsJson + "\"" + escapeJsonString(tag) + "\""
+            w.writeValue(tag)
         }
-        tagsJson = tagsJson + "]"
-        ResponseView.successJson(ctx, "{\"tags\":${tagsJson}}", "获取标签名列表成功")
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签名列表成功")
     }
 
     /**
@@ -784,31 +831,34 @@ public class TagController {
      */
     public static func adminExport(ctx: JoyContext): Unit {
         let rows = TagDao.list(None, None, 200000, 0)
-        var itemsJson = "["
-        var first = true
-        for (row in rows) {
-            if (!first) { itemsJson = itemsJson + "," } else { first = false }
-            itemsJson = itemsJson + "{"
-            itemsJson = itemsJson + "\"namespace\":\"${escapeJsonString(row.namespace)}\","
-            itemsJson = itemsJson + "\"name\":\"${escapeJsonString(row.name)}\","
-
-            var translationsJson = "{"
-            var tFirst = true
-            for ((lang, t) in row.translations) {
-                if (!tFirst) { translationsJson = translationsJson + "," } else { tFirst = false }
-                translationsJson = translationsJson + "\"${escapeJsonString(lang)}\":{\"text\":\"${escapeJsonString(t.text)}\",\"intro\":\"${escapeJsonString(t.intro)}\"}"
-            }
-            translationsJson = translationsJson + "}"
-
-            itemsJson = itemsJson + "\"translations\":${translationsJson},"
-            itemsJson = itemsJson + "\"links\":\"${escapeJsonString(row.links)}\""
-            itemsJson = itemsJson + "}"
-        }
-        itemsJson = itemsJson + "]"
-
         let now = DateTime.nowUTC().toString()
-        let data = "{\"generated_at\":\"${escapeJsonString(now)}\",\"tags\":${itemsJson}}"
-        ResponseView.successJson(ctx, data, "导出成功")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("generated_at").writeValue(now)
+        w.writeName("tags")
+        w.startArray()
+        for (row in rows) {
+            w.startObject()
+            w.writeName("namespace").writeValue(row.namespace)
+            w.writeName("name").writeValue(row.name)
+            w.writeName("translations")
+            w.startObject()
+            for ((lang, t) in row.translations) {
+                w.writeName(lang)
+                w.startObject()
+                w.writeName("text").writeValue(t.text)
+                w.writeName("intro").writeValue(t.intro)
+                w.endObject()
+            }
+            w.endObject()
+            w.writeName("links").writeValue(row.links)
+            w.endObject()
+        }
+        w.endArray()
+        w.endObject()
+        w.flush()
+        ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "导出成功")
     }
 
     /**

@@ -2,6 +2,8 @@ package lrr4cj.task_runners
 
 import std.convert.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
@@ -12,6 +14,28 @@ import lrr4cj.archivehandler.*
  * 负责扫描一个具体分类的目录并创建 scan_archive 子任务
  */
 public class ScanSingleCategoryTaskRunner {
+    private static func errorJsonString(message: String): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(message)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func summaryJsonString(created: Int64, total: Int64): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(1)
+        w.writeName("created").writeValue(created)
+        w.writeName("total").writeValue(total)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
 
     public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("scan_single_category")
@@ -24,7 +48,7 @@ public class ScanSingleCategoryTaskRunner {
                 let errorMsg = "category_id is required"
                 TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                 TaskModel.failTask(taskId, errorMsg)
-                TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
+                TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
                 return
             }
 
@@ -38,7 +62,7 @@ public class ScanSingleCategoryTaskRunner {
                     let errorMsg = "Category not found: ${catidParam}"
                     TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                     TaskModel.failTask(taskId, errorMsg)
-                    TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
+                    TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
                     return
             }
 
@@ -49,7 +73,7 @@ public class ScanSingleCategoryTaskRunner {
                 let errorMsg = "Category not found: ${catidParam}"
                 TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                 TaskModel.failTask(taskId, errorMsg)
-                TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
+                TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
                 return
             }
             let groupId = "scan_single_category:${taskId}"
@@ -67,7 +91,7 @@ public class ScanSingleCategoryTaskRunner {
             total = scannedTotal
             created = createdCount
 
-            let summary = "{\"success\":1,\"created\":${created},\"total\":${total}}"
+            let summary = summaryJsonString(created, total)
             TaskIO.appendLog(taskId, "Task creation completed: created=${created}, total=${total}")
             TaskModel.updateTaskProgress(taskId, 100, "Created ${created} scan_archive tasks")
             TaskModel.completeTask(taskId, summary)
@@ -79,7 +103,7 @@ public class ScanSingleCategoryTaskRunner {
             TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
             TaskIO.appendLog(taskId, "Stack trace: ${e.toString()}")
             TaskModel.failTask(taskId, errorMsg)
-            TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(errorMsg)}\"}")
+            TaskIO.writeOutput(taskId, errorJsonString(errorMsg))
         }
     }
 
@@ -190,7 +214,14 @@ public class ScanSingleCategoryTaskRunner {
                 getLogger("scan_single_category").debug("Archive not found, creating scan_archive task: ${filePath}")
         }
 
-        let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"category_id\":${ctx.categoryId}}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("archive_path").writeValue(filePath)
+        w.writeName("category_id").writeValue(ctx.categoryId)
+        w.endObject()
+        w.flush()
+        let params = String.fromUtf8(readToEnd(out))
         let childTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, ctx.priority, ctx.groupId, ctx.triggerSource)
         if (childTask.id > 0) {
             ctx.notifier()
@@ -247,7 +278,15 @@ public class ScanSingleCategoryTaskRunner {
                 case None => "archive"  // 默认类型
             }
 
-            let parameters = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\",\"type\":\"${archiveType}\"}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archive_path").writeValue(filePath)
+            w.writeName("archive_id").writeValue(archiveId)
+            w.writeName("type").writeValue(archiveType)
+            w.endObject()
+            w.flush()
+            let parameters = String.fromUtf8(readToEnd(out))
             let task = TaskModel.createTaskWithOptions(
                 "生成封面",
                 "generate_thumbnail",

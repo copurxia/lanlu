@@ -4,6 +4,7 @@ import std.collection.*
 import std.convert.*
 import std.fs.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import std.time.*
 import stdx.log.*
 import stdx.encoding.json.stream.*
@@ -16,6 +17,17 @@ import lrr4cj.utils.*
  * 在 deno_task 结束后触发：读取下载插件输出、搬运文件、创建 scan_archive，并将结果写回到 download_url 任务
  */
 public class DownloadUrlCallbackRunner {
+    private static func writeErrorOutput(taskId: Int64, message: String): Unit {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(message)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
+    }
+
     public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("download_url_callback")
         TaskIO.appendLog(taskId, "download_url_callback task started")
@@ -41,7 +53,7 @@ public class DownloadUrlCallbackRunner {
                 if (denoTask.message.trimAscii().size > 0) { denoTask.message } else { "Deno task failed" }
             // 将失败写回父任务，避免前端卡在 waiting
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, "Dependency deno_task not completed: ${denoTask.status} - ${errMsg}")
             return
         }
@@ -49,7 +61,7 @@ public class DownloadUrlCallbackRunner {
         if (pluginOutput.trimAscii().size == 0) {
             let errMsg = "Deno task output is empty"
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
@@ -63,14 +75,14 @@ public class DownloadUrlCallbackRunner {
             let pluginErr = parsePluginError(pluginOutput)
             let errMsg = if (pluginErr.size > 0) { pluginErr } else { "Plugin did not return relative_path" }
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
         if (downloadedRelativePaths.size > 1) {
             let errMsg = "Multiple archives not yet supported in this version"
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
@@ -80,7 +92,7 @@ public class DownloadUrlCallbackRunner {
             !downloadedRelativePath.startsWith("plugins/${pluginNamespace}/")) {
             let errMsg = "Plugin returned invalid relative_path"
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
@@ -94,7 +106,7 @@ public class DownloadUrlCallbackRunner {
             case None =>
                 let errMsg = "Category not found"
                 TaskModel.failTask(downloadTaskId, errMsg)
-                TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+                writeErrorOutput(downloadTaskId, errMsg)
                 fail(taskId, errMsg)
                 return
         }
@@ -106,7 +118,7 @@ public class DownloadUrlCallbackRunner {
         if (!exists(pluginTarget)) {
             let errMsg = "Plugin downloaded file not found"
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
@@ -139,7 +151,7 @@ public class DownloadUrlCallbackRunner {
         } catch (e: Exception) {
             let errMsg = "Failed to move file to archive: ${e.message}"
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
@@ -158,15 +170,17 @@ public class DownloadUrlCallbackRunner {
             tags = "source:${downloadedSource}"
         }
 
-        let scanParams = """
-            {
-                "archive_path":"${escapeJson(finalArchivePathStr)}",
-                "category_id":${categoryId},
-                "cache_path":"${escapeJson(cachePathStr)}",
-                "archive_type":"${archiveType}",
-                "tags":"${escapeJson(tags)}"
-            }
-        """
+        let scanOut = ByteBuffer()
+        let scanW = JsonWriter(scanOut)
+        scanW.startObject()
+        scanW.writeName("archive_path").writeValue(finalArchivePathStr)
+        scanW.writeName("category_id").writeValue(categoryId)
+        scanW.writeName("cache_path").writeValue(cachePathStr)
+        scanW.writeName("archive_type").writeValue(archiveType)
+        scanW.writeName("tags").writeValue(tags)
+        scanW.endObject()
+        scanW.flush()
+        let scanParams = String.fromUtf8(readToEnd(scanOut))
         let scanTask = TaskModel.createTaskWithOptions(
             "扫描档案",
             "scan_archive",
@@ -178,7 +192,7 @@ public class DownloadUrlCallbackRunner {
         if (scanTask.id <= 0) {
             let errMsg = "Failed to create scan_archive task"
             TaskModel.failTask(downloadTaskId, errMsg)
-            TaskIO.writeOutput(downloadTaskId, "{\"success\":0,\"error\":\"${escapeJson(errMsg)}\"}")
+            writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
@@ -187,7 +201,20 @@ public class DownloadUrlCallbackRunner {
         context.notifyTaskAvailable()
 
         // 将结果写回父任务（download_url）
-        let resultJson = "{\"success\":1,\"archives\":[{\"filename\":\"${escapeJson(fileName)}\"}],\"task_id\":\"${scanTask.id}\"}"
+        let resultOut = ByteBuffer()
+        let resultW = JsonWriter(resultOut)
+        resultW.startObject()
+        resultW.writeName("success").writeValue(1)
+        resultW.writeName("archives")
+        resultW.startArray()
+        resultW.startObject()
+        resultW.writeName("filename").writeValue(fileName)
+        resultW.endObject()
+        resultW.endArray()
+        resultW.writeName("task_id").writeValue(scanTask.id.toString())
+        resultW.endObject()
+        resultW.flush()
+        let resultJson = String.fromUtf8(readToEnd(resultOut))
         TaskModel.updateTaskProgress(downloadTaskId, 100, "下载完成")
         TaskModel.completeTask(downloadTaskId, "download_url completed")
         TaskIO.writeOutput(downloadTaskId, resultJson)
@@ -196,7 +223,15 @@ public class DownloadUrlCallbackRunner {
         // 完成回调任务自身
         TaskModel.updateTaskProgress(taskId, 100, "下载回调完成")
         TaskModel.completeTask(taskId, "download_url_callback completed")
-        TaskIO.writeOutput(taskId, "{\"success\":1,\"download_task_id\":${downloadTaskId},\"scan_task_id\":${scanTask.id}}")
+        let cbOut = ByteBuffer()
+        let cbW = JsonWriter(cbOut)
+        cbW.startObject()
+        cbW.writeName("success").writeValue(1)
+        cbW.writeName("download_task_id").writeValue(downloadTaskId)
+        cbW.writeName("scan_task_id").writeValue(scanTask.id)
+        cbW.endObject()
+        cbW.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(cbOut)))
 
         logger.debug("download_url_callback completed", ("download_task_id", downloadTaskId.toString()), ("scan_task_id", scanTask.id.toString()))
     }
@@ -448,7 +483,7 @@ public class DownloadUrlCallbackRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        writeErrorOutput(taskId, msg)
     }
 
 }

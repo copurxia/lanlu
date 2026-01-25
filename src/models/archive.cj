@@ -1,6 +1,5 @@
 package lrr4cj.models
 
-import cjoy.json.*
 import std.database.sql.*
 import lrr4cj.config.*
 import std.collection.*

@@ -5,12 +5,12 @@ import std.process.*
 import std.time.*
 import std.convert.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import std.collection.*
 import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
-import cjoy.json.*
 import semver.*
 
 /**
@@ -417,7 +417,18 @@ public class ScanPluginsTaskRunner {
         // deno_task parameters is a JSON string parsed by DenoTaskRunner.parseParameters().
         // extraParams is expected to be a JSON *string* (merged into plugin params at runtime).
         let groupId = "cron:script:${namespace}"
-        return "{\"pluginNamespace\":\"${escapeJson(namespace)}\",\"pluginType\":\"Script\",\"action\":\"run\",\"groupId\":\"${escapeJson(groupId)}\",\"oneshotParam\":\"\",\"extraParams\":\"{}\"}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("pluginNamespace").writeValue(namespace)
+        w.writeName("pluginType").writeValue("Script")
+        w.writeName("action").writeValue("run")
+        w.writeName("groupId").writeValue(groupId)
+        w.writeName("oneshotParam").writeValue("")
+        w.writeName("extraParams").writeValue("{}")
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     private static func syncScriptScheduledTask(taskId: Int64, metadata: PluginMetadata, pluginType: String): Unit {

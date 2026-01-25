@@ -4,6 +4,7 @@ import stdx.log.*
 import std.convert.*
 import std.collection.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -46,7 +47,15 @@ public class ScanArchiveTaskRunner {
                 return
             }
 
-            let successJson = "{\"success\":1,\"archive_id\":\"${result.archiveId}\",\"path\":\"${escapeJson(config.archivePath)}\"}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(1)
+            w.writeName("archive_id").writeValue(result.archiveId)
+            w.writeName("path").writeValue(config.archivePath)
+            w.endObject()
+            w.flush()
+            let successJson = String.fromUtf8(readToEnd(out))
             TaskIO.appendLog(taskId, "Archive processed successfully, archiveId=${result.archiveId}")
             TaskModel.updateTaskProgress(taskId, 100, "Archive processed")
             TaskModel.completeTask(taskId, successJson)
@@ -258,7 +267,15 @@ public class ScanArchiveTaskRunner {
      */
     private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String, notifier: TaskNotifier): Bool {
         try {
-            let parameters = "{\"archive_path\":\"${escapeJson(archivePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\",\"type\":\"${archiveType}\"}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archive_path").writeValue(archivePath)
+            w.writeName("archive_id").writeValue(archiveId)
+            w.writeName("type").writeValue(archiveType)
+            w.endObject()
+            w.flush()
+            let parameters = String.fromUtf8(readToEnd(out))
             let task = TaskModel.createTaskWithOptions(
                 "生成封面",
                 "generate_thumbnail",
@@ -328,7 +345,14 @@ public class ScanArchiveTaskRunner {
      */
     private static func submitMetadataPluginTask(archiveId: String, namespace: String, notifier: TaskNotifier): Bool {
         try {
-            let parameters = "{\"archive_id\":\"${escapeJson(archiveId)}\",\"namespace\":\"${escapeJson(namespace)}\"}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archive_id").writeValue(archiveId)
+            w.writeName("namespace").writeValue(namespace)
+            w.endObject()
+            w.flush()
+            let parameters = String.fromUtf8(readToEnd(out))
             let task = TaskModel.createTaskWithOptions(
                 "元数据扫描: ${namespace}",
                 "metadata_plugin",
@@ -355,7 +379,14 @@ public class ScanArchiveTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
 }

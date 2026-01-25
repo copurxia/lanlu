@@ -5,6 +5,7 @@ import std.convert.*
 import stdx.log.*
 import std.fs.*
 import std.io.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -104,7 +105,15 @@ public class RegenerateCoverTaskRunner {
                         continue
                     }
 
-                    let params = "{\"archive_path\":\"${escapeJson(filePath)}\",\"archive_id\":\"${escapeJson(archiveId)}\",\"type\":\"${escapeJson(row.archiveType)}\"}"
+                    let paramsOut = ByteBuffer()
+                    let paramsW = JsonWriter(paramsOut)
+                    paramsW.startObject()
+                    paramsW.writeName("archive_path").writeValue(filePath)
+                    paramsW.writeName("archive_id").writeValue(archiveId)
+                    paramsW.writeName("type").writeValue(row.archiveType)
+                    paramsW.endObject()
+                    paramsW.flush()
+                    let params = String.fromUtf8(readToEnd(paramsOut))
                     let child = TaskModel.createTaskWithOptions(
                         "生成封面",
                         "generate_thumbnail",
@@ -127,7 +136,18 @@ public class RegenerateCoverTaskRunner {
                 TaskModel.updateTaskProgress(taskId, 90, "Dispatched ${submitted} thumbnail tasks (scanned=${candidates})")
             }
 
-            let resultJson = "{\"success\":1,\"mode\":\"${escapeJson(mode)}\",\"candidates\":${candidates},\"submitted\":${submitted},\"skipped\":${skipped},\"deleted_assets\":${deletedAssets}}"
+            let resultOut = ByteBuffer()
+            let resultW = JsonWriter(resultOut)
+            resultW.startObject()
+            resultW.writeName("success").writeValue(1)
+            resultW.writeName("mode").writeValue(mode)
+            resultW.writeName("candidates").writeValue(candidates)
+            resultW.writeName("submitted").writeValue(submitted)
+            resultW.writeName("skipped").writeValue(skipped)
+            resultW.writeName("deleted_assets").writeValue(deletedAssets)
+            resultW.endObject()
+            resultW.flush()
+            let resultJson = String.fromUtf8(readToEnd(resultOut))
             TaskModel.updateTaskProgress(taskId, 100, "Dispatched ${submitted} thumbnail tasks")
             TaskModel.completeTask(taskId, resultJson)
             TaskIO.writeOutput(taskId, resultJson)
@@ -198,7 +218,14 @@ public class RegenerateCoverTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
 }

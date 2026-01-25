@@ -1,9 +1,12 @@
 package lrr4cj.controllers
 
 import cjoy.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
+import lrr4cj.views.*
 
 /**
  * Info API 控制器
@@ -25,21 +28,28 @@ public class InfoController {
             let serverName = SystemSettingsService.getString("SERVER_NAME")
             let serverMotd = SystemSettingsService.getString("SERVER_MOTD")
 
-            // 构建服务器信息响应
-            var serverInfo = "{"
-            serverInfo += "\"motd\":\"${escapeJson(serverMotd)}\","
-            serverInfo += "\"name\":\"${escapeJson(serverName)}\","
-            serverInfo += "\"total_archives\":${totalArchives},"
-            serverInfo += "\"total_pages_read\":${totalPagesRead},"
-            serverInfo += "\"version\":\"0.9.50\","
-            serverInfo += "\"version_desc\":\"Lanlu - Initial Release\","
-            serverInfo += "\"version_name\":\"Cangjie\""
-            serverInfo += "}"
-
-            ctx.json(serverInfo)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("motd").writeValue(serverMotd)
+            w.writeName("name").writeValue(serverName)
+            w.writeName("total_archives").writeValue(totalArchives)
+            w.writeName("total_pages_read").writeValue(totalPagesRead)
+            w.writeName("version").writeValue("0.9.50")
+            w.writeName("version_desc").writeValue("Lanlu - Initial Release")
+            w.writeName("version_name").writeValue("Cangjie")
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         } catch (ex: Exception) {
-            let errorResponse = "{\"error\":\"Failed to get server info: ${ex.message}\"}"
-            ctx.status(500).json(errorResponse)
+            ctx.status(500)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("error").writeValue("Failed to get server info: ${ex.message}")
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
         }
     }
 

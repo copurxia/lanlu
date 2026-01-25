@@ -70,7 +70,18 @@ public class DownloadUrlTaskRunner {
 
             // 创建 deno_task 参数
             // parentTaskId allows deno_task to mirror plugin logs/progress back to this download_url task.
-            let denoParams = "{\"pluginNamespace\":\"${escapeJson(plugin.namespace)}\",\"pluginType\":\"Download\",\"action\":\"run\",\"groupId\":\"${escapeJson(groupId)}\",\"parentTaskId\":${taskId},\"url\":\"${escapeJson(url)}\"}"
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("pluginNamespace").writeValue(plugin.namespace)
+            w.writeName("pluginType").writeValue("Download")
+            w.writeName("action").writeValue("run")
+            w.writeName("groupId").writeValue(groupId)
+            w.writeName("parentTaskId").writeValue(taskId)
+            w.writeName("url").writeValue(url)
+            w.endObject()
+            w.flush()
+            let denoParams = String.fromUtf8(readToEnd(out))
 
             // 创建并提交 deno_task
             let denoTask = TaskModel.createTaskWithOptions(
@@ -140,7 +151,14 @@ public class DownloadUrlTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
     private static func parseUrl(parameters: String): String {

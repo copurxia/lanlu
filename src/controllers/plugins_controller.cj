@@ -3,6 +3,8 @@ package lrr4cj.controllers
 import cjoy.*
 import std.collection.*
 import std.convert.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
 import lrr4cj.services.*
@@ -230,45 +232,45 @@ public class PluginsController {
      * 将插件数据转换为JSON字符串
      */
     private static func pluginToJson(plugin: PluginData): String {
-        var json = "{"
-        json += "\"id\":${plugin.id},"
-        json += "\"name\":\"${escapeJsonString(plugin.name)}\","
-        json += "\"namespace\":\"${escapeJsonString(plugin.namespace)}\","
-        json += "\"version\":\"${escapeJsonString(plugin.version)}\","
-        json += "\"description\":\"${escapeJsonString(plugin.description)}\","
-        json += "\"author\":\"${escapeJsonString(plugin.author)}\","
-        json += "\"entry\":\"${escapeJsonString(plugin.entry)}\","
-        json += "\"plugin_type\":\"${escapeJsonString(plugin.plugin_type)}\","
-        json += "\"tags\":\"${escapeJsonString(plugin.tags)}\","
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
 
-        // 处理权限字段 - 如果为空则返回空字符串，否则将逗号分隔的字符串转换为JSON数组
+        w.startObject()
+        w.writeName("id").writeValue(plugin.id)
+        w.writeName("name").writeValue(plugin.name)
+        w.writeName("namespace").writeValue(plugin.namespace)
+        w.writeName("version").writeValue(plugin.version)
+        w.writeName("description").writeValue(plugin.description)
+        w.writeName("author").writeValue(plugin.author)
+        w.writeName("entry").writeValue(plugin.entry)
+        w.writeName("plugin_type").writeValue(plugin.plugin_type)
+        w.writeName("tags").writeValue(plugin.tags)
+
+        w.writeName("permissions")
+        w.startArray()
         let permissionArray = plugin.permissions.split(",")
-        json += "\"permissions\":["
-        var firstPermission = true
         for (permission in permissionArray) {
             let trimmed = permission.trimAscii()
-            if (trimmed.size == 0) {
-                continue
-            }
-            if (!firstPermission) { json += "," }
-            json += "\"${escapeJsonString(trimmed)}\""
-            firstPermission = false
+            if (trimmed.size == 0) { continue }
+            w.writeValue(trimmed)
         }
-        json += "],"
+        w.endArray()
 
-        json += "\"icon\":\"${escapeJsonString(plugin.icon)}\","
-        json += "\"enabled\":${plugin.enabled},"
-        json += "\"installed\":${plugin.installed},"
-        json += "\"update_url\":\"${escapeJsonString(plugin.update_url)}\","
+        w.writeName("icon").writeValue(plugin.icon)
+        w.writeName("enabled").writeValue(plugin.enabled)
+        w.writeName("installed").writeValue(plugin.installed)
+        w.writeName("update_url").writeValue(plugin.update_url)
 
-        // 添加has_schema字段（指示是否有配置参数）
-        json += "\"has_schema\":${plugin.has_schema},"
-        json += "\"parameters\":${plugin.parameters},"
+        w.writeName("has_schema").writeValue(plugin.has_schema)
+        // Stored as raw JSON string (schema array/object)
+        let params = plugin.parameters.trimAscii()
+        w.writeName("parameters").jsonValue(if (params.size > 0) { params } else { "[]" })
 
-        json += "\"created_at\":\"${escapeJsonString(plugin.created_at)}\","
-        json += "\"updated_at\":\"${escapeJsonString(plugin.updated_at)}\""
-        json += "}"
-        return json
+        w.writeName("created_at").writeValue(plugin.created_at)
+        w.writeName("updated_at").writeValue(plugin.updated_at)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     // ========== 新增Schema相关API ==========
@@ -378,19 +380,22 @@ public class PluginsController {
             return
         }
 
-        var response2 = "{"
-        response2 += "\"success\": true,"
-        response2 += "\"message\": \"${escapeJsonString(r.message)}\","
-        response2 += "\"filename\": \"${escapeJsonString(r.filename)}\","
-        response2 += "\"plugin_type\": \"${escapeJsonString(r.plugin_type)}\","
-        response2 += "\"namespace\": \"${escapeJsonString(r.namespace)}\","
-        response2 += "\"old_version\": \"${escapeJsonString(r.old_version)}\","
-        response2 += "\"new_version\": \"${escapeJsonString(r.new_version)}\","
-        response2 += "\"clear_parameters\": ${r.clear_parameters},"
-        response2 += "\"reason\": \"${escapeJsonString(r.reason)}\","
-        response2 += "\"scan_task_id\": ${r.scan_task_id}"
-        response2 += "}"
-        ctx.json(response2)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(true)
+        w.writeName("message").writeValue(r.message)
+        w.writeName("filename").writeValue(r.filename)
+        w.writeName("plugin_type").writeValue(r.plugin_type)
+        w.writeName("namespace").writeValue(r.namespace)
+        w.writeName("old_version").writeValue(r.old_version)
+        w.writeName("new_version").writeValue(r.new_version)
+        w.writeName("clear_parameters").writeValue(r.clear_parameters)
+        w.writeName("reason").writeValue(r.reason)
+        w.writeName("scan_task_id").writeValue(r.scan_task_id)
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
     }
 
     /**
@@ -415,16 +420,19 @@ public class PluginsController {
             return
         }
 
-        var response2 = "{"
-        response2 += "\"success\": true,"
-        response2 += "\"message\": \"${escapeJsonString(r.message)}\","
-        response2 += "\"namespace\": \"${escapeJsonString(r.namespace)}\","
-        response2 += "\"old_version\": \"${escapeJsonString(r.old_version)}\","
-        response2 += "\"new_version\": \"${escapeJsonString(r.new_version)}\","
-        response2 += "\"clear_parameters\": ${r.clear_parameters},"
-        response2 += "\"reason\": \"${escapeJsonString(r.reason)}\","
-        response2 += "\"scan_task_id\": ${r.scan_task_id}"
-        response2 += "}"
-        ctx.json(response2)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(true)
+        w.writeName("message").writeValue(r.message)
+        w.writeName("namespace").writeValue(r.namespace)
+        w.writeName("old_version").writeValue(r.old_version)
+        w.writeName("new_version").writeValue(r.new_version)
+        w.writeName("clear_parameters").writeValue(r.clear_parameters)
+        w.writeName("reason").writeValue(r.reason)
+        w.writeName("scan_task_id").writeValue(r.scan_task_id)
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
     }
 }

@@ -4,6 +4,8 @@ import lrr4cj.dao.*
 import lrr4cj.utils.*
 import std.collection.*
 import std.time.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 
 /**
  * Task任务数据模型
@@ -57,33 +59,37 @@ public class Task {
      * 转换为JSON字符串
      */
     public func toJson(): String {
-        var json = "{"
-        json += "\"id\":${id},"
-        json += "\"name\":\"${escapeJsonString(name)}\","
-        json += "\"status\":\"${escapeJsonString(status)}\","
-        json += "\"progress\":${progress},"
-        json += "\"message\":\"${escapeJsonString(message)}\","
-        json += "\"taskType\":\"${escapeJsonString(taskType)}\","
-        json += "\"pluginNamespace\":\"${escapeJsonString(pluginNamespace)}\","
-        // parameters 可能是字符串或JSON字符串，需要根据内容判断
-        json += "\"parameters\":"
-        if (parameters.size > 0 && parameters[0] == 123) {
-            // 如果是JSON对象，直接拼接
-            json += "${parameters},"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("id").writeValue(id)
+        w.writeName("name").writeValue(name)
+        w.writeName("status").writeValue(status)
+        w.writeName("progress").writeValue(progress)
+        w.writeName("message").writeValue(message)
+        w.writeName("taskType").writeValue(taskType)
+        w.writeName("pluginNamespace").writeValue(pluginNamespace)
+
+        // parameters may be a raw JSON object/array string or a plain string.
+        let p = parameters.trimAscii()
+        w.writeName("parameters")
+        if ((p.startsWith("{") && p.endsWith("}")) || (p.startsWith("[") && p.endsWith("]"))) {
+            w.jsonValue(p)
         } else {
-            // 如果是普通字符串，用引号包围
-            json += "\"${escapeJsonString(parameters)}\","
+            w.writeValue(parameters)
         }
-        json += "\"result\":\"${escapeJsonString(result)}\","
-        json += "\"createdAt\":\"${escapeJsonString(createdAt)}\","
-        json += "\"startedAt\":\"${escapeJsonString(startedAt)}\","
-        json += "\"completedAt\":\"${escapeJsonString(completedAt)}\","
-        json += "\"priority\":${priority},"
-        json += "\"groupId\":\"${escapeJsonString(groupId)}\","
-        json += "\"timeoutAt\":\"${escapeJsonString(timeoutAt)}\","
-        json += "\"triggerSource\":\"${escapeJsonString(triggerSource)}\""
-        json += "}"
-        return json
+
+        w.writeName("result").writeValue(result)
+        w.writeName("createdAt").writeValue(createdAt)
+        w.writeName("startedAt").writeValue(startedAt)
+        w.writeName("completedAt").writeValue(completedAt)
+        w.writeName("priority").writeValue(priority)
+        w.writeName("groupId").writeValue(groupId)
+        w.writeName("timeoutAt").writeValue(timeoutAt)
+        w.writeName("triggerSource").writeValue(triggerSource)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
 }
@@ -118,19 +124,22 @@ public class TaskPageResult {
      * 转换为JSON字符串
      */
     public func toJson(): String {
-        var json = "{"
-        json += "\"tasks\":["
-        for (i in 0..tasks.size) {
-            if (i > 0) { json += "," }
-            json += tasks[i].toJson()
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("tasks")
+        w.startArray()
+        for (t in tasks) {
+            w.jsonValue(t.toJson())
         }
-        json += "],"
-        json += "\"total\":${total},"
-        json += "\"page\":${page},"
-        json += "\"pageSize\":${pageSize},"
-        json += "\"totalPages\":${totalPages}"
-        json += "}"
-        return json
+        w.endArray()
+        w.writeName("total").writeValue(total)
+        w.writeName("page").writeValue(page)
+        w.writeName("pageSize").writeValue(pageSize)
+        w.writeName("totalPages").writeValue(totalPages)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 }
 
