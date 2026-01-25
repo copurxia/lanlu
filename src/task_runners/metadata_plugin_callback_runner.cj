@@ -74,12 +74,11 @@ public class MetadataPluginCallbackRunner {
         if (newTags.size > 0) {
             changed = true
         }
-        // Prefer plugin-provided updated_at if present; otherwise bump updated_at to now when anything changes.
+        // Prefer plugin-provided updated_at if present.
+        // Otherwise, do NOT bump archives.updated_at when only metadata changes (treat it as "release time").
         if (pluginUpdatedAt.size > 0) {
             archiveToUpdate.updated_at = pluginUpdatedAt
             changed = true
-        } else if (changed) {
-            archiveToUpdate.updated_at = DateTime.now().toString()
         }
         if (changed) {
             let ok = ArchiveDao.update(archiveToUpdate)

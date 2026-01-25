@@ -351,8 +351,9 @@ public class ArchiveController {
             case None => () // 保持原值
         }
 
-        // Default: bump updated_at when user saves.
-        var nextUpdatedAt = DateTime.now().toString()
+        // Default: do NOT bump updated_at when only metadata changes.
+        // In this project, archives.updated_at is treated as the "release time" unless a plugin explicitly sets it.
+        var nextUpdatedAt = existingArchive.updated_at
 
         // If tags contain `updated_at:*`, prefer it as archive updated_at and strip it from tag storage.
         var cleanedTagsOpt: Option<String> = None
