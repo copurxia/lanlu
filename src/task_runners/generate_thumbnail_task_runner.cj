@@ -1,7 +1,8 @@
 package lrr4cj.task_runners
 
-import stdx.encoding.json.*
 import stdx.log.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import std.fs.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -414,37 +415,26 @@ public class GenerateThumbnailTaskRunner {
         var archivePath = ""
         var archiveType = "archive"  // 默认压缩包
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("archive_id")) {
-                        let value = fields["archive_id"]
-                        match (value) {
-                            case s: JsonString => archiveId = s.getValue().trimAscii()
-                            case _ => throw Exception("archive_id must be a string")
-                        }
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                        case "archive_path" => archivePath = r.readValue<String>().trimAscii()
+                        case "type" =>
+                            archiveType = r.readValue<String>().trimAscii()
+                            if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
+                                archiveType = "archive"
+                            }
+                        case _ => r.skip()
                     }
-                    if (fields.contains("archive_path")) {
-                        let value = fields["archive_path"]
-                        match (value) {
-                            case s: JsonString => archivePath = s.getValue().trimAscii()
-                            case _ => throw Exception("archive_path must be a string")
-                        }
-                    }
-                    if (fields.contains("type")) {
-                        let value = fields["type"]
-                        match (value) {
-                            case s: JsonString =>
-                                archiveType = s.getValue().trimAscii()
-                                // 验证类型有效性
-                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
-                                    archiveType = "archive"
-                                }
-                            case _ => ()
-                        }
-                    }
-                case _ => ()
+                }
+                r.endObject()
             }
         } catch (_: Exception) {}
         return (archiveId, archivePath, archiveType)
@@ -455,18 +445,6 @@ public class GenerateThumbnailTaskRunner {
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
-    }
-
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
     }
 
     /**

@@ -1,7 +1,8 @@
 package lrr4cj.controllers
 
-import stdx.encoding.json.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import cjoy.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -13,44 +14,24 @@ import lrr4cj.utils.*
  * 负责创建 taskpool 任务并返回 job id，前端通过 /api/taskpool/{id} 查询进度与结果
  */
 public class MetadataPluginController {
-    private static func jsonValueToString(value: JsonValue): String {
-        match (value) {
-            case s: JsonString => return s.getValue()
-            case _ => return value.toString()
+    private static func readRawJson(r: JsonReader): String {
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(BeginArray) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(_) =>
+                return r.readValue<String>()
+            case None =>
+                return ""
         }
     }
 
-    private static func getJsonString(obj: JsonObject, key: String): String {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) {
-            return ""
-        }
-        return jsonValueToString(fields[key]).trimAscii()
-    }
-
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
-    private static func jsonValueToBool(value: JsonValue): Bool {
-        match (value) {
-            case b: JsonBool => return b.getValue()
-            case i: JsonInt => return i.getValue() != 0
-            case s: JsonString =>
-                let v = s.getValue().trimAscii().toAsciiLower()
-                return v == "true" || v == "1" || v == "yes" || v == "y"
-            case _ =>
-                let v = value.toString().trimAscii().toAsciiLower().replace("\"", "")
-                return v == "true" || v == "1" || v == "yes" || v == "y"
-        }
+    private static func readBoolFlexible(r: JsonReader): Bool {
+        let v = r.readValue<String>().trimAscii().toAsciiLower()
+        return v == "true" || v == "1" || v == "yes" || v == "y"
     }
 
     /**
@@ -64,11 +45,11 @@ public class MetadataPluginController {
 
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
-                let jsonVal = JsonValue.fromStr(trimmed)
-                match (jsonVal) {
-                    case _: JsonObject =>
-                        return (Option.None, Option<String>.Some(trimmed))
-                    case _ => ()
+                var buf = ByteBuffer()
+                unsafe { buf.write(trimmed.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    return (Option.None, Option<String>.Some(trimmed))
                 }
             } catch (_: Exception) {}
         }
@@ -97,49 +78,37 @@ public class MetadataPluginController {
 
             if (requestBody.trimAscii().size > 0) {
                 try {
-                    let bodyJson = JsonValue.fromStr(requestBody)
-                    match (bodyJson) {
-                        case obj: JsonObject =>
-                            archiveId = getJsonString(obj, "archive_id")
-                            if (archiveId.size == 0) {
-                                // 兼容：id
-                                archiveId = getJsonString(obj, "id")
-                            }
-                            if (archiveId.size == 0) {
-                                // 兼容：arcid / archiveId
-                                archiveId = getJsonString(obj, "arcid")
-                            }
-                            if (archiveId.size == 0) {
-                                archiveId = getJsonString(obj, "archiveId")
-                            }
-                            namespace = getJsonString(obj, "namespace")
+                    var buf = ByteBuffer()
+                    unsafe { buf.write(requestBody.rawData()) }
+                    let r = JsonReader(buf)
 
-                            // param 允许 string / object；object 则序列化为 JSON 字符串
-                            let fields = obj.getFields()
-                            if (fields.contains("param")) {
-                                let pv = fields["param"]
-                                match (pv) {
-                                    case s: JsonString => param = s.getValue().trimAscii()
-                                    case o: JsonObject => param = o.toString().trimAscii()
-                                    case _ => param = pv.toString().trimAscii()
-                                }
+                    if (r.peek() == Some(BeginObject)) {
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            let k = r.readName()
+                            match (k) {
+                                case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                                case "id" =>
+                                    if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                                case "arcid" =>
+                                    if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                                case "archiveId" =>
+                                    if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                                case "namespace" => namespace = r.readValue<String>().trimAscii()
+                                case "param" => param = readRawJson(r).trimAscii()
+                                case "write_back" => writeBack = readBoolFlexible(r)
+                                case "writeBack" => writeBack = readBoolFlexible(r)
+                                case "mode" =>
+                                    let mode = r.readValue<String>().trimAscii().toAsciiLower()
+                                    if (mode == "write" || mode == "persist" || mode == "save" || mode == "apply") {
+                                        writeBack = true
+                                    } else if (mode == "query" || mode == "preview" || mode == "dry_run" || mode == "dryrun") {
+                                        writeBack = false
+                                    }
+                                case _ => r.skip()
                             }
-
-                            // write_back / mode（可选）
-                            if (fields.contains("write_back")) {
-                                writeBack = jsonValueToBool(fields["write_back"])
-                            } else if (fields.contains("writeBack")) {
-                                writeBack = jsonValueToBool(fields["writeBack"])
-                            }
-                            if (fields.contains("mode")) {
-                                let mode = jsonValueToString(fields["mode"]).trimAscii().toAsciiLower().replace("\"", "")
-                                if (mode == "write" || mode == "persist" || mode == "save" || mode == "apply") {
-                                    writeBack = true
-                                } else if (mode == "query" || mode == "preview" || mode == "dry_run" || mode == "dryrun") {
-                                    writeBack = false
-                                }
-                            }
-                        case _ => ()
+                        }
+                        r.endObject()
                     }
                 } catch (e: Exception) {
                     logger.warn("解析 metadata_plugin 请求JSON失败", ("error", e.message))
@@ -221,25 +190,26 @@ public class MetadataPluginController {
 
             // 预览/查询模式：只跑 deno_task，前端直接读取 deno_task 的 output（不写库）
             let (oneshotOpt, extraParamsOpt) = splitParam(param)
-
-            var paramsObj = JsonObject()
-            let fields = paramsObj.getFields()
-            fields["pluginNamespace"] = JsonString(namespace)
-            fields["pluginType"] = JsonString("Metadata")
-            fields["action"] = JsonString("run")
-            fields["archiveId"] = JsonString(archiveId)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("pluginNamespace").writeValue(namespace)
+            w.writeName("pluginType").writeValue("Metadata")
+            w.writeName("action").writeValue("run")
+            w.writeName("archiveId").writeValue(archiveId)
             match (oneshotOpt) {
-                case Some(v) => fields["oneshotParam"] = JsonString(v)
+                case Some(v) => w.writeName("oneshotParam").writeValue(v)
                 case None => ()
             }
             match (extraParamsOpt) {
-                case Some(v) => fields["extraParams"] = JsonString(v)
+                case Some(v) => w.writeName("extraParams").writeValue(v)
                 case None => ()
             }
-
             // groupId 仅用于任务运行期共享 KV（默认语义下任务结束会清理整组），这里用 archiveId 便于同归档并发共享。
-            fields["groupId"] = JsonString(archiveId)
-            let denoParams = paramsObj.toString()
+            w.writeName("groupId").writeValue(archiveId)
+            w.endObject()
+            w.flush()
+            let denoParams = String.fromUtf8(readToEnd(out))
 
             let denoTask = TaskModel.createTaskWithOptions(
                 "元数据插件执行(预览)",

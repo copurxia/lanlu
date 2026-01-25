@@ -5,8 +5,9 @@ import std.fs.*
 import std.time.*
 import std.convert.*
 import std.collection.*
-import stdx.encoding.json.*
 import stdx.log.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -123,13 +124,16 @@ public class DownloadUrlTaskRunner {
      * 构建回调任务参数
      */
     private static func buildCallbackParams(downloadTaskId: Int64, denoTaskId: Int64, categoryId: Int64, pluginNamespace: String): String {
-        var paramsObj = JsonObject()
-        let fields = paramsObj.getFields()
-        fields["downloadTaskId"] = JsonInt(downloadTaskId)
-        fields["denoTaskId"] = JsonInt(denoTaskId)
-        fields["categoryId"] = JsonInt(categoryId)
-        fields["pluginNamespace"] = JsonString(pluginNamespace)
-        return paramsObj.toString()
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("downloadTaskId").writeValue(downloadTaskId)
+        w.writeName("denoTaskId").writeValue(denoTaskId)
+        w.writeName("categoryId").writeValue(categoryId)
+        w.writeName("pluginNamespace").writeValue(pluginNamespace)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
@@ -145,15 +149,21 @@ public class DownloadUrlTaskRunner {
             return ""
         }
         try {
-            let bodyJson = JsonValue.fromStr(trimmed)
-            match (bodyJson) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("url")) {
-                        return fields["url"].toString().trimAscii()
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return "" }
+            var url = ""
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "url" => url = r.readValue<String>().trimAscii()
+                    case _ => r.skip()
+                }
             }
+            r.endObject()
+            return url
         } catch (_: Exception) {}
         return ""
     }
@@ -164,37 +174,23 @@ public class DownloadUrlTaskRunner {
             return 0
         }
         try {
-            let bodyJson = JsonValue.fromStr(trimmed)
-            match (bodyJson) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("category_id")) {
-                        let raw = fields["category_id"].toString().trimAscii()
-                        // 兼容两种格式：
-                        // - 直接传内部ID（Int）
-                        // - 传 catid（如 CAT_...），需要再查一次内部ID
-                        try {
-                            return Int64.parse(raw)
-                        } catch (_: Exception) {
-                            return CategoryDao.getInternalId(raw)
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return 0 }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "category_id" =>
+                        let raw = r.readValue<String>().trimAscii()
+                        try { return Int64.parse(raw) } catch (_: Exception) { return CategoryDao.getInternalId(raw) }
+                    case _ => r.skip()
+                }
             }
+            r.endObject()
         } catch (_: Exception) {}
         return 0
-    }
-
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
     }
 
     private static func findMatchingDownloadPlugin(url: String): Option<PluginData> {
@@ -242,39 +238,53 @@ public class DownloadUrlTaskRunner {
             return paths
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataArray: JsonArray =>
-                                        // 数组格式：提取每个档案的relative_path
-                                        for (i in 0..dataArray.size()) {
-                                            match (dataArray.get(i)) {
-                                                case Some(item: JsonObject) =>
-                                                    let itemFields = item.getFields()
-                                                    if (itemFields.contains("relative_path")) {
-                                                        let rpVal = itemFields["relative_path"]
-                                                        match (rpVal) {
-                                                            case rpStr: JsonString => paths.add(rpStr.getValue().trimAscii())
-                                                            case _ => paths.add(rpVal.toString().trimAscii())
-                                                        }
-                                                    }
-                                                case _ => ()
-                                            }
-                                        }
-                                    case _ => ()
-                                }
-                            }
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
             }
+
+            var ok = false
+            if (r.peek() != Some(BeginObject)) { return paths }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" => ok = readBoolFlexible()
+                    case "data" =>
+                        if (!ok) { r.skip(); continue }
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    match (r.peek()) {
+                                        case Some(BeginObject) =>
+                                            var rp = ""
+                                            r.startObject()
+                                            while (r.peek() != EndObject) {
+                                                let fn = r.readName()
+                                                match (fn) {
+                                                    case "relative_path" => rp = r.readValue<String>().trimAscii()
+                                                    case _ => r.skip()
+                                                }
+                                            }
+                                            r.endObject()
+                                            if (rp.size > 0) { paths.add(rp) }
+                                        case Some(_) => r.skip()
+                                        case None => break
+                                    }
+                                }
+                                r.endArray()
+                            case Some(_) => r.skip()
+                            case None => ()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
         } catch (_: Exception) {
             return paths
         }
@@ -286,39 +296,54 @@ public class DownloadUrlTaskRunner {
             return ""
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataArray: JsonArray =>
-                                        // 数组格式：提取第一个档案的source
-                                        if (dataArray.size() > 0) {
-                                            match (dataArray.get(0)) {
-                                                case Some(item: JsonObject) =>
-                                                    let itemFields = item.getFields()
-                                                    if (itemFields.contains("source")) {
-                                                        let sourceVal = itemFields["source"]
-                                                        match (sourceVal) {
-                                                            case sourceStr: JsonString => return sourceStr.getValue().trimAscii()
-                                                            case _ => return sourceVal.toString().trimAscii()
-                                                        }
-                                                    }
-                                                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
+            }
+
+            var ok = false
+            if (r.peek() != Some(BeginObject)) { return "" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" => ok = readBoolFlexible()
+                    case "data" =>
+                        if (!ok) { r.skip(); continue }
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                r.startArray()
+                                match (r.peek()) {
+                                    case Some(BeginObject) =>
+                                        var source = ""
+                                        r.startObject()
+                                        while (r.peek() != EndObject) {
+                                            let fn = r.readName()
+                                            match (fn) {
+                                                case "source" => source = r.readValue<String>().trimAscii()
+                                                case _ => r.skip()
                                             }
                                         }
-                                    case _ => ()
+                                        r.endObject()
+                                        while (r.peek() != EndArray) { r.skip() }
+                                        r.endArray()
+                                        return source
+                                    case Some(_) =>
+                                        while (r.peek() != EndArray) { r.skip() }
+                                        r.endArray()
+                                    case None => ()
                                 }
-                            }
+                            case Some(_) => r.skip()
+                            case None => ()
                         }
-                    }
-                case _ => ()
+                    case _ => r.skip()
+                }
             }
+            r.endObject()
         } catch (_: Exception) {
             return ""
         }
@@ -330,37 +355,44 @@ public class DownloadUrlTaskRunner {
             return "archive"  // 默认压缩包
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataObj: JsonObject =>
-                                        let dataFields = dataObj.getFields()
-                                        if (dataFields.contains("archive_type")) {
-                                            let typeVal = dataFields["archive_type"]
-                                            match (typeVal) {
-                                                case typeStr: JsonString =>
-                                                    let typeName = typeStr.getValue().trimAscii()
-                                                    // 验证类型是否有效
-                                                    if (typeName == "archive" || typeName == "folder" || typeName == "pdf") {
-                                                        return typeName
-                                                    }
-                                                case _ => ()
-                                            }
-                                        }
-                                    case _ => ()
-                                }
-                            }
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
             }
+
+            var ok = false
+            if (r.peek() != Some(BeginObject)) { return "archive" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" => ok = readBoolFlexible()
+                    case "data" =>
+                        if (!ok) { r.skip(); continue }
+                        match (r.peek()) {
+                            case Some(BeginObject) =>
+                                var t = ""
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let fn = r.readName()
+                                    match (fn) {
+                                        case "archive_type" => t = r.readValue<String>().trimAscii()
+                                        case _ => r.skip()
+                                    }
+                                }
+                                r.endObject()
+                                if (t == "archive" || t == "folder" || t == "pdf") { return t }
+                            case Some(_) => r.skip()
+                            case None => ()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
         } catch (_: Exception) {}
         return "archive"  // 默认压缩包（向后兼容）
     }

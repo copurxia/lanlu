@@ -271,20 +271,6 @@ public class PluginsController {
         return json
     }
 
-    private static func escapeJsonString(input: String): String {
-        var escaped = input
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
-
-
     // ========== 新增Schema相关API ==========
 
     /**

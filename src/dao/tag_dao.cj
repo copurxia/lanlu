@@ -5,7 +5,8 @@ import lrr4cj.config.*
 import lrr4cj.utils.*
 import std.collection.*
 import stdx.log.*
-import stdx.encoding.json.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import std.sync.*
 
 /**
@@ -1056,31 +1057,35 @@ public class TagDao {
         }
 
         try {
-            let jsonValue = JsonValue.fromStr(jsonStr)
-            match (jsonValue) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    for ((lang, value) in fields) {
+            var buf = ByteBuffer()
+            unsafe { buf.write(jsonStr.rawData()) }
+            let r = JsonReader(buf)
+
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let lang = r.readName()
                         let translation = TagTranslation()
-                        match (value) {
-                            case innerObj: JsonObject =>
-                                let innerFields = innerObj.getFields()
-                                if (innerFields.contains("text")) {
-                                    match (innerFields["text"]) {
-                                        case s: JsonString => translation.text = s.getValue()
-                                        case _ => ()
+                        match (r.peek()) {
+                            case Some(BeginObject) =>
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let k = r.readName()
+                                    match (k) {
+                                        case "text" => translation.text = r.readValue<String>()
+                                        case "intro" => translation.intro = r.readValue<String>()
+                                        case _ => r.skip()
                                     }
                                 }
-                                if (innerFields.contains("intro")) {
-                                    match (innerFields["intro"]) {
-                                        case s: JsonString => translation.intro = s.getValue()
-                                        case _ => ()
-                                    }
-                                }
-                            case _ => ()
+                                r.endObject()
+                                result[lang] = translation
+                            case Some(_) =>
+                                r.skip()
+                            case None => break
                         }
-                        result[lang] = translation
                     }
+                    r.endObject()
                 case _ => ()
             }
         } catch (e: Exception) {
@@ -1098,28 +1103,19 @@ public class TagDao {
             return "{}"
         }
 
-        var parts: ArrayList<String> = ArrayList<String>()
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
         for ((lang, t) in translations) {
-            let textEscaped = escapeJsonString(t.text)
-            let introEscaped = escapeJsonString(t.intro)
-            parts.add("\"${lang}\":{\"text\":\"${textEscaped}\",\"intro\":\"${introEscaped}\"}")
+            w.writeName(lang)
+            w.startObject()
+            w.writeName("text").writeValue(t.text)
+            w.writeName("intro").writeValue(t.intro)
+            w.endObject()
         }
-
-        let joined = String.join(parts.toArray(), delimiter: ",")
-        return "{${joined}}"
-    }
-
-    /**
-     * 转义 JSON 字符串
-     */
-    private static func escapeJsonString(s: String): String {
-        var result = s
-        result = result.replace("\\", "\\\\")
-        result = result.replace("\"", "\\\"")
-        result = result.replace("\n", "\\n")
-        result = result.replace("\r", "\\r")
-        result = result.replace("\t", "\\t")
-        return result
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     // ============ 自动补全搜索方法 ============

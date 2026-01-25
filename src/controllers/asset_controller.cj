@@ -11,18 +11,6 @@ import lrr4cj.utils.*
  * Asset controller: serve files stored in ASSET_PATH by asset id.
  */
 public class AssetController {
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     // GET /api/assets/{id}
     public static func getAsset(ctx: JoyContext): Unit {
         let idStr = ctx.getParam("id").getOrThrow()

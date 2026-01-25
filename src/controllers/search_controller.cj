@@ -6,6 +6,7 @@ import lrr4cj.models.*
 import lrr4cj.views.*
 import lrr4cj.dao.*
 import lrr4cj.middleware.*
+import lrr4cj.utils.*
 import std.convert.*
 import std.collection.*
 
@@ -13,21 +14,6 @@ import std.collection.*
  * 搜索控制器
  */
 public class SearchController {
-
-    /**
-     * JSON字符串转义函数
-     */
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 
     /**
      * 从逗号分隔的 tags 字符串中提取并去重标签（namespace:name），用于批量翻译。

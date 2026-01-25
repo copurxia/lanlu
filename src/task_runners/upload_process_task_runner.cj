@@ -1,7 +1,8 @@
 package lrr4cj.task_runners
 
-import stdx.encoding.json.*
 import stdx.log.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 
@@ -68,29 +69,22 @@ public class UploadProcessTaskRunner {
             return ""
         }
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains(key)) {
-                        return fields[key].toString().trimAscii()
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return "" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                if (k == key) {
+                    return r.readValue<String>().trimAscii()
+                } else {
+                    r.skip()
+                }
             }
+            r.endObject()
         } catch (_: Exception) {}
         return ""
-    }
-
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

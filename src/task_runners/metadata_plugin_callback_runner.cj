@@ -2,8 +2,9 @@ package lrr4cj.task_runners
 
 import std.collection.*
 import std.convert.*
-import stdx.encoding.json.*
 import std.time.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -99,44 +100,31 @@ public class MetadataPluginCallbackRunner {
         var denoTaskId: Int64 = 0
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("archiveId")) {
-                        archiveId = jsonValueToString(fields["archiveId"]).trimAscii()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readInt64Flexible(): Int64 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int64.parse(s) } catch (_: Exception) { return 0 }
+            }
+
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                        case "namespace" => namespace = r.readValue<String>().trimAscii()
+                        case "denoTaskId" => denoTaskId = readInt64Flexible()
+                        case _ => r.skip()
                     }
-                    if (fields.contains("namespace")) {
-                        namespace = jsonValueToString(fields["namespace"]).trimAscii()
-                    }
-                    if (fields.contains("denoTaskId")) {
-                        denoTaskId = jsonValueToInt64(fields["denoTaskId"])
-                    }
-                case _ => ()
+                }
+                r.endObject()
             }
         } catch (_: Exception) {}
 
         return (archiveId, namespace, denoTaskId)
-    }
-
-    private static func jsonValueToString(value: JsonValue): String {
-        match (value) {
-            case s: JsonString => return s.getValue()
-            case _ => return value.toString()
-        }
-    }
-
-    private static func jsonValueToInt64(value: JsonValue): Int64 {
-        match (value) {
-            case n: JsonInt => return n.getValue()
-            case s: JsonString =>
-                try {
-                    return Int64.parse(s.getValue())
-                } catch (_: Exception) {
-                    return 0
-                }
-            case _ => return 0
-        }
     }
 
     private static func parseMetadataOutput(output: String): ParsedMetadataResult {
@@ -145,55 +133,64 @@ public class MetadataPluginCallbackRunner {
         }
 
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    if (!getJsonBool(obj, "success")) {
-                        let err = getJsonString(obj, "error")
-                        return ParsedMetadataResult(false, if (err.size > 0) { err } else { "Plugin returned success=false" }, "", "", "")
-                    }
-                    var title = ""
-                    var summary = ""
-                    var tags = ""
-                    let fields = obj.getFields()
-                    if (fields.contains("data")) {
-                        match (fields["data"]) {
-                            case dataObj: JsonObject =>
-                                title = getJsonString(dataObj, "title")
-                                summary = getJsonString(dataObj, "summary")
-                                tags = getJsonString(dataObj, "tags")
-                            case _ => ()
-                        }
-                    }
-                    return ParsedMetadataResult(true, "", title, summary, tags)
-                case _ =>
-                    return ParsedMetadataResult(false, "Plugin output is not a JSON object", "", "", "")
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
             }
+
+            if (r.peek() != Some(BeginObject)) {
+                return ParsedMetadataResult(false, "Plugin output is not a JSON object", "", "", "")
+            }
+
+            var successSeen = false
+            var success = false
+            var err = ""
+            var title = ""
+            var summary = ""
+            var tags = ""
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" =>
+                        successSeen = true
+                        success = readBoolFlexible()
+                    case "error" =>
+                        err = r.readValue<String>()
+                    case "data" =>
+                        match (r.peek()) {
+                            case Some(BeginObject) =>
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let dk = r.readName()
+                                    match (dk) {
+                                        case "title" => title = r.readValue<String>()
+                                        case "summary" => summary = r.readValue<String>()
+                                        case "tags" => tags = r.readValue<String>()
+                                        case _ => r.skip()
+                                    }
+                                }
+                                r.endObject()
+                            case Some(_) => r.skip()
+                            case None => ()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+
+            if (!successSeen || !success) {
+                let msg = if (err.trimAscii().size > 0) { err.trimAscii() } else { "Plugin returned success=false" }
+                return ParsedMetadataResult(false, msg, "", "", "")
+            }
+            return ParsedMetadataResult(true, "", title, summary, tags)
         } catch (e: Exception) {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
-        }
-    }
-
-    private static func getJsonBool(jsonObj: JsonObject, key: String): Bool {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) { return false }
-        match (fields[key]) {
-            case b: JsonBool => return b.getValue()
-            case s: JsonString =>
-                let v = s.getValue()
-                return v == "true" || v == "True" || v == "TRUE" || v == "1"
-            case _ =>
-                let v = fields[key].toString()
-                return v == "true" || v == "True" || v == "TRUE" || v == "1"
-        }
-    }
-
-    private static func getJsonString(jsonObj: JsonObject, key: String): String {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) { return "" }
-        match (fields[key]) {
-            case s: JsonString => return s.getValue()
-            case _ => return fields[key].toString()
         }
     }
 
@@ -216,15 +213,4 @@ public class MetadataPluginCallbackRunner {
         "}"
     }
 
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

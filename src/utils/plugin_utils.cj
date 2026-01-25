@@ -1,7 +1,8 @@
 package lrr4cj.utils
 
 import std.collection.*
-import stdx.encoding.json.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import stdx.log.*
 
 /**
@@ -22,98 +23,178 @@ public func mergePluginParameters(existingJson: String, discoveredJson: String):
     }
 
     try {
-        let discoveredVal = JsonValue.fromStr(discoveredTrimmed)
-        let existingVal = JsonValue.fromStr(existingTrimmed)
+        // Only merge when discovered is a JSON array (schema array).
+        var discoveredBuf = ByteBuffer()
+        unsafe { discoveredBuf.write(discoveredTrimmed.rawData()) }
+        let discoveredReader = JsonReader(discoveredBuf)
 
-        // 仅对“schema数组”做合并；其他格式直接返回 discovered
-        match (discoveredVal) {
-            case discoveredArr: JsonArray =>
-                // 提取 existing 中的 value 映射
-                var existingValueMap = HashMap<String, JsonValue>()
-                var existingObjMap = HashMap<String, JsonObject>()
-
-                match (existingVal) {
-                    case existingArr: JsonArray =>
-                        let size = existingArr.size()
-                        for (i in 0..size) {
-                            match (existingArr.get(i)) {
-                                case Some(v) =>
-                                    match (v) {
-                                        case obj: JsonObject =>
-                                            let key = getParamKey(obj, i)
-                                            existingObjMap[key] = obj
-                                            let fields = obj.getFields()
-                                            if (fields.contains("value")) {
-                                                existingValueMap[key] = fields["value"]
-                                            }
-                                        case _ => ()
-                                    }
-                                case None => ()
-                            }
-                        }
-                    case existingObj: JsonObject =>
-                        // 兼容：如果数据库里是 {name:value} 的对象格式
-                        for ((k, v) in existingObj.getFields()) {
-                            existingValueMap[k] = v
-                        }
-                    case _ => ()
-                }
-
-                // 构建 merged schema：以 discovered 为准，填充 existing.value
-                var seenKeys = HashSet<String>()
-                var mergedList = ArrayList<JsonValue>()
-                let dSize = discoveredArr.size()
-                for (i in 0..dSize) {
-                    match (discoveredArr.get(i)) {
-                        case Some(v) =>
-                            match (v) {
-                                case obj: JsonObject =>
-                                    let key = getParamKey(obj, i)
-                                    seenKeys.add(key)
-
-                                    if (existingValueMap.contains(key)) {
-                                        obj.put("value", existingValueMap[key])
-                                    }
-                                    mergedList.add(obj)
-                                case _ =>
-                                    mergedList.add(v)
-                            }
-                        case None => ()
-                    }
-                }
-
-                // 追加 schema 中不存在，但 existing 中存在的参数对象，避免用户配置丢失
-                for ((key, obj) in existingObjMap) {
-                    if (!seenKeys.contains(key)) {
-                        mergedList.add(obj)
-                    }
-                }
-
-                return JsonArray(mergedList).toString()
-            case _ =>
-                return discoveredJson
+        if (discoveredReader.peek() != Some(BeginArray)) {
+            return discoveredJson
         }
+
+        // existingValueMap: key -> raw JSON value string (not quoted unless value itself is string literal)
+        var existingValueMap = HashMap<String, String>()
+        // existingObjMap: key -> raw JSON object string (for appending objects not present in discovered)
+        var existingObjMap = HashMap<String, String>()
+
+        func extractKeyAndValue(rawObj: String, index: Int64): (String, Option<String>) {
+            var key = "param${index.toString()}"
+            var valueRaw: Option<String> = None
+
+            var buf = ByteBuffer()
+            unsafe { buf.write(rawObj.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return (key, valueRaw)
+            }
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let n = r.readName()
+                match (n) {
+                    case "name" =>
+                        let v = r.readValue<String>().trimAscii()
+                        if (v.size > 0) { key = v }
+                    case "value" =>
+                        let bytes = r.readValueBytes()
+                        valueRaw = Some(String.fromUtf8(bytes))
+                    case _ =>
+                        r.skip()
+                }
+            }
+            r.endObject()
+            return (key, valueRaw)
+        }
+
+        func extractKeyFromObject(rawObj: String, index: Int64): String {
+            let (k, _) = extractKeyAndValue(rawObj, index)
+            return k
+        }
+
+        func injectValueIntoObject(rawObj: String, valueRaw: String): String {
+            // Re-serialize object, dropping any existing "value" field and appending/overwriting with provided valueRaw.
+            var inBuf = ByteBuffer()
+            unsafe { inBuf.write(rawObj.rawData()) }
+            let r = JsonReader(inBuf)
+
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+
+            if (r.peek() != Some(BeginObject)) {
+                // Not an object; best-effort return original.
+                return rawObj
+            }
+
+            w.startObject()
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == "value") {
+                    r.skip()
+                    continue
+                }
+                let bytes = r.readValueBytes()
+                w.writeName(name).jsonValue(String.fromUtf8(bytes))
+            }
+            r.endObject()
+
+            w.writeName("value").jsonValue(valueRaw)
+            w.endObject()
+            w.flush()
+            return String.fromUtf8(readToEnd(out))
+        }
+
+        // Parse existingJson into maps.
+        try {
+            var existingBuf = ByteBuffer()
+            unsafe { existingBuf.write(existingTrimmed.rawData()) }
+            let existingReader = JsonReader(existingBuf)
+
+            match (existingReader.peek()) {
+                case Some(BeginArray) =>
+                    existingReader.startArray()
+                    var idx: Int64 = 0
+                    while (existingReader.peek() != EndArray) {
+                        match (existingReader.peek()) {
+                            case Some(BeginObject) =>
+                                let rawObj = String.fromUtf8(existingReader.readValueBytes())
+                                let (key, valueOpt) = extractKeyAndValue(rawObj, idx)
+                                existingObjMap[key] = rawObj
+                                match (valueOpt) {
+                                    case Some(v) => existingValueMap[key] = v
+                                    case None => ()
+                                }
+                                idx += 1
+                            case Some(_) =>
+                                existingReader.skip()
+                                idx += 1
+                            case None => break
+                        }
+                    }
+                    existingReader.endArray()
+                case Some(BeginObject) =>
+                    // Compat: DB stored as {name:value}
+                    existingReader.startObject()
+                    while (existingReader.peek() != EndObject) {
+                        let k = existingReader.readName()
+                        let bytes = existingReader.readValueBytes()
+                        existingValueMap[k] = String.fromUtf8(bytes)
+                    }
+                    existingReader.endObject()
+                case _ => ()
+            }
+        } catch (_: Exception) {
+            // ignore; fall back to discovered below
+        }
+
+        // Build merged schema: discovered wins, but inject existing.value.
+        var seenKeys = HashSet<String>()
+        var mergedRawItems = ArrayList<String>()
+
+        discoveredReader.startArray()
+        var dIdx: Int64 = 0
+        while (discoveredReader.peek() != EndArray) {
+            match (discoveredReader.peek()) {
+                case Some(BeginObject) =>
+                    let rawObj = String.fromUtf8(discoveredReader.readValueBytes())
+                    let key = extractKeyFromObject(rawObj, dIdx)
+                    seenKeys.add(key)
+
+                    if (existingValueMap.contains(key)) {
+                        mergedRawItems.add(injectValueIntoObject(rawObj, existingValueMap[key]))
+                    } else {
+                        mergedRawItems.add(rawObj)
+                    }
+                    dIdx += 1
+                case Some(_) =>
+                    // Preserve non-object items as raw values.
+                    let raw = String.fromUtf8(discoveredReader.readValueBytes())
+                    mergedRawItems.add(raw)
+                    dIdx += 1
+                case None => break
+            }
+        }
+        discoveredReader.endArray()
+
+        // Append existing objects that were not present in discovered schema.
+        for ((k, rawObj) in existingObjMap) {
+            if (!seenKeys.contains(k)) {
+                mergedRawItems.add(rawObj)
+            }
+        }
+
+        // Serialize merged array.
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
+        for (i in 0..mergedRawItems.size) {
+            w.jsonValue(mergedRawItems[i])
+        }
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     } catch (e: Exception) {
         getLogger("plugin_utils").warn("合并插件参数失败，使用discovered参数", ("error", e.message))
         return discoveredJson
     }
-}
-
-private func getParamKey(paramObj: JsonObject, index: Int64): String {
-    let fields = paramObj.getFields()
-    if (fields.contains("name")) {
-        match (fields["name"]) {
-            case s: JsonString =>
-                let value = s.getValue().trimAscii()
-                if (value.size > 0) {
-                    return value
-                }
-            case _ =>
-                let value = fields["name"].toString().trimAscii()
-                if (value.size > 0) {
-                    return value
-                }
-        }
-    }
-    return "param${index.toString()}"
 }

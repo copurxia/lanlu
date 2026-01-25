@@ -820,17 +820,6 @@ public class CronService {
         return ScanResultData(0, 0, 0, [], taskId: task.id)
     }
 
-    private func escapeJson(value: String): String {
-        var escaped = value
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }
 
 /**
@@ -860,15 +849,6 @@ public class CronValidationResult {
         return json
     }
 
-    private func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }
 
 /**

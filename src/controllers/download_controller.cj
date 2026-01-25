@@ -1,8 +1,9 @@
 package lrr4cj.controllers
 
 import std.collection.*
-import stdx.encoding.json.*
 import stdx.log.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import cjoy.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -14,18 +15,6 @@ import lrr4cj.utils.*
  * 负责匹配下载插件、调用插件并拉取文件到归档目录
  */
 public class DownloadController {
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     /**
      * POST /api/download_url
      * 请求体: { "url": "https://example.com/file.zip" }
@@ -39,14 +28,20 @@ public class DownloadController {
 
             if (requestBody.size > 0) {
                 try {
-                    let bodyJson = JsonValue.fromStr(requestBody)
-                    match (bodyJson) {
-                        case obj: JsonObject =>
-                            let fields = obj.getFields()
-                            if (fields.contains("url")) {
-                                let urlVal = fields["url"]
-                                url = urlVal.toString().trimAscii()
+                    var buf = ByteBuffer()
+                    unsafe { buf.write(requestBody.rawData()) }
+                    let r = JsonReader(buf)
+                    match (r.peek()) {
+                        case Some(BeginObject) =>
+                            r.startObject()
+                            while (r.peek() != EndObject) {
+                                let n = r.readName()
+                                match (n) {
+                                    case "url" => url = r.readValue<String>().trimAscii()
+                                    case _ => r.skip()
+                                }
                             }
+                            r.endObject()
                         case _ => ()
                     }
                 } catch (e: Exception) {

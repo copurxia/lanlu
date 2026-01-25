@@ -3,7 +3,8 @@ package lrr4cj.controllers
 import cjoy.*
 import std.collection.*
 import stdx.log.*
-import stdx.encoding.json.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.services.*
 import lrr4cj.models.*
 import lrr4cj.dao.*
@@ -213,21 +214,6 @@ public class SystemSettingsController {
     }
 
     /**
-     * 辅助方法：转义JSON字符串
-     */
-    private static func escapeJson(value: String): String {
-        var escaped = value
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
-    /**
      * 辅助方法：从JSON字符串提取值
      */
     private static func extractJsonValue(json: String, key: String): String {
@@ -236,16 +222,22 @@ public class SystemSettingsController {
         }
         
         try {
-            let jsonVal = JsonValue.fromStr(json)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains(key)) {
-                        match (fields[key]) {
-                            case s: JsonString => return s.getValue()
-                            case _ => return fields[key].toString()
+            var buf = ByteBuffer()
+            unsafe { buf.write(json.rawData()) }
+            let r = JsonReader(buf)
+
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        if (n == key) {
+                            return r.readValue<String>()
+                        } else {
+                            r.skip()
                         }
                     }
+                    r.endObject()
                 case _ => return ""
             }
         } catch (e: Exception) {
@@ -264,13 +256,23 @@ public class SystemSettingsController {
         }
         
         try {
-            let jsonVal = JsonValue.fromStr(json)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains(key)) {
-                        return fields[key].toString()
+            var buf = ByteBuffer()
+            unsafe { buf.write(json.rawData()) }
+            let r = JsonReader(buf)
+
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        if (n == key) {
+                            let bytes = r.readValueBytes()
+                            return String.fromUtf8(bytes)
+                        } else {
+                            r.skip()
+                        }
                     }
+                    r.endObject()
                 case _ => return ""
             }
         } catch (e: Exception) {
@@ -291,19 +293,31 @@ public class SystemSettingsController {
         }
         
         try {
-            let jsonVal = JsonValue.fromStr(settingsJson)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    for ((key, value) in fields) {
-                        match (value) {
-                            case s: JsonString => settingsMap[key] = s.getValue()
-                            case _ => settingsMap[key] = value.toString()
+            var buf = ByteBuffer()
+            unsafe { buf.write(settingsJson.rawData()) }
+            let r = JsonReader(buf)
+
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let k = r.readName()
+                        match (r.peek()) {
+                            case Some(BeginObject) =>
+                                let bytes = r.readValueBytes()
+                                settingsMap[k] = String.fromUtf8(bytes)
+                            case Some(BeginArray) =>
+                                let bytes = r.readValueBytes()
+                                settingsMap[k] = String.fromUtf8(bytes)
+                            case Some(_) =>
+                                settingsMap[k] = r.readValue<String>()
+                            case None => break
                         }
                     }
+                    r.endObject()
                 case _ => return settingsMap
             }
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return settingsMap
         }
         

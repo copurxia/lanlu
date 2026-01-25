@@ -5,7 +5,7 @@ import std.fs.*
 import std.io.*
 import std.process.*
 import std.time.*
-import stdx.encoding.json.*
+import stdx.encoding.json.stream.*
 
 /**
  * Helper to execute a TypeScript plugin in a sandboxed temp directory and fetch its plugin_info.
@@ -104,55 +104,55 @@ public class DenoPluginInfoRunner {
             if (trimmed.size == 0) { continue }
 
             try {
-                let jsonVal = JsonValue.fromStr(trimmed)
-                match (jsonVal) {
-                    case obj: JsonObject =>
-                        let fields = obj.getFields()
+                var buf = ByteBuffer()
+                unsafe { buf.write(trimmed.rawData()) }
+                let r = JsonReader(buf)
 
-                        // NDJSON result message.
-                        if (fields.contains("type")) {
-                            let msgType = match (fields.get("type")) {
-                                case Some(s: JsonString) => s.getValue().trimAscii()
-                                case Some(v) => v.toString().trimAscii().replace("\"", "")
-                                case None => ""
-                            }
-                            if (msgType == "result") {
-                                let success = match (fields.get("success")) {
-                                    case Some(b: JsonBool) => b.getValue()
-                                    case Some(s: JsonString) =>
-                                        let v = s.getValue().trimAscii().toAsciiLower()
-                                        v == "true" || v == "1"
-                                    case Some(v) =>
-                                        let t = v.toString().trimAscii().toAsciiLower()
-                                        t == "true" || t == "1"
-                                    case None => false
-                                }
-                                if (success) {
-                                    match (fields.get("data")) {
-                                        case Some(dataVal) => return dataVal.toString()
-                                        case None => ()
-                                    }
-                                }
-                            }
-                        }
+                func readBoolFlexible(): Bool {
+                    let v = r.readValue<String>().trimAscii().toAsciiLower()
+                    return v == "true" || v == "1"
+                }
 
-                        // Legacy single-object output.
-                        if (fields.contains("success") && fields.contains("data")) {
-                            let success = match (fields.get("success")) {
-                                case Some(b: JsonBool) => b.getValue()
-                                case Some(s: JsonString) =>
-                                    let v = s.getValue().trimAscii().toAsciiLower()
-                                    v == "true" || v == "1"
-                                case Some(v) =>
-                                    let t = v.toString().trimAscii().toAsciiLower()
-                                    t == "true" || t == "1"
-                                case None => false
-                            }
-                            if (success) {
-                                return fields["data"].toString()
-                            }
-                        }
-                    case _ => ()
+                var msgType = ""
+                var hasType = false
+                var successSeen = false
+                var success = false
+                var dataRaw: Option<String> = None
+
+                if (r.peek() != Some(BeginObject)) { continue }
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "type" =>
+                            hasType = true
+                            msgType = r.readValue<String>().trimAscii()
+                        case "success" =>
+                            successSeen = true
+                            success = readBoolFlexible()
+                        case "data" =>
+                            let bytes = r.readValueBytes()
+                            dataRaw = Some(String.fromUtf8(bytes))
+                        case _ =>
+                            r.skip()
+                    }
+                }
+                r.endObject()
+
+                // NDJSON result message.
+                if (hasType && msgType == "result" && success) {
+                    match (dataRaw) {
+                        case Some(s) => return s
+                        case None => ()
+                    }
+                }
+
+                // Legacy single-object output.
+                if (!hasType && successSeen && success) {
+                    match (dataRaw) {
+                        case Some(s) => return s
+                        case None => ()
+                    }
                 }
             } catch (_: Exception) {
                 // Ignore parse errors and keep scanning.
@@ -162,4 +162,3 @@ public class DenoPluginInfoRunner {
         return ""
     }
 }
-

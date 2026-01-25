@@ -1,12 +1,13 @@
 package lrr4cj.controllers
 
 import cjoy.*
-import stdx.encoding.json.*
 import stdx.log.*
 import std.time.DateTime
 import std.collection.*
 import std.convert.*
 import std.fs.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.services.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -22,31 +23,46 @@ public class TagController {
     private static let CACHE_DIR = "./data/cache"
     private static let IMPORT_CHUNK_SIZE: Int64 = 1536 * 1024 // 1.5MB
 
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     private static func langFromQuery(ctx: JoyContext): String {
         let lang = (ctx.getQuery("lang") ?? "").trimAscii()
         if (lang.size == 0) { return "zh" }
         return lang
     }
 
-    private static func getJsonString(obj: JsonObject, key: String): String {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) { return "" }
-        match (fields[key]) {
-            case s: JsonString => return s.getValue().trimAscii()
-            case _ => return fields[key].toString().trimAscii()
+    private static func readStringFlexible(r: JsonReader): String {
+        return r.readValue<String>().trimAscii()
+    }
+
+    private static func parseTranslationsFromReader(r: JsonReader): HashMap<String, TagTranslation> {
+        var result = HashMap<String, TagTranslation>()
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let lang = r.readName()
+                    let t = TagTranslation()
+                    match (r.peek()) {
+                        case Some(BeginObject) =>
+                            r.startObject()
+                            while (r.peek() != EndObject) {
+                                let k = r.readName()
+                                match (k) {
+                                    case "text" => t.text = r.readValue<String>()
+                                    case "intro" => t.intro = r.readValue<String>()
+                                    case _ => r.skip()
+                                }
+                            }
+                            r.endObject()
+                            result[lang] = t
+                        case Some(_) =>
+                            r.skip()
+                        case None => break
+                    }
+                }
+                r.endObject()
+            case _ => ()
         }
+        return result
     }
 
     /**
@@ -621,27 +637,32 @@ public class TagController {
                 return
             }
 
-            let json = JsonValue.fromStr(body)
             var namespace = ""
             var name = ""
             var links = ""
             var translations = HashMap<String, TagTranslation>()
-
-            match (json) {
-                case obj: JsonObject =>
-                    namespace = getJsonString(obj, "namespace")
-                    name = getJsonString(obj, "name")
-                    links = getJsonString(obj, "links")
-
-                    let fields = obj.getFields()
-                    if (fields.contains("translations")) {
-                        match (fields["translations"]) {
-                            case tObj: JsonObject =>
-                                translations = parseTranslationsFromJson(tObj)
-                            case _ => ()
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(body.rawData()) }
+                let r = JsonReader(buf)
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            let k = r.readName()
+                            match (k) {
+                                case "namespace" => namespace = readStringFlexible(r)
+                                case "name" => name = readStringFlexible(r)
+                                case "links" => links = readStringFlexible(r)
+                                case "translations" => translations = parseTranslationsFromReader(r)
+                                case _ => r.skip()
+                            }
                         }
-                    }
-                case _ => ()
+                        r.endObject()
+                    case _ => ()
+                }
+            } catch (_: Exception) {
+                ()
             }
 
             if (name.size == 0) {
@@ -692,23 +713,28 @@ public class TagController {
                 return
             }
 
-            let json = JsonValue.fromStr(body)
             var links = ""
             var translations = HashMap<String, TagTranslation>()
-
-            match (json) {
-                case obj: JsonObject =>
-                    links = getJsonString(obj, "links")
-
-                    let fields = obj.getFields()
-                    if (fields.contains("translations")) {
-                        match (fields["translations"]) {
-                            case tObj: JsonObject =>
-                                translations = parseTranslationsFromJson(tObj)
-                            case _ => ()
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(body.rawData()) }
+                let r = JsonReader(buf)
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            let k = r.readName()
+                            match (k) {
+                                case "links" => links = readStringFlexible(r)
+                                case "translations" => translations = parseTranslationsFromReader(r)
+                                case _ => r.skip()
+                            }
                         }
-                    }
-                case _ => ()
+                        r.endObject()
+                    case _ => ()
+                }
+            } catch (_: Exception) {
+                ()
             }
 
             let ok = TagDao.update(id, translations, links)
@@ -1119,30 +1145,5 @@ public class TagController {
 
     // ============ 辅助方法 ============
 
-    private static func parseTranslationsFromJson(obj: JsonObject): HashMap<String, TagTranslation> {
-        var result = HashMap<String, TagTranslation>()
-        let fields = obj.getFields()
-        for ((lang, value) in fields) {
-            let t = TagTranslation()
-            match (value) {
-                case innerObj: JsonObject =>
-                    let innerFields = innerObj.getFields()
-                    if (innerFields.contains("text")) {
-                        match (innerFields["text"]) {
-                            case s: JsonString => t.text = s.getValue()
-                            case _ => ()
-                        }
-                    }
-                    if (innerFields.contains("intro")) {
-                        match (innerFields["intro"]) {
-                            case s: JsonString => t.intro = s.getValue()
-                            case _ => ()
-                        }
-                    }
-                case _ => ()
-            }
-            result[lang] = t
-        }
-        return result
-    }
+    // parseTranslationsFromReader() is used instead (json.stream-based).
 }

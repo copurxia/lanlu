@@ -6,8 +6,8 @@ import std.fs.*
 import std.io.*
 import std.process.*
 import std.time.*
-import stdx.encoding.json.*
 import stdx.log.*
+import stdx.encoding.json.stream.*
 import semver.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
@@ -391,115 +391,98 @@ public class PluginManagerService {
         var result = ParsedPluginInfo()
 
         try {
-            // Accept either:
-            // - full NDJSON "result" object: {type:"result",success:true,data:{...}}
-            // - direct plugin_info data object: {...}
-            let jsonVal = JsonValue.fromStr(output.trimAscii())
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    // If this looks like a wrapper object with a "data" field, prefer that.
-                    // Otherwise treat the object itself as the plugin_info payload.
-                    let dataFields = match (fields.get("data")) {
-                        case Some(v) =>
-                            match (v) {
-                                case dataObj: JsonObject => dataObj.getFields()
-                                case _ => fields
-                            }
-                        case None => fields
-                    }
-                    let pluginType = getJsonStrValue(dataFields, "type")
-                    result.pluginType = capitalizeFirst(pluginType)
-                    result.updateUrl = getJsonStrValue(dataFields, "update_url")
-                    if (result.updateUrl.size == 0) {
-                        result.updateUrl = sourceUrl
-                    }
-                    result.namespace = getJsonStrValue(dataFields, "namespace")
-                    result.name = getJsonStrValue(dataFields, "name")
-                    result.version = getJsonStrValue(dataFields, "version")
-                    result.description = getJsonStrValue(dataFields, "description")
-                    result.author = getJsonStrValue(dataFields, "author")
-                    result.tags = getJsonStrValue(dataFields, "tags")
-                    result.permissions = getJsonCommaSeparatedValue(dataFields, "permissions")
-                    result.url_regex = getJsonStrValue(dataFields, "url_regex")
-                    result.login_from = getJsonStrValue(dataFields, "login_from")
-                    result.icon = getJsonStrValue(dataFields, "icon")
+            let trimmed = output.trimAscii()
+            if (trimmed.size == 0) { return result }
 
-                    let (paramsJson, hasSchema) = getJsonArrayStringValue(dataFields, "parameters")
-                    result.parameters = paramsJson
-                    result.has_schema = hasSchema
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func applyField(key: String): Unit {
+                match (key) {
+                    case "type" =>
+                        let t = r.readValue<String>().trimAscii()
+                        result.pluginType = capitalizeFirst(t)
+                    case "update_url" =>
+                        result.updateUrl = r.readValue<String>().trimAscii()
+                    case "namespace" => result.namespace = r.readValue<String>().trimAscii()
+                    case "name" => result.name = r.readValue<String>().trimAscii()
+                    case "version" => result.version = r.readValue<String>().trimAscii()
+                    case "description" => result.description = r.readValue<String>()
+                    case "author" => result.author = r.readValue<String>()
+                    case "tags" => result.tags = r.readValue<String>()
+                    case "url_regex" => result.url_regex = r.readValue<String>()
+                    case "login_from" => result.login_from = r.readValue<String>()
+                    case "icon" => result.icon = r.readValue<String>()
+                    case "permissions" =>
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                var out = ""
+                                var first = true
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    let s = r.readValue<String>().trimAscii()
+                                    if (s.size == 0) { continue }
+                                    if (!first) { out += "," } else { first = false }
+                                    out += s
+                                }
+                                r.endArray()
+                                result.permissions = out
+                            case Some(_) =>
+                                result.permissions = r.readValue<String>().trimAscii()
+                            case None => ()
+                        }
+                    case "parameters" =>
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                let bytes = r.readValueBytes()
+                                let raw = String.fromUtf8(bytes)
+                                result.parameters = raw
+                                let t = raw.trimAscii()
+                                result.has_schema = t.size > 2 && t != "[]"
+                            case Some(_) =>
+                                // Unexpected format; keep defaults.
+                                r.skip()
+                            case None => ()
+                        }
+                    case _ =>
+                        r.skip()
+                }
+            }
+
+            func parsePayloadObject(): Unit {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    applyField(k)
+                }
+                r.endObject()
+            }
+
+            if (r.peek() != Some(BeginObject)) { return result }
+
+            // Wrapper-aware parsing: if there's a "data" object, prefer it.
+            r.startObject()
+            var parsedData = false
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                if (k == "data" && r.peek() == Some(BeginObject)) {
+                    parsedData = true
+                    parsePayloadObject()
+                } else if (!parsedData) {
+                    applyField(k)
+                } else {
+                    r.skip()
+                }
+            }
+            r.endObject()
+
+            if (result.updateUrl.size == 0) {
+                result.updateUrl = sourceUrl
             }
         } catch (_: Exception) {}
 
         return result
-    }
-
-    private static func getJsonStrValue(fields: HashMap<String, JsonValue>, key: String): String {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case s: JsonString => return s.getValue()
-                    case _ => return ""
-                }
-            case None => return ""
-        }
-    }
-
-    private static func getJsonBoolValue(fields: HashMap<String, JsonValue>, key: String): Bool {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case b: JsonBool => return b.getValue()
-                    case _ => return false
-                }
-            case None => return false
-        }
-    }
-
-    private static func getJsonCommaSeparatedValue(fields: HashMap<String, JsonValue>, key: String): String {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case arr: JsonArray =>
-                        var out = ""
-                        var first = true
-                        let size = arr.size()
-                        for (i in 0..size) {
-                            match (arr.get(i)) {
-                                case Some(item) =>
-                                    let s = match (item) {
-                                        case js: JsonString => js.getValue()
-                                        case _ => item.toString()
-                                    }.trimAscii()
-                                    if (s.size == 0) { continue }
-                                    if (!first) { out += "," }
-                                    out += s
-                                    first = false
-                                case None => ()
-                            }
-                        }
-                        return out
-                    case s: JsonString =>
-                        return s.getValue()
-                    case _ =>
-                        return v.toString()
-                }
-            case None => return ""
-        }
-    }
-
-    private static func getJsonArrayStringValue(fields: HashMap<String, JsonValue>, key: String): (String, Bool) {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case arr: JsonArray =>
-                        return (arr.toString(), arr.size() > 0)
-                    case _ =>
-                        return ("[]", false)
-                }
-            case None => return ("[]", false)
-        }
     }
 
     private static func capitalizeFirst(s: String): String {

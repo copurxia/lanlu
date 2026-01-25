@@ -19,21 +19,6 @@ import stdx.encoding.url.Form
 public class ArchiveController {
 
     /**
-     * JSON字符串转义函数
-     */
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
-    /**
      * 获取档案的基础路径（从分类获取）
      */
     private static func getArchiveBasePath(arcid: String): String {

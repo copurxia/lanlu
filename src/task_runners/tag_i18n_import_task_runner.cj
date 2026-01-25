@@ -15,18 +15,6 @@ import lrr4cj.utils.*
  * {"tags": [{"namespace": "...", "name": "...", "translations": {"zh": {...}, "en": {...}}}]}
  */
 public class TagI18nImportTaskRunner {
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     private static func fail(taskId: Int64, message: String): Unit {
         TaskIO.appendLog(taskId, "failed: ${message}")
         TaskModel.failTask(taskId, message)

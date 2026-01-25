@@ -1,8 +1,9 @@
 package lrr4cj.task_runners
 
 import std.collection.*
-import stdx.encoding.json.*
 import std.time.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -69,22 +70,25 @@ public class MetadataPluginTaskRunner {
         let (oneshotOpt, extraParamsOpt) = splitParam(param)
 
         // 创建 deno_task 参数
-        var paramsObj = JsonObject()
-        let paramsFields = paramsObj.getFields()
-        paramsFields["pluginNamespace"] = JsonString(plugin.namespace)
-        paramsFields["pluginType"] = JsonString("Metadata")
-        paramsFields["action"] = JsonString("run")
-        paramsFields["groupId"] = JsonString(groupId)
-        paramsFields["archiveId"] = JsonString(archiveId)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("pluginNamespace").writeValue(plugin.namespace)
+        w.writeName("pluginType").writeValue("Metadata")
+        w.writeName("action").writeValue("run")
+        w.writeName("groupId").writeValue(groupId)
+        w.writeName("archiveId").writeValue(archiveId)
         match (oneshotOpt) {
-            case Some(v) => paramsFields["oneshotParam"] = JsonString(v)
+            case Some(v) => w.writeName("oneshotParam").writeValue(v)
             case None => ()
         }
         match (extraParamsOpt) {
-            case Some(v) => paramsFields["extraParams"] = JsonString(v)
+            case Some(v) => w.writeName("extraParams").writeValue(v)
             case None => ()
         }
-        let denoParams = paramsObj.toString()
+        w.endObject()
+        w.flush()
+        let denoParams = String.fromUtf8(readToEnd(out))
 
         // 创建并提交 deno_task
         let denoTask = TaskModel.createTaskWithOptions(
@@ -136,12 +140,15 @@ public class MetadataPluginTaskRunner {
      * 构建回调任务参数
      */
     private static func buildCallbackParams(archiveId: String, namespace: String, denoTaskId: Int64): String {
-        var paramsObj = JsonObject()
-        let fields = paramsObj.getFields()
-        fields["archiveId"] = JsonString(archiveId)
-        fields["namespace"] = JsonString(namespace)
-        fields["denoTaskId"] = JsonInt(denoTaskId)
-        return paramsObj.toString()
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("archiveId").writeValue(archiveId)
+        w.writeName("namespace").writeValue(namespace)
+        w.writeName("denoTaskId").writeValue(denoTaskId)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     private static func parseParameters(parameters: String): (String, String, String) {
@@ -155,43 +162,46 @@ public class MetadataPluginTaskRunner {
         var param = ""
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("archive_id")) {
-                        archiveId = jsonValueToString(fields["archive_id"]).trimAscii()
-                    } else if (fields.contains("id")) {
-                        archiveId = jsonValueToString(fields["id"]).trimAscii()
-                    } else if (fields.contains("arcid")) {
-                        archiveId = jsonValueToString(fields["arcid"]).trimAscii()
-                    } else if (fields.contains("archiveId")) {
-                        archiveId = jsonValueToString(fields["archiveId"]).trimAscii()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readRawJson(): String {
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(BeginArray) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(_) =>
+                        return r.readValue<String>()
+                    case None => return ""
+                }
+            }
+
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                        case "id" =>
+                            if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "arcid" =>
+                            if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "archiveId" =>
+                            if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "namespace" => namespace = r.readValue<String>().trimAscii()
+                        case "param" => param = readRawJson()
+                        case _ => r.skip()
                     }
-                    if (fields.contains("namespace")) {
-                        namespace = jsonValueToString(fields["namespace"]).trimAscii()
-                    }
-                    if (fields.contains("param")) {
-                        // param 允许 string / object
-                        let pv = fields["param"]
-                        match (pv) {
-                            case s: JsonString => param = s.getValue()
-                            case o: JsonObject => param = o.toString()
-                            case _ => param = pv.toString()
-                        }
-                    }
-                case _ => ()
+                }
+                r.endObject()
             }
         } catch (_: Exception) {}
 
         return (archiveId, namespace, param.trimAscii())
-    }
-
-    private static func jsonValueToString(value: JsonValue): String {
-        match (value) {
-            case s: JsonString => return s.getValue()
-            case _ => return value.toString()
-        }
     }
 
     /**
@@ -205,11 +215,11 @@ public class MetadataPluginTaskRunner {
 
         if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
             try {
-                let jsonVal = JsonValue.fromStr(trimmed)
-                match (jsonVal) {
-                    case _: JsonObject =>
-                        return (Option.None, Option<String>.Some(trimmed))
-                    case _ => ()
+                var buf = ByteBuffer()
+                unsafe { buf.write(trimmed.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    return (Option.None, Option<String>.Some(trimmed))
                 }
             } catch (_: Exception) {}
         }
@@ -224,15 +234,4 @@ public class MetadataPluginTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

@@ -1,39 +1,78 @@
 package lrr4cj.controllers
 
 import cjoy.*
-import stdx.encoding.json.*
 import std.time.*
 import std.fs.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.services.*
 import lrr4cj.utils.*
+import stdx.encoding.json.stream.*
+
+class CategoryUpsertReq <: JsonDeserializable<CategoryUpsertReq> {
+    var name: String = ""
+    var scanPath: String = ""
+    var description: String = ""
+    var icon: String = ""
+    var sortOrder: Int32 = 0
+    var enabled: Bool = true
+    // Stored as raw JSON string (array/object); defaults to [].
+    var plugins: String = "[]"
+
+    private static func readRawJson(r: JsonReader): String {
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(BeginArray) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(_) =>
+                return r.readValue<String>()
+            case None =>
+                return ""
+        }
+    }
+
+    public static func fromJson(r: JsonReader): CategoryUpsertReq {
+        let res = CategoryUpsertReq()
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "name" => res.name = r.readValue<String>().trimAscii()
+                            case "scan_path" => res.scanPath = r.readValue<String>().trimAscii()
+                            case "description" => res.description = r.readValue<String>()
+                            case "icon" => res.icon = r.readValue<String>()
+                            case "sort_order" =>
+                                let s = r.readValue<String>().trimAscii()
+                                try { res.sortOrder = Int32.parse(s) } catch (_: Exception) {}
+                            case "enabled" =>
+                                let s = r.readValue<String>().trimAscii()
+                                res.enabled = s == "true" || s == "1"
+                            case "plugins" =>
+                                let raw = readRawJson(r).trimAscii()
+                                if (raw.size > 0) { res.plugins = raw }
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => throw Exception("invalid json")
+            }
+        }
+        return res
+    }
+}
 
 /**
  * 分类控制器（新结构）
  * 每个分类对应一个扫描目录
  */
 public class CategoryController {
-
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
-    private static func getJsonString(obj: JsonObject, key: String): String {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) { return "" }
-        match (fields[key]) {
-            case s: JsonString => return s.getValue().trimAscii()
-            case _ => return fields[key].toString().trimAscii()
-        }
-    }
-
     private static func categoryToJson(cat: CategoryData): String {
         var json = "{"
         json += "\"id\":${cat.id},"
@@ -95,41 +134,14 @@ public class CategoryController {
     public static func createCategory(ctx: JoyContext) {
         try {
             let body = ctx.readString()
-            var name = ""
-            var scanPath = ""
-            var description = ""
-            var icon = ""
-            var sortOrder: Int32 = 0
-            var enabled = true
-            var plugins = "[]"
-
-            if (body.size > 0) {
-                let jsonVal = JsonValue.fromStr(body)
-                match (jsonVal) {
-                    case obj: JsonObject =>
-                        name = getJsonString(obj, "name")
-                        scanPath = getJsonString(obj, "scan_path")
-                        description = getJsonString(obj, "description")
-                        icon = getJsonString(obj, "icon")
-                        let fields = obj.getFields()
-                        if (fields.contains("sort_order")) {
-                            try {
-                                sortOrder = Int32.parse(getJsonString(obj, "sort_order"))
-                            } catch (_: Exception) {}
-                        }
-                        if (fields.contains("enabled")) {
-                            let enabledStr = getJsonString(obj, "enabled")
-                            enabled = enabledStr == "true" || enabledStr == "1"
-                        }
-                        if (fields.contains("plugins")) {
-                            match (fields["plugins"]) {
-                                case arr: JsonArray => plugins = arr.toString()
-                                case _ => ()
-                            }
-                        }
-                    case _ => ()
-                }
-            }
+            let req = if (body.trimAscii().size > 0) { JsonCodec.decode<CategoryUpsertReq>(body) } else { CategoryUpsertReq() }
+            let name = req.name
+            let scanPath = req.scanPath
+            let description = req.description
+            let icon = req.icon
+            let sortOrder = req.sortOrder
+            let enabled = req.enabled
+            let plugins = req.plugins
 
             if (name.size == 0) {
                 ctx.status(400)
@@ -206,36 +218,15 @@ public class CategoryController {
             var enabled = existing.enabled
             var plugins = existing.plugins
 
-            if (body.size > 0) {
-                let jsonVal = JsonValue.fromStr(body)
-                match (jsonVal) {
-                    case obj: JsonObject =>
-                        let newName = getJsonString(obj, "name")
-                        if (newName.size > 0) { name = newName }
-                        let newScanPath = getJsonString(obj, "scan_path")
-                        if (newScanPath.size > 0) { scanPath = newScanPath }
-                        let newDescription = getJsonString(obj, "description")
-                        if (newDescription.size > 0) { description = newDescription }
-                        let newIcon = getJsonString(obj, "icon")
-                        if (newIcon.size > 0) { icon = newIcon }
-                        let fields = obj.getFields()
-                        if (fields.contains("sort_order")) {
-                            try {
-                                sortOrder = Int32.parse(getJsonString(obj, "sort_order"))
-                            } catch (_: Exception) {}
-                        }
-                        if (fields.contains("enabled")) {
-                            let enabledStr = getJsonString(obj, "enabled")
-                            enabled = enabledStr == "true" || enabledStr == "1"
-                        }
-                        if (fields.contains("plugins")) {
-                            match (fields["plugins"]) {
-                                case arr: JsonArray => plugins = arr.toString()
-                                case _ => ()
-                            }
-                        }
-                    case _ => ()
-                }
+            if (body.trimAscii().size > 0) {
+                let req = JsonCodec.decode<CategoryUpsertReq>(body)
+                if (req.name.size > 0) { name = req.name }
+                if (req.scanPath.size > 0) { scanPath = req.scanPath }
+                if (req.description.size > 0) { description = req.description }
+                if (req.icon.size > 0) { icon = req.icon }
+                sortOrder = req.sortOrder
+                enabled = req.enabled
+                if (req.plugins.trimAscii().size > 0) { plugins = req.plugins }
             }
 
             if (name.size == 0) {

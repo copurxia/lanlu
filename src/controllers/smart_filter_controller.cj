@@ -1,13 +1,88 @@
 package lrr4cj.controllers
 
 import cjoy.*
-import stdx.encoding.json.*
 import stdx.log.*
 import std.collection.*
 import std.convert.*
+import std.io.*
 import lrr4cj.dao.*
 import lrr4cj.views.*
 import lrr4cj.utils.*
+import stdx.encoding.json.stream.*
+
+class SmartFilterUpsertReq <: JsonDeserializable<SmartFilterUpsertReq> {
+    var name: String = ""
+    var translations: String = "{}" // raw JSON object string
+    var icon: String = ""
+    var query: String = ""
+    var sortBy: String = ""
+    var sortOrder: String = ""
+    var dateFrom: String = ""
+    var dateTo: String = ""
+    var newOnly: Bool = false
+    var untaggedOnly: Bool = false
+    var sortOrderNum: Int32 = 0
+    var enabled: Bool = false
+
+    private static func readRawJson(r: JsonReader): String {
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(BeginArray) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(_) =>
+                return r.readValue<String>()
+            case None =>
+                return ""
+        }
+    }
+
+    private static func readBoolFlexible(r: JsonReader): Bool {
+        let s = r.readValue<String>().trimAscii()
+        return s == "true" || s == "1"
+    }
+
+    private static func readInt32Flexible(r: JsonReader): Int32 {
+        let s = r.readValue<String>().trimAscii()
+        try { return Int32.parse(s) } catch (_: Exception) { return 0 }
+    }
+
+    public static func fromJson(r: JsonReader): SmartFilterUpsertReq {
+        let res = SmartFilterUpsertReq()
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "name" => res.name = r.readValue<String>()
+                            case "translations" =>
+                                let raw = readRawJson(r).trimAscii()
+                                res.translations = if (raw.size > 0) { raw } else { "{}" }
+                            case "icon" => res.icon = r.readValue<String>()
+                            case "query" => res.query = r.readValue<String>()
+                            case "sort_by" => res.sortBy = r.readValue<String>()
+                            case "sort_order" => res.sortOrder = r.readValue<String>()
+                            case "date_from" => res.dateFrom = r.readValue<String>()
+                            case "date_to" => res.dateTo = r.readValue<String>()
+                            case "newonly" => res.newOnly = readBoolFlexible(r)
+                            case "untaggedonly" => res.untaggedOnly = readBoolFlexible(r)
+                            case "sort_order_num" => res.sortOrderNum = readInt32Flexible(r)
+                            case "enabled" => res.enabled = readBoolFlexible(r)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => throw Exception("invalid json")
+            }
+        }
+        return res
+    }
+}
 
 /**
  * 智能分类控制器
@@ -15,54 +90,6 @@ import lrr4cj.utils.*
  * - 管理接口：管理员维护智能分类
  */
 public class SmartFilterController {
-
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
-    private static func getJsonString(obj: JsonObject, key: String): String {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) { return "" }
-        match (fields[key]) {
-            case s: JsonString => return s.getValue()
-            case _ => return ""
-        }
-    }
-
-    private static func getJsonBool(obj: JsonObject, key: String): Bool {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) { return false }
-        match (fields[key]) {
-            case b: JsonBool => return b.getValue()
-            case _ => return false
-        }
-    }
-
-    private static func getJsonInt(obj: JsonObject, key: String): Int32 {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) { return 0 }
-        match (fields[key]) {
-            case n: JsonInt => return Int32(n.getValue())
-            case _ => return 0
-        }
-    }
-
-    private static func getJsonObjectString(obj: JsonObject, key: String): String {
-        let fields = obj.getFields()
-        if (!fields.contains(key)) { return "{}" }
-        match (fields[key]) {
-            case o: JsonObject => return o.toJsonString()
-            case _ => return "{}"
-        }
-    }
 
     private static func filterToJson(filter: SmartFilterData): String {
         var json = "{"
@@ -165,26 +192,25 @@ public class SmartFilterController {
                 return
             }
 
-            let json = JsonValue.fromStr(body)
             var filter = SmartFilterData()
-            match (json) {
-                case obj: JsonObject =>
-                    filter.name = getJsonString(obj, "name")
-                    filter.translations = getJsonObjectString(obj, "translations")
-                    filter.icon = getJsonString(obj, "icon")
-                    filter.query = getJsonString(obj, "query")
-                    filter.sort_by = getJsonString(obj, "sort_by")
-                    filter.sort_order = getJsonString(obj, "sort_order")
-                    filter.date_from = getJsonString(obj, "date_from")
-                    filter.date_to = getJsonString(obj, "date_to")
-                    filter.newonly = getJsonBool(obj, "newonly")
-                    filter.untaggedonly = getJsonBool(obj, "untaggedonly")
-                    filter.sort_order_num = getJsonInt(obj, "sort_order_num")
-                    filter.enabled = getJsonBool(obj, "enabled")
-                case _ =>
-                    ctx.status(400)
-                    ResponseView.errorJson(ctx, "Invalid JSON", 400)
-                    return
+            try {
+                let req = JsonCodec.decode<SmartFilterUpsertReq>(body)
+                filter.name = req.name.trimAscii()
+                filter.translations = req.translations
+                filter.icon = req.icon
+                filter.query = req.query
+                filter.sort_by = req.sortBy
+                filter.sort_order = req.sortOrder
+                filter.date_from = req.dateFrom
+                filter.date_to = req.dateTo
+                filter.newonly = req.newOnly
+                filter.untaggedonly = req.untaggedOnly
+                filter.sort_order_num = req.sortOrderNum
+                filter.enabled = req.enabled
+            } catch (_: Exception) {
+                ctx.status(400)
+                ResponseView.errorJson(ctx, "Invalid JSON", 400)
+                return
             }
 
             if (filter.name.size == 0) {
@@ -251,27 +277,26 @@ public class SmartFilterController {
                 return
             }
 
-            let json = JsonValue.fromStr(body)
             var filter = SmartFilterData()
             filter.id = id
-            match (json) {
-                case obj: JsonObject =>
-                    filter.name = getJsonString(obj, "name")
-                    filter.translations = getJsonObjectString(obj, "translations")
-                    filter.icon = getJsonString(obj, "icon")
-                    filter.query = getJsonString(obj, "query")
-                    filter.sort_by = getJsonString(obj, "sort_by")
-                    filter.sort_order = getJsonString(obj, "sort_order")
-                    filter.date_from = getJsonString(obj, "date_from")
-                    filter.date_to = getJsonString(obj, "date_to")
-                    filter.newonly = getJsonBool(obj, "newonly")
-                    filter.untaggedonly = getJsonBool(obj, "untaggedonly")
-                    filter.sort_order_num = getJsonInt(obj, "sort_order_num")
-                    filter.enabled = getJsonBool(obj, "enabled")
-                case _ =>
-                    ctx.status(400)
-                    ResponseView.errorJson(ctx, "Invalid JSON", 400)
-                    return
+            try {
+                let req = JsonCodec.decode<SmartFilterUpsertReq>(body)
+                filter.name = req.name.trimAscii()
+                filter.translations = req.translations
+                filter.icon = req.icon
+                filter.query = req.query
+                filter.sort_by = req.sortBy
+                filter.sort_order = req.sortOrder
+                filter.date_from = req.dateFrom
+                filter.date_to = req.dateTo
+                filter.newonly = req.newOnly
+                filter.untaggedonly = req.untaggedOnly
+                filter.sort_order_num = req.sortOrderNum
+                filter.enabled = req.enabled
+            } catch (_: Exception) {
+                ctx.status(400)
+                ResponseView.errorJson(ctx, "Invalid JSON", 400)
+                return
             }
 
             if (filter.name.size == 0) {
@@ -340,48 +365,62 @@ public class SmartFilterController {
                 return
             }
 
-            let json = JsonValue.fromStr(body)
             var orders: ArrayList<(Int64, Int32)> = ArrayList<(Int64, Int32)>()
+            var buf = ByteBuffer()
+            unsafe { buf.write(body.rawData()) }
+            let r = JsonReader(buf)
 
-            match (json) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (!fields.contains("orders")) {
-                        ctx.status(400)
-                        ResponseView.errorJson(ctx, "orders is required", 400)
-                        return
-                    }
-                    match (fields["orders"]) {
-                        case arr: JsonArray =>
-                            for (item in arr.getItems()) {
-                                match (item) {
-                                    case itemObj: JsonObject =>
-                                        let itemFields = itemObj.getFields()
-                                        var id: Int64 = 0
-                                        var sortOrder: Int32 = 0
-                                        if (itemFields.contains("id")) {
-                                            match (itemFields["id"]) {
-                                                case n: JsonInt => id = n.getValue()
-                                                case _ => ()
+            func readInt64Flexible(): Int64 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int64.parse(s) } catch (_: Exception) { return 0 }
+            }
+            func readInt32Flexible(): Int32 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return 0 }
+            }
+
+            // Expect: {"orders":[{"id":1,"sort_order_num":0}, ...]}
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "orders" =>
+                                match (r.peek()) {
+                                    case Some(BeginArray) =>
+                                        r.startArray()
+                                        while (r.peek() != EndArray) {
+                                            match (r.peek()) {
+                                                case Some(BeginObject) =>
+                                                    var id: Int64 = 0
+                                                    var sortOrder: Int32 = 0
+                                                    r.startObject()
+                                                    while (r.peek() != EndObject) {
+                                                        let fn = r.readName()
+                                                        match (fn) {
+                                                            case "id" => id = readInt64Flexible()
+                                                            case "sort_order_num" => sortOrder = readInt32Flexible()
+                                                            case _ => r.skip()
+                                                        }
+                                                    }
+                                                    r.endObject()
+                                                    if (id > 0) { orders.add((id, sortOrder)) }
+                                                case Some(_) => r.skip()
+                                                case None => break
                                             }
                                         }
-                                        if (itemFields.contains("sort_order_num")) {
-                                            match (itemFields["sort_order_num"]) {
-                                                case n: JsonInt => sortOrder = Int32(n.getValue())
-                                                case _ => ()
-                                            }
-                                        }
-                                        if (id > 0) {
-                                            orders.add((id, sortOrder))
-                                        }
-                                    case _ => ()
+                                        r.endArray()
+                                    case Some(_) =>
+                                        ctx.status(400)
+                                        ResponseView.errorJson(ctx, "orders must be an array", 400)
+                                        return
+                                    case None => ()
                                 }
-                            }
-                        case _ =>
-                            ctx.status(400)
-                            ResponseView.errorJson(ctx, "orders must be an array", 400)
-                            return
+                            case _ => r.skip()
+                        }
                     }
+                    r.endObject()
                 case _ =>
                     ctx.status(400)
                     ResponseView.errorJson(ctx, "Invalid JSON", 400)

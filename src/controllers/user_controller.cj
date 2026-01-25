@@ -12,18 +12,6 @@ import lrr4cj.utils.*
  * User profile APIs (avatar, etc.)
  */
 public class UserController {
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     /**
      * PUT /api/user/avatar
      * Body: raw bytes of the uploaded image file.

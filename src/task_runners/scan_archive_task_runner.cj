@@ -1,9 +1,10 @@
 package lrr4cj.task_runners
 
-import stdx.encoding.json.*
 import stdx.log.*
 import std.convert.*
 import std.collection.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
@@ -74,60 +75,29 @@ public class ScanArchiveTaskRunner {
         }
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("archive_path")) {
-                        let value = fields["archive_path"]
-                        match (value) {
-                            case s: JsonString => archivePath = s.getValue().trimAscii()
-                            case _ => throw Exception("archive_path must be a string")
-                        }
-                    }
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
 
-                    if (fields.contains("cache_path")) {
-                        let value = fields["cache_path"]
-                        match (value) {
-                            case s: JsonString => cachePath = s.getValue().trimAscii()
-                            case _ => throw Exception("cache_path must be a string")
-                        }
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "archive_path" => archivePath = r.readValue<String>().trimAscii()
+                        case "cache_path" => cachePath = r.readValue<String>().trimAscii()
+                        case "thumbnail_path" => thumbnailPath = r.readValue<String>().trimAscii()
+                        case "archive_type" =>
+                            archiveType = r.readValue<String>().trimAscii()
+                            if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
+                                archiveType = "archive"
+                            }
+                        case "tags" => tags = r.readValue<String>().trimAscii()
+                        case "category_id" => categoryId = r.readValue<String>().trimAscii()
+                        case _ => r.skip()
                     }
-                    if (fields.contains("thumbnail_path")) {
-                        let value = fields["thumbnail_path"]
-                        match (value) {
-                            case s: JsonString => thumbnailPath = s.getValue().trimAscii()
-                            case _ => throw Exception("thumbnail_path must be a string")
-                        }
-                    }
-                    if (fields.contains("archive_type")) {
-                        let value = fields["archive_type"]
-                        match (value) {
-                            case s: JsonString =>
-                                archiveType = s.getValue().trimAscii()
-                                if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
-                                    archiveType = "archive"
-                                }
-                            case _ => ()
-                        }
-                    }
-                    if (fields.contains("tags")) {
-                        let value = fields["tags"]
-                        match (value) {
-                            case s: JsonString => tags = s.getValue().trimAscii()
-                            case _ => ()
-                        }
-                    }
-                    if (fields.contains("category_id")) {
-                        let value = fields["category_id"]
-                        match (value) {
-                            case s: JsonString => categoryId = s.getValue().trimAscii()
-                            case n: JsonInt => categoryId = n.getValue().toString()
-                            case n: JsonFloat => categoryId = Int64(n.getValue()).toString()
-                            case _ => ()
-                        }
-                    }
-                case _ => ()
+                }
+                r.endObject()
             }
         } catch (_: Exception) {}
 
@@ -339,17 +309,16 @@ public class ScanArchiveTaskRunner {
     private static func parsePluginsArray(pluginsJson: String): Array<String> {
         var namespaces = ArrayList<String>()
         try {
-            let jsonVal = JsonValue.fromStr(pluginsJson)
-            match (jsonVal) {
-                case arr: JsonArray =>
-                    for (item in arr.getItems()) {
-                        match (item) {
-                            case s: JsonString => namespaces.add(s.getValue().trimAscii())
-                            case _ => ()
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(pluginsJson.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginArray)) { return namespaces.toArray() }
+            r.startArray()
+            while (r.peek() != EndArray) {
+                let v = r.readValue<String>().trimAscii()
+                if (v.size > 0) { namespaces.add(v) }
             }
+            r.endArray()
         } catch (_: Exception) {}
         return namespaces.toArray()
     }
@@ -389,15 +358,4 @@ public class ScanArchiveTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

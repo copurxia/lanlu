@@ -7,7 +7,8 @@ import std.io.*
 import std.convert.*
 import std.sync.*
 import std.time.*
-import stdx.encoding.json.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 import stdx.log.*
 import lrr4cj.dao.*
 import lrr4cj.kv.*
@@ -36,6 +37,48 @@ public class DenoExecutionResult {
         this.output = output
         this.cookiesJson = cookiesJson
         this.exitCode = exitCode
+    }
+}
+
+class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
+    var pluginNamespace: String = ""
+    var pluginType: String = ""
+    var action: String = "run"
+    var groupId: String = ""
+    var archiveId: String = ""
+    var oneshotParam: String = ""
+    var extraParams: String = ""
+    var url: String = ""
+    var parentTaskId: String = ""
+
+    public static func fromJson(r: JsonReader): DenoTaskParametersReq {
+        let res = DenoTaskParametersReq()
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "pluginNamespace" => res.pluginNamespace = r.readValue<String>().trimAscii()
+                            case "pluginType" => res.pluginType = r.readValue<String>().trimAscii()
+                            case "action" => res.action = r.readValue<String>().trimAscii()
+                            case "groupId" => res.groupId = r.readValue<String>().trimAscii()
+                            case "archiveId" => res.archiveId = r.readValue<String>().trimAscii()
+                            case "oneshotParam" => res.oneshotParam = r.readValue<String>()
+                            case "extraParams" => res.extraParams = r.readValue<String>()
+                            case "url" => res.url = r.readValue<String>().trimAscii()
+                            case "parentTaskId" => res.parentTaskId = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => throw Exception("invalid json")
+            }
+        }
+        if (res.action.size == 0) { res.action = "run" }
+        return res
     }
 }
 
@@ -133,7 +176,14 @@ public class DenoTaskRunner {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
         TaskModel.failTask(taskId, msg)
-        TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(0)
+        w.writeName("error").writeValue(msg)
+        w.endObject()
+        w.flush()
+        TaskIO.writeOutput(taskId, String.fromUtf8(readToEnd(out)))
     }
 
     private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String) {
@@ -153,22 +203,16 @@ public class DenoTaskRunner {
         }
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    pluginNamespace = getJsonStringValue(fields, "pluginNamespace")
-                    pluginType = getJsonStringValue(fields, "pluginType")
-                    action = getJsonStringValue(fields, "action")
-                    if (action.size == 0) { action = "run" }
-                    groupId = getJsonStringValue(fields, "groupId")
-                    archiveId = getJsonStringValue(fields, "archiveId")
-                    oneshotParam = getJsonStringValue(fields, "oneshotParam")
-                    extraParams = getJsonStringValue(fields, "extraParams")
-                    url = getJsonStringValue(fields, "url")
-                    parentTaskId = getJsonStringValue(fields, "parentTaskId")
-                case _ => ()
-            }
+            let req = JsonCodec.decode<DenoTaskParametersReq>(trimmed)
+            pluginNamespace = req.pluginNamespace
+            pluginType = req.pluginType
+            action = req.action
+            groupId = req.groupId
+            archiveId = req.archiveId
+            oneshotParam = req.oneshotParam
+            extraParams = req.extraParams
+            url = req.url
+            parentTaskId = req.parentTaskId
         } catch (_: Exception) {}
 
         return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url, parentTaskId)
@@ -182,29 +226,6 @@ public class DenoTaskRunner {
         } catch (_: Exception) {
             return 0
         }
-    }
-
-    private static func getJsonStringValue(fields: HashMap<String, JsonValue>, key: String): String {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case s: JsonString => return s.getValue().trimAscii()
-                    case _ => return v.toString().trimAscii()
-                }
-            case None => return ""
-        }
-    }
-
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
     }
 
     /**
@@ -308,48 +329,53 @@ public class DenoTaskRunner {
         }
 
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case jsonObj: JsonObject =>
-                    let fields = jsonObj.getFields()
-                    if (!getJsonBool(fields, "success")) {
-                        return ""
-                    }
-                    if (fields.contains("data")) {
-                        match (fields["data"]) {
-                            case dataObj: JsonObject =>
-                                let dataFields = dataObj.getFields()
-                                if (dataFields.contains("cookies")) {
-                                    match (dataFields["cookies"]) {
-                                        case cookiesArr: JsonArray =>
-                                            return cookiesArr.toString()
-                                        case _ => ()
-                                    }
-                                }
-                            case _ => ()
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            if (r.peek() != Some(BeginObject)) {
+                return ""
             }
+
+            var success = false
+            var cookiesRaw = ""
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let n = r.readName()
+                match (n) {
+                    case "success" =>
+                        let v = r.readValue<String>().trimAscii()
+                        success = (v == "true" || v == "1")
+                    case "data" =>
+                        if (r.peek() == Some(BeginObject)) {
+                            r.startObject()
+                            while (r.peek() != EndObject) {
+                                let dn = r.readName()
+                                match (dn) {
+                                    case "cookies" =>
+                                        if (r.peek() == Some(BeginArray)) {
+                                            cookiesRaw = String.fromUtf8(r.readValueBytes())
+                                        } else {
+                                            r.skip()
+                                        }
+                                    case _ => r.skip()
+                                }
+                            }
+                            r.endObject()
+                        } else {
+                            r.skip()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+
+            if (!success) { return "" }
+            return cookiesRaw
         } catch (_: Exception) {}
 
         return ""
-    }
-
-    private static func getJsonBool(fields: HashMap<String, JsonValue>, key: String): Bool {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case b: JsonBool => return b.getValue()
-                    case s: JsonString =>
-                        let val = s.getValue()
-                        return val == "true" || val == "1"
-                    case _ =>
-                        let val = v.toString()
-                        return val == "true" || val == "1"
-                }
-            case None => return false
-        }
     }
 
     /**
@@ -460,43 +486,42 @@ public class DenoTaskRunner {
         loginCookies: String,
         url: String
     ): String {
-        var json = JsonObject()
-        let fields = json.getFields()
-        fields["action"] = JsonString(action)
-        fields["pluginType"] = JsonString(pluginType)
-        fields["pluginDir"] = JsonString(pluginDir)
-        fields["archiveId"] = JsonString(archiveId)
-        fields["archiveTitle"] = JsonString(archiveTitle)
-        fields["existingTags"] = JsonString(existingTags)
-        fields["thumbnailHash"] = JsonString(thumbnailHash)
-        fields["oneshotParam"] = JsonString(oneshotParam)
-        fields["url"] = JsonString(url)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
 
-        // params 是 JSON 字符串，需要解析后嵌入
-        if (params.trimAscii().size > 0) {
-            try {
-                let paramsVal = JsonValue.fromStr(params)
-                fields["params"] = paramsVal
-            } catch (_: Exception) {
-                fields["params"] = JsonObject()
-            }
+        w.startObject()
+        w.writeName("action").writeValue(action)
+        w.writeName("pluginType").writeValue(pluginType)
+        w.writeName("pluginDir").writeValue(pluginDir)
+        w.writeName("archiveId").writeValue(archiveId)
+        w.writeName("archiveTitle").writeValue(archiveTitle)
+        w.writeName("existingTags").writeValue(existingTags)
+        w.writeName("thumbnailHash").writeValue(thumbnailHash)
+        w.writeName("oneshotParam").writeValue(oneshotParam)
+        w.writeName("url").writeValue(url)
+
+        // params/loginCookies are stored as JSON inside String; embed as raw JSON values.
+        let paramsTrimmed = params.trimAscii()
+        if (paramsTrimmed.size > 0) {
+            w.writeName("params").jsonValue(paramsTrimmed)
         } else {
-            fields["params"] = JsonObject()
+            w.writeName("params")
+            w.startObject()
+            w.endObject()
         }
 
-        // loginCookies 是 JSON 数组字符串
-        if (loginCookies.trimAscii().size > 0) {
-            try {
-                let cookiesVal = JsonValue.fromStr(loginCookies)
-                fields["loginCookies"] = cookiesVal
-            } catch (_: Exception) {
-                fields["loginCookies"] = JsonArray()
-            }
+        let cookiesTrimmed = loginCookies.trimAscii()
+        if (cookiesTrimmed.size > 0) {
+            w.writeName("loginCookies").jsonValue(cookiesTrimmed)
         } else {
-            fields["loginCookies"] = JsonArray()
+            w.writeName("loginCookies")
+            w.startArray()
+            w.endArray()
         }
 
-        return json.toString()
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**
@@ -510,62 +535,55 @@ public class DenoTaskRunner {
         }
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    let msgType = getJsonStringValue(fields, "type")
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
 
-                    match (msgType) {
-                        case "progress" =>
-                            let progress = getJsonIntValue(fields, "progress")
-                            let message = getJsonStringValue(fields, "message")
-                            return ("progress", progress, message, false, "")
-                        case "log" =>
-                            let level = getJsonStringValue(fields, "level")
-                            let message = getJsonStringValue(fields, "message")
-                            return ("log", 0, "[${level}] ${message}", false, "")
-                        case "data" =>
-                            let key = getJsonStringValue(fields, "key")
-                            let value = match (fields.get("value")) {
-                                case Some(v) => v.toString()
-                                case None => ""
-                            }
-                            return ("data", 0, key, false, value)
-                        case "result" =>
-                            let success = getJsonBool(fields, "success")
-                            let data = match (fields.get("data")) {
-                                case Some(v) => v.toString()
-                                case None => ""
-                            }
-                            let error = getJsonStringValue(fields, "error")
-                            return ("result", 0, "", success, if (success) { data } else { error })
-                        case _ =>
-                            return ("unknown", 0, trimmed, false, "")
-                    }
-                case _ =>
-                    return ("raw", 0, trimmed, false, "")
+            if (r.peek() != Some(BeginObject)) {
+                return ("raw", 0, trimmed, false, "")
+            }
+
+            var msgType = ""
+            var progress = 0i32
+            var message = ""
+            var level = ""
+            var key = ""
+            var valueRaw = ""
+            var success = false
+            var dataRaw = ""
+            var error = ""
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let n = r.readName()
+                match (n) {
+                    case "type" => msgType = r.readValue<String>().trimAscii()
+                    case "progress" =>
+                        let p = r.readValue<String>().trimAscii()
+                        try { progress = Int32.parse(p) } catch (_: Exception) { progress = 0i32 }
+                    case "message" => message = r.readValue<String>()
+                    case "level" => level = r.readValue<String>().trimAscii()
+                    case "key" => key = r.readValue<String>().trimAscii()
+                    case "value" => valueRaw = String.fromUtf8(r.readValueBytes())
+                    case "success" =>
+                        let v = r.readValue<String>().trimAscii()
+                        success = (v == "true" || v == "1")
+                    case "data" => dataRaw = String.fromUtf8(r.readValueBytes())
+                    case "error" => error = r.readValue<String>()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+
+            match (msgType) {
+                case "progress" => return ("progress", progress, message, false, "")
+                case "log" => return ("log", 0, "[${level}] ${message}", false, "")
+                case "data" => return ("data", 0, key, false, valueRaw)
+                case "result" => return ("result", 0, "", success, if (success) { dataRaw } else { error })
+                case _ => return ("unknown", 0, trimmed, false, "")
             }
         } catch (_: Exception) {
             return ("raw", 0, trimmed, false, "")
-        }
-    }
-
-    private static func getJsonIntValue(fields: HashMap<String, JsonValue>, key: String): Int32 {
-        match (fields.get(key)) {
-            case Some(v) =>
-                match (v) {
-                    case n: JsonInt => return Int32(n.getValue())
-                    case n: JsonFloat => return Int32(n.getValue())
-                    case s: JsonString =>
-                        try {
-                            return Int32.parse(s.getValue())
-                        } catch (_: Exception) {
-                            return 0
-                        }
-                    case _ => return 0
-                }
-            case None => return 0
         }
     }
 
@@ -680,15 +698,20 @@ public class DenoTaskRunner {
             }
 
             // 构建最终输出 JSON
-            var outputJson = if (finalSuccess) {
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(finalSuccess)
+            if (finalSuccess) {
                 if (finalData.size > 0) {
-                    "{\"success\":true,\"data\":${finalData}}"
-                } else {
-                    "{\"success\":true}"
+                    w.writeName("data").jsonValue(finalData)
                 }
             } else {
-                "{\"success\":false,\"error\":\"${escapeJson(finalError)}\"}"
+                w.writeName("error").writeValue(finalError)
             }
+            w.endObject()
+            w.flush()
+            let outputJson = String.fromUtf8(readToEnd(out))
 
             return DenoExecutionResult(finalSuccess, finalError, outputJson, "", Int32(exitCode))
 
@@ -783,62 +806,85 @@ public class DenoTaskRunner {
         }
 
         try {
-            let jsonVal = JsonValue.fromStr(plugin.parameters)
-            match (jsonVal) {
-                case array: JsonArray =>
-                    var mergedParams = JsonObject()
-                    let fields = mergedParams.getFields()
-                    let size = array.size()
-                    for (i in 0..size) {
-                        match (array.get(i)) {
-                            case Some(paramVal) =>
-                                match (paramVal) {
-                                    case paramObj: JsonObject =>
-                                        let paramFields = paramObj.getFields()
-                                        let name = getParamName(paramFields)
-                                        let key = if (name.size > 0) { name } else { "param${i}" }
-                                        match (getParamValue(paramFields)) {
-                                            case Some(value) => fields[key] = value
-                                            case None => ()
-                                        }
-                                    case _ => ()
-                                }
+            let trimmed = plugin.parameters.trimAscii()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            match (r.peek()) {
+                case Some(BeginArray) =>
+                    // schema array -> {name: value/default_value}
+                    var paramMap = HashMap<String, String>()
+                    r.startArray()
+                    var idx: Int64 = 0
+                    while (r.peek() != EndArray) {
+                        if (r.peek() != Some(BeginObject)) {
+                            r.skip()
+                            idx += 1
+                            continue
+                        }
+                        var name = ""
+                        var valueRaw: Option<String> = None
+
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            let n = r.readName()
+                            match (n) {
+                                case "name" => name = r.readValue<String>().trimAscii()
+                                case "value" =>
+                                    let bytes = r.readValueBytes()
+                                    valueRaw = Some(String.fromUtf8(bytes))
+                                case "default_value" =>
+                                    // only keep default_value if value is not provided
+                                    if (valueRaw.isNone()) {
+                                        let bytes = r.readValueBytes()
+                                        valueRaw = Some(String.fromUtf8(bytes))
+                                    } else {
+                                        r.skip()
+                                    }
+                                case _ => r.skip()
+                            }
+                        }
+                        r.endObject()
+
+                        let key = if (name.size > 0) { name } else { "param${idx.toString()}" }
+                        match (valueRaw) {
+                            case Some(v) => paramMap[key] = v
                             case None => ()
                         }
+
+                        idx += 1
                     }
-                    if (fields.size > 0) {
-                        return mergedParams.toString()
+                    r.endArray()
+
+                    if (paramMap.size == 0) {
+                        return ""
                     }
-                case obj: JsonObject =>
-                    if (obj.getFields().size > 0) {
-                        return obj.toString()
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    for ((k, v) in paramMap) {
+                        w.writeName(k).jsonValue(v)
                     }
+                    w.endObject()
+                    w.flush()
+                    return String.fromUtf8(readToEnd(out))
+                case Some(BeginObject) =>
+                    // Already an object; keep as-is unless it's empty.
+                    var hasField = false
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        hasField = true
+                        r.readName()
+                        r.skip()
+                    }
+                    r.endObject()
+                    return if (hasField) { trimmed } else { "" }
                 case _ => ()
             }
         } catch (_: Exception) {}
 
         return ""
-    }
-
-    private static func getParamName(fields: HashMap<String, JsonValue>): String {
-        match (fields.get("name")) {
-            case Some(v) =>
-                match (v) {
-                    case s: JsonString => return s.getValue()
-                    case _ => return ""
-                }
-            case None => return ""
-        }
-    }
-
-    private static func getParamValue(fields: HashMap<String, JsonValue>): Option<JsonValue> {
-        if (fields.contains("value")) {
-            return Option<JsonValue>.Some(fields["value"])
-        }
-        if (fields.contains("default_value")) {
-            return Option<JsonValue>.Some(fields["default_value"])
-        }
-        return Option.None
     }
 
     /**
@@ -909,25 +955,43 @@ public class DenoTaskRunner {
         }
 
         try {
-            let baseVal = JsonValue.fromStr(baseTrimmed)
-            let extraVal = JsonValue.fromStr(extraTrimmed)
+            func parseObjectToRawMap(json: String): Option<HashMap<String, String>> {
+                var buf = ByteBuffer()
+                unsafe { buf.write(json.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() != Some(BeginObject)) {
+                    return None
+                }
+                var m = HashMap<String, String>()
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let name = r.readName()
+                    let bytes = r.readValueBytes()
+                    m[name] = String.fromUtf8(bytes)
+                }
+                r.endObject()
+                return Some(m)
+            }
 
-            match (baseVal) {
-                case baseObj: JsonObject =>
-                    match (extraVal) {
-                        case extraObj: JsonObject =>
-                            let merged = JsonObject()
-                            let fields = merged.getFields()
-                            for ((k, v) in baseObj.getFields()) {
-                                fields[k] = v
+            match (parseObjectToRawMap(baseTrimmed)) {
+                case Some(baseMap) =>
+                    match (parseObjectToRawMap(extraTrimmed)) {
+                        case Some(extraMap) =>
+                            for ((k, v) in extraMap) {
+                                baseMap[k] = v
                             }
-                            for ((k, v) in extraObj.getFields()) {
-                                fields[k] = v
+                            let out = ByteBuffer()
+                            let w = JsonWriter(out)
+                            w.startObject()
+                            for ((k, v) in baseMap) {
+                                w.writeName(k).jsonValue(v)
                             }
-                            return merged.toString()
-                        case _ => return extraTrimmed
+                            w.endObject()
+                            w.flush()
+                            return String.fromUtf8(readToEnd(out))
+                        case None => return extraTrimmed
                     }
-                case _ => return extraTrimmed
+                case None => return extraTrimmed
             }
         } catch (_: Exception) {
             return extraTrimmed

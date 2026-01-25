@@ -3,6 +3,7 @@ package lrr4cj.controllers
 import cjoy.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
+import lrr4cj.utils.*
 
 /**
  * Info API 控制器
@@ -42,18 +43,4 @@ public class InfoController {
         }
     }
 
-    /**
-     * 辅助方法：转义JSON字符串
-     */
-    private static func escapeJson(value: String): String {
-        var escaped = value
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

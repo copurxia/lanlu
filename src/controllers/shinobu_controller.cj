@@ -5,6 +5,7 @@ import std.convert.*
 import lrr4cj.models.*
 import lrr4cj.services.*
 import lrr4cj.dao.*
+import lrr4cj.utils.*
 
 /**
  * Shinobu控制器（兼容旧API，实际调用CronService）
@@ -155,18 +156,4 @@ public class ShinobuController {
         return 0
     }
 
-    /**
-     * JSON字符串转义
-     */
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

@@ -2,9 +2,10 @@ package lrr4cj.task_runners
 
 import std.collection.*
 import std.convert.*
-import stdx.encoding.json.*
 import stdx.log.*
 import std.fs.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -148,31 +149,38 @@ public class RegenerateCoverTaskRunner {
         var deleteOldCover = false
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("mode")) {
-                        mode = jsonValueToString(fields["mode"]).trimAscii()
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
+            }
+            func readInt32Flexible(): Int32 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return 0i32 }
+            }
+
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "mode" => mode = r.readValue<String>().trimAscii()
+                        case "batchSize" =>
+                            let parsed = readInt32Flexible()
+                            if (parsed > 0) { batchSize = parsed }
+                        case "limit" =>
+                            // Backward compat: treat limit as batchSize.
+                            let parsed = readInt32Flexible()
+                            if (parsed > 0) { batchSize = parsed }
+                        case "deleteOldCover" => deleteOldCover = readBoolFlexible()
+                        case "delete_old_cover" => deleteOldCover = readBoolFlexible()
+                        case _ => r.skip()
                     }
-                    if (fields.contains("batchSize")) {
-                        let v = jsonValueToString(fields["batchSize"]).trimAscii()
-                        let parsed = try { Int32.parse(v) } catch (_: Exception) { 0i32 }
-                        if (parsed > 0) { batchSize = parsed }
-                    } else if (fields.contains("limit")) {
-                        // Backward compat: treat limit as batchSize.
-                        let v = jsonValueToString(fields["limit"]).trimAscii()
-                        let parsed = try { Int32.parse(v) } catch (_: Exception) { 0i32 }
-                        if (parsed > 0) { batchSize = parsed }
-                    }
-                    if (fields.contains("deleteOldCover")) {
-                        let v = jsonValueToString(fields["deleteOldCover"]).trimAscii()
-                        deleteOldCover = (v == "true" || v == "1")
-                    } else if (fields.contains("delete_old_cover")) {
-                        let v = jsonValueToString(fields["delete_old_cover"]).trimAscii()
-                        deleteOldCover = (v == "true" || v == "1")
-                    }
-                case _ => ()
+                }
+                r.endObject()
             }
         } catch (_: Exception) {}
 
@@ -186,13 +194,6 @@ public class RegenerateCoverTaskRunner {
         return (mode, batchSize, deleteOldCover)
     }
 
-    private static func jsonValueToString(value: JsonValue): String {
-        match (value) {
-            case s: JsonString => return s.getValue()
-            case _ => return value.toString()
-        }
-    }
-
     private static func fail(taskId: Int64, message: String): Unit {
         let msg = if (message.size == 0) { "Unknown error" } else { message }
         TaskIO.appendLog(taskId, "FAILED: ${msg}")
@@ -200,15 +201,4 @@ public class RegenerateCoverTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

@@ -3,9 +3,10 @@ package lrr4cj.task_runners
 import std.collection.*
 import std.convert.*
 import std.fs.*
+import std.io.*
 import std.time.*
-import stdx.encoding.json.*
 import stdx.log.*
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -212,22 +213,29 @@ public class DownloadUrlCallbackRunner {
         var pluginNamespace = ""
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("downloadTaskId")) {
-                        downloadTaskId = jsonValueToInt64(fields["downloadTaskId"])
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readInt64Flexible(): Int64 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int64.parse(s) } catch (_: Exception) { return 0 }
+            }
+
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let k = r.readName()
+                        match (k) {
+                            case "downloadTaskId" => downloadTaskId = readInt64Flexible()
+                            case "denoTaskId" => denoTaskId = readInt64Flexible()
+                            case "categoryId" => categoryId = readInt64Flexible()
+                            case "pluginNamespace" => pluginNamespace = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
                     }
-                    if (fields.contains("denoTaskId")) {
-                        denoTaskId = jsonValueToInt64(fields["denoTaskId"])
-                    }
-                    if (fields.contains("categoryId")) {
-                        categoryId = jsonValueToInt64(fields["categoryId"])
-                    }
-                    if (fields.contains("pluginNamespace")) {
-                        pluginNamespace = jsonValueToString(fields["pluginNamespace"]).trimAscii()
-                    }
+                    r.endObject()
                 case _ => ()
             }
         } catch (_: Exception) {}
@@ -235,50 +243,40 @@ public class DownloadUrlCallbackRunner {
         return (downloadTaskId, denoTaskId, categoryId, pluginNamespace)
     }
 
-    private static func jsonValueToString(value: JsonValue): String {
-        match (value) {
-            case s: JsonString => return s.getValue()
-            case _ => return value.toString()
-        }
-    }
-
-    private static func jsonValueToInt64(value: JsonValue): Int64 {
-        match (value) {
-            case n: JsonInt => return n.getValue()
-            case s: JsonString =>
-                try {
-                    return Int64.parse(s.getValue())
-                } catch (_: Exception) {
-                    return 0
-                }
-            case _ =>
-                try {
-                    return Int64.parse(value.toString())
-                } catch (_: Exception) {
-                    return 0
-                }
-        }
-    }
-
     private static func parsePluginError(output: String): String {
         if (output.trimAscii().size == 0) {
             return ""
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "false" || successVal == "0") {
-                            if (fields.contains("error")) {
-                                return jsonValueToString(fields["error"]).trimAscii()
-                            }
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
             }
+
+            var successSeen = false
+            var success = false
+            var err = ""
+
+            if (r.peek() != Some(BeginObject)) { return "" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" =>
+                        successSeen = true
+                        success = readBoolFlexible()
+                    case "error" =>
+                        err = r.readValue<String>().trimAscii()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+
+            if (successSeen && !success && err.size > 0) { return err }
         } catch (_: Exception) {}
         return ""
     }
@@ -289,38 +287,53 @@ public class DownloadUrlCallbackRunner {
             return paths
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataArray: JsonArray =>
-                                        for (i in 0..dataArray.size()) {
-                                            match (dataArray.get(i)) {
-                                                case Some(item: JsonObject) =>
-                                                    let itemFields = item.getFields()
-                                                    if (itemFields.contains("relative_path")) {
-                                                        let rpVal = itemFields["relative_path"]
-                                                        match (rpVal) {
-                                                            case rpStr: JsonString => paths.add(rpStr.getValue().trimAscii())
-                                                            case _ => paths.add(rpVal.toString().trimAscii())
-                                                        }
-                                                    }
-                                                case _ => ()
-                                            }
-                                        }
-                                    case _ => ()
-                                }
-                            }
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
             }
+
+            var ok = false
+            if (r.peek() != Some(BeginObject)) { return paths }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" => ok = readBoolFlexible()
+                    case "data" =>
+                        if (!ok) { r.skip(); continue }
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    match (r.peek()) {
+                                        case Some(BeginObject) =>
+                                            var rp = ""
+                                            r.startObject()
+                                            while (r.peek() != EndObject) {
+                                                let fn = r.readName()
+                                                match (fn) {
+                                                    case "relative_path" => rp = r.readValue<String>().trimAscii()
+                                                    case _ => r.skip()
+                                                }
+                                            }
+                                            r.endObject()
+                                            if (rp.size > 0) { paths.add(rp) }
+                                        case Some(_) => r.skip()
+                                        case None => break
+                                    }
+                                }
+                                r.endArray()
+                            case Some(_) => r.skip()
+                            case None => ()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
         } catch (_: Exception) {}
         return paths
     }
@@ -330,38 +343,56 @@ public class DownloadUrlCallbackRunner {
             return ""
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataArray: JsonArray =>
-                                        if (dataArray.size() > 0) {
-                                            match (dataArray.get(0)) {
-                                                case Some(item: JsonObject) =>
-                                                    let itemFields = item.getFields()
-                                                    if (itemFields.contains("source")) {
-                                                        let sourceVal = itemFields["source"]
-                                                        match (sourceVal) {
-                                                            case sourceStr: JsonString => return sourceStr.getValue().trimAscii()
-                                                            case _ => return sourceVal.toString().trimAscii()
-                                                        }
-                                                    }
-                                                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
+            }
+
+            var ok = false
+            if (r.peek() != Some(BeginObject)) { return "" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" => ok = readBoolFlexible()
+                    case "data" =>
+                        if (!ok) { r.skip(); continue }
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                r.startArray()
+                                // Only look at the first element (keeps behavior).
+                                match (r.peek()) {
+                                    case Some(BeginObject) =>
+                                        var source = ""
+                                        r.startObject()
+                                        while (r.peek() != EndObject) {
+                                            let fn = r.readName()
+                                            match (fn) {
+                                                case "source" => source = r.readValue<String>().trimAscii()
+                                                case _ => r.skip()
                                             }
                                         }
-                                    case _ => ()
+                                        r.endObject()
+                                        // Skip the rest of the array quickly.
+                                        while (r.peek() != EndArray) { r.skip() }
+                                        r.endArray()
+                                        return source
+                                    case Some(_) =>
+                                        while (r.peek() != EndArray) { r.skip() }
+                                        r.endArray()
+                                    case None => ()
                                 }
-                            }
+                            case Some(_) => r.skip()
+                            case None => ()
                         }
-                    }
-                case _ => ()
+                    case _ => r.skip()
+                }
             }
+            r.endObject()
         } catch (_: Exception) {}
         return ""
     }
@@ -371,36 +402,44 @@ public class DownloadUrlCallbackRunner {
             return "archive"
         }
         try {
-            let jsonVal = JsonValue.fromStr(output)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("success")) {
-                        let successVal = fields["success"].toString()
-                        if (successVal == "true" || successVal == "1") {
-                            if (fields.contains("data")) {
-                                let dataVal = fields["data"]
-                                match (dataVal) {
-                                    case dataObj: JsonObject =>
-                                        let dataFields = dataObj.getFields()
-                                        if (dataFields.contains("archive_type")) {
-                                            let typeVal = dataFields["archive_type"]
-                                            match (typeVal) {
-                                                case typeStr: JsonString =>
-                                                    let typeName = typeStr.getValue().trimAscii()
-                                                    if (typeName == "archive" || typeName == "folder" || typeName == "pdf") {
-                                                        return typeName
-                                                    }
-                                                case _ => ()
-                                            }
-                                        }
-                                    case _ => ()
-                                }
-                            }
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(output.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
             }
+
+            var ok = false
+            if (r.peek() != Some(BeginObject)) { return "archive" }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "success" => ok = readBoolFlexible()
+                    case "data" =>
+                        if (!ok) { r.skip(); continue }
+                        match (r.peek()) {
+                            case Some(BeginObject) =>
+                                var t = ""
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let fn = r.readName()
+                                    match (fn) {
+                                        case "archive_type" => t = r.readValue<String>().trimAscii()
+                                        case _ => r.skip()
+                                    }
+                                }
+                                r.endObject()
+                                if (t == "archive" || t == "folder" || t == "pdf") { return t }
+                            case Some(_) => r.skip()
+                            case None => ()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
         } catch (_: Exception) {}
         return "archive"
     }
@@ -412,15 +451,4 @@ public class DownloadUrlCallbackRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

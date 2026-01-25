@@ -6,7 +6,7 @@ import std.time.*
 import std.convert.*
 import std.io.*
 import std.collection.*
-import stdx.encoding.json.*
+import stdx.encoding.json.stream.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
 import lrr4cj.dao.*
@@ -289,45 +289,89 @@ public class ScanPluginsTaskRunner {
                 // 解析 NDJSON 格式的输出，查找 result 类型的消息
                 let pluginInfo = DenoPluginInfoRunner.extractPluginInfoDataFromNdjson(jsonStr)
                 if (pluginInfo.size > 0) {
-                    let json = JsonValue.fromStr(pluginInfo)
-                    match (json) {
-                        case jsonObj: JsonObject =>
-                            let nameValue = getJsonString(jsonObj, "name")
-                            metadata.name = if (nameValue.size > 0) { nameValue } else { Path(filePath).fileName.toString() }
-                            metadata.namespace = getJsonString(jsonObj, "namespace")
-                            metadata.version = getJsonString(jsonObj, "version")
-                            metadata.description = getJsonString(jsonObj, "description")
-                            metadata.author = getJsonString(jsonObj, "author")
-                            metadata.tags = getJsonString(jsonObj, "tags")
-                            metadata.permissions = getJsonCommaSeparated(jsonObj, "permissions")
-                            metadata.update_url = getJsonString(jsonObj, "update_url")
+                    try {
+                        var buf = ByteBuffer()
+                        unsafe { buf.write(pluginInfo.rawData()) }
+                        let r = JsonReader(buf)
 
-                            // 解析parameters字段
-                            if (jsonObj.getFields().contains("parameters")) {
-                                let paramsValue = jsonObj.getFields()["parameters"]
-                                match (paramsValue) {
-                                    case paramsArray: JsonArray =>
-                                        metadata.parameters = paramsArray.toString()
-                                        metadata.has_schema = paramsArray.size() > 0
-                                    case _ =>
-                                        metadata.parameters = "[]"
-                                        metadata.has_schema = false
+                        func readBoolFlexible(): Bool {
+                            let v = r.readValue<String>().trimAscii().toAsciiLower()
+                            return v == "true" || v == "1"
+                        }
+                        func readInt32Flexible(defaultValue: Int32): Int32 {
+                            let s = r.readValue<String>().trimAscii()
+                            try { return Int32.parse(s) } catch (_: Exception) { return defaultValue }
+                        }
+                        func readCommaSeparated(): String {
+                            match (r.peek()) {
+                                case Some(BeginArray) =>
+                                    var out = ""
+                                    var first = true
+                                    r.startArray()
+                                    while (r.peek() != EndArray) {
+                                        let s = r.readValue<String>().trimAscii()
+                                        if (s.size == 0) { continue }
+                                        if (!first) { out += "," } else { first = false }
+                                        out += s
+                                    }
+                                    r.endArray()
+                                    return out
+                                case Some(_) =>
+                                    return r.readValue<String>().trimAscii()
+                                case None => return ""
+                            }
+                        }
+
+                        if (r.peek() == Some(BeginObject)) {
+                            r.startObject()
+                            while (r.peek() != EndObject) {
+                                let k = r.readName()
+                                match (k) {
+                                    case "name" => metadata.name = r.readValue<String>().trimAscii()
+                                    case "namespace" => metadata.namespace = r.readValue<String>().trimAscii()
+                                    case "version" => metadata.version = r.readValue<String>().trimAscii()
+                                    case "description" => metadata.description = r.readValue<String>()
+                                    case "author" => metadata.author = r.readValue<String>()
+                                    case "tags" => metadata.tags = r.readValue<String>()
+                                    case "permissions" => metadata.permissions = readCommaSeparated()
+                                    case "update_url" => metadata.update_url = r.readValue<String>().trimAscii()
+                                    case "parameters" =>
+                                        match (r.peek()) {
+                                            case Some(BeginArray) =>
+                                                let bytes = r.readValueBytes()
+                                                let raw = String.fromUtf8(bytes)
+                                                metadata.parameters = raw
+                                                let t = raw.trimAscii()
+                                                metadata.has_schema = t.size > 2 && t != "[]"
+                                            case Some(_) =>
+                                                r.skip()
+                                                metadata.parameters = "[]"
+                                                metadata.has_schema = false
+                                            case None => ()
+                                        }
+                                    case "url_regex" => metadata.url_regex = r.readValue<String>()
+                                    case "login_from" => metadata.login_from = r.readValue<String>()
+                                    case "icon" => metadata.icon = r.readValue<String>()
+                                    case "type" => metadata.plugin_type = r.readValue<String>().trimAscii()
+                                    case "cron_expression" => metadata.cron_expression = r.readValue<String>()
+                                    case "cron_enabled" => metadata.cron_enabled = readBoolFlexible()
+                                    case "cron_priority" => metadata.cron_priority = readInt32Flexible(50)
+                                    case "cron_timeout_seconds" => metadata.cron_timeout_seconds = readInt32Flexible(3600)
+                                    case _ => r.skip()
                                 }
                             }
+                            r.endObject()
 
-                            // 解析其他可选字段
-                            metadata.url_regex = getJsonString(jsonObj, "url_regex")
-                            metadata.login_from = getJsonString(jsonObj, "login_from")
-                            metadata.icon = getJsonString(jsonObj, "icon")
-                            metadata.plugin_type = getJsonString(jsonObj, "type")
-                            metadata.cron_expression = getJsonString(jsonObj, "cron_expression")
-                            metadata.cron_enabled = getJsonBool(jsonObj, "cron_enabled", false)
-                            metadata.cron_priority = getJsonInt32(jsonObj, "cron_priority", 50)
-                            metadata.cron_timeout_seconds = getJsonInt32(jsonObj, "cron_timeout_seconds", 3600)
+                            if (metadata.name.size == 0) {
+                                metadata.name = Path(filePath).fileName.toString()
+                            }
 
                             TaskIO.appendLog(taskId, "Successfully parsed plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, type=${metadata.plugin_type}")
-                        case _ =>
+                        } else {
                             TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON for ${filePath}")
+                        }
+                    } catch (_: Exception) {
+                        TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON for ${filePath}")
                     }
                 } else {
                     TaskIO.appendLog(taskId, "WARN: No result message found in plugin output for ${filePath}")
@@ -364,111 +408,9 @@ public class ScanPluginsTaskRunner {
         return result
     }
 
-    /**
-     * 从JsonObject获取字符串值的辅助函数
-     */
-    private static func getJsonString(jsonObj: JsonObject, key: String): String {
-        let fields = jsonObj.getFields()
-        if (fields.contains(key)) {
-            let value = fields[key]
-            match (value) {
-                case jsonStr: JsonString =>
-                    return jsonStr.getValue()
-                case _ =>
-                    return value.toString()
-            }
-        }
-        return ""
-    }
-
-    private static func getJsonBool(jsonObj: JsonObject, key: String, defaultValue: Bool): Bool {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) { return defaultValue }
-        let value = fields[key]
-        match (value) {
-            case b: JsonBool => return b.getValue()
-            case s: JsonString =>
-                let v = s.getValue().trimAscii().toAsciiLower()
-                if (v == "true" || v == "1" || v == "yes" || v == "y" || v == "on") { return true }
-                if (v == "false" || v == "0" || v == "no" || v == "n" || v == "off") { return false }
-                return defaultValue
-            case _ =>
-                let v = value.toString().trimAscii().toAsciiLower()
-                if (v == "true" || v == "1") { return true }
-                if (v == "false" || v == "0") { return false }
-                return defaultValue
-        }
-    }
-
-    private static func getJsonInt32(jsonObj: JsonObject, key: String, defaultValue: Int32): Int32 {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) { return defaultValue }
-        let value = fields[key]
-        match (value) {
-            case n: JsonInt =>
-                return Int32(n.getValue())
-            case n: JsonFloat =>
-                return Int32(n.getValue())
-            case s: JsonString =>
-                let v = s.getValue().trimAscii()
-                if (v.size == 0) { return defaultValue }
-                return try { Int32.parse(v) } catch (_: Exception) { defaultValue }
-            case _ =>
-                let v = value.toString().trimAscii()
-                if (v.size == 0) { return defaultValue }
-                return try { Int32.parse(v) } catch (_: Exception) { defaultValue }
-        }
-    }
-
-    private static func getJsonCommaSeparated(jsonObj: JsonObject, key: String): String {
-        let fields = jsonObj.getFields()
-        if (!fields.contains(key)) {
-            return ""
-        }
-
-        let value = fields[key]
-        match (value) {
-            case arr: JsonArray =>
-                var out = ""
-                var first = true
-                let size = arr.size()
-                for (i in 0..size) {
-                    match (arr.get(i)) {
-                        case Some(v) =>
-                            let s = match (v) {
-                                case js: JsonString => js.getValue()
-                                case _ => v.toString()
-                            }.trimAscii()
-                            if (s.size == 0) { continue }
-                            if (!first) { out += "," }
-                            out += s
-                            first = false
-                        case None => ()
-                    }
-                }
-                return out
-            case jsonStr: JsonString =>
-                return jsonStr.getValue()
-            case _ =>
-                return value.toString()
-        }
-    }
-
     private static func buildScriptScheduledTaskName(namespace: String): String {
         // Stable, namespaced identifier to avoid colliding with user-created scheduled tasks.
         return "plugin_script:${namespace}"
-    }
-
-    private static func escapeJson(value: String): String {
-        var escaped = value
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
     }
 
     private static func buildScriptDenoTaskParameters(namespace: String): String {

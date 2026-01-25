@@ -4,6 +4,7 @@ import cjoy.*
 import std.convert.*
 import lrr4cj.dao.*
 import lrr4cj.middleware.*
+import lrr4cj.utils.*
 
 /**
  * 用户统计控制器
@@ -159,16 +160,4 @@ public class UserStatsController {
         return json
     }
 
-    /**
-     * 转义 JSON 字符串中的特殊字符
-     */
-    private static func escapeJson(s: String): String {
-        var result = s
-        result = result.replace("\\", "\\\\")
-        result = result.replace("\"", "\\\"")
-        result = result.replace("\n", "\\n")
-        result = result.replace("\r", "\\r")
-        result = result.replace("\t", "\\t")
-        return result
-    }
 }

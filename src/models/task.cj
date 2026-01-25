@@ -86,18 +86,6 @@ public class Task {
         return json
     }
 
-    // 辅助函数：转义JSON字符串中的特殊字符
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")  // 转义反斜杠
-        escaped = escaped.replace("\"", "\\\"")   // 转义双引号
-        escaped = escaped.replace("\b", "\\b")    // 转义退格
-        escaped = escaped.replace("\f", "\\f")    // 转义换页
-        escaped = escaped.replace("\n", "\\n")    // 转义换行
-        escaped = escaped.replace("\r", "\\r")    // 转义回车
-        escaped = escaped.replace("\t", "\\t")    // 转义制表符
-        return escaped
-    }
 }
 
 /**

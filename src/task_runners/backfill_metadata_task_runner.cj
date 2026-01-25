@@ -2,8 +2,9 @@ package lrr4cj.task_runners
 
 import std.collection.*
 import std.convert.*
-import stdx.encoding.json.*
 import stdx.log.*
+import std.io.*
+import stdx.encoding.json.stream.*
 import lrr4cj.dao.*
 import lrr4cj.models.*
 import lrr4cj.utils.*
@@ -112,25 +113,32 @@ public class BackfillMetadataTaskRunner {
         var namespaceOverride = ""
 
         try {
-            let jsonVal = JsonValue.fromStr(trimmed)
-            match (jsonVal) {
-                case obj: JsonObject =>
-                    let fields = obj.getFields()
-                    if (fields.contains("limit")) {
-                        let v = jsonValueToString(fields["limit"]).trimAscii()
-                        let parsed = try { Int32.parse(v) } catch (_: Exception) { 0i32 }
-                        if (parsed > 0) { limit = parsed }
-                    } else if (fields.contains("batchSize")) {
-                        let v = jsonValueToString(fields["batchSize"]).trimAscii()
-                        let parsed = try { Int32.parse(v) } catch (_: Exception) { 0i32 }
-                        if (parsed > 0) { limit = parsed }
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readInt32Flexible(): Int32 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return 0i32 }
+            }
+
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "limit" =>
+                            let parsed = readInt32Flexible()
+                            if (parsed > 0) { limit = parsed }
+                        case "batchSize" =>
+                            let parsed = readInt32Flexible()
+                            if (parsed > 0) { limit = parsed }
+                        case "namespace" => namespaceOverride = r.readValue<String>().trimAscii()
+                        case "pluginNamespace" => namespaceOverride = r.readValue<String>().trimAscii()
+                        case _ => r.skip()
                     }
-                    if (fields.contains("namespace")) {
-                        namespaceOverride = jsonValueToString(fields["namespace"]).trimAscii()
-                    } else if (fields.contains("pluginNamespace")) {
-                        namespaceOverride = jsonValueToString(fields["pluginNamespace"]).trimAscii()
-                    }
-                case _ => ()
+                }
+                r.endObject()
             }
         } catch (_: Exception) {}
 
@@ -142,28 +150,22 @@ public class BackfillMetadataTaskRunner {
     private static func parsePluginsArray(pluginsJson: String): Array<String> {
         var namespaces = ArrayList<String>()
         try {
-            let jsonVal = JsonValue.fromStr(pluginsJson)
-            match (jsonVal) {
-                case arr: JsonArray =>
-                    for (item in arr.getItems()) {
-                        match (item) {
-                            case s: JsonString =>
-                                let v = s.getValue().trimAscii()
-                                if (v.size > 0) { namespaces.add(v) }
-                            case _ => ()
-                        }
-                    }
-                case _ => ()
+            var buf = ByteBuffer()
+            unsafe { buf.write(pluginsJson.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginArray)) { return namespaces.toArray() }
+            r.startArray()
+            while (r.peek() != EndArray) {
+                match (r.peek()) {
+                    case Some(_) =>
+                        let v = r.readValue<String>().trimAscii()
+                        if (v.size > 0) { namespaces.add(v) }
+                    case None => break
+                }
             }
+            r.endArray()
         } catch (_: Exception) {}
         return namespaces.toArray()
-    }
-
-    private static func jsonValueToString(value: JsonValue): String {
-        match (value) {
-            case s: JsonString => return s.getValue()
-            case _ => return value.toString()
-        }
     }
 
     private static func fail(taskId: Int64, message: String): Unit {
@@ -173,15 +175,4 @@ public class BackfillMetadataTaskRunner {
         TaskIO.writeOutput(taskId, "{\"success\":0,\"error\":\"${escapeJson(msg)}\"}")
     }
 
-    private static func escapeJson(s: String): String {
-        var escaped = s
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 }

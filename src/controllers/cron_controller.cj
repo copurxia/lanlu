@@ -4,6 +4,7 @@ import cjoy.*
 import std.convert.*
 import lrr4cj.models.*
 import lrr4cj.services.*
+import lrr4cj.utils.*
 
 /**
  * 定时任务控制器
@@ -389,16 +390,6 @@ public class CronController {
     }
 
     // ========== JSON解析辅助函数 ==========
-
-    private static func escapeJsonString(str: String): String {
-        var escaped = str
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
 
     private static func extractJsonString(json: String, key: String): String {
         let keyIndexOpt = json.indexOf("\"${key}\"")

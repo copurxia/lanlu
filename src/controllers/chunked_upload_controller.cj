@@ -772,18 +772,6 @@ public class ChunkedUploadController {
         }
     }
 
-    private static func escapeJsonString(input: String): String {
-        var escaped = input
-        escaped = escaped.replace("\\", "\\\\")
-        escaped = escaped.replace("\"", "\\\"")
-        escaped = escaped.replace("\b", "\\b")
-        escaped = escaped.replace("\f", "\\f")
-        escaped = escaped.replace("\n", "\\n")
-        escaped = escaped.replace("\r", "\\r")
-        escaped = escaped.replace("\t", "\\t")
-        return escaped
-    }
-
     /**
      * 取消上传
      * DELETE /api/archives/upload/:taskId
