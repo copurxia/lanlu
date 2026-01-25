@@ -1,6 +1,5 @@
 package lanlu.controllers
 
-import std.collection.*
 import stdx.log.*
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}

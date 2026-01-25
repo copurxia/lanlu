@@ -6,7 +6,6 @@ import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lanlu.dao.*
 import lanlu.middleware.*
-import lanlu.utils.*
 
 /**
  * 用户统计控制器

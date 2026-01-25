@@ -464,12 +464,6 @@ public class DenoTaskRunner {
         return netAll
     }
 
-    private static func escapeShellArg(arg: String): String {
-        if (arg.size == 0) { return "''" }
-        let safe = arg.replace("'", "'\"'\"'")
-        return "'${safe}'"
-    }
-
     /**
      * 构建 stdin JSON 输入
      */

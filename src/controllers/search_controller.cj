@@ -5,7 +5,6 @@ import lanlu.models.*
 import lanlu.views.*
 import lanlu.dao.*
 import lanlu.middleware.*
-import lanlu.utils.*
 import std.convert.*
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}

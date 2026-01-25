@@ -619,60 +619,6 @@ public class ArchiveUtils {
         return (exitCode, stderrStr)
     }
 
-    /**
-     * 动态构建FFmpeg滤镜
-     */
-    private static func buildFilter(inputPath: String): (String, Bool) {
-        // 使用 ffprobe 获取图片尺寸
-        let probeProcess = launch(
-            "ffprobe",
-            "-v", "error",
-            "-select_streams", "v:0",
-            "-show_entries", "stream=width,height",
-            "-of", "csv=p=0",
-            inputPath,
-            stdOut: ProcessRedirect.Pipe,
-            stdErr: ProcessRedirect.Pipe
-        )
-        let (probeExitCode, probeStdout, _) = probeProcess.waitOutput()
-
-        if (probeExitCode != 0) {
-            logger.error("Failed to get image dimensions", ("inputPath", inputPath))
-            return ("", false)
-        }
-
-        let dimensions = String.fromUtf8(probeStdout).trimAscii()
-        let parts = dimensions.split(",")
-        if (parts.size < 2) {
-            logger.error("Invalid image dimensions", ("dimensions", dimensions))
-            return ("", false)
-        }
-
-        let width = try { Int64.parse(parts[0].trimAscii()) } catch (_: Exception) { 0i64 }
-        let height = try { Int64.parse(parts[1].trimAscii()) } catch (_: Exception) { 0i64 }
-
-        if (width <= 0 || height <= 0) {
-            logger.error("Invalid image dimensions", ("width", width.toString()), ("height", height.toString()))
-            return ("", false)
-        }
-
-        // 计算缩放后的高度
-        let scaledHeight = height * 500 / width
-
-        var vfFilter = ""
-        if (scaledHeight >= 1000) {
-            // 高度足够：先缩放，再裁剪
-            vfFilter = "scale=500:-1,crop=500:1000:0:0"
-        } else {
-            // 高度不足：只缩放（保持宽高比，不裁剪）
-            vfFilter = "scale=500:-1"
-        }
-
-        logger.debug("Built filter", ("width", width.toString()), ("height", height.toString()), ("scaledHeight", scaledHeight.toString()), ("filter", vfFilter))
-        return (vfFilter, true)
-    }
-
-
     // ==================== 私有工具方法 ====================
 
     /**

@@ -861,52 +861,6 @@ public class ArchiveController {
     }
 
     /**
-     * 大文件：使用 chunked 分块传输
-     */
-    private static func sendPageDataChunked(
-        ctx: JoyContext,
-        data: Array<UInt8>,
-        contentType: String,
-        etag: String
-    ): Unit {
-        let writer = ctx.chunkedWriter()
-
-        // 设置响应头
-        writer.header("Content-Type", contentType)
-        writer.header("ETag", etag)
-        writer.header("Cache-Control", "private, max-age=3600")
-
-        // 分块发送数据
-        let totalSize = Int64(data.size)
-        let chunkSizeInt = Int64(CHUNK_SIZE)
-        var offset: Int64 = 0
-
-        while (offset < totalSize) {
-            let remaining = totalSize - offset
-            let currentChunkSize = if (remaining > chunkSizeInt) { chunkSizeInt } else { remaining }
-
-            // 使用 sliceToBytes 辅助函数创建块数据
-            let chunk = sliceToBytes(data, offset, currentChunkSize)
-            writer.write(chunk)
-
-            offset += currentChunkSize
-        }
-
-        writer.end()
-    }
-
-    /**
-     * 从 UInt8 数组切片转换为 Byte 数组
-     */
-    private static func sliceToBytes(data: Array<UInt8>, start: Int64, length: Int64): Array<Byte> {
-        let result = Array<Byte>(length, {_ => 0})
-        for (i in 0..length) {
-            result[i] = data[start + i]
-        }
-        return result
-    }
-
-    /**
      * 使用 EntryReader 发送页面数据，支持真正的流式分块传输
      */
     private static func sendPageDataWithReader(
