@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.cron
+package lanlu.routes.api.cron
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * Cron定时任务API路由

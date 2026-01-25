@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.categories
+package lanlu.routes.api.categories
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * 分类API路由（新结构）

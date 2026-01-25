@@ -1,4 +1,4 @@
-package lrr4cj.task_runners
+package lanlu.task_runners
 
 import stdx.log.*
 import std.convert.*
@@ -6,10 +6,10 @@ import std.collection.*
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
-import lrr4cj.dao.*
-import lrr4cj.archivehandler.*
+import lanlu.models.*
+import lanlu.utils.*
+import lanlu.dao.*
+import lanlu.archivehandler.*
 
 /**
  * 单个档案扫描任务：处理归档文件并入库

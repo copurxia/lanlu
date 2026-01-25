@@ -1,12 +1,12 @@
-package lrr4cj
+package lanlu
 
-import lrr4cj.routes.*
-import lrr4cj.config.*
-import lrr4cj.services.*
-import lrr4cj.utils.*
-import lrr4cj.models.*
-import lrr4cj.migrations.*
-import lrr4cj.migrations.versions.*
+import lanlu.routes.*
+import lanlu.config.*
+import lanlu.services.*
+import lanlu.utils.*
+import lanlu.models.*
+import lanlu.migrations.*
+import lanlu.migrations.versions.*
 import std.convert.*
 import cjoy.*
 import cjdotenv.load

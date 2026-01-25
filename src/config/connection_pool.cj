@@ -1,10 +1,10 @@
-package lrr4cj.config
+package lanlu.config
 
 import std.database.sql.*
 import std.sync.*
 import std.env.getVariable
 import std.convert.*
-import lrr4cj.utils.*
+import lanlu.utils.*
 
 /**
  * 连接池配置

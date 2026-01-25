@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.database
+package lanlu.routes.api.database
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * API 数据库路由模块

@@ -1,12 +1,12 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import lrr4cj.dao.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
-import lrr4cj.views.*
+import lanlu.dao.*
+import lanlu.models.*
+import lanlu.utils.*
+import lanlu.views.*
 
 /**
  * Info API 控制器

@@ -1,12 +1,12 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import lrr4cj.dao.*
-import lrr4cj.middleware.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.middleware.*
+import lanlu.utils.*
 
 /**
  * 用户统计控制器

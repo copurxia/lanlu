@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.tags
+package lanlu.routes.api.tags
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * 标签路由

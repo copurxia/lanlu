@@ -1,7 +1,7 @@
-package lrr4cj.models
+package lanlu.models
 
-import lrr4cj.dao.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.utils.*
 import std.collection.*
 import std.time.*
 import cjcron.*

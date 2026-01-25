@@ -1,9 +1,9 @@
-package lrr4cj.archivehandler
+package lanlu.archivehandler
 
 import std.fs.*
 import std.collection.*
-import lrr4cj.models.ArchiveTypes
-import lrr4cj.utils.DirectoryScanner
+import lanlu.models.ArchiveTypes
+import lanlu.utils.DirectoryScanner
 import epub.Epub
 
 /**

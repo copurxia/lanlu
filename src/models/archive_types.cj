@@ -1,4 +1,4 @@
-package lrr4cj.models
+package lanlu.models
 
 /**
  * Archive类型枚举常量

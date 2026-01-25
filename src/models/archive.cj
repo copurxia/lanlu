@@ -1,11 +1,11 @@
-package lrr4cj.models
+package lanlu.models
 
 import std.database.sql.*
-import lrr4cj.config.*
+import lanlu.config.*
 import std.collection.*
 import std.fs.*
-import lrr4cj.dao.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.utils.*
 
 /**
  * 归档数据模型

@@ -1,4 +1,4 @@
-package lrr4cj.utils
+package lanlu.utils
 
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*

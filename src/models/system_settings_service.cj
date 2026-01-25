@@ -1,11 +1,11 @@
-package lrr4cj.models
+package lanlu.models
 
 import std.collection.*
 import std.sync.*
 import stdx.log.*
 import std.convert.*
-import lrr4cj.dao.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.utils.*
 
 /**
  * 系统设置服务

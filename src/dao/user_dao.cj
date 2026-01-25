@@ -1,10 +1,10 @@
-package lrr4cj.dao
+package lanlu.dao
 
 import std.database.sql.*
 import stdx.log.*
 import std.collection.*
-import lrr4cj.config.*
-import lrr4cj.utils.*
+import lanlu.config.*
+import lanlu.utils.*
 
 public class UserRow {
     public var id: Int64 = 0

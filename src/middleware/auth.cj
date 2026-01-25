@@ -1,11 +1,11 @@
-package lrr4cj.middleware
+package lanlu.middleware
 
 import cjoy.*
 import stdx.net.http.HttpStatusCode
-import lrr4cj.views.*
-import lrr4cj.config.*
-import lrr4cj.dao.*
-import lrr4cj.utils.*
+import lanlu.views.*
+import lanlu.config.*
+import lanlu.dao.*
+import lanlu.utils.*
 
 /**
  * 认证中间件

@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.tankoubons
+package lanlu.routes.api.tankoubons
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * 单行本API路由

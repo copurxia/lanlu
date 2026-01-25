@@ -1,15 +1,15 @@
-package lrr4cj.routes
+package lanlu.routes
 
 import cjoy.*
-import lrr4cj.routes.api.archives.*
-import lrr4cj.routes.api.database.*
-import lrr4cj.routes.api.search.*
-import lrr4cj.routes.api.categories.*
-import lrr4cj.routes.api.plugins.*
-import lrr4cj.routes.api.tankoubons.*
-import lrr4cj.routes.api.shinobu.*
-import lrr4cj.routes.api.*
-import lrr4cj.controllers.*
+import lanlu.routes.api.archives.*
+import lanlu.routes.api.database.*
+import lanlu.routes.api.search.*
+import lanlu.routes.api.categories.*
+import lanlu.routes.api.plugins.*
+import lanlu.routes.api.tankoubons.*
+import lanlu.routes.api.shinobu.*
+import lanlu.routes.api.*
+import lanlu.controllers.*
 
 /**
  * 路由注册模块

@@ -1,4 +1,4 @@
-package lrr4cj.models
+package lanlu.models
 
 import std.convert.*
 import std.fs.*

@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.assets
+package lanlu.routes.api.assets
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * Asset routes module

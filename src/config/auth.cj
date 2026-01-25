@@ -1,4 +1,4 @@
-package lrr4cj.config
+package lanlu.config
 
 import std.env.getVariable
 import cjdotenv.load

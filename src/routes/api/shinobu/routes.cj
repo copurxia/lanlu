@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.shinobu
+package lanlu.routes.api.shinobu
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * Shinobu API路由

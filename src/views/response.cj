@@ -1,7 +1,7 @@
-package lrr4cj.views
+package lanlu.views
 
 import cjoy.*
-import lrr4cj.utils.{JsonCodec, JsonRaw}
+import lanlu.utils.{JsonCodec, JsonRaw}
 import stdx.encoding.json.stream.*
 
 /**

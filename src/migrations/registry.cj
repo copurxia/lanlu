@@ -1,4 +1,4 @@
-package lrr4cj.migrations
+package lanlu.migrations
 
 import std.collection.*
 import std.sort.*

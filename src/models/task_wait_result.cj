@@ -1,4 +1,4 @@
-package lrr4cj.models
+package lanlu.models
 
 /**
  * 任务等待结果

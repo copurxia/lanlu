@@ -1,9 +1,9 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
-import lrr4cj.models.*
-import lrr4cj.dao.*
-import lrr4cj.middleware.*
+import lanlu.models.*
+import lanlu.dao.*
+import lanlu.middleware.*
 import stdx.net.http.HttpStatusCode
 
 /**

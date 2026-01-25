@@ -1,12 +1,12 @@
-package lrr4cj.task_runners
+package lanlu.task_runners
 
 import std.fs.*
 import stdx.encoding.json.stream.*
 import stdx.log.*
 import std.io.{ByteBuffer, readToEnd}
-import lrr4cj.config.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
+import lanlu.config.*
+import lanlu.models.*
+import lanlu.utils.*
 
 /**
  * tag_i18n_import 任务执行器（运行在TaskPool中）

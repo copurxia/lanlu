@@ -1,4 +1,4 @@
-package lrr4cj.utils
+package lanlu.utils
 
 import cjoy.*
 import stdx.net.http.HttpStatusCode

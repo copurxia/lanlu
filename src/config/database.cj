@@ -1,10 +1,10 @@
-package lrr4cj.config
+package lanlu.config
 
 import std.database.sql.*
 import stdx.log.*
 import cjdotenv.load
 import std.env.getVariable
-import lrr4cj.utils.*
+import lanlu.utils.*
 import opengauss.driver.*
 import std.fs.exists
 

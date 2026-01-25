@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.smart_filters
+package lanlu.routes.api.smart_filters
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * 智能分类 API 路由

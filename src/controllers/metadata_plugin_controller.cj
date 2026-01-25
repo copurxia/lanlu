@@ -1,13 +1,13 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import stdx.log.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import cjoy.*
-import lrr4cj.dao.*
-import lrr4cj.models.*
-import lrr4cj.services.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.models.*
+import lanlu.services.*
+import lanlu.utils.*
 
 /**
  * 元数据插件执行控制器

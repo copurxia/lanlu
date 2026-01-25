@@ -1,14 +1,14 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
 import std.collection.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import lrr4cj.views.*
-import lrr4cj.dao.*
-import lrr4cj.services.*
-import lrr4cj.utils.*
+import lanlu.views.*
+import lanlu.dao.*
+import lanlu.services.*
+import lanlu.utils.*
 
 /**
  * 插件控制器

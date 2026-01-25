@@ -1,7 +1,7 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
-import lrr4cj.views.*
+import lanlu.views.*
 
 /**
  * 数据库控制器

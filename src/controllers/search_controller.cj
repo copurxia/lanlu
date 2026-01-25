@@ -1,11 +1,11 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
-import lrr4cj.models.*
-import lrr4cj.views.*
-import lrr4cj.dao.*
-import lrr4cj.middleware.*
-import lrr4cj.utils.*
+import lanlu.models.*
+import lanlu.views.*
+import lanlu.dao.*
+import lanlu.middleware.*
+import lanlu.utils.*
 import std.convert.*
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}

@@ -1,8 +1,8 @@
-package lrr4cj.migrations.versions
+package lanlu.migrations.versions
 
 import std.database.sql.*
-import lrr4cj.migrations.*
-import lrr4cj.utils.*
+import lanlu.migrations.*
+import lanlu.utils.*
 
 /**
  * V001: 初始数据库 schema

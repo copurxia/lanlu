@@ -1,4 +1,4 @@
-package lrr4cj.task_runners
+package lanlu.task_runners
 
 import std.collection.*
 import std.convert.*
@@ -8,9 +8,9 @@ import std.io.{ByteBuffer, readToEnd}
 import std.time.*
 import stdx.log.*
 import stdx.encoding.json.stream.*
-import lrr4cj.dao.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.models.*
+import lanlu.utils.*
 
 /**
  * download_url_callback 回调任务执行器

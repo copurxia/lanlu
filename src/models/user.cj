@@ -1,8 +1,8 @@
-package lrr4cj.models
+package lanlu.models
 
-import lrr4cj.dao.*
-import lrr4cj.utils.*
-import lrr4cj.config.*
+import lanlu.dao.*
+import lanlu.utils.*
+import lanlu.config.*
 
 public class UserModel {
     /**

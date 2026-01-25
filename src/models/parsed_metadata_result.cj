@@ -1,4 +1,4 @@
-package lrr4cj.models
+package lanlu.models
 
 /**
  * 元数据解析结果

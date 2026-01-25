@@ -1,10 +1,10 @@
-package lrr4cj.archivehandler
+package lanlu.archivehandler
 
 import std.fs.*
 import std.collection.*
-import lrr4cj.models.ArchiveTypes
-import lrr4cj.utils.DirectoryScanner
-import lrr4cj.utils.NaturalSort
+import lanlu.models.ArchiveTypes
+import lanlu.utils.DirectoryScanner
+import lanlu.utils.NaturalSort
 
 /**
  * 文件读取器 - 支持分块读取文件

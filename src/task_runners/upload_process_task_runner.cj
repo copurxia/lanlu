@@ -1,11 +1,11 @@
-package lrr4cj.task_runners
+package lanlu.task_runners
 
 import stdx.log.*
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
+import lanlu.models.*
+import lanlu.utils.*
 
 /**
  * upload_process 任务执行器：对已落盘的archive文件进行入库/缩略图处理

@@ -1,14 +1,14 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import lrr4cj.models.*
-import lrr4cj.services.*
-import lrr4cj.dao.*
-import lrr4cj.utils.*
-import lrr4cj.views.*
+import lanlu.models.*
+import lanlu.services.*
+import lanlu.dao.*
+import lanlu.utils.*
+import lanlu.views.*
 
 /**
  * Shinobu控制器（兼容旧API，实际调用CronService）

@@ -1,12 +1,12 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import stdx.net.http.HttpStatusCode
 import cjoy.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
-import lrr4cj.dao.*
-import lrr4cj.services.*
-import lrr4cj.views.*
+import lanlu.models.*
+import lanlu.utils.*
+import lanlu.dao.*
+import lanlu.services.*
+import lanlu.views.*
 import std.fs.*
 import std.convert.*
 import std.io.*

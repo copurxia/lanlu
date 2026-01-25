@@ -1,4 +1,4 @@
-package lrr4cj.models
+package lanlu.models
 
 /**
  * 分类数据模型（新结构）

@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.user
+package lanlu.routes.api.user
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * 用户统计路由模块

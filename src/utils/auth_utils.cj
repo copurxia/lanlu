@@ -1,4 +1,4 @@
-package lrr4cj.utils
+package lanlu.utils
 
 import stdx.crypto.digest.*
 import stdx.crypto.crypto.*

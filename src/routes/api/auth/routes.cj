@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.auth
+package lanlu.routes.api.auth
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 public func registerAuthRoutes(router: JoyRouters) {
     // 注册接口：需要已登录用户才能创建新用户

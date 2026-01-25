@@ -1,6 +1,6 @@
-package lrr4cj.models
+package lanlu.models
 
-import lrr4cj.dao.*
+import lanlu.dao.*
 import std.collection.*
 
 /**

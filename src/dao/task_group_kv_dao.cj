@@ -1,14 +1,14 @@
-package lrr4cj.dao
+package lanlu.dao
 
 import std.database.sql.*
 import std.collection.*
 import std.time.*
-import lrr4cj.config.*
+import lanlu.config.*
 
 /**
  * task_group_kv DAO
  *
- * 注意：不要 import lrr4cj.models.*，避免 dao <-> models 循环依赖。
+ * 注意：不要 import lanlu.models.*，避免 dao <-> models 循环依赖。
  */
 public class TaskGroupKVDao {
     private static func nowSeconds(): Int64 {

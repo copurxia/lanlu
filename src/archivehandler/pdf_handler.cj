@@ -1,11 +1,11 @@
-package lrr4cj.archivehandler
+package lanlu.archivehandler
 
 import std.fs.*
 import std.process.*
 import std.collection.*
 import std.convert.*
-import lrr4cj.models.ArchiveTypes
-import lrr4cj.utils.{ArchiveUtils, DirectoryScanner}
+import lanlu.models.ArchiveTypes
+import lanlu.utils.{ArchiveUtils, DirectoryScanner}
 
 /**
  * PDF文件类型处理器

@@ -1,10 +1,10 @@
-package lrr4cj.routes.api.archives
+package lanlu.routes.api.archives
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.controllers.ChunkedUploadController
-import lrr4cj.controllers.DownloadController
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.controllers.ChunkedUploadController
+import lanlu.controllers.DownloadController
+import lanlu.middleware.*
 
 /**
  * API 归档路由模块

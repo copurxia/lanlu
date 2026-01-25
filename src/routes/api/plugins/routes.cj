@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.plugins
+package lanlu.routes.api.plugins
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * 插件管理API路由

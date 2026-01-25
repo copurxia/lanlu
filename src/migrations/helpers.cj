@@ -1,7 +1,7 @@
-package lrr4cj.migrations
+package lanlu.migrations
 
 import std.database.sql.*
-import lrr4cj.utils.*
+import lanlu.utils.*
 
 /**
  * 迁移辅助函数

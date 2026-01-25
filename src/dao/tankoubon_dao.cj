@@ -1,11 +1,11 @@
-package lrr4cj.dao
+package lanlu.dao
 
 import std.database.sql.*
-import lrr4cj.config.*
+import lanlu.config.*
 import std.collection.*
 import stdx.log.*
 import std.time.*
-import lrr4cj.utils.*
+import lanlu.utils.*
 
 /**
  * Tankoubon数据结构

@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.search
+package lanlu.routes.api.search
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * API 搜索路由模块

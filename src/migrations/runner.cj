@@ -1,9 +1,9 @@
-package lrr4cj.migrations
+package lanlu.migrations
 
 import std.database.sql.*
 import std.collection.*
-import lrr4cj.config.*
-import lrr4cj.utils.*
+import lanlu.config.*
+import lanlu.utils.*
 
 /**
  * 迁移执行器 - 执行待处理的迁移

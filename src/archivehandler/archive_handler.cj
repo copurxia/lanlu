@@ -1,4 +1,4 @@
-package lrr4cj.archivehandler
+package lanlu.archivehandler
 
 import archive_ffi.ArchiveEntryReader
 

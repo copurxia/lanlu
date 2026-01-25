@@ -1,10 +1,10 @@
-package lrr4cj.dao
+package lanlu.dao
 
 import std.database.sql.*
-import lrr4cj.config.*
-import lrr4cj.utils.*
+import lanlu.config.*
+import lanlu.utils.*
 import stdx.log.*
-import lrr4cj.utils.*
+import lanlu.utils.*
 
 public class AssetRow {
     public var id: Int64 = 0

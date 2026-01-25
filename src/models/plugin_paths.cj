@@ -1,7 +1,7 @@
-package lrr4cj.models
+package lanlu.models
 
 import std.fs.*
-import lrr4cj.utils.*
+import lanlu.utils.*
 
 /**
  * 插件路径工具：集中管理 PLUGIN_PATH / CACHE_PATH 派生路径

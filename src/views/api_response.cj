@@ -1,4 +1,4 @@
-package lrr4cj.views
+package lanlu.views
 
 import stdx.encoding.json.stream.*
 

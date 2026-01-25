@@ -1,10 +1,10 @@
-package lrr4cj.services
+package lanlu.services
 
 import std.fs.*
 import stdx.log.*
-import lrr4cj.dao.*
-import lrr4cj.models.*
-import lrr4cj.utils.*
+import lanlu.dao.*
+import lanlu.models.*
+import lanlu.utils.*
 
 /**
  * One-time best-effort migration of legacy thumbnails from ./data/thumb into assets storage,

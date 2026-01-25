@@ -1,9 +1,9 @@
-package lrr4cj.dao
+package lanlu.dao
 
 import std.database.sql.*
 import std.collection.*
-import lrr4cj.config.*
-import lrr4cj.utils.*
+import lanlu.config.*
+import lanlu.utils.*
 
 /**
  * 用户收藏 Tankoubon 数据访问对象

@@ -1,14 +1,14 @@
-package lrr4cj.controllers
+package lanlu.controllers
 
 import cjoy.*
 import std.time.*
 import std.fs.*
 import std.io.{ByteBuffer, readToEnd}
-import lrr4cj.dao.*
-import lrr4cj.models.*
-import lrr4cj.services.*
-import lrr4cj.utils.*
-import lrr4cj.views.*
+import lanlu.dao.*
+import lanlu.models.*
+import lanlu.services.*
+import lanlu.utils.*
+import lanlu.views.*
 import stdx.encoding.json.stream.*
 
 class CategoryUpsertReq <: JsonDeserializable<CategoryUpsertReq> {

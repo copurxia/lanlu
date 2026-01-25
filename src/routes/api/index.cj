@@ -1,21 +1,21 @@
-package lrr4cj.routes.api
+package lanlu.routes.api
 
 import cjoy.*
-import lrr4cj.routes.api.archives.*
-import lrr4cj.routes.api.database.*
-import lrr4cj.routes.api.search.*
-import lrr4cj.routes.api.categories.*
-import lrr4cj.routes.api.plugins.*
-import lrr4cj.routes.api.taskpool.*
-import lrr4cj.routes.api.tankoubons.*
-import lrr4cj.routes.api.shinobu.*
-import lrr4cj.routes.api.auth.*
-import lrr4cj.routes.api.tags.*
-import lrr4cj.routes.api.user.*
-import lrr4cj.routes.api.assets.*
-import lrr4cj.routes.api.smart_filters.*
-import lrr4cj.routes.api.cron.*
-import lrr4cj.controllers.*
+import lanlu.routes.api.archives.*
+import lanlu.routes.api.database.*
+import lanlu.routes.api.search.*
+import lanlu.routes.api.categories.*
+import lanlu.routes.api.plugins.*
+import lanlu.routes.api.taskpool.*
+import lanlu.routes.api.tankoubons.*
+import lanlu.routes.api.shinobu.*
+import lanlu.routes.api.auth.*
+import lanlu.routes.api.tags.*
+import lanlu.routes.api.user.*
+import lanlu.routes.api.assets.*
+import lanlu.routes.api.smart_filters.*
+import lanlu.routes.api.cron.*
+import lanlu.controllers.*
 
 /**
  * API路由注册

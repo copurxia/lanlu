@@ -1,12 +1,12 @@
-package lrr4cj.archivehandler
+package lanlu.archivehandler
 
 import std.fs.*
 import std.collection.*
 import archive_ffi.Archive
-import lrr4cj.models.ArchiveTypes
-import lrr4cj.utils.DirectoryScanner
-import lrr4cj.utils.NaturalSort
-import lrr4cj.utils.getLogger
+import lanlu.models.ArchiveTypes
+import lanlu.utils.DirectoryScanner
+import lanlu.utils.NaturalSort
+import lanlu.utils.getLogger
 
 /**
  * 压缩包类型处理器

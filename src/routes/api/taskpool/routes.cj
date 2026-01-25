@@ -1,8 +1,8 @@
-package lrr4cj.routes.api.taskpool
+package lanlu.routes.api.taskpool
 
 import cjoy.*
-import lrr4cj.controllers.*
-import lrr4cj.middleware.*
+import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * TaskPool API路由
