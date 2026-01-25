@@ -21,6 +21,76 @@ import stdx.encoding.url.Form
 public class ArchiveController {
 
     /**
+     * Extract `updated_at:*` pseudo-tags from a comma-separated tag string.
+     * Returns (updatedAtString, cleanedTagsString).
+     */
+    private static func extractUpdatedAtFromTags(tagsString: String): (String, String) {
+        if (tagsString.trimAscii().size == 0) {
+            return ("", "")
+        }
+
+        var extracted = ""
+        var kept: ArrayList<String> = ArrayList<String>()
+
+        let parts = tagsString.split(",")
+        for (p in parts) {
+            let t = p.trimAscii()
+            if (t.size == 0) { continue }
+
+            if (t.startsWith("updated_at:")) {
+                let raw = t["updated_at:".size..].trimAscii()
+                if (raw.size > 0) {
+                    match (normalizeUpdatedAt(raw)) {
+                        case Some(normalized) => extracted = normalized
+                        case None => ()
+                    }
+                }
+                continue
+            }
+
+            kept.add(t)
+        }
+
+        return (extracted, String.join(kept.toArray(), delimiter: ", "))
+    }
+
+    /**
+     * Normalize a plugin-provided updated_at value into a DateTime string suitable for DB writes.
+     * Supports:
+     * - unix seconds (e.g. "1700000000")
+     * - DateTime parseable strings
+     */
+    private static func normalizeUpdatedAt(raw: String): Option<String> {
+        let s = raw.trimAscii()
+        if (s.size == 0) { return None }
+
+        var allDigits = true
+        var i: Int64 = 0
+        while (i < s.size) {
+            let ch = s[i]
+            if (ch < 48u8 || ch > 57u8) {
+                allDigits = false
+                break
+            }
+            i += 1
+        }
+        if (allDigits) {
+            try {
+                let secs = Int64.parse(s)
+                let dt = DateTime.fromUnixTimeStamp(Duration.second * secs)
+                return Some(dt.toString())
+            } catch (_: Exception) {
+                return None
+            }
+        }
+
+        match (DateTime.tryParse(s)) {
+            case Some(dt) => Some(dt.toString())
+            case None => None
+        }
+    }
+
+    /**
      * 获取档案的基础路径（从分类获取）
      */
     private static func getArchiveBasePath(arcid: String): String {
@@ -280,24 +350,37 @@ public class ArchiveController {
             case Some(summary) => existingArchive.summary = summary
             case None => () // 保持原值
         }
-        
-        // 更新时间戳
-        existingArchive.updated_at = DateTime.now().toString()
+
+        // Default: bump updated_at when user saves.
+        var nextUpdatedAt = DateTime.now().toString()
+
+        // If tags contain `updated_at:*`, prefer it as archive updated_at and strip it from tag storage.
+        var cleanedTagsOpt: Option<String> = None
+        match (tagsParam) {
+            case Some(tags) =>
+                let originalTags = if (lang.size > 0) {
+                    TagDao.reverseTranslateTagsString(tags, lang)
+                } else {
+                    tags
+                }
+                let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(originalTags)
+                if (pluginUpdatedAt.size > 0) {
+                    nextUpdatedAt = pluginUpdatedAt
+                }
+                cleanedTagsOpt = Some(cleanedTags)
+            case None => ()
+        }
+
+        existingArchive.updated_at = nextUpdatedAt
         
         // 执行数据库更新
         let updateSuccess = ArchiveDao.update(existingArchive)
         
         if (updateSuccess) {
             // 如果有标签参数，更新标签
-            match (tagsParam) {
-                case Some(tags) =>
-                    // 如果提供了lang参数，需要将翻译后的标签还原为原始标签
-                    let originalTags = if (lang.size > 0) {
-                        TagDao.reverseTranslateTagsString(tags, lang)
-                    } else {
-                        tags
-                    }
-                    // 使用TagDao更新标签
+            match (cleanedTagsOpt) {
+                case Some(originalTags) =>
+                    // 使用TagDao更新标签（updated_at:* 已剥离，不会作为普通标签写入）
                     let tagUpdateSuccess = TagDao.updateArchiveTags(id, originalTags)
                     if (!tagUpdateSuccess) {
                         // 记录错误日志到日志文件，而不是控制台

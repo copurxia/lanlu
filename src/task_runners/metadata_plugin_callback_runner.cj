@@ -5,6 +5,7 @@ import std.time.*
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
+import std.collection.*
 import lanlu.dao.*
 import lanlu.models.*
 import lanlu.utils.*
@@ -45,8 +46,12 @@ public class MetadataPluginCallbackRunner {
         }
 
         let newTitle = parsed.title
-        let newTags = parsed.tags
+        var newTags = parsed.tags
         let newSummary = parsed.summary
+        // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
+        // Map it to archives.updated_at and prevent it from being stored as a normal tag.
+        let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(newTags)
+        newTags = cleanedTags
 
         // 写回 archives 表
         TaskModel.updateTaskProgress(taskId, 70, "写回元数据")
@@ -65,8 +70,18 @@ public class MetadataPluginCallbackRunner {
             archiveToUpdate.summary = newSummary
             changed = true
         }
-        if (changed) {
+        // If tags are updated, we also consider the archive updated.
+        if (newTags.size > 0) {
+            changed = true
+        }
+        // Prefer plugin-provided updated_at if present; otherwise bump updated_at to now when anything changes.
+        if (pluginUpdatedAt.size > 0) {
+            archiveToUpdate.updated_at = pluginUpdatedAt
+            changed = true
+        } else if (changed) {
             archiveToUpdate.updated_at = DateTime.now().toString()
+        }
+        if (changed) {
             let ok = ArchiveDao.update(archiveToUpdate)
             if (!ok) {
                 fail(taskId, "Failed to update archive metadata")
@@ -196,6 +211,78 @@ public class MetadataPluginCallbackRunner {
 
     private static func fail(taskId: Int64, message: String): Unit {
         TaskRunnerOutput.fail(taskId, message)
+    }
+
+    /**
+     * Extract `updated_at:*` pseudo-tags from the tag list.
+     * Returns (updatedAtString, cleanedTagsString).
+     */
+    private static func extractUpdatedAtFromTags(tagsString: String): (String, String) {
+        if (tagsString.trimAscii().size == 0) {
+            return ("", "")
+        }
+
+        var extracted = ""
+        var kept: ArrayList<String> = ArrayList<String>()
+
+        let parts = tagsString.split(",")
+        for (p in parts) {
+            let t = p.trimAscii()
+            if (t.size == 0) { continue }
+
+            if (t.startsWith("updated_at:")) {
+                let raw = t["updated_at:".size..].trimAscii()
+                if (raw.size > 0) {
+                    match (normalizeUpdatedAt(raw)) {
+                        case Some(normalized) => extracted = normalized
+                        case None => ()
+                    }
+                }
+                continue
+            }
+
+            kept.add(t)
+        }
+
+        return (extracted, String.join(kept.toArray(), delimiter: ", "))
+    }
+
+    /**
+     * Normalize a plugin-provided updated_at value into a DateTime string suitable for DB writes.
+     * Supports:
+     * - unix seconds (e.g. "1700000000")
+     * - DateTime parseable strings
+     */
+    private static func normalizeUpdatedAt(raw: String): Option<String> {
+        let s = raw.trimAscii()
+        if (s.size == 0) { return None }
+
+        // If it's an integer unix timestamp (seconds), convert from Unix epoch.
+        var allDigits = true
+        var i: Int64 = 0
+        while (i < s.size) {
+            let ch = s[i]
+            if (ch < 48u8 || ch > 57u8) {
+                allDigits = false
+                break
+            }
+            i += 1
+        }
+        if (allDigits) {
+            try {
+                let secs = Int64.parse(s)
+                let dt = DateTime.fromUnixTimeStamp(Duration.second * secs)
+                return Some(dt.toString())
+            } catch (_: Exception) {
+                return None
+            }
+        }
+
+        // Otherwise, try parse as DateTime string.
+        match (DateTime.tryParse(s)) {
+            case Some(dt) => Some(dt.toString())
+            case None => None
+        }
     }
 
     private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, output: String): String {
