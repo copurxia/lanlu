@@ -5,6 +5,7 @@ import std.fs.*
 import std.io.*
 import std.process.*
 import std.time.*
+import std.collection.*
 import stdx.log.*
 import stdx.encoding.json.stream.*
 import semver.*
@@ -23,6 +24,22 @@ public class PluginInstallResult {
     public var clear_parameters: Bool = false
     public var reason: String = ""
     public var scan_task_id: Int64 = 0
+
+    public init() {}
+}
+
+public class PluginCheckUpdateResult {
+    public var success: Bool = false
+    public var message: String = ""
+    public var namespace: String = ""
+    public var update_url: String = ""
+    public var old_version: String = ""
+    public var new_version: String = ""
+    public var has_update: Bool = false
+    public var clear_parameters: Bool = false
+    public var reason: String = ""
+    public var old_etag: String = ""
+    public var new_etag: String = ""
 
     public init() {}
 }
@@ -70,10 +87,10 @@ public class PluginManagerService {
      * 下载 URL 到指定文件。
      * 统一使用 deno+fetch（避免容器/发行版环境下 HTTP 客户端行为不一致导致的 HTTP 0）。
      */
-    private static func downloadUrlToFile(url: String, outFile: Path): (Bool, String) {
-        let (ok, err) = downloadUrlToFileWithDeno(url, outFile)
-        if (ok) { return (true, "") }
-        return (false, "Failed to download plugin: ${err}")
+    private static func downloadUrlToFile(url: String, outFile: Path, ifNoneMatch!: String = ""): (Bool, String, String, Bool) {
+        let (ok, err, etag, notModified) = downloadUrlToFileWithDeno(url, outFile, ifNoneMatch)
+        if (ok) { return (true, "", etag, notModified) }
+        return (false, "Failed to download plugin: ${err}", etag, notModified)
     }
 
     private static func truncateForLog(s: String, maxLen: Int64): String {
@@ -83,25 +100,30 @@ public class PluginManagerService {
         return trimmed[0..maxLen] + "...(truncated,len=${trimmed.size.toString()})"
     }
 
-    private static func downloadUrlToFileWithDeno(url: String, outFile: Path): (Bool, String) {
+    private static func downloadUrlToFileWithDeno(url: String, outFile: Path, ifNoneMatch: String): (Bool, String, String, Bool) {
         // 使用仓库内置脚本，避免运行时创建临时脚本文件。
         let scriptPath = Path("./plugins/deno_fetch.ts")
         if (!exists(scriptPath)) {
-            return (false, "missing ./plugins/deno_fetch.ts")
+            return (false, "missing ./plugins/deno_fetch.ts", "", false)
         }
 
         let tempDir = Path(getPluginTempRoot())
         FileUtils.ensureDirectoryExists(tempDir)
 
         try {
-            let process = launch("deno", [
-                "run",
-                "--allow-net",
-                "--allow-write=${tempDir.toString()}",
-                scriptPath.toString(),
-                url,
-                outFile.toString()
-            ],
+            var args = ArrayList<String>()
+            args.add("run")
+            args.add("--allow-net")
+            args.add("--allow-write=${tempDir.toString()}")
+            args.add(scriptPath.toString())
+            args.add(url)
+            args.add(outFile.toString())
+            let etagTrimmed = ifNoneMatch.trimAscii()
+            if (etagTrimmed.size > 0) {
+                args.add(etagTrimmed)
+            }
+
+            let process = launch("deno", args.toArray(),
                 stdIn: ProcessRedirect.Pipe,
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe)
@@ -111,22 +133,99 @@ public class PluginManagerService {
             let stderrStr = if (stderrBytes.size > 0) { String.fromUtf8(stderrBytes).trimAscii() } else { "" }
             let stdoutStr = if (stdoutBytes.size > 0) { String.fromUtf8(stdoutBytes).trimAscii() } else { "" }
 
+            // Parse stdout JSON: { not_modified: bool, etag: string }
+            var notModified = false
+            var etag = ""
+            if (stdoutStr.trimAscii().size > 0) {
+                try {
+                    var buf = ByteBuffer()
+                    unsafe { buf.write(stdoutStr.trimAscii().rawData()) }
+                    let r = JsonReader(buf)
+                    func readBoolFlexible(): Bool {
+                        let v = r.readValue<String>().trimAscii().toAsciiLower()
+                        return v == "true" || v == "1"
+                    }
+                    if (r.peek() == Some(BeginObject)) {
+                        r.startObject()
+                        while (r.peek() != EndObject) {
+                            let k = r.readName()
+                            match (k) {
+                                case "not_modified" => notModified = readBoolFlexible()
+                                case "etag" => etag = r.readValue<String>().trimAscii()
+                                case _ => r.skip()
+                            }
+                        }
+                        r.endObject()
+                    }
+                } catch (_: Exception) {}
+            }
+
             if (exitCode == 0 && exists(outFile)) {
-                return (true, "")
+                return (true, "", etag, false)
+            }
+            if (exitCode == 0 && notModified) {
+                return (true, "", etag, true)
             }
             // deno_fetch.ts 会把可诊断信息写到 stderr
             if (stderrStr.size > 0) {
                 logger.error("deno fetch failed", ("url", url), ("stderr", truncateForLog(stderrStr, 1024)))
-                return (false, stderrStr)
+                return (false, stderrStr, etag, false)
             }
             if (stdoutStr.size > 0) {
                 logger.error("deno fetch failed (stdout)", ("url", url), ("stdout", truncateForLog(stdoutStr, 1024)))
-                return (false, stdoutStr)
+                return (false, stdoutStr, etag, false)
             }
-            return (false, "deno fetch failed (exitCode=${exitCode.toString()})")
+            return (false, "deno fetch failed (exitCode=${exitCode.toString()})", etag, false)
         } catch (e: Exception) {
-            return (false, e.message)
+            return (false, e.message, "", false)
         }
+    }
+
+    private static func sanitizeEntryName(s: String): String {
+        // Avoid directory traversal and keep storage entry stable.
+        var out = s.trimAscii()
+        out = out.replace("/", "_").replace("\\", "_").replace("..", "_")
+        return out
+    }
+
+    private static func getEtagSidecarPathForEntry(entry: String): Path {
+        let filePath = Path(buildPluginFilePath("", entry))
+        return Path(filePath.toString() + ".etag")
+    }
+
+    private static func readStoredEtag(entry: String): String {
+        let p = getEtagSidecarPathForEntry(entry)
+        try {
+            if (!exists(p)) { return "" }
+            let f = File(p, Read)
+            let r = StringReader<InputStream>(f)
+            let raw = r.readToEnd()
+            f.close()
+            return raw.trimAscii()
+        } catch (_: Exception) {
+            return ""
+        }
+    }
+
+    private static func writeStoredEtag(entry: String, etag: String): Unit {
+        let trimmed = etag.trimAscii()
+        let p = getEtagSidecarPathForEntry(entry)
+        try {
+            if (trimmed.size == 0) {
+                if (exists(p)) { try { remove(p) } catch (_: Exception) {} }
+                return
+            }
+            FileUtils.ensureDirectoryExists(p.parent)
+            let f = File(p, Write)
+            f.write(trimmed.toArray())
+            f.flush()
+            f.close()
+        } catch (_: Exception) {}
+    }
+
+    private static func deleteStoredEtag(entry: String): Unit {
+        let p = getEtagSidecarPathForEntry(entry)
+        try { if (exists(p)) { remove(p) } } catch (_: Exception) {}
     }
 
     public static func installFromUrl(url: String): PluginInstallResult {
@@ -153,7 +252,7 @@ public class PluginManagerService {
         FileUtils.ensureDirectoryExists(tempDir)
         let tempFile = Path("${tempDir.toString()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${filename}")
 
-        let (downloadOk, downloadErr) = downloadUrlToFile(trimmedUrl, tempFile)
+        let (downloadOk, downloadErr, newEtag, _) = downloadUrlToFile(trimmedUrl, tempFile, ifNoneMatch: "")
         if (!downloadOk) {
             result.message = downloadErr
             return result
@@ -170,8 +269,18 @@ public class PluginManagerService {
         // 写入到存储目录
         result.plugin_type = info.pluginType
         result.namespace = info.namespace
-        // 所有插件统一存放在 PLUGIN_PATH 根目录，不再按类型分子目录
-        let targetFile = Path("${getPluginStorageRoot()}/${filename}")
+        // Use namespace as the stable entry name to avoid collisions between different URLs sharing the same filename.
+        let storedEntry = sanitizeEntryName("${info.namespace}.ts")
+        result.filename = storedEntry
+
+        let targetFile = Path(buildPluginFilePath(info.pluginType, storedEntry))
+
+        // Backup existing file to avoid destructive rollback if upsert fails.
+        var backupPath = Path("")
+        if (exists(targetFile)) {
+            backupPath = Path("${getPluginTempRoot()}/backup_install_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${storedEntry}")
+            try { copy(targetFile, to: backupPath, overwrite: true) } catch (_: Exception) {}
+        }
 
         let writeOk = atomicReplaceFile(targetFile, tempFile)
         if (!writeOk) {
@@ -179,12 +288,24 @@ public class PluginManagerService {
             return result
         }
 
-        let upsert = upsertPluginInDatabase(info, filename)
+        let upsert = upsertPluginInDatabase(info, storedEntry)
         if (upsert.error.size > 0) {
-            // 回滚：删除落盘的文件
-            try { remove(targetFile) } catch (_: Exception) {}
+            // Rollback: restore backup if present; otherwise remove the newly written file.
+            if (backupPath.toString().trimAscii().size > 0 && exists(backupPath)) {
+                try {
+                    if (exists(targetFile)) { try { remove(targetFile) } catch (_: Exception) {} }
+                    rename(backupPath, to: targetFile)
+                } catch (_: Exception) {}
+            } else {
+                try { remove(targetFile) } catch (_: Exception) {}
+            }
             result.message = upsert.error
             return result
+        }
+
+        // Best-effort: persist ETag for conditional checks/updates (if present).
+        if (newEtag.trimAscii().size > 0) {
+            writeStoredEtag(storedEntry, newEtag)
         }
 
         // 触发扫描任务（统一入口）
@@ -200,7 +321,7 @@ public class PluginManagerService {
         return result
     }
 
-    public static func updateFromDatabase(namespace: String): PluginInstallResult {
+    public static func updateFromDatabase(namespace: String, force!: Bool = false): PluginInstallResult {
         ensurePluginDirs()
         var result = PluginInstallResult()
 
@@ -226,14 +347,31 @@ public class PluginManagerService {
         result.plugin_type = existing.plugin_type
         result.filename = existing.entry
 
-        // 下载到临时文件
+        // 下载到临时文件（支持 ETag 条件请求；force 时跳过条件）
         let tempDir = Path(getPluginTempRoot())
         FileUtils.ensureDirectoryExists(tempDir)
         let tempFile = Path("${tempDir.toString()}/${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${existing.entry}")
 
-        let (downloadOk, downloadErr) = downloadUrlToFile(updateUrl, tempFile)
+        let storedEtag = if (!force) { readStoredEtag(existing.entry) } else { "" }
+        let (downloadOk, downloadErr, newEtag, notModified) = downloadUrlToFile(updateUrl, tempFile, ifNoneMatch: storedEtag)
         if (!downloadOk) {
             result.message = downloadErr
+            return result
+        }
+        if (!force && notModified) {
+            result.success = true
+            result.message = "Plugin already up to date (etag not modified)."
+            result.namespace = existing.namespace
+            result.plugin_type = existing.plugin_type
+            result.filename = existing.entry
+            result.old_version = existing.version
+            result.new_version = existing.version
+            result.clear_parameters = false
+            result.reason = "etag_not_modified"
+            // Update stored etag if server provided a fresh value.
+            if (newEtag.trimAscii().size > 0) {
+                writeStoredEtag(existing.entry, newEtag)
+            }
             return result
         }
 
@@ -253,6 +391,22 @@ public class PluginManagerService {
             try { remove(tempFile) } catch (_: Exception) {}
             result.message = "Plugin type mismatch after update"
             return result
+        }
+
+        // Guard against downgrade/invalid unless force is explicitly requested.
+        let compareResult = compare(existing.version, info.version)
+        if (!force) {
+            match (compareResult) {
+                case Downgrade =>
+                    try { remove(tempFile) } catch (_: Exception) {}
+                    result.message = "Refusing plugin downgrade without force"
+                    return result
+                case Invalid =>
+                    try { remove(tempFile) } catch (_: Exception) {}
+                    result.message = "Refusing plugin update with invalid version without force"
+                    return result
+                case _ => ()
+            }
         }
 
         let targetPath = Path(buildPluginFilePath(existing.plugin_type, existing.entry))
@@ -287,6 +441,11 @@ public class PluginManagerService {
             return result
         }
 
+        // Persist ETag for future conditional checks/updates (best-effort).
+        if (newEtag.trimAscii().size > 0) {
+            writeStoredEtag(existing.entry, newEtag)
+        }
+
         // 成功后清理备份
         if (backupPath.toString().trimAscii().size > 0) {
             try { remove(backupPath) } catch (_: Exception) {}
@@ -302,6 +461,117 @@ public class PluginManagerService {
         result.clear_parameters = upsert.clearParameters
         result.reason = upsert.reason
         return result
+    }
+
+    public static func checkUpdateFromDatabase(namespace: String, force!: Bool = false): PluginCheckUpdateResult {
+        ensurePluginDirs()
+        var out = PluginCheckUpdateResult()
+
+        let ns = namespace.trimAscii()
+        if (ns.size == 0) {
+            out.message = "Plugin namespace is required"
+            return out
+        }
+
+        let existing = PluginDao.getPluginByNamespace(ns)
+        if (existing.namespace.size == 0) {
+            out.message = "Plugin not found"
+            return out
+        }
+
+        let updateUrl = existing.update_url.trimAscii()
+        if (updateUrl.size == 0) {
+            out.message = "Plugin does not have an update URL"
+            return out
+        }
+
+        out.namespace = existing.namespace
+        out.update_url = updateUrl
+        out.old_version = existing.version
+        out.old_etag = readStoredEtag(existing.entry)
+
+        // If we have an ETag and not forcing, try conditional download first.
+        let tempDir = Path(getPluginTempRoot())
+        FileUtils.ensureDirectoryExists(tempDir)
+        let tempFile = Path("${tempDir.toString()}/check_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${existing.entry}")
+
+        let ifNoneMatch = if (!force) { out.old_etag } else { "" }
+        let (downloadOk, downloadErr, newEtag, notModified) = downloadUrlToFile(updateUrl, tempFile, ifNoneMatch: ifNoneMatch)
+        if (!downloadOk) {
+            out.message = downloadErr
+            return out
+        }
+
+        out.new_etag = newEtag
+
+        if (!force && notModified) {
+            out.success = true
+            out.has_update = false
+            out.new_version = existing.version
+            out.clear_parameters = false
+            out.reason = "etag_not_modified"
+            out.message = "No update (etag not modified)."
+            if (newEtag.trimAscii().size > 0) {
+                writeStoredEtag(existing.entry, newEtag)
+            }
+            return out
+        }
+
+        // Parse plugin_info from downloaded file to compute semver/clear_parameters.
+        let info = parsePluginInfoFromFile(tempFile.toString(), updateUrl, "Temp")
+        try { remove(tempFile) } catch (_: Exception) {}
+
+        if (info.namespace.size == 0 || info.pluginType.size == 0) {
+            out.message = "Failed to get plugin info from updated file"
+            return out
+        }
+        if (info.namespace != existing.namespace) {
+            out.message = "Plugin namespace mismatch after update"
+            return out
+        }
+        if (info.pluginType != existing.plugin_type) {
+            out.message = "Plugin type mismatch after update"
+            return out
+        }
+
+        out.new_version = info.version
+
+        let compareResult = compare(existing.version, info.version)
+        match (compareResult) {
+            case MajorUpgrade =>
+                out.has_update = true
+                out.clear_parameters = true
+                out.reason = "major_upgrade"
+            case MinorUpgrade | PatchUpgrade =>
+                out.has_update = true
+                out.clear_parameters = false
+                out.reason = "upgrade_preserve_parameters"
+            case Equal =>
+                // Treat as update if ETag changed (content changed without version bump).
+                let oldE = out.old_etag.trimAscii()
+                let newE = out.new_etag.trimAscii()
+                if (!force && oldE.size > 0 && newE.size > 0 && oldE != newE) {
+                    out.has_update = true
+                    out.clear_parameters = false
+                    out.reason = "etag_changed_version_unchanged"
+                } else {
+                    out.has_update = false
+                    out.clear_parameters = false
+                    out.reason = "version_unchanged"
+                }
+            case Downgrade =>
+                out.has_update = false
+                out.clear_parameters = false
+                out.reason = "downgrade"
+            case Invalid =>
+                out.has_update = false
+                out.clear_parameters = false
+                out.reason = "invalid_version"
+        }
+
+        out.success = true
+        out.message = if (out.has_update) { "Update available." } else { "No update available." }
+        return out
     }
 
     public static func deletePlugin(namespace: String): String {
@@ -325,6 +595,9 @@ public class PluginManagerService {
             return "Failed to delete plugin file: ${e.message}"
         }
 
+        // Remove stored etag sidecar (best-effort).
+        deleteStoredEtag(plugin.entry)
+
         // 删除运行时缓存目录（可选）
         let runtimeDir = Path(FileUtils.joinPath(getPluginRuntimeRoot(), plugin.namespace))
         try {
@@ -332,6 +605,12 @@ public class PluginManagerService {
                 remove(runtimeDir, recursive: true)
             }
         } catch (_: Exception) {}
+
+        // Delete cron task for script plugins (best-effort).
+        if (plugin.plugin_type == "Script") {
+            let cronName = "plugin_script:${plugin.namespace}"
+            try { let _ = ScheduledTaskModel.deleteByName(cronName) } catch (_: Exception) {}
+        }
 
         if (!PluginDao.delete(ns)) {
             return "Failed to delete plugin from database"

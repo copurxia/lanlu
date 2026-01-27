@@ -222,13 +222,13 @@ public class ScanPluginsTaskRunner {
                         TaskIO.appendLog(taskId, "Upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, preserving parameters")
                         return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, false)
                     case Downgrade =>
-                        TaskIO.appendLog(taskId, "Version downgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, skipping")
-                        syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
-                        return ProcessResultData(true, pluginMetadata.namespace, "")
+                        // Keep DB consistent with filesystem: apply the downgrade metadata but preserve parameters.
+                        TaskIO.appendLog(taskId, "Version downgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, applying (preserve parameters)")
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, false)
                     case Invalid =>
-                        TaskIO.appendLog(taskId, "Invalid version format for ${pluginMetadata.namespace}, skipping")
-                        syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
-                        return ProcessResultData(true, pluginMetadata.namespace, "")
+                        // Keep DB consistent with filesystem even if semver is invalid.
+                        TaskIO.appendLog(taskId, "Invalid version format for ${pluginMetadata.namespace}, applying metadata (preserve parameters)")
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, false)
                 }
             }
 

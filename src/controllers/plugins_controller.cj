@@ -412,8 +412,21 @@ public class PluginsController {
             return
         }
 
+        // Optional request body: { "force": true }
+        var force = false
+        try {
+            match (ctx.readJson<HashMap<String, String>>()) {
+                case Some(m) =>
+                    let v = (m.get("force") ?? "").trimAscii().toAsciiLower()
+                    force = (v == "true" || v == "1")
+                case None => ()
+            }
+        } catch (_: Exception) {
+            // No body or invalid JSON; ignore.
+        }
+
         logger.info("开始更新插件", [("namespace", namespace)])
-        let r = PluginManagerService.updateFromDatabase(namespace)
+        let r = PluginManagerService.updateFromDatabase(namespace, force: force)
         if (!r.success) {
             logger.error("更新插件失败", [("namespace", namespace), ("error", r.message)])
             ResponseView.errorJson(ctx, r.message)
@@ -431,6 +444,57 @@ public class PluginsController {
         w.writeName("clear_parameters").writeValue(r.clear_parameters)
         w.writeName("reason").writeValue(r.reason)
         w.writeName("scan_task_id").writeValue(r.scan_task_id)
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
+    }
+
+    /**
+     * 检查插件更新
+     * POST /api/plugins/:namespace/check_update
+     * 可选: {force:true}（跳过 ETag 条件请求/版本保护）
+     */
+    public static func checkUpdatePlugin(ctx: JoyContext) {
+        let logger = getLogger("plugins_controller")
+        let namespace = ctx.getParam("namespace") ?? ""
+
+        if (namespace.size == 0) {
+            ResponseView.errorJson(ctx, "Plugin namespace is required")
+            return
+        }
+
+        var force = false
+        try {
+            match (ctx.readJson<HashMap<String, String>>()) {
+                case Some(m) =>
+                    let v = (m.get("force") ?? "").trimAscii().toAsciiLower()
+                    force = (v == "true" || v == "1")
+                case None => ()
+            }
+        } catch (_: Exception) {}
+
+        logger.info("检查插件更新", [("namespace", namespace), ("force", force.toString())])
+        let r = PluginManagerService.checkUpdateFromDatabase(namespace, force: force)
+        if (!r.success) {
+            logger.error("检查更新失败", [("namespace", namespace), ("error", r.message)])
+            ResponseView.errorJson(ctx, r.message)
+            return
+        }
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(true)
+        w.writeName("message").writeValue(r.message)
+        w.writeName("namespace").writeValue(r.namespace)
+        w.writeName("update_url").writeValue(r.update_url)
+        w.writeName("has_update").writeValue(r.has_update)
+        w.writeName("old_version").writeValue(r.old_version)
+        w.writeName("new_version").writeValue(r.new_version)
+        w.writeName("clear_parameters").writeValue(r.clear_parameters)
+        w.writeName("reason").writeValue(r.reason)
+        w.writeName("old_etag").writeValue(r.old_etag)
+        w.writeName("new_etag").writeValue(r.new_etag)
         w.endObject()
         w.flush()
         ctx.json(String.fromUtf8(readToEnd(out)))

@@ -861,7 +861,14 @@
     "pluginUpdateUrlPlaceholder": "Enter the plugin update URL",
     "pluginUpdating": "Updating...",
     "pluginUpdateSuccess": "Plugin updated successfully",
-    "pluginUpdateFailed": "Failed to update plugin"
+    "pluginUpdateFailed": "Failed to update plugin",
+    "pluginCheckUpdate": "Check Updates",
+    "pluginCheckUpdateFailed": "Failed to check for updates",
+    "pluginUpToDate": "Plugin is up to date",
+    "pluginUpdateAvailable": "Update available: {old} -> {new}",
+    "pluginUpdateReason": "Reason",
+    "pluginUpdateWillClearParameters": "will clear parameters",
+    "pluginForceUpdate": "Force Update Plugin"
   },
   "tankoubon": {
     "collection": "Collection",

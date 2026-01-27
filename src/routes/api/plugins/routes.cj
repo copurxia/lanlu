@@ -81,4 +81,12 @@ public func registerPluginsRoutes(router: JoyRouters) {
             case None => return
         }
     })
+
+    // 检查插件更新（使用 update_url；优先走 ETag 条件请求，force 可跳过）
+    router.post("/api/plugins/{namespace}/check_update", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => PluginsController.checkUpdatePlugin(ctx)
+            case None => return
+        }
+    })
 }

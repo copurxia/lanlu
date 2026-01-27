@@ -6,7 +6,7 @@ import { logger } from '@/lib/utils/logger';
 import { PluginConfigDialog } from '@/components/settings/PluginConfigDialog';
 import { PluginInstallDialog } from '@/components/settings/PluginInstallDialog';
 import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
-import { PluginService, Plugin } from '@/lib/services/plugin-service';
+import { PluginService, Plugin, PluginCheckUpdateResult } from '@/lib/services/plugin-service';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,6 +29,8 @@ export default function SettingsPluginsPage() {
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [activeType, setActiveType] = useState('all');
+  const [checkResults, setCheckResults] = useState<Record<string, PluginCheckUpdateResult | null>>({});
+  const [checkingNamespaces, setCheckingNamespaces] = useState<Record<string, boolean>>({});
 
   const fetchPlugins = useCallback(async () => {
     try {
@@ -104,7 +106,55 @@ export default function SettingsPluginsPage() {
       success(t('settings.pluginUpdateSuccess'));
       await fetchPlugins();
     } catch (e: any) {
-      showError(e?.response?.data?.error || e?.message || t('settings.pluginUpdateFailed'));
+      const msg = e?.response?.data?.error || e?.message || t('settings.pluginUpdateFailed');
+
+      // If backend refused downgrade/invalid without force, offer a force retry.
+      if (typeof msg === 'string' && msg.toLowerCase().includes('without force')) {
+        const confirmed = await confirm({
+          title: t('settings.pluginForceUpdate'),
+          description: msg,
+          confirmText: t('common.confirm'),
+          cancelText: t('common.cancel'),
+          variant: 'destructive',
+        });
+        if (!confirmed) return;
+
+        try {
+          await PluginService.updatePlugin(plugin.namespace, { force: true });
+          success(t('settings.pluginUpdateSuccess'));
+          await fetchPlugins();
+          return;
+        } catch (e2: any) {
+          showError(e2?.response?.data?.error || e2?.message || t('settings.pluginUpdateFailed'));
+          return;
+        }
+      }
+
+      showError(msg);
+    }
+  };
+
+  const handleCheckUpdatePlugin = async (plugin: Plugin) => {
+    const ns = plugin.namespace;
+    try {
+      setCheckingNamespaces((prev) => ({ ...prev, [ns]: true }));
+      const r = await PluginService.checkUpdate(ns);
+      setCheckResults((prev) => ({ ...prev, [ns]: r }));
+
+      if (r?.has_update) {
+        success(
+          t('settings.pluginUpdateAvailable', {
+            old: r.old_version || plugin.version,
+            new: r.new_version || '',
+          })
+        );
+      } else {
+        success(t('settings.pluginUpToDate'));
+      }
+    } catch (e: any) {
+      showError(e?.response?.data?.error || e?.message || t('settings.pluginCheckUpdateFailed'));
+    } finally {
+      setCheckingNamespaces((prev) => ({ ...prev, [ns]: false }));
     }
   };
 
@@ -215,10 +265,13 @@ export default function SettingsPluginsPage() {
             <PluginCard
               key={plugin.id}
               plugin={plugin}
+              checkUpdateResult={checkResults[plugin.namespace] ?? null}
+              checkingUpdate={!!checkingNamespaces[plugin.namespace]}
               onToggleStatus={handleTogglePluginStatus}
               onOpenConfig={handleOpenConfig}
               onDelete={handleDeletePlugin}
               onUpdate={handleUpdatePlugin}
+              onCheckUpdate={handleCheckUpdatePlugin}
               getPluginTypeColor={getPluginTypeColor}
               getPluginTypeLabel={getPluginTypeLabel}
             />

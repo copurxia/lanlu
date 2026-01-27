@@ -867,7 +867,14 @@
     "pluginUpdateUrlPlaceholder": "输入插件的更新地址",
     "pluginUpdating": "更新中...",
     "pluginUpdateSuccess": "插件更新成功",
-    "pluginUpdateFailed": "插件更新失败"
+    "pluginUpdateFailed": "插件更新失败",
+    "pluginCheckUpdate": "检查更新",
+    "pluginCheckUpdateFailed": "检查更新失败",
+    "pluginUpToDate": "插件已是最新",
+    "pluginUpdateAvailable": "发现更新: {old} -> {new}",
+    "pluginUpdateReason": "原因",
+    "pluginUpdateWillClearParameters": "将清空参数",
+    "pluginForceUpdate": "强制更新插件"
   },
   "tankoubon": {
     "collection": "合集",

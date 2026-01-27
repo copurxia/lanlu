@@ -23,6 +23,20 @@ export interface Plugin {
   updated_at: string;
 }
 
+export interface PluginCheckUpdateResult {
+  success: boolean;
+  message?: string;
+  namespace?: string;
+  update_url?: string;
+  has_update?: boolean;
+  old_version?: string;
+  new_version?: string;
+  clear_parameters?: boolean;
+  reason?: string;
+  old_etag?: string;
+  new_etag?: string;
+}
+
 export class PluginService {
   static async getAllPlugins(): Promise<Plugin[]> {
     try {
@@ -112,15 +126,42 @@ export class PluginService {
   /**
    * 更新插件（使用插件声明的 update_url）
    */
-  static async updatePlugin(namespace: string): Promise<{
+  static async updatePlugin(
+    namespace: string,
+    opts?: { force?: boolean }
+  ): Promise<{
     success: boolean;
     message?: string;
   }> {
     try {
-      const response = await apiClient.post(`/api/plugins/${namespace}/update`);
+      const force = !!opts?.force;
+      const response = await apiClient.post(
+        `/api/plugins/${namespace}/update`,
+        force ? { force: 'true' } : undefined
+      );
       return response.data;
     } catch (error) {
       console.error('Failed to update plugin:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 检查插件更新（使用插件声明的 update_url；优先走 ETag 条件请求，force 可跳过）
+   */
+  static async checkUpdate(
+    namespace: string,
+    opts?: { force?: boolean }
+  ): Promise<PluginCheckUpdateResult> {
+    try {
+      const force = !!opts?.force;
+      const response = await apiClient.post(
+        `/api/plugins/${namespace}/check_update`,
+        force ? { force: 'true' } : undefined
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Failed to check plugin update:', error);
       throw error;
     }
   }

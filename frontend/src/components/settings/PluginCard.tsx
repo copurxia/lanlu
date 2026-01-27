@@ -1,31 +1,37 @@
 'use client';
 
-import { Plugin } from '@/lib/services/plugin-service';
+import { Plugin, PluginCheckUpdateResult } from '@/lib/services/plugin-service';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { Settings as SettingsIcon, Package, User, Calendar, Shield, Trash2, RefreshCw } from 'lucide-react';
+import { Settings as SettingsIcon, Package, User, Calendar, Shield, Trash2, RefreshCw, Search } from 'lucide-react';
 import Image from 'next/image';
 
 interface PluginCardProps {
   plugin: Plugin;
+  checkUpdateResult?: PluginCheckUpdateResult | null;
+  checkingUpdate?: boolean;
   onToggleStatus: (namespace: string, enabled: boolean) => void;
   onOpenConfig: (plugin: Plugin) => void;
   onDelete: (plugin: Plugin) => void;
   onUpdate: (plugin: Plugin) => void;
+  onCheckUpdate: (plugin: Plugin) => void;
   getPluginTypeColor: (type: string) => string;
   getPluginTypeLabel: (type: string) => string;
 }
 
 export function PluginCard({
   plugin,
+  checkUpdateResult,
+  checkingUpdate,
   onToggleStatus,
   onOpenConfig,
   onDelete,
   onUpdate,
+  onCheckUpdate,
   getPluginTypeColor,
   getPluginTypeLabel
 }: PluginCardProps) {
@@ -145,18 +151,49 @@ export function PluginCard({
           )}
         </div>
 
+        {checkUpdateResult?.success ? (
+          <div className="pt-3 border-t border-border mt-4 text-sm">
+            <p className="text-muted-foreground">
+              {checkUpdateResult.has_update
+                ? t('settings.pluginUpdateAvailable', {
+                    old: checkUpdateResult.old_version || plugin.version,
+                    new: checkUpdateResult.new_version || '',
+                  })
+                : t('settings.pluginUpToDate')}
+            </p>
+            {checkUpdateResult.reason ? (
+              <p className="text-xs text-muted-foreground mt-1">
+                {t('settings.pluginUpdateReason')}: {checkUpdateResult.reason}
+                {checkUpdateResult.clear_parameters ? ` (${t('settings.pluginUpdateWillClearParameters')})` : ''}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="flex items-center justify-between pt-4 border-t border-border mt-4">
           <div className="flex items-center space-x-2">
             {plugin.update_url?.trim() ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onUpdate(plugin)}
-                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
-                title={t('settings.pluginUpdate')}
-              >
-                <RefreshCw className="w-4 h-4" />
-              </Button>
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onCheckUpdate(plugin)}
+                  disabled={!!checkingUpdate}
+                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+                  title={t('settings.pluginCheckUpdate')}
+                >
+                  <Search className={`w-4 h-4 ${checkingUpdate ? 'animate-pulse' : ''}`} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onUpdate(plugin)}
+                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950"
+                  title={t('settings.pluginUpdate')}
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </Button>
+              </>
             ) : null}
             <Button
               variant="ghost"

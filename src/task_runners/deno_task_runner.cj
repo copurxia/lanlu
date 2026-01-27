@@ -233,9 +233,8 @@ public class DenoTaskRunner {
                 getLogger("deno_task").error("缺少基础插件文件", ("path", basePluginSource.toString()))
                 return false
             }
-            if (!exists(basePluginTarget)) {
-                copy(basePluginSource, to: basePluginTarget, overwrite: false)
-            }
+            // Always refresh base_plugin.ts so runtime cache doesn't get stale across upgrades.
+            copy(basePluginSource, to: basePluginTarget, overwrite: true)
 
             // 创建插件运行时目录（按命名空间）
             let pluginDir = Path("${pluginsRoot.toString()}/${plugin.namespace}")
