@@ -71,7 +71,8 @@ public class MetadataPluginController {
 
         try {
             let requestBody = ctx.readString()
-            var archiveId = ""
+            var targetType = ""
+            var targetId = ""
             var namespace = ""
             var param = ""
             var writeBack = false  // default: query/preview
@@ -87,13 +88,20 @@ public class MetadataPluginController {
                         while (r.peek() != EndObject) {
                             let k = r.readName()
                             match (k) {
-                                case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                                case "target_type" => targetType = r.readValue<String>().trimAscii()
+                                case "targetType" => targetType = r.readValue<String>().trimAscii()
+                                case "target_id" => targetId = r.readValue<String>().trimAscii()
+                                case "targetId" => targetId = r.readValue<String>().trimAscii()
+                                case "tankoubon_id" =>
+                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); targetType = "tankoubon" } else { r.skip() }
+                                case "archive_id" =>
+                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                                 case "id" =>
-                                    if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
                                 case "arcid" =>
-                                    if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
                                 case "archiveId" =>
-                                    if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                                 case "namespace" => namespace = r.readValue<String>().trimAscii()
                                 case "param" => param = readRawJson(r).trimAscii()
                                 case "write_back" => writeBack = readBoolFlexible(r)
@@ -116,8 +124,31 @@ public class MetadataPluginController {
             }
 
             // 兜底支持 query 参数（方便调试）
-            if (archiveId.size == 0) {
-                archiveId = ctx.getQuery("archive_id") ?? (ctx.getQuery("id") ?? "")
+            if (targetType.size == 0) {
+                targetType = ctx.getQuery("target_type") ?? (ctx.getQuery("targetType") ?? "")
+            }
+            if (targetId.size == 0) {
+                // Backward compatible keys (avoid deep coalescing chains for parser compatibility).
+                let q1 = ctx.getQuery("target_id") ?? ""
+                let q2 = ctx.getQuery("targetId") ?? ""
+                let q3 = ctx.getQuery("tankoubon_id") ?? ""
+                let q4 = ctx.getQuery("archive_id") ?? ""
+                let q5 = ctx.getQuery("archiveId") ?? ""
+                let q6 = ctx.getQuery("id") ?? ""
+                if (q1.size > 0) { targetId = q1 }
+                else if (q2.size > 0) { targetId = q2 }
+                else if (q3.size > 0) { targetId = q3 }
+                else if (q4.size > 0) { targetId = q4 }
+                else if (q5.size > 0) { targetId = q5 }
+                else { targetId = q6 }
+            }
+            if (targetType.size == 0) {
+                // Infer type from which id param was provided.
+                if ((ctx.getQuery("tankoubon_id") ?? "").trimAscii().size > 0) {
+                    targetType = "tankoubon"
+                } else {
+                    targetType = "archive"
+                }
             }
             if (namespace.size == 0) {
                 namespace = ctx.getQuery("namespace") ?? ""
@@ -140,18 +171,29 @@ public class MetadataPluginController {
                 }
             }
 
-            if (archiveId.size == 0 || namespace.size == 0) {
+            if (targetId.size == 0 || namespace.size == 0) {
                 ctx.status(400)
-                ctx.json("{\"success\":0,\"error\":\"archive_id and namespace are required\"}")
+                ctx.json("{\"success\":0,\"error\":\"target_id and namespace are required\"}")
                 return
             }
 
-            // 校验归档存在
-            let archive = ArchiveDao.getArchiveById(archiveId)
-            if (archive.id.size == 0) {
-                ctx.status(404)
-                ctx.json("{\"success\":0,\"error\":\"archive not found\"}")
-                return
+            let effectiveType = targetType.trimAscii().toAsciiLower()
+            // 校验目标存在
+            if (effectiveType == "tankoubon" || effectiveType == "tank") {
+                match (TankoubonDao.getTankoubonById(targetId)) {
+                    case Some(_) => ()
+                    case None =>
+                        ctx.status(404)
+                        ctx.json("{\"success\":0,\"error\":\"tankoubon not found\"}")
+                        return
+                }
+            } else {
+                let archive = ArchiveDao.getArchiveById(targetId)
+                if (archive.id.size == 0) {
+                    ctx.status(404)
+                    ctx.json("{\"success\":0,\"error\":\"archive not found\"}")
+                    return
+                }
             }
 
             if (writeBack) {
@@ -164,7 +206,8 @@ public class MetadataPluginController {
                     let out = ByteBuffer()
                     let w = JsonWriter(out)
                     w.startObject()
-                    w.writeName("archive_id").writeValue(archiveId)
+                    w.writeName("target_type").writeValue(effectiveType)
+                    w.writeName("target_id").writeValue(targetId)
                     w.writeName("namespace").writeValue(namespace)
                     w.writeName("param").writeValue(param)
                     w.writeName("write_back").writeValue(1)
@@ -174,7 +217,7 @@ public class MetadataPluginController {
                 }
 
                 TaskDao.updateTaskParameters(task.id, paramsJson)
-                TaskIO.appendLog(task.id, "enqueued metadata_plugin(write_back=1) archive_id=${archiveId} namespace=${namespace}")
+                TaskIO.appendLog(task.id, "enqueued metadata_plugin(write_back=1) target_type=${effectiveType} target_id=${targetId} namespace=${namespace}")
 
                 TaskPoolService.getInstance().notifyTaskAvailable()
 
@@ -186,7 +229,8 @@ public class MetadataPluginController {
                 w.writeName("task_type").writeValue("metadata_plugin")
                 w.writeName("write_back").writeValue(1)
                 w.writeName("success").writeValue(1)
-                w.writeName("archive_id").writeValue(archiveId)
+                w.writeName("target_type").writeValue(effectiveType)
+                w.writeName("target_id").writeValue(targetId)
                 w.writeName("namespace").writeValue(namespace)
                 w.endObject()
                 w.flush()
@@ -202,7 +246,9 @@ public class MetadataPluginController {
             w.writeName("pluginNamespace").writeValue(namespace)
             w.writeName("pluginType").writeValue("Metadata")
             w.writeName("action").writeValue("run")
-            w.writeName("archiveId").writeValue(archiveId)
+            w.writeName("targetType").writeValue(effectiveType)
+            w.writeName("targetId").writeValue(targetId)
+            w.writeName("archiveId").writeValue(targetId)
             match (oneshotOpt) {
                 case Some(v) => w.writeName("oneshotParam").writeValue(v)
                 case None => ()
@@ -212,7 +258,7 @@ public class MetadataPluginController {
                 case None => ()
             }
             // groupId 仅用于任务运行期共享 KV（默认语义下任务结束会清理整组），这里用 archiveId 便于同归档并发共享。
-            w.writeName("groupId").writeValue(archiveId)
+            w.writeName("groupId").writeValue(targetId)
             w.endObject()
             w.flush()
             let denoParams = String.fromUtf8(readToEnd(out))
@@ -222,7 +268,7 @@ public class MetadataPluginController {
                 "deno_task",
                 denoParams,
                 50,
-                archiveId,
+                targetId,
                 "metadata_plugin_preview"
             )
 
@@ -232,7 +278,7 @@ public class MetadataPluginController {
                 return
             }
 
-            TaskIO.appendLog(denoTask.id, "enqueued deno_task(metadata preview) archive_id=${archiveId} namespace=${namespace}")
+            TaskIO.appendLog(denoTask.id, "enqueued deno_task(metadata preview) target_type=${effectiveType} target_id=${targetId} namespace=${namespace}")
             TaskPoolService.getInstance().notifyTaskAvailable()
 
             let out2 = ByteBuffer()
@@ -243,7 +289,8 @@ public class MetadataPluginController {
             w2.writeName("task_type").writeValue("deno_task")
             w2.writeName("write_back").writeValue(0)
             w2.writeName("success").writeValue(1)
-            w2.writeName("archive_id").writeValue(archiveId)
+            w2.writeName("target_type").writeValue(effectiveType)
+            w2.writeName("target_id").writeValue(targetId)
             w2.writeName("namespace").writeValue(namespace)
             w2.endObject()
             w2.flush()

@@ -334,8 +334,34 @@ export class ArchiveService {
     callbacks?: MetadataPluginRunCallbacks,
     options?: { writeBack?: boolean }
   ): Promise<Task> {
+    return await this.runMetadataPluginForTarget(
+      'archive',
+      archiveId,
+      namespace,
+      param,
+      callbacks,
+      options
+    );
+  }
+
+  /**
+   * 执行元数据插件（支持 archive / tankoubon 目标）
+   * - Preview (writeBack=false): 返回 deno_task，前端读取输出并填充编辑表单
+   * - Write-back (writeBack=true): 返回 metadata_plugin，再跟踪 callback 任务完成持久化
+   */
+  static async runMetadataPluginForTarget(
+    targetType: 'archive' | 'tankoubon',
+    targetId: string,
+    namespace: string,
+    param?: string,
+    callbacks?: MetadataPluginRunCallbacks,
+    options?: { writeBack?: boolean }
+  ): Promise<Task> {
     const response = await apiClient.post('/api/metadata_plugin', {
-      archive_id: archiveId,
+      target_type: targetType,
+      target_id: targetId,
+      // Backward-compatible field; backend ignores it when target_* is present.
+      archive_id: targetId,
       namespace,
       param: param || '',
       // Default is preview/query (no persistence). Explicitly pass the flag so behavior is stable.

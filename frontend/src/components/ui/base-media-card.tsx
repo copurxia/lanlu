@@ -17,6 +17,7 @@ export interface BaseMediaCardProps {
   id: string
   title: string
   thumbnailId: string
+  thumbnailUrl?: string
   tags?: string
   summary?: string
   pagecount: number
@@ -43,6 +44,7 @@ export function BaseMediaCard({
   id,
   title,
   thumbnailId,
+  thumbnailUrl,
   tags,
   summary,
   pagecount,
@@ -99,6 +101,9 @@ export function BaseMediaCard({
   const animationDelay = shouldEntranceAnimate ? Math.min(index * 50, 500) : 0
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
   const readerPath = `/reader?id=${thumbnailId}`
+  const imageSrc = thumbnailUrl && thumbnailUrl.trim().length > 0
+    ? thumbnailUrl
+    : ArchiveService.getThumbnailUrl(thumbnailId)
 
   return (
     <Card
@@ -118,7 +123,7 @@ export function BaseMediaCard({
       <div className="aspect-[3/4] bg-muted relative">
         {!imageError ? (
           <Image
-            src={ArchiveService.getThumbnailUrl(thumbnailId)}
+            src={imageSrc}
             alt={title}
             fill
             className="object-cover"

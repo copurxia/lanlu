@@ -160,6 +160,7 @@ public class ScanArchiveTaskRunner {
             let relativePath = ArchiveUtils.calculateRelativePath(filePath, archiveBasePath)
             let fileName = ArchiveUtils.getFullFileName(filePath)
             let existingArchive = ArchiveDao.getByPathAndFilename(relativePath, fileName)
+            let dirFullPath = if (relativePath.size > 0) { FileUtils.joinPath(archiveBasePath, relativePath) } else { archiveBasePath }
 
             match (existingArchive) {
                 case Some(archive) =>
@@ -179,10 +180,12 @@ public class ScanArchiveTaskRunner {
                         }
 
                         // 直接返回成功，不等待缩略图生成完成
+                        try { TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
                         return ProcessResultData(true, archive.id, "")
                     } else {
                         // Archive存在且已生成thumbhash - 跳过所有处理，直接返回成功
                         logger.debug("Archive already processed with thumbnail: ${filePath}")
+                        try { TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
                         return ProcessResultData(true, archive.id, "")
                     }
                 case None =>
@@ -227,6 +230,9 @@ public class ScanArchiveTaskRunner {
 
             // 提交元数据插件任务（根据分类配置）
             submitMetadataPluginTasks(categoryInternalId, dbResult.archiveId, notifier)
+
+            // Auto-create/sync Tankoubon for this directory (append new entries at end).
+            try { TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
 
             return ProcessResultData(true, dbResult.archiveId, "")
         } catch (e: Exception) {

@@ -53,6 +53,7 @@ export class TankoubonService {
     if (data.name) params.append('name', data.name);
     if (data.summary) params.append('summary', data.summary);
     if (data.tags) params.append('tags', data.tags);
+    if (typeof data.cover_asset_id === 'number') params.append('cover_asset_id', String(data.cover_asset_id));
 
     await apiClient.put(`${this.baseUrl}/${id}?${params.toString()}`, undefined);
   }

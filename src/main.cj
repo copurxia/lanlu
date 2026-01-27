@@ -52,6 +52,7 @@ main(): Int64 {
     // 注册并运行数据库迁移
     logger.debug("Application starting... step 8: running database migrations")
     MigrationRegistry.register(V001_InitialSchema())
+    MigrationRegistry.register(V002_TankoubonMetadataAndAutocreate())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {

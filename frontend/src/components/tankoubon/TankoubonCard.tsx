@@ -23,6 +23,7 @@ export function TankoubonCard({ tankoubon, priority = false }: TankoubonCardProp
       id={tankoubon.tankoubon_id}
       title={tankoubon.name}
       thumbnailId={firstArchiveId || ''}
+      thumbnailUrl={`/api/tankoubons/${tankoubon.tankoubon_id}/thumbnail`}
       tags={tankoubon.tags}
       summary={tankoubon.summary}
       pagecount={tankoubon.pagecount || 0}

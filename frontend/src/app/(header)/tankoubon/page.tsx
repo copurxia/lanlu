@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { TagInput } from '@/components/ui/tag-input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Dialog,
   DialogBody,
@@ -32,11 +34,13 @@ import {
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
+import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/utils/logger';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
+import Image from 'next/image';
 
 function TankoubonDetailContent() {
   const { t, language } = useLanguage();
@@ -55,8 +59,16 @@ function TankoubonDetailContent() {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editName, setEditName] = useState('');
   const [editSummary, setEditSummary] = useState('');
-  const [editTags, setEditTags] = useState('');
+  const [editTags, setEditTags] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+
+  // Metadata plugin state (preview mode: fill edit form without DB write-back)
+  const [metadataPlugins, setMetadataPlugins] = useState<Plugin[]>([]);
+  const [selectedMetadataPlugin, setSelectedMetadataPlugin] = useState<string>('');
+  const [metadataPluginParam, setMetadataPluginParam] = useState<string>('');
+  const [isMetadataPluginRunning, setIsMetadataPluginRunning] = useState(false);
+  const [metadataPluginProgress, setMetadataPluginProgress] = useState<number | null>(null);
+  const [metadataPluginMessage, setMetadataPluginMessage] = useState<string>('');
 
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -113,7 +125,12 @@ function TankoubonDetailContent() {
       // Set edit form values
       setEditName(data.name);
       setEditSummary(data.summary || '');
-      setEditTags(data.tags || '');
+      setEditTags(
+        (data.tags || '')
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter((tag) => tag)
+      );
     } catch (error) {
       logger.apiError('fetch tankoubon', error);
     } finally {
@@ -193,7 +210,7 @@ function TankoubonDetailContent() {
       await TankoubonService.updateTankoubon(tankoubon.tankoubon_id, {
         name: editName,
         summary: editSummary,
-        tags: editTags,
+        tags: editTags.join(', '),
       });
       setEditDialogOpen(false);
       fetchTankoubon();
@@ -203,6 +220,94 @@ function TankoubonDetailContent() {
       setSaving(false);
     }
   };
+
+  // Load metadata plugins when opening the edit dialog
+  useEffect(() => {
+    if (!editDialogOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const metas = await PluginService.getMetadataPlugins();
+        if (cancelled) return;
+        setMetadataPlugins(metas);
+        if (!selectedMetadataPlugin && metas.length > 0) {
+          setSelectedMetadataPlugin(metas[0].namespace);
+        }
+      } catch (e) {
+        logger.apiError('load metadata plugins', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editDialogOpen, selectedMetadataPlugin]);
+
+  const runMetadataPlugin = useCallback(async () => {
+    if (!tankoubon) return;
+    if (!selectedMetadataPlugin) return;
+
+    setIsMetadataPluginRunning(true);
+    setMetadataPluginProgress(0);
+    setMetadataPluginMessage(t('archive.metadataPluginEnqueued'));
+
+    try {
+      const finalTask = await ArchiveService.runMetadataPluginForTarget(
+        'tankoubon',
+        tankoubon.tankoubon_id,
+        selectedMetadataPlugin,
+        metadataPluginParam,
+        {
+          onUpdate: (task) => {
+            setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0);
+            setMetadataPluginMessage(task.message || '');
+          },
+        },
+        { writeBack: false }
+      );
+
+      if (finalTask.status !== 'completed') {
+        const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+        logger.operationFailed('run metadata plugin (tankoubon)', new Error(err));
+        return;
+      }
+
+      // Preview mode: parse plugin output and fill the edit form (no DB write-back).
+      try {
+        const out = finalTask.result ? JSON.parse(finalTask.result) : null;
+        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true';
+        if (!ok) {
+          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+          logger.operationFailed('run metadata plugin (tankoubon)', new Error(err));
+          return;
+        }
+
+        const data = out?.data || {};
+        const nextTitle = typeof data.title === 'string' ? data.title : '';
+        const nextSummary = typeof data.summary === 'string' ? data.summary : '';
+        const nextTags = typeof data.tags === 'string' ? data.tags : '';
+
+        if (nextTitle.trim()) setEditName(nextTitle);
+        if (nextSummary.trim()) setEditSummary(nextSummary);
+        if (nextTags.trim()) {
+          setEditTags(
+            nextTags
+              .split(',')
+              .map((tag: string) => tag.trim())
+              .filter((tag: string) => tag)
+          );
+        }
+      } catch {
+        // ignore parse errors
+      }
+
+      setMetadataPluginMessage(t('archive.metadataPluginCompleted'));
+      setMetadataPluginProgress(100);
+    } catch (e) {
+      logger.operationFailed('run metadata plugin (tankoubon)', e);
+    } finally {
+      setIsMetadataPluginRunning(false);
+    }
+  }, [tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
 
   // Handle delete
   const handleDelete = async () => {
@@ -346,6 +451,7 @@ function TankoubonDetailContent() {
   const archiveCount = typeof tankoubon.archive_count === 'number' ? tankoubon.archive_count : archives.length;
   const totalPages = typeof tankoubon.pagecount === 'number' ? tankoubon.pagecount : 0;
   const progressPercent = Math.max(0, Math.min(100, Math.round(tankoubon.progress ?? 0)));
+  const coverUrl = `/api/tankoubons/${tankoubon.tankoubon_id}/thumbnail`;
 
   return (
     <div className="min-h-screen bg-background pb-20 lg:pb-0">
@@ -355,7 +461,21 @@ function TankoubonDetailContent() {
           <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
             <div className="p-4 md:p-5">
               <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
+                <div className="flex min-w-0 gap-4">
+                  <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-lg border bg-muted md:h-36 md:w-24">
+                    <Image
+                      src={coverUrl}
+                      alt={tankoubon.name}
+                      fill
+                      className="object-cover"
+                      sizes="96px"
+                      // Tankoubon thumbnail endpoint may redirect (to assets or archive thumbnail),
+                      // and may serve non-avif images; bypass optimizer to avoid strict content-type checks.
+                      unoptimized
+                    />
+                  </div>
+
+                  <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge className="bg-primary">
                       <BookOpen className="w-3 h-3 mr-1" />
@@ -381,6 +501,7 @@ function TankoubonDetailContent() {
                       ))}
                     </div>
                   ) : null}
+                  </div>
                 </div>
 
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -528,6 +649,54 @@ function TankoubonDetailContent() {
             <DialogBody className="pt-0">
               <div className="space-y-4">
                 <div>
+                  <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
+                  <div className="mt-2 flex flex-col gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="sm:w-[220px]">
+                        <Select value={selectedMetadataPlugin} onValueChange={setSelectedMetadataPlugin}>
+                          <SelectTrigger disabled={saving || isMetadataPluginRunning || metadataPlugins.length === 0}>
+                            <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {metadataPlugins.map((p) => (
+                              <SelectItem key={p.namespace} value={p.namespace}>
+                                {p.name} ({p.namespace})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Input
+                        value={metadataPluginParam}
+                        onChange={(e) => setMetadataPluginParam(e.target.value)}
+                        disabled={saving || isMetadataPluginRunning}
+                        placeholder={t('archive.metadataPluginParamPlaceholder')}
+                      />
+                      <Button
+                        type="button"
+                        onClick={runMetadataPlugin}
+                        disabled={saving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin}
+                      >
+                        <Play className="w-4 h-4 mr-2" />
+                        {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
+                      </Button>
+                    </div>
+                    {(metadataPluginProgress !== null || metadataPluginMessage) && (
+                      <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
+                        <span className="truncate" title={metadataPluginMessage}>
+                          {metadataPluginMessage || ''}
+                        </span>
+                        {metadataPluginProgress !== null && (
+                          <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
+                        )}
+                      </div>
+                    )}
+                    {metadataPlugins.length === 0 && (
+                      <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
+                    )}
+                  </div>
+                </div>
+                <div>
                   <label className="text-sm font-medium">{t('tankoubon.name')}</label>
                   <Input
                     value={editName}
@@ -546,10 +715,11 @@ function TankoubonDetailContent() {
                 </div>
                 <div>
                   <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
-                  <Input
+                  <TagInput
                     value={editTags}
-                    onChange={(e) => setEditTags(e.target.value)}
+                    onChange={setEditTags}
                     placeholder={t('tankoubon.tagsPlaceholder')}
+                    disabled={saving}
                   />
                   <p className="text-xs text-muted-foreground mt-1">{t('tankoubon.tagsHint')}</p>
                 </div>

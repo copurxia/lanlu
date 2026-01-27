@@ -45,7 +45,10 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
     var pluginType: String = ""
     var action: String = "run"
     var groupId: String = ""
+    // Backward compatible: archiveId is still accepted. New fields: targetType/targetId.
     var archiveId: String = ""
+    var targetType: String = ""
+    var targetId: String = ""
     var oneshotParam: String = ""
     var extraParams: String = ""
     var url: String = ""
@@ -65,6 +68,8 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
                             case "action" => res.action = r.readValue<String>().trimAscii()
                             case "groupId" => res.groupId = r.readValue<String>().trimAscii()
                             case "archiveId" => res.archiveId = r.readValue<String>().trimAscii()
+                            case "targetType" => res.targetType = r.readValue<String>().trimAscii()
+                            case "targetId" => res.targetId = r.readValue<String>().trimAscii()
                             case "oneshotParam" => res.oneshotParam = r.readValue<String>()
                             case "extraParams" => res.extraParams = r.readValue<String>()
                             case "url" => res.url = r.readValue<String>().trimAscii()
@@ -96,7 +101,7 @@ public class DenoTaskRunner {
         TaskModel.updateTaskProgress(taskId, 1, "Deno任务开始")
 
         // 解析参数
-        let (pluginNamespace, pluginType, _, groupId, archiveId, oneshotParam, extraParams, url, parentTaskIdRaw) = parseParameters(parameters)
+        let (pluginNamespace, pluginType, _, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskIdRaw) = parseParameters(parameters)
         let parentTaskId = parseInt64OrZero(parentTaskIdRaw)
 
         if (pluginNamespace.size == 0 || pluginType.size == 0) {
@@ -144,7 +149,7 @@ public class DenoTaskRunner {
 
             // 根据类型执行插件
             let result = match (pluginType) {
-                case "Metadata" => executeMetadataPlugin(taskId, plugin, archiveId, oneshotParam, extraParams, loginCookiesJson)
+                case "Metadata" => executeMetadataPlugin(taskId, plugin, targetType, targetId, oneshotParam, extraParams, loginCookiesJson)
                 case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson, parentTaskId)
                 case "Login" => executeLoginPluginDirect(taskId, plugin)
                 case "Script" => executeScriptPlugin(taskId, plugin, oneshotParam, extraParams, loginCookiesJson)
@@ -176,12 +181,14 @@ public class DenoTaskRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String, String) {
         var pluginNamespace = ""
         var pluginType = ""
         var action = "run"
         var groupId = ""
         var archiveId = ""
+        var targetType = ""
+        var targetId = ""
         var oneshotParam = ""
         var extraParams = ""
         var url = ""
@@ -189,7 +196,7 @@ public class DenoTaskRunner {
 
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url, parentTaskId)
+            return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId)
         }
 
         try {
@@ -199,13 +206,17 @@ public class DenoTaskRunner {
             action = req.action
             groupId = req.groupId
             archiveId = req.archiveId
+            targetType = req.targetType
+            targetId = req.targetId
             oneshotParam = req.oneshotParam
             extraParams = req.extraParams
             url = req.url
             parentTaskId = req.parentTaskId
         } catch (_: Exception) {}
 
-        return (pluginNamespace, pluginType, action, groupId, archiveId, oneshotParam, extraParams, url, parentTaskId)
+        if (targetType.size == 0) { targetType = "archive" }
+        if (targetId.size == 0) { targetId = archiveId }
+        return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId)
     }
 
     private static func parseInt64OrZero(s: String): Int64 {
@@ -873,7 +884,8 @@ public class DenoTaskRunner {
     private static func executeMetadataPlugin(
         taskId: Int64,
         plugin: PluginData,
-        archiveId: String,
+        targetType: String,
+        targetId: String,
         oneshotParam: String,
         extraParams: String,
         loginCookiesJson: String
@@ -885,12 +897,40 @@ public class DenoTaskRunner {
             return DenoExecutionResult(false, "Plugin file not found", "")
         }
 
-        // 获取归档信息
-        let archive = ArchiveDao.getArchiveById(archiveId)
-        if (archive.id.size == 0) {
-            return DenoExecutionResult(false, "Archive not found", "")
+        // Resolve target into plugin input fields.
+        let effectiveType = targetType.trimAscii().toAsciiLower()
+        let effectiveId = targetId.trimAscii()
+        if (effectiveId.size == 0) {
+            return DenoExecutionResult(false, "Missing targetId", "")
         }
-        let tagsString = TagDao.getArchiveTags(archiveId)
+
+        var title = ""
+        var tagsString = ""
+        var thumbhash = ""
+
+        if (effectiveType == "tankoubon" || effectiveType == "tank") {
+            let tankOpt = TankoubonDao.getTankoubonById(effectiveId)
+            match (tankOpt) {
+                case Some(t) =>
+                    title = t.name
+                    tagsString = TankoubonDao.getMergedTagsForTankoubon(effectiveId)
+                    let coverAssetId = TankoubonDao.getTankoubonCoverAssetId(effectiveId)
+                    if (coverAssetId > 0) {
+                        let asset = AssetDao.getById(coverAssetId)
+                        thumbhash = asset.thumbhash
+                    }
+                case None => return DenoExecutionResult(false, "Tankoubon not found", "")
+            }
+        } else {
+            // Default: archive
+            let archive = ArchiveDao.getArchiveById(effectiveId)
+            if (archive.id.size == 0) {
+                return DenoExecutionResult(false, "Archive not found", "")
+            }
+            title = archive.title
+            tagsString = TagDao.getArchiveTags(effectiveId)
+            thumbhash = archive.thumbhash
+        }
 
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
         denoArgs.add("--allow-read=./data/thumb")
@@ -905,10 +945,10 @@ public class DenoTaskRunner {
             "run",
             "Metadata",
             pluginDir,
-            archiveId,
-            archive.title,
+            effectiveId,
+            title,
             tagsString,
-            archive.thumbhash,
+            thumbhash,
             oneshotParam,
             mergedParams,
             loginCookiesJson,

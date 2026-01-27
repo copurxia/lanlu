@@ -305,6 +305,43 @@ public class ArchiveUtils {
     }
 
     /**
+     * 计算目录自身的相对路径（相对于 archiveBasePath）
+     *
+     * 对于分类根目录，返回 ""。
+     * 对于 /base/A/B，返回 "A/B"。
+     */
+    public static func calculateRelativeDirPath(fullDirPath: String, archiveBasePath: String): String {
+        try {
+            let resolvedBase = FileUtils.resolvePath(archiveBasePath)
+            let resolvedDir = FileUtils.resolvePath(fullDirPath)
+
+            if (resolvedDir == resolvedBase) {
+                return ""
+            }
+
+            if (resolvedDir.startsWith(resolvedBase)) {
+                let relativePath = resolvedDir.replace(resolvedBase, "")
+                if (relativePath.startsWith("/")) {
+                    let parts = relativePath.split("/")
+                    var result = ""
+                    var firstNonEmpty = true
+                    for (i in 1..parts.size) {
+                        if (parts[i].size > 0) {
+                            if (!firstNonEmpty) { result += "/" }
+                            result += parts[i]
+                            firstNonEmpty = false
+                        }
+                    }
+                    return result
+                } else {
+                    return relativePath
+                }
+            }
+        } catch (_: Exception) {}
+        return ""
+    }
+
+    /**
      * 转换图片或视频为AVIF格式缩略图
      * 使用FFmpeg处理，支持图片和视频文件
      * 统一处理策略：宽度缩放到500px，高度裁剪到1000px（自适应，从顶部裁剪）

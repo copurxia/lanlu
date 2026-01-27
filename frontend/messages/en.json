@@ -894,6 +894,7 @@
     "tags": "Tags",
     "tagsPlaceholder": "Enter tags separated by commas",
     "tagsHint": "Separate multiple tags with commas",
+    "metadataPluginLabel": "Metadata plugin",
     "deleteConfirmTitle": "Delete Collection",
     "deleteConfirmMessage": "Are you sure you want to delete this collection? The archives themselves will not be deleted.",
     "createNew": "Create Collection",

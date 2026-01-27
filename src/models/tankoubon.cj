@@ -12,6 +12,7 @@ public class Tankoubon {
     public var summary: String
     public var tags: String
     public var archives: Array<String>
+    public var cover_asset_id: Int64 = 0
 
     // 聚合字段（用于搜索结果显示）
     public var pagecount: Int32 = 0
@@ -44,14 +45,14 @@ public class Tankoubon {
         }
         archivesJson += "]"
 
-        return "{\"tankoubon_id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"archives\":${archivesJson},\"archive_count\":${archive_count},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"isfavorite\":${isfavorite}}"
+        return "{\"tankoubon_id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"cover_asset_id\":${cover_asset_id},\"archives\":${archivesJson},\"archive_count\":${archive_count},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"isfavorite\":${isfavorite}}"
     }
 
     /**
      * 转换为带聚合数据的JSON字符串（用于搜索结果）
      */
     public func toAggregatedJson(): String {
-        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"archive_count\":${archive_count},\"isfavorite\":${isfavorite}}"
+        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"cover_asset_id\":${cover_asset_id},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"archive_count\":${archive_count},\"isfavorite\":${isfavorite}}"
     }
 }
 
@@ -67,9 +68,26 @@ public class TankoubonModel {
         var tankoubons: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
 
         for (data in daoData) {
-            tankoubons.add(Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives))
+            let t = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
+            t.cover_asset_id = data.cover_asset_id
+            tankoubons.add(t)
         }
 
+        return tankoubons.toArray()
+    }
+
+    /**
+     * 获取所有单行本（带聚合 tags/progress 等），用于列表展示
+     */
+    public static func getAllTankoubonsWithUser(userId: Int64): Array<Tankoubon> {
+        let daoData = TankoubonDao.getAllTankoubons()
+        var tankoubons: ArrayList<Tankoubon> = ArrayList<Tankoubon>()
+        for (data in daoData) {
+            let t = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
+            t.cover_asset_id = data.cover_asset_id
+            applyAggregatedMetadata(t, userId)
+            tankoubons.add(t)
+        }
         return tankoubons.toArray()
     }
 
@@ -126,6 +144,7 @@ public class TankoubonModel {
 
     private static func buildTankoubonFromData(data: TankoubonData): Tankoubon {
         let tankoubon = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
+        tankoubon.cover_asset_id = data.cover_asset_id
         let (archiveCount, totalPages) = TankoubonDao.getTankoubonArchiveStats(data.tankoubon_id)
         tankoubon.archive_count = archiveCount
         tankoubon.pagecount = totalPages
@@ -184,6 +203,14 @@ public class TankoubonModel {
         return TankoubonDao.updateTankoubon(id, name, summary)
     }
 
+    public static func updateTankoubonCover(id: String, coverAssetId: Int64): Bool {
+        return TankoubonDao.updateTankoubonCover(id, coverAssetId)
+    }
+
+    public static func updateTankoubonTags(id: String, tagsString: String): Bool {
+        return TankoubonDao.updateTankoubonTags(id, tagsString)
+    }
+
     /**
      * 删除单行本
      */
@@ -195,7 +222,7 @@ public class TankoubonModel {
      * 向单行本添加档案
      */
     public static func addArchiveToTankoubon(tankoubonId: String, archiveId: String): Bool {
-        return TankoubonDao.addArchiveToTankoubon(tankoubonId, archiveId, 0)
+        return TankoubonDao.addArchiveToTankoubonAppend(tankoubonId, archiveId)
     }
 
     /**

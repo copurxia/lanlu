@@ -108,6 +108,13 @@ public class ScanSingleCategoryTaskRunner {
 
         let entries = DirectoryScanner.listDirectory(dirPath)
 
+        // Auto-create/sync Tankoubon for qualifying directories (2+ archives, no non-archive subdirs).
+        // This also performs deletion cleanup (remove items missing from filesystem).
+        try {
+            let relDir = ArchiveUtils.calculateRelativeDirPath(dirPath, ctx.basePath)
+            TankoubonAutocreateService.ensureAndSync(ctx.categoryId, relDir, dirPath)
+        } catch (_: Exception) {}
+
         // Optimization: leaf media folders are treated as a single "folder archive".
         // Avoid scanning each contained media file (which would be skipped anyway) and
         // avoid redundant DirectoryScanner.listDirectory() calls inside FolderHandler.canHandle().

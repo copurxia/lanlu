@@ -19,6 +19,11 @@ public func registerTankoubonRoutes(router: JoyRouters) {
         if (!AuthMiddleware.requiredAuth(ctx)) { return }
         TankoubonController.getTankoubonById(ctx)
     })
+
+    // 获取合集封面（cover 或 fallback 到首个 archive）
+    router.get("/api/tankoubons/{id}/thumbnail", { ctx =>
+        TankoubonController.getThumbnail(ctx)
+    })
     
     // 创建新单行本
     router.put("/api/tankoubons", { ctx => 

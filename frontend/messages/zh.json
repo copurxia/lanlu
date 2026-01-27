@@ -900,6 +900,7 @@
     "tags": "标签",
     "tagsPlaceholder": "输入标签，用逗号分隔",
     "tagsHint": "多个标签请用逗号分隔",
+    "metadataPluginLabel": "元数据插件",
     "deleteConfirmTitle": "删除合集",
     "deleteConfirmMessage": "确定要删除此合集吗？档案本身不会被删除，只是从合集中移除。",
     "createNew": "创建合集",

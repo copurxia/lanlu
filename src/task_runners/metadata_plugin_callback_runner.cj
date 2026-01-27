@@ -20,13 +20,13 @@ public class MetadataPluginCallbackRunner {
         TaskModel.updateTaskProgress(taskId, 10, "开始处理元数据回调")
 
         // 解析参数
-        let (archiveId, namespace, denoTaskId) = parseParameters(parameters)
-        if (archiveId.size == 0 || denoTaskId <= 0) {
-            fail(taskId, "Invalid callback parameters: missing archiveId or denoTaskId")
+        let (targetType, targetId, namespace, denoTaskId) = parseParameters(parameters)
+        if (targetId.size == 0 || denoTaskId <= 0) {
+            fail(taskId, "Invalid callback parameters: missing targetId or denoTaskId")
             return
         }
 
-        TaskIO.appendLog(taskId, "callback params: archiveId=${archiveId}, namespace=${namespace}, denoTaskId=${denoTaskId}")
+        TaskIO.appendLog(taskId, "callback params: targetType=${targetType}, targetId=${targetId}, namespace=${namespace}, denoTaskId=${denoTaskId}")
 
         // 读取 deno_task 输出
         TaskModel.updateTaskProgress(taskId, 30, "读取插件输出")
@@ -53,63 +53,84 @@ public class MetadataPluginCallbackRunner {
         let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(newTags)
         newTags = cleanedTags
 
-        // 写回 archives 表
+        let effectiveType = targetType.trimAscii().toAsciiLower()
         TaskModel.updateTaskProgress(taskId, 70, "写回元数据")
-        var archiveToUpdate = ArchiveDao.getArchiveById(archiveId)
-        if (archiveToUpdate.id.size == 0) {
-            fail(taskId, "Archive not found when updating")
-            return
-        }
 
-        var changed = false
-        if (newTitle.size > 0) {
-            archiveToUpdate.title = newTitle
-            changed = true
-        }
-        if (newSummary.size > 0) {
-            archiveToUpdate.summary = newSummary
-            changed = true
-        }
-        // If tags are updated, we also consider the archive updated.
-        if (newTags.size > 0) {
-            changed = true
-        }
-        // Prefer plugin-provided updated_at if present.
-        // Otherwise, do NOT bump archives.updated_at when only metadata changes (treat it as "release time").
-        if (pluginUpdatedAt.size > 0) {
-            archiveToUpdate.updated_at = pluginUpdatedAt
-            changed = true
-        }
-        if (changed) {
-            let ok = ArchiveDao.update(archiveToUpdate)
-            if (!ok) {
-                fail(taskId, "Failed to update archive metadata")
+        if (effectiveType == "tankoubon" || effectiveType == "tank") {
+            // Write back to Tankoubon (name/summary/tankoubon_tags).
+            match (TankoubonDao.getTankoubonById(targetId)) {
+                case None =>
+                    fail(taskId, "Tankoubon not found when updating")
+                    return
+                case Some(existing) =>
+                    let updatedName = if (newTitle.size > 0) { newTitle } else { existing.name }
+                    let updatedSummary = if (newSummary.size > 0) { newSummary } else { existing.summary }
+
+                    let ok = TankoubonDao.updateTankoubon(targetId, updatedName, updatedSummary)
+                    if (!ok) {
+                        fail(taskId, "Failed to update tankoubon metadata")
+                        return
+                    }
+                    if (newTags.size > 0 || parsed.tags.trimAscii().size == 0) {
+                        // If plugin emits tags (non-empty) update; if plugin emits empty, treat as no-op.
+                        if (newTags.size > 0) {
+                            let _ = TankoubonDao.updateTankoubonTags(targetId, newTags)
+                        }
+                    }
+            }
+        } else {
+            // Default: archive write-back.
+            var archiveToUpdate = ArchiveDao.getArchiveById(targetId)
+            if (archiveToUpdate.id.size == 0) {
+                fail(taskId, "Archive not found when updating")
                 return
             }
-        }
 
-        // 写回 tags
-        if (newTags.size > 0) {
-            let tagOk = TagDao.updateArchiveTags(archiveId, newTags)
-            if (!tagOk) {
-                TaskIO.appendLog(taskId, "WARN: failed to update tags")
+            var changed = false
+            if (newTitle.size > 0) {
+                archiveToUpdate.title = newTitle
+                changed = true
+            }
+            if (newSummary.size > 0) {
+                archiveToUpdate.summary = newSummary
+                changed = true
+            }
+            if (newTags.size > 0) { changed = true }
+            if (pluginUpdatedAt.size > 0) {
+                archiveToUpdate.updated_at = pluginUpdatedAt
+                changed = true
+            }
+            if (changed) {
+                let ok = ArchiveDao.update(archiveToUpdate)
+                if (!ok) {
+                    fail(taskId, "Failed to update archive metadata")
+                    return
+                }
+            }
+
+            if (newTags.size > 0) {
+                let tagOk = TagDao.updateArchiveTags(targetId, newTags)
+                if (!tagOk) {
+                    TaskIO.appendLog(taskId, "WARN: failed to update tags")
+                }
             }
         }
 
         // 完成任务
         TaskModel.updateTaskProgress(taskId, 100, "元数据回调完成")
-        let resultJson = buildResultJson(archiveId, namespace, newTitle, newSummary, newTags, output)
+        let resultJson = buildResultJson(targetId, namespace, newTitle, newSummary, newTags, output)
         TaskModel.completeTask(taskId, "metadata_plugin_callback completed")
         TaskIO.writeOutput(taskId, resultJson)
     }
 
-    private static func parseParameters(parameters: String): (String, String, Int64) {
+    private static func parseParameters(parameters: String): (String, String, String, Int64) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return ("", "", 0)
+            return ("", "", "", 0)
         }
 
-        var archiveId = ""
+        var targetType = ""
+        var targetId = ""
         var namespace = ""
         var denoTaskId: Int64 = 0
 
@@ -128,7 +149,10 @@ public class MetadataPluginCallbackRunner {
                 while (r.peek() != EndObject) {
                     let k = r.readName()
                     match (k) {
-                        case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                        case "targetType" => targetType = r.readValue<String>().trimAscii()
+                        case "targetId" => targetId = r.readValue<String>().trimAscii()
+                        case "archiveId" =>
+                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
                         case "denoTaskId" => denoTaskId = readInt64Flexible()
                         case _ => r.skip()
@@ -138,7 +162,8 @@ public class MetadataPluginCallbackRunner {
             }
         } catch (_: Exception) {}
 
-        return (archiveId, namespace, denoTaskId)
+        if (targetType.size == 0) { targetType = "archive" }
+        return (targetType, targetId, namespace, denoTaskId)
     }
 
     private static func parseMetadataOutput(output: String): ParsedMetadataResult {

@@ -16,6 +16,10 @@ public class TankoubonData {
     public var tankoubon_id: String = ""
     public var name: String = ""
     public var summary: String = ""
+    public var cover_asset_id: Int64 = 0
+    public var auto_created: Bool = false
+    public var source_category_id: Int64 = 0
+    public var source_relative_path: String = ""
     public var created_at: String = ""
     public var updated_at: String = ""
     public var archives: Array<String> = Array<String>()  // Array of archive arcids
@@ -53,7 +57,7 @@ public class TankoubonDao {
                 var tankoubons: ArrayList<TankoubonData> = ArrayList<TankoubonData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, tankoubon_id, name, summary, created_at, updated_at FROM tankoubons ORDER BY id")
+                        "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -63,8 +67,12 @@ public class TankoubonDao {
                                 tankoubon.tankoubon_id = rs.getOrNull<String>(1) ?? ""
                                 tankoubon.name = rs.getOrNull<String>(2) ?? ""
                                 tankoubon.summary = rs.getOrNull<String>(3) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(4) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(5) ?? ""
+                                tankoubon.cover_asset_id = rs.getOrNull<Int64>(4) ?? 0
+                                tankoubon.auto_created = rs.getOrNull<Bool>(5) ?? false
+                                tankoubon.source_category_id = rs.getOrNull<Int64>(6) ?? 0
+                                tankoubon.source_relative_path = rs.getOrNull<String>(7) ?? ""
+                                tankoubon.created_at = rs.getOrNull<String>(8) ?? ""
+                                tankoubon.updated_at = rs.getOrNull<String>(9) ?? ""
                                 tankoubon.archives = getArchivesInTankoubon(tankoubon.tankoubon_id)
                                 tankoubons.add(tankoubon)
                             }
@@ -97,7 +105,7 @@ public class TankoubonDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, tankoubon_id, name, summary, created_at, updated_at FROM tankoubons WHERE tankoubon_id = ?")
+                        "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons WHERE tankoubon_id = ?")
                     try {
                         stmt.set(0, tankoubonId)
                         let rs = stmt.query()
@@ -108,8 +116,12 @@ public class TankoubonDao {
                                 tankoubon.tankoubon_id = rs.getOrNull<String>(1) ?? ""
                                 tankoubon.name = rs.getOrNull<String>(2) ?? ""
                                 tankoubon.summary = rs.getOrNull<String>(3) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(4) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(5) ?? ""
+                                tankoubon.cover_asset_id = rs.getOrNull<Int64>(4) ?? 0
+                                tankoubon.auto_created = rs.getOrNull<Bool>(5) ?? false
+                                tankoubon.source_category_id = rs.getOrNull<Int64>(6) ?? 0
+                                tankoubon.source_relative_path = rs.getOrNull<String>(7) ?? ""
+                                tankoubon.created_at = rs.getOrNull<String>(8) ?? ""
+                                tankoubon.updated_at = rs.getOrNull<String>(9) ?? ""
                                 tankoubon.archives = getArchivesInTankoubon(tankoubonId)
                                 return Some(tankoubon)
                             }
@@ -185,8 +197,8 @@ public class TankoubonDao {
             case Some(conn) =>
                 
                 try {
-                    // 生成tankoubon_id: TANK_ + 时间戳
-                    let timestamp = DateTime.now().toUnixTimeStamp().toSeconds().toString()
+                    // 生成tankoubon_id: TANK_ + 时间戳（毫秒，避免并发冲突）
+                    let timestamp = DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
                     let tankoubonId = "TANK_${timestamp}"
 
                     let stmt = conn.prepareStatement(
@@ -359,6 +371,276 @@ public class TankoubonDao {
             case None =>
                 getLogger("tankoubon_dao").error("无法连接到数据库")
                 return false
+        }
+    }
+
+    /**
+     * 添加归档到 Tankoubon（追加到末尾，不改变已有顺序）
+     */
+    public static func addArchiveToTankoubonAppend(tankoubonId: String, archiveArcid: String): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
+                    let archiveInternalId = getArchiveInternalId(conn, archiveArcid)
+                    if (tankInternalId == 0 || archiveInternalId == 0) {
+                        return false
+                    }
+
+                    // Compute next sort order.
+                    var nextOrder: Int32 = 0
+                    let maxStmt = conn.prepareStatement("SELECT COALESCE(MAX(sort_order), 0)::INT FROM tankoubon_archives WHERE tankoubon_id = ?")
+                    try {
+                        maxStmt.set(0, tankInternalId)
+                        let rs = maxStmt.query()
+                        try {
+                            if (rs.next()) {
+                                nextOrder = (rs.getOrNull<Int32>(0) ?? 0) + 1
+                            } else {
+                                nextOrder = 1
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        maxStmt.close()
+                    }
+
+                    let stmt = conn.prepareStatement(
+                        "INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order) VALUES (?, ?, ?) ON CONFLICT (tankoubon_id, archive_id) DO NOTHING")
+                    try {
+                        stmt.set(0, tankInternalId)
+                        stmt.set(1, archiveInternalId)
+                        stmt.set(2, nextOrder)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tankoubon_dao").error("append archive to tank failed",
+                        ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
+     * Get or create an auto-created Tankoubon for a directory source mapping.
+     * Returns tankoubons.tankoubon_id.
+     */
+    public static func getOrCreateAutoTankoubon(categoryInternalId: Int64, sourceRelativePath: String, name: String): String {
+        if (categoryInternalId <= 0) { return "" }
+        let rel = sourceRelativePath.trimAscii()
+        if (rel.size == 0) { return "" }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    // Try to find existing.
+                    let sel = conn.prepareStatement("""
+                        SELECT tankoubon_id
+                        FROM tankoubons
+                        WHERE auto_created = true AND source_category_id = ? AND COALESCE(source_relative_path, '') = ?
+                        LIMIT 1
+                    """)
+                    try {
+                        sel.set(0, categoryInternalId)
+                        sel.set(1, rel)
+                        let rs = sel.query()
+                        try {
+                            if (rs.next()) {
+                                let tid = rs.getOrNull<String>(0) ?? ""
+                                if (tid.size > 0) { return tid }
+                            }
+                        } finally { rs.close() }
+                    } finally { sel.close() }
+
+                    // Create new.
+                    let timestamp = DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
+                    let tid = "TANK_${timestamp}"
+
+                    let ins = conn.prepareStatement("""
+                        INSERT INTO tankoubons (tankoubon_id, name, summary, cover_asset_id, auto_created, source_category_id, source_relative_path)
+                        VALUES (?, ?, '', 0, true, ?, ?)
+                    """)
+                    try {
+                        ins.set(0, tid)
+                        ins.set(1, name)
+                        ins.set(2, categoryInternalId)
+                        ins.set(3, rel)
+                        ins.update()
+                        return tid
+                    } finally { ins.close() }
+                } catch (e: Exception) {
+                    // If concurrent creation raced, try select again.
+                    getLogger("tankoubon_dao").warn("getOrCreateAutoTankoubon create failed, retrying select",
+                        ("categoryInternalId", categoryInternalId.toString()), ("rel", rel), ("error", e.message))
+                    try {
+                        let stmt2 = conn.prepareStatement("""
+                            SELECT tankoubon_id
+                            FROM tankoubons
+                            WHERE auto_created = true AND source_category_id = ? AND COALESCE(source_relative_path, '') = ?
+                            LIMIT 1
+                        """)
+                        try {
+                            stmt2.set(0, categoryInternalId)
+                            stmt2.set(1, rel)
+                            let rs2 = stmt2.query()
+                            try {
+                                if (rs2.next()) {
+                                    return rs2.getOrNull<String>(0) ?? ""
+                                }
+                            } finally { rs2.close() }
+                        } finally { stmt2.close() }
+                    } catch (_: Exception) {}
+                    return ""
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return ""
+        }
+    }
+
+    /**
+     * Update Tankoubon cover.
+     */
+    public static func updateTankoubonCover(tankoubonId: String, coverAssetId: Int64): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement(
+                        "UPDATE tankoubons SET cover_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE tankoubon_id = ?")
+                    try {
+                        stmt.set(0, coverAssetId)
+                        stmt.set(1, tankoubonId)
+                        stmt.update()
+                        return true
+                    } finally { stmt.close() }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
+     * Update Tankoubon tags (tankoubon_tags relation).
+     */
+    public static func updateTankoubonTags(tankoubonId: String, tagsString: String): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return false
+            case Some(conn) =>
+                try {
+                    let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
+                    if (tankInternalId <= 0) { return false }
+
+                    // Remove existing relations.
+                    let del = conn.prepareStatement("DELETE FROM tankoubon_tags WHERE tankoubon_id = ?")
+                    try {
+                        del.set(0, tankInternalId)
+                        del.update()
+                    } finally { del.close() }
+
+                    let trimmed = tagsString.trimAscii()
+                    if (trimmed.size == 0) { return true }
+
+                    let parts = trimmed.split(",")
+                    for (p in parts) {
+                        let t = p.trimAscii()
+                        if (t.size == 0) { continue }
+                        let (namespace, name) = TagDao.parseTagName(t)
+                        if (name.trimAscii().size == 0) { continue }
+
+                        // Upsert tag within the same connection to avoid extra pool usage.
+                        var tagId: Int64 = 0
+                        let tagStmt = conn.prepareStatement("""
+                            INSERT INTO tags (namespace, name)
+                            VALUES (?, ?)
+                            ON CONFLICT (namespace, name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                            RETURNING id
+                        """)
+                        try {
+                            tagStmt.set(0, namespace)
+                            tagStmt.set(1, name)
+                            let rs = tagStmt.query()
+                            try {
+                                if (rs.next()) {
+                                    tagId = rs.getOrNull<Int64>(0) ?? 0
+                                }
+                            } finally { rs.close() }
+                        } finally { tagStmt.close() }
+                        if (tagId <= 0) { continue }
+                        let ins = conn.prepareStatement("""
+                            INSERT INTO tankoubon_tags (tankoubon_id, tag_id) VALUES (?, ?) ON CONFLICT DO NOTHING
+                        """)
+                        try {
+                            ins.set(0, tankInternalId)
+                            ins.set(1, tagId)
+                            ins.update()
+                        } finally { ins.close() }
+                    }
+                    return true
+                } catch (e: Exception) {
+                    getLogger("tankoubon_dao").error("updateTankoubonTags failed", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+    }
+
+    /**
+     * Get merged tags string for a Tankoubon (tankoubon tags + all archive tags).
+     */
+    public static func getMergedTagsForTankoubon(tankoubonId: String): String {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return ""
+            case Some(conn) =>
+                try {
+                    let tankTags = getTankoubonTagsForTankoubon(conn, tankoubonId)
+                    let archiveTags = getArchiveTagsForTankoubon(conn, tankoubonId)
+                    return mergeTags(tankTags, archiveTags)
+                } catch (_: Exception) {
+                    return ""
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+    }
+
+    public static func getTankoubonCoverAssetId(tankoubonId: String): Int64 {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return 0
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("SELECT COALESCE(cover_asset_id, 0) FROM tankoubons WHERE tankoubon_id = ?")
+                    try {
+                        stmt.set(0, tankoubonId)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<Int64>(0) ?? 0
+                            }
+                        } finally { rs.close() }
+                    } finally { stmt.close() }
+                    return 0
+                } catch (_: Exception) {
+                    return 0
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
         }
     }
 

@@ -17,20 +17,32 @@ public class MetadataPluginTaskRunner {
         TaskModel.updateTaskProgress(taskId, 1, "元数据插件任务开始")
         TaskIO.appendLog(taskId, "metadata_plugin: about to parse parameters")
 
-        let (archiveId, namespace, param) = parseParameters(parameters)
+        let (targetType, targetId, namespace, param) = parseParameters(parameters)
         TaskIO.appendLog(taskId, "metadata_plugin: parameters parsed")
-        if (archiveId.size == 0 || namespace.size == 0) {
-            fail(taskId, "archive_id and namespace are required")
+        if (targetId.size == 0 || namespace.size == 0) {
+            fail(taskId, "target_id and namespace are required")
             return
         }
 
-        TaskIO.appendLog(taskId, "metadata_plugin: about to get archive")
-        // 获取归档并验证存在
-        let archive = ArchiveDao.getArchiveById(archiveId)
-        TaskIO.appendLog(taskId, "metadata_plugin: archive retrieved")
-        if (archive.id.size == 0) {
-            fail(taskId, "Archive not found")
-            return
+        let effectiveType = if (targetType.size > 0) { targetType.trimAscii().toAsciiLower() } else { "archive" }
+        TaskIO.appendLog(taskId, "metadata_plugin: targetType=${effectiveType} targetId=${targetId}")
+
+        // Validate target exists.
+        if (effectiveType == "tankoubon" || effectiveType == "tank") {
+            match (TankoubonDao.getTankoubonById(targetId)) {
+                case Some(_) => ()
+                case None =>
+                    fail(taskId, "Tankoubon not found")
+                    return
+            }
+        } else {
+            TaskIO.appendLog(taskId, "metadata_plugin: about to get archive")
+            let archive = ArchiveDao.getArchiveById(targetId)
+            TaskIO.appendLog(taskId, "metadata_plugin: archive retrieved")
+            if (archive.id.size == 0) {
+                fail(taskId, "Archive not found")
+                return
+            }
         }
 
         TaskIO.appendLog(taskId, "metadata_plugin: about to get plugin")
@@ -76,7 +88,10 @@ public class MetadataPluginTaskRunner {
         w.writeName("pluginType").writeValue("Metadata")
         w.writeName("action").writeValue("run")
         w.writeName("groupId").writeValue(groupId)
-        w.writeName("archiveId").writeValue(archiveId)
+        w.writeName("targetType").writeValue(effectiveType)
+        w.writeName("targetId").writeValue(targetId)
+        // Backward-compatible field for older runners/plugins.
+        w.writeName("archiveId").writeValue(targetId)
         match (oneshotOpt) {
             case Some(v) => w.writeName("oneshotParam").writeValue(v)
             case None => ()
@@ -108,7 +123,7 @@ public class MetadataPluginTaskRunner {
 
         // 创建回调任务（等待 deno_task 完成后自动触发）
         TaskModel.updateTaskProgress(taskId, 20, "创建回调任务")
-        let callbackParams = buildCallbackParams(archiveId, plugin.namespace, denoTask.id)
+        let callbackParams = buildCallbackParams(effectiveType, targetId, plugin.namespace, denoTask.id)
         let callbackTask = TaskModel.createWaitingTask(
             "元数据写回",
             "metadata_plugin_callback",
@@ -130,7 +145,7 @@ public class MetadataPluginTaskRunner {
 
         // 立即完成原任务（不再等待）
         TaskModel.updateTaskProgress(taskId, 100, "任务已提交")
-        let resultJson = "{\"success\":1,\"deno_task_id\":${denoTask.id},\"callback_task_id\":${callbackTask.id}}"
+        let resultJson = "{\"success\":1,\"deno_task_id\":${denoTask.id},\"callback_task_id\":${callbackTask.id},\"target_type\":\"${effectiveType}\",\"target_id\":\"${targetId}\"}"
         TaskModel.completeTask(taskId, "metadata_plugin task submitted")
         TaskIO.writeOutput(taskId, resultJson)
     }
@@ -138,11 +153,14 @@ public class MetadataPluginTaskRunner {
     /**
      * 构建回调任务参数
      */
-    private static func buildCallbackParams(archiveId: String, namespace: String, denoTaskId: Int64): String {
+    private static func buildCallbackParams(targetType: String, targetId: String, namespace: String, denoTaskId: Int64): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
-        w.writeName("archiveId").writeValue(archiveId)
+        w.writeName("targetType").writeValue(targetType)
+        w.writeName("targetId").writeValue(targetId)
+        // Backward-compatible field.
+        w.writeName("archiveId").writeValue(targetId)
         w.writeName("namespace").writeValue(namespace)
         w.writeName("denoTaskId").writeValue(denoTaskId)
         w.endObject()
@@ -150,13 +168,14 @@ public class MetadataPluginTaskRunner {
         return String.fromUtf8(readToEnd(out))
     }
 
-    private static func parseParameters(parameters: String): (String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return ("", "", "")
+            return ("", "", "", "")
         }
 
-        var archiveId = ""
+        var targetType = ""
+        var targetId = ""
         var namespace = ""
         var param = ""
 
@@ -184,13 +203,20 @@ public class MetadataPluginTaskRunner {
                 while (r.peek() != EndObject) {
                     let k = r.readName()
                     match (k) {
-                        case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                        case "target_type" => targetType = r.readValue<String>().trimAscii()
+                        case "targetType" => targetType = r.readValue<String>().trimAscii()
+                        case "target_id" => targetId = r.readValue<String>().trimAscii()
+                        case "targetId" => targetId = r.readValue<String>().trimAscii()
+                        case "tankoubon_id" =>
+                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); targetType = "tankoubon" } else { r.skip() }
+                        case "archive_id" =>
+                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                         case "id" =>
-                            if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
                         case "arcid" =>
-                            if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
                         case "archiveId" =>
-                            if (archiveId.size == 0) { archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
                         case "param" => param = readRawJson()
                         case _ => r.skip()
@@ -200,7 +226,8 @@ public class MetadataPluginTaskRunner {
             }
         } catch (_: Exception) {}
 
-        return (archiveId, namespace, param.trimAscii())
+        if (targetType.size == 0) { targetType = "archive" }
+        return (targetType.trimAscii(), targetId.trimAscii(), namespace, param.trimAscii())
     }
 
     /**
