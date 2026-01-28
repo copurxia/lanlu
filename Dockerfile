@@ -14,8 +14,6 @@ RUN set -eux; \
       libarchive13 \
       libavif15; \
     arch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"; \
-    # Some runtimes/plugins dlopen("libssl.so") / dlopen("libcrypto.so") (unversioned),
-    # but Debian provides unversioned .so symlinks only in -dev packages.
     ln -sf "/usr/lib/${arch}/libssl.so.3" "/usr/lib/${arch}/libssl.so"; \
     ln -sf "/usr/lib/${arch}/libcrypto.so.3" "/usr/lib/${arch}/libcrypto.so"; \
     rm -rf /var/lib/apt/lists/*
