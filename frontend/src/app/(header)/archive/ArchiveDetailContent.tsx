@@ -3,11 +3,19 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { TagService } from '@/lib/services/tag-service';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { TagInput } from '@/components/ui/tag-input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -17,13 +25,12 @@ import { useMounted } from '@/hooks/common-hooks';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { stripNamespace } from '@/lib/utils/tag-utils';
-import { ArchiveCoverCard } from './components/ArchiveCoverCard';
-import { ArchiveMainCard } from './components/ArchiveMainCard';
 import { ArchivePreviewCard } from './components/ArchivePreviewCard';
 import { ArchiveBasicInfoCard } from './components/ArchiveBasicInfoCard';
 import { ArchiveMobileActions } from './components/ArchiveMobileActions';
 import { ArchiveCollectionsCard } from './components/ArchiveCollectionsCard';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
+import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, Play } from 'lucide-react';
 
 export function ArchiveDetailContent() {
   const router = useRouter();
@@ -126,13 +133,11 @@ export function ArchiveDetailContent() {
     }
   }, [favoriteLoading, id, isFavorite, setIsFavorite]);
 
-  const [isEditing, setIsEditing] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    summary: '',
-    tags: [] as string[],
-  });
+  const [editTitle, setEditTitle] = useState('');
+  const [editSummary, setEditSummary] = useState('');
+  const [editTags, setEditTags] = useState<string[]>([]);
 
   const [metadataPlugins, setMetadataPlugins] = useState<Plugin[]>([]);
   const [selectedMetadataPlugin, setSelectedMetadataPlugin] = useState<string>('');
@@ -142,13 +147,12 @@ export function ArchiveDetailContent() {
   const [metadataPluginMessage, setMetadataPluginMessage] = useState<string>('');
 
   useEffect(() => {
-    if (!isEditing || !isAuthenticated) return;
+    if (!editDialogOpen || !isAuthenticated) return;
     let cancelled = false;
 
     (async () => {
       try {
-        const plugins = await PluginService.getAllPlugins();
-        const metas = plugins.filter((p) => String(p.plugin_type || '').toLowerCase() === 'metadata');
+        const metas = await PluginService.getMetadataPlugins();
         if (cancelled) return;
         setMetadataPlugins(metas);
         if (!selectedMetadataPlugin && metas.length > 0) {
@@ -162,50 +166,31 @@ export function ArchiveDetailContent() {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, isAuthenticated, selectedMetadataPlugin]);
+  }, [editDialogOpen, isAuthenticated, selectedMetadataPlugin]);
 
   useEffect(() => {
     if (!metadata) return;
-    if (isEditing) return;
-    setFormData({
-      title: metadata.title || '',
-      summary: metadata.summary || '',
-      tags: tags.map(toCanonicalTag),
-    });
-  }, [isEditing, metadata, tags, toCanonicalTag]);
-
-  const startEdit = useCallback(() => {
-    if (!metadata) return;
-    if (!isAuthenticated) return;
-    setFormData({
-      title: metadata.title || '',
-      summary: metadata.summary || '',
-      tags: tags.map(toCanonicalTag),
-    });
-    setIsEditing(true);
-  }, [isAuthenticated, metadata, tags, toCanonicalTag]);
-
-  const cancelEdit = useCallback(() => {
-    setIsEditing(false);
-    if (!metadata) return;
-    setFormData({
-      title: metadata.title || '',
-      summary: metadata.summary || '',
-      tags: tags.map(toCanonicalTag),
-    });
+    setEditTitle(metadata.title || '');
+    setEditSummary(metadata.summary || '');
+    setEditTags(tags.map(toCanonicalTag));
   }, [metadata, tags, toCanonicalTag]);
+
+  const openEditDialog = useCallback(() => {
+    if (!isAuthenticated) return;
+    setEditDialogOpen(true);
+  }, [isAuthenticated]);
 
   const saveEdit = useCallback(async () => {
     if (!metadata) return;
     setIsSaving(true);
     try {
-      const canonicalTags = formData.tags.map((t) => toCanonicalTag(t));
+      const canonicalTags = editTags.map((t) => toCanonicalTag(t));
       await ArchiveService.updateMetadata(
         metadata.arcid,
-        { title: formData.title, summary: formData.summary, tags: canonicalTags.join(', ') },
+        { title: editTitle, summary: editSummary, tags: canonicalTags.join(', ') },
         language
       );
-      setIsEditing(false);
+      setEditDialogOpen(false);
       await refetch();
     } catch (err) {
       logger.operationFailed('update metadata', err);
@@ -213,7 +198,7 @@ export function ArchiveDetailContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [formData.summary, formData.tags, formData.title, language, metadata, refetch, showError, t, toCanonicalTag]);
+  }, [editSummary, editTags, editTitle, language, metadata, refetch, showError, t, toCanonicalTag]);
 
   const runMetadataPlugin = useCallback(async () => {
     if (!metadata) return;
@@ -228,7 +213,8 @@ export function ArchiveDetailContent() {
     setMetadataPluginMessage(t('archive.metadataPluginEnqueued'));
 
     try {
-      const finalTask = await ArchiveService.runMetadataPlugin(
+      const finalTask = await ArchiveService.runMetadataPluginForTarget(
+        'archive',
         metadata.arcid,
         selectedMetadataPlugin,
         metadataPluginParam,
@@ -238,7 +224,7 @@ export function ArchiveDetailContent() {
             setMetadataPluginMessage(task.message || '');
           },
         },
-        // Frontend "run metadata plugin" is preview by default: show plugin result, don't persist automatically.
+        // Preview by default: fill edit form, don't persist automatically.
         { writeBack: false }
       );
 
@@ -263,18 +249,18 @@ export function ArchiveDetailContent() {
         const nextSummary = typeof data.summary === 'string' ? data.summary : '';
         const nextTags = typeof data.tags === 'string' ? data.tags : '';
 
-        setFormData((prev) => ({
-          title: nextTitle.trim() ? nextTitle : prev.title,
-          summary: nextSummary.trim() ? nextSummary : prev.summary,
-          tags: nextTags.trim()
-            ? nextTags
-                .split(',')
-                .map((tag: string) => tag.trim())
-                .filter((tag: string) => tag)
-                .map((tag: string) => toCanonicalTag(tag))
-            : prev.tags,
-        }));
-        setIsEditing(true);
+        if (nextTitle.trim()) setEditTitle(nextTitle.trim());
+        if (nextSummary.trim()) setEditSummary(nextSummary.trim());
+        if (nextTags.trim()) {
+          setEditTags(
+            nextTags
+              .split(',')
+              .map((tag: string) => tag.trim())
+              .filter((tag: string) => tag)
+              .map((tag: string) => toCanonicalTag(tag))
+          );
+        }
+        setEditDialogOpen(true);
       } catch {
         // If output isn't JSON, still mark as completed and let user view logs/result.
       }
@@ -286,7 +272,7 @@ export function ArchiveDetailContent() {
     } finally {
       setIsMetadataPluginRunning(false);
     }
-  }, [isAuthenticated, metadata, metadataPluginParam, refetch, selectedMetadataPlugin, showError, t]);
+  }, [isAuthenticated, metadata, metadataPluginParam, selectedMetadataPlugin, showError, t, toCanonicalTag]);
 
   const [isNewStatusLoading, setIsNewStatusLoading] = useState(false);
   const handleMarkAsRead = useCallback(async () => {
@@ -377,50 +363,263 @@ export function ArchiveDetailContent() {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-background pb-20 lg:pb-0">
       <main className="container mx-auto px-4 pt-6 pb-24 sm:pb-6 max-w-7xl">
         <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-            <div className="lg:col-span-5 xl:col-span-4">
-              <ArchiveCoverCard arcid={metadata.arcid} title={metadata.title} noCoverLabel={t('archive.noCover')} />
-            </div>
+          {/* Header / hero (unified with Tankoubon page) */}
+          <div className="relative">
+            <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
+              <div className="p-4 md:p-5">
+                <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+                  <div className="flex min-w-0 gap-4">
+                    <div className="relative h-40 w-28 shrink-0 overflow-hidden rounded-xl border bg-muted md:h-52 md:w-36">
+                      <Image
+                        src={`/api/archives/${metadata.arcid}/thumbnail`}
+                        alt={metadata.title || ''}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 768px) 112px, 144px"
+                        unoptimized
+                      />
+                    </div>
 
-            <div className="lg:col-span-7 xl:col-span-8 h-full">
-              <ArchiveMainCard
-                metadata={metadata}
-                t={t}
-                tags={tags}
-                isEditing={isEditing}
-                isSaving={isSaving}
-                formData={formData}
-                setFormData={setFormData}
-                isAuthenticated={isAuthenticated}
-                isAdmin={isAdmin}
-                isFavorite={isFavorite}
-                favoriteLoading={favoriteLoading}
-                isNewStatusLoading={isNewStatusLoading}
-                deleteLoading={deleteLoading}
-                onStartEdit={startEdit}
-                onCancelEdit={cancelEdit}
-                onSaveEdit={saveEdit}
-                onFavoriteClick={handleFavoriteClick}
-                onMarkAsRead={handleMarkAsRead}
-                onMarkAsNew={handleMarkAsNew}
-                onDeleteArchive={handleDeleteArchive}
-                onTagClick={handleTagClick}
-                toCanonicalTag={toCanonicalTag}
-                metadataPlugins={metadataPlugins}
-                selectedMetadataPlugin={selectedMetadataPlugin}
-                setSelectedMetadataPlugin={setSelectedMetadataPlugin}
-                metadataPluginParam={metadataPluginParam}
-                setMetadataPluginParam={setMetadataPluginParam}
-                isMetadataPluginRunning={isMetadataPluginRunning}
-                metadataPluginProgress={metadataPluginProgress}
-                metadataPluginMessage={metadataPluginMessage}
-                onRunMetadataPlugin={runMetadataPlugin}
-              />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Badge className="bg-primary">
+                          <BookOpen className="w-3 h-3 mr-1" />
+                          {t('archive.archiveLabel')}
+                        </Badge>
+                        <h1 className="text-xl md:text-2xl font-bold tracking-tight break-words">
+                          {metadata.title}
+                        </h1>
+                      </div>
+
+                      {metadata.summary ? (
+                        <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-3">
+                          {metadata.summary}
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
+                      )}
+
+                      {tags.length > 0 ? (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {tags.map((fullTag) => (
+                            <Badge
+                              key={fullTag}
+                              variant="secondary"
+                              className="cursor-pointer max-w-full"
+                              title={fullTag}
+                              onClick={() => handleTagClick(fullTag)}
+                            >
+                              <span className="truncate">{stripNamespace(fullTag)}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                      title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                      disabled={!isAuthenticated || favoriteLoading}
+                      onClick={handleFavoriteClick}
+                    >
+                      <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-9 w-9 p-0"
+                      title={t('archive.download')}
+                      onClick={() => {
+                        const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
+                        window.open(downloadUrl, '_blank');
+                      }}
+                    >
+                      <Download className="w-4 h-4" />
+                    </Button>
+
+                    {metadata.isnew ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-9 w-9 p-0"
+                        title={t('archive.markAsRead')}
+                        disabled={!isAuthenticated || isNewStatusLoading}
+                        onClick={handleMarkAsRead}
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-9 w-9 p-0"
+                        title={t('archive.markAsNew')}
+                        disabled={!isAuthenticated || isNewStatusLoading}
+                        onClick={handleMarkAsNew}
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                      </Button>
+                    )}
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      title={t('common.edit')}
+                      disabled={!isAuthenticated}
+                      onClick={openEditDialog}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+
+                    {isAdmin ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-9 w-9 p-0 text-destructive"
+                        title={t('common.delete')}
+                        disabled={deleteLoading}
+                        onClick={handleDeleteArchive}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-xl border bg-background/60 p-3">
+                    <p className="text-xs text-muted-foreground">{t('archive.pageCount')}</p>
+                    <p className="mt-0.5 text-xl font-semibold tabular-nums">{metadata.pagecount}</p>
+                  </div>
+                  <div className="rounded-xl border bg-background/60 p-3">
+                    <p className="text-xs text-muted-foreground">{t('archive.updatedAt')}</p>
+                    <p className="mt-0.5 text-sm font-medium tabular-nums truncate" title={metadata.updated_at}>
+                      {metadata.updated_at || t('archive.unknown')}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border bg-background/60 p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground">{t('archive.progress')}</p>
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        {Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}%
+                      </p>
+                    </div>
+                    <Progress className="mt-1.5" value={Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))} />
+                  </div>
+                </div>
+
+                <div className="mt-4 hidden sm:block">
+                  <Link href={`/reader?id=${metadata.arcid}`}>
+                    <Button>
+                      <BookOpen className="w-4 h-4 mr-2" />
+                      {t('archive.startReading')}
+                    </Button>
+                  </Link>
+                </div>
+              </div>
             </div>
           </div>
+
+          {/* Edit metadata dialog (aligned with Tankoubon page) */}
+          <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t('archive.editMetadata')}</DialogTitle>
+              </DialogHeader>
+              <DialogBody className="pt-0">
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium">{t('archive.titleField')}</label>
+                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} disabled={isSaving} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t('archive.summary')}</label>
+                    <Textarea
+                      value={editSummary}
+                      onChange={(e) => setEditSummary(e.target.value)}
+                      placeholder={t('archive.summaryPlaceholder')}
+                      rows={3}
+                      disabled={isSaving}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
+                    <div className="mt-2 flex flex-col gap-2">
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="sm:w-[220px]">
+                          <Select value={selectedMetadataPlugin} onValueChange={setSelectedMetadataPlugin}>
+                            <SelectTrigger disabled={isSaving || isMetadataPluginRunning || metadataPlugins.length === 0}>
+                              <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {metadataPlugins.map((p) => (
+                                <SelectItem key={p.namespace} value={p.namespace}>
+                                  {p.name} ({p.namespace})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Input
+                          value={metadataPluginParam}
+                          onChange={(e) => setMetadataPluginParam(e.target.value)}
+                          disabled={isSaving || isMetadataPluginRunning}
+                          placeholder={t('archive.metadataPluginParamPlaceholder')}
+                        />
+                        <Button
+                          type="button"
+                          onClick={runMetadataPlugin}
+                          disabled={isSaving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin}
+                        >
+                          <Play className="w-4 h-4 mr-2" />
+                          {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
+                        </Button>
+                      </div>
+                      {(metadataPluginProgress !== null || metadataPluginMessage) && (
+                        <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
+                          <span className="truncate" title={metadataPluginMessage}>
+                            {metadataPluginMessage || ''}
+                          </span>
+                          {metadataPluginProgress !== null && (
+                            <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
+                          )}
+                        </div>
+                      )}
+                      {metadataPlugins.length === 0 && (
+                        <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t('archive.tags')}</label>
+                    <TagInput
+                      value={editTags}
+                      onChange={setEditTags}
+                      placeholder={t('archive.tagsPlaceholder')}
+                      disabled={isSaving}
+                    />
+                  </div>
+                </div>
+              </DialogBody>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditDialogOpen(false)} disabled={isSaving}>
+                  {t('common.cancel')}
+                </Button>
+                <Button onClick={saveEdit} disabled={isSaving || !editTitle.trim()}>
+                  {t('common.save')}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <ArchivePreviewCard
             metadata={metadata}
@@ -454,7 +653,7 @@ export function ArchiveDetailContent() {
       <ArchiveMobileActions
         metadata={metadata}
         t={t}
-        isEditing={isEditing}
+        isEditing={false}
         isAuthenticated={isAuthenticated}
         isAdmin={isAdmin}
         isFavorite={isFavorite}
@@ -464,7 +663,7 @@ export function ArchiveDetailContent() {
         onFavoriteClick={handleFavoriteClick}
         onMarkAsRead={handleMarkAsRead}
         onMarkAsNew={handleMarkAsNew}
-        onStartEdit={startEdit}
+        onStartEdit={openEditDialog}
         onDeleteArchive={handleDeleteArchive}
       />
     </div>

@@ -131,6 +131,8 @@
   },
   "archive": {
     "title": "归档详情",
+    "archiveLabel": "档案",
+    "titleField": "标题",
     "backToHome": "返回首页",
     "backToDetails": "返回详情页",
     "startReading": "开始阅读",

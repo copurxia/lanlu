@@ -126,6 +126,8 @@
   },
   "archive": {
     "title": "Archive Details",
+    "archiveLabel": "Archive",
+    "titleField": "Title",
     "backToHome": "Back to Home",
     "backToDetails": "Back to Details",
     "startReading": "Start Reading",

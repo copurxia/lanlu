@@ -462,13 +462,13 @@ function TankoubonDetailContent() {
             <div className="p-4 md:p-5">
               <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-4">
-                  <div className="relative h-28 w-20 shrink-0 overflow-hidden rounded-lg border bg-muted md:h-36 md:w-24">
+                  <div className="relative h-40 w-28 shrink-0 overflow-hidden rounded-xl border bg-muted md:h-52 md:w-36">
                     <Image
                       src={coverUrl}
                       alt={tankoubon.name}
                       fill
                       className="object-cover"
-                      sizes="96px"
+                      sizes="(max-width: 768px) 112px, 144px"
                       // Tankoubon thumbnail endpoint may redirect (to assets or archive thumbnail),
                       // and may serve non-avif images; bypass optimizer to avoid strict content-type checks.
                       unoptimized
@@ -515,18 +515,23 @@ function TankoubonDetailContent() {
                   >
                     <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => setEditDialogOpen(true)}>
-                    <Edit className="w-4 h-4 mr-2" />
-                    {t('common.edit')}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    title={t('common.edit')}
+                    onClick={() => setEditDialogOpen(true)}
+                  >
+                    <Edit className="w-4 h-4" />
                   </Button>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-destructive"
+                    className="h-9 w-9 p-0 text-destructive"
+                    title={t('common.delete')}
                     onClick={() => setDeleteDialogOpen(true)}
                   >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    {t('common.delete')}
+                    <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
               </div>
@@ -649,6 +654,23 @@ function TankoubonDetailContent() {
             <DialogBody className="pt-0">
               <div className="space-y-4">
                 <div>
+                  <label className="text-sm font-medium">{t('tankoubon.name')}</label>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder={t('tankoubon.namePlaceholder')}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
+                  <Textarea
+                    value={editSummary}
+                    onChange={(e) => setEditSummary(e.target.value)}
+                    placeholder={t('tankoubon.summaryPlaceholder')}
+                    rows={3}
+                  />
+                </div>
+                <div>
                   <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
                   <div className="mt-2 flex flex-col gap-2">
                     <div className="flex flex-col sm:flex-row gap-2">
@@ -695,23 +717,6 @@ function TankoubonDetailContent() {
                       <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
                     )}
                   </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.name')}</label>
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder={t('tankoubon.namePlaceholder')}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
-                  <Textarea
-                    value={editSummary}
-                    onChange={(e) => setEditSummary(e.target.value)}
-                    placeholder={t('tankoubon.summaryPlaceholder')}
-                    rows={3}
-                  />
                 </div>
                 <div>
                   <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
