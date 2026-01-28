@@ -13,8 +13,11 @@ RUN set -eux; \
       libssl3 \
       libarchive13 \
       libavif15; \
-    ssl3="$(ldconfig -p | awk '/libssl\\.so\\.3/{print $NF; exit}')"; \
-    crypto3="$(ldconfig -p | awk '/libcrypto\\.so\\.3/{print $NF; exit}')"; \
+    # Debian's ldconfig cache may not be populated in some slim images/layers; use dpkg file list instead.
+    ssl3="$(dpkg -L libssl3 | awk '/\\/libssl\\.so\\.3$/{print; exit}')"; \
+    crypto3="$(dpkg -L libssl3 | awk '/\\/libcrypto\\.so\\.3$/{print; exit}')"; \
+    test -n "${ssl3}" -a -e "${ssl3}"; \
+    test -n "${crypto3}" -a -e "${crypto3}"; \
     ln -sf "${ssl3}" "$(dirname "${ssl3}")/libssl.so"; \
     ln -sf "${crypto3}" "$(dirname "${crypto3}")/libcrypto.so"; \
     rm -rf /var/lib/apt/lists/*
