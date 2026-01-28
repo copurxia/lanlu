@@ -13,9 +13,10 @@ RUN set -eux; \
       libssl3 \
       libarchive13 \
       libavif15; \
-    arch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"; \
-    ln -sf "/usr/lib/${arch}/libssl.so.3" "/usr/lib/${arch}/libssl.so"; \
-    ln -sf "/usr/lib/${arch}/libcrypto.so.3" "/usr/lib/${arch}/libcrypto.so"; \
+    ssl3="$(ldconfig -p | awk '/libssl\\.so\\.3/{print $NF; exit}')"; \
+    crypto3="$(ldconfig -p | awk '/libcrypto\\.so\\.3/{print $NF; exit}')"; \
+    ln -sf "${ssl3}" "$(dirname "${ssl3}")/libssl.so"; \
+    ln -sf "${crypto3}" "$(dirname "${crypto3}")/libcrypto.so"; \
     rm -rf /var/lib/apt/lists/*
 
 ENV LD_LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
