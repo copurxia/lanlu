@@ -372,52 +372,82 @@ export function ArchiveDetailContent() {
               <div className="p-4 md:p-5">
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">
-                    <div className="relative h-40 w-28 shrink-0 overflow-hidden rounded-xl border bg-muted md:h-64 md:w-44 lg:h-72 lg:w-48">
+                    <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
                       <Image
                         src={`/api/archives/${metadata.arcid}/thumbnail`}
                         alt={metadata.title || ''}
                         fill
                         className="object-cover"
-                        sizes="(max-width: 640px) 112px, (max-width: 1024px) 176px, 192px"
+                        sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
                         unoptimized
                       />
                     </div>
 
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-3">
                         <Badge className="bg-primary">
                           <BookOpen className="w-3 h-3 mr-1" />
                           {t('archive.archiveLabel')}
                         </Badge>
-                        <h1 className="text-xl md:text-2xl font-bold tracking-tight break-words">
+                        <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight break-words">
                           {metadata.title}
                         </h1>
                       </div>
 
-                      {metadata.summary ? (
-                        <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                          {metadata.summary}
-                        </p>
-                      ) : (
-                        <p className="mt-2 text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
-                      )}
+                      {/* On mobile, summary/tags span full width below (to avoid an empty left column under the cover). */}
+                      <div className="hidden sm:block">
+                        {metadata.summary ? (
+                          <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-3">
+                            {metadata.summary}
+                          </p>
+                        ) : (
+                          <p className="mt-2 text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
+                        )}
 
-                      {tags.length > 0 ? (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {tags.map((fullTag) => (
-                            <Badge
-                              key={fullTag}
-                              variant="secondary"
-                              className="cursor-pointer max-w-full"
-                              title={fullTag}
-                              onClick={() => handleTagClick(fullTag)}
-                            >
-                              <span className="truncate">{stripNamespace(fullTag)}</span>
-                            </Badge>
-                          ))}
-                        </div>
-                      ) : null}
+                        {tags.length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {tags.map((fullTag) => (
+                              <Badge
+                                key={fullTag}
+                                variant="secondary"
+                                className="cursor-pointer max-w-full"
+                                title={fullTag}
+                                onClick={() => handleTagClick(fullTag)}
+                              >
+                                <span className="truncate">{stripNamespace(fullTag)}</span>
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
+                  </div>
+
+                  {/* Mobile: show summary/tags full width (not constrained to the title column). */}
+                  <div className="sm:hidden w-full">
+                    {metadata.summary ? (
+                      <p className="text-sm text-muted-foreground max-w-3xl line-clamp-3">
+                        {metadata.summary}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
+                    )}
+
+                    {tags.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2 w-full">
+                        {tags.map((fullTag) => (
+                          <Badge
+                            key={fullTag}
+                            variant="secondary"
+                            className="cursor-pointer max-w-full"
+                            title={fullTag}
+                            onClick={() => handleTagClick(fullTag)}
+                          >
+                            <span className="truncate">{stripNamespace(fullTag)}</span>
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   {/* Desktop/tablet actions; mobile uses the bottom action bar */}
