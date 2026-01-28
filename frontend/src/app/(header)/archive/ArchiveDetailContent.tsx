@@ -394,6 +394,27 @@ export function ArchiveDetailContent() {
                         </h1>
                       </div>
 
+                      {/* Mobile: compact stats under the title (desktop keeps the cards below). */}
+                      <div className="sm:hidden mt-2">
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          <span className="tabular-nums">
+                            {t('archive.pageCount')} {metadata.pagecount}
+                          </span>
+                          <span className="text-muted-foreground/60">•</span>
+                          <span className="tabular-nums truncate" title={metadata.updated_at}>
+                            {t('archive.updatedAt')} {metadata.updated_at || t('archive.unknown')}
+                          </span>
+                          <span className="text-muted-foreground/60">•</span>
+                          <span className="tabular-nums">
+                            {t('archive.progress')} {Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}%
+                          </span>
+                        </div>
+                        <Progress
+                          className="mt-2 h-1.5"
+                          value={Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}
+                        />
+                      </div>
+
                       {/* On mobile, summary/tags span full width below (to avoid an empty left column under the cover). */}
                       <div className="hidden sm:block">
                         {metadata.summary ? (
@@ -533,7 +554,7 @@ export function ArchiveDetailContent() {
                   </div>
                 </div>
 
-                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                <div className="mt-4 hidden sm:grid gap-2 sm:grid-cols-3">
                   <div className="rounded-xl border bg-background/60 p-3">
                     <p className="text-xs text-muted-foreground">{t('archive.pageCount')}</p>
                     <p className="mt-0.5 text-xl font-semibold tabular-nums">{metadata.pagecount}</p>

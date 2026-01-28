@@ -13,6 +13,7 @@ import { Progress } from '@/components/ui/progress';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import {
   Dialog,
   DialogBody,
@@ -37,7 +38,7 @@ import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/utils/logger';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import Image from 'next/image';
@@ -54,6 +55,7 @@ function TankoubonDetailContent() {
   const [archivesLoading, setArchivesLoading] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
@@ -460,55 +462,72 @@ function TankoubonDetailContent() {
         <div className="relative mb-8">
           <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
             <div className="p-4 md:p-5">
+              {/* Mobile: keep hero clean; actions live in a bottom sheet. */}
+              <div className="sm:hidden absolute right-4 top-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 w-9 p-0"
+                  aria-label={t('common.actions')}
+                  onClick={() => setMobileActionsOpen(true)}
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </div>
+
               <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-4">
-                  <div className="relative h-40 w-28 shrink-0 overflow-hidden rounded-xl border bg-muted md:h-52 md:w-36">
+                  <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
                     <Image
                       src={coverUrl}
                       alt={tankoubon.name}
                       fill
                       className="object-cover"
-                      sizes="(max-width: 768px) 112px, 144px"
+                      sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
                       // Tankoubon thumbnail endpoint may redirect (to assets or archive thumbnail),
                       // and may serve non-avif images; bypass optimizer to avoid strict content-type checks.
                       unoptimized
                     />
                   </div>
 
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-3">
                     <Badge className="bg-primary">
                       <BookOpen className="w-3 h-3 mr-1" />
                       {t('tankoubon.collection')}
                     </Badge>
-                    <h1 className="text-xl md:text-2xl font-bold tracking-tight break-words">
+                    <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight break-words">
                       {tankoubon.name}
                     </h1>
                   </div>
 
-                  {tankoubon.summary ? (
-                    <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-2">
-                      {tankoubon.summary}
-                    </p>
-                  ) : null}
+                  {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}
+                  <div className="hidden sm:block">
+                    {tankoubon.summary ? (
+                      <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-2">
+                        {tankoubon.summary}
+                      </p>
+                    ) : null}
 
-                  {allTags.length > 0 ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {allTags.map((tag, index) => (
-                        <Badge key={index} variant="secondary" className="max-w-full" title={tag}>
-                          <span className="truncate">{displayTag(tag)}</span>
-                        </Badge>
-                      ))}
-                    </div>
-                  ) : null}
+                    {allTags.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {allTags.map((tag, index) => (
+                          <Badge key={index} variant="secondary" className="max-w-full" title={tag}>
+                            <span className="truncate">{displayTag(tag)}</span>
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                {/* Desktop/tablet actions; mobile actions are in the sheet. */}
+                <div className="hidden sm:flex shrink-0 flex-wrap items-center gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className={`px-3 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                    className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
                     title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
                     disabled={favoriteLoading}
                     onClick={handleFavoriteClick}
@@ -536,6 +555,25 @@ function TankoubonDetailContent() {
                 </div>
               </div>
 
+              {/* Mobile: summary/tags span full width (avoid an empty left column under the cover). */}
+              <div className="sm:hidden w-full">
+                {tankoubon.summary ? (
+                  <p className="text-sm text-muted-foreground max-w-3xl line-clamp-2">
+                    {tankoubon.summary}
+                  </p>
+                ) : null}
+
+                {allTags.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2 w-full">
+                    {allTags.map((tag, index) => (
+                      <Badge key={index} variant="secondary" className="max-w-full" title={tag}>
+                        <span className="truncate">{displayTag(tag)}</span>
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
               <div className="mt-4 grid gap-2 sm:grid-cols-3">
                 <div className="rounded-xl border bg-background/60 p-3">
                   <p className="text-xs text-muted-foreground">{t('tankoubon.archiveCount')}</p>
@@ -556,6 +594,75 @@ function TankoubonDetailContent() {
             </div>
           </div>
         </div>
+
+        <Sheet open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
+          <SheetContent
+            side="bottom"
+            className="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-h-[85vh] overflow-y-auto rounded-t-xl sm:hidden"
+          >
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" />
+            <SheetHeader className="mb-3">
+              <SheetTitle>{t('common.actions')}</SheetTitle>
+              <div className="text-sm text-muted-foreground line-clamp-2">{tankoubon.name}</div>
+            </SheetHeader>
+
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  setAddArchiveDialogOpen(true);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t('tankoubon.addArchive')}
+              </Button>
+
+              <Button
+                variant="outline"
+                className={`w-full justify-start ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                onClick={async () => {
+                  await handleFavoriteClick();
+                  setMobileActionsOpen(false);
+                }}
+                disabled={favoriteLoading}
+              >
+                <Heart className={`w-4 h-4 mr-2 ${isFavorite ? 'fill-current' : ''}`} />
+                {favoriteLoading ? t('common.loading') : isFavorite ? t('common.unfavorite') : t('common.favorite')}
+              </Button>
+
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  setEditDialogOpen(true);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                {t('common.edit')}
+              </Button>
+
+              <Button
+                variant="destructive"
+                className="w-full justify-start"
+                onClick={() => {
+                  setDeleteDialogOpen(true);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                {t('common.delete')}
+              </Button>
+
+              <Button variant="outline" className="w-full justify-start" onClick={() => setMobileActionsOpen(false)}>
+                <X className="w-4 h-4 mr-2" />
+                {t('common.close')}
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
 
         {/* Archives section */}
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
