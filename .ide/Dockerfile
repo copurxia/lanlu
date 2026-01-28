@@ -1,4 +1,4 @@
-FROM ubuntu:latest
+FROM debian:bookworm-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Asia/Shanghai
@@ -12,8 +12,7 @@ RUN set -eux; \
   apt-get install -y --no-install-recommends \
     ca-certificates curl git wget unzip zip xz-utils \
     build-essential clang ninja-build \
-    libarchive-dev libavif-dev \
-    gnupg dirmngr; \
+    libarchive-dev libavif-dev; \
   rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).
@@ -37,21 +36,18 @@ RUN set -eux; \
   corepack prepare pnpm@10.27.0 --activate; \
   pnpm -v
 
-# Install xmake via apt. If not in the base repo, add the official xmake PPA (still apt-based).
+# Install xmake from official GitHub release tarball (Ubuntu PPA doesn't apply to Debian).
 RUN set -eux; \
-  if ! command -v xmake >/dev/null 2>&1; then \
-    apt-get update; \
-    if ! apt-get install -y --no-install-recommends xmake; then \
-      codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"; \
-      : "${codename:=jammy}"; \
-      mkdir -p /etc/apt/keyrings; \
-      curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xC8CA50B566BFBA052B13B9A770AF26A4DCBD1EB4" \
-        | gpg --dearmor -o /etc/apt/keyrings/xmake-io-xmake.gpg; \
-      echo "deb [signed-by=/etc/apt/keyrings/xmake-io-xmake.gpg] http://ppa.launchpad.net/xmake-io/xmake/ubuntu ${codename} main" \
-        > /etc/apt/sources.list.d/xmake-io-xmake.list; \
-      apt-get update; \
-      apt-get install -y --no-install-recommends xmake; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*; \
-  fi; \
+  XMAKE_VERSION="2.9.8"; \
+  arch="$(dpkg --print-architecture)"; \
+  case "$arch" in \
+    amd64) xmake_arch="x86_64" ;; \
+    arm64) xmake_arch="aarch64" ;; \
+    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
+  esac; \
+  curl -fsSLO "https://github.com/xmake-io/xmake/releases/download/v${XMAKE_VERSION}/xmake-v${XMAKE_VERSION}.linux.${xmake_arch}.tar.gz"; \
+  tar -xzf "xmake-v${XMAKE_VERSION}.linux.${xmake_arch}.tar.gz"; \
+  rm -f "xmake-v${XMAKE_VERSION}.linux.${xmake_arch}.tar.gz"; \
+  mv "xmake-v${XMAKE_VERSION}.linux.${xmake_arch}" /opt/xmake; \
+  ln -sf /opt/xmake/xmake /usr/local/bin/xmake; \
   xmake --version
