@@ -1,9 +1,23 @@
-FROM ubuntu
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-RUN apt-get update && \
-    apt-get install -y ffmpeg ghostscript imagemagick tzdata libssl-dev libarchive13 libavif16 && \
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      ca-certificates \
+      ffmpeg \
+      ghostscript \
+      imagemagick \
+      tzdata \
+      libssl3 \
+      libarchive13 \
+      libavif15; \
+    arch="$(dpkg-architecture -qDEB_HOST_MULTIARCH)"; \
+    # Some runtimes/plugins dlopen("libssl.so") / dlopen("libcrypto.so") (unversioned),
+    # but Debian provides unversioned .so symlinks only in -dev packages.
+    ln -sf "/usr/lib/${arch}/libssl.so.3" "/usr/lib/${arch}/libssl.so"; \
+    ln -sf "/usr/lib/${arch}/libcrypto.so.3" "/usr/lib/${arch}/libcrypto.so"; \
     rm -rf /var/lib/apt/lists/*
 
 ENV LD_LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
