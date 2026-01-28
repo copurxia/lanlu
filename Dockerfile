@@ -13,8 +13,8 @@ RUN set -eux; \
       libssl3 \
       libarchive13 \
       libavif16; \
-    ssl3="$(dpkg -L libssl3 | grep -m1 '/libssl\.so\.3$')"; \
-    crypto3="$(dpkg -L libssl3 | grep -m1 '/libcrypto\.so\.3$')"; \
+    ssl3="$(dpkg -S 'libssl.so.3' | head -n1 | sed 's/.*: //')"; \
+    crypto3="$(dpkg -S 'libcrypto.so.3' | head -n1 | sed 's/.*: //')"; \
     ln -sf "${ssl3}" "$(dirname "${ssl3}")/libssl.so"; \
     ln -sf "${crypto3}" "$(dirname "${crypto3}")/libcrypto.so"; \
     rm -rf /var/lib/apt/lists/*
