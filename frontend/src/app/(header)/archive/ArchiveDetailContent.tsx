@@ -372,13 +372,13 @@ export function ArchiveDetailContent() {
               <div className="p-4 md:p-5">
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">
-                    <div className="relative h-40 w-28 shrink-0 overflow-hidden rounded-xl border bg-muted md:h-52 md:w-36">
+                    <div className="relative h-40 w-28 shrink-0 overflow-hidden rounded-xl border bg-muted md:h-64 md:w-44 lg:h-72 lg:w-48">
                       <Image
                         src={`/api/archives/${metadata.arcid}/thumbnail`}
                         alt={metadata.title || ''}
                         fill
                         className="object-cover"
-                        sizes="(max-width: 768px) 112px, 144px"
+                        sizes="(max-width: 640px) 112px, (max-width: 1024px) 176px, 192px"
                         unoptimized
                       />
                     </div>
@@ -420,7 +420,15 @@ export function ArchiveDetailContent() {
                     </div>
                   </div>
 
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  {/* Desktop/tablet actions; mobile uses the bottom action bar */}
+                  <div className="hidden sm:flex shrink-0 flex-wrap items-center gap-2">
+                    <Link href={`/reader?id=${metadata.arcid}`}>
+                      <Button size="sm" variant="secondary" className="h-9">
+                        <BookOpen className="w-4 h-4 mr-2" />
+                        {t('archive.startReading')}
+                      </Button>
+                    </Link>
+
                     <Button
                       size="sm"
                       variant="outline"
@@ -515,15 +523,6 @@ export function ArchiveDetailContent() {
                     </div>
                     <Progress className="mt-1.5" value={Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))} />
                   </div>
-                </div>
-
-                <div className="mt-4 hidden sm:block">
-                  <Link href={`/reader?id=${metadata.arcid}`}>
-                    <Button>
-                      <BookOpen className="w-4 h-4 mr-2" />
-                      {t('archive.startReading')}
-                    </Button>
-                  </Link>
                 </div>
               </div>
             </div>
