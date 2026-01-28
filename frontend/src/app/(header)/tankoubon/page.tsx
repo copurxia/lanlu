@@ -501,6 +501,24 @@ function TankoubonDetailContent() {
                     </h1>
                   </div>
 
+                  {/* Mobile: compact stats under the title (desktop keeps the cards below). */}
+                  <div className="sm:hidden mt-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span className="tabular-nums">
+                        {t('tankoubon.archiveCount')} {archiveCount}
+                      </span>
+                      <span className="text-muted-foreground/60">•</span>
+                      <span className="tabular-nums">
+                        {t('tankoubon.totalPagesLabel')} {totalPages}
+                      </span>
+                      <span className="text-muted-foreground/60">•</span>
+                      <span className="tabular-nums">
+                        {t('tankoubon.progress')} {progressPercent}%
+                      </span>
+                    </div>
+                    <Progress className="mt-2 h-1.5" value={progressPercent} />
+                  </div>
+
                   {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}
                   <div className="hidden sm:block">
                     {tankoubon.summary ? (
@@ -553,7 +571,7 @@ function TankoubonDetailContent() {
                     <Trash2 className="w-4 h-4" />
                   </Button>
                 </div>
-              </div>
+                </div>
 
               {/* Mobile: summary/tags span full width (avoid an empty left column under the cover). */}
               <div className="sm:hidden w-full">
@@ -574,7 +592,7 @@ function TankoubonDetailContent() {
                 ) : null}
               </div>
 
-              <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              <div className="mt-4 hidden sm:grid gap-2 sm:grid-cols-3">
                 <div className="rounded-xl border bg-background/60 p-3">
                   <p className="text-xs text-muted-foreground">{t('tankoubon.archiveCount')}</p>
                   <p className="mt-0.5 text-xl font-semibold tabular-nums">{archiveCount}</p>
