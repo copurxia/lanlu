@@ -12,7 +12,7 @@ RUN set -eux; \
       tzdata \
       libssl3 \
       libarchive13 \
-      libavif15; \
+      libavif16; \
     ssl3="$(dpkg -L libssl3 | grep -m1 '/libssl\.so\.3$')"; \
     crypto3="$(dpkg -L libssl3 | grep -m1 '/libcrypto\.so\.3$')"; \
     ln -sf "${ssl3}" "$(dirname "${ssl3}")/libssl.so"; \
