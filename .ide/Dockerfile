@@ -36,18 +36,9 @@ RUN set -eux; \
   corepack prepare pnpm@10.27.0 --activate; \
   pnpm -v
 
-# Install xmake from official GitHub release tarball (Ubuntu PPA doesn't apply to Debian).
+# Install xmake using the official installer (tracks upstream; no pinned version).
+# The installer defaults to PREFIX=~/.local, so link it into /usr/local/bin for subsequent steps.
 RUN set -eux; \
-  XMAKE_VERSION="2.9.8"; \
-  arch="$(dpkg --print-architecture)"; \
-  case "$arch" in \
-    amd64) xmake_arch="x86_64" ;; \
-    arm64) xmake_arch="aarch64" ;; \
-    *) echo "Unsupported arch: $arch" >&2; exit 1 ;; \
-  esac; \
-  curl -fsSLO "https://github.com/xmake-io/xmake/releases/download/v${XMAKE_VERSION}/xmake-v${XMAKE_VERSION}.linux.${xmake_arch}.tar.gz"; \
-  tar -xzf "xmake-v${XMAKE_VERSION}.linux.${xmake_arch}.tar.gz"; \
-  rm -f "xmake-v${XMAKE_VERSION}.linux.${xmake_arch}.tar.gz"; \
-  mv "xmake-v${XMAKE_VERSION}.linux.${xmake_arch}" /opt/xmake; \
-  ln -sf /opt/xmake/xmake /usr/local/bin/xmake; \
+  curl -fsSL https://xmake.io/shget.text | bash; \
+  ln -sf /root/.local/bin/xmake /usr/local/bin/xmake; \
   xmake --version
