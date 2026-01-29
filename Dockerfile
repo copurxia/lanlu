@@ -4,7 +4,7 @@ WORKDIR /app
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends \
+    apt-get install -y \
       ca-certificates \
       ffmpeg \
       ghostscript \
