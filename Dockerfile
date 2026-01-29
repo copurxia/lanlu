@@ -1,4 +1,4 @@
-FROM debian:trixie-slim
+FROM ubuntu:latest
 
 WORKDIR /app
 
