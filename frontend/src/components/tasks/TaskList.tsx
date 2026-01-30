@@ -10,6 +10,7 @@ import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Spinner } from '@/components/ui/spinner';
 import { Pagination } from '@/components/ui/pagination';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   Play,
   Square,
@@ -24,6 +25,21 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useToast } from '@/hooks/use-toast';
 
+const ALLOWED_FILTERS = ['all', 'pending', 'running', 'completed', 'failed'] as const;
+type AllowedFilter = (typeof ALLOWED_FILTERS)[number];
+
+function normalizeFilter(value: string | null): AllowedFilter {
+  if (!value) return 'all';
+  return (ALLOWED_FILTERS as readonly string[]).includes(value) ? (value as AllowedFilter) : 'all';
+}
+
+function normalizePageIndex(value: string | null): number {
+  if (!value) return 0;
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return 0;
+  return parsed - 1;
+}
+
 interface TaskListProps {
   className?: string;
 }
@@ -32,20 +48,49 @@ export function TaskList({ className }: TaskListProps) {
   const { t } = useLanguage();
   const { confirm } = useConfirmContext();
   const { success: showSuccess } = useToast();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Pagination state
-  const [currentPage, setCurrentPage] = useState(0);
+  const [currentPage, setCurrentPage] = useState(() => normalizePageIndex(searchParams.get('page')));
   const [pageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
   const [totalAll, setTotalAll] = useState<number | null>(null);
 
   // Filter state
-  const [activeFilter, setActiveFilter] = useState('all');
+  const [activeFilter, setActiveFilter] = useState<AllowedFilter>(() =>
+    normalizeFilter(searchParams.get('tab'))
+  );
+
+  const updateUrl = useCallback(
+    (nextFilter: AllowedFilter, nextPageIndex: number) => {
+      const params = new URLSearchParams(searchParams.toString());
+      params.set('tab', nextFilter);
+      params.set('page', String(nextPageIndex + 1));
+
+      const nextQuery = params.toString();
+      const currentQuery = searchParams.toString();
+      if (nextQuery === currentQuery) return;
+
+      router.replace(`${pathname}?${nextQuery}`, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
+
+  // Sync state from URL (supports refresh + back/forward navigation).
+  useEffect(() => {
+    const urlFilter = normalizeFilter(searchParams.get('tab'));
+    const urlPageIndex = normalizePageIndex(searchParams.get('page'));
+
+    if (urlFilter !== activeFilter) setActiveFilter(urlFilter);
+    if (urlPageIndex !== currentPage) setCurrentPage(urlPageIndex);
+  }, [activeFilter, currentPage, searchParams]);
 
   const fetchTasks = useCallback(
     async (page: number, isAutoRefresh = false) => {
@@ -105,8 +150,15 @@ export function TaskList({ className }: TaskListProps) {
   };
 
   const handleFilterChange = (value: string) => {
-    setActiveFilter(value);
+    const nextFilter = normalizeFilter(value);
+    setActiveFilter(nextFilter);
     setCurrentPage(0); // keep pagination consistent when switching tabs
+    updateUrl(nextFilter, 0);
+  };
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    updateUrl(activeFilter, page);
   };
 
   const handleCancelTask = async (taskId: number) => {
@@ -478,7 +530,7 @@ export function TaskList({ className }: TaskListProps) {
           <Pagination
             currentPage={currentPage}
             totalPages={totalPages}
-            onPageChange={(page) => setCurrentPage(page)}
+            onPageChange={handlePageChange}
           />
         </div>
       )}
