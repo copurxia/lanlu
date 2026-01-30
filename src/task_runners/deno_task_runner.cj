@@ -517,13 +517,25 @@ public class DenoTaskRunner {
     }
 
     /**
-     * 解析插件输出的 NDJSON 消息
-     * 返回: (type, progress, message, success, data/error)
+     * Parse a single NDJSON line from plugin stdout.
+     *
+     * Supports both:
+     * - Plugin messages: progress/log/data/result
+     * - Host RPC requests: call
+     *
+     * Returns:
+     * - kind:
+     *   - "call": a=id, b=method, payload=paramsRawJson
+     *   - "progress": progress, payload=message
+     *   - "log": a=level, payload=message
+     *   - "data": a=key, payload=valueRawJson
+     *   - "result": success, payload=dataRawJson (if success) OR error string (if !success)
+     *   - "raw"/"unknown": payload=original line
      */
-    private static func parsePluginMessage(line: String): (String, Int32, String, Bool, String) {
+    private static func parseNdjsonLine(line: String): (String, String, String, Int32, Bool, String) {
         let trimmed = line.trimAscii()
         if (trimmed.size == 0) {
-            return ("", 0, "", false, "")
+            return ("", "", "", 0, false, "")
         }
 
         try {
@@ -532,10 +544,13 @@ public class DenoTaskRunner {
             let r = JsonReader(buf)
 
             if (r.peek() != Some(BeginObject)) {
-                return ("raw", 0, trimmed, false, "")
+                return ("raw", "", "", 0, false, trimmed)
             }
 
             var msgType = ""
+            var id = ""
+            var method = ""
+            var paramsRaw = "{}"
             var progress = 0i32
             var message = ""
             var level = ""
@@ -550,6 +565,9 @@ public class DenoTaskRunner {
                 let n = r.readName()
                 match (n) {
                     case "type" => msgType = r.readValue<String>().trimAscii()
+                    case "id" => id = r.readValue<String>().trimAscii()
+                    case "method" => method = r.readValue<String>().trimAscii()
+                    case "params" => paramsRaw = String.fromUtf8(r.readValueBytes())
                     case "progress" =>
                         let p = r.readValue<String>().trimAscii()
                         try { progress = Int32.parse(p) } catch (_: Exception) { progress = 0i32 }
@@ -568,56 +586,17 @@ public class DenoTaskRunner {
             r.endObject()
 
             match (msgType) {
-                case "progress" => return ("progress", progress, message, false, "")
-                case "log" => return ("log", 0, "[${level}] ${message}", false, "")
-                case "data" => return ("data", 0, key, false, valueRaw)
-                case "result" => return ("result", 0, "", success, if (success) { dataRaw } else { error })
-                case _ => return ("unknown", 0, trimmed, false, "")
+                case "call" =>
+                    if (id.size == 0 || method.size == 0) { return ("unknown", "", "", 0, false, trimmed) }
+                    return ("call", id, method, 0, false, paramsRaw)
+                case "progress" => return ("progress", "", "", progress, false, message)
+                case "log" => return ("log", level, "", 0, false, message)
+                case "data" => return ("data", key, "", 0, false, valueRaw)
+                case "result" => return ("result", "", "", 0, success, if (success) { dataRaw } else { error })
+                case _ => return ("unknown", "", "", 0, false, trimmed)
             }
         } catch (_: Exception) {
-            return ("raw", 0, trimmed, false, "")
-        }
-    }
-
-    /**
-     * 解析插件发起的 Host RPC 调用请求（NDJSON 单行）
-     * 格式：
-     *   {"type":"call","id":"...","method":"tags.list","params":{...}}
-     */
-    private static func parseHostCallRequest(line: String): Option<(String, String, String)> {
-        let trimmed = line.trimAscii()
-        if (trimmed.size == 0) { return None }
-        if (!trimmed.startsWith("{")) { return None }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) { return None }
-
-            var msgType = ""
-            var id = ""
-            var method = ""
-            var paramsRaw = "{}"
-
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let n = r.readName()
-                match (n) {
-                    case "type" => msgType = r.readValue<String>().trimAscii()
-                    case "id" => id = r.readValue<String>().trimAscii()
-                    case "method" => method = r.readValue<String>().trimAscii()
-                    case "params" => paramsRaw = String.fromUtf8(r.readValueBytes())
-                    case _ => r.skip()
-                }
-            }
-            r.endObject()
-
-            if (msgType != "call") { return None }
-            if (id.size == 0 || method.size == 0) { return None }
-            return Some((id, method, paramsRaw))
-        } catch (_: Exception) {
-            return None
+            return ("raw", "", "", 0, false, trimmed)
         }
     }
 
@@ -649,7 +628,7 @@ public class DenoTaskRunner {
         try { return Int64.parse(v) } catch (_: Exception) { return defaultValue }
     }
 
-    private static func handleHostRpcCall(method: String, paramsRaw: String): (Bool, String, String) {
+    private static func handleHostRpcCall(method: String, paramsRaw: String, pluginNamespace: String): (Bool, String, String) {
         // returns: (success, dataJson, error)
         let m = method.trimAscii()
         let paramsTrimmed = paramsRaw.trimAscii()
@@ -700,10 +679,13 @@ public class DenoTaskRunner {
 
         func ensureUnderRuntimeRoot(pluginDir: String): Bool {
             let root = PluginPaths.getPluginRuntimeRoot().trimAscii()
-            let p = pluginDir.trimAscii()
+            var p = pluginDir.trimAscii()
             if (root.size == 0 || p.size == 0) { return false }
-            // Basic prefix check; runtimeRoot is an absolute/relative path string.
-            return p.startsWith(root)
+            // Avoid false positives like "/cache/plugins_evil" matching "/cache/plugins".
+            var cleanRoot = root
+            while (cleanRoot.size > 1 && cleanRoot.endsWith("/")) { cleanRoot = cleanRoot[0..(cleanRoot.size - 1)] }
+            while (p.size > 1 && p.endsWith("/")) { p = p[0..(p.size - 1)] }
+            return p == cleanRoot || p.startsWith("${cleanRoot}/")
         }
 
         if (m == "tags.list") {
@@ -894,11 +876,24 @@ public class DenoTaskRunner {
                 }
             } catch (_: Exception) {}
 
-            if (archiveId.size == 0 || entryName.trimAscii().size == 0 || pluginDir.size == 0) {
-                return (false, "{}", "missing archiveId/entryName/pluginDir")
+            if (archiveId.size == 0 || entryName.trimAscii().size == 0) {
+                return (false, "{}", "missing archiveId/entryName")
             }
+
+            // Never trust plugin-provided pluginDir; derive it from the caller namespace.
+            let expectedPluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${pluginNamespace.trimAscii()}"
+            if (pluginNamespace.trimAscii().size == 0) {
+                return (false, "{}", "missing pluginNamespace context")
+            }
+            if (pluginDir.size > 0) {
+                // Backward-compatible: accept provided pluginDir only if it matches the expected one.
+                if (pluginDir.trimAscii() != expectedPluginDir) {
+                    return (false, "{}", "invalid pluginDir (must match expected plugin runtime dir)")
+                }
+            }
+            pluginDir = expectedPluginDir
             if (!ensureUnderRuntimeRoot(pluginDir)) {
-                return (false, "{}", "invalid pluginDir (must be under runtime root)")
+                return (false, "{}", "invalid pluginDir (not under runtime root)")
             }
 
             let resolved = resolveArchiveActualPath(archiveId)
@@ -913,7 +908,13 @@ public class DenoTaskRunner {
                     sub = normalizeSafeRelPath(sub)
                     if (sub.size == 0) { sub = "cache" }
 
-                    let outPath = "${pluginDir}/${sub}/${archiveId}/${safeEntryRel}"
+                    // Prevent traversal via archiveId. Require it to be a safe relative path segment.
+                    let safeArchiveId = normalizeSafeRelPath(archiveId)
+                    if (safeArchiveId.size == 0 || safeArchiveId != archiveId.trimAscii()) {
+                        return (false, "{}", "invalid archiveId")
+                    }
+
+                    let outPath = "${pluginDir}/${sub}/${safeArchiveId}/${safeEntryRel}"
                     let outFile = Path(outPath)
                     try {
                         if (!overwrite && exists(outFile)) {
@@ -954,7 +955,8 @@ public class DenoTaskRunner {
         command: String,
         args: ArrayList<String>,
         inputJson: String,
-        parentTaskId: Int64
+        parentTaskId: Int64,
+        pluginNamespace: String
     ): DenoExecutionResult {
         let logger = getLogger("deno_task")
 
@@ -994,7 +996,6 @@ public class DenoTaskRunner {
             var finalSuccess = false
             var finalData = ""
             var finalError = ""
-            var dataCollector = ArrayList<String>()
 
             for (line in reader.lines()) {
                 let trimmed = line.trimAscii()
@@ -1002,39 +1003,38 @@ public class DenoTaskRunner {
                     continue
                 }
 
-                // Host RPC: plugin can request backend operations via NDJSON "call".
-                match (parseHostCallRequest(trimmed)) {
-                    case Some((id, method, paramsRaw)) =>
-                        let (ok, dataJson, err) = handleHostRpcCall(method, paramsRaw)
+                let (kind, a, b, progress, success, payload) = parseNdjsonLine(trimmed)
+
+                match (kind) {
+                    case "call" =>
+                        let id = a
+                        let method = b
+                        let paramsRaw = payload
+                        let (ok, dataJson, err) = handleHostRpcCall(method, paramsRaw, pluginNamespace)
                         let respLine = buildHostCallResultLine(id, ok, dataJson, err)
                         process.stdInPipe.write(respLine.toArray())
                         process.stdInPipe.write("\n".toArray())
                         process.stdInPipe.flush()
                         continue
-                    case None => ()
-                }
-
-                let (msgType, progress, message, success, data) = parsePluginMessage(trimmed)
-
-                match (msgType) {
                     case "progress" =>
-                        TaskModel.updateTaskProgress(taskId, progress, message)
-                        TaskIO.appendLog(taskId, "[PROGRESS] ${progress}% - ${message}")
-                        mirrorParentProgress(parentTaskId, taskId, progress, message)
+                        TaskModel.updateTaskProgress(taskId, progress, payload)
+                        TaskIO.appendLog(taskId, "[PROGRESS] ${progress}% - ${payload}")
+                        mirrorParentProgress(parentTaskId, taskId, progress, payload)
                     case "log" =>
-                        TaskIO.appendLog(taskId, message)
-                        mirrorParentLog(parentTaskId, taskId, message)
+                        let level = a.trimAscii()
+                        let msg = if (level.size > 0) { "[${level}] ${payload}" } else { payload }
+                        TaskIO.appendLog(taskId, msg)
+                        mirrorParentLog(parentTaskId, taskId, msg)
                     case "data" =>
-                        // message 是 key，data 是 value
-                        TaskIO.appendLog(taskId, "[DATA] ${message}")
-                        mirrorParentLog(parentTaskId, taskId, "[DATA] ${message}")
-                        dataCollector.add(data)
+                        let key = a
+                        TaskIO.appendLog(taskId, "[DATA] ${key}")
+                        mirrorParentLog(parentTaskId, taskId, "[DATA] ${key}")
                     case "result" =>
                         finalSuccess = success
                         if (success) {
-                            finalData = data
+                            finalData = payload
                         } else {
-                            finalError = data
+                            finalError = payload
                         }
                     case _ =>
                         // 未知格式，作为原始日志记录
@@ -1121,7 +1121,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        return executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
+        return executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace)
     }
 
     /**
@@ -1163,7 +1163,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace)
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
 
@@ -1334,7 +1334,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace)
         // 保留 loginCookiesJson 用于后续处理
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
@@ -1433,7 +1433,7 @@ public class DenoTaskRunner {
             url
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, parentTaskId)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, parentTaskId, plugin.namespace)
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
 

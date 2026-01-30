@@ -67,8 +67,14 @@ export interface PluginInput {
 export abstract class BasePlugin {
   protected input: PluginInput | null = null;
   private rpcSeq = 0;
+  private stdinLineReader: StdinLineReader | null = null;
 
   abstract getPluginInfo(): PluginInfo;
+
+  private getLineReader(): StdinLineReader {
+    if (!this.stdinLineReader) this.stdinLineReader = new StdinLineReader();
+    return this.stdinLineReader;
+  }
 
   /**
    * 从 stdin 读取输入（逐行读取，避免等待 EOF）
@@ -109,24 +115,8 @@ export abstract class BasePlugin {
    * Read a single NDJSON line from stdin (used for host RPC responses).
    */
   private async readLineFromStdin(): Promise<string> {
-    const reader = Deno.stdin.readable.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const idx = buffer.indexOf('\n');
-      if (idx !== -1) {
-        const line = buffer.slice(0, idx).trim();
-        reader.releaseLock();
-        return line;
-      }
-    }
-
-    reader.releaseLock();
-    return buffer.trim();
+    // Important: keep a persistent buffer so we don't drop lines when a single read contains multiple NDJSON messages.
+    return this.getLineReader().readLine();
   }
 
   /**
@@ -300,6 +290,36 @@ export abstract class BasePlugin {
       return JSON.stringify(value);
     } catch {
       return '"<unserializable>"';
+    }
+  }
+}
+
+class StdinLineReader {
+  private reader: ReadableStreamDefaultReader<Uint8Array>;
+  private decoder = new TextDecoder();
+  private buffer = '';
+
+  constructor() {
+    this.reader = Deno.stdin.readable.getReader();
+  }
+
+  async readLine(): Promise<string> {
+    while (true) {
+      const idx = this.buffer.indexOf('\n');
+      if (idx !== -1) {
+        const line = this.buffer.slice(0, idx).replace(/\r$/, '').trim();
+        this.buffer = this.buffer.slice(idx + 1);
+        return line;
+      }
+
+      const { done, value } = await this.reader.read();
+      if (done) {
+        const remaining = this.buffer.replace(/\r$/, '').trim();
+        this.buffer = '';
+        return remaining;
+      }
+
+      this.buffer += this.decoder.decode(value, { stream: true });
     }
   }
 }
