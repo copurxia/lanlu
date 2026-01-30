@@ -11,29 +11,6 @@ import lanlu.utils.*
  */
 public class UserTankoubonFavoriteDao {
     /**
-     * 根据 tankoubon_id 获取 tankoubons 表内部 ID
-     */
-    private static func getTankoubonInternalId(conn: Connection, tankoubonId: String): Int64 {
-        try {
-            let stmt = conn.prepareStatement("SELECT id FROM tankoubons WHERE tankoubon_id = ?")
-            try {
-                stmt.set(0, tankoubonId)
-                let rs = stmt.query()
-                try {
-                    if (rs.next()) {
-                        return rs.getOrNull<Int64>(0) ?? 0
-                    }
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
-            }
-        } catch (_: Exception) {}
-        return 0
-    }
-
-    /**
      * 添加收藏
      */
     public static func addFavorite(userId: Int64, tankoubonId: String): Bool {
@@ -43,7 +20,7 @@ public class UserTankoubonFavoriteDao {
             case Some(conn) =>
                 
                 try {
-                    let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
+                    let tankInternalId = TankoubonDao.getTankoubonInternalId(conn, tankoubonId)
                     if (tankInternalId <= 0) {
                         return false
                     }
@@ -83,7 +60,7 @@ public class UserTankoubonFavoriteDao {
             case Some(conn) =>
                 
                 try {
-                    let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
+                    let tankInternalId = TankoubonDao.getTankoubonInternalId(conn, tankoubonId)
                     if (tankInternalId <= 0) {
                         return false
                     }
@@ -121,7 +98,7 @@ public class UserTankoubonFavoriteDao {
             case Some(conn) =>
                 
                 try {
-                    let tankInternalId = getTankoubonInternalId(conn, tankoubonId)
+                    let tankInternalId = TankoubonDao.getTankoubonInternalId(conn, tankoubonId)
                     if (tankInternalId <= 0) {
                         return false
                     }

@@ -864,7 +864,7 @@ public class TankoubonDao {
     /**
      * 获取Tankoubon内部ID（从tankoubon_id）
      */
-    private static func getTankoubonInternalId(conn: Connection, tankoubonId: String): Int64 {
+    public static func getTankoubonInternalId(conn: Connection, tankoubonId: String): Int64 {
         try {
             let stmt = conn.prepareStatement("SELECT id FROM tankoubons WHERE tankoubon_id = ?")
             try {
