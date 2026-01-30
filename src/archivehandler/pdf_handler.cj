@@ -6,6 +6,7 @@ import std.collection.*
 import std.convert.*
 import lanlu.models.ArchiveTypes
 import lanlu.utils.{ArchiveUtils, DirectoryScanner}
+import lanlu.utils.FileUtils
 
 /**
  * PDF文件类型处理器
@@ -128,8 +129,9 @@ public class PdfHandler <: ArchiveHandler {
 
     private func extractPdfPage(pdfPath: String, pageNumber: Int32, outputPath: String): Bool {
         try {
-            let outputDir = getParentDirectory(outputPath)
-            if (!DirectoryScanner.directoryExists(outputDir)) {
+            let outputDir = FileUtils.getParentDirectory(outputPath)
+            // If outputPath has no parent (e.g. "out.jpg"), keep it in the current directory.
+            if (outputDir.size > 0 && !DirectoryScanner.directoryExists(outputDir)) {
                 Directory.create(outputDir, recursive: true)
             }
 
@@ -170,22 +172,4 @@ public class PdfHandler <: ArchiveHandler {
         return fileName.replace(" ", "_").replace(":", "_")
     }
 
-    private func getParentDirectory(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 1) {
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                if (i == 0 && parts[i].size == 0) {
-                    result += "/"
-                } else {
-                    if (result.size > 0 && result != "/") {
-                        result += "/"
-                    }
-                    result += parts[i]
-                }
-            }
-            return result
-        }
-        return "."
-    }
 }

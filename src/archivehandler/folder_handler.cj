@@ -5,6 +5,7 @@ import std.collection.*
 import lanlu.models.ArchiveTypes
 import lanlu.utils.DirectoryScanner
 import lanlu.utils.NaturalSort
+import lanlu.utils.FileUtils
 
 /**
  * 文件读取器 - 支持分块读取文件
@@ -136,8 +137,9 @@ public class FolderHandler <: ArchiveHandler {
             }
             let sourceData = File.readFrom(Path(sourcePath))
 
-            let outputDir = getParentDirectory(outputPath)
-            if (!DirectoryScanner.directoryExists(outputDir)) {
+            let outputDir = FileUtils.getParentDirectory(outputPath)
+            // If outputPath has no parent (e.g. "out.jpg"), keep it in the current directory.
+            if (outputDir.size > 0 && !DirectoryScanner.directoryExists(outputDir)) {
                 Directory.create(outputDir, recursive: true)
             }
 
@@ -274,25 +276,6 @@ public class FolderHandler <: ArchiveHandler {
         // 按文件名自然排序
         NaturalSort.sortTuples(result)
         return result.toArray()
-    }
-
-    private func getParentDirectory(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 1) {
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                if (i == 0 && parts[i].size == 0) {
-                    result += "/"
-                } else {
-                    if (result.size > 0 && result != "/") {
-                        result += "/"
-                    }
-                    result += parts[i]
-                }
-            }
-            return result
-        }
-        return "."
     }
 
     // ==================== 私有工具方法 - 媒体文件过滤 ====================

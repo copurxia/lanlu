@@ -4,6 +4,7 @@ import std.fs.*
 import std.collection.*
 import lanlu.models.ArchiveTypes
 import lanlu.utils.DirectoryScanner
+import lanlu.utils.FileUtils
 import epub.Epub
 
 /**
@@ -88,8 +89,9 @@ public class EpubHandler <: ArchiveHandler {
             let (exitCode, data, _) = extractEntryToStream(archivePath, entryName)
 
             if (exitCode == 0 && data.size > 0) {
-                let outputDir = getParentDirectory(outputPath)
-                if (!DirectoryScanner.directoryExists(outputDir)) {
+                let outputDir = FileUtils.getParentDirectory(outputPath)
+                // If outputPath has no parent (e.g. "out.xhtml"), keep it in the current directory.
+                if (outputDir.size > 0 && !DirectoryScanner.directoryExists(outputDir)) {
                     Directory.create(outputDir, recursive: true)
                 }
 
@@ -215,22 +217,4 @@ public class EpubHandler <: ArchiveHandler {
         }
     }
 
-    private func getParentDirectory(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 1) {
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                if (i == 0 && parts[i].size == 0) {
-                    result += "/"
-                } else {
-                    if (result.size > 0 && result != "/") {
-                        result += "/"
-                    }
-                    result += parts[i]
-                }
-            }
-            return result
-        }
-        return "."
-    }
 }

@@ -5,6 +5,7 @@ import std.collection.*
 import archive_ffi.Archive
 import lanlu.models.ArchiveTypes
 import lanlu.utils.DirectoryScanner
+import lanlu.utils.FileUtils
 import lanlu.utils.NaturalSort
 import lanlu.utils.getLogger
 
@@ -60,8 +61,9 @@ public class ArchiveFileHandler <: ArchiveHandler {
 
             if (exitCode == 0 && stdout.size > 0) {
                 // 确保输出目录存在
-                let outputDir = getParentDirectory(outputPath)
-                if (!directoryExists(outputDir)) {
+                let outputDir = FileUtils.getParentDirectory(outputPath)
+                // If outputPath has no parent (e.g. "out.jpg"), keep it in the current directory.
+                if (outputDir.size > 0 && !directoryExists(outputDir)) {
                     Directory.create(outputDir, recursive: true)
                 }
 
@@ -159,25 +161,6 @@ public class ArchiveFileHandler <: ArchiveHandler {
 
     private func directoryExists(path: String): Bool {
         return DirectoryScanner.directoryExists(path)
-    }
-
-    private func getParentDirectory(filePath: String): String {
-        let parts = filePath.split("/")
-        if (parts.size > 1) {
-            var result = ""
-            for (i in 0..parts.size - 1) {
-                if (i == 0 && parts[i].size == 0) {
-                    result += "/"
-                } else {
-                    if (result.size > 0 && result != "/") {
-                        result += "/"
-                    }
-                    result += parts[i]
-                }
-            }
-            return result
-        }
-        return "."
     }
 
     // ==================== 私有工具方法 - 媒体文件过滤 ====================
