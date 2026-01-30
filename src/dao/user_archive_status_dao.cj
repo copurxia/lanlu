@@ -525,20 +525,7 @@ public class UserArchiveStatusDao {
                         let rs = stmt.query()
                         try {
                             while (rs.next()) {
-                                let archive = ArchiveData()
-                                archive.id = rs.getOrNull<String>(0) ?? ""
-                                archive.filename = rs.getOrNull<String>(1) ?? ""
-                                archive.title = rs.getOrNull<String>(2) ?? ""
-                                archive.summary = rs.getOrNull<String>(3) ?? ""
-                                archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.created_at = rs.getOrNull<String>(5) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                                archive.last_read_time = rs.getOrNull<String>(10) ?? ""
-                                archive.progress = rs.getOrNull<Int32>(11) ?? 0
-                                archive.tags = rs.getOrNull<String>(12) ?? ""
+                                let archive = ArchiveDataMappers.fromArchivesWithTagsRow(rs)
                                 result.add(archive)
                             }
                         } finally {

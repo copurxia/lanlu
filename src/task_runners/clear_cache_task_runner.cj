@@ -5,8 +5,6 @@ import std.convert.*
 import std.time.*
 import std.collection.*
 import stdx.log.*
-import std.io.{ByteBuffer, readToEnd}
-import stdx.encoding.json.stream.*
 import lanlu.models.*
 import lanlu.utils.*
 
@@ -52,7 +50,7 @@ public class ClearCacheTaskRunner {
 
             // 准备输出结果
             let deletedSizeMB = totalDeletedSize / (1024 * 1024)
-            let successJson = "{\"success\":1,\"deleted_count\":${totalDeletedCount},\"deleted_size_mb\":${deletedSizeMB},\"skipped_count\":${totalSkippedCount},\"errors\":${errorsToJson(errors)}}"
+            let successJson = "{\"success\":1,\"deleted_count\":${totalDeletedCount},\"deleted_size_mb\":${deletedSizeMB},\"skipped_count\":${totalSkippedCount},\"errors\":${TaskRunnerUtils.errorsToJson(errors)}}"
 
             TaskIO.appendLog(taskId, "Cache cleanup completed: deleted=${totalDeletedCount} items, size=${deletedSizeMB}MB, skipped=${totalSkippedCount}")
             if (errors.size > 0) {
@@ -67,7 +65,7 @@ public class ClearCacheTaskRunner {
             logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
             TaskIO.appendLog(taskId, "FATAL ERROR: ${errorMsg}")
             TaskIO.appendLog(taskId, "Stack trace: ${e.toString()}")
-            fail(taskId, errorMsg)
+            TaskRunnerUtils.fail(taskId, errorMsg)
         }
     }
 
@@ -176,7 +174,7 @@ public class ClearCacheTaskRunner {
         let logger = getLogger("clear_cache")
         var result = CleanResult()
 
-        if (!directoryExists(dirPath)) {
+        if (!TaskRunnerUtils.directoryExists(dirPath)) {
             return result
         }
 
@@ -206,10 +204,10 @@ public class ClearCacheTaskRunner {
         result: CleanResult
     ): Unit {
         try {
-            let entries = listDirectory(dirPath)
+            let entries = TaskRunnerUtils.listDirectory(dirPath)
 
             for (entry in entries) {
-                let fullPath = joinPath(dirPath, entry)
+                let fullPath = TaskRunnerUtils.joinPath(dirPath, entry)
 
                 try {
                     let fileInfo = FileInfo(Path(fullPath))
@@ -228,7 +226,7 @@ public class ClearCacheTaskRunner {
                             if (dryRun) {
                                 result.skippedCount += 1
                             } else {
-                                if (removeFile(fullPath)) {
+                                if (TaskRunnerUtils.removeFile(fullPath)) {
                                     result.deletedCount += 1
                                     result.deletedSize += size
                                 } else {
@@ -251,11 +249,11 @@ public class ClearCacheTaskRunner {
      */
     private static func removeEmptyDirectories(dirPath: String, rootPath: String, result: CleanResult): Bool {
         try {
-            let entries = listDirectory(dirPath)
+            let entries = TaskRunnerUtils.listDirectory(dirPath)
 
             // 先递归处理子目录
             for (entry in entries) {
-                let fullPath = joinPath(dirPath, entry)
+                let fullPath = TaskRunnerUtils.joinPath(dirPath, entry)
                 let fileInfo = FileInfo(Path(fullPath))
 
                 if (fileInfo.isDirectory()) {
@@ -264,7 +262,7 @@ public class ClearCacheTaskRunner {
             }
 
             // 重新检查当前目录是否为空
-            let currentEntries = listDirectory(dirPath)
+            let currentEntries = TaskRunnerUtils.listDirectory(dirPath)
             if (currentEntries.size == 0 && dirPath != rootPath) {
                 // 目录为空且不是根目录，删除它
                 try {
@@ -281,18 +279,6 @@ public class ClearCacheTaskRunner {
     }
 
     /**
-     * 删除单个文件
-     */
-    private static func removeFile(path: String): Bool {
-        try {
-            remove(Path(path))
-            return true
-        } catch (_: Exception) {
-            return false
-        }
-    }
-
-    /**
      * 获取文件或目录的最后修改时间（Unix时间戳，秒）
      */
     private static func getLastModifiedTime(path: String): Int64 {
@@ -306,9 +292,9 @@ public class ClearCacheTaskRunner {
     private static func calculateDirectorySize(dirPath: String): Int64 {
         var totalSize: Int64 = 0
         try {
-            let entries = listDirectory(dirPath)
+            let entries = TaskRunnerUtils.listDirectory(dirPath)
             for (entry in entries) {
-                let fullPath = joinPath(dirPath, entry)
+                let fullPath = TaskRunnerUtils.joinPath(dirPath, entry)
                 let fileInfo = FileInfo(Path(fullPath))
                 if (fileInfo.isDirectory()) {
                     totalSize += calculateDirectorySize(fullPath)
@@ -322,36 +308,7 @@ public class ClearCacheTaskRunner {
         return totalSize
     }
 
-    private static func fail(taskId: Int64, message: String): Unit {
-        TaskRunnerOutput.fail(taskId, message)
-    }
-
-    private static func directoryExists(path: String): Bool {
-        return DirectoryScanner.directoryExists(path)
-    }
-
-    private static func listDirectory(path: String): Array<String> {
-        return DirectoryScanner.listDirectory(path)
-    }
-
-    private static func joinPath(base: String, part: String): String {
-        return DirectoryScanner.joinPath(base, part)
-    }
-
-    private static func errorsToJson(errors: ArrayList<String>): String {
-        if (errors.size == 0) {
-            return "[]"
-        }
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startArray()
-        for (e in errors) {
-            w.writeValue(e)
-        }
-        w.endArray()
-        w.flush()
-        return String.fromUtf8(readToEnd(out))
-    }
+    // Shared helpers live in TaskRunnerUtils.
 }
 
 /**
