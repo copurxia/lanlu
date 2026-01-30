@@ -11,6 +11,7 @@ import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import stdx.log.*
 import lanlu.dao.*
+import lanlu.archivehandler.*
 import lanlu.kv.*
 import lanlu.models.*
 import lanlu.utils.*
@@ -654,6 +655,57 @@ public class DenoTaskRunner {
         let paramsTrimmed = paramsRaw.trimAscii()
         let effectiveParams = if (paramsTrimmed.size > 0) { paramsTrimmed } else { "{}" }
 
+        // Resolve archiveId -> (archiveType, actualPath).
+        func resolveArchiveActualPath(archiveId: String): Option<(String, String)> {
+            let arcid = archiveId.trimAscii()
+            if (arcid.size == 0) { return None }
+
+            let archive = ArchiveDao.getArchiveById(arcid)
+            if (archive.id.size == 0) { return None }
+
+            let categoryId = archive.category_id
+            if (categoryId <= 0) { return None }
+            let basePath = match (CategoryDao.getCategoryByInternalId(categoryId)) {
+                case Some(cat) => cat.scanPath
+                case None => ""
+            }
+            if (basePath.trimAscii().size == 0) { return None }
+
+            let fullArchivePath = if (archive.relative_path.size > 0) {
+                "${basePath}/${archive.relative_path}/${archive.filename}"
+            } else {
+                "${basePath}/${archive.filename}"
+            }
+            let actualPath = FileUtils.resolvePath(fullArchivePath)
+            if (actualPath.trimAscii().size == 0) { return None }
+            return Some((archive.archive_type, actualPath))
+        }
+
+        func normalizeSafeRelPath(input: String): String {
+            // Convert to a safe relative path: drop leading '/', remove '.', '..' segments.
+            var s = input.trimAscii().replace("\\", "/")
+            while (s.startsWith("/")) { s = s[1..s.size] }
+            let parts = s.split("/")
+            var outParts = ArrayList<String>()
+            for (p in parts) {
+                let t = p.trimAscii()
+                if (t.size == 0 || t == ".") { continue }
+                if (t == "..") { continue }
+                // Avoid path separators.
+                if (t.contains("/") || t.contains("\\")) { continue }
+                outParts.add(t)
+            }
+            return String.join(outParts.toArray(), delimiter: "/")
+        }
+
+        func ensureUnderRuntimeRoot(pluginDir: String): Bool {
+            let root = PluginPaths.getPluginRuntimeRoot().trimAscii()
+            let p = pluginDir.trimAscii()
+            if (root.size == 0 || p.size == 0) { return false }
+            // Basic prefix check; runtimeRoot is an absolute/relative path string.
+            return p.startsWith(root)
+        }
+
         if (m == "tags.list") {
             var namespaceStr = ""
             var q = ""
@@ -772,6 +824,122 @@ public class DenoTaskRunner {
                 return (false, "{}", "merge failed")
             }
             return (true, "{\"merged\":true}", "")
+        }
+
+        if (m == "archive.listFiles") {
+            var archiveId = ""
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            let resolved = resolveArchiveActualPath(archiveId)
+            match (resolved) {
+                case None => return (false, "{}", "archive not found or path unresolved")
+                case Some((archiveType, actualPath)) =>
+                    let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+                    let entries = handler.listEntries(actualPath)
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archiveId").writeValue(archiveId)
+                    w.writeName("count").writeValue(Int64(entries.size))
+                    w.writeName("files")
+                    w.startArray()
+                    for (e in entries) { w.writeValue(e) }
+                    w.endArray()
+                    w.endObject()
+                    w.flush()
+                    return (true, String.fromUtf8(readToEnd(out)), "")
+            }
+        }
+
+        if (m == "archive.extractFileToCache") {
+            var archiveId = ""
+            var entryName = ""
+            var pluginDir = ""
+            var cacheSubdir = "cache"
+            var overwrite = true
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case "entryName" => entryName = r.readValue<String>()
+                            case "pluginDir" => pluginDir = r.readValue<String>().trimAscii()
+                            case "cacheSubdir" => cacheSubdir = r.readValue<String>().trimAscii()
+                            case "overwrite" => overwrite = parseBoolLoose(r.readValue<String>())
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (archiveId.size == 0 || entryName.trimAscii().size == 0 || pluginDir.size == 0) {
+                return (false, "{}", "missing archiveId/entryName/pluginDir")
+            }
+            if (!ensureUnderRuntimeRoot(pluginDir)) {
+                return (false, "{}", "invalid pluginDir (must be under runtime root)")
+            }
+
+            let resolved = resolveArchiveActualPath(archiveId)
+            match (resolved) {
+                case None => return (false, "{}", "archive not found or path unresolved")
+                case Some((archiveType, actualPath)) =>
+                    let safeEntryRel = normalizeSafeRelPath(entryName)
+                    if (safeEntryRel.size == 0) { return (false, "{}", "invalid entryName") }
+
+                    var sub = cacheSubdir.trimAscii()
+                    if (sub.size == 0) { sub = "cache" }
+                    sub = normalizeSafeRelPath(sub)
+                    if (sub.size == 0) { sub = "cache" }
+
+                    let outPath = "${pluginDir}/${sub}/${archiveId}/${safeEntryRel}"
+                    let outFile = Path(outPath)
+                    try {
+                        if (!overwrite && exists(outFile)) {
+                            // Keep existing.
+                        } else {
+                            FileUtils.ensureDirectoryExists(outFile.parent)
+                            let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+                            let ok = handler.extractEntryToFile(actualPath, entryName, outPath)
+                            if (!ok) { return (false, "{}", "extract failed") }
+                        }
+                    } catch (e: Exception) {
+                        return (false, "{}", "extract exception: ${e.message}")
+                    }
+
+                    let rel = "${sub}/${archiveId}/${safeEntryRel}"
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archiveId").writeValue(archiveId)
+                    w.writeName("entryName").writeValue(entryName)
+                    w.writeName("outputPath").writeValue(outPath)
+                    w.writeName("relativePath").writeValue(rel)
+                    w.endObject()
+                    w.flush()
+                    return (true, String.fromUtf8(readToEnd(out)), "")
+            }
         }
 
         return (false, "{}", "unknown method: ${m}")
