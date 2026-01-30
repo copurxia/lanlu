@@ -12,7 +12,11 @@ RUN set -eux; \
   apt-get install -y --no-install-recommends \
     ca-certificates curl git wget unzip zip xz-utils \
     build-essential clang ninja-build \
-    libarchive-dev libavif-dev; \
+    pkg-config \
+    libarchive-dev libavif-dev \
+    libpng-dev zlib1g-dev \
+    libwebp-dev \
+    libjpeg-dev; \
   rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).

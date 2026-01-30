@@ -12,7 +12,11 @@ RUN set -eux; \
       tzdata \
       libssl3 \
       libarchive13 \
-      libavif16; \
+      libavif16 \
+      libpng16-16 \
+      zlib1g \
+      libwebp7 \
+      libjpeg-turbo8; \
     ssl3="$(dpkg -S 'libssl.so.3' | head -n1 | sed 's/.*: //')"; \
     crypto3="$(dpkg -S 'libcrypto.so.3' | head -n1 | sed 's/.*: //')"; \
     ln -sf "${ssl3}" "$(dirname "${ssl3}")/libssl.so"; \
