@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Task, TaskPageResult } from '@/types/task';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { Badge } from '@/components/ui/badge';
@@ -42,9 +42,10 @@ function normalizePageIndex(value: string | null): number {
 
 interface TaskListProps {
   className?: string;
+  refreshToken?: number;
 }
 
-export function TaskList({ className }: TaskListProps) {
+export function TaskList({ className, refreshToken }: TaskListProps) {
   const { t } = useLanguage();
   const { confirm } = useConfirmContext();
   const { success: showSuccess } = useToast();
@@ -54,7 +55,10 @@ export function TaskList({ className }: TaskListProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasLoadedOnceRef = useRef(false);
+  const latestFetchIdRef = useRef(0);
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(() => normalizePageIndex(searchParams.get('page')));
@@ -93,13 +97,21 @@ export function TaskList({ className }: TaskListProps) {
   }, [activeFilter, currentPage, searchParams]);
 
   const fetchTasks = useCallback(
-    async (page: number, isAutoRefresh = false) => {
+    async (
+      page: number,
+      opts: {
+        mode?: 'initial' | 'update' | 'manual' | 'auto';
+      } = {}
+    ) => {
+      const fetchId = ++latestFetchIdRef.current;
+      const mode = opts.mode ?? 'update';
+
       try {
         setError(null);
-        // Only show loading spinner on initial load, not on auto-refresh
-        if (!isAutoRefresh) {
-          setLoading(true);
-        }
+        // Keep the list stable during tab/page switching; only show the big spinner on first load.
+        if (mode === 'initial') setLoading(true);
+        if (mode === 'update') setUpdating(true);
+        if (mode === 'manual') setRefreshing(true);
 
         const result: TaskPageResult = await TaskPoolService.getTasks(
           page + 1,
@@ -107,21 +119,26 @@ export function TaskList({ className }: TaskListProps) {
           activeFilter !== 'all' ? activeFilter : undefined
         );
 
+        if (fetchId !== latestFetchIdRef.current) return;
+
         setTasks(Array.isArray(result.tasks) ? result.tasks : []);
         setTotal(typeof result.total === 'number' ? result.total : 0);
         setTotalAll(typeof result.totalAll === 'number' ? result.totalAll : null);
         setTotalPages(typeof result.totalPages === 'number' ? result.totalPages : 0);
-        setCurrentPage(page);
+        hasLoadedOnceRef.current = true;
       } catch (err) {
         console.error('Failed to fetch tasks:', err);
+        if (fetchId !== latestFetchIdRef.current) return;
         setError(err instanceof Error ? err.message : 'Failed to fetch tasks');
         setTasks([]);
         setTotal(0);
         setTotalAll(null);
         setTotalPages(0);
       } finally {
+        if (fetchId !== latestFetchIdRef.current) return;
         setLoading(false);
         setRefreshing(false);
+        setUpdating(false);
       }
     },
     [activeFilter, pageSize] 
@@ -129,34 +146,43 @@ export function TaskList({ className }: TaskListProps) {
 
   // Fetch data when page/filter changes.
   useEffect(() => {
-    fetchTasks(currentPage);
+    fetchTasks(currentPage, { mode: hasLoadedOnceRef.current ? 'update' : 'initial' });
   }, [currentPage, activeFilter, fetchTasks]);
+
+  // External refresh signal (from parent) without remounting the list.
+  useEffect(() => {
+    if (!hasLoadedOnceRef.current) return;
+    if (typeof refreshToken !== 'number') return;
+    if (refreshToken <= 0) return;
+    fetchTasks(currentPage, { mode: 'manual' });
+  }, [currentPage, fetchTasks, refreshToken]);
 
   // Auto-refresh when there are active tasks
   useEffect(() => {
     const hasActive = tasks.some(t => t?.status === 'running' || t?.status === 'pending');
-    if (!hasActive || loading || refreshing) return;
+    if (!hasActive || loading || refreshing || updating) return;
 
     const timer = setInterval(() => {
-      fetchTasks(currentPage, true);
+      fetchTasks(currentPage, { mode: 'auto' });
     }, 1500);
 
     return () => clearInterval(timer);
-  }, [tasks, currentPage, loading, refreshing, fetchTasks]);
+  }, [tasks, currentPage, loading, refreshing, updating, fetchTasks]);
 
   const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchTasks(currentPage);
+    await fetchTasks(currentPage, { mode: 'manual' });
   };
 
   const handleFilterChange = (value: string) => {
     const nextFilter = normalizeFilter(value);
+    setUpdating(true);
     setActiveFilter(nextFilter);
     setCurrentPage(0); // keep pagination consistent when switching tabs
     updateUrl(nextFilter, 0);
   };
 
   const handlePageChange = (page: number) => {
+    setUpdating(true);
     setCurrentPage(page);
     updateUrl(activeFilter, page);
   };
@@ -267,7 +293,7 @@ export function TaskList({ className }: TaskListProps) {
     }
   };
 
-  if (loading) {
+  if (loading && tasks.length === 0) {
     return (
       <div className="flex items-center justify-center py-8">
         <Spinner size="lg" />
@@ -286,32 +312,40 @@ export function TaskList({ className }: TaskListProps) {
       )}
 
       {/* Filters */}
-      <Tabs value={activeFilter} onValueChange={handleFilterChange}>
-        <TabsList className="w-full justify-start overflow-x-auto">
-          <TabsTrigger value="all" className="flex items-center gap-2 flex-none px-2 sm:px-3">
-            <span className="whitespace-nowrap">{t('settings.taskManagement.all')}</span>
-            <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5 flex items-center justify-center">
-              {totalAll ?? total}
-            </Badge>
-          </TabsTrigger>
-          <TabsTrigger value="pending" className="flex items-center gap-2 flex-none px-2 sm:px-3">
-            <Clock className="w-4 h-4 shrink-0" />
-            <span className="whitespace-nowrap">{t('settings.taskManagement.pending')}</span>
-          </TabsTrigger>
-          <TabsTrigger value="running" className="flex items-center gap-2 flex-none px-2 sm:px-3">
-            <RefreshCw className="w-4 h-4 shrink-0" />
-            <span className="whitespace-nowrap">{t('settings.taskManagement.running')}</span>
-          </TabsTrigger>
-          <TabsTrigger value="completed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
-            <CheckCircle className="w-4 h-4 shrink-0" />
-            <span className="whitespace-nowrap">{t('settings.taskManagement.completed')}</span>
-          </TabsTrigger>
-          <TabsTrigger value="failed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
-            <XCircle className="w-4 h-4 shrink-0" />
-            <span className="whitespace-nowrap">{t('settings.taskManagement.failed')}</span>
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <div className="flex items-center justify-between gap-3">
+        <Tabs value={activeFilter} onValueChange={handleFilterChange}>
+          <TabsList className="w-full justify-start overflow-x-auto">
+            <TabsTrigger value="all" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+              <span className="whitespace-nowrap">{t('settings.taskManagement.all')}</span>
+              <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5 flex items-center justify-center">
+                {totalAll ?? total}
+              </Badge>
+            </TabsTrigger>
+            <TabsTrigger value="pending" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+              <Clock className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">{t('settings.taskManagement.pending')}</span>
+            </TabsTrigger>
+            <TabsTrigger value="running" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+              <RefreshCw className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">{t('settings.taskManagement.running')}</span>
+            </TabsTrigger>
+            <TabsTrigger value="completed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">{t('settings.taskManagement.completed')}</span>
+            </TabsTrigger>
+            <TabsTrigger value="failed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">{t('settings.taskManagement.failed')}</span>
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {(updating || refreshing) && (
+          <div className="shrink-0 flex items-center text-muted-foreground">
+            <Spinner size="sm" />
+          </div>
+        )}
+      </div>
 
       {/* Task List */}
       {tasks.length > 0 ? (

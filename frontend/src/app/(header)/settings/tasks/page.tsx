@@ -82,7 +82,7 @@ export default function SettingsTasksPage() {
         </Button>
       </div>
 
-      <TaskList key={refreshKey} />
+      <TaskList refreshToken={refreshKey} />
     </div>
   );
 }
