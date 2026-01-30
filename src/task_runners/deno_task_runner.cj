@@ -579,6 +579,205 @@ public class DenoTaskRunner {
     }
 
     /**
+     * 解析插件发起的 Host RPC 调用请求（NDJSON 单行）
+     * 格式：
+     *   {"type":"call","id":"...","method":"tags.list","params":{...}}
+     */
+    private static func parseHostCallRequest(line: String): Option<(String, String, String)> {
+        let trimmed = line.trimAscii()
+        if (trimmed.size == 0) { return None }
+        if (!trimmed.startsWith("{")) { return None }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) { return None }
+
+            var msgType = ""
+            var id = ""
+            var method = ""
+            var paramsRaw = "{}"
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let n = r.readName()
+                match (n) {
+                    case "type" => msgType = r.readValue<String>().trimAscii()
+                    case "id" => id = r.readValue<String>().trimAscii()
+                    case "method" => method = r.readValue<String>().trimAscii()
+                    case "params" => paramsRaw = String.fromUtf8(r.readValueBytes())
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+
+            if (msgType != "call") { return None }
+            if (id.size == 0 || method.size == 0) { return None }
+            return Some((id, method, paramsRaw))
+        } catch (_: Exception) {
+            return None
+        }
+    }
+
+    private static func buildHostCallResultLine(id: String, success: Bool, dataJson: String, error: String): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("type").writeValue("call_result")
+        w.writeName("id").writeValue(id)
+        w.writeName("success").writeValue(success)
+        if (success) {
+            w.writeName("data").jsonValue(dataJson)
+        } else {
+            w.writeName("error").writeValue(error)
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func parseBoolLoose(s: String): Bool {
+        let v = s.trimAscii().toAsciiLower()
+        return (v == "true" || v == "1" || v == "yes" || v == "y" || v == "on")
+    }
+
+    private static func parseInt64Loose(s: String, defaultValue: Int64): Int64 {
+        let v = s.trimAscii()
+        if (v.size == 0) { return defaultValue }
+        try { return Int64.parse(v) } catch (_: Exception) { return defaultValue }
+    }
+
+    private static func handleHostRpcCall(method: String, paramsRaw: String): (Bool, String, String) {
+        // returns: (success, dataJson, error)
+        let m = method.trimAscii()
+        let paramsTrimmed = paramsRaw.trimAscii()
+        let effectiveParams = if (paramsTrimmed.size > 0) { paramsTrimmed } else { "{}" }
+
+        if (m == "tags.list") {
+            var namespaceStr = ""
+            var q = ""
+            var lang = "zh"
+            var limit: Int64 = 1000i64
+            var offset: Int64 = 0i64
+            var includeTranslations = false
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "namespace" => namespaceStr = r.readValue<String>()
+                            case "q" => q = r.readValue<String>()
+                            case "lang" => lang = r.readValue<String>()
+                            case "limit" => limit = parseInt64Loose(r.readValue<String>(), 1000i64)
+                            case "offset" => offset = parseInt64Loose(r.readValue<String>(), 0i64)
+                            case "includeTranslations" => includeTranslations = parseBoolLoose(r.readValue<String>())
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (limit <= 0) { limit = 1000i64 }
+            if (limit > 2000) { limit = 2000i64 }
+            if (offset < 0) { offset = 0i64 }
+            let nsOpt: ?String = if (namespaceStr.trimAscii().size > 0) { Some(namespaceStr.trimAscii()) } else { None }
+            let qOpt: ?String = if (q.trimAscii().size > 0) { Some(q.trimAscii()) } else { None }
+            let effectiveLang = if (lang.trimAscii().size > 0) { lang.trimAscii() } else { "zh" }
+
+            let total = TagDao.count(nsOpt, qOpt)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("total").writeValue(total)
+            w.writeName("limit").writeValue(limit)
+            w.writeName("offset").writeValue(offset)
+            w.writeName("items")
+            w.startArray()
+
+            if (includeTranslations) {
+                let rows = TagDao.list(nsOpt, qOpt, limit, offset)
+                for (row in rows) {
+                    w.startObject()
+                    w.writeName("id").writeValue(row.id)
+                    w.writeName("namespace").writeValue(row.namespace)
+                    w.writeName("name").writeValue(row.name)
+                    w.writeName("translation_text").writeValue(row.getTranslatedText(effectiveLang))
+                    w.writeName("translations")
+                    w.startObject()
+                    for ((l, t) in row.translations) {
+                        w.writeName(l)
+                        w.startObject()
+                        w.writeName("text").writeValue(t.text)
+                        w.writeName("intro").writeValue(t.intro)
+                        w.endObject()
+                    }
+                    w.endObject()
+                    w.endObject()
+                }
+            } else {
+                let rows = TagDao.listLite(nsOpt, qOpt, effectiveLang, limit, offset)
+                for (row in rows) {
+                    w.startObject()
+                    w.writeName("id").writeValue(row.id)
+                    w.writeName("namespace").writeValue(row.namespace)
+                    w.writeName("name").writeValue(row.name)
+                    w.writeName("translation_text").writeValue(row.translationText)
+                    w.endObject()
+                }
+            }
+
+            w.endArray()
+            w.endObject()
+            w.flush()
+            return (true, String.fromUtf8(readToEnd(out)), "")
+        }
+
+        if (m == "tags.merge") {
+            var sourceId: Int64 = 0i64
+            var targetId: Int64 = 0i64
+            var deleteSource = true
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "sourceId" => sourceId = parseInt64Loose(r.readValue<String>(), 0i64)
+                            case "targetId" => targetId = parseInt64Loose(r.readValue<String>(), 0i64)
+                            case "deleteSource" => deleteSource = parseBoolLoose(r.readValue<String>())
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (sourceId <= 0 || targetId <= 0 || sourceId == targetId) {
+                return (false, "{}", "invalid sourceId/targetId")
+            }
+
+            let ok = TagDao.mergeById(sourceId, targetId, deleteSource)
+            if (!ok) {
+                return (false, "{}", "merge failed")
+            }
+            return (true, "{\"merged\":true}", "")
+        }
+
+        return (false, "{}", "unknown method: ${m}")
+    }
+
+    /**
      * 通过 stdio 执行 Deno 插件
      * 支持实时进度回报和流式数据输出
      */
@@ -633,6 +832,18 @@ public class DenoTaskRunner {
                 let trimmed = line.trimAscii()
                 if (trimmed.size == 0) {
                     continue
+                }
+
+                // Host RPC: plugin can request backend operations via NDJSON "call".
+                match (parseHostCallRequest(trimmed)) {
+                    case Some((id, method, paramsRaw)) =>
+                        let (ok, dataJson, err) = handleHostRpcCall(method, paramsRaw)
+                        let respLine = buildHostCallResultLine(id, ok, dataJson, err)
+                        process.stdInPipe.write(respLine.toArray())
+                        process.stdInPipe.write("\n".toArray())
+                        process.stdInPipe.flush()
+                        continue
+                    case None => ()
                 }
 
                 let (msgType, progress, message, success, data) = parsePluginMessage(trimmed)

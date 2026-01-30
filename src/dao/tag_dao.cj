@@ -70,6 +70,19 @@ public class TagData {
 }
 
 /**
+ * 轻量标签结构（用于分页/批处理场景，避免解析完整 translations JSON）
+ */
+public class TagLiteData {
+    public var id: Int64 = 0
+    public var namespace: String = ""
+    public var name: String = ""
+    // 指定语言的翻译文本（不存在则为空字符串）
+    public var translationText: String = ""
+
+    public init() {}
+}
+
+/**
  * 标签数据访问对象
  */
 public class TagDao {
@@ -347,6 +360,99 @@ public class TagDao {
             case None =>
                 getLogger("tag_dao").error("无法连接到数据库")
                 return ArrayList<TagData>()
+        }
+    }
+
+    /**
+     * 获取标签列表（轻量版，返回指定语言翻译文本；用于大批量分页拉取）
+     * - translations JSONB 通过 SQL 提取，不解析整个对象
+     */
+    public static func listLite(namespace: ?String, query: ?String, lang: String, limit: Int64, offset: Int64): ArrayList<TagLiteData> {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        var effectiveLang = lang.trimAscii()
+        if (effectiveLang.size == 0) { effectiveLang = "zh" }
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    var sql = """
+                        SELECT
+                            id,
+                            namespace,
+                            name,
+                            COALESCE(translations -> ? ->> 'text', '') AS translation_text
+                        FROM tags
+                        WHERE 1=1
+                    """
+                    var params: ArrayList<String> = ArrayList<String>()
+
+                    // First param is lang for JSONB extraction.
+                    params.add(effectiveLang)
+
+                    match (namespace) {
+                        case Some(ns) =>
+                            sql += " AND namespace = ?"
+                            params.add(ns)
+                        case None => ()
+                    }
+
+                    match (query) {
+                        case Some(q) =>
+                            if (q.size > 0) {
+                                sql += " AND (name ILIKE ? OR translations::text ILIKE ?)"
+                                let searchPattern = "%${q}%"
+                                params.add(searchPattern)
+                                params.add(searchPattern)
+                            }
+                        case None => ()
+                    }
+
+                    sql += " ORDER BY namespace, name LIMIT ? OFFSET ?"
+
+                    let stmt = conn.prepareStatement(sql)
+                    var idx = 0
+                    for (p in params) {
+                        stmt.set(idx, p)
+                        idx++
+                    }
+                    stmt.set(idx, limit)
+                    stmt.set(idx + 1, offset)
+
+                    let rs = stmt.query()
+                    var list: ArrayList<TagLiteData> = ArrayList<TagLiteData>()
+                    try {
+                        while (rs.next()) {
+                            let row = TagLiteData()
+                            row.id = rs.getOrNull<Int64>(0) ?? 0
+                            row.namespace = rs.getOrNull<String>(1) ?? ""
+                            row.name = rs.getOrNull<String>(2) ?? ""
+                            row.translationText = rs.getOrNull<String>(3) ?? ""
+                            list.add(row)
+                        }
+                    } finally {
+                        rs.close()
+                        stmt.close()
+                    }
+                    return list
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("查询标签轻量列表失败", ("error", e.message))
+                    // Fallback: use the full list() and derive translation text in-process.
+                    let full = list(namespace, query, limit, offset)
+                    var out: ArrayList<TagLiteData> = ArrayList<TagLiteData>()
+                    for (row in full) {
+                        let lite = TagLiteData()
+                        lite.id = row.id
+                        lite.namespace = row.namespace
+                        lite.name = row.name
+                        lite.translationText = row.getTranslatedText(effectiveLang)
+                        out.add(lite)
+                    }
+                    return out
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("tag_dao").error("无法连接到数据库")
+                return ArrayList<TagLiteData>()
         }
     }
 
@@ -1349,6 +1455,107 @@ public class TagDao {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None => return false
+        }
+    }
+
+    /**
+     * 合并标签（按 id）：将 sourceId 的关联关系迁移到 targetId，并可选删除 sourceId。
+     * - archive_tags/tankoubon_tags：先插入目标关系(去重)，再删除源关系
+     * - tags.translations：将 source 的 translations 合并到 target（target 同 key 优先）
+     * - links/icon/background：仅在 target 为空时回填 source 的值
+     */
+    public static func mergeById(sourceId: Int64, targetId: Int64, deleteSource: Bool): Bool {
+        if (sourceId <= 0 || targetId <= 0 || sourceId == targetId) { return false }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return false
+            case Some(conn) =>
+                try {
+                    // Best-effort transaction; if driver doesn't support BEGIN/COMMIT, statements still run in auto-commit.
+                    try {
+                        let begin = conn.prepareStatement("BEGIN")
+                        try { begin.update() } finally { begin.close() }
+                    } catch (_: Exception) {}
+
+                    // Merge translations/fields: update target from source.
+                    let mergeStmt = conn.prepareStatement("""
+                        UPDATE tags t
+                        SET
+                            translations = s.translations || t.translations,
+                            links = CASE WHEN COALESCE(t.links, '') = '' THEN COALESCE(s.links, '') ELSE t.links END,
+                            icon_asset_id = CASE WHEN COALESCE(t.icon_asset_id, 0) = 0 THEN COALESCE(s.icon_asset_id, 0) ELSE t.icon_asset_id END,
+                            background_asset_id = CASE WHEN COALESCE(t.background_asset_id, 0) = 0 THEN COALESCE(s.background_asset_id, 0) ELSE t.background_asset_id END,
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM tags s
+                        WHERE s.id = ? AND t.id = ?
+                    """)
+                    try {
+                        mergeStmt.set(0, sourceId)
+                        mergeStmt.set(1, targetId)
+                        mergeStmt.update()
+                    } finally { mergeStmt.close() }
+
+                    // archive_tags: insert then delete.
+                    let insArchive = conn.prepareStatement("""
+                        INSERT INTO archive_tags (archive_id, tag_id)
+                        SELECT archive_id, ? FROM archive_tags WHERE tag_id = ?
+                        ON CONFLICT DO NOTHING
+                    """)
+                    try {
+                        insArchive.set(0, targetId)
+                        insArchive.set(1, sourceId)
+                        insArchive.update()
+                    } finally { insArchive.close() }
+
+                    let delArchive = conn.prepareStatement("DELETE FROM archive_tags WHERE tag_id = ?")
+                    try {
+                        delArchive.set(0, sourceId)
+                        delArchive.update()
+                    } finally { delArchive.close() }
+
+                    // tankoubon_tags: insert then delete.
+                    let insTank = conn.prepareStatement("""
+                        INSERT INTO tankoubon_tags (tankoubon_id, tag_id)
+                        SELECT tankoubon_id, ? FROM tankoubon_tags WHERE tag_id = ?
+                        ON CONFLICT DO NOTHING
+                    """)
+                    try {
+                        insTank.set(0, targetId)
+                        insTank.set(1, sourceId)
+                        insTank.update()
+                    } finally { insTank.close() }
+
+                    let delTank = conn.prepareStatement("DELETE FROM tankoubon_tags WHERE tag_id = ?")
+                    try {
+                        delTank.set(0, sourceId)
+                        delTank.update()
+                    } finally { delTank.close() }
+
+                    if (deleteSource) {
+                        let delTag = conn.prepareStatement("DELETE FROM tags WHERE id = ?")
+                        try {
+                            delTag.set(0, sourceId)
+                            delTag.update()
+                        } finally { delTag.close() }
+                    }
+
+                    try {
+                        let commit = conn.prepareStatement("COMMIT")
+                        try { commit.update() } finally { commit.close() }
+                    } catch (_: Exception) {}
+
+                    return true
+                } catch (e: Exception) {
+                    try {
+                        let rb = conn.prepareStatement("ROLLBACK")
+                        try { rb.update() } finally { rb.close() }
+                    } catch (_: Exception) {}
+                    getLogger("tag_dao").error("mergeById failed", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
         }
     }
 }

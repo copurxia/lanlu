@@ -66,6 +66,7 @@ export interface PluginInput {
  */
 export abstract class BasePlugin {
   protected input: PluginInput | null = null;
+  private rpcSeq = 0;
 
   abstract getPluginInfo(): PluginInfo;
 
@@ -102,6 +103,56 @@ export abstract class BasePlugin {
     }
 
     throw new Error('No input received from stdin');
+  }
+
+  /**
+   * Read a single NDJSON line from stdin (used for host RPC responses).
+   */
+  private async readLineFromStdin(): Promise<string> {
+    const reader = Deno.stdin.readable.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const idx = buffer.indexOf('\n');
+      if (idx !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        reader.releaseLock();
+        return line;
+      }
+    }
+
+    reader.releaseLock();
+    return buffer.trim();
+  }
+
+  /**
+   * Call back into the host/backend via stdio NDJSON.
+   * Host must support:
+   *   {"type":"call","id":"...","method":"...","params":{...}}
+   * and reply with:
+   *   {"type":"call_result","id":"...","success":true,"data":...}
+   */
+  protected async callHost<T = unknown>(method: string, params: unknown = {}): Promise<T> {
+    const id = `${Date.now()}_${++this.rpcSeq}`;
+    console.log(JSON.stringify({ type: 'call', id, method, params }));
+
+    while (true) {
+      const line = await this.readLineFromStdin();
+      if (!line) continue;
+      let msg: any;
+      try {
+        msg = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (msg?.type !== 'call_result' || msg?.id !== id) continue;
+      if (msg?.success) return msg.data as T;
+      throw new Error(String(msg?.error ?? 'host call failed'));
+    }
   }
 
   /**
