@@ -343,7 +343,9 @@ public class ArchiveUtils {
 
     /**
      * 转换图片或视频为AVIF格式缩略图
-     * 使用FFmpeg处理，支持图片和视频文件
+     * Thumbnail conversion strategy: self-impl > ImageMagick > FFmpeg
+     * - Self-impl currently supports PNG via libpng+libavif (extensible).
+     * - ImageMagick and FFmpeg are used as fallbacks for wider format support.
      * 统一处理策略：宽度缩放到500px，高度裁剪到1000px（自适应，从顶部裁剪）
      */
     public static func convertImageToAvif(inputPath: String, outputPath: String, tempPath: String): ProcessResultData {
@@ -359,6 +361,16 @@ public class ArchiveUtils {
             // After scaling to width=500, crop height to at most 1000 (top-aligned).
             // The comma in min() must be escaped for FFmpeg filter parsing.
             let vfFilter = "scale=500:-1,crop=500:min(ih\\,1000):0:0"
+
+            // 1) Self implementation (extensible):
+            // Try a native decoder+libavif encoder first for formats we support ourselves.
+            // This avoids relying on external toolchains and is the preferred path for PNG.
+            match (SelfImageConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
+                case Some(res) =>
+                    if (res.success) { return res }
+                    logger.warn("Self convert->avif failed; falling back to ImageMagick/ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                case None => ()
+            }
 
             // Prefer ImageMagick first (decode+resize+crop), then fall back to FFmpeg.
             // This helps with some images that FFmpeg/ffprobe struggles to decode reliably.

@@ -133,7 +133,7 @@ public class GenerateThumbnailTaskRunner {
         }
 
         // 先转换图片为 AVIF 格式（临时路径）
-        TaskIO.appendLog(taskId, "Converting image to AVIF format (prefer ImageMagick, fallback FFmpeg)...")
+        TaskIO.appendLog(taskId, "Converting image to AVIF format (self-impl > ImageMagick > FFmpeg)...")
         let tempAvifPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.avif")
         let convertResult = ArchiveUtils.convertImageToAvif(tempImagePath, tempAvifPath, taskTempDir)
 

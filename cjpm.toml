@@ -8,7 +8,7 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = "-larchive -lavif"
+  link-option = "-larchive -lavif -lpng16 -lz"
   package-configuration = {}
 
 [dependencies]
@@ -20,6 +20,7 @@
   epub = { path = "packages/epub" }
   archive_ffi = { path = "packages/archive_ffi" }
   avif_ffi = { path = "packages/avif_ffi" }
+  png_ffi = { path = "packages/png_ffi" }
   semver = { path = "packages/semver" }
 
 [target]

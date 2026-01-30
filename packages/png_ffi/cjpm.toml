@@ -1,0 +1,11 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "png_ffi"
+  description = "PNG image decoder (libpng simplified API) FFI bindings"
+  version = "0.1.0"
+  output-type = "static"
+  # libpng relies on zlib; keep both explicit for static linking environments.
+  link-option = "-lpng16 -lz"
+
+[dependencies]
+
