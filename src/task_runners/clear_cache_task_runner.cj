@@ -310,20 +310,3 @@ public class ClearCacheTaskRunner {
 
     // Shared helpers live in TaskRunnerUtils.
 }
-
-/**
- * 清理结果统计
- */
-class CleanResult {
-    public var deletedCount: Int64
-    public var deletedSize: Int64
-    public var skippedCount: Int64
-    public var errors: ArrayList<String>
-
-    public init() {
-        this.deletedCount = 0
-        this.deletedSize = 0
-        this.skippedCount = 0
-        this.errors = ArrayList<String>()
-    }
-}

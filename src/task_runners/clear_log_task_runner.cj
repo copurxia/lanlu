@@ -214,8 +214,8 @@ public class ClearLogTaskRunner {
     /**
      * 清理任务日志目录
      */
-    private static func cleanTaskLogs(dirPath: String, maxAgeSeconds: Int64, dryRun: Bool): LogCleanResult {
-        var result = LogCleanResult()
+    private static func cleanTaskLogs(dirPath: String, maxAgeSeconds: Int64, dryRun: Bool): CleanResult {
+        var result = CleanResult()
 
         if (!TaskRunnerUtils.directoryExists(dirPath)) {
             return result
@@ -270,8 +270,8 @@ public class ClearLogTaskRunner {
     /**
      * 清理系统日志（如果超过指定天数则删除）
      */
-    private static func cleanSystemLogFile(logPath: String, maxAgeSeconds: Int64, dryRun: Bool): LogCleanResult {
-        var result = LogCleanResult()
+    private static func cleanSystemLogFile(logPath: String, maxAgeSeconds: Int64, dryRun: Bool): CleanResult {
+        var result = CleanResult()
 
         try {
             // 检查文件是否存在
@@ -308,21 +308,4 @@ public class ClearLogTaskRunner {
     }
 
     // Shared helpers live in TaskRunnerUtils.
-}
-
-/**
- * 日志清理结果统计
- */
-class LogCleanResult {
-    public var deletedCount: Int64
-    public var deletedSize: Int64
-    public var skippedCount: Int64
-    public var errors: ArrayList<String>
-
-    public init() {
-        this.deletedCount = 0
-        this.deletedSize = 0
-        this.skippedCount = 0
-        this.errors = ArrayList<String>()
-    }
 }
