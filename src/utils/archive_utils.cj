@@ -344,7 +344,7 @@ public class ArchiveUtils {
     /**
      * 转换图片或视频为AVIF格式缩略图
      * Thumbnail conversion strategy: self-impl > ImageMagick > FFmpeg
-     * - Self-impl currently supports PNG via libpng+libavif (extensible).
+     * - Self-impl currently supports PNG/WEBP via libpng/libwebp + libavif (extensible).
      * - ImageMagick and FFmpeg are used as fallbacks for wider format support.
      * 统一处理策略：宽度缩放到500px，高度裁剪到1000px（自适应，从顶部裁剪）
      */

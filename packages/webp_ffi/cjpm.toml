@@ -1,0 +1,10 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "webp_ffi"
+  description = "WebP image decoder (libwebp) FFI bindings"
+  version = "0.1.0"
+  output-type = "static"
+  link-option = "-lwebp"
+
+[dependencies]
+

@@ -1,0 +1,10 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "jpeg_ffi"
+  description = "JPEG image decoder (libjpeg) FFI bindings"
+  version = "0.1.0"
+  output-type = "static"
+  link-option = "-ljpeg"
+
+[dependencies]
+

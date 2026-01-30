@@ -3,6 +3,8 @@ package lanlu.utils
 import std.fs.*
 import png_ffi.*
 import avif_ffi.*
+import webp_ffi.*
+import jpeg_ffi.*
 
 /**
  * Self-implemented image->AVIF conversion pipeline.
@@ -23,26 +25,39 @@ public class SelfImageConvertUtils {
     public static func tryConvertToAvifThumbnail(inputPath: String, outputPath: String, targetWidth: Int64, maxHeight: Int64): ?ProcessResultData {
         let ext = ArchiveUtils.getFileExtension(inputPath)
 
-        // Currently only PNG is supported by self path.
-        if (ext != "png") {
+        // Self backends: keep explicit list for easy extension.
+        // NOTE: JPEG decode failures can terminate the current process because libjpeg
+        // may call its fatal error handler. This is acceptable because generate_thumbnail
+        // runs in a dedicated spawned worker process.
+        if (ext != "png" && ext != "webp" && ext != "jpg" && ext != "jpeg") {
             return None
         }
 
         try {
             let bytes = readAllBytes(inputPath)
-            if (let Some((w, h, rgba)) <- PngDecoder.decodeRGBA(bytes)) {
-                let (tw, th, tpix) = resizeToWidthNearest(w, h, rgba, UInt32(targetWidth))
-                let (cw, ch, cpix) = cropTop(tw, th, tpix, UInt32(maxHeight))
-
-                let ok = AvifEncoder.encodeRGBAFile(cw, ch, cpix, outputPath)
-                if (ok) {
-                    return Some(ProcessResultData(true, outputPath, ""))
-                }
-                return Some(ProcessResultData(false, "", "Self PNG->AVIF (libpng+libavif) encode failed"))
+            let decoded = if (ext == "png") {
+                PngDecoder.decodeRGBA(bytes)
+            } else if (ext == "webp") {
+                WebpDecoder.decodeRGBA(bytes)
+            } else {
+                // jpg/jpeg
+                JpegDecoder.decodeRGBA(bytes)
             }
-            return Some(ProcessResultData(false, "", "Self PNG->AVIF decode failed"))
+
+            match (decoded) {
+                case None => return None
+                case Some((w, h, rgba)) =>
+                    let (tw, th, tpix) = resizeToWidthNearest(w, h, rgba, UInt32(targetWidth))
+                    let (cw, ch, cpix) = cropTop(tw, th, tpix, UInt32(maxHeight))
+
+                    let ok = AvifEncoder.encodeRGBAFile(cw, ch, cpix, outputPath)
+                    if (ok) {
+                        return Some(ProcessResultData(true, outputPath, ""))
+                    }
+                    return Some(ProcessResultData(false, "", "Self decode->AVIF (ffi+libavif) encode failed"))
+            }
         } catch (e: Exception) {
-            return Some(ProcessResultData(false, "", "Self PNG->AVIF exception: ${e.message}"))
+            return Some(ProcessResultData(false, "", "Self decode->AVIF exception: ${e.message}"))
         }
     }
 
@@ -116,4 +131,3 @@ public class SelfImageConvertUtils {
         return (w, outH, out)
     }
 }
-
