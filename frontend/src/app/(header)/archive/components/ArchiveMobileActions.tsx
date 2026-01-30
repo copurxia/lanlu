@@ -86,7 +86,10 @@ export function ArchiveMobileActions({
         </div>
       </div>
 
-      <Sheet open={open} onOpenChange={handleOpenChange}>
+      {/* Radix Sheet is a Dialog; when it's modal it can swallow pointer events for portals outside it.
+          We open our own Dialog (AddToTankoubonDialog) from inside this Sheet, so keep Sheet non-modal
+          to allow the nested dialog to be interactive. */}
+      <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
         <SheetContent
           side="bottom"
           className="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-h-[85vh] overflow-y-auto rounded-t-xl"

@@ -30,7 +30,8 @@ import { ArchiveBasicInfoCard } from './components/ArchiveBasicInfoCard';
 import { ArchiveMobileActions } from './components/ArchiveMobileActions';
 import { ArchiveCollectionsCard } from './components/ArchiveCollectionsCard';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
-import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, Play } from 'lucide-react';
+import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
+import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, Play, FolderPlus } from 'lucide-react';
 
 export function ArchiveDetailContent() {
   const router = useRouter();
@@ -479,6 +480,20 @@ export function ArchiveDetailContent() {
                         {t('archive.startReading')}
                       </Button>
                     </Link>
+
+                    <AddToTankoubonDialog
+                      archiveId={metadata.arcid}
+                      trigger={
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-9 w-9 p-0"
+                          title={t('tankoubon.addToCollection')}
+                        >
+                          <FolderPlus className="w-4 h-4" />
+                        </Button>
+                      }
+                    />
 
                     <Button
                       size="sm"
