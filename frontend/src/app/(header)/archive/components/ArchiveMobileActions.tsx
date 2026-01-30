@@ -44,6 +44,8 @@ export function ArchiveMobileActions({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(true);
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [pendingAddDialog, setPendingAddDialog] = useState(false);
   const readyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -51,6 +53,18 @@ export function ArchiveMobileActions({
       if (readyTimerRef.current) window.clearTimeout(readyTimerRef.current);
     };
   }, []);
+
+  // Open the add-to-collection dialog only after the actions sheet closes.
+  useEffect(() => {
+    // If the sheet is reopened, cancel any pending open.
+    if (open) {
+      if (pendingAddDialog) setPendingAddDialog(false);
+      return;
+    }
+    if (!pendingAddDialog) return;
+    setPendingAddDialog(false);
+    setAddDialogOpen(true);
+  }, [open, pendingAddDialog]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
@@ -86,10 +100,7 @@ export function ArchiveMobileActions({
         </div>
       </div>
 
-      {/* Radix Sheet is a Dialog; when it's modal it can swallow pointer events for portals outside it.
-          We open our own Dialog (AddToTankoubonDialog) from inside this Sheet, so keep Sheet non-modal
-          to allow the nested dialog to be interactive. */}
-      <Sheet open={open} onOpenChange={handleOpenChange} modal={false}>
+      <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent
           side="bottom"
           className="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-h-[85vh] overflow-y-auto rounded-t-xl"
@@ -156,16 +167,19 @@ export function ArchiveMobileActions({
               </Button>
             )}
 
-            <AddToTankoubonDialog
-              archiveId={metadata.arcid}
-              trigger={
-                <Button variant="outline" className="w-full justify-start" disabled={!ready}>
-                  <BookOpen className="w-4 h-4 mr-2" />
-                  {t('tankoubon.addToCollection')}
-                </Button>
-              }
-              onAdded={() => setOpen(false)}
-            />
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              disabled={!ready}
+              onClick={() => {
+                // Close the sheet first, then open the dialog (rendered outside the sheet).
+                setPendingAddDialog(true);
+                setOpen(false);
+              }}
+            >
+              <BookOpen className="w-4 h-4 mr-2" />
+              {t('tankoubon.addToCollection')}
+            </Button>
 
             {isAuthenticated ? (
               <Button
@@ -209,6 +223,14 @@ export function ArchiveMobileActions({
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Render outside the Sheet so it doesn't unmount during close animation. */}
+      <AddToTankoubonDialog
+        archiveId={metadata.arcid}
+        open={addDialogOpen}
+        onOpenChange={setAddDialogOpen}
+        onAdded={() => setAddDialogOpen(false)}
+      />
     </div>
   );
 }

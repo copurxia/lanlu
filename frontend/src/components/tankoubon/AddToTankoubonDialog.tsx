@@ -23,6 +23,8 @@ interface AddToTankoubonDialogProps {
   onAdded?: () => void;
   trigger?: React.ReactElement;
   fullWidth?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function AddToTankoubonDialog({
@@ -30,11 +32,15 @@ export function AddToTankoubonDialog({
   onAdded,
   trigger,
   fullWidth = false,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: AddToTankoubonDialogProps) {
   const { t } = useLanguage();
   const { confirm, ConfirmComponent } = useConfirm();
   const { error: showError, success: showSuccess } = useToast();
-  const [open, setOpen] = useState(false);
+  const isControlled = typeof controlledOpen === 'boolean';
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = isControlled ? (controlledOpen as boolean) : openInternal;
   const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState<string | null>(null);
@@ -59,7 +65,11 @@ export function AddToTankoubonDialog({
 
   function handleOpenChange(newOpen: boolean) {
     if (!mounted) return;
-    setOpen(newOpen);
+    if (isControlled) {
+      controlledOnOpenChange?.(newOpen);
+    } else {
+      setOpenInternal(newOpen);
+    }
     if (!newOpen) {
       setShowCreateForm(false);
       setNewTankoubonName('');
@@ -173,14 +183,19 @@ export function AddToTankoubonDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger asChild>
-        {trigger ?? (
-          <Button variant="outline" size="sm" className={fullWidth ? 'w-full' : undefined}>
-            <BookOpen className="w-4 h-4 mr-2" />
-            {t('tankoubon.addToCollection')}
-          </Button>
-        )}
-      </DialogTrigger>
+      {/* When controlled, the parent may choose to render no trigger and toggle `open` itself. */}
+      {!isControlled ? (
+        <DialogTrigger asChild>
+          {trigger ?? (
+            <Button variant="outline" size="sm" className={fullWidth ? 'w-full' : undefined}>
+              <BookOpen className="w-4 h-4 mr-2" />
+              {t('tankoubon.addToCollection')}
+            </Button>
+          )}
+        </DialogTrigger>
+      ) : trigger ? (
+        <DialogTrigger asChild>{trigger}</DialogTrigger>
+      ) : null}
       <DialogContent size="fluid">
         <DialogBody>
           <div className="space-y-4">
