@@ -289,7 +289,7 @@ export function ReaderSingleModeView({
 	                    fetchPriority="high"
 	                    className="absolute inset-0 object-contain select-none touch-none w-full h-full transition-opacity duration-300 ease-in-out"
 	                    style={{
-	                      opacity: loadedImages.has(currentPage) ? 1 : 0.3,
+	                      opacity: 1,
 	                      cursor: 'pointer',
 	                      maxHeight: '100%',
 	                      height: '100%',
@@ -323,7 +323,7 @@ export function ReaderSingleModeView({
 	                    fetchPriority="high"
 	                    className="absolute inset-0 object-contain select-none touch-none w-full h-full transition-opacity duration-300 ease-in-out"
 	                    style={{
-	                      opacity: loadedImages.has(currentPage + 1) ? 1 : 0.3,
+	                      opacity: 1,
 	                      cursor: 'pointer',
 	                      maxHeight: '100%',
 	                      height: '100%',
@@ -370,7 +370,7 @@ export function ReaderSingleModeView({
                     style={{
                       maxHeight: '100%',
                       height: '100%',
-                      opacity: loadedImages.has(currentPage) ? 1 : 0.3,
+                      opacity: 1,
                       transform: !doublePageMode && shouldTransform ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : undefined,
                       transition: !doublePageMode && shouldTransform ? 'transform 0.1s ease-out' : undefined,
                     }}
@@ -420,7 +420,7 @@ export function ReaderSingleModeView({
 	                            transition-opacity duration-300 ease-in-out
 	                          `}
 	                          style={{
-	                            opacity: loadedImages.has(currentPage) ? 1 : 0.3,
+	                            opacity: 1,
 	                            transform: shouldTransform ? `scale(${scale})` : undefined,
 	                            transformOrigin: 'top center',
 	                            cursor: doublePageMode ? 'pointer' : scale > 1 ? 'grab' : 'default',
@@ -466,7 +466,7 @@ export function ReaderSingleModeView({
 	                            style={{
 	                              maxHeight: '100%',
 	                              height: '100%',
-	                              opacity: loadedImages.has(currentPage) ? 1 : 0.3,
+	                              opacity: 1,
 	                              transform:
 	                                !doublePageMode && shouldTransform
 	                                  ? `scale(${scale}) translate(${translateX}px, ${translateY}px)`
@@ -513,7 +513,7 @@ export function ReaderSingleModeView({
                       style={{
                         maxHeight: '100%',
                         height: '100%',
-                        opacity: loadedImages.has(currentPage + 1) ? 1 : 0.3,
+                        opacity: 1,
                       }}
                       onLoadedData={() => onImageLoaded(currentPage + 1)}
                       onError={() => onImageError(currentPage + 1)}
@@ -548,7 +548,7 @@ export function ReaderSingleModeView({
 	                      style={{
 	                        maxHeight: '100%',
 	                        height: '100%',
-	                        opacity: loadedImages.has(currentPage + 1) ? 1 : 0.3,
+	                        opacity: 1,
 	                        cursor: 'pointer',
 	                      }}
 	                      onLoad={(e) => {

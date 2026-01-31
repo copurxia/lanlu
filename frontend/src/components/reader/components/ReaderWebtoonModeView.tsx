@@ -158,7 +158,7 @@ export function ReaderWebtoonModeView({
                             height: 'auto',
                             display: 'block',
                             margin: '0 auto',
-                            opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
+                            opacity: 1,
                           }}
                           onLoadedData={() => onImageLoaded(actualIndex)}
                           onError={() => onImageError(actualIndex)}
@@ -194,7 +194,7 @@ export function ReaderWebtoonModeView({
 	                          loading="lazy"
 	                          className="absolute inset-0 object-contain select-none w-full h-full"
 	                          style={{
-	                            opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
+	                            opacity: 1,
 	                            transform,
 	                            transition: transformTransition,
 	                            cursor: scale > 1 ? 'grab' : 'default',
