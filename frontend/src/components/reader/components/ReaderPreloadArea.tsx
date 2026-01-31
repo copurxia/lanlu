@@ -1,5 +1,5 @@
-/* eslint-disable @next/next/no-img-element */
 import type { PageInfo } from '@/lib/services/archive-service';
+import Image from 'next/image';
 
 export function ReaderPreloadArea({
   enabled,
@@ -47,14 +47,15 @@ export function ReaderPreloadArea({
         }
 
         return (
-          <img
+          <Image
             key={`preload-${pageIndex}`}
             src={page.url}
             alt=""
-            loading="lazy"
-            fetchPriority="low"
-            decoding="async"
-            onLoad={() => {
+            width={1}
+            height={1}
+            priority
+            fetchPriority="high"
+            onLoadingComplete={() => {
               onLoaded(pageIndex);
               if (!cachedPages[pageIndex]) {
                 onCacheImage(page.url, pageIndex);
