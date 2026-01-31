@@ -1,6 +1,7 @@
 package archive_ffi
 
 import std.collection.*
+import std.sort.*
 
 /**
  * 压缩包条目流式读取器
@@ -121,6 +122,75 @@ public class Archive {
     }
 
     /**
+     * Find the first image entry in an archive using a single streaming scan.
+     *
+     * This avoids building a full entry list + natural sorting, which can be very slow
+     * on large archives. The ordering matches lanlu.utils.NaturalSort semantics
+     * (numbers are compared by value, case-insensitive text).
+     *
+     * @return best-matching image entry name, or "" if none found / open fails.
+     */
+    public static func findFirstImageEntry(archivePath: String): String {
+        let a = unsafe { archive_read_new() }
+        if (a.isNull()) {
+            return ""
+        }
+
+        unsafe {
+            archive_read_support_format_all(a)
+            archive_read_support_filter_all(a)
+        }
+
+        let pathCStr = unsafe { LibC.mallocCString(archivePath) }
+        let openResult = unsafe { archive_read_open_filename(a, pathCStr, 10240) }
+        unsafe { LibC.free(pathCStr) }
+
+        if (openResult != Int32(ARCHIVE_OK)) {
+            unsafe { archive_read_free(a) }
+            return ""
+        }
+
+        let entry = unsafe { archive_entry_new2(a) }
+        var best = ""
+
+        while (true) {
+            let r = unsafe { archive_read_next_header2(a, entry) }
+            if (r == Int32(ARCHIVE_EOF)) {
+                break
+            }
+            if (r != Int32(ARCHIVE_OK)) {
+                break
+            }
+
+            let pathname = unsafe { archive_entry_pathname(entry) }
+            if (pathname.isNull()) {
+                continue
+            }
+
+            let name = unsafe { pathname.toString() }
+            if (!isImageEntryName(name)) {
+                continue
+            }
+
+            if (best.size == 0) {
+                best = name
+            } else {
+                if (naturalCompare(name, best) == Ordering.LT) {
+                    best = name
+                }
+            }
+        }
+
+        unsafe {
+            archive_entry_free(entry)
+            archive_read_close(a)
+            archive_read_free(a)
+        }
+
+        return best
+    }
+
+    /**
      * 提取压缩包内指定条目的内容
      * @param archivePath 压缩包文件路径
      * @param entryName 条目名称
@@ -216,6 +286,118 @@ public class Archive {
         }
 
         return Array<UInt8>()
+    }
+
+    // ---- helpers ----
+
+    private static func isImageEntryName(name: String): Bool {
+        if (name.size == 0) {
+            return false
+        }
+        let parts = name.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let ext = parts[parts.size - 1].toAsciiLower()
+        return ext == "avif" || ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif"
+    }
+
+    // Natural sort compare (mirrors lanlu.utils.NaturalSort.naturalCompare).
+    private static func naturalCompare(a: String, b: String): Ordering {
+        let aSegments = splitIntoSegments(a)
+        let bSegments = splitIntoSegments(b)
+
+        let minLen = if (aSegments.size < bSegments.size) { aSegments.size } else { bSegments.size }
+
+        for (i in 0..minLen) {
+            let aSeg = aSegments[i]
+            let bSeg = bSegments[i]
+            let result = compareSegments(aSeg, bSeg)
+            if (result != Ordering.EQ) {
+                return result
+            }
+        }
+
+        if (aSegments.size < bSegments.size) {
+            return Ordering.LT
+        } else if (aSegments.size > bSegments.size) {
+            return Ordering.GT
+        }
+        return Ordering.EQ
+    }
+
+    private static func splitIntoSegments(s: String): ArrayList<(String, Bool)> {
+        let segments = ArrayList<(String, Bool)>()
+        if (s.isEmpty()) {
+            return segments
+        }
+        let runes = s.toRuneArray()
+        var i = 0
+        while (i < runes.size) {
+            if (isDigit(runes[i])) {
+                var numStr = ""
+                while (i < runes.size && isDigit(runes[i])) {
+                    numStr += runes[i].toString()
+                    i++
+                }
+                segments.add((numStr, true))
+            } else {
+                var textStr = ""
+                while (i < runes.size && !isDigit(runes[i])) {
+                    textStr += runes[i].toString()
+                    i++
+                }
+                segments.add((textStr, false))
+            }
+        }
+        return segments
+    }
+
+    private static func compareSegments(a: (String, Bool), b: (String, Bool)): Ordering {
+        let aVal = a[0]
+        let aIsNum = a[1]
+        let bVal = b[0]
+        let bIsNum = b[1]
+
+        if (aIsNum && bIsNum) {
+            let aNum = parseNumber(aVal)
+            let bNum = parseNumber(bVal)
+            if (aNum < bNum) {
+                return Ordering.LT
+            } else if (aNum > bNum) {
+                return Ordering.GT
+            }
+            // More leading zeros sorts first.
+            if (aVal.size > bVal.size) {
+                return Ordering.LT
+            } else if (aVal.size < bVal.size) {
+                return Ordering.GT
+            }
+            return Ordering.EQ
+        }
+
+        if (aIsNum && !bIsNum) {
+            return Ordering.LT
+        }
+        if (!aIsNum && bIsNum) {
+            return Ordering.GT
+        }
+
+        return aVal.toAsciiLower().compare(bVal.toAsciiLower())
+    }
+
+    private static func parseNumber(s: String): Int64 {
+        var result: Int64 = 0
+        for (r in s.toRuneArray()) {
+            let digit = UInt32(r) - UInt32(r'0')
+            result = result * 10 + Int64(digit)
+        }
+        return result
+    }
+
+    private static func isDigit(r: Rune): Bool {
+        let code = UInt32(r)
+        return code >= UInt32(r'0') && code <= UInt32(r'9')
     }
 
     /**

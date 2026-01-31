@@ -92,19 +92,13 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func getFirstImage(archivePath: String): (String, String) {
-        let entries = listEntries(archivePath)
-        // 筛选图片文件并排序
-        let imageEntries = ArrayList<String>()
-        for (entry in entries) {
-            if (isImageFile(entry)) {
-                imageEntries.add(entry)
-            }
-        }
-        if (imageEntries.isEmpty()) {
+        // Fast-path: avoid listing/sorting all entries for large archives.
+        // This scans headers once and selects the best candidate using natural order.
+        let best = Archive.findFirstImageEntry(archivePath)
+        if (best.size == 0) {
             return ("", "")
         }
-        NaturalSort.sortStrings(imageEntries)
-        return (imageEntries[0], "")
+        return (best, "")
     }
 
     // 支持的压缩包扩展名
