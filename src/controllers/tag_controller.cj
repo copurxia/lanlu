@@ -397,7 +397,7 @@ public class TagController {
         }
 
         // Reuse avatar policy: center-crop square 256x256 then server stores AVIF.
-        let convertRes = ArchiveUtils.convertAvatarToAvif(inputPath, outputAvifPath, tempDir)
+        let (convertRes, thumbHashFromConvert) = ArchiveUtils.convertAvatarToAvifWithThumbHash(inputPath, outputAvifPath, tempDir)
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(422)
@@ -405,7 +405,8 @@ public class TagController {
             return
         }
 
-        let thumbHash = try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" }
+        let thumbHash = if (thumbHashFromConvert.size > 0) { thumbHashFromConvert }
+            else { try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" } }
         let byteSize = try { Int64(FileInfo(Path(outputAvifPath)).size) } catch (_: Exception) { 0 }
 
         // Delete previous icon asset (best-effort)
@@ -499,7 +500,7 @@ public class TagController {
             return
         }
 
-        let convertRes = ArchiveUtils.convertTagBackgroundToAvif(inputPath, outputAvifPath, tempDir)
+        let (convertRes, thumbHashFromConvert2) = ArchiveUtils.convertTagBackgroundToAvifWithThumbHash(inputPath, outputAvifPath, tempDir)
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(422)
@@ -507,7 +508,8 @@ public class TagController {
             return
         }
 
-        let thumbHash = try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" }
+        let thumbHash = if (thumbHashFromConvert2.size > 0) { thumbHashFromConvert2 }
+            else { try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" } }
         let byteSize = try { Int64(FileInfo(Path(outputAvifPath)).size) } catch (_: Exception) { 0 }
 
         // Delete previous background asset (best-effort)

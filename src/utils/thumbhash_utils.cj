@@ -11,6 +11,18 @@ import avif_ffi.*
  */
 public class ThumbHashUtils {
     /**
+     * Calculate a deterministic hash from RGBA pixels (already decoded).
+     * This lets callers avoid re-decoding the written AVIF just to compute thumbhash.
+     */
+    public static func calculateThumbHashFromRgbaPixels(pixels: Array<UInt8>): String {
+        let builder = RandomState.new()
+        let hasher = builder.buildHasher()
+        hasher.write(pixels)
+        let hash = hasher.finish()
+        return hashToHex(hash)
+    }
+
+    /**
      * Calculate a deterministic hash from the decoded RGBA pixels of an AVIF file.
      */
     public static func calculateAvifThumbHashFromFile(imagePath: String): String {
@@ -28,11 +40,7 @@ public class ThumbHashUtils {
 
         let imageData = buffer[0..bytesRead]
         if (let Some((_, _, pixels)) <- AvifDecoder.decodeRGBA(imageData)) {
-            let builder = RandomState.new()
-            let hasher = builder.buildHasher()
-            hasher.write(pixels)
-            let hash = hasher.finish()
-            return hashToHex(hash)
+            return calculateThumbHashFromRgbaPixels(pixels)
         }
 
         throw Exception("AVIF decode failed for: ${imagePath}")
@@ -54,4 +62,3 @@ public class ThumbHashUtils {
         return result
     }
 }
-

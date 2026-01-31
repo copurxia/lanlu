@@ -186,7 +186,7 @@ public class GenerateThumbnailTaskRunner {
         // 先转换图片为 AVIF 格式（临时路径）
         TaskIO.appendLog(taskId, "Converting image to AVIF format (libvips > FFmpeg)...")
         let tempAvifPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.avif")
-        let convertResult = ArchiveUtils.convertImageToAvif(tempImagePath, tempAvifPath, taskTempDir)
+        let (convertResult, thumbHashFromConvert) = ArchiveUtils.convertImageToAvifWithThumbHash(tempImagePath, tempAvifPath, taskTempDir)
 
         // 清理输入临时文件（无论转换成功或失败）
         try {
@@ -228,10 +228,14 @@ public class GenerateThumbnailTaskRunner {
             TaskIO.appendLog(taskId, "Temp AVIF size: ${avifSize} bytes")
         } catch (_: Exception) {}
 
-        // 计算 thumbhash（基于转换后的 AVIF，仅用于数据库记录）
-        TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
-        logger.debug("Calculating thumbhash for archive: ${archiveId}")
-        let thumbHash = ThumbHashUtils.calculateAvifThumbHashFromFile(tempAvifPath)
+        // thumbhash: prefer the one computed from the final pixels during conversion (no AVIF re-decode).
+        var thumbHash = thumbHashFromConvert
+        if (thumbHash.size == 0) {
+            TaskIO.appendLog(taskId, "WARN: Conversion did not provide thumbhash; falling back to AVIF decode for hash.")
+            TaskIO.appendLog(taskId, "Calculating thumbhash for archive: ${archiveId}")
+            logger.debug("Calculating thumbhash for archive: ${archiveId}")
+            thumbHash = ThumbHashUtils.calculateAvifThumbHashFromFile(tempAvifPath)
+        }
         TaskIO.appendLog(taskId, "Calculated thumbhash: ${thumbHash}")
         logger.debug("Calculated thumbhash: ${thumbHash}")
 

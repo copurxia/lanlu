@@ -75,7 +75,7 @@ public class UserController {
             return
         }
 
-        let convertRes = ArchiveUtils.convertAvatarToAvif(inputPath, outputAvifPath, tempDir)
+        let (convertRes, thumbHashFromConvert) = ArchiveUtils.convertAvatarToAvifWithThumbHash(inputPath, outputAvifPath, tempDir)
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             ctx.status(HttpStatusCode.STATUS_UNPROCESSABLE_ENTITY)
@@ -83,7 +83,8 @@ public class UserController {
             return
         }
 
-        let thumbHash = try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" }
+        let thumbHash = if (thumbHashFromConvert.size > 0) { thumbHashFromConvert }
+            else { try { ThumbHashUtils.calculateAvifThumbHashFromFile(outputAvifPath) } catch (_: Exception) { "" } }
         let byteSize = try { Int64(FileInfo(Path(outputAvifPath)).size) } catch (_: Exception) { 0 }
 
         match (AssetDao.create(Some(userId), "user_avatar", originalFilename, "image/avif", "avif", byteSize, thumbHash)) {
