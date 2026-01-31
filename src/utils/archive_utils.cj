@@ -343,11 +343,10 @@ public class ArchiveUtils {
 
     /**
      * 转换图片或视频为AVIF格式缩略图
-     * Thumbnail conversion strategy: libvips > self-impl > ImageMagick > FFmpeg
+     * Thumbnail conversion strategy: libvips > FFmpeg
      * - libvips is preferred: it supports many input formats via loaders and can write AVIF
      *   when the system has an AVIF-capable saver (typically via libheif).
-     * - Self-impl is kept as an optional native path for a small set of formats.
-     * - ImageMagick/FFmpeg are used as fallbacks for maximum compatibility.
+     * - If libvips fails, we fall back directly to FFmpeg for maximum compatibility.
      * 统一处理策略：宽度缩放到500px，高度裁剪到1000px（自适应，从顶部裁剪）
      */
     public static func convertImageToAvif(inputPath: String, outputPath: String, tempPath: String): ProcessResultData {
@@ -368,48 +367,16 @@ public class ArchiveUtils {
             match (VipsConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
                 case Some(res) =>
                     if (res.success) { return res }
-                    logger.warn("libvips convert->avif failed; falling back", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
-            // 1) Self implementation (extensible):
-            // Try a native decoder+libavif encoder first for formats we support ourselves.
-            // This avoids relying on external toolchains and is the preferred path for PNG.
-            match (SelfImageConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
-                case Some(res) =>
-                    if (res.success) { return res }
-                    logger.warn("Self convert->avif failed; falling back to ImageMagick/ffmpeg", ("inputPath", inputPath), ("error", res.error))
-                case None => ()
-            }
-
-            // Prefer ImageMagick first (decode+resize+crop), then fall back to FFmpeg.
-            // This helps with some images that FFmpeg/ffprobe struggles to decode reliably.
-            let (imExitCode, imStderrStr) = runImageMagickToAvif(inputPath, outputPath, 500i64, 1000i64)
-            if (imExitCode == 0) {
-                return ProcessResultData(true, outputPath, "")
-            }
-            logger.warn("ImageMagick convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath))
-
-            // Then try FFmpeg directly.
+            // 1) FFmpeg fallback.
             let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
-
-            // Last resort: ImageMagick renders a still PNG (first frame), then FFmpeg encodes AVIF.
-            // This covers cases where IM can decode, but cannot encode AVIF (missing delegate),
-            // or where FFmpeg can't decode animated formats that IM can read.
-            let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
-            let (imExitCode2, imStderrStr2) = runImageMagickToPng(inputPath, fallbackPngPath)
-            if (imExitCode2 == 0) {
-                let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
-                if (exitCode2 == 0) {
-                    return ProcessResultData(true, outputPath, "")
-                }
-                return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png ok; ffmpeg retry failed:\n${stderrStr2}")
-            }
-
-            return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png fallback failed:\n${imStderrStr2}")
+            return ProcessResultData(false, "", "libvips failed, ffmpeg failed:\n${stderrStr}")
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Exception: ${e.message}")
         }
@@ -433,34 +400,17 @@ public class ArchiveUtils {
             match (VipsConvertUtils.tryConvertAvatarToAvif(inputPath, outputPath, 256i64)) {
                 case Some(res) =>
                     if (res.success) { return res }
-                    logger.warn("libvips avatar convert->avif failed; falling back", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips avatar convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
-            // Prefer ImageMagick first.
-            let (imExitCode, imStderrStr) = runImageMagickToAvifSquare(inputPath, outputPath, 256i64)
-            if (imExitCode == 0) {
-                return ProcessResultData(true, outputPath, "")
-            }
-            logger.warn("ImageMagick avatar convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath))
-
+            // 1) FFmpeg fallback.
             let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
 
-            // Fallback: render first frame to PNG then FFmpeg encode.
-            let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
-            let (imExitCode2, imStderrStr2) = runImageMagickToPng(inputPath, fallbackPngPath)
-            if (imExitCode2 == 0) {
-                let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
-                if (exitCode2 == 0) {
-                    return ProcessResultData(true, outputPath, "")
-                }
-                return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png ok; ffmpeg retry failed:\n${stderrStr2}")
-            }
-
-            return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png fallback failed:\n${imStderrStr2}")
+            return ProcessResultData(false, "", "libvips failed, ffmpeg failed:\n${stderrStr}")
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Exception: ${e.message}")
         }
@@ -484,34 +434,17 @@ public class ArchiveUtils {
             match (VipsConvertUtils.tryConvertTagBackgroundToAvif(inputPath, outputPath, 1200i64, 400i64)) {
                 case Some(res) =>
                     if (res.success) { return res }
-                    logger.warn("libvips tag background convert->avif failed; falling back", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips tag background convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
-            // Prefer ImageMagick first.
-            let (imExitCode, imStderrStr) = runImageMagickToAvif(inputPath, outputPath, 1200i64, 400i64)
-            if (imExitCode == 0) {
-                return ProcessResultData(true, outputPath, "")
-            }
-            logger.warn("ImageMagick tag background convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath))
-
+            // 1) FFmpeg fallback.
             let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
 
-            // Fallback: render first frame to PNG then FFmpeg encode.
-            let fallbackPngPath = FileUtils.joinPath(tempPath, "im_fallback.png")
-            let (imExitCode2, imStderrStr2) = runImageMagickToPng(inputPath, fallbackPngPath)
-            if (imExitCode2 == 0) {
-                let (exitCode2, stderrStr2) = runFfmpegToAvif(fallbackPngPath, outputPath, vfFilter)
-                if (exitCode2 == 0) {
-                    return ProcessResultData(true, outputPath, "")
-                }
-                return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png ok; ffmpeg retry failed:\n${stderrStr2}")
-            }
-
-            return ProcessResultData(false, "", "ImageMagick avif failed:\n${imStderrStr}\n---\nFFmpeg failed:\n${stderrStr}\n---\nImageMagick png fallback failed:\n${imStderrStr2}")
+            return ProcessResultData(false, "", "libvips failed, ffmpeg failed:\n${stderrStr}")
         } catch (e: Exception) {
             return ProcessResultData(false, "", "Exception: ${e.message}")
         }

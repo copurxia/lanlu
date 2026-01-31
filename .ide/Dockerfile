@@ -14,10 +14,7 @@ RUN set -eux; \
     build-essential clang ninja-build \
     pkg-config \
     libarchive-dev libavif-dev \
-    libpng-dev zlib1g-dev \
-    # demux.h + libwebpdemux live in libwebp-dev on Ubuntu.
-    libwebp-dev \
-    libjpeg-dev; \
+    libvips-dev libheif-dev; \
   rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).
