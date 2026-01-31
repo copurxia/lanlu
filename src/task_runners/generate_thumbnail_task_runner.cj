@@ -91,45 +91,96 @@ public class GenerateThumbnailTaskRunner {
         FileUtils.ensureDirectoryExists(taskTempPath)
         TaskIO.appendLog(taskId, "Created task temp directory: ${taskTempDir}")
 
-        // 使用 getCoverImage 直接获取封面图片数据
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
-        TaskIO.appendLog(taskId, "Extracting cover image using getCoverImage (type: ${archiveType})...")
-        let (exitCode, imageData, errorData) = handler.getCoverImage(actualArchivePath)
 
-        if (exitCode != 0 || imageData.size == 0) {
-            TaskIO.appendLog(taskId, "Cover extraction failed (exit_code=${exitCode}, image_bytes=${imageData.size}, err_bytes=${errorData.size})")
-            let errorMsg = if (errorData.size > 0) {
-                let previewBytes = if (errorData.size > 1024) { errorData.slice(0, 1024) } else { errorData }
-                let previewStr = try { String.fromUtf8(previewBytes) } catch (_: Exception) { "" }
-                if (errorData.size > 1024) { "${previewStr}\n...(truncated)" } else { previewStr }
-            } else {
-                "No cover image found in ${archiveType} archive"
-            }
+        // Stream cover extraction into a temp file to avoid loading huge entries into memory.
+        // This prevents long stalls on large archives (e.g. 40MB+ PNG cover pages).
+        TaskIO.appendLog(taskId, "Extracting cover image using streaming reader (type: ${archiveType})...")
+
+        let (coverEntryName, _) = handler.getFirstImage(actualArchivePath)
+        if (coverEntryName.size == 0) {
+            let errorMsg = "No image found in ${archiveType} archive"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
+        TaskIO.appendLog(taskId, "Cover entry selected: ${coverEntryName}")
 
-        TaskIO.appendLog(taskId, "Cover image extracted (exit_code=${exitCode}), size: ${imageData.size} bytes")
+        var inferredExt = inferExtensionFromName(coverEntryName)
+        if (inferredExt.size == 0) {
+            inferredExt = "tmp"
+        }
 
-        // FFmpeg/ffprobe may mis-detect some formats when the file has no extension (e.g. ".tmp").
-        // Prefer inferring the extension from the bytes; fallback to the first media entry's extension.
-        let inferredExt = inferMediaExtension(imageData, handler, actualArchivePath)
         let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${inferredExt}")
         TaskIO.appendLog(taskId, "Inferred cover extension: ${inferredExt}")
-        TaskIO.appendLog(taskId, "Writing cover image to: ${tempImagePath}")
+        TaskIO.appendLog(taskId, "Streaming cover entry to: ${tempImagePath}")
 
-        try {
-            let tempFile = File(Path(tempImagePath), Write)
-            tempFile.write(imageData)
-            tempFile.close()
+        let (readerExitCode, readerOpt, readerErr) = handler.getEntryReader(actualArchivePath, coverEntryName)
+        if (readerExitCode == 0) {
+            match (readerOpt) {
+                case Some(reader) =>
+                    try {
+                        let outFile = File(Path(tempImagePath), Write)
+                        let bufSize: Int64 = 1024 * 1024
+                        var buf = Array<Byte>(bufSize, repeat: 0)
+                        var total: Int64 = 0
+                        while (true) {
+                            let n = reader.read(buf)
+                            if (n <= 0) {
+                                break
+                            }
+                            outFile.write(buf[0..n])
+                            total += n
+                        }
+                        outFile.close()
+                        reader.close()
+                        TaskIO.appendLog(taskId, "Cover image extracted via streaming, size: ${total} bytes")
+                    } catch (e: Exception) {
+                        try { reader.close() } catch (_: Exception) {}
+                        let errorMsg = "Failed to write cover image to temp file (streaming): ${e.message}"
+                        TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                        return ProcessResultData(false, "", errorMsg)
+                    }
+                case None =>
+                    TaskIO.appendLog(taskId, "WARN: getEntryReader returned None; falling back to in-memory extraction. err=${readerErr}")
+                    let (exitCode, imageData, errorData) = handler.getCoverImage(actualArchivePath)
+                    if (exitCode != 0 || imageData.size == 0) {
+                        var errStr = ""
+                        try { errStr = String.fromUtf8(errorData) } catch (_: Exception) { errStr = "Unknown error" }
+                        let errorMsg = "Cover extraction failed (exit_code=${exitCode}): ${errStr}"
+                        TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                        return ProcessResultData(false, "", errorMsg)
+                    }
+                    try {
+                        let tempFile = File(Path(tempImagePath), Write)
+                        tempFile.write(imageData)
+                        tempFile.close()
+                        TaskIO.appendLog(taskId, "Cover image extracted (fallback), size: ${imageData.size} bytes")
+                    } catch (e: Exception) {
+                        let errorMsg = "Failed to write cover image to temp file (fallback): ${e.message}"
+                        TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                        return ProcessResultData(false, "", errorMsg)
+                    }
+            }
+        } else {
+            TaskIO.appendLog(taskId, "WARN: getEntryReader failed; falling back to in-memory extraction. err=${readerErr}")
+            let (exitCode, imageData, errorData) = handler.getCoverImage(actualArchivePath)
+            if (exitCode != 0 || imageData.size == 0) {
+                var errStr = ""
+                try { errStr = String.fromUtf8(errorData) } catch (_: Exception) { errStr = "Unknown error" }
+                let errorMsg = "Cover extraction failed (exit_code=${exitCode}): ${errStr}"
+                TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                return ProcessResultData(false, "", errorMsg)
+            }
             try {
-                let tmpSize = FileInfo(Path(tempImagePath)).size
-                TaskIO.appendLog(taskId, "Wrote temp cover file (size=${tmpSize} bytes)")
-            } catch (_: Exception) {}
-        } catch (e: Exception) {
-            let errorMsg = "Failed to write cover image to temp file: ${e.message}"
-            TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
-            return ProcessResultData(false, "", errorMsg)
+                let tempFile = File(Path(tempImagePath), Write)
+                tempFile.write(imageData)
+                tempFile.close()
+                TaskIO.appendLog(taskId, "Cover image extracted (fallback), size: ${imageData.size} bytes")
+            } catch (e: Exception) {
+                let errorMsg = "Failed to write cover image to temp file (fallback): ${e.message}"
+                TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
+                return ProcessResultData(false, "", errorMsg)
+            }
         }
 
         // 先转换图片为 AVIF 格式（临时路径）
@@ -249,28 +300,6 @@ public class GenerateThumbnailTaskRunner {
     // NOTE: removeFileOrDirectory/safeReplaceFile are provided by FileUtils.
 
     /**
-     * Infer a file extension for ffprobe/ffmpeg based on the cover bytes.
-     * If detection fails, fallback to the first media entry name.
-     */
-    private static func inferMediaExtension(imageData: Array<UInt8>, handler: ArchiveHandler, archivePath: String): String {
-        // 1) Magic-number detection (best effort)
-        let magicExt = inferExtensionFromMagic(imageData)
-        if (magicExt.size > 0) {
-            return magicExt
-        }
-
-        // 2) Fallback: use the first media entry's extension (if available)
-        let (entryName, _) = handler.getFirstImage(archivePath)
-        let nameExt = inferExtensionFromName(entryName)
-        if (nameExt.size > 0) {
-            return nameExt
-        }
-
-        // 3) Last resort
-        return "tmp"
-    }
-
-    /**
      * Infer extension from filename.
      */
     private static func inferExtensionFromName(name: String): String {
@@ -282,84 +311,6 @@ public class GenerateThumbnailTaskRunner {
             return ""
         }
         return parts[parts.size - 1].toAsciiLower()
-    }
-
-    /**
-     * Infer extension from common file signatures.
-     */
-    private static func inferExtensionFromMagic(data: Array<UInt8>): String {
-        if (data.size < 12) {
-            return ""
-        }
-
-        // JPEG: FF D8 FF
-        if (data.size >= 3 && data[0] == 0xFFu8 && data[1] == 0xD8u8 && data[2] == 0xFFu8) {
-            return "jpg"
-        }
-
-        // PNG: 89 50 4E 47 0D 0A 1A 0A
-        if (data.size >= 8 &&
-            data[0] == 0x89u8 && data[1] == 0x50u8 && data[2] == 0x4Eu8 && data[3] == 0x47u8 &&
-            data[4] == 0x0Du8 && data[5] == 0x0Au8 && data[6] == 0x1Au8 && data[7] == 0x0Au8) {
-            return "png"
-        }
-
-        // GIF: "GIF8"
-        if (data.size >= 4 &&
-            data[0] == 0x47u8 && data[1] == 0x49u8 && data[2] == 0x46u8 && data[3] == 0x38u8) {
-            return "gif"
-        }
-
-        // WEBP: "RIFF" .... "WEBP"
-        if (data.size >= 12 &&
-            data[0] == 0x52u8 && data[1] == 0x49u8 && data[2] == 0x46u8 && data[3] == 0x46u8 &&
-            data[8] == 0x57u8 && data[9] == 0x45u8 && data[10] == 0x42u8 && data[11] == 0x50u8) {
-            return "webp"
-        }
-
-        // EBML (Matroska/WebM): 1A 45 DF A3
-        if (data.size >= 4 && data[0] == 0x1Au8 && data[1] == 0x45u8 && data[2] == 0xDFu8 && data[3] == 0xA3u8) {
-            return "mkv"
-        }
-
-        // ISO BMFF (MP4/AVIF/HEIF): "....ftyp" + major brand
-        if (data.size >= 12 &&
-            data[4] == 0x66u8 && data[5] == 0x74u8 && data[6] == 0x79u8 && data[7] == 0x70u8) {
-            // Read major brand as ASCII
-            let b0 = data[8]
-            let b1 = data[9]
-            let b2 = data[10]
-            let b3 = data[11]
-
-            // avif/avis
-            if (b0 == 0x61u8 && b1 == 0x76u8 && b2 == 0x69u8 && b3 == 0x66u8) { // "avif"
-                return "avif"
-            }
-            if (b0 == 0x61u8 && b1 == 0x76u8 && b2 == 0x69u8 && b3 == 0x73u8) { // "avis"
-                return "avif"
-            }
-
-            // heic/heif variants
-            if (b0 == 0x68u8 && b1 == 0x65u8 && b2 == 0x69u8 && b3 == 0x63u8) { // "heic"
-                return "heic"
-            }
-            if (b0 == 0x6Du8 && b1 == 0x69u8 && b2 == 0x66u8 && b3 == 0x31u8) { // "mif1"
-                return "avif"
-            }
-
-            // mp4 family (best-effort)
-            if (b0 == 0x69u8 && b1 == 0x73u8 && b2 == 0x6Fu8 && b3 == 0x6Du8) { // "isom"
-                return "mp4"
-            }
-            if (b0 == 0x6Du8 && b1 == 0x70u8 && b2 == 0x34u8 && b3 == 0x32u8) { // "mp42"
-                return "mp4"
-            }
-            if (b0 == 0x71u8 && b1 == 0x74u8 && b2 == 0x20u8 && b3 == 0x20u8) { // "qt  "
-                return "mov"
-            }
-        }
-
-        return ""
     }
 
     private static func parseParameters(parameters: String): (String, String, String) {
