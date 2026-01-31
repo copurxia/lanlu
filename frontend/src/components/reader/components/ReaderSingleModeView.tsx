@@ -250,9 +250,7 @@ export function ReaderSingleModeView({
               !loadedImages.has(currentPage + 1))) &&
           !loadedImages.has(currentPage) && (
             <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
-              <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
-                <Spinner size="lg" />
-              </div>
+              <Spinner size="lg" className="drop-shadow-md" />
             </div>
           )}
 

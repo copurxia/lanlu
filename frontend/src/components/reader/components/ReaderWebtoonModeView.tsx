@@ -124,9 +124,7 @@ export function ReaderWebtoonModeView({
                         minHeight: '100px',
                       }}
                     >
-                      <div className="bg-background/80 backdrop-blur-sm rounded-full p-3 shadow-lg">
-                        <Spinner size="lg" />
-                      </div>
+                      <Spinner size="lg" className="drop-shadow-md" />
                     </div>
                   )}
 

@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'rea
 import type React from 'react';
 import { ArchiveService, PageInfo } from '@/lib/services/archive-service';
 import { Button } from '@/components/ui/button';
+import { Spinner } from '@/components/ui/spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { MediaInfoOverlay } from '@/components/reader/components/MediaInfoOverlay';
 import { ReaderFloatingControls } from '@/components/reader/components/ReaderFloatingControls';
@@ -774,9 +775,7 @@ function ReaderContent() {
   if (loading) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-lg">{t('common.loading')}</p>
-        </div>
+        <Spinner size="lg" />
       </div>
     );
   }
