@@ -343,9 +343,11 @@ public class ArchiveUtils {
 
     /**
      * 转换图片或视频为AVIF格式缩略图
-     * Thumbnail conversion strategy: self-impl > ImageMagick > FFmpeg
-     * - Self-impl currently supports PNG/WEBP via libpng/libwebp + libavif (extensible).
-     * - ImageMagick and FFmpeg are used as fallbacks for wider format support.
+     * Thumbnail conversion strategy: libvips > self-impl > ImageMagick > FFmpeg
+     * - libvips is preferred: it supports many input formats via loaders and can write AVIF
+     *   when the system has an AVIF-capable saver (typically via libheif).
+     * - Self-impl is kept as an optional native path for a small set of formats.
+     * - ImageMagick/FFmpeg are used as fallbacks for maximum compatibility.
      * 统一处理策略：宽度缩放到500px，高度裁剪到1000px（自适应，从顶部裁剪）
      */
     public static func convertImageToAvif(inputPath: String, outputPath: String, tempPath: String): ProcessResultData {
@@ -361,6 +363,14 @@ public class ArchiveUtils {
             // After scaling to width=500, crop height to at most 1000 (top-aligned).
             // The comma in min() must be escaped for FFmpeg filter parsing.
             let vfFilter = "scale=500:-1,crop=500:min(ih\\,1000):0:0"
+
+            // 0) libvips (preferred): decode+resize+crop+write directly.
+            match (VipsConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
+                case Some(res) =>
+                    if (res.success) { return res }
+                    logger.warn("libvips convert->avif failed; falling back", ("inputPath", inputPath), ("error", res.error))
+                case None => ()
+            }
 
             // 1) Self implementation (extensible):
             // Try a native decoder+libavif encoder first for formats we support ourselves.
@@ -419,6 +429,14 @@ public class ArchiveUtils {
             // Scale to fill then center-crop.
             let vfFilter = "scale=256:256:force_original_aspect_ratio=increase,crop=256:256"
 
+            // 0) libvips (preferred).
+            match (VipsConvertUtils.tryConvertAvatarToAvif(inputPath, outputPath, 256i64)) {
+                case Some(res) =>
+                    if (res.success) { return res }
+                    logger.warn("libvips avatar convert->avif failed; falling back", ("inputPath", inputPath), ("error", res.error))
+                case None => ()
+            }
+
             // Prefer ImageMagick first.
             let (imExitCode, imStderrStr) = runImageMagickToAvifSquare(inputPath, outputPath, 256i64)
             if (imExitCode == 0) {
@@ -461,6 +479,14 @@ public class ArchiveUtils {
             }
 
             let vfFilter = "scale=1200:-1,crop=1200:min(ih\\,400):0:0"
+
+            // 0) libvips (preferred).
+            match (VipsConvertUtils.tryConvertTagBackgroundToAvif(inputPath, outputPath, 1200i64, 400i64)) {
+                case Some(res) =>
+                    if (res.success) { return res }
+                    logger.warn("libvips tag background convert->avif failed; falling back", ("inputPath", inputPath), ("error", res.error))
+                case None => ()
+            }
 
             // Prefer ImageMagick first.
             let (imExitCode, imStderrStr) = runImageMagickToAvif(inputPath, outputPath, 1200i64, 400i64)

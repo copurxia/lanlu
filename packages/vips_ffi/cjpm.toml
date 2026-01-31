@@ -1,0 +1,11 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "vips_ffi"
+  description = "Minimal libvips FFI bindings (thumbnail/resize/crop/write)"
+  version = "0.1.0"
+  output-type = "static"
+  # Use pkg-config --libs vips as reference.
+  link-option = "-lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
+
+[dependencies]
+

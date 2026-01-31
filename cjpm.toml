@@ -9,7 +9,8 @@
   compile-option = ""
   override-compile-option = ""
   # webp_ffi uses WebPAnimDecoder* for animated WebP thumbnails (libwebpdemux).
-  link-option = "-larchive -lavif -lpng16 -lz -lwebpdemux -lwebp -ljpeg"
+  # vips_ffi uses libvips for general-purpose decode/resize/crop/encode.
+  link-option = "-larchive -lavif -lpng16 -lz -lwebpdemux -lwebp -ljpeg -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
   package-configuration = {}
 
 [dependencies]
@@ -24,6 +25,7 @@
   png_ffi = { path = "packages/png_ffi" }
   webp_ffi = { path = "packages/webp_ffi" }
   jpeg_ffi = { path = "packages/jpeg_ffi" }
+  vips_ffi = { path = "packages/vips_ffi" }
   semver = { path = "packages/semver" }
 
 [target]
