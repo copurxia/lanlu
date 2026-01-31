@@ -47,6 +47,8 @@ const SheetContent = React.forwardRef<
     <SheetPrimitive.Content
       ref={ref}
       className={cn(sheetVariants({ side }), className)}
+      // Used by reader navigation hooks to ignore wheel/tap events originating from overlays.
+      data-reader-overlay="true"
       {...props}
     >
       {children}

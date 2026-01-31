@@ -92,6 +92,10 @@ export function useReaderWheelNavigation({
     (e: WheelEvent) => {
       if (e.target instanceof HTMLInputElement) return;
 
+      const targetEl = e.target as HTMLElement | null;
+      // Ignore wheel events coming from overlay UI (e.g. settings sheet) so scrolling there doesn't flip pages.
+      if (targetEl?.closest?.('[data-reader-overlay="true"]')) return;
+
       if (autoHideEnabled && showToolbar) {
         hideToolbar();
       }
@@ -102,8 +106,6 @@ export function useReaderWheelNavigation({
         }
         return;
       }
-
-      const targetEl = e.target as HTMLElement | null;
 
       // Long image page uses an internal scroll container. Like HTML pages, when the user keeps scrolling
       // near the top/bottom edges, start a countdown to flip pages.
