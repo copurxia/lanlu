@@ -1,15 +1,45 @@
-import Image from 'next/image';
+/* eslint-disable @next/next/no-img-element */
 import { memo, forwardRef } from 'react';
 import type React from 'react';
 
-export const MemoizedImage = memo(Image, (prevProps, nextProps) => {
-  return (
-    prevProps.src === nextProps.src &&
-    prevProps.fill === nextProps.fill &&
-    prevProps.className === nextProps.className &&
-    prevProps.style === nextProps.style
-  );
-});
+type ImgFetchPriority = 'high' | 'low' | 'auto';
+
+type MemoizedImageProps = Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'fetchPriority'> & {
+  fetchPriority?: ImgFetchPriority;
+};
+
+export const MemoizedImage = memo(
+  forwardRef(function MemoizedImage(
+    { src, alt, className, style, decoding, loading, fetchPriority, ...rest }: MemoizedImageProps,
+    ref: React.ForwardedRef<HTMLImageElement>
+  ) {
+    return (
+      <img
+        ref={ref}
+        src={src}
+        alt={alt}
+        className={className}
+        style={style}
+        decoding={decoding}
+        loading={loading}
+        fetchPriority={fetchPriority}
+        {...rest}
+      />
+    );
+  }),
+  (prevProps, nextProps) => {
+    // Ignore handler identity changes (onLoad/onError/etc) to reduce re-renders while paging/zooming.
+    return (
+      prevProps.src === nextProps.src &&
+      prevProps.alt === nextProps.alt &&
+      prevProps.className === nextProps.className &&
+      prevProps.style === nextProps.style &&
+      prevProps.decoding === nextProps.decoding &&
+      prevProps.loading === nextProps.loading &&
+      prevProps.fetchPriority === nextProps.fetchPriority
+    );
+  }
+);
 
 MemoizedImage.displayName = 'MemoizedImage';
 

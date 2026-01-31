@@ -1,8 +1,7 @@
 /* eslint-disable react-hooks/immutability */
-/* eslint-disable @next/next/no-img-element */
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
-import { MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
@@ -184,7 +183,7 @@ export function ReaderWebtoonModeView({
                           )}
                         </div>
 	                      ) : (
-	                        <img
+	                        <MemoizedImage
 	                          key={`page-${actualIndex}`}
 	                          ref={(el) => {
 	                            imageRefs.current[actualIndex] = el;

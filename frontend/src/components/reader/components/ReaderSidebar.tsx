@@ -1,7 +1,7 @@
-import Image from 'next/image';
 import { Book } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
+import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
@@ -118,14 +118,17 @@ export function ReaderSidebar({
                           }}
                         />
                       ) : (
-                        <Image
+                        <MemoizedImage
                           src={page.url}
                           alt={t('archive.previewPage')
                             .replace('{current}', String(actualPageIndex + 1))
                             .replace('{total}', String(pagesLength))}
-                          fill
-                          className={`object-contain transition-opacity duration-200 ${isLoading ? 'opacity-0' : 'opacity-100'}`}
-                          onLoadingComplete={() => onThumbLoaded(actualPageIndex)}
+                          className={`absolute inset-0 object-contain transition-opacity duration-200 ${
+                            isLoading ? 'opacity-0' : 'opacity-100'
+                          }`}
+                          decoding="async"
+                          loading="lazy"
+                          onLoad={() => onThumbLoaded(actualPageIndex)}
                           onError={() => onThumbError(actualPageIndex)}
                           draggable={false}
                         />

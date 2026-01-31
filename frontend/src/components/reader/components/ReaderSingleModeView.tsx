@@ -1,8 +1,7 @@
 /* eslint-disable react-hooks/immutability */
-/* eslint-disable @next/next/no-img-element */
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
-import { MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import { getTapTurnAction } from '@/components/reader/hooks/useReaderInteractionHandlers';
 import type { PageInfo } from '@/lib/services/archive-service';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -278,7 +277,7 @@ export function ReaderSingleModeView({
 	                style={{ width: spreadLayout.groupW, height: spreadLayout.groupH }}
 	              >
 	                <div className="relative" style={{ width: spreadLayout.leftW, height: spreadLayout.groupH }}>
-	                  <img
+	                  <MemoizedImage
 	                    key={`page-${currentPage}`}
 	                    ref={(el) => {
 	                      imageRefs.current[currentPage] = el;
@@ -312,7 +311,7 @@ export function ReaderSingleModeView({
 	                </div>
 
 	                <div className="relative" style={{ width: spreadLayout.rightW, height: spreadLayout.groupH }}>
-	                  <img
+	                  <MemoizedImage
 	                    key={`page-${currentPage + 1}`}
 	                    ref={(el) => {
 	                      imageRefs.current[currentPage + 1] = el;
@@ -403,7 +402,7 @@ export function ReaderSingleModeView({
 	                  >
 	                    <div className={useLongPageScroll ? 'w-full lg:max-w-[800px] lg:px-4' : 'w-full h-full'}>
 	                      {useLongPageScroll && currentMeta ? (
-	                        <img
+	                        <MemoizedImage
 	                          key={`page-${currentPage}`}
 	                          ref={(el) => {
 	                            imageRefs.current[currentPage] = el;
@@ -442,7 +441,7 @@ export function ReaderSingleModeView({
 	                        />
 	                      ) : (
 	                        <div className="relative w-full h-full">
-	                          <img
+	                          <MemoizedImage
 	                            key={`page-${currentPage}`}
 	                            ref={(el) => {
 	                              imageRefs.current[currentPage] = el;
@@ -529,7 +528,7 @@ export function ReaderSingleModeView({
                       <HtmlRenderer html={htmlContents[currentPage + 1] || ''} className="max-w-4xl mx-auto p-4" />
                     </div>
 	                  ) : (
-	                    <img
+	                    <MemoizedImage
 	                      key={`page-${currentPage + 1}`}
 	                      ref={(el) => {
 	                        imageRefs.current[currentPage + 1] = el;
