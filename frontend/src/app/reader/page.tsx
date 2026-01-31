@@ -164,17 +164,24 @@ function ReaderContent() {
     [getImageHeight, webtoonVirtualization]
   );
 
-  const imageLoading = useReaderImageLoading({
-    pages,
-    readingMode,
-    currentPage,
-    priorityIndices:
+  // Stable reference: avoid re-running effects on every render (can cause update loops).
+  const priorityIndices = useMemo(() => {
+    if (
       readingMode !== 'webtoon' &&
       doublePageMode &&
       !(splitCoverMode && currentPage === 0) &&
       currentPage + 1 < pages.length
-        ? [currentPage, currentPage + 1]
-        : [currentPage],
+    ) {
+      return [currentPage, currentPage + 1];
+    }
+    return [currentPage];
+  }, [currentPage, doublePageMode, pages.length, readingMode, splitCoverMode]);
+
+  const imageLoading = useReaderImageLoading({
+    pages,
+    readingMode,
+    currentPage,
+    priorityIndices,
     visibleRange: webtoonVirtualization.visibleRange,
     imageRefs,
   });
