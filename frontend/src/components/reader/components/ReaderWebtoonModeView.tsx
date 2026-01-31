@@ -1,7 +1,8 @@
 /* eslint-disable react-hooks/immutability */
+/* eslint-disable @next/next/no-img-element */
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
-import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
@@ -182,38 +183,40 @@ export function ReaderWebtoonModeView({
                             </div>
                           )}
                         </div>
-                      ) : (
-                        <MemoizedImage
-                          key={`page-${actualIndex}`}
-                          src={cachedPages[actualIndex] || page.url}
-                          alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
-                          fill
-                          className="object-contain select-none"
-                          sizes="(max-width: 1024px) 95vw, 800px"
-                          decoding="async"
-                          style={{
-                            opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
-                            transform,
-                            transition: transformTransition,
-                            cursor: scale > 1 ? 'grab' : 'default',
-                          }}
-                          onLoadingComplete={(img) => {
-                            imageRefs.current[actualIndex] = img;
-                            imageRequestUrls.current[actualIndex] = img.currentSrc || img.src;
-                            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                              onMeasureImageHeight?.(actualIndex, img.naturalWidth, img.naturalHeight);
-                            }
-                            onImageLoaded(actualIndex);
-                            if (!cachedPages[actualIndex]) {
-                              onCacheImage(page.url, actualIndex);
-                            }
-                          }}
-                          onError={() => onImageError(actualIndex)}
-                          onDoubleClick={onDoubleClick}
-                          onDragStart={onImageDragStart}
-                          draggable={false}
-                        />
-                      )}
+	                      ) : (
+	                        <img
+	                          key={`page-${actualIndex}`}
+	                          ref={(el) => {
+	                            imageRefs.current[actualIndex] = el;
+	                          }}
+	                          src={cachedPages[actualIndex] || page.url}
+	                          alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
+	                          decoding="async"
+	                          loading="lazy"
+	                          className="absolute inset-0 object-contain select-none w-full h-full"
+	                          style={{
+	                            opacity: loadedImages.has(actualIndex) ? 1 : 0.3,
+	                            transform,
+	                            transition: transformTransition,
+	                            cursor: scale > 1 ? 'grab' : 'default',
+	                          }}
+	                          onLoad={(e) => {
+	                            const img = e.currentTarget;
+	                            imageRequestUrls.current[actualIndex] = img.currentSrc || img.src;
+	                            if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+	                              onMeasureImageHeight?.(actualIndex, img.naturalWidth, img.naturalHeight);
+	                            }
+	                            onImageLoaded(actualIndex);
+	                            if (!cachedPages[actualIndex]) {
+	                              onCacheImage(page.url, actualIndex);
+	                            }
+	                          }}
+	                          onError={() => onImageError(actualIndex)}
+	                          onDoubleClick={onDoubleClick}
+	                          onDragStart={onImageDragStart}
+	                          draggable={false}
+	                        />
+	                      )}
                     </div>
                   </div>
                 </div>
