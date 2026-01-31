@@ -51,6 +51,9 @@ export function ReaderPreloadArea({
             key={`preload-${pageIndex}`}
             src={page.url}
             alt=""
+            loading="lazy"
+            fetchPriority="low"
+            decoding="async"
             onLoad={() => {
               onLoaded(pageIndex);
               if (!cachedPages[pageIndex]) {

@@ -168,6 +168,13 @@ function ReaderContent() {
     pages,
     readingMode,
     currentPage,
+    priorityIndices:
+      readingMode !== 'webtoon' &&
+      doublePageMode &&
+      !(splitCoverMode && currentPage === 0) &&
+      currentPage + 1 < pages.length
+        ? [currentPage, currentPage + 1]
+        : [currentPage],
     visibleRange: webtoonVirtualization.visibleRange,
     imageRefs,
   });

@@ -22,12 +22,14 @@ export function useReaderImageLoading({
   pages,
   readingMode,
   currentPage,
+  priorityIndices,
   visibleRange,
   imageRefs,
 }: {
   pages: PageInfo[];
   readingMode: ReadingMode;
   currentPage: number;
+  priorityIndices?: number[];
   visibleRange: VisibleRange;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
 }) {
@@ -230,28 +232,47 @@ export function useReaderImageLoading({
   useEffect(() => {
     if (pages.length === 0) return;
 
+    const prioritySet = new Set(priorityIndices ?? [currentPage]);
+    const isPriorityReady = () => {
+      for (const idx of prioritySet) {
+        if (idx < 0 || idx >= pages.length) continue;
+        const page = pages[idx];
+        // HTML pages are handled by useReaderHtmlPages; don't block image/video preloading on them.
+        if (page?.type === 'html') continue;
+        if (!loadedImages.has(idx)) return false;
+      }
+      return true;
+    };
+
     if (readingMode === 'webtoon') {
       const preloadRange = 2;
       setImagesLoading((prev) => {
         const updated = new Set(prev);
+        const priorityReady = isPriorityReady();
 
         for (let i = Math.max(0, currentPage - preloadRange); i <= Math.min(pages.length - 1, currentPage + preloadRange); i++) {
           if (!loadedImages.has(i)) {
             if (!shouldLoadIndexNow(i)) continue;
-            if (pages[i]?.type !== 'html') updated.add(i);
+            if (pages[i]?.type !== 'html' && (priorityReady || prioritySet.has(i))) updated.add(i);
           }
         }
 
         for (let i = visibleRange.start; i <= visibleRange.end; i++) {
           if (i >= 0 && i < pages.length && !loadedImages.has(i)) {
             if (!shouldLoadIndexNow(i)) continue;
-            if (pages[i]?.type !== 'html') updated.add(i);
+            if (pages[i]?.type !== 'html' && (priorityReady || prioritySet.has(i))) updated.add(i);
           }
         }
 
         // Prevent unbounded growth when rapidly scrolling/jumping.
         for (const idx of Array.from(updated)) {
           if (!isIndexDesiredNow(idx)) updated.delete(idx);
+        }
+
+        if (!priorityReady) {
+          for (const idx of Array.from(updated)) {
+            if (!prioritySet.has(idx)) updated.delete(idx);
+          }
         }
 
         return updated;
@@ -261,6 +282,7 @@ export function useReaderImageLoading({
         const updated = new Set(prev);
         const preloadBefore = 1;
         const preloadAfter = 5;
+        const priorityReady = isPriorityReady();
 
         for (
           let i = Math.max(0, currentPage - preloadBefore);
@@ -269,7 +291,7 @@ export function useReaderImageLoading({
         ) {
           if (!loadedImages.has(i)) {
             if (!shouldLoadIndexNow(i)) continue;
-            if (pages[i]?.type !== 'html') updated.add(i);
+            if (pages[i]?.type !== 'html' && (priorityReady || prioritySet.has(i))) updated.add(i);
           }
         }
 
@@ -277,10 +299,26 @@ export function useReaderImageLoading({
           if (!isIndexDesiredNow(idx)) updated.delete(idx);
         }
 
+        if (!priorityReady) {
+          for (const idx of Array.from(updated)) {
+            if (!prioritySet.has(idx)) updated.delete(idx);
+          }
+        }
+
         return updated;
       });
     }
-  }, [currentPage, readingMode, pages, loadedImages, visibleRange.start, visibleRange.end, shouldLoadIndexNow, isIndexDesiredNow]);
+  }, [
+    currentPage,
+    priorityIndices,
+    readingMode,
+    pages,
+    loadedImages,
+    visibleRange.start,
+    visibleRange.end,
+    shouldLoadIndexNow,
+    isIndexDesiredNow,
+  ]);
 
   useEffect(() => {
     if (readingMode !== 'webtoon') return;

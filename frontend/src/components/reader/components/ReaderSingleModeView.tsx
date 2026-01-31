@@ -282,6 +282,7 @@ export function ReaderSingleModeView({
                     src={cachedPages[currentPage] || pages[currentPage]?.url}
                     alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
                     fill
+                    priority
                     sizes="(max-width: 1024px) 95vw, 800px"
                     decoding="async"
                     className="block object-contain select-none touch-none w-full h-full transition-opacity duration-300 ease-in-out"
@@ -398,6 +399,7 @@ export function ReaderSingleModeView({
                         {...(useLongPageScroll && currentMeta
                           ? { width: currentMeta.w, height: currentMeta.h }
                           : { fill: true })}
+                        priority
                         sizes="(max-width: 1024px) 95vw, 800px"
                         decoding="async"
                         className={`
