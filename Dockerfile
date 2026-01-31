@@ -16,6 +16,7 @@ RUN set -eux; \
       libpng16-16 \
       zlib1g \
       libwebp7 \
+      libwebpdemux2 \
       libjpeg-turbo8; \
     ssl3="$(dpkg -S 'libssl.so.3' | head -n1 | sed 's/.*: //')"; \
     crypto3="$(dpkg -S 'libcrypto.so.3' | head -n1 | sed 's/.*: //')"; \

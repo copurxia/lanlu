@@ -15,6 +15,7 @@ RUN set -eux; \
     pkg-config \
     libarchive-dev libavif-dev \
     libpng-dev zlib1g-dev \
+    # demux.h + libwebpdemux live in libwebp-dev on Ubuntu.
     libwebp-dev \
     libjpeg-dev; \
   rm -rf /var/lib/apt/lists/*
