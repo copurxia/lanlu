@@ -4,6 +4,9 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # xmake refuses to run as root unless explicitly allowed. Some CI runners execute as root.
+      XMAKE_ROOT: 'y'
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -12,19 +15,46 @@ jobs:
       #   with:
       #   channel: lts
       #   version: auto
+      - name: Install build tools
+        run: |
+          set -eux
+
+          if command -v sudo >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip zip xz-utils \
+              build-essential clang ninja-build \
+              pkg-config \
+              libarchive-dev libavif-dev \
+              libvips-dev libheif-dev
+          else
+            apt-get update
+            apt-get install -y --no-install-recommends \
+              ca-certificates curl git wget unzip zip xz-utils \
+              build-essential clang ninja-build \
+              pkg-config \
+              libarchive-dev libavif-dev \
+              libvips-dev libheif-dev
+          fi
+
+      - name: Install xmake (official installer)
+        run: |
+          set -eux
+          curl -fsSL https://xmake.io/shget.text | bash
+          if command -v sudo >/dev/null 2>&1; then
+            sudo ln -sf "$HOME/.local/bin/xmake" /usr/local/bin/xmake
+          else
+            ln -sf "$HOME/.local/bin/xmake" /usr/local/bin/xmake
+          fi
+          xmake --version
       - name: Unzip Cangjie
         run: |
           wget -O c.tar.gz "${{ vars.CANGJIE_URL }}"
           tar -xzvf c.tar.gz
           wget -O s.zip "${{ vars.STDX_URL }}"
           unzip s.zip -d stdx
-      - name: Install build tools
-        run: |
-          apt-get update
-          apt-get install -y build-essential libarchive-dev libavif-dev xmake clang ninja-build
       - name: Set Up Cangjie and build
         run: |
-          export XMAKE_ROOT=y
           export CANGJIE_STDX_PATH="$PWD/stdx"
           export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
           source cangjie/envsetup.sh
@@ -33,9 +63,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      - name: Install pnpm
-        run: npm install -g pnpm
+          node-version: '20.20.0'
+      - name: Setup pnpm (corepack)
+        run: |
+          set -eux
+          corepack enable
+          corepack prepare pnpm@10.27.0 --activate
+          pnpm -v
       - name: Build frontend
         run: |
           cd frontend
@@ -49,7 +83,7 @@ jobs:
           cp -r plugins app/plugins
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: release
           path: |
@@ -64,7 +98,7 @@ jobs:
       - name: Check out repository code
         uses: actions/checkout@v4
       - name: Download artifact
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: release
           path: ./app/
@@ -83,7 +117,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
       - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
