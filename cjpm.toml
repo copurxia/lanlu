@@ -8,7 +8,8 @@
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
-  link-option = "-larchive -lavif -lpng16 -lz -lwebp -ljpeg"
+  # webp_ffi uses WebPAnimDecoder* for animated WebP thumbnails (libwebpdemux).
+  link-option = "-larchive -lavif -lpng16 -lz -lwebpdemux -lwebp -ljpeg"
   package-configuration = {}
 
 [dependencies]
