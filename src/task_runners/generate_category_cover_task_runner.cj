@@ -221,15 +221,193 @@ public class GenerateCategoryCoverTaskRunner {
         }
     }
 
+    private static func drawRadialGlow(
+        pixels: Array<UInt8>,
+        width: Int32,
+        height: Int32,
+        cx: Int32,
+        cy: Int32,
+        radius: Int32,
+        maxAlpha: Int32
+    ): Unit {
+        if (radius <= 0i32 || maxAlpha <= 0i32) { return }
+        let r = Float64(radius)
+        let r2 = r * r
+        let x0 = if (cx - radius < 0i32) { 0i32 } else { cx - radius }
+        let y0 = if (cy - radius < 0i32) { 0i32 } else { cy - radius }
+        let x1 = if (cx + radius > width) { width } else { cx + radius }
+        let y1 = if (cy + radius > height) { height } else { cy + radius }
+        for (yy in y0..y1) {
+            for (xx in x0..x1) {
+                let dx = Float64(xx - cx)
+                let dy = Float64(yy - cy)
+                let d2 = dx * dx + dy * dy
+                if (d2 >= r2) { continue }
+                // Smooth-ish falloff.
+                let t = 1.0 - (d2 / r2)
+                let a = Int32(Float64(maxAlpha) * (t * t))
+                if (a <= 0i32) { continue }
+                blendOver(pixels, width, xx, yy, 255i32, 255i32, 255i32, a)
+            }
+        }
+    }
+
+    private static func drawStarDots(
+        pixels: Array<UInt8>,
+        width: Int32,
+        height: Int32,
+        seed: UInt64,
+        maxX: Int32,
+        count: Int32
+    ): Unit {
+        if (count <= 0i32) { return }
+        let rng = CategoryCoverRng(seed ^ 0x7f4a7c15u64)
+        let mx = if (maxX <= 0i32 || maxX > width) { width } else { maxX }
+        for (_ in 0..count) {
+            let x = Int32(Int64(rng.nextU64() % UInt64(mx)))
+            let y = Int32(Int64(rng.nextU64() % UInt64(height)))
+            let a = 18i32 + Int32(Int64(rng.nextU64() % 28u64)) // 18..45
+            // Small cross + center dot.
+            blendOver(pixels, width, x, y, 255i32, 255i32, 255i32, a)
+            if ((rng.nextU64() & 3u64) == 0u64) {
+                blendOver(pixels, width, x + 1, y, 255i32, 255i32, 255i32, a / 2)
+                blendOver(pixels, width, x - 1, y, 255i32, 255i32, 255i32, a / 2)
+                blendOver(pixels, width, x, y + 1, 255i32, 255i32, 255i32, a / 2)
+                blendOver(pixels, width, x, y - 1, 255i32, 255i32, 255i32, a / 2)
+            }
+        }
+    }
+
+    private static func drawTintedRgbaImage(
+        dst: Array<UInt8>,
+        dstW: Int32,
+        dstH: Int32,
+        x0: Int32,
+        y0: Int32,
+        src: Array<UInt8>,
+        srcW: Int32,
+        srcH: Int32,
+        r: Int32,
+        g: Int32,
+        b: Int32,
+        alphaMul: Int32
+    ): Unit {
+        if (srcW <= 0i32 || srcH <= 0i32) { return }
+        if (Int64(src.size) != Int64(srcW) * Int64(srcH) * 4) { return }
+        let mul = if (alphaMul < 0i32) { 0i32 } else if (alphaMul > 255i32) { 255i32 } else { alphaMul }
+        for (sy in 0..srcH) {
+            let dy = y0 + sy
+            if (dy < 0i32 || dy >= dstH) { continue }
+            for (sx in 0..srcW) {
+                let dx = x0 + sx
+                if (dx < 0i32 || dx >= dstW) { continue }
+                let sidx = (Int64(sy) * Int64(srcW) + Int64(sx)) * 4
+                let sa0 = Int32(src[sidx + 3])
+                if (sa0 <= 0i32) { continue }
+                let sa = (sa0 * mul) / 255i32
+                if (sa <= 0i32) { continue }
+                blendOver(dst, dstW, dx, dy, r, g, b, sa)
+            }
+        }
+    }
+
+    private static func drawRotatedRgbaImageNearest(
+        dst: Array<UInt8>,
+        dstW: Int32,
+        dstH: Int32,
+        centerX: Int32,
+        centerY: Int32,
+        src: Array<UInt8>,
+        srcW: Int32,
+        srcH: Int32,
+        // Precomputed cos/sin for angle.
+        cosA: Float64,
+        sinA: Float64,
+        scale: Float64
+    ): Unit {
+        if (srcW <= 0i32 || srcH <= 0i32) { return }
+        if (scale <= 0.0) { return }
+        if (Int64(src.size) != Int64(srcW) * Int64(srcH) * 4) { return }
+
+        let absCos = if (cosA < 0.0) { -cosA } else { cosA }
+        let absSin = if (sinA < 0.0) { -sinA } else { sinA }
+        let bbW = Int32((Float64(srcW) * absCos + Float64(srcH) * absSin) * scale) + 2i32
+        let bbH = Int32((Float64(srcW) * absSin + Float64(srcH) * absCos) * scale) + 2i32
+        let x0 = centerX - (bbW / 2)
+        let y0 = centerY - (bbH / 2)
+        let x1 = x0 + bbW
+        let y1 = y0 + bbH
+
+        let halfW = Float64(srcW) / 2.0
+        let halfH = Float64(srcH) / 2.0
+
+        let sy0 = if (y0 < 0i32) { 0i32 } else { y0 }
+        let sx0 = if (x0 < 0i32) { 0i32 } else { x0 }
+        let sy1 = if (y1 > dstH) { dstH } else { y1 }
+        let sx1 = if (x1 > dstW) { dstW } else { x1 }
+
+        for (yy in sy0..sy1) {
+            for (xx in sx0..sx1) {
+                // Map dst -> src via inverse rotation+scale about center.
+                let dx = (Float64(xx - centerX)) / scale
+                let dy = (Float64(yy - centerY)) / scale
+
+                let sx = (cosA * dx + sinA * dy) + halfW
+                let sy = (-sinA * dx + cosA * dy) + halfH
+
+                let isx = Int32(sx + 0.5)
+                let isy = Int32(sy + 0.5)
+                if (isx < 0i32 || isy < 0i32 || isx >= srcW || isy >= srcH) { continue }
+
+                let sidx = (Int64(isy) * Int64(srcW) + Int64(isx)) * 4
+                let sr = Int32(src[sidx])
+                let sg = Int32(src[sidx + 1])
+                let sb = Int32(src[sidx + 2])
+                let sa = Int32(src[sidx + 3])
+                if (sa <= 0i32) { continue }
+                blendOver(dst, dstW, xx, yy, sr, sg, sb, sa)
+            }
+        }
+    }
+
+    private static func drawTextWithShadow(
+        dst: Array<UInt8>,
+        dstW: Int32,
+        dstH: Int32,
+        x: Int32,
+        y: Int32,
+        textPixels: Array<UInt8>,
+        textW: Int32,
+        textH: Int32,
+        // Shadow.
+        shadowDx: Int32,
+        shadowDy: Int32,
+        shadowAlpha: Int32,
+        // Fill.
+        fillAlpha: Int32
+    ): Unit {
+        if (textPixels.size == 0 || textW <= 0i32 || textH <= 0i32) { return }
+
+        // 1) Shadow (soft-ish by layering a couple offsets).
+        if (shadowAlpha > 0i32) {
+            drawTintedRgbaImage(dst, dstW, dstH, x + shadowDx, y + shadowDy, textPixels, textW, textH, 0, 0, 0, shadowAlpha)
+            drawTintedRgbaImage(dst, dstW, dstH, x + shadowDx + 1, y + shadowDy + 1, textPixels, textW, textH, 0, 0, 0, shadowAlpha / 2)
+        }
+
+        // 2) Fill.
+        let fa = if (fillAlpha < 0i32) { 0i32 } else if (fillAlpha > 255i32) { 255i32 } else { fillAlpha }
+        if (fa > 0i32) {
+            drawTintedRgbaImage(dst, dstW, dstH, x, y, textPixels, textW, textH, 255, 255, 255, fa)
+        }
+    }
+
     private static func generateTemplateCoverAvif(
         taskId: Int64,
         title: String,
+        description: String,
         outputAvifPath: String,
         seed: UInt64,
-        hero: ?CoverSlotImage,
-        c1: ?CoverSlotImage,
-        c2: ?CoverSlotImage,
-        c3: ?CoverSlotImage
+        wallImages: Array<?CoverSlotImage>
     ): (Bool, String, String) {
         // Returns (ok, thumbhash, error).
         // We generate pixels in-memory and encode directly to AVIF (no external tools like ffmpeg/convert).
@@ -246,74 +424,112 @@ public class GenerateCategoryCoverTaskRunner {
             let ((r1, g1, b1), (r2, g2, b2)) = pickPalette(rng)
             TaskIO.appendLog(taskId, "Cover step: palette (${r1.toString()},${g1.toString()},${b1.toString()}) -> (${r2.toString()},${g2.toString()},${b2.toString()})")
 
-            // Background: diagonal gradient + vignette + subtle grain.
+            // Background: clean gradient + subtle dots.
             TaskIO.appendLog(taskId, "Cover step: background")
-            let halfW = Float64(w) / 2.0
-            let halfH = Float64(h) / 2.0
             for (yy in 0..h) {
                 for (xx in 0..w) {
-                    let t = (Float64(xx) + Float64(yy) * 0.35) / Float64(w)
+                    // Mostly horizontal gradient, with tiny diagonal for depth.
+                    let t = (Float64(xx) / Float64(w)) * 0.85 + (Float64(yy) / Float64(h)) * 0.08
                     let tr = Float64(r1) + (Float64(r2 - r1) * t)
                     let tg = Float64(g1) + (Float64(g2 - g1) * t)
                     let tb = Float64(b1) + (Float64(b2 - b1) * t)
 
-                    // Vignette.
-                    let dx = (Float64(xx) - halfW) / halfW
-                    let dy = (Float64(yy) - halfH) / halfH
-                    var v = 1.0 - 0.28 * (dx * dx + dy * dy)
-                    if (v < 0.65) { v = 0.65 }
-
-                    // Grain (tiny random delta).
+                    // Very subtle grain (keeps banding away without looking noisy).
                     let n = Int32(rng.nextU64() & 255u64) - 128i32
-                    let delta = n / 28i32  // ~[-4..4]
+                    let delta = n / 80i32  // ~[-1..1]
 
                     let idx = (Int64(yy) * Int64(w) + Int64(xx)) * 4
-                    pixels[idx] = clamp8(Int32(tr * v) + delta)
-                    pixels[idx + 1] = clamp8(Int32(tg * v) + delta)
-                    pixels[idx + 2] = clamp8(Int32(tb * v) + delta)
+                    pixels[idx] = clamp8(Int32(tr) + delta)
+                    pixels[idx + 1] = clamp8(Int32(tg) + delta)
+                    pixels[idx + 2] = clamp8(Int32(tb) + delta)
                     pixels[idx + 3] = 255u8
                 }
             }
+            // Sprinkle dots on the left to match the reference vibe.
+            drawStarDots(pixels, w, h, seed, 540i32, 110i32)
 
-            // Left "glass" overlay to make the UI title pop.
             TaskIO.appendLog(taskId, "Cover step: overlays")
-            // Hero card background.
-            drawRoundedRect(pixels, w, h, 54, 56, 520, 288, 30, 255, 255, 255, 190)
-            drawRoundedRect(pixels, w, h, 58, 60, 512, 280, 28, 0, 0, 0, 16)
-            if (let Some(img) <- hero) {
-                // Fit image into the inner area (padding).
-                drawImageRounded(pixels, w, h, 66, 68, 496, 264, 22, img.pixels)
-            } else {
-                // Fallback: subtle glass if no archive covers available.
-                drawRoundedRect(pixels, w, h, 66, 68, 496, 264, 22, 255, 255, 255, 22)
+            // Gentle highlight behind title (cleaner than heavy fade overlays).
+            drawRadialGlow(pixels, w, h, 200i32, 190i32, 260i32, 46i32)
+
+            // Poster wall: draw into an offscreen buffer, then rotate+blit.
+            let wallW: Int32 = 760
+            let wallH: Int32 = 520
+            let wallLen = Int64(wallW) * Int64(wallH) * 4
+            var wall = Array<UInt8>(wallLen, repeat: 0u8) // transparent
+
+            let cardW: Int32 = 170
+            let cardH: Int32 = 250
+            let gap: Int32 = 24
+            let marginX: Int32 = 18
+            let marginY: Int32 = 18
+            let cols: Int32 = 4
+            let rows: Int32 = 2
+
+            var imgIdx: Int64 = 0
+            for (ry in 0..rows) {
+                for (cx in 0..cols) {
+                    let jx = Int32(Int64(rng.nextU64() % 13u64)) - 6i32
+                    let jy = Int32(Int64(rng.nextU64() % 13u64)) - 6i32
+                    let x = marginX + cx * (cardW + gap) + jx
+                    let y = marginY + ry * (cardH + gap) + jy
+
+                    // Shadow only; no border/frame around archive covers.
+                    drawRoundedRect(wall, wallW, wallH, x + 8, y + 10, cardW, cardH, 18, 0, 0, 0, 78)
+
+                    if (imgIdx < wallImages.size) {
+                        match (wallImages[imgIdx]) {
+                            case Some(img) =>
+                                drawImageRounded(wall, wallW, wallH, x, y, cardW, cardH, 18, img.pixels)
+                            case None =>
+                                drawRoundedRect(wall, wallW, wallH, x, y, cardW, cardH, 18, 255, 255, 255, 22)
+                        }
+                    } else {
+                        drawRoundedRect(wall, wallW, wallH, x, y, cardW, cardH, 18, 255, 255, 255, 22)
+                    }
+                    imgIdx += 1
+                }
             }
 
-            // Floating cards on the right.
-            // Card 1
-            drawRoundedRect(pixels, w, h, 760, 48, 220, 150, 24, 255, 255, 255, 182)
-            drawRoundedRect(pixels, w, h, 764, 52, 212, 142, 22, 0, 0, 0, 14)
-            if (let Some(img1) <- c1) {
-                drawImageRounded(pixels, w, h, 772, 60, 196, 126, 18, img1.pixels)
-            } else {
-                drawRoundedRect(pixels, w, h, 772, 60, 196, 126, 18, 255, 255, 255, 20)
-            }
+            // Rotate the wall slightly clockwise (matches the reference).
+            // Fixed angle avoids needing trig functions at runtime.
+            let cosA = 0.9781476
+            let sinA = 0.2079117
+            drawRotatedRgbaImageNearest(pixels, w, h, 930i32, 188i32, wall, wallW, wallH, cosA, sinA, 0.98)
 
-            // Card 2
-            drawRoundedRect(pixels, w, h, 1000, 40, 180, 132, 22, 255, 255, 255, 170)
-            drawRoundedRect(pixels, w, h, 1004, 44, 172, 124, 20, 0, 0, 0, 14)
-            if (let Some(img2) <- c2) {
-                drawImageRounded(pixels, w, h, 1012, 52, 156, 108, 16, img2.pixels)
-            } else {
-                drawRoundedRect(pixels, w, h, 1012, 52, 156, 108, 16, 255, 255, 255, 20)
-            }
+            // Title and optional description (rendered via libvips/pango).
+            let safeTitle = title.trimAscii()
+            if (safeTitle.size > 0) {
+                // Keep the title a bit smaller and lighter to match the reference.
+                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeTitle, "Sans 22", 520i32, 150i32, true, 0i32)) {
+                    case Some((tpix, tw, th)) =>
+                        if (tpix.size > 0 && tw > 0i32 && th > 0i32) {
+                            // Add a small solid accent block at the left of the title.
+                            let x0 = 96i32
+                            // Vertically center-ish, but keep comfortable top padding.
+                            var y0 = 178i32 - (th / 2)
+                            if (y0 < 92i32) { y0 = 92i32 }
+                            // Softer shadow so the glyphs don't look "thick".
+                            drawTextWithShadow(pixels, w, h, x0, y0, tpix, tw, th, 2i32, 2i32, 26i32, 255i32)
 
-            // Card 3
-            drawRoundedRect(pixels, w, h, 840, 220, 250, 160, 26, 255, 255, 255, 185)
-            drawRoundedRect(pixels, w, h, 844, 224, 242, 152, 24, 0, 0, 0, 14)
-            if (let Some(img3) <- c3) {
-                drawImageRounded(pixels, w, h, 852, 232, 226, 136, 20, img3.pixels)
-            } else {
-                drawRoundedRect(pixels, w, h, 852, 232, 226, 136, 20, 255, 255, 255, 20)
+                            // Solid accent rectangle (no border / no tail).
+                            drawRoundedRect(pixels, w, h, x0 - 18i32, y0 + 6i32, 8i32, th - 12i32, 4i32, 255, 255, 255, 160i32)
+
+                            let safeDesc = description.trimAscii()
+                            if (safeDesc.size > 0) {
+                                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeDesc, "Sans 16", 520i32, 90i32, true, 4i32)) {
+                                    case Some((dpix, dw, dh)) =>
+                                        if (dpix.size > 0 && dw > 0i32 && dh > 0i32) {
+                                            let dy = y0 + th + 10i32
+                                            // Keep description subtle.
+                                            drawTextWithShadow(pixels, w, h, x0, dy, dpix, dw, dh, 2i32, 2i32, 14i32, 170i32)
+                                        }
+                                    case None => ()
+                                }
+                            }
+                        }
+                    case None => ()
+                }
             }
 
             // Encode to AVIF.
@@ -402,20 +618,21 @@ public class GenerateCategoryCoverTaskRunner {
         // Pull real archive cover assets to compose into the category cover.
         // We sample from a larger pool to keep the result "template-like but unique".
         let poolIds = ArchiveDao.getCategoryCoverAssetIds(cat.id, 24i32)
-        let pickedIds = pickDistinctCoverIds(poolIds, 4i32, seed)
+        let pickedIds = pickDistinctCoverIds(poolIds, 8i32, seed)
         if (pickedIds.size > 0) {
             TaskIO.appendLog(taskId, "Using archive cover assets: ${pickedIds.size.toString()}/${poolIds.size.toString()}")
         } else {
             TaskIO.appendLog(taskId, "No archive cover assets available; using placeholders")
         }
 
-        // Slot sizes must match the hard-coded layout in generateTemplateCoverAvif().
-        let heroImg: ?CoverSlotImage = if (pickedIds.size >= 1) { tryLoadCoverSlotImage(taskId, assetRoot, pickedIds[0], 496i32, 264i32) } else { None }
-        let c1: ?CoverSlotImage = if (pickedIds.size >= 2) { tryLoadCoverSlotImage(taskId, assetRoot, pickedIds[1], 196i32, 126i32) } else { None }
-        let c2: ?CoverSlotImage = if (pickedIds.size >= 3) { tryLoadCoverSlotImage(taskId, assetRoot, pickedIds[2], 156i32, 108i32) } else { None }
-        let c3: ?CoverSlotImage = if (pickedIds.size >= 4) { tryLoadCoverSlotImage(taskId, assetRoot, pickedIds[3], 226i32, 136i32) } else { None }
+        // Slot sizes must match the hard-coded layout in generateTemplateCoverAvif() (poster cards).
+        var wallImages = ArrayList<?CoverSlotImage>()
+        for (id in pickedIds) {
+            // Must match cardW/cardH in generateTemplateCoverAvif().
+            wallImages.add(tryLoadCoverSlotImage(taskId, assetRoot, id, 170i32, 250i32))
+        }
 
-        let (ok, thumbHash, err) = generateTemplateCoverAvif(taskId, cat.name, avifPath, seed, heroImg, c1, c2, c3)
+        let (ok, thumbHash, err) = generateTemplateCoverAvif(taskId, cat.name, cat.description, avifPath, seed, wallImages.toArray())
         if (!ok) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
             TaskIO.appendLog(taskId, "ERROR: cover template generation failed: ${err}")

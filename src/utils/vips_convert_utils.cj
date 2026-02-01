@@ -248,6 +248,75 @@ public class VipsConvertUtils {
     }
 
     /**
+     * Render text to an RGBA8 pixel buffer using libvips/pango.
+     *
+     * Returns None only when libvips is unavailable/uninitialized.
+     * On render failure, returns Some((empty, 0, 0)).
+     */
+    public static func tryRenderTextRgbaPixels(
+        text: String,
+        font: String,
+        maxWidth: Int32,
+        maxHeight: Int32,
+        wrapChar: Bool,
+        lineSpacing: Int32
+    ): ?(Array<UInt8>, Int32, Int32) {
+        if (!ensureInit()) {
+            return None
+        }
+
+        let t = text.trimAscii()
+        if (t.size == 0 || maxWidth <= 0 || maxHeight <= 0) {
+            return Some((Array<UInt8>(), 0i32, 0i32))
+        }
+
+        var outImg: VipsImagePtr = CPointer<VipsImage>()
+        try {
+            let tC = unsafe { LibC.mallocCString(t) }
+            let fontC = unsafe { LibC.mallocCString(font) }
+            try {
+                let rc = VipsApi.text(CPointer<VipsImagePtr>(inout outImg), tC, fontC, maxWidth, maxHeight, true, wrapChar, lineSpacing)
+                if (rc != 0 || outImg.isNull()) {
+                    return Some((Array<UInt8>(), 0i32, 0i32))
+                }
+            } finally {
+                unsafe {
+                    LibC.free(fontC)
+                    LibC.free(tC)
+                }
+            }
+
+            // Convert to RGBA8 and copy to managed pixels.
+            let (okNorm, rgbaImg, _) = normalizeToRgbaU8(outImg)
+            unref(outImg)
+            if (!okNorm || rgbaImg.isNull()) {
+                return Some((Array<UInt8>(), 0i32, 0i32))
+            }
+
+            let w = VipsApi.imageWidth(rgbaImg)
+            let h = VipsApi.imageHeight(rgbaImg)
+
+            var size: UIntNative = 0
+            let mem = VipsApi.writeToMemory(rgbaImg, CPointer<UIntNative>(inout size))
+            unref(rgbaImg)
+            if (mem.isNull() || size == 0 || w <= 0 || h <= 0) {
+                return Some((Array<UInt8>(), 0i32, 0i32))
+            }
+
+            let n = Int64(size)
+            var pixels = Array<UInt8>(n, repeat: 0u8)
+            for (i in 0..n) {
+                pixels[i] = unsafe { (CPointer<UInt8>(mem) + i).read() }
+            }
+            VipsApi.free(mem)
+            return Some((pixels, w, h))
+        } catch (_: Exception) {
+            unref(outImg)
+            return Some((Array<UInt8>(), 0i32, 0i32))
+        }
+    }
+
+    /**
      * Convert an image file to an AVIF thumbnail:
      * - scale to `targetWidth`, preserving aspect ratio
      * - crop height to at most `maxHeight` (top-aligned)

@@ -34,6 +34,10 @@ foreign func vips_resize(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, scale: 
 // Crop/extract.
 foreign func vips_extract_area(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32, ...): Int32
 
+// Render text via Pango.
+// Signature: int vips_text(VipsImage **out, const char *text, ...)
+foreign func vips_text(out: CPointer<VipsImagePtr>, text: CString, ...): Int32
+
 // Colorspace conversion (we use sRGB for a stable pixel space).
 public const VIPS_INTERPRETATION_sRGB: Int32 = 22
 foreign func vips_colourspace(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, space: Int32, ...): Int32
@@ -110,6 +114,67 @@ public class VipsApi {
 
     public static func extractArea(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32): Int32 {
         return unsafe { vips_extract_area(_in, out, left, top, width, height, CPointer<Unit>()) }
+    }
+
+    // Wrap values (best-effort, matches libvips enum order).
+    private static let TEXT_WRAP_WORD: Int32 = 0
+    private static let TEXT_WRAP_CHAR: Int32 = 1
+
+    /**
+     * Render text to an image using libvips/pango.
+     *
+     * `maxWidth`/`maxHeight` are limits; the output can be smaller.
+     * When `rgba` is true, output is 4-band RGBA (transparent background).
+     */
+    public static func text(
+        out: CPointer<VipsImagePtr>,
+        text: CString,
+        font: CString,
+        maxWidth: Int32,
+        maxHeight: Int32,
+        rgba: Bool,
+        wrapChar: Bool,
+        lineSpacing: Int32
+    ): Int32 {
+        // libvips uses name/value varargs, terminated by NULL.
+        let kFont = unsafe { LibC.mallocCString("font") }
+        let kWidth = unsafe { LibC.mallocCString("width") }
+        let kHeight = unsafe { LibC.mallocCString("height") }
+        let kRgba = unsafe { LibC.mallocCString("rgba") }
+        let kWrap = unsafe { LibC.mallocCString("wrap") }
+        let kSpacing = unsafe { LibC.mallocCString("spacing") }
+        let wrap = if (wrapChar) { TEXT_WRAP_CHAR } else { TEXT_WRAP_WORD }
+        let rgbaI = if (rgba) { 1i32 } else { 0i32 }
+        try {
+            return unsafe {
+                vips_text(
+                    out,
+                    text,
+                    kFont,
+                    font,
+                    kWidth,
+                    maxWidth,
+                    kHeight,
+                    maxHeight,
+                    kRgba,
+                    rgbaI,
+                    kWrap,
+                    wrap,
+                    kSpacing,
+                    lineSpacing,
+                    CPointer<Unit>()
+                )
+            }
+        } finally {
+            unsafe {
+                LibC.free(kSpacing)
+                LibC.free(kWrap)
+                LibC.free(kRgba)
+                LibC.free(kHeight)
+                LibC.free(kWidth)
+                LibC.free(kFont)
+            }
+        }
     }
 
     public static func colourspaceSRgb(_in: VipsImagePtr, out: CPointer<VipsImagePtr>): Int32 {
