@@ -454,7 +454,8 @@ public class GenerateCategoryCoverTaskRunner {
 
             // Poster wall: draw into an offscreen buffer, then rotate+blit.
             let wallW: Int32 = 760
-            let wallH: Int32 = 520
+            // Must fit 2 rows of cards + gap + margins; otherwise the bottom row gets clipped in the offscreen buffer.
+            let wallH: Int32 = 560
             let wallLen = Int64(wallW) * Int64(wallH) * 4
             var wall = Array<UInt8>(wallLen, repeat: 0u8) // transparent
 
@@ -474,8 +475,8 @@ public class GenerateCategoryCoverTaskRunner {
                     let x = marginX + cx * (cardW + gap) + jx
                     let y = marginY + ry * (cardH + gap) + jy
 
-                    // Shadow only; no border/frame around archive covers.
-                    drawRoundedRect(wall, wallW, wallH, x + 8, y + 10, cardW, cardH, 18, 0, 0, 0, 78)
+                    // Shadow only; keep it subtle so it doesn't look like a thick black frame.
+                    drawRoundedRect(wall, wallW, wallH, x + 6, y + 8, cardW, cardH, 18, 0, 0, 0, 6)
 
                     if (imgIdx < wallImages.size) {
                         match (wallImages[imgIdx]) {

@@ -379,7 +379,8 @@ export default function CategoriesSettingsPage() {
                       ) : (
                         <div className="absolute inset-0 bg-gradient-to-br from-muted/40 via-muted/20 to-background" />
                       )}
-                      <div className="absolute inset-0 bg-background/50" />
+                      {/* Only add a veil for the placeholder; generated covers are already composed for readability. */}
+                      {!bgId ? <div className="absolute inset-0 bg-background/50" /> : null}
 
                       {/* Mosaic is embedded into the generated cover image (SVG). */}
                     </>
