@@ -501,28 +501,29 @@ public class GenerateCategoryCoverTaskRunner {
             let safeTitle = title.trimAscii()
             if (safeTitle.size > 0) {
                 // Keep the title a bit smaller and lighter to match the reference.
-                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeTitle, "Sans 22", 520i32, 150i32, true, 0i32)) {
+                // Shrink the whole text block (~2/3 size) so it doesn't dominate the cover.
+                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeTitle, "Sans 16", 360i32, 110i32, true, 0i32)) {
                     case Some((tpix, tw, th)) =>
                         if (tpix.size > 0 && tw > 0i32 && th > 0i32) {
                             // Add a small solid accent block at the left of the title.
-                            let x0 = 96i32
+                            let x0 = 88i32
                             // Vertically center-ish, but keep comfortable top padding.
-                            var y0 = 178i32 - (th / 2)
-                            if (y0 < 92i32) { y0 = 92i32 }
+                            var y0 = 160i32 - (th / 2)
+                            if (y0 < 78i32) { y0 = 78i32 }
                             // Softer shadow so the glyphs don't look "thick".
-                            drawTextWithShadow(pixels, w, h, x0, y0, tpix, tw, th, 2i32, 2i32, 26i32, 255i32)
+                            drawTextWithShadow(pixels, w, h, x0, y0, tpix, tw, th, 2i32, 2i32, 18i32, 255i32)
 
                             // Solid accent rectangle (no border / no tail).
-                            drawRoundedRect(pixels, w, h, x0 - 18i32, y0 + 6i32, 8i32, th - 12i32, 4i32, 255, 255, 255, 160i32)
+                            drawRoundedRect(pixels, w, h, x0 - 14i32, y0 + 4i32, 6i32, th - 8i32, 3i32, 255, 255, 255, 140i32)
 
                             let safeDesc = description.trimAscii()
                             if (safeDesc.size > 0) {
-                                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeDesc, "Sans 16", 520i32, 90i32, true, 4i32)) {
+                                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeDesc, "Sans 12", 360i32, 70i32, true, 3i32)) {
                                     case Some((dpix, dw, dh)) =>
                                         if (dpix.size > 0 && dw > 0i32 && dh > 0i32) {
-                                            let dy = y0 + th + 10i32
+                                            let dy = y0 + th + 8i32
                                             // Keep description subtle.
-                                            drawTextWithShadow(pixels, w, h, x0, dy, dpix, dw, dh, 2i32, 2i32, 14i32, 170i32)
+                                            drawTextWithShadow(pixels, w, h, x0, dy, dpix, dw, dh, 2i32, 2i32, 10i32, 160i32)
                                         }
                                     case None => ()
                                 }
