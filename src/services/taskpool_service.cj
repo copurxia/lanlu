@@ -218,7 +218,13 @@ public class TaskPoolService {
     private func runWorker(task: TaskData, workerId: Int32): Unit {
         let logger = getLogger("taskpool")
         logger.debug("TaskPool worker executing", ("worker", workerId.toString()), ("task_id", task.id.toString()), ("task_type", task.taskType))
-        executeTask(task, workerId)
+        try {
+            executeTask(task, workerId)
+        } catch (e: Exception) {
+            // Safety net: never leave the task stuck in "running" due to an unhandled exception.
+            TaskIO.appendLog(task.id, "ERROR: task runner crashed: ${e.message}")
+            TaskModel.failTask(task.id, "Task runner crashed: ${e.message}")
+        }
 
         // 异步触发依赖此任务的等待任务（不阻塞 worker 释放）
         let completedTaskId = task.id

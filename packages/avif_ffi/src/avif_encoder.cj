@@ -60,6 +60,37 @@ public class AvifEncoder {
                 avifImageDestroy(image)
                 return false
             }
+            // Tune for "thumbnail-like" speed. Defaults can be extremely slow depending on codec.
+            // We keep quality reasonable and prioritize runtime determinism for server-side tasks.
+            try {
+                let e0 = encoder.read()
+                let tuned = avifEncoder(
+                    e0.codecChoice,
+                    1,          // maxThreads
+                    8,          // speed (0=slowest, 10=fastest)
+                    e0.keyframeInterval,
+                    e0.timescale,
+                    e0.repetitionCount,
+                    e0.extraLayerCount,
+                    60,         // quality
+                    60,         // qualityAlpha
+                    e0.minQuantizer,
+                    e0.maxQuantizer,
+                    e0.minQuantizerAlpha,
+                    e0.maxQuantizerAlpha,
+                    e0.tileRowsLog2,
+                    e0.tileColsLog2,
+                    e0.autoTiling,
+                    e0.scalingMode,
+                    e0.ioStats,
+                    e0.diag,
+                    e0.data,
+                    e0.csOptions
+                )
+                encoder.write(tuned)
+            } catch (_: Exception) {
+                // Best-effort: if this fails, fall back to libavif defaults.
+            }
 
             let pixelHandle = acquireArrayRawData(pixels)
             var rgb = avifRGBImage(

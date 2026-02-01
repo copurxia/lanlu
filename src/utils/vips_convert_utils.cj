@@ -155,6 +155,99 @@ public class VipsConvertUtils {
     }
 
     /**
+     * Decode an image into RGBA8 pixels, scaled/cropped to exactly `outW` x `outH` (center-crop cover).
+     *
+     * Returns None only when libvips is unavailable/uninitialized.
+     * On decode failure, returns Some(empty array) so caller can fallback.
+     */
+    public static func tryDecodeRgbaCoverPixels(inputPath: String, outW: Int32, outH: Int32): ?Array<UInt8> {
+        if (!ensureInit()) {
+            return Some(Array<UInt8>())
+        }
+        if (outW <= 0 || outH <= 0) {
+            return Some(Array<UInt8>())
+        }
+
+        var inImg: VipsImagePtr = CPointer<VipsImage>()
+        var rotImg: VipsImagePtr = CPointer<VipsImage>()
+        var resizedImg: VipsImagePtr = CPointer<VipsImage>()
+        var cropImg: VipsImagePtr = CPointer<VipsImage>()
+
+        try {
+            let inC = unsafe { LibC.mallocCString(inputPath) }
+            inImg = VipsApi.imageNewFromFile(inC)
+            unsafe { LibC.free(inC) }
+            if (inImg.isNull()) {
+                return Some(Array<UInt8>())
+            }
+
+            // Autorotate based on metadata.
+            let rotRc = VipsApi.autorot(inImg, CPointer<VipsImagePtr>(inout rotImg))
+            if (rotRc != 0 || rotImg.isNull()) {
+                return Some(Array<UInt8>())
+            }
+
+            let w = VipsApi.imageWidth(rotImg)
+            let h = VipsApi.imageHeight(rotImg)
+            if (w <= 0 || h <= 0) {
+                return Some(Array<UInt8>())
+            }
+
+            // Scale to cover.
+            let sx = Float64(outW) / Float64(w)
+            let sy = Float64(outH) / Float64(h)
+            let scale = if (sx > sy) { sx } else { sy }
+
+            let resizeRc = VipsApi.resize(rotImg, CPointer<VipsImagePtr>(inout resizedImg), scale)
+            if (resizeRc != 0 || resizedImg.isNull()) {
+                return Some(Array<UInt8>())
+            }
+
+            let rw = VipsApi.imageWidth(resizedImg)
+            let rh = VipsApi.imageHeight(resizedImg)
+            if (rw <= 0 || rh <= 0) {
+                return Some(Array<UInt8>())
+            }
+
+            // Center-crop to exact size.
+            let left = if (rw > outW) { (rw - outW) / 2 } else { 0i32 }
+            let top = if (rh > outH) { (rh - outH) / 2 } else { 0i32 }
+            let cropRc = VipsApi.extractArea(resizedImg, CPointer<VipsImagePtr>(inout cropImg), left, top, outW, outH)
+            if (cropRc != 0 || cropImg.isNull()) {
+                return Some(Array<UInt8>())
+            }
+
+            let (okNorm, rgbaImg, _) = normalizeToRgbaU8(cropImg)
+            if (!okNorm || rgbaImg.isNull()) {
+                return Some(Array<UInt8>())
+            }
+
+            var size: UIntNative = 0
+            let mem = VipsApi.writeToMemory(rgbaImg, CPointer<UIntNative>(inout size))
+            unref(rgbaImg)
+            if (mem.isNull() || size == 0) {
+                return Some(Array<UInt8>())
+            }
+
+            // Copy into managed array.
+            let n = Int64(size)
+            var pixels = Array<UInt8>(n, repeat: 0u8)
+            for (i in 0..n) {
+                pixels[i] = unsafe { (CPointer<UInt8>(mem) + i).read() }
+            }
+            VipsApi.free(mem)
+            return Some(pixels)
+        } catch (_: Exception) {
+            return Some(Array<UInt8>())
+        } finally {
+            unref(cropImg)
+            unref(resizedImg)
+            unref(rotImg)
+            unref(inImg)
+        }
+    }
+
+    /**
      * Convert an image file to an AVIF thumbnail:
      * - scale to `targetWidth`, preserving aspect ratio
      * - crop height to at most `maxHeight` (top-aligned)
