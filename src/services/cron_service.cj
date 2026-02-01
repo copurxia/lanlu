@@ -577,127 +577,110 @@ public class CronService {
     public func initializeDefaultTasks(): Unit {
         let logger = getLogger("cron_service")
 
-        // 检查是否已有定时任务
-        if (ScheduledTaskDao.getCount() > 0) {
-            logger.debug("Scheduled tasks already exist, skipping default task creation")
-            return
+        logger.debug("Ensuring default scheduled tasks")
+
+        // Create only if missing (by name). Never overwrite user-modified tasks.
+        let ensure = { name: String, cron: String, taskType: String, params: String, enabled: Bool, priority: Int32 =>
+            match (ScheduledTaskModel.getByName(name)) {
+                case Some(_) => ()
+                case None =>
+                    let created = createScheduledTask(
+                        name,
+                        cron,
+                        taskType,
+                        taskParameters: params,
+                        enabled: enabled,
+                        priority: priority
+                    )
+                    match (created) {
+                        case Some(t) => logger.debug("Created default ${taskType} task", ("id", t.id.toString()))
+                        case None => logger.error("Failed to create default ${taskType} task", ("name", name))
+                    }
+            }
         }
 
-        logger.debug("Creating default scheduled tasks")
-
         // 定时扫描所有分类（每6小时）- 已禁用，改用分类系统手动触发扫描
-        let scanTask = createScheduledTask(
+        ensure(
             "定时扫描所有分类",
             "0 */6 * * *",
             "scan_all_categories",
-            taskParameters: "{}",  // 扫描所有启用分类
-            enabled: false,  // 默认禁用，用户应通过分类管理界面触发扫描
-            priority: 30
+            "{}",  // 扫描所有启用分类
+            false,  // 默认禁用，用户应通过分类管理界面触发扫描
+            30
         )
-        match (scanTask) {
-            case Some(t) =>
-                logger.debug("Created default scan_all_categories task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default scan_all_categories task")
-        }
+
+        // 定时生成分类封面（每天凌晨0:30）- 默认禁用，按需在任务管理里启用
+        // 参数为空/{} 表示对所有启用分类生成封面。
+        ensure(
+            "定时生成分类封面",
+            "30 0 * * *",
+            "generate_category_cover",
+            "{}",
+            false,
+            40
+        )
 
         // 定时数据库检查（每天凌晨2点）
-        let dbCheckTask = createScheduledTask(
+        ensure(
             "定时数据库检查",
             "0 2 * * *",
             "check_database",
-            taskParameters: "",  // 不需要参数
-            enabled: false,
-            priority: 50
+            "",  // 不需要参数
+            false,
+            50
         )
-        match (dbCheckTask) {
-            case Some(t) =>
-                logger.debug("Created default check_database task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default check_database task")
-        }
 
         // 定时插件扫描（每天凌晨1点）
-        let pluginScanTask = createScheduledTask(
+        ensure(
             "定时插件扫描",
             "0 1 * * *",
             "scan_plugins",
-            taskParameters: "",  // 不需要参数
-            enabled: false,
-            priority: 50
+            "",  // 不需要参数
+            false,
+            50
         )
-        match (pluginScanTask) {
-            case Some(t) =>
-                logger.debug("Created default scan_plugins task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default scan_plugins task")
-        }
 
         // 定时清理缓存（每天凌晨3点）
-        let clearCacheTask = createScheduledTask(
+        ensure(
             "定时清理缓存",
             "0 3 * * *",
             "clear_cache",
-            taskParameters: "{\"maxAgeDays\":7}",  // 清理7天前的缓存
-            enabled: true,  // 默认启用，缓存清理是安全的维护操作
-            priority: 40
+            "{\"maxAgeDays\":7}",  // 清理7天前的缓存
+            true,  // 默认启用，缓存清理是安全的维护操作
+            40
         )
-        match (clearCacheTask) {
-            case Some(t) =>
-                logger.debug("Created default clear_cache task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default clear_cache task")
-        }
 
         // 定时清理日志（每天凌晨4点）
-        let clearLogTask = createScheduledTask(
+        ensure(
             "定时清理日志",
             "0 4 * * *",
             "clear_log",
-            taskParameters: "{\"maxAgeDays\":7}",  // 清理7天前的任务日志
-            enabled: true,  // 默认启用，日志清理是安全的维护操作
-            priority: 40
+            "{\"maxAgeDays\":7}",  // 清理7天前的任务日志
+            true,  // 默认启用，日志清理是安全的维护操作
+            40
         )
-        match (clearLogTask) {
-            case Some(t) =>
-                logger.debug("Created default clear_log task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default clear_log task")
-        }
 
         // 批量重生成封面（默认禁用，属于维护/重建操作）
-        let regenerateCoverTask = createScheduledTask(
+        ensure(
             "重生成封面",
             "0 5 * * *",
             "regenerate_cover",
-            taskParameters: "{\"mode\":\"all\",\"deleteOldCover\":true,\"batchSize\":200}",  // 点击执行=全量重建，使用 batchSize 分页派发
-            enabled: false,
-            priority: 50
+            "{\"mode\":\"all\",\"deleteOldCover\":true,\"batchSize\":200}",  // 点击执行=全量重建，使用 batchSize 分页派发
+            false,
+            50
         )
-        match (regenerateCoverTask) {
-            case Some(t) =>
-                logger.debug("Created default regenerate_cover task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default regenerate_cover task")
-        }
 
         // 批量补全元数据（默认禁用，可能触发大量插件调用）
-        let backfillMetadataTask = createScheduledTask(
+        ensure(
             "补全元数据",
             "30 5 * * *",
             "backfill_metadata",
-            taskParameters: "{\"batchSize\":200}",  // 点击执行=全量扫描（按 batchSize 分页），对每个档案跑分类勾选的所有 plugins
-            enabled: false,
-            priority: 50
+            "{\"batchSize\":200}",  // 点击执行=全量扫描（按 batchSize 分页），对每个档案跑分类勾选的所有 plugins
+            false,
+            50
         )
-        match (backfillMetadataTask) {
-            case Some(t) =>
-                logger.debug("Created default backfill_metadata task", ("id", t.id.toString()))
-            case None =>
-                logger.error("Failed to create default backfill_metadata task")
-        }
 
-        logger.debug("Default scheduled tasks created")
+        logger.debug("Default scheduled tasks ensured")
     }
 
     /**

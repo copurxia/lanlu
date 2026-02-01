@@ -51,4 +51,5 @@ public func registerCategoryRoutes(router: JoyRouters) {
             case None => return
         }
     })
+
 }

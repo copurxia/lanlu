@@ -246,6 +246,8 @@ export class TaskPoolService {
         return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200';
       case 'generate_thumbnail':
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+      case 'generate_category_cover':
+        return 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900 dark:text-fuchsia-200';
       case 'check_database':
         return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
       case 'scan_plugins':
@@ -274,6 +276,8 @@ export class TaskPoolService {
         return '档案扫描';
       case 'generate_thumbnail':
         return '生成缩略图';
+      case 'generate_category_cover':
+        return '生成分类封面';
       case 'check_database':
         return '数据库检查';
       case 'scan_plugins':

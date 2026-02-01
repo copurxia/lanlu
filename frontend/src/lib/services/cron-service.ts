@@ -364,6 +364,8 @@ export class CronService {
         return '扫描档案';
       case 'generate_thumbnail':
         return '生成缩略图';
+      case 'generate_category_cover':
+        return '生成分类封面';
       case 'check_database':
         return '数据库检查';
       case 'scan_plugins':
@@ -410,6 +412,8 @@ export class CronService {
         return 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200';
       case 'generate_thumbnail':
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+      case 'generate_category_cover':
+        return 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900 dark:text-fuchsia-200';
       case 'deno_task':
         return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
       case 'clear_cache':
@@ -447,6 +451,7 @@ export class CronService {
     { value: 'scan_single_category' },
     { value: 'scan_archive' },
     { value: 'generate_thumbnail' },
+    { value: 'generate_category_cover' },
     { value: 'check_database' },
     { value: 'scan_plugins' },
     { value: 'deno_task' },

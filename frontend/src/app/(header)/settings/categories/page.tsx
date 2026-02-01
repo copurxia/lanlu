@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Folder, Plus, Search, Edit2, Trash2, Play, FolderOpen, RotateCcw } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Play, FolderOpen, RotateCcw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { CategoryService, type Category, type CategoryCreateRequest, type CategoryUpdateRequest } from '@/lib/services/category-service';
@@ -364,12 +364,57 @@ export default function CategoriesSettingsPage() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {categories.map((category) => (
-            <Card key={category.catid} className="hover:shadow-md transition-shadow">
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    {category.icon && <span className="text-2xl">{category.icon}</span>}
-                    <CardTitle className="text-lg">{category.name}</CardTitle>
+            <Card key={category.catid} className="overflow-hidden hover:shadow-md transition-shadow">
+              {/* Cover */}
+              <div className="relative h-32">
+                {(() => {
+                  const coverIds = (category.cover_assets || []).slice(0, 6);
+                  const bgId = coverIds[0];
+                  return (
+                    <>
+                      {bgId ? (
+                        <div
+                          className="absolute inset-0 bg-cover bg-center"
+                          style={{ backgroundImage: `url(/api/assets/${bgId})` }}
+                        />
+                      ) : (
+                        <div className="absolute inset-0 bg-gradient-to-br from-muted/40 via-muted/20 to-background" />
+                      )}
+                      <div className="absolute inset-0 bg-background/50" />
+
+                      {/* Mosaic */}
+                      {coverIds.length > 1 ? (
+                        <div className="absolute right-3 bottom-3 grid grid-cols-3 gap-1">
+                          {coverIds.slice(0, 6).map((id) => (
+                            <div
+                              key={id}
+                              className="h-9 w-7 rounded-md overflow-hidden border border-white/20 bg-muted/30 shadow-sm"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={`/api/assets/${id}`}
+                                alt={category.name}
+                                className="h-full w-full object-cover"
+                                loading="lazy"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </>
+                  );
+                })()}
+              </div>
+
+              <CardContent className="space-y-3 pt-4">
+                {/* Reduced external metadata per fig3: keep name/description; hide scan_path + sort_order */}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {category.icon ? <span className="text-xl">{category.icon}</span> : null}
+                    <div className="text-lg font-semibold leading-tight truncate">{category.name}</div>
+                    <Badge variant="outline" className="text-xs flex-shrink-0">
+                      {category.archive_count} {t('settings.categoryArchives')}
+                    </Badge>
                   </div>
                   <Switch
                     checked={category.enabled}
@@ -380,23 +425,8 @@ export default function CategoriesSettingsPage() {
                 <CardDescription className="line-clamp-2">
                   {category.description || t('settings.categoryNoDescription')}
                 </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Folder className="w-4 h-4" />
-                    <span className="truncate">{category.scan_path}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Badge variant="outline" className="text-xs">
-                      {category.archive_count} {t('settings.categoryArchives')}
-                    </Badge>
-                    <span className="text-xs">
-                      {t('settings.categorySortOrder')}: {category.sort_order}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex gap-2 pt-2">
+
+                <div className="flex items-center gap-2 pt-1">
                   <Button
                     variant="outline"
                     size="sm"

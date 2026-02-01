@@ -88,6 +88,9 @@ public class CategoryController {
         // Stored as raw JSON (array/object) string.
         let plugins = cat.plugins.trimAscii()
         w.writeName("plugins").jsonValue(if (plugins.size > 0) { plugins } else { "[]" })
+        // Stored as raw JSON array string of asset ids.
+        let coverAssets = cat.coverAssets.trimAscii()
+        w.writeName("cover_assets").jsonValue(if (coverAssets.size > 0) { coverAssets } else { "[]" })
         w.writeName("archive_count").writeValue(cat.archiveCount)
         w.writeName("created_at").writeValue(cat.createdAt)
         w.writeName("updated_at").writeValue(cat.updatedAt)
@@ -388,4 +391,5 @@ public class CategoryController {
                 ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
         }
     }
+
 }

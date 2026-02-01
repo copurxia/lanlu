@@ -1308,6 +1308,54 @@ public class ArchiveDao {
     }
 
     /**
+     * Get up to `limit` cover asset ids for a category, ordered by most recently updated archives.
+     */
+    public static func getCategoryCoverAssetIds(categoryId: Int64, limit: Int32): Array<Int64> {
+        if (categoryId <= 0 || limit <= 0) {
+            return Array<Int64>()
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                var ids = ArrayList<Int64>()
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(cover_asset_id, 0) AS cover_asset_id
+                        FROM archives
+                        WHERE category_id = ?
+                          AND COALESCE(cover_asset_id, 0) > 0
+                        ORDER BY updated_at DESC, id DESC
+                        LIMIT ?
+                    """)
+                    try {
+                        stmt.set(0, categoryId)
+                        stmt.set(1, Int64(limit))
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let id = rs.getOrNull<Int64>(0) ?? 0
+                                if (id > 0) { ids.add(id) }
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("获取分类封面资源ID列表失败", ("error", e.message))
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+                return ids.toArray()
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return Array<Int64>()
+        }
+    }
+
+    /**
      * Check if an archive exists by arcid.
      */
     public static func archiveExists(archiveId: String): Bool {

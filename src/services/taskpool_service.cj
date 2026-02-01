@@ -28,6 +28,7 @@ public class TaskPoolService {
             "scan_single_category",
             "scan_archive",
             "generate_thumbnail",
+            "generate_category_cover",
             "check_database",
             "scan_plugins",
             "deno_task",
@@ -294,6 +295,8 @@ public class TaskPoolService {
                 ScanArchiveTaskRunner.run(task.id, task.parameters, context)
             case "generate_thumbnail" =>
                 GenerateThumbnailTaskRunner.run(task.id, task.parameters, context)
+            case "generate_category_cover" =>
+                GenerateCategoryCoverTaskRunner.run(task.id, task.parameters, context)
             case "check_database" =>
                 CheckDatabaseTaskRunner.run(task.id, task.parameters, context)
             case "scan_plugins" =>
