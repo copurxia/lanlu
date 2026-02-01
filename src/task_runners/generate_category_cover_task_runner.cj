@@ -502,7 +502,7 @@ public class GenerateCategoryCoverTaskRunner {
             if (safeTitle.size > 0) {
                 // Keep the title a bit smaller and lighter to match the reference.
                 // Shrink the whole text block (~2/3 size) so it doesn't dominate the cover.
-                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeTitle, "Sans 16", 360i32, 110i32, true, 0i32)) {
+                match (VipsConvertUtils.tryRenderTextRgbaPixels(safeTitle, "Sans 22", 360i32, 110i32, true, 0i32)) {
                     case Some((tpix, tw, th)) =>
                         if (tpix.size > 0 && tw > 0i32 && th > 0i32) {
                             // Add a small solid accent block at the left of the title.
