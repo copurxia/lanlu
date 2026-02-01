@@ -11,8 +11,8 @@ export interface Category {
   sort_order: number;
   enabled: boolean;
   plugins: string[];
-  // Asset ids for rendering category cover (mosaic). Provided by backend as JSON array.
-  cover_assets?: number[];
+  // Generated category cover image asset id (assets.id), computed by backend.
+  cover_asset_id?: number;
   archive_count: number;
   created_at: string;
   updated_at: string;

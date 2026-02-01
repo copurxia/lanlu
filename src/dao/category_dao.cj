@@ -19,8 +19,8 @@ public class CategoryData {
     public var sortOrder: Int32 = 0
     public var enabled: Bool = true
     public var plugins: String = "[]"
-    // JSON array string of asset ids (e.g. [1,2,3]) used as category "cover" mosaic.
-    public var coverAssets: String = "[]"
+    // Generated cover asset id stored on categories table.
+    public var coverAssetId: Int64 = 0
     public var createdAt: String = ""
     public var updatedAt: String = ""
     public var archiveCount: Int64 = 0
@@ -34,7 +34,9 @@ public class CategoryDao {
 
     private static let CATEGORY_SELECT_WITH_COUNT = """
         SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-               c.sort_order, c.enabled, c.plugins, c.cover_assets, c.created_at, c.updated_at,
+               c.sort_order, c.enabled, c.plugins,
+               COALESCE(c.cover_asset_id, 0) AS cover_asset_id,
+               c.created_at, c.updated_at,
                COUNT(a.id) as archive_count
         FROM categories c
         LEFT JOIN archives a ON a.category_id = c.id
@@ -42,7 +44,7 @@ public class CategoryDao {
 
     private static let CATEGORY_GROUP_BY = """
         GROUP BY c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
-                 c.sort_order, c.enabled, c.plugins, c.cover_assets, c.created_at, c.updated_at
+                 c.sort_order, c.enabled, c.plugins, c.cover_asset_id, c.created_at, c.updated_at
     """
 
     private static func readCategoryFromResultSet(rs: QueryResult): CategoryData {
@@ -56,11 +58,47 @@ public class CategoryDao {
         cat.sortOrder = rs.getOrNull<Int32>(6) ?? 0
         cat.enabled = rs.getOrNull<Bool>(7) ?? true
         cat.plugins = rs.getOrNull<String>(8) ?? "[]"
-        cat.coverAssets = rs.getOrNull<String>(9) ?? "[]"
+        cat.coverAssetId = rs.getOrNull<Int64>(9) ?? 0
         cat.createdAt = rs.getOrNull<String>(10) ?? ""
         cat.updatedAt = rs.getOrNull<String>(11) ?? ""
         cat.archiveCount = rs.getOrNull<Int64>(12) ?? 0
         return cat
+    }
+
+    /**
+     * Update generated cover asset id for a category.
+     */
+    public static func updateCoverAssetId(catid: String, coverAssetId: Int64): Bool {
+        let trimmedCatid = catid.trimAscii()
+        if (trimmedCatid.size == 0) { return false }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE categories
+                        SET cover_asset_id = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE catid = ?
+                    """)
+                    try {
+                        stmt.set(0, coverAssetId)
+                        stmt.set(1, trimmedCatid)
+                        let result = stmt.update()
+                        return result.rowCount > 0
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.error("更新分类封面资源ID失败", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法连接到数据库")
+                return false
+        }
     }
 
     /**
@@ -473,41 +511,7 @@ public class CategoryDao {
         }
     }
 
-    /**
-     * Update category cover assets JSON (array of asset ids).
-     */
-    public static func updateCoverAssets(catid: String, coverAssetsJson: String): Bool {
-        let trimmedCatid = catid.trimAscii()
-        if (trimmedCatid.size == 0) { return false }
-        // Best-effort: store raw JSON string; caller should pass a valid JSON array.
-        let payload = if (coverAssetsJson.trimAscii().size > 0) { coverAssetsJson } else { "[]" }
+    // NOTE: category cover is stored as assets(kind='category_cover', file ext avif),
+    // and referenced by categories.cover_asset_id.
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE categories
-                        SET cover_assets = ?, updated_at = CURRENT_TIMESTAMP
-                        WHERE catid = ?
-                    """)
-                    try {
-                        stmt.set(0, payload)
-                        stmt.set(1, trimmedCatid)
-                        let result = stmt.update()
-                        return result.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("更新分类封面失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                logger.error("无法连接到数据库")
-                return false
-        }
-    }
 }

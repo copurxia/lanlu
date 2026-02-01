@@ -368,8 +368,7 @@ export default function CategoriesSettingsPage() {
               {/* Cover */}
               <div className="relative h-32">
                 {(() => {
-                  const coverIds = (category.cover_assets || []).slice(0, 6);
-                  const bgId = coverIds[0];
+                  const bgId = category.cover_asset_id;
                   return (
                     <>
                       {bgId ? (
@@ -382,25 +381,7 @@ export default function CategoriesSettingsPage() {
                       )}
                       <div className="absolute inset-0 bg-background/50" />
 
-                      {/* Mosaic */}
-                      {coverIds.length > 1 ? (
-                        <div className="absolute right-3 bottom-3 grid grid-cols-3 gap-1">
-                          {coverIds.slice(0, 6).map((id) => (
-                            <div
-                              key={id}
-                              className="h-9 w-7 rounded-md overflow-hidden border border-white/20 bg-muted/30 shadow-sm"
-                            >
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={`/api/assets/${id}`}
-                                alt={category.name}
-                                className="h-full w-full object-cover"
-                                loading="lazy"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
+                      {/* Mosaic is embedded into the generated cover image (SVG). */}
                     </>
                   );
                 })()}
