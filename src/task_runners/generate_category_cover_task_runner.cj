@@ -126,14 +126,36 @@ public class GenerateCategoryCoverTaskRunner {
         let dstR = Int32(pixels[idx])
         let dstG = Int32(pixels[idx + 1])
         let dstB = Int32(pixels[idx + 2])
+        let dstA = Int32(pixels[idx + 3])
 
-        let alpha = if (a < 0i32) { 0i32 } else if (a > 255i32) { 255i32 } else { a }
-        let inv = 255i32 - alpha
+        let srcA = if (a < 0i32) { 0i32 } else if (a > 255i32) { 255i32 } else { a }
+        if (srcA <= 0i32) { return }
+        if (srcA >= 255i32) {
+            pixels[idx] = clamp8(r)
+            pixels[idx + 1] = clamp8(g)
+            pixels[idx + 2] = clamp8(b)
+            pixels[idx + 3] = 255u8
+            return
+        }
 
-        pixels[idx] = clamp8((dstR * inv + r * alpha) / 255i32)
-        pixels[idx + 1] = clamp8((dstG * inv + g * alpha) / 255i32)
-        pixels[idx + 2] = clamp8((dstB * inv + b * alpha) / 255i32)
-        pixels[idx + 3] = 255u8
+        // Proper "source over" compositing for straight alpha buffers.
+        // This matters for offscreen buffers like `wall` which start transparent.
+        let invSA: Int32 = 255i32 - srcA
+        let outA: Int32 = srcA + (dstA * invSA) / 255i32
+        if (outA <= 0i32) { return }
+
+        let drTerm = (Int64(dstR) * Int64(dstA) * Int64(invSA)) / 255
+        let dgTerm = (Int64(dstG) * Int64(dstA) * Int64(invSA)) / 255
+        let dbTerm = (Int64(dstB) * Int64(dstA) * Int64(invSA)) / 255
+
+        let or = (Int64(r) * Int64(srcA) + drTerm) / Int64(outA)
+        let og = (Int64(g) * Int64(srcA) + dgTerm) / Int64(outA)
+        let ob = (Int64(b) * Int64(srcA) + dbTerm) / Int64(outA)
+
+        pixels[idx] = clamp8(Int32(or))
+        pixels[idx + 1] = clamp8(Int32(og))
+        pixels[idx + 2] = clamp8(Int32(ob))
+        pixels[idx + 3] = clamp8(outA)
     }
 
     private static func drawImageRounded(
@@ -475,8 +497,11 @@ public class GenerateCategoryCoverTaskRunner {
                     let x = marginX + cx * (cardW + gap) + jx
                     let y = marginY + ry * (cardH + gap) + jy
 
-                    // Shadow only; keep it subtle so it doesn't look like a thick black frame.
-                    drawRoundedRect(wall, wallW, wallH, x + 6, y + 8, cardW, cardH, 18, 0, 0, 0, 6)
+                    // Soft drop shadow (layer a few offsets instead of a single hard rect).
+                    // With correct alpha blending, the previous alpha=6 became almost invisible.
+                    drawRoundedRect(wall, wallW, wallH, x + 5, y + 7, cardW, cardH, 18, 0, 0, 0, 18)
+                    drawRoundedRect(wall, wallW, wallH, x + 6, y + 8, cardW, cardH, 18, 0, 0, 0, 14)
+                    drawRoundedRect(wall, wallW, wallH, x + 7, y + 9, cardW, cardH, 18, 0, 0, 0, 10)
 
                     if (imgIdx < wallImages.size) {
                         match (wallImages[imgIdx]) {
