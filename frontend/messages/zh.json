@@ -177,6 +177,7 @@
     "fetchError": "获取归档信息失败",
     "notFound": "归档不存在",
     "noArchives": "暂无归档",
+    "noMatchingArchives": "没有找到匹配的档案",
     "noCover": "无封面",
     "new": "新",
     "details": "详情",

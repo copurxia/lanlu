@@ -172,6 +172,7 @@
     "fetchError": "Failed to fetch archive information",
     "notFound": "Archive not found",
     "noArchives": "No archives",
+    "noMatchingArchives": "No matching archives found",
     "noCover": "No cover",
     "new": "New",
     "details": "Details",

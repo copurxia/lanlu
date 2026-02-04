@@ -104,14 +104,19 @@ export function ReaderSettingsSheet({
               <div className="space-y-2">
                 <span className="text-sm font-medium">{t('archive.tags')}</span>
                 {metadataTags.length > 0 ? (
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto overflow-x-hidden pb-1 pr-1">
                     {metadataTags.slice(0, 10).map((tag, index) => (
-                      <Badge key={`${tag}-${index}`} variant="secondary" className="text-xs">
+                      <Badge
+                        key={`${tag}-${index}`}
+                        variant="secondary"
+                        className="text-xs whitespace-nowrap max-w-[240px] truncate"
+                        title={tag}
+                      >
                         {tag}
                       </Badge>
                     ))}
                     {metadataTags.length > 10 ? (
-                      <Badge variant="secondary" className="text-xs">
+                      <Badge variant="secondary" className="text-xs whitespace-nowrap">
                         +{metadataTags.length - 10}
                       </Badge>
                     ) : null}
