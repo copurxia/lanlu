@@ -36,7 +36,6 @@ export interface BaseMediaCardProps {
   pagesLabel?: string
   priority?: boolean  // 优先加载图片（用于 LCP 优化）
   hideMetaOnMobile?: boolean
-  hideActionsOnMobile?: boolean
 
   // 收藏回调
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
@@ -61,7 +60,6 @@ export function BaseMediaCard({
   pagesLabel,
   priority = false,
   hideMetaOnMobile = false,
-  hideActionsOnMobile = false,
   onFavoriteToggle,
 }: BaseMediaCardProps) {
   const router = useRouter()
@@ -155,12 +153,10 @@ export function BaseMediaCard({
         <div
           className={[
             "absolute bottom-2 left-2 z-20 items-center gap-2",
-            hideActionsOnMobile ? "hidden sm:flex" : "flex",
-            // Mobile has no hover; keep actions visible by default. On >=sm, show on hover/focus.
-            hideActionsOnMobile ? "" : "opacity-100",
-            "sm:opacity-0 sm:translate-y-1 sm:transition-all",
-            "sm:group-hover:opacity-100 sm:group-hover:translate-y-0",
-            "sm:group-focus-within:opacity-100 sm:group-focus-within:translate-y-0",
+            // Default hidden on all viewports; show on hover/focus for pointer devices.
+            "flex opacity-0 translate-y-1 transition-all",
+            "group-hover:opacity-100 group-hover:translate-y-0",
+            "group-focus-within:opacity-100 group-focus-within:translate-y-0",
           ].filter(Boolean).join(" ")}
           onClick={(e) => e.stopPropagation()}
         >
@@ -198,9 +194,8 @@ export function BaseMediaCard({
         <div
           className={[
             "pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent transition-opacity",
-            // Mobile has no hover; keep a scrim when actions are visible.
-            hideActionsOnMobile ? "opacity-0" : "opacity-100",
-            "sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+            // Default hidden on all viewports; show on hover/focus behind floating actions / tag chips.
+            "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
           ].join(" ")}
         >
           {(allTags.length > 0 || summary) && (
