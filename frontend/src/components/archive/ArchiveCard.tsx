@@ -28,7 +28,6 @@ export function ArchiveCard({ archive, index = 0, priority = false, compactMobil
       type="archive"
       index={index}
       priority={priority}
-      hideMetaOnMobile={compactMobile}
       hideActionsOnMobile={compactMobile}
       onFavoriteToggle={handleFavoriteToggle}
     />
