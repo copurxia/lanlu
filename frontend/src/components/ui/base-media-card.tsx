@@ -4,7 +4,7 @@ import * as React from "react"
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 import Link from 'next/link'
-import { Card, CardContent, CardFooter } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Eye, Heart } from 'lucide-react'
@@ -143,18 +143,61 @@ export function BaseMediaCard({
         )}
 
         {/* Badges */}
-        {badge && <div className="absolute top-2 left-2">{badge}</div>}
+        {badge && <div className="absolute top-2 left-2 z-30">{badge}</div>}
         {isnew && (
-          <Badge className="absolute top-2 right-2 bg-red-500">
+          <Badge className="absolute top-2 right-2 z-30 bg-red-500">
             {t('archive.new')}
           </Badge>
         )}
-        {extraBadge && <div className="absolute bottom-2 right-2">{extraBadge}</div>}
+        {extraBadge && <div className="absolute bottom-2 right-2 z-30">{extraBadge}</div>}
+
+        {/* Floating actions (details/favorite) */}
+        <div
+          className={[
+            "absolute bottom-2 left-2 z-20 items-center gap-2",
+            hideActionsOnMobile ? "hidden sm:flex" : "flex",
+            // Mobile has no hover; keep actions visible by default. On >=sm, show on hover/focus.
+            hideActionsOnMobile ? "" : "opacity-100",
+            "sm:opacity-0 sm:translate-y-1 sm:transition-all",
+            "sm:group-hover:opacity-100 sm:group-hover:translate-y-0",
+            "sm:group-focus-within:opacity-100 sm:group-focus-within:translate-y-0",
+          ].filter(Boolean).join(" ")}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button
+            asChild
+            size="icon"
+            variant="secondary"
+            className="h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25"
+            aria-label={detailsLabel || t('archive.details')}
+            title={detailsLabel || t('archive.details')}
+          >
+            {/* Avoid prefetching N distinct URLs like `/archive?id=...` for large grids. */}
+            <Link href={detailPath} prefetch={false}>
+              <Eye className="h-4 w-4" />
+            </Link>
+          </Button>
+          <Button
+            type="button"
+            size="icon"
+            variant="secondary"
+            className={[
+              "h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25",
+              isFavorite ? "text-red-400" : "",
+            ].filter(Boolean).join(" ")}
+            aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+            title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+            disabled={favoriteLoading}
+            onClick={handleFavoriteClick}
+          >
+            <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+          </Button>
+        </div>
 
         {/* Hover overlay */}
         {(allTags.length > 0 || summary) && (
-          <div className="pointer-events-none absolute inset-0 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-            <div className="w-full p-3 space-y-2">
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <div className="w-full p-3 space-y-2 sm:pb-12">
               {allTags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {hoverTags.map((tag) => (
@@ -188,31 +231,6 @@ export function BaseMediaCard({
           {progress > 0 && ` • ${Math.round((progress / pagecount) * 100)}% ${t('common.read')}`}
         </div>
       </CardContent>
-
-      <CardFooter className={["p-4 pt-0 flex gap-2", hideActionsOnMobile ? "hidden sm:flex" : ""].join(" ")}>
-        <Button
-          asChild
-          size="sm"
-          className="flex-1"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {/* Avoid prefetching N distinct URLs like `/archive?id=...` for large grids. */}
-          <Link href={detailPath} prefetch={false}>
-            <Eye className="w-4 h-4 mr-2" />
-            {detailsLabel || t('archive.details')}
-          </Link>
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className={`px-3 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-          title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-          disabled={favoriteLoading}
-          onClick={handleFavoriteClick}
-        >
-          <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-        </Button>
-      </CardFooter>
     </Card>
   )
 }
