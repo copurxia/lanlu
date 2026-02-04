@@ -21,58 +21,59 @@ export function ArchiveBasicInfoCard({ metadata, t }: Props) {
       </CardHeader>
       <CardContent className="pt-0">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-          <div className="sm:col-span-2 flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.fileName')}</span>
+          <div className="sm:col-span-2 flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileName')}</span>
             <span
-              className="truncate max-w-[22rem] sm:max-w-[30rem] md:max-w-[40rem] lg:max-w-[50rem]"
+              className="flex-1 text-right whitespace-normal break-all"
               title={metadata.relative_path + '/' + metadata.filename}
             >
               {metadata.relative_path}/{metadata.filename}
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.pageCount')}</span>
-            <span>{metadata.pagecount}</span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.pageCount')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{metadata.pagecount}</span>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.progress')}</span>
-            <span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.progress')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">
               {metadata.progress}/{metadata.pagecount}
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.lastRead')}</span>
-            <span className="truncate">
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.lastRead')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">
               {metadata.lastreadtime ? new Date(metadata.lastreadtime * 1000).toLocaleDateString() : t('archive.neverRead')}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.status')}</span>
-            <span>{metadata.isnew ? t('archive.statusNew') : t('archive.statusRead')}</span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.status')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">
+              {metadata.isnew ? t('archive.statusNew') : t('archive.statusRead')}
+            </span>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.fileSize')}</span>
-            <span>{formatFileSize(metadata.file_size)}</span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileSize')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{formatFileSize(metadata.file_size)}</span>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.fileType')}</span>
-            <span>{metadata.archivetype.toUpperCase()}</span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileType')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{metadata.archivetype.toUpperCase()}</span>
           </div>
 
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.createdAt')}</span>
-            <span className="truncate">{formatDate(metadata.created_at, t('archive.unknown'))}</span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.createdAt')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.created_at, t('archive.unknown'))}</span>
           </div>
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-muted-foreground">{t('archive.updatedAt')}</span>
-            <span className="truncate">{formatDate(metadata.updated_at, t('archive.unknown'))}</span>
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.updatedAt')}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.updated_at, t('archive.unknown'))}</span>
           </div>
         </div>
       </CardContent>
     </Card>
   );
 }
-

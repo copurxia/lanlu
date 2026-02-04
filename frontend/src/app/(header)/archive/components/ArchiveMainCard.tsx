@@ -319,13 +319,13 @@ export function ArchiveMainCard({
         {!isEditing && (
           <div className="rounded-md border border-border p-3">
             <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">{t('archive.pageCount')}</span>
-                <span>{metadata.pagecount}</span>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.pageCount')}</span>
+                <span className="flex-1 text-right whitespace-normal break-words">{metadata.pagecount}</span>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">{t('archive.updatedAt')}</span>
-                <span className="truncate">{formatDate(metadata.updated_at, t('archive.unknown'))}</span>
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.updatedAt')}</span>
+                <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.updated_at, t('archive.unknown'))}</span>
               </div>
             </div>
           </div>
