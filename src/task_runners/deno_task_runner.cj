@@ -8,6 +8,8 @@ import std.convert.*
 import std.sync.*
 import std.time.*
 import std.io.{ByteBuffer, readToEnd}
+import stdx.crypto.digest.*
+import stdx.encoding.hex.*
 import stdx.encoding.json.stream.*
 import stdx.log.*
 import lanlu.dao.*
@@ -688,6 +690,77 @@ public class DenoTaskRunner {
             return p == cleanRoot || p.startsWith("${cleanRoot}/")
         }
 
+        func sha1HexFromFile(filePath: String): String {
+            let p = Path(filePath)
+            if (!exists(p)) { return "" }
+            var sha1 = SHA1()
+            try {
+                let f = File(p, Read)
+                let bufSize: Int64 = 1024 * 1024
+                var buf = Array<Byte>(bufSize, repeat: 0)
+                while (true) {
+                    let n = f.read(buf)
+                    if (n <= 0) { break }
+                    sha1.write(buf[0..n])
+                }
+                f.close()
+                return toHexString(sha1.finish())
+            } catch (_: Exception) {
+                return ""
+            }
+        }
+
+        func runFfmpegToJpeg(inputPath: String, outputPath: String, maxSide: Int64, jpegQuality: Int64): (Int64, String) {
+            // Best-effort conversion to a JPEG suitable for EH image lookup.
+            let scale = if (maxSide > 0) { maxSide } else { 1280i64 }
+            // ffmpeg's JPEG "quality" uses qscale (lower is better). Map 1..100 -> 31..2.
+            let q = if (jpegQuality > 0) { jpegQuality } else { 85i64 }
+            var qv = 31i64 - (q * 29i64 / 100i64)
+            if (qv < 2i64) { qv = 2i64 }
+            if (qv > 31i64) { qv = 31i64 }
+            let vf = "scale=${scale}:${scale}:force_original_aspect_ratio=decrease"
+            let args = [
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",
+                "-i", inputPath,
+                "-frames:v", "1",
+                "-vf", vf,
+                "-q:v", qv.toString(),
+                "-map_metadata", "-1",
+                outputPath
+            ]
+            try {
+                let proc = launch("ffmpeg", args, stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+                let (exitCode, _, stderr) = proc.waitOutput()
+                let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
+                return (exitCode, stderrStr)
+            } catch (e: Exception) {
+                return (1, e.message)
+            }
+        }
+
+        func runImageMagickToJpeg(inputPath: String, outputPath: String, maxSide: Int64, jpegQuality: Int64): (Int64, String) {
+            let scale = if (maxSide > 0) { maxSide } else { 1280i64 }
+            let q = if (jpegQuality > 0) { jpegQuality } else { 85i64 }
+            let firstFrameInput = "${inputPath}[0]"
+            let args = [
+                firstFrameInput,
+                "-strip",
+                "-resize", "${scale}x${scale}>",
+                "-quality", q.toString(),
+                outputPath
+            ]
+            try {
+                let proc = launch("convert", args, stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
+                let (exitCode, _, stderr) = proc.waitOutput()
+                let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
+                return (exitCode, stderrStr)
+            } catch (e: Exception) {
+                return (1, e.message)
+            }
+        }
+
         if (m == "tags.list") {
             var namespaceStr = ""
             var q = ""
@@ -842,6 +915,138 @@ public class DenoTaskRunner {
                     w.startArray()
                     for (e in entries) { w.writeValue(e) }
                     w.endArray()
+                    w.endObject()
+                    w.flush()
+                    return (true, String.fromUtf8(readToEnd(out)), "")
+            }
+        }
+
+        // Export the first image ("cover") from an archive into the plugin runtime directory,
+        // compute its SHA-1 (LANraragi-style thumbnail_hash), and optionally generate a JPEG for upload.
+        if (m == "archive.exportCoverForSearch") {
+            var archiveId = ""
+            var pluginDir = ""
+            var cacheSubdir = "cache"
+            var overwrite = true
+            var exportJpeg = true
+            var maxSide: Int64 = 1280i64
+            var jpegQuality: Int64 = 85i64
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case "pluginDir" => pluginDir = r.readValue<String>().trimAscii()
+                            case "cacheSubdir" => cacheSubdir = r.readValue<String>().trimAscii()
+                            case "overwrite" => overwrite = parseBoolLoose(r.readValue<String>())
+                            case "exportJpeg" => exportJpeg = parseBoolLoose(r.readValue<String>())
+                            case "maxSide" => maxSide = parseInt64Loose(r.readValue<String>(), 1280i64)
+                            case "jpegQuality" => jpegQuality = parseInt64Loose(r.readValue<String>(), 85i64)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (archiveId.size == 0) {
+                return (false, "{}", "missing archiveId")
+            }
+            if (pluginNamespace.trimAscii().size == 0) {
+                return (false, "{}", "missing pluginNamespace context")
+            }
+
+            // Never trust plugin-provided pluginDir; derive it from the caller namespace.
+            let expectedPluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${pluginNamespace.trimAscii()}"
+            if (pluginDir.size > 0) {
+                if (pluginDir.trimAscii() != expectedPluginDir) {
+                    return (false, "{}", "invalid pluginDir (must match expected plugin runtime dir)")
+                }
+            }
+            pluginDir = expectedPluginDir
+            if (!ensureUnderRuntimeRoot(pluginDir)) {
+                return (false, "{}", "invalid pluginDir (not under runtime root)")
+            }
+
+            // Prevent traversal via archiveId. Require it to be a safe relative path segment.
+            let safeArchiveId = normalizeSafeRelPath(archiveId)
+            if (safeArchiveId.size == 0 || safeArchiveId != archiveId.trimAscii()) {
+                return (false, "{}", "invalid archiveId")
+            }
+
+            var sub = cacheSubdir.trimAscii()
+            if (sub.size == 0) { sub = "cache" }
+            sub = normalizeSafeRelPath(sub)
+            if (sub.size == 0) { sub = "cache" }
+
+            let resolved = resolveArchiveActualPath(archiveId)
+            match (resolved) {
+                case None => return (false, "{}", "archive not found or path unresolved")
+                case Some((archiveType, actualPath)) =>
+                    let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+                    let (entryName, _) = handler.getFirstImage(actualPath)
+                    if (entryName.trimAscii().size == 0) {
+                        return (false, "{}", "no image found in archive")
+                    }
+
+                    // Infer ext from entryName.
+                    var inferredExt = ""
+                    let parts = entryName.split(".")
+                    if (parts.size > 1) { inferredExt = parts[parts.size - 1].trimAscii().toAsciiLower() }
+                    if (inferredExt.size == 0) { inferredExt = "bin" }
+
+                    let baseDir = "${pluginDir}/${sub}/${archiveId}"
+                    let originalPath = "${baseDir}/cover_original.${inferredExt}"
+                    let uploadPath = "${baseDir}/cover_upload.jpg"
+                    try { FileUtils.ensureDirectoryExists(Path(baseDir)) } catch (_: Exception) {}
+
+                    // Extract original cover.
+                    if (overwrite || !exists(Path(originalPath))) {
+                        let ok = handler.extractEntryToFile(actualPath, entryName, originalPath)
+                        if (!ok) {
+                            return (false, "{}", "extract failed")
+                        }
+                    }
+                    let originalSha1 = sha1HexFromFile(originalPath)
+
+                    // Prepare a JPEG for upload (EH upload/lookup expects common formats).
+                    var uploadSha1 = ""
+                    if (exportJpeg) {
+                        if (overwrite || !exists(Path(uploadPath))) {
+                            if (inferredExt == "jpg" || inferredExt == "jpeg") {
+                                try {
+                                    FileUtils.safeReplaceFile(Path(uploadPath), Path(originalPath))
+                                } catch (e: Exception) {
+                                    return (false, "{}", "failed to copy jpeg: ${e.message}")
+                                }
+                            } else {
+                                let (exitCode, err1) = runFfmpegToJpeg(originalPath, uploadPath, maxSide, jpegQuality)
+                                if (exitCode != 0 || !exists(Path(uploadPath))) {
+                                    let (exit2, err2) = runImageMagickToJpeg(originalPath, uploadPath, maxSide, jpegQuality)
+                                    if (exit2 != 0 || !exists(Path(uploadPath))) {
+                                        return (false, "{}", "jpeg convert failed: ffmpeg=${err1}; convert=${err2}")
+                                    }
+                                }
+                            }
+                        }
+                        uploadSha1 = sha1HexFromFile(uploadPath)
+                    }
+
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archiveId").writeValue(archiveId)
+                    w.writeName("entryName").writeValue(entryName)
+                    w.writeName("originalPath").writeValue(originalPath)
+                    w.writeName("originalSha1").writeValue(originalSha1)
+                    w.writeName("uploadPath").writeValue(if (exportJpeg) { uploadPath } else { "" })
+                    w.writeName("uploadSha1").writeValue(if (exportJpeg) { uploadSha1 } else { "" })
                     w.endObject()
                     w.flush()
                     return (true, String.fromUtf8(readToEnd(out)), "")
@@ -1312,6 +1517,9 @@ public class DenoTaskRunner {
         }
 
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
+        // Allow reading the plugin runtime dir so plugins can consume files exported via host RPC
+        // (e.g. archive.exportCoverForSearch).
+        denoArgs.add("--allow-read=${pluginDir}")
         denoArgs.add("--allow-read=./data/thumb")
         denoArgs.add(pluginFile)
 
