@@ -194,9 +194,16 @@ export function BaseMediaCard({
           </Button>
         </div>
 
-        {/* Hover overlay */}
-        {(allTags.length > 0 || summary) && (
-          <div className="pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+        {/* Hover overlay (also acts as a scrim behind floating actions when there are no tags/summary) */}
+        <div
+          className={[
+            "pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent transition-opacity",
+            // Mobile has no hover; keep a scrim when actions are visible.
+            hideActionsOnMobile ? "opacity-0" : "opacity-100",
+            "sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100",
+          ].join(" ")}
+        >
+          {(allTags.length > 0 || summary) && (
             <div className="w-full p-3 space-y-2 sm:pb-12">
               {allTags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
@@ -216,8 +223,8 @@ export function BaseMediaCard({
                 <div className="text-[11px] leading-snug text-white/90 line-clamp-3">{summary}</div>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       <CardContent className="p-4">
