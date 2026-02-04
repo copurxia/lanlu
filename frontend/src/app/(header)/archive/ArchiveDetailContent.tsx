@@ -474,13 +474,6 @@ export function ArchiveDetailContent() {
 
                   {/* Desktop/tablet actions; mobile uses the bottom action bar */}
                   <div className="hidden sm:flex shrink-0 flex-wrap items-center gap-2">
-                    <Link href={`/reader?id=${metadata.arcid}`}>
-                      <Button size="sm" variant="secondary" className="h-9">
-                        <BookOpen className="w-4 h-4 mr-2" />
-                        {t('archive.startReading')}
-                      </Button>
-                    </Link>
-
                     <AddToTankoubonDialog
                       archiveId={metadata.arcid}
                       trigger={
@@ -566,6 +559,13 @@ export function ArchiveDetailContent() {
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     ) : null}
+
+                    <Link href={`/reader?id=${metadata.arcid}`} className="ml-auto">
+                      <Button size="sm" variant="default" className="h-9">
+                        <BookOpen className="w-4 h-4 mr-2" />
+                        {t('archive.startReading')}
+                      </Button>
+                    </Link>
                   </div>
                 </div>
 
