@@ -20,6 +20,10 @@ import { useDebounce, useGridColumnCount } from '@/hooks/common-hooks';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/utils/logger';
 
+// In-memory cache so random recommendations don't change when navigating away and back.
+// Keyed by `${gridColumnCount}:${language}`.
+const randomArchivesCache = new Map<string, any[]>();
+
 function isAbortLikeError(err: any) {
   return (
     err?.name === 'AbortError' ||
@@ -34,13 +38,17 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const gridColumnCount = useGridColumnCount();
+  const pageSize = 20;
+  const randomKey = `${gridColumnCount}:${language}`;
   const mainScrollRef = useRef<HTMLElement | null>(null);
   const lastPageRef = useRef<number | null>(null);
 
   const [archives, setArchives] = useState<any[]>([]);
-  const [randomArchives, setRandomArchives] = useState<any[]>([]);
+  const cachedRandomArchives =
+    typeof window !== 'undefined' ? randomArchivesCache.get(randomKey) : undefined;
+  const [randomArchives, setRandomArchives] = useState<any[]>(() => cachedRandomArchives ?? []);
   const [loading, setLoading] = useState(true);
-  const [randomLoading, setRandomLoading] = useState(true);
+  const [randomLoading, setRandomLoading] = useState(() => !cachedRandomArchives);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
@@ -56,8 +64,6 @@ function HomePageContent() {
   const [categoryId, setCategoryId] = useState<string>('all');
   const [isInitialized, setIsInitialized] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
-  const pageSize = 20;
-  const randomKey = `${gridColumnCount}:${language}`;
   const lastRandomKeyRef = useRef<string | null>(null);
   const archivesAbortRef = useRef<AbortController | null>(null);
   const archivesRequestIdRef = useRef(0);
@@ -170,18 +176,29 @@ function HomePageContent() {
     }
   }, [pageSize]);
 
-  const fetchRandomArchives = useCallback(async () => {
+  const fetchRandomArchives = useCallback(async (options?: { force?: boolean }) => {
+    if (typeof window !== 'undefined' && !options?.force) {
+      const cached = randomArchivesCache.get(randomKey);
+      if (cached) {
+        setRandomArchives(cached);
+        setRandomLoading(false);
+        return;
+      }
+    }
+
     try {
       setRandomLoading(true);
       const archives = await ArchiveService.getRandom({ count: gridColumnCount, lang: language });
       setRandomArchives(archives);
+      if (typeof window !== 'undefined') randomArchivesCache.set(randomKey, archives);
     } catch (error) {
       logger.apiError('fetch random archives', error);
       setRandomArchives([]);
+      if (typeof window !== 'undefined') randomArchivesCache.set(randomKey, []);
     } finally {
       setRandomLoading(false);
     }
-  }, [gridColumnCount, language]);
+  }, [gridColumnCount, language, randomKey]);
 
   // Cancel in-flight list request on unmount.
   useEffect(() => {
@@ -250,6 +267,14 @@ function HomePageContent() {
     if (searchQuery) return;
     if (lastRandomKeyRef.current === randomKey) return;
     lastRandomKeyRef.current = randomKey;
+    // Avoid refreshing when navigating away/back by restoring from cache if available.
+    const cached = randomArchivesCache.get(randomKey);
+    if (cached) {
+      setRandomArchives(cached);
+      setRandomLoading(false);
+      return;
+    }
+    setRandomArchives([]);
     fetchRandomArchives();
   }, [fetchRandomArchives, isInitialized, randomKey, searchQuery]);
 
@@ -257,12 +282,12 @@ function HomePageContent() {
   useEffect(() => {
     const handleUploadCompleted = () => {
       fetchArchives(fetchInputRef.current);
-      if (!searchQuery) fetchRandomArchives();
+      if (!searchQuery) fetchRandomArchives({ force: true });
     };
 
     const handleArchivesRefresh = () => {
       fetchArchives(fetchInputRef.current);
-      if (!searchQuery) fetchRandomArchives();
+      if (!searchQuery) fetchRandomArchives({ force: true });
     };
 
     const handleSearchReset = () => {
@@ -392,7 +417,7 @@ function HomePageContent() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={fetchRandomArchives}
+                  onClick={() => fetchRandomArchives({ force: true })}
                   disabled={randomLoading}
                   className="border-border bg-background hover:bg-accent hover:text-accent-foreground"
                 >
