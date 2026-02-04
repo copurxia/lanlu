@@ -407,11 +407,12 @@ function HomePageContent() {
 
         {/* 主内容区 - 独立滚动 */}
         <main ref={mainScrollRef} className="flex-1 min-w-0 min-h-0 overflow-y-auto pb-24 lg:pb-0">
-          <div className="px-4 py-8">
+          {/* Slightly tighter vertical padding so section headers don't feel "pushed down" on both desktop and mobile. */}
+          <div className="px-4 pt-4 pb-8">
           {/* 随机推荐 - 搜索模式下隐藏 */}
           {!isSearchMode && (
-          <section className="mb-12">
-            <div className="flex items-center justify-between mb-6">
+          <section className="mb-8">
+            <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold">{t('home.randomRecommendations')}</h2>
               <div className="flex items-center gap-2">
                 <Button
@@ -439,7 +440,7 @@ function HomePageContent() {
 
           {/* 档案列表 */}
           <section>
-            <div className="flex flex-col gap-4 mb-6">
+            <div className="flex flex-col gap-3 mb-4">
               {/* 标题栏 + 排序控件同一行（移动端/桌面端统一） */}
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-2xl font-semibold min-w-0 flex-1 truncate">
