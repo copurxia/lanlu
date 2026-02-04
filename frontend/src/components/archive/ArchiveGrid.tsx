@@ -88,12 +88,14 @@ export function ArchiveGrid({
             />
           );
         } else {
+          const compactMobile = variant === 'home' || variant === 'random';
           return (
             <ArchiveCard
               key={item.arcid}
               archive={item}
               index={index}
               priority={index < priorityCount}
+              compactMobile={compactMobile}
             />
           );
         }

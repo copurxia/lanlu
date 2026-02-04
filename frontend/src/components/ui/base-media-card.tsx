@@ -35,6 +35,8 @@ export interface BaseMediaCardProps {
   detailsLabel?: string
   pagesLabel?: string
   priority?: boolean  // 优先加载图片（用于 LCP 优化）
+  hideMetaOnMobile?: boolean
+  hideActionsOnMobile?: boolean
 
   // 收藏回调
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
@@ -58,6 +60,8 @@ export function BaseMediaCard({
   detailsLabel,
   pagesLabel,
   priority = false,
+  hideMetaOnMobile = false,
+  hideActionsOnMobile = false,
   onFavoriteToggle,
 }: BaseMediaCardProps) {
   const router = useRouter()
@@ -179,13 +183,13 @@ export function BaseMediaCard({
             {title}
           </h3>
         </div>
-        <div className="text-xs text-muted-foreground">
+        <div className={["text-xs text-muted-foreground", hideMetaOnMobile ? "hidden sm:block" : ""].join(" ")}>
           {pagesLabel || t('archive.pages').replace('{count}', String(pagecount))}
           {progress > 0 && ` • ${Math.round((progress / pagecount) * 100)}% ${t('common.read')}`}
         </div>
       </CardContent>
 
-      <CardFooter className="p-4 pt-0 flex gap-2">
+      <CardFooter className={["p-4 pt-0 flex gap-2", hideActionsOnMobile ? "hidden sm:flex" : ""].join(" ")}>
         <Button
           asChild
           size="sm"
