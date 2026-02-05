@@ -406,9 +406,13 @@ function HomePageContent() {
         </div>
 
         {/* 主内容区 - 独立滚动 */}
-        <main ref={mainScrollRef} className="flex-1 min-w-0 min-h-0 overflow-y-auto pb-24 lg:pb-0">
+        {/* Reserve just enough space for the fixed mobile bottom nav (plus iOS safe-area). */}
+        <main
+          ref={mainScrollRef}
+          className="flex-1 min-w-0 min-h-0 overflow-y-auto pb-[calc(env(safe-area-inset-bottom)+3.75rem)] lg:pb-2"
+        >
           {/* Slightly tighter vertical padding so section headers don't feel "pushed down" on both desktop and mobile. */}
-          <div className="px-4 pt-4 pb-8">
+          <div className="px-4 pt-4 pb-2">
           {/* 随机推荐 - 搜索模式下隐藏 */}
           {!isSearchMode && (
           <section className="mb-8">
@@ -516,7 +520,7 @@ function HomePageContent() {
               <>
                 <ArchiveGrid archives={archives} variant="home" />
 
-                <div className="mt-8 flex items-center justify-between gap-3">
+                <div className="mt-4 flex items-center justify-between gap-3">
                   <div
                     className="text-xs sm:text-sm text-muted-foreground min-w-0 flex-1 truncate"
                     title={statsText}

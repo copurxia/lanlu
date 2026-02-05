@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useLanguage } from "@/contexts/LanguageContext"
+import { cn } from "@/lib/utils/utils"
 
 interface PaginationProps {
   currentPage: number
@@ -34,7 +35,13 @@ export function Pagination({
   }
 
   return (
-    <div className={`flex items-center justify-center space-x-1 sm:space-x-2 overflow-x-auto py-2 ${className}`}>
+    <div
+      className={cn(
+        // Keep defaults minimal; callers can add padding via `className`.
+        "flex items-center justify-center space-x-1 sm:space-x-2 overflow-x-auto py-0",
+        className
+      )}
+    >
       <Button
         variant="outline"
         size="sm"
