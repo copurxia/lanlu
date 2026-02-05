@@ -18,14 +18,6 @@ public func registerPluginsRoutes(router: JoyRouters) {
         }
     })
 
-    // 根据类型获取插件
-    router.get("/api/plugins/{type}", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(_) => PluginsController.getPluginsByType(ctx)
-            case None => return
-        }
-    })
-
     // 获取插件配置
     router.get("/api/plugins/{namespace}/config", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
@@ -46,14 +38,6 @@ public func registerPluginsRoutes(router: JoyRouters) {
     router.put("/api/plugins/{namespace}/enabled", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => PluginsController.setPluginEnabled(ctx)
-            case None => return
-        }
-    })
-
-    // 获取插件配置Schema
-    router.get("/api/plugins/{namespace}/schema", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(_) => PluginsController.getPluginSchema(ctx)
             case None => return
         }
     })

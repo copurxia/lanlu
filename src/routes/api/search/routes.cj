@@ -24,11 +24,5 @@ public class SearchRoutes {
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
             SearchController.getRandomArchives(ctx)
         })
-
-        // 获取搜索建议
-        router.get("/api/search/suggestions", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            SearchController.getSearchSuggestions(ctx)
-        })
     }
 }

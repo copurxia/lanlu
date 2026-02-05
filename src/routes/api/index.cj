@@ -82,10 +82,6 @@ private func registerSystemSettingsRoutes(router: JoyRouters) {
     })
 
     // 按分类获取设置
-    router.get("/api/system/settings/category/{category}", { ctx =>
-        SystemSettingsController.getSettingsByCategory(ctx)
-    })
-
     // 更新单个设置
     router.put("/api/system/settings", { ctx =>
         SystemSettingsController.updateSetting(ctx)

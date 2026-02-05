@@ -2,12 +2,10 @@ package lanlu.routes
 
 import cjoy.*
 import lanlu.routes.api.archives.*
-import lanlu.routes.api.database.*
 import lanlu.routes.api.search.*
 import lanlu.routes.api.categories.*
 import lanlu.routes.api.plugins.*
 import lanlu.routes.api.tankoubons.*
-import lanlu.routes.api.shinobu.*
 import lanlu.routes.api.*
 import lanlu.controllers.*
 
@@ -23,9 +21,6 @@ public class Routes {
         // 注册 API 归档路由
         ArchiveRoutes.configure(router)
         
-        // 注册 API 数据库路由
-        DatabaseRoutes.configure(router)
-        
         // 注册 API 搜索路由
         SearchRoutes.configure(router)
         
@@ -37,9 +32,6 @@ public class Routes {
         
         // 注册 API 单行本路由
         registerTankoubonRoutes(router)
-        
-        // 注册 API Shinobu路由
-        registerShinobuRoutes(router)
         
         // 注册所有 API 路由（包括 /api/info）
         registerApiRoutes(router)

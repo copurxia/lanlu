@@ -15,18 +15,6 @@ public class ArchiveRoutes {
      * 配置 API 归档相关路由
      */
     public static func configure(router: JoyRouters) {
-        // 获取所有归档
-        router.get("/api/archives", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getArchives(ctx)
-        })
-
-        // 根据 ID 获取归档
-        router.get("/api/archives/{id}", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getArchive(ctx)
-        })
-
         // 获取归档元数据
         router.get("/api/archives/{id}/metadata", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
@@ -128,16 +116,6 @@ public class ArchiveRoutes {
         router.post("/api/download_url", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DownloadController.downloadFromUrl(ctx)
-        })
-        router.get("/api/download_url", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            DownloadController.downloadFromUrl(ctx)
-        })
-
-        // 执行元数据插件（进入TaskPool，返回job id）
-        router.post("/api/metadata_plugin", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            MetadataPluginController.runMetadataPlugin(ctx)
         })
     }
 }

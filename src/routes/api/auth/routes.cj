@@ -5,14 +5,6 @@ import lanlu.controllers.*
 import lanlu.middleware.*
 
 public func registerAuthRoutes(router: JoyRouters) {
-    // 注册接口：需要已登录用户才能创建新用户
-    router.post("/api/auth/register", { ctx =>
-        match (AuthMiddleware.requireUser(ctx)) {
-            case Some(_) => AuthController.register(ctx)
-            case None => return
-        }
-    })
-
     router.post("/api/auth/login", { ctx =>
         AuthController.login(ctx)
     })
@@ -103,4 +95,3 @@ public func registerAuthRoutes(router: JoyRouters) {
         }
     })
 }
-

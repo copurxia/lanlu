@@ -86,34 +86,6 @@ export class PluginSchemaService {
   }
 
   /**
-   * 验证插件配置
-   */
-  static async validatePluginConfig(namespace: string, config: Record<string, any>): Promise<PluginValidationResponse> {
-    try {
-      const response = await apiClient.post(`/api/plugins/${namespace}/validate`, config);
-
-      const data = response.data;
-      if (typeof data === 'string') {
-        const parsed = JSON.parse(data);
-        return {
-          valid: parsed.valid === 'true',
-          error: parsed.error,
-          message: parsed.message
-        };
-      }
-
-      return {
-        valid: data.valid,
-        error: data.error,
-        message: data.message
-      };
-    } catch (error) {
-      console.error('Failed to validate plugin config:', error);
-      throw error;
-    }
-  }
-
-  /**
    * 获取插件默认配置 - 从schema中计算默认值
    */
   static async getPluginDefaults(namespace: string): Promise<PluginDefaultsResponse> {

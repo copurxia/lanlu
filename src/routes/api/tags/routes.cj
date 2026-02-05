@@ -99,14 +99,6 @@ public func registerTagRoutes(router: JoyRouters): Unit {
         }
     })
 
-    // 管理员接口：导入标签
-    router.post("/api/admin/tags/import", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(_) => TagController.adminImport(ctx)
-            case None => return
-        }
-    })
-
     // 管理员接口：分片上传导入
     router.post("/api/admin/tags/import/init", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {

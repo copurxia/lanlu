@@ -14,12 +14,6 @@ public func registerCategoryRoutes(router: JoyRouters) {
         CategoryController.getCategories(ctx)
     })
 
-    // 根据ID获取分类
-    router.get("/api/categories/{id}", { ctx =>
-        if (!AuthMiddleware.requiredAuth(ctx)) { return }
-        CategoryController.getCategoryById(ctx)
-    })
-
     // 创建新分类（需要管理员权限）
     router.post("/api/categories", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
