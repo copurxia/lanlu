@@ -8,7 +8,7 @@ export default function ArchiveDetailPage() {
   const { t } = useLanguage();
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-dvh">
       <Suspense
         fallback={
           <div className="container mx-auto px-4 py-8">

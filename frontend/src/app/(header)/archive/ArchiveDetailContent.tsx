@@ -376,7 +376,7 @@ export function ArchiveDetailContent() {
 
   if (!mounted || loading) {
     return (
-      <div className="min-h-screen">
+      <div className="min-h-dvh">
         <div className="container mx-auto px-4 py-8">
           <div className="text-center py-12">
             <p className="text-muted-foreground">{t('common.loading')}</p>
@@ -388,7 +388,7 @@ export function ArchiveDetailContent() {
 
   if (error || !metadata) {
     return (
-      <div className="min-h-screen">
+      <div className="min-h-dvh">
         <div className="container mx-auto px-4 py-8">
           <div className="text-center py-12">
             <p className="text-red-500 mb-4">{error || t('archive.notFound')}</p>
@@ -402,8 +402,9 @@ export function ArchiveDetailContent() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-20 lg:pb-0">
-      <main className="container mx-auto px-4 pt-6 pb-24 sm:pb-6 max-w-7xl">
+    <div className="min-h-dvh bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
+      {/* Reserve space for the fixed mobile action bar (includes safe-area inset). */}
+      <main className="container mx-auto px-4 pt-6 pb-2 sm:pb-6 max-w-7xl">
         <div className="space-y-6">
           {/* Header / hero (unified with Tankoubon page) */}
           <div className="relative">
