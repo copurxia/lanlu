@@ -152,7 +152,8 @@ export function BaseMediaCard({
         {/* Floating actions (details/favorite) */}
         <div
           className={[
-            "absolute bottom-2 left-2 z-20 items-center gap-2",
+            // Align with the tag/summary padding (`p-3`) so chips and buttons share the same left edge.
+            "absolute bottom-3 left-3 z-20 items-center gap-2",
             // Default hidden on all viewports; show on hover/focus for pointer devices.
             "flex opacity-0 translate-y-1 transition-all",
             "group-hover:opacity-100 group-hover:translate-y-0",
@@ -199,7 +200,8 @@ export function BaseMediaCard({
           ].join(" ")}
         >
           {(allTags.length > 0 || summary) && (
-            <div className="w-full p-3 space-y-2 sm:pb-12">
+            <div className="w-full p-3 pb-12 space-y-2">
+              {/* Reserve space for the floating action buttons on all viewports (mobile has no hover). */}
               {allTags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {hoverTags.map((tag) => (
