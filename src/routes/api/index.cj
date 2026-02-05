@@ -2,13 +2,11 @@ package lanlu.routes.api
 
 import cjoy.*
 import lanlu.routes.api.archives.*
-import lanlu.routes.api.database.*
 import lanlu.routes.api.search.*
 import lanlu.routes.api.categories.*
 import lanlu.routes.api.plugins.*
 import lanlu.routes.api.taskpool.*
 import lanlu.routes.api.tankoubons.*
-import lanlu.routes.api.shinobu.*
 import lanlu.routes.api.auth.*
 import lanlu.routes.api.tags.*
 import lanlu.routes.api.user.*
@@ -24,9 +22,6 @@ public func registerApiRoutes(router: JoyRouters) {
     // 注册档案相关路由
     ArchiveRoutes.configure(router)
 
-    // 注册数据库相关路由
-    DatabaseRoutes.configure(router)
-
     // 注册搜索相关路由
     SearchRoutes.configure(router)
 
@@ -41,9 +36,6 @@ public func registerApiRoutes(router: JoyRouters) {
 
     // 注册单行本相关路由
     registerTankoubonRoutes(router)
-
-    // 注册Shinobu相关路由
-    registerShinobuRoutes(router)
 
     // 注册认证/用户token相关路由
     registerAuthRoutes(router)
