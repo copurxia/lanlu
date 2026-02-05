@@ -31,7 +31,7 @@ import { ArchiveMobileActions } from './components/ArchiveMobileActions';
 import { ArchiveCollectionsCard } from './components/ArchiveCollectionsCard';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
-import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, Play, FolderPlus } from 'lucide-react';
+import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, Play, FolderPlus, ExternalLink } from 'lucide-react';
 
 export function ArchiveDetailContent() {
   const router = useRouter();
@@ -117,6 +117,44 @@ export function ArchiveDetailContent() {
       router.push(`/?q=${encodeURIComponent(q)}`);
     },
     [router, toCanonicalTag]
+  );
+
+  const renderTagBadge = useCallback(
+    (displayFullTag: string) => {
+      const canonical = toCanonicalTag(displayFullTag);
+      const colonIdx = canonical.indexOf(':');
+      const namespace = colonIdx > 0 ? canonical.slice(0, colonIdx).trim().toLowerCase() : '';
+      const isSource = namespace === 'source';
+      const sourceValue = isSource ? stripNamespace(canonical).trim() : '';
+      const sourceUrl = isSource ? (sourceValue.startsWith('http') ? sourceValue : `https://${sourceValue}`) : '';
+
+      return (
+        <Badge
+          key={displayFullTag}
+          variant="secondary"
+          className="cursor-pointer max-w-full"
+          title={displayFullTag}
+          onClick={() => handleTagClick(displayFullTag)}
+        >
+          <span className="flex items-center gap-1 max-w-full">
+            <span className="truncate">{stripNamespace(displayFullTag)}</span>
+            {isSource && sourceValue && (
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-primary transition-colors shrink-0"
+                title={sourceUrl}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            )}
+          </span>
+        </Badge>
+      );
+    },
+    [handleTagClick, toCanonicalTag]
   );
 
   const [favoriteLoading, setFavoriteLoading] = useState(false);
@@ -428,17 +466,7 @@ export function ArchiveDetailContent() {
 
                         {tags.length > 0 ? (
                           <div className="mt-3 flex flex-wrap gap-2">
-                            {tags.map((fullTag) => (
-                              <Badge
-                                key={fullTag}
-                                variant="secondary"
-                                className="cursor-pointer max-w-full"
-                                title={fullTag}
-                                onClick={() => handleTagClick(fullTag)}
-                              >
-                                <span className="truncate">{stripNamespace(fullTag)}</span>
-                              </Badge>
-                            ))}
+                            {tags.map(renderTagBadge)}
                           </div>
                         ) : null}
                       </div>
@@ -457,17 +485,7 @@ export function ArchiveDetailContent() {
 
                     {tags.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2 w-full">
-                        {tags.map((fullTag) => (
-                          <Badge
-                            key={fullTag}
-                            variant="secondary"
-                            className="cursor-pointer max-w-full"
-                            title={fullTag}
-                            onClick={() => handleTagClick(fullTag)}
-                          >
-                            <span className="truncate">{stripNamespace(fullTag)}</span>
-                          </Badge>
-                        ))}
+                        {tags.map(renderTagBadge)}
                       </div>
                     ) : null}
                   </div>

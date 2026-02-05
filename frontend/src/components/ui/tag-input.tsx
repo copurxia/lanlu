@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { createPortal } from "react-dom"
-import { X } from "lucide-react"
+import { ExternalLink, X } from "lucide-react"
 import { cn } from "@/lib/utils/utils"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -163,18 +163,38 @@ export function TagInput({
         )}
         onClick={() => inputRef.current?.focus()}
       >
-        {value.map((tag) => (
-          <Badge key={tag} variant="secondary" className="gap-1 pr-1">
-            {tag}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); removeTag(tag) }}
-              className="rounded-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            >
-              <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
-            </button>
-          </Badge>
-        ))}
+        {value.map((tag) => {
+          const colonIdx = tag.indexOf(":")
+          const namespace = colonIdx > 0 ? tag.slice(0, colonIdx).trim().toLowerCase() : ""
+          const isSource = namespace === "source"
+          const sourceValue = isSource ? tag.slice(colonIdx + 1).trim() : ""
+          const sourceUrl = isSource && sourceValue ? (sourceValue.startsWith("http") ? sourceValue : `https://${sourceValue}`) : ""
+
+          return (
+            <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+              {tag}
+              {isSource && sourceUrl && (
+                <a
+                  href={sourceUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-primary transition-colors"
+                  title={sourceUrl}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); removeTag(tag) }}
+                className="rounded-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              >
+                <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+              </button>
+            </Badge>
+          )
+        })}
         <Input
           ref={inputRef}
           value={inputValue}
