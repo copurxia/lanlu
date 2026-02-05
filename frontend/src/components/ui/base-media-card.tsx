@@ -228,8 +228,8 @@ export function BaseMediaCard({
 
       {/* Keep the white "card" background scoped to the cover only; meta text renders outside. */}
       <div className="pt-3">
-        <div className="h-10 mb-2">
-          <h3 className="font-semibold text-sm line-clamp-2" title={title}>
+        <div className="h-5 mb-2">
+          <h3 className="font-semibold text-sm line-clamp-1" title={title}>
             {title}
           </h3>
         </div>
