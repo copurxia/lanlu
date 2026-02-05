@@ -117,5 +117,12 @@ public class ArchiveRoutes {
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
             DownloadController.downloadFromUrl(ctx)
         })
+
+        // 执行元数据插件（进入TaskPool，返回job id）
+        router.post("/api/metadata_plugin", { ctx =>
+            if (!AuthMiddleware.requiredAuth(ctx)) { return }
+            MetadataPluginController.runMetadataPlugin(ctx)
+        })
+
     }
 }
