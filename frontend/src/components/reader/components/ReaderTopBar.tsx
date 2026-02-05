@@ -35,7 +35,7 @@ export function ReaderTopBar({
       <div
         className={`
           transition-all duration-250 ease-out
-          ${showToolbar ? 'p-3 opacity-100' : 'p-0 opacity-0'}
+          ${showToolbar ? 'p-2 sm:p-3 opacity-100' : 'p-0 opacity-0'}
         `}
       >
         <div
@@ -106,4 +106,3 @@ export function ReaderTopBar({
     </div>
   );
 }
-

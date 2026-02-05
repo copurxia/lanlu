@@ -103,7 +103,8 @@ export function Header() {
 
   return (
     <header ref={headerRef} className="bg-background border-b border-border sticky top-0 z-50">
-      <div className="mx-auto px-4 py-3">
+      {/* Slightly shorter top bar on mobile to match typical 48-56px app headers. */}
+      <div className="mx-auto px-4 py-2 sm:py-3">
         <div className="relative flex items-center justify-between">
           {/* Logo和标题 */}
           <div
