@@ -4,6 +4,7 @@ export interface Tankoubon {
   summary: string;
   tags: string;
   cover_asset_id?: number;
+  cover?: string;
   archives?: string[];  // Array of arcids (optional for search results)
 
   // Aggregated metadata for display (only in search results)
@@ -30,6 +31,7 @@ export interface TankoubonUpdateRequest {
   name?: string;
   summary?: string;
   tags?: string;
+  cover?: string;
   cover_asset_id?: number;
   archives?: Array<{
     archive_id?: string;
@@ -38,6 +40,7 @@ export interface TankoubonUpdateRequest {
     summary?: string;
     tags?: string;
     updated_at?: string;
+    cover?: string;
   }>;
 }
 

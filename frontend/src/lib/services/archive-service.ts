@@ -88,6 +88,9 @@ export class ArchiveService {
     if (metadata.tags !== undefined) {
       params.append('tags', metadata.tags);
     }
+    if (metadata.cover !== undefined) {
+      params.append('cover', metadata.cover);
+    }
 
     await apiClient.put(`/api/archives/${id}/metadata?${params.toString()}`);
   }

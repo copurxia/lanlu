@@ -10,6 +10,7 @@ public class ParsedMetadataResult {
     public var title: String = ""
     public var summary: String = ""
     public var tags: String = ""
+    public var cover: String = ""
     public var archives: Array<ArchiveMetadataPatch> = Array<ArchiveMetadataPatch>()
 
     public init(success: Bool, error: String, title: String, summary: String, tags: String) {
@@ -18,15 +19,17 @@ public class ParsedMetadataResult {
         this.title = title
         this.summary = summary
         this.tags = tags
+        this.cover = ""
         this.archives = Array<ArchiveMetadataPatch>()
     }
 
-    public init(success: Bool, error: String, title: String, summary: String, tags: String, archives: Array<ArchiveMetadataPatch>) {
+    public init(success: Bool, error: String, title: String, summary: String, tags: String, cover: String, archives: Array<ArchiveMetadataPatch>) {
         this.success = success
         this.error = error
         this.title = title
         this.summary = summary
         this.tags = tags
+        this.cover = cover
         this.archives = archives
     }
 }
@@ -41,6 +44,7 @@ public class ArchiveMetadataPatch {
     public var summary: String = ""
     public var tags: String = ""
     public var updatedAt: String = ""
+    public var cover: String = ""
 
     public init() {}
 }

@@ -48,6 +48,7 @@ public class MetadataPluginCallbackRunner {
         let newTitle = parsed.title
         var newTags = parsed.tags
         let newSummary = parsed.summary
+        let newCover = parsed.cover
         let archivePatches = parsed.archives
         // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
         // Map it to archives.updated_at and prevent it from being stored as a normal tag.
@@ -79,8 +80,31 @@ public class MetadataPluginCallbackRunner {
                         }
                     }
 
+                    if (newCover.trimAscii().size > 0) {
+                        let oldCoverAssetId = TankoubonDao.getTankoubonCoverAssetId(targetId)
+                        let (okCover, coverAssetId, _, coverErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                            newCover,
+                            namespace,
+                            "tankoubon_cover",
+                            "${targetId}.avif"
+                        )
+                        if (okCover && coverAssetId > 0) {
+                            let coverUpdated = TankoubonDao.updateTankoubonCover(targetId, coverAssetId)
+                            if (coverUpdated) {
+                                if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
+                                    PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                                }
+                            } else {
+                                PluginCoverUtils.deleteAsset(coverAssetId)
+                                TaskIO.appendLog(taskId, "WARN: failed to apply tankoubon cover asset, removed new asset id=${coverAssetId}")
+                            }
+                        } else {
+                            TaskIO.appendLog(taskId, "WARN: failed to install tankoubon cover from plugin result: ${coverErr}")
+                        }
+                    }
+
                     // Optional: plugin can return per-archive metadata patches for this Tankoubon.
-                    let (patchedCount, skippedCount) = applyArchivePatchesForTankoubon(targetId, archivePatches, taskId)
+                    let (patchedCount, skippedCount) = applyArchivePatchesForTankoubon(targetId, archivePatches, taskId, namespace)
                     TaskIO.appendLog(taskId, "archive patches applied: patched=${patchedCount}, skipped=${skippedCount}")
             }
         } else {
@@ -119,16 +143,42 @@ public class MetadataPluginCallbackRunner {
                     TaskIO.appendLog(taskId, "WARN: failed to update tags")
                 }
             }
+
+            if (newCover.trimAscii().size > 0) {
+                let oldCoverAssetId = ArchiveDao.getCoverAssetId(targetId)
+                let (okCover, coverAssetId, coverThumbHash, coverErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                    newCover,
+                    namespace,
+                    "archive_cover",
+                    "${targetId}.avif"
+                )
+                if (okCover && coverAssetId > 0) {
+                    let coverUpdated = ArchiveDao.updateCoverAssetId(targetId, coverAssetId)
+                    if (coverUpdated) {
+                        if (coverThumbHash.trimAscii().size > 0) {
+                            let _ = ArchiveDao.updateThumbHash(targetId, coverThumbHash)
+                        }
+                        if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
+                            PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                        }
+                    } else {
+                        PluginCoverUtils.deleteAsset(coverAssetId)
+                        TaskIO.appendLog(taskId, "WARN: failed to apply archive cover asset, removed new asset id=${coverAssetId}")
+                    }
+                } else {
+                    TaskIO.appendLog(taskId, "WARN: failed to install archive cover from plugin result: ${coverErr}")
+                }
+            }
         }
 
         // 完成任务
         TaskModel.updateTaskProgress(taskId, 100, "元数据回调完成")
-        let resultJson = buildResultJson(targetId, namespace, newTitle, newSummary, newTags, output, archivePatches.size)
+        let resultJson = buildResultJson(targetId, namespace, newTitle, newSummary, newTags, newCover, output, archivePatches.size)
         TaskModel.completeTask(taskId, "metadata_plugin_callback completed")
         TaskIO.writeOutput(taskId, resultJson)
     }
 
-    private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64): (Int64, Int64) {
+    private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64, pluginNamespace: String): (Int64, Int64) {
         if (patches.size == 0) {
             return (0, 0)
         }
@@ -200,6 +250,32 @@ public class MetadataPluginCallbackRunner {
                 let tagOk = TagDao.updateArchiveTags(targetArchiveId, cleanedPatchTags)
                 if (!tagOk) {
                     TaskIO.appendLog(taskId, "WARN: archive tag update failed id=${targetArchiveId}")
+                }
+            }
+
+            if (patch.cover.trimAscii().size > 0) {
+                let oldCoverAssetId = ArchiveDao.getCoverAssetId(targetArchiveId)
+                let (okCover, coverAssetId, coverThumbHash, coverErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                    patch.cover,
+                    pluginNamespace,
+                    "archive_cover",
+                    "${targetArchiveId}.avif"
+                )
+                if (okCover && coverAssetId > 0) {
+                    let coverUpdated = ArchiveDao.updateCoverAssetId(targetArchiveId, coverAssetId)
+                    if (coverUpdated) {
+                        if (coverThumbHash.trimAscii().size > 0) {
+                            let _ = ArchiveDao.updateThumbHash(targetArchiveId, coverThumbHash)
+                        }
+                        if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
+                            PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                        }
+                    } else {
+                        PluginCoverUtils.deleteAsset(coverAssetId)
+                        TaskIO.appendLog(taskId, "WARN: archive cover update failed for patch id=${targetArchiveId}")
+                    }
+                } else {
+                    TaskIO.appendLog(taskId, "WARN: archive patch cover install failed id=${targetArchiveId}: ${coverErr}")
                 }
             }
 
@@ -277,6 +353,7 @@ public class MetadataPluginCallbackRunner {
             var title = ""
             var summary = ""
             var tags = ""
+            var cover = ""
             var archives = ArrayList<ArchiveMetadataPatch>()
 
             func readStringFlexible(): String {
@@ -322,6 +399,7 @@ public class MetadataPluginCallbackRunner {
                         case "tags" => patch.tags = readStringFlexible().trimAscii()
                         case "updated_at" => patch.updatedAt = readStringFlexible().trimAscii()
                         case "updatedAt" => patch.updatedAt = readStringFlexible().trimAscii()
+                        case "cover" => patch.cover = readStringFlexible().trimAscii()
                         case _ => r.skip()
                     }
                 }
@@ -348,6 +426,7 @@ public class MetadataPluginCallbackRunner {
                                         case "title" => title = r.readValue<String>()
                                         case "summary" => summary = r.readValue<String>()
                                         case "tags" => tags = readStringFlexible()
+                                        case "cover" => cover = readStringFlexible().trimAscii()
                                         case "tankoubon" =>
                                             match (r.peek()) {
                                                 case Some(BeginObject) =>
@@ -358,6 +437,7 @@ public class MetadataPluginCallbackRunner {
                                                             case "title" => title = r.readValue<String>()
                                                             case "summary" => summary = r.readValue<String>()
                                                             case "tags" => tags = readStringFlexible()
+                                                            case "cover" => cover = readStringFlexible().trimAscii()
                                                             case _ => r.skip()
                                                         }
                                                     }
@@ -395,7 +475,7 @@ public class MetadataPluginCallbackRunner {
                 let msg = if (err.trimAscii().size > 0) { err.trimAscii() } else { "Plugin returned success=false" }
                 return ParsedMetadataResult(false, msg, "", "", "")
             }
-            return ParsedMetadataResult(true, "", title, summary, tags, archives.toArray())
+            return ParsedMetadataResult(true, "", title, summary, tags, cover, archives.toArray())
         } catch (e: Exception) {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
         }
@@ -405,7 +485,7 @@ public class MetadataPluginCallbackRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, output: String, archivesCount: Int64): String {
+    private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, cover: String, output: String, archivesCount: Int64): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -415,6 +495,7 @@ public class MetadataPluginCallbackRunner {
         w.writeName("title").writeValue(title)
         w.writeName("summary").writeValue(summary)
         w.writeName("tags").writeValue(tags)
+        w.writeName("cover").writeValue(cover)
         w.writeName("archives_count").writeValue(archivesCount)
         w.writeName("plugin_output").writeValue(output)
         w.endObject()

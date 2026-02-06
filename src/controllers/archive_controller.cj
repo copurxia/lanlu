@@ -258,6 +258,7 @@ public class ArchiveController {
         let titleParam = ctx.getQuery("title")
         let tagsParam = ctx.getQuery("tags")
         let summaryParam = ctx.getQuery("summary")
+        let coverParam = ctx.getQuery("cover")
         
         // 检查归档是否存在
         let archive = ArchiveModel.getArchiveById(id)
@@ -332,6 +333,37 @@ public class ArchiveController {
                 case None => () // 不更新标签
             }
             
+            match (coverParam) {
+                case Some(coverPath) =>
+                    let coverTrimmed = coverPath.trimAscii()
+                    if (coverTrimmed.size > 0) {
+                        let oldCoverAssetId = ArchiveDao.getCoverAssetId(id)
+                        let (okCover, coverAssetId, coverThumbHash, coverErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                            coverTrimmed,
+                            "",
+                            "archive_cover",
+                            "${id}.avif"
+                        )
+                        if (okCover && coverAssetId > 0) {
+                            let coverUpdated = ArchiveDao.updateCoverAssetId(id, coverAssetId)
+                            if (coverUpdated) {
+                                if (coverThumbHash.trimAscii().size > 0) {
+                                    let _ = ArchiveDao.updateThumbHash(id, coverThumbHash)
+                                }
+                                if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
+                                    PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                                }
+                            } else {
+                                PluginCoverUtils.deleteAsset(coverAssetId)
+                                getLogger("archive_controller").warn("Failed to update archive cover asset id", ("arcid", id))
+                            }
+                        } else {
+                            getLogger("archive_controller").warn("Failed to install archive cover from plugin path", ("arcid", id), ("error", coverErr))
+                        }
+                    }
+                case None => ()
+            }
+
             let result = "{\"operation\":\"update_metadata\",\"success\":1}"
             ResponseView.json(ctx, result)
         } else {

@@ -65,4 +65,5 @@ export interface ArchiveMetadata {
   created_at: string;
   updated_at: string;
   relative_path: string;
+  cover?: string;
 }

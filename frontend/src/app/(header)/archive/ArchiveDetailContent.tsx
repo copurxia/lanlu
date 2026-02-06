@@ -177,6 +177,7 @@ export function ArchiveDetailContent() {
   const [editTitle, setEditTitle] = useState('');
   const [editSummary, setEditSummary] = useState('');
   const [editTags, setEditTags] = useState<string[]>([]);
+  const [editCover, setEditCover] = useState('');
 
   const [metadataPlugins, setMetadataPlugins] = useState<Plugin[]>([]);
   const [selectedMetadataPlugin, setSelectedMetadataPlugin] = useState<string>('');
@@ -212,6 +213,7 @@ export function ArchiveDetailContent() {
     setEditTitle(metadata.title || '');
     setEditSummary(metadata.summary || '');
     setEditTags(tags.map(toCanonicalTag));
+    setEditCover('');
   }, [metadata, tags, toCanonicalTag]);
 
   const openEditDialog = useCallback(() => {
@@ -226,7 +228,7 @@ export function ArchiveDetailContent() {
       const canonicalTags = editTags.map((t) => toCanonicalTag(t));
       await ArchiveService.updateMetadata(
         metadata.arcid,
-        { title: editTitle, summary: editSummary, tags: canonicalTags.join(', ') },
+        { title: editTitle, summary: editSummary, tags: canonicalTags.join(', '), cover: editCover || undefined },
         language
       );
       setEditDialogOpen(false);
@@ -237,7 +239,7 @@ export function ArchiveDetailContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [editSummary, editTags, editTitle, language, metadata, refetch, showError, t, toCanonicalTag]);
+  }, [editCover, editSummary, editTags, editTitle, language, metadata, refetch, showError, t, toCanonicalTag]);
 
   const runMetadataPlugin = useCallback(async () => {
     if (!metadata) return;
@@ -287,6 +289,7 @@ export function ArchiveDetailContent() {
         const nextTitle = typeof data.title === 'string' ? data.title : '';
         const nextSummary = typeof data.summary === 'string' ? data.summary : '';
         const nextTags = typeof data.tags === 'string' ? data.tags : '';
+        const nextCover = typeof data.cover === 'string' ? data.cover : '';
 
         if (nextTitle.trim()) setEditTitle(nextTitle.trim());
         if (nextSummary.trim()) setEditSummary(nextSummary.trim());
@@ -299,6 +302,7 @@ export function ArchiveDetailContent() {
               .map((tag: string) => toCanonicalTag(tag))
           );
         }
+        if (nextCover.trim()) setEditCover(nextCover.trim());
         setEditDialogOpen(true);
       } catch {
         // If output isn't JSON, still mark as completed and let user view logs/result.
@@ -449,10 +453,12 @@ export function ArchiveDetailContent() {
                             {t('archive.progress')} {Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}%
                           </span>
                         </div>
-                        <Progress
-                          className="mt-2 h-1.5"
-                          value={Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}
-                        />
+                        {Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0))) > 0 ? (
+                          <Progress
+                            className="mt-2 h-1.5"
+                            value={Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}
+                          />
+                        ) : null}
                       </div>
 
                       {/* On mobile, summary/tags span full width below (to avoid an empty left column under the cover). */}

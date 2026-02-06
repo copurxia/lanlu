@@ -107,9 +107,11 @@ public class TankoubonController {
         var hasSummary = false
         var hasTags = false
         var hasCoverAssetId = false
+        var hasCover = false
         var name = ""
         var summary = ""
         var tags = ""
+        var cover = ""
         var coverAssetId: Int64 = -1i64
         var archivePatches = ArrayList<ArchiveMetadataPatch>()
 
@@ -165,6 +167,7 @@ public class TankoubonController {
                         case "tags" => patch.tags = readStringFlexible().trimAscii()
                         case "updated_at" => patch.updatedAt = readStringFlexible().trimAscii()
                         case "updatedAt" => patch.updatedAt = readStringFlexible().trimAscii()
+                        case "cover" => patch.cover = readStringFlexible().trimAscii()
                         case _ => r.skip()
                     }
                 }
@@ -192,6 +195,9 @@ public class TankoubonController {
                         case "coverAssetId" =>
                             hasCoverAssetId = true
                             coverAssetId = readInt64Flexible()
+                        case "cover" =>
+                            hasCover = true
+                            cover = readStringFlexible().trimAscii()
                         case "archives" =>
                             match (r.peek()) {
                                 case Some(BeginArray) =>
@@ -237,6 +243,27 @@ public class TankoubonController {
         // cover_asset_id: only update when provided and non-negative
         if (success && hasCoverAssetId && coverAssetId >= 0) {
             let _ = TankoubonModel.updateTankoubonCover(id, coverAssetId)
+        }
+
+        // cover: plugin cache relative path -> assets + tankoubon cover
+        if (success && hasCover && cover.trimAscii().size > 0) {
+            let oldCoverAssetId = TankoubonDao.getTankoubonCoverAssetId(id)
+            let (okCover, newCoverAssetId, _, _) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                cover,
+                "",
+                "tankoubon_cover",
+                "${id}.avif"
+            )
+            if (okCover && newCoverAssetId > 0) {
+                let coverUpdated = TankoubonModel.updateTankoubonCover(id, newCoverAssetId)
+                if (coverUpdated) {
+                    if (oldCoverAssetId > 0 && oldCoverAssetId != newCoverAssetId) {
+                        PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                    }
+                } else {
+                    PluginCoverUtils.deleteAsset(newCoverAssetId)
+                }
+            }
         }
 
         var patchedCount: Int64 = 0
@@ -331,6 +358,29 @@ public class TankoubonController {
 
             if (cleanedPatchTags.trimAscii().size > 0) {
                 let _ = TagDao.updateArchiveTags(targetArchiveId, cleanedPatchTags)
+            }
+
+            if (patch.cover.trimAscii().size > 0) {
+                let oldCoverAssetId = ArchiveDao.getCoverAssetId(targetArchiveId)
+                let (okCover, coverAssetId, coverThumbHash, _) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                    patch.cover,
+                    "",
+                    "archive_cover",
+                    "${targetArchiveId}.avif"
+                )
+                if (okCover && coverAssetId > 0) {
+                    let coverUpdated = ArchiveDao.updateCoverAssetId(targetArchiveId, coverAssetId)
+                    if (coverUpdated) {
+                        if (coverThumbHash.trimAscii().size > 0) {
+                            let _ = ArchiveDao.updateThumbHash(targetArchiveId, coverThumbHash)
+                        }
+                        if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
+                            PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                        }
+                    } else {
+                        PluginCoverUtils.deleteAsset(coverAssetId)
+                    }
+                }
             }
 
             patched += 1
