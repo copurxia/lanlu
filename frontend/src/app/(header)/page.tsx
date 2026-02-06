@@ -111,8 +111,8 @@ function HomePageContent() {
     try {
       setLoading(true);
       const params: any = {
-        start: input.page * pageSize,
-        count: pageSize,
+        page: input.page + 1,
+        pageSize,
         sortby: input.sortBy,
         order: input.sortOrder
       };

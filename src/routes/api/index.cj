@@ -70,17 +70,21 @@ public func registerApiRoutes(router: JoyRouters) {
  * 注册系统设置路由
  */
 private func registerSystemSettingsRoutes(router: JoyRouters) {
+    // Canonical admin paths
+    registerSystemSettingsRoutesAt(router, "/api/admin/system/settings")
+}
+
+private func registerSystemSettingsRoutesAt(router: JoyRouters, basePath: String) {
     // 获取所有设置
-    router.get("/api/system/settings", { ctx =>
+    router.get(basePath, { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => SystemSettingsController.getAllSettings(ctx)
             case None => return
         }
     })
 
-    // 按分类获取设置
     // 更新单个设置
-    router.put("/api/system/settings", { ctx =>
+    router.put(basePath, { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => SystemSettingsController.updateSetting(ctx)
             case None => return
@@ -88,7 +92,7 @@ private func registerSystemSettingsRoutes(router: JoyRouters) {
     })
 
     // 批量更新设置
-    router.put("/api/system/settings/batch", { ctx =>
+    router.put("${basePath}/batch", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => SystemSettingsController.updateSettings(ctx)
             case None => return
@@ -96,7 +100,7 @@ private func registerSystemSettingsRoutes(router: JoyRouters) {
     })
 
     // 获取设置分类
-    router.get("/api/system/settings/categories", { ctx =>
+    router.get("${basePath}/categories", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => SystemSettingsController.getCategories(ctx)
             case None => return
@@ -104,7 +108,7 @@ private func registerSystemSettingsRoutes(router: JoyRouters) {
     })
 
     // 重新加载设置缓存
-    router.post("/api/system/settings/reload", { ctx =>
+    router.post("${basePath}/reload", { ctx =>
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(_) => SystemSettingsController.reloadCache(ctx)
             case None => return

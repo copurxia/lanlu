@@ -44,7 +44,11 @@ export interface PageInfo {
 
 export class ArchiveService {
   static async search(params: SearchParams, options?: { signal?: AbortSignal }): Promise<SearchResponse> {
-    const response = await apiClient.get('/api/search', { params, signal: options?.signal });
+    const normalizedParams: Record<string, unknown> = { ...params };
+    normalizedParams.page = Math.max(1, Math.trunc(params.page ?? 1));
+    normalizedParams.pageSize = Math.max(1, Math.trunc(params.pageSize ?? 20));
+
+    const response = await apiClient.get('/api/search', { params: normalizedParams, signal: options?.signal });
     return response.data;
   }
 

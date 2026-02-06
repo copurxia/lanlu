@@ -49,7 +49,7 @@ export class PluginSchemaService {
         };
       }
 
-      const response = await apiClient.get(`/api/plugins/${namespace}/config`);
+      const response = await apiClient.get(`/api/admin/plugins/${namespace}/config`);
 
 
       // 解析响应数据
@@ -155,7 +155,7 @@ export class PluginSchemaService {
         parameters: JSON.stringify(data.parameters)
       };
 
-      const response = await apiClient.put(`/api/plugins/${namespace}/config`, requestBody);
+      const response = await apiClient.put(`/api/admin/plugins/${namespace}/config`, requestBody);
 
       const responseData = response.data;
       if (typeof responseData === 'string') {

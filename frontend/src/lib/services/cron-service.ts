@@ -71,7 +71,7 @@ export interface ScheduledTaskInput {
  * Cron Service - 定时任务管理 API
  */
 export class CronService {
-  private static BASE_URL = '/api/cron';
+  private static BASE_URL = '/api/admin/cron';
   private static taskTypesCache: CronTaskTypeOption[] | null = null;
 
   static readonly CUSTOM_TASK_TYPE_VALUE = '__custom__';

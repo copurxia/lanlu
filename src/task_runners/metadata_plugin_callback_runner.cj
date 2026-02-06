@@ -50,6 +50,7 @@ public class MetadataPluginCallbackRunner {
         let newSummary = parsed.summary
         let newCover = parsed.cover
         let archivePatches = parsed.archives
+        let archivesProvided = parsed.archivesProvided
         // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
         // Map it to archives.updated_at and prevent it from being stored as a normal tag.
         let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(newTags)
@@ -104,7 +105,7 @@ public class MetadataPluginCallbackRunner {
                     }
 
                     // Optional: plugin can return per-archive metadata patches for this Tankoubon.
-                    let (patchedCount, skippedCount) = applyArchivePatchesForTankoubon(targetId, archivePatches, taskId, namespace)
+                    let (patchedCount, skippedCount) = applyArchivePatchesForTankoubon(targetId, archivePatches, taskId, namespace, archivesProvided, context.notifyTaskAvailable)
                     TaskIO.appendLog(taskId, "archive patches applied: patched=${patchedCount}, skipped=${skippedCount}")
             }
         } else {
@@ -178,8 +179,8 @@ public class MetadataPluginCallbackRunner {
         TaskIO.writeOutput(taskId, resultJson)
     }
 
-    private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64, pluginNamespace: String): (Int64, Int64) {
-        if (patches.size == 0) {
+    private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64, pluginNamespace: String, archivesProvided: Bool, notifier: TaskNotifier): (Int64, Int64) {
+        if (patches.size == 0 && !archivesProvided) {
             return (0, 0)
         }
 
@@ -191,6 +192,11 @@ public class MetadataPluginCallbackRunner {
         var memberSet = HashSet<String>()
         for (arcid in memberArchiveIds) {
             memberSet.add(arcid)
+        }
+
+        if (archivesProvided) {
+            let restoredCount = restoreArchiveMetadataForTankoubon(memberArchiveIds, taskId, notifier)
+            TaskIO.appendLog(taskId, "restored archive metadata: restored=${restoredCount}")
         }
 
         var patched: Int64 = 0
@@ -285,6 +291,126 @@ public class MetadataPluginCallbackRunner {
         return (patched, skipped)
     }
 
+    private static func restoreArchiveMetadataForTankoubon(memberArchiveIds: Array<String>, taskId: Int64, notifier: TaskNotifier): Int64 {
+        var restored: Int64 = 0
+        for (arcid in memberArchiveIds) {
+            let targetId = arcid.trimAscii()
+            if (targetId.size == 0) {
+                continue
+            }
+
+            var archive = ArchiveDao.getArchiveById(targetId)
+            if (archive.id.size == 0) {
+                TaskIO.appendLog(taskId, "skip restore archive metadata: archive not found id=${targetId}")
+                continue
+            }
+
+            let archivePath = resolveArchivePath(archive)
+            var defaultTitle = ""
+            if (archivePath.trimAscii().size > 0) {
+                defaultTitle = ArchiveUtils.generateDefaultTitle(archivePath)
+            } else if (archive.filename.trimAscii().size > 0) {
+                defaultTitle = ArchiveUtils.generateDefaultTitle(archive.filename)
+            }
+
+            var changed = false
+            if (defaultTitle.trimAscii().size > 0 && archive.title != defaultTitle) {
+                archive.title = defaultTitle
+                changed = true
+            }
+            if (archive.summary.trimAscii().size > 0) {
+                archive.summary = ""
+                changed = true
+            }
+
+            if (changed) {
+                let ok = ArchiveDao.update(archive)
+                if (!ok) {
+                    TaskIO.appendLog(taskId, "skip restore archive metadata: archive update failed id=${targetId}")
+                    continue
+                }
+            }
+
+            let tagOk = TagDao.updateArchiveTags(targetId, "")
+            if (!tagOk) {
+                TaskIO.appendLog(taskId, "WARN: failed to clear archive tags id=${targetId}")
+            }
+
+            let oldCoverAssetId = ArchiveDao.getCoverAssetId(targetId)
+            if (oldCoverAssetId > 0) {
+                let coverUpdated = ArchiveDao.updateCoverAssetId(targetId, 0)
+                if (coverUpdated) {
+                    let _ = ArchiveDao.updateThumbHash(targetId, "")
+                    PluginCoverUtils.deleteAsset(oldCoverAssetId)
+                } else {
+                    TaskIO.appendLog(taskId, "WARN: failed to clear archive cover asset id=${targetId}")
+                }
+            } else if (archive.thumbhash.trimAscii().size > 0) {
+                let _ = ArchiveDao.updateThumbHash(targetId, "")
+            }
+
+            if (archivePath.trimAscii().size > 0) {
+                enqueueThumbnailRegeneration(taskId, targetId, archivePath, archive.archive_type, notifier)
+            } else {
+                TaskIO.appendLog(taskId, "WARN: unable to resolve archive path for thumbnail regeneration id=${targetId}")
+            }
+
+            restored += 1
+        }
+
+        return restored
+    }
+
+    private static func resolveArchivePath(archive: ArchiveData): String {
+        if (archive.category_id <= 0) {
+            return ""
+        }
+        match (CategoryDao.getCategoryByInternalId(archive.category_id)) {
+            case None => return ""
+            case Some(cat) =>
+                let base = cat.scanPath.trimAscii()
+                if (base.size == 0) {
+                    return ""
+                }
+                let rel = archive.relative_path.trimAscii()
+                let dirPath = if (rel.size > 0) { FileUtils.joinPath(base, rel) } else { base }
+                if (archive.filename.trimAscii().size == 0) {
+                    return ""
+                }
+                return FileUtils.joinPath(dirPath, archive.filename.trimAscii())
+        }
+    }
+
+    private static func enqueueThumbnailRegeneration(taskId: Int64, archiveId: String, archivePath: String, archiveType: String, notifier: TaskNotifier): Unit {
+        try {
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archive_path").writeValue(archivePath)
+            w.writeName("archive_id").writeValue(archiveId)
+            w.writeName("type").writeValue(archiveType)
+            w.endObject()
+            w.flush()
+            let parameters = String.fromUtf8(readToEnd(out))
+            let task = TaskModel.createTaskWithOptions(
+                "生成封面",
+                "generate_thumbnail",
+                parameters,
+                10i32,
+                archiveId,
+                "metadata_plugin_callback"
+            )
+            if (task.id > 0) {
+                notifier()
+                TaskIO.appendLog(taskId, "enqueued generate_thumbnail for archive_id=${archiveId}")
+            } else {
+                TaskIO.appendLog(taskId, "WARN: failed to enqueue generate_thumbnail for archive_id=${archiveId}")
+            }
+        } catch (e: Exception) {
+            TaskIO.appendLog(taskId, "WARN: enqueue generate_thumbnail failed for archive_id=${archiveId}, error=${e.message}")
+        }
+    }
+
     private static func parseParameters(parameters: String): (String, String, String, Int64) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
@@ -355,6 +481,7 @@ public class MetadataPluginCallbackRunner {
             var tags = ""
             var cover = ""
             var archives = ArrayList<ArchiveMetadataPatch>()
+            var archivesProvided = false
 
             func readStringFlexible(): String {
                 match (r.peek()) {
@@ -446,6 +573,7 @@ public class MetadataPluginCallbackRunner {
                                                 case None => ()
                                             }
                                         case "archives" =>
+                                            archivesProvided = true
                                             match (r.peek()) {
                                                 case Some(BeginArray) =>
                                                     r.startArray()
@@ -475,7 +603,7 @@ public class MetadataPluginCallbackRunner {
                 let msg = if (err.trimAscii().size > 0) { err.trimAscii() } else { "Plugin returned success=false" }
                 return ParsedMetadataResult(false, msg, "", "", "")
             }
-            return ParsedMetadataResult(true, "", title, summary, tags, cover, archives.toArray())
+            return ParsedMetadataResult(true, "", title, summary, tags, cover, archives.toArray(), archivesProvided)
         } catch (e: Exception) {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
         }

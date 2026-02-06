@@ -26,8 +26,8 @@ export interface SearchParams {
   filter?: string;
   category?: string;
   tankoubon_id?: string;
-  start?: number;
-  count?: number;
+  page?: number;
+  pageSize?: number;
   sortby?: string;
   order?: string;
   newonly?: boolean;

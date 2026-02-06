@@ -283,8 +283,8 @@ function TankoubonDetailContent() {
         const searchResult = await ArchiveService.search({
           tankoubon_id: tankoubonId,
           groupby_tanks: true,
-          start: 0,
-          count: 1,
+          page: 1,
+          pageSize: 1,
           sortby: 'tank_order',
           order: 'asc',
           lang: language,
@@ -332,8 +332,8 @@ function TankoubonDetailContent() {
         tankoubon_id: tankoubon.tankoubon_id,
         sortby: 'tank_order',
         order: 'asc',
-        start: 0,
-        count: 10000,
+        page: 1,
+        pageSize: 10000,
         groupby_tanks: false,
         lang: language,
       });
@@ -586,7 +586,8 @@ function TankoubonDetailContent() {
       setSearchLoading(true);
       const result = await ArchiveService.search({
         filter: searchQuery,
-        count: 50,
+        page: 1,
+        pageSize: 50,
         groupby_tanks: false, // Don't group by tanks when searching for archives to add
         lang: language,
       });

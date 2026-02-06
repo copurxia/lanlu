@@ -67,7 +67,7 @@ export default function SystemSettingsPage() {
   const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch('/api/system/settings');
+      const response = await fetch('/api/admin/system/settings');
       const data = await response.json();
 
       if (data.success) {
@@ -125,7 +125,7 @@ export default function SystemSettingsPage() {
         value: setting.value,
       }));
 
-      const response = await fetch('/api/system/settings/batch', {
+      const response = await fetch('/api/admin/system/settings/batch', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

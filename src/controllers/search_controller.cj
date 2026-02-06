@@ -41,9 +41,9 @@ public class SearchController {
         let filter = ctx.getQuery("filter") ?? ""
         let tankoubonId = ctx.getQuery("tankoubon_id") ?? ""
 
-        // 处理分页参数，设置默认值
-        let startStr = ctx.getQuery("start") ?? "0"
-        let countStr = ctx.getQuery("count") ?? "20"
+        // 处理分页参数
+        let pageStr = ctx.getQuery("page") ?? "1"
+        let pageSizeStr = ctx.getQuery("pageSize") ?? "20"
         let sortby = ctx.getQuery("sortby") ?? "title"
         let order = ctx.getQuery("order") ?? "asc"
 
@@ -67,16 +67,28 @@ public class SearchController {
         let lang = ctx.getQuery("lang") ?? ""
 
         // 解析分页参数
-        let start = try {
-            Int32.parse(startStr)
+        var page = 1i32
+        var pageSize = 20i32
+        var start = 0i32
+        var count = 20i32
+
+        page = try {
+            Int32.parse(pageStr)
         } catch (e: Exception) {
-            0i32
+            1i32
         }
-        let count = try {
-            Int32.parse(countStr)
+        if (page < 1i32) { page = 1i32 }
+
+        pageSize = try {
+            Int32.parse(pageSizeStr)
         } catch (e: Exception) {
             20i32
         }
+        if (pageSize < 1i32) { pageSize = 20i32 }
+        if (pageSize > 200i32) { pageSize = 200i32 }
+
+        start = (page - 1i32) * pageSize
+        count = pageSize
 
         // 获取用户ID（用于 newOnly 过滤）
         let userIdOpt = AuthMiddleware.optionalUser(ctx)
@@ -158,6 +170,8 @@ public class SearchController {
             }
             w.endArray()
             w.writeName("draw").writeValue(0)
+            w.writeName("page").writeValue(page)
+            w.writeName("pageSize").writeValue(pageSize)
             w.writeName("recordsFiltered").writeValue(totalTankCount)
             w.writeName("recordsTotal").writeValue(totalTankCount)
             w.endObject()
@@ -408,6 +422,8 @@ public class SearchController {
 
         w.endArray()
         w.writeName("draw").writeValue(0)
+        w.writeName("page").writeValue(page)
+        w.writeName("pageSize").writeValue(pageSize)
         w.writeName("recordsFiltered").writeValue(totalCount)
         w.writeName("recordsTotal").writeValue(totalCount)
         w.endObject()

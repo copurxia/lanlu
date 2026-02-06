@@ -54,8 +54,8 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
             tankoubon_id: tank.tankoubon_id,
             sortby: 'tank_order',
             order: 'asc',
-            start,
-            count: windowSize,
+            page: Math.floor(start / windowSize) + 1,
+            pageSize: windowSize,
             groupby_tanks: false,
             lang: language,
           });

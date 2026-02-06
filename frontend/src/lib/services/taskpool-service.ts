@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
  * TaskPool Service - 使用新的 TaskPool API
  */
 export class TaskPoolService {
-  private static BASE_URL = '/api/taskpool';
+  private static BASE_URL = '/api/admin/taskpool';
 
   /**
    * Get tasks with pagination

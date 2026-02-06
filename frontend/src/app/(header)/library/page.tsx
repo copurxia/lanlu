@@ -85,13 +85,13 @@ function LibraryPageContent() {
             groupby_tanks: false,
             sortby: 'date_added',
             order: 'desc',
-            start: 0,
-            count: 1000,
+            page: 1,
+            pageSize: 1000,
             lang: language,
           }),
           TankoubonService.getFavoriteTankoubons({
-            start: 0,
-            count: 1000,
+            page: 1,
+            pageSize: 1000,
           }),
         ]);
 
@@ -141,8 +141,8 @@ function LibraryPageContent() {
         const response = await ArchiveService.search({
           sortby: 'lastread',
           order: 'desc',
-          start: 0,
-          count: 1000,
+          page: 1,
+          pageSize: 1000,
           lang: language,
         });
 

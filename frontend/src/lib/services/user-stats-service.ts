@@ -76,15 +76,15 @@ export class UserStatsService {
           params: {
             sortby: 'lastread',
             order: 'desc',
-            start: 0,
-            count: safeLimit,
+            page: 1,
+            pageSize: safeLimit,
           },
         }),
         apiClient.get('/api/search', {
           params: {
             favoriteonly: true,
-            start: 0,
-            count: Math.max(safeLimit * 4, 50),
+            page: 1,
+            pageSize: Math.max(safeLimit * 4, 50),
           },
         }),
       ]);

@@ -41,7 +41,7 @@ export class PluginService {
   static async getAllPlugins(): Promise<Plugin[]> {
     try {
 
-      const response = await apiClient.get('/api/plugins');
+      const response = await apiClient.get('/api/admin/plugins');
 
 
       // API 返回直接的数组
@@ -64,7 +64,7 @@ export class PluginService {
 
   static async togglePluginStatus(namespace: string, enabled: boolean): Promise<void> {
     try {
-      await apiClient.put(`/api/plugins/${namespace}/enabled`, { enabled });
+      await apiClient.put(`/api/admin/plugins/${namespace}/enabled`, { enabled });
     } catch (error) {
       console.error('Failed to toggle plugin status:', error);
       throw error;
@@ -73,7 +73,7 @@ export class PluginService {
 
   static async updatePluginConfig(namespace: string, config: object): Promise<void> {
     try {
-      await apiClient.put(`/api/plugins/${namespace}/config`, config);
+      await apiClient.put(`/api/admin/plugins/${namespace}/config`, config);
     } catch (error) {
       console.error('Failed to update plugin config:', error);
       throw error;
@@ -98,7 +98,7 @@ export class PluginService {
    */
   static async deletePlugin(namespace: string): Promise<void> {
     try {
-      await apiClient.delete(`/api/plugins/${namespace}`);
+      await apiClient.delete(`/api/admin/plugins/${namespace}`);
     } catch (error) {
       console.error('Failed to delete plugin:', error);
       throw error;
@@ -115,7 +115,7 @@ export class PluginService {
     plugin_type?: string;
   }> {
     try {
-      const response = await apiClient.post('/api/plugins/install', { url });
+      const response = await apiClient.post('/api/admin/plugins/install', { url });
       return response.data;
     } catch (error) {
       console.error('Failed to install plugin:', error);
@@ -136,7 +136,7 @@ export class PluginService {
     try {
       const force = !!opts?.force;
       const response = await apiClient.post(
-        `/api/plugins/${namespace}/update`,
+        `/api/admin/plugins/${namespace}/update`,
         force ? { force: 'true' } : undefined
       );
       return response.data;
@@ -156,7 +156,7 @@ export class PluginService {
     try {
       const force = !!opts?.force;
       const response = await apiClient.post(
-        `/api/plugins/${namespace}/check_update`,
+        `/api/admin/plugins/${namespace}/check_update`,
         force ? { force: 'true' } : undefined
       );
       return response.data;

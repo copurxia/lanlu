@@ -18,7 +18,7 @@ export interface SystemSettingsApi {
 
 export const SystemSettingsApi: SystemSettingsApi = {
   async getAllSettings() {
-    const response = await fetch('/api/system/settings');
+    const response = await fetch('/api/admin/system/settings');
     const data = await response.json();
     if (data.success) {
       return data.data;
@@ -27,7 +27,7 @@ export const SystemSettingsApi: SystemSettingsApi = {
   },
 
   async updateSetting(key: string, value: string) {
-    const response = await fetch('/api/system/settings', {
+    const response = await fetch('/api/admin/system/settings', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -39,7 +39,7 @@ export const SystemSettingsApi: SystemSettingsApi = {
   },
 
   async updateSettings(settings: Record<string, string>) {
-    const response = await fetch('/api/system/settings/batch', {
+    const response = await fetch('/api/admin/system/settings/batch', {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -51,7 +51,7 @@ export const SystemSettingsApi: SystemSettingsApi = {
   },
 
   async getCategories() {
-    const response = await fetch('/api/system/settings/categories');
+    const response = await fetch('/api/admin/system/settings/categories');
     const data = await response.json();
     if (data.success) {
       return data.data;
@@ -60,7 +60,7 @@ export const SystemSettingsApi: SystemSettingsApi = {
   },
 
   async reloadCache() {
-    const response = await fetch('/api/system/settings/reload', {
+    const response = await fetch('/api/admin/system/settings/reload', {
       method: 'POST',
     });
     const data = await response.json();
