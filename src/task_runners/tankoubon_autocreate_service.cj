@@ -3,6 +3,7 @@ package lanlu.task_runners
 import std.collection.*
 import stdx.log.*
 import lanlu.utils.*
+import lanlu.utils.NaturalSort
 import lanlu.archivehandler.*
 import lanlu.dao.*
 
@@ -13,7 +14,7 @@ import lanlu.dao.*
  * - A directory qualifies if it contains 2+ "archives" and no other directories.
  *   Child directories that are recognized as folder-type archives DO NOT count as "other directories".
  * - Do not create at category root (relative_path == "").
- * - Existing order is preserved; new items append to end; missing items are removed.
+ * - Members are ordered by natural filename sort (same behavior as folder archives).
  * - Tankoubon name uses the directory relative path.
  */
 public class TankoubonAutocreateService {
@@ -83,50 +84,68 @@ public class TankoubonAutocreateService {
 
         if (hasOtherDirectory || hasOtherFile) { return (false, []) }
         if (candidates.size < 2) { return (false, []) }
+
+        NaturalSort.sortStrings(candidates)
         return (true, candidates.toArray())
     }
 
-    public static func ensureAndSync(categoryInternalId: Int64, dirRelativePath: String, dirFullPath: String): Unit {
+    public static func ensureAndSync(categoryInternalId: Int64, dirRelativePath: String, dirFullPath: String): String {
         let rel = dirRelativePath.trimAscii()
-        if (categoryInternalId <= 0) { return }
-        if (rel.size == 0) { return }
+        if (categoryInternalId <= 0) { return "" }
+        if (rel.size == 0) { return "" }
 
         let (ok, candidates) = inspectDirectoryForTank(dirFullPath)
-        if (!ok) { return }
+        if (!ok) { return "" }
 
         let tankId = TankoubonDao.getOrCreateAutoTankoubon(categoryInternalId, rel, rel)
-        if (tankId.size == 0) { return }
+        if (tankId.size == 0) { return "" }
 
         syncMembers(tankId, rel, candidates)
+        return tankId
     }
 
     private static func syncMembers(tankoubonId: String, dirRelativePath: String, candidatesInOrder: Array<String>): Unit {
         let current = TankoubonDao.getArchivesInTankoubon(tankoubonId)
-        var currentSet: HashSet<String> = HashSet<String>()
-        for (a in current) { currentSet.add(a) }
+        var desired: ArrayList<String> = ArrayList<String>()
+        var desiredSet: HashSet<String> = HashSet<String>()
 
-        var presentNames: HashSet<String> = HashSet<String>()
-        for (n in candidatesInOrder) { presentNames.add(n) }
+        // Resolve archive ids in sorted filename order.
+        for (entryName in candidatesInOrder) {
+            match (ArchiveDao.getByPathAndFilename(dirRelativePath, entryName)) {
+                case Some(arch) =>
+                    desired.add(arch.id)
+                    desiredSet.add(arch.id)
+                case None => ()
+            }
+        }
 
-        // Remove missing items.
+        // Remove members no longer present in this directory.
         for (arcid in current) {
-            let a = ArchiveDao.getArchiveById(arcid)
-            if (a.id.size == 0 || a.relative_path != dirRelativePath || !presentNames.contains(a.filename)) {
+            if (!desiredSet.contains(arcid)) {
                 let _ = TankoubonDao.removeArchiveFromTankoubon(tankoubonId, arcid)
             }
         }
 
-        // Append new items at end, following directory order.
-        for (entryName in candidatesInOrder) {
-            match (ArchiveDao.getByPathAndFilename(dirRelativePath, entryName)) {
-                case Some(arch) =>
-                    if (!currentSet.contains(arch.id)) {
-                        let _ = TankoubonDao.addArchiveToTankoubonAppend(tankoubonId, arch.id)
-                        currentSet.add(arch.id)
-                    }
-                case None => ()
-            }
+        // Always enforce natural-sorted order for all members.
+        for (i in 0..desired.size) {
+            let arcid = desired[i]
+            let _ = TankoubonDao.addArchiveToTankoubon(tankoubonId, arcid, Int32(i + 1))
         }
     }
-}
 
+    public static func hasAllCandidatesIndexed(dirRelativePath: String, dirFullPath: String): Bool {
+        let rel = dirRelativePath.trimAscii()
+        if (rel.size == 0) { return false }
+
+        let (ok, candidates) = inspectDirectoryForTank(dirFullPath)
+        if (!ok) { return false }
+
+        for (entryName in candidates) {
+            match (ArchiveDao.getByPathAndFilename(rel, entryName)) {
+                case Some(_) => ()
+                case None => return false
+            }
+        }
+        return true
+    }
+}

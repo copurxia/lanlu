@@ -180,12 +180,12 @@ public class ScanArchiveTaskRunner {
                         }
 
                         // 直接返回成功，不等待缩略图生成完成
-                        try { TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                        try { let _ = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
                         return ProcessResultData(true, archive.id, "")
                     } else {
                         // Archive存在且已生成thumbhash - 跳过所有处理，直接返回成功
                         logger.debug("Archive already processed with thumbnail: ${filePath}")
-                        try { TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                        try { let _ = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
                         return ProcessResultData(true, archive.id, "")
                     }
                 case None =>
@@ -228,11 +228,26 @@ public class ScanArchiveTaskRunner {
                 logger.error("Failed to submit thumbnail generation task for archive: ${dbResult.archiveId}")
             }
 
-            // 提交元数据插件任务（根据分类配置）
-            submitMetadataPluginTasks(categoryInternalId, dbResult.archiveId, notifier)
+            // Auto-create/sync Tankoubon for this directory.
+            let autoTankoubonId = try {
+                TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath)
+            } catch (_: Exception) {
+                ""
+            }
 
-            // Auto-create/sync Tankoubon for this directory (append new entries at end).
-            try { TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+            if (autoTankoubonId.size > 0) {
+                // For auto-created collections, scrape metadata once for the whole Tankoubon,
+                // instead of running archive-level scraping on every member.
+                if (TankoubonAutocreateService.hasAllCandidatesIndexed(relativePath, dirFullPath)) {
+                    submitTankoubonMetadataPluginTasks(categoryInternalId, autoTankoubonId, notifier)
+                } else {
+                    logger.debug("Auto Tankoubon not fully indexed yet, postpone metadata scraping",
+                        ("tankoubon_id", autoTankoubonId), ("relative_path", relativePath))
+                }
+            } else {
+                // Non-collection archive path: keep original archive-level metadata behavior.
+                submitMetadataPluginTasks(categoryInternalId, dbResult.archiveId, notifier)
+            }
 
             return ProcessResultData(true, dbResult.archiveId, "")
         } catch (e: Exception) {
@@ -326,6 +341,25 @@ public class ScanArchiveTaskRunner {
         }
     }
 
+    private static func submitTankoubonMetadataPluginTasks(categoryId: Int64, tankoubonId: String, notifier: TaskNotifier): Unit {
+        if (categoryId <= 0 || tankoubonId.size == 0) { return }
+
+        let categoryOpt = CategoryDao.getCategoryByInternalId(categoryId)
+        match (categoryOpt) {
+            case Some(category) =>
+                let pluginNamespaces = parsePluginsArray(category.plugins)
+                for (namespace in pluginNamespaces) {
+                    let submitted = submitMetadataPluginTaskForTarget("tankoubon", tankoubonId, namespace, notifier)
+                    if (!submitted) {
+                        logger.error("Failed to submit tankoubon metadata plugin task",
+                            ("tankoubon_id", tankoubonId), ("namespace", namespace))
+                    }
+                }
+            case None =>
+                logger.debug("Category not found for tankoubon metadata plugin tasks", ("category_id", categoryId))
+        }
+    }
+
     /**
      * 解析 plugins JSON 数组
      */
@@ -350,11 +384,22 @@ public class ScanArchiveTaskRunner {
      * 提交单个元数据插件任务
      */
     private static func submitMetadataPluginTask(archiveId: String, namespace: String, notifier: TaskNotifier): Bool {
+        return submitMetadataPluginTaskForTarget("archive", archiveId, namespace, notifier)
+    }
+
+    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, notifier: TaskNotifier): Bool {
         try {
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
-            w.writeName("archive_id").writeValue(archiveId)
+            w.writeName("target_type").writeValue(targetType)
+            w.writeName("target_id").writeValue(targetId)
+            // Backward compatibility for old metadata_plugin parsers.
+            if (targetType == "tankoubon" || targetType == "tank") {
+                w.writeName("tankoubon_id").writeValue(targetId)
+            } else {
+                w.writeName("archive_id").writeValue(targetId)
+            }
             w.writeName("namespace").writeValue(namespace)
             w.endObject()
             w.flush()
@@ -364,19 +409,21 @@ public class ScanArchiveTaskRunner {
                 "metadata_plugin",
                 parameters,
                 15i32,
-                archiveId,
+                targetId,
                 "scan_archive"
             )
 
             if (task.id > 0) {
                 notifier()
-                logger.debug("Submitted metadata plugin task", ("archive_id", archiveId), ("namespace", namespace))
+                logger.debug("Submitted metadata plugin task",
+                    ("target_type", targetType), ("target_id", targetId), ("namespace", namespace))
                 return true
             } else {
                 return false
             }
         } catch (e: Exception) {
-            logger.error("Exception submitting metadata plugin task", ("archive_id", archiveId), ("namespace", namespace), ("error", e.message))
+            logger.error("Exception submitting metadata plugin task",
+                ("target_type", targetType), ("target_id", targetId), ("namespace", namespace), ("error", e.message))
             return false
         }
     }
