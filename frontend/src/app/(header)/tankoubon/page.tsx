@@ -40,7 +40,7 @@ import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink, LayoutGrid, List } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import Image from 'next/image';
@@ -49,6 +49,138 @@ type ArchiveViewMode = 'grid' | 'list';
 
 const ARCHIVE_VIEW_MODE_STORAGE_KEY = 'tankoubon_archive_view_mode';
 const MOBILE_BREAKPOINT_MEDIA_QUERY = '(max-width: 639px)';
+
+type ArchiveListItemProps = {
+  archive: Archive;
+  isRemoving: boolean;
+  onRemove: () => void;
+};
+
+function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps) {
+  const router = useRouter();
+  const { t } = useLanguage();
+  const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const parsedTags = useMemo(() => parseTags(archive.tags).map(stripNamespace).slice(0, 8), [archive.tags]);
+
+  useEffect(() => {
+    setIsFavorite(archive.isfavorite || false);
+  }, [archive.isfavorite]);
+
+  const handleFavoriteClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (favoriteLoading) return;
+    setFavoriteLoading(true);
+    try {
+      const success = await FavoriteService.toggleFavorite(archive.arcid, isFavorite);
+      if (success) setIsFavorite(!isFavorite);
+    } catch (error) {
+      logger.operationFailed('toggle archive favorite', error);
+    } finally {
+      setFavoriteLoading(false);
+    }
+  };
+
+  const handleNavigateToReader = () => {
+    router.push(`/reader?id=${archive.arcid}`);
+  };
+
+  return (
+    <div
+      className="relative rounded-lg border bg-card p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-sm"
+      role="button"
+      tabIndex={0}
+      onClick={handleNavigateToReader}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleNavigateToReader();
+        }
+      }}
+    >
+      <div className="absolute right-3 top-3 flex items-center gap-2">
+        <Button
+          asChild
+          variant="secondary"
+          size="icon"
+          className="h-8 w-8"
+          title={t('archive.details')}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Link href={`/archive?id=${archive.arcid}`} prefetch={false}>
+            <Eye className="h-4 w-4" />
+          </Link>
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className={`h-8 w-8 ${isFavorite ? 'text-red-500' : ''}`}
+          title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+          disabled={favoriteLoading}
+          onClick={handleFavoriteClick}
+        >
+          {favoriteLoading ? <Spinner size="sm" /> : <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="h-8 w-8"
+          title={t('tankoubon.removeArchive')}
+          disabled={isRemoving}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      <div className="flex gap-3 sm:gap-4">
+        <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
+          <Image
+            src={ArchiveService.getThumbnailUrl(archive.arcid)}
+            alt={archive.title}
+            fill
+            className="object-cover"
+            sizes="96px"
+            decoding="async"
+          />
+        </div>
+
+        <div className="min-w-0 flex-1 pr-28">
+          <h3 className="font-semibold leading-tight line-clamp-2 hover:text-primary transition-colors" title={archive.title}>
+            {archive.title}
+          </h3>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {t('archive.pages').replace('{count}', String(archive.pagecount))}
+            {archive.progress > 0 && archive.pagecount > 0
+              ? ` • ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}`
+              : ''}
+          </div>
+
+          {archive.summary && (
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={archive.summary}>
+              {archive.summary}
+            </p>
+          )}
+
+          {parsedTags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {parsedTags.map((tag) => (
+                <Badge key={`${archive.arcid}-${tag}`} variant="secondary" className="max-w-full text-[10px] sm:text-xs" title={tag}>
+                  <span className="truncate">{tag}</span>
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function TankoubonDetailContent() {
   const { t, language } = useLanguage();
@@ -845,68 +977,16 @@ function TankoubonDetailContent() {
           <div className="space-y-3">
             {filteredArchives.map((archive) => {
               const isRemoving = removingArcids.has(archive.arcid);
-              const parsedTags = parseTags(archive.tags).map(stripNamespace).slice(0, 8);
               return (
-                <div key={archive.arcid} className="rounded-lg border bg-card p-3 sm:p-4">
-                  <div className="flex gap-3 sm:gap-4">
-                    <Link href={`/archive?id=${archive.arcid}`} prefetch={false} className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
-                      <Image
-                        src={ArchiveService.getThumbnailUrl(archive.arcid)}
-                        alt={archive.title}
-                        fill
-                        className="object-cover"
-                        sizes="96px"
-                        decoding="async"
-                      />
-                    </Link>
-
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          <Link href={`/archive?id=${archive.arcid}`} prefetch={false} className="hover:text-primary transition-colors">
-                            <h3 className="font-semibold leading-tight line-clamp-2" title={archive.title}>{archive.title}</h3>
-                          </Link>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {t('archive.pages').replace('{count}', String(archive.pagecount))}
-                            {archive.progress > 0 && archive.pagecount > 0
-                              ? ` • ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}`
-                              : ''}
-                          </div>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="icon"
-                          className="h-8 w-8 shrink-0"
-                          title={t('tankoubon.removeArchive')}
-                          disabled={isRemoving}
-                          onClick={() => {
-                            setRemoveTarget(archive);
-                            setRemoveDialogOpen(true);
-                          }}
-                        >
-                          {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
-                        </Button>
-                      </div>
-
-                      {archive.summary && (
-                        <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={archive.summary}>
-                          {archive.summary}
-                        </p>
-                      )}
-
-                      {parsedTags.length > 0 && (
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {parsedTags.map((tag) => (
-                            <Badge key={`${archive.arcid}-${tag}`} variant="secondary" className="max-w-full text-[10px] sm:text-xs" title={tag}>
-                              <span className="truncate">{tag}</span>
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <ArchiveListItem
+                  key={archive.arcid}
+                  archive={archive}
+                  isRemoving={isRemoving}
+                  onRemove={() => {
+                    setRemoveTarget(archive);
+                    setRemoveDialogOpen(true);
+                  }}
+                />
               );
             })}
           </div>
