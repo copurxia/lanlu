@@ -51,11 +51,7 @@ public class AssetController {
         }
 
         try {
-            let etag = if (asset.thumbhash.size > 0) {
-                "\"${asset.thumbhash}\""
-            } else {
-                CacheUtils.generateETag("${asset.id}-${ext}")
-            }
+            let etag = CacheUtils.generateETag("${asset.id}-${ext}")
             if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
                 CacheUtils.sendNotModified(ctx, etag)
                 return

@@ -331,12 +331,8 @@ public class ArchiveController {
         if (thumbnailPath.size > 0 && exists(Path(thumbnailPath))) {
             println("Thumbnail exists, reading from: ${thumbnailPath}")
             try {
-                // 生成 ETag（使用 thumbhash）
-                let etag = if (archive.thumbhash.size > 0) {
-                    "\"${archive.thumbhash}\""
-                } else {
-                    CacheUtils.generateETag(id)
-                }
+                // 生成 ETag（统一使用 CacheUtils）
+                let etag = CacheUtils.generateETag(id)
 
                 // 检查条件请求 - If-None-Match
                 if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
