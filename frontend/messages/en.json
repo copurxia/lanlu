@@ -920,7 +920,11 @@
     "createNewAndAddHint": "Create a new collection and add this archive in one step.",
     "toggleCreateToStart": "Click “Create New Collection” to enable this form.",
     "metaDescription": "View and manage collections, add or remove archives, and monitor reading progress.",
-    "metaKeywords": "collection,manga collection,archive management,reading progress,comic archive"
+    "metaKeywords": "collection,manga collection,archive management,reading progress,comic archive",
+    "listView": "List",
+    "gridView": "Grid",
+    "switchToListView": "Switch to list view",
+    "switchToGridView": "Switch to grid view"
   },
   "dashboard": {
     "title": "Dashboard",

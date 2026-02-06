@@ -926,7 +926,11 @@
     "createNewAndAddHint": "创建新合集并自动将该档案加入。",
     "toggleCreateToStart": "点击“创建新合集”以启用创建表单。",
     "metaDescription": "查看并管理合集，添加或移除档案并跟踪阅读进度。",
-    "metaKeywords": "合集,漫画合集,档案管理,阅读进度,漫画归档"
+    "metaKeywords": "合集,漫画合集,档案管理,阅读进度,漫画归档",
+    "listView": "列表",
+    "gridView": "网格",
+    "switchToListView": "切换为列表视图",
+    "switchToGridView": "切换为网格视图"
   },
   "dashboard": {
     "title": "仪表板",

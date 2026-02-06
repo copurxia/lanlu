@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 import { Button } from '@/components/ui/button';
@@ -38,10 +39,16 @@ import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/utils/logger';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink } from 'lucide-react';
+import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink, LayoutGrid, List } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import Image from 'next/image';
+
+type ArchiveViewMode = 'grid' | 'list';
+
+const ARCHIVE_VIEW_MODE_STORAGE_KEY = 'tankoubon_archive_view_mode';
+const MOBILE_BREAKPOINT_MEDIA_QUERY = '(max-width: 639px)';
 
 function TankoubonDetailContent() {
   const { t, language } = useLanguage();
@@ -62,6 +69,7 @@ function TankoubonDetailContent() {
   const [editName, setEditName] = useState('');
   const [editSummary, setEditSummary] = useState('');
   const [editTags, setEditTags] = useState<string[]>([]);
+  const [editCover, setEditCover] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Metadata plugin state (preview mode: fill edit form without DB write-back)
@@ -78,6 +86,7 @@ function TankoubonDetailContent() {
     summary?: string;
     tags?: string;
     updated_at?: string;
+    cover?: string;
   }>>([]);
 
   // Delete dialog state
@@ -99,6 +108,29 @@ function TankoubonDetailContent() {
 
   // Archive filter (within this collection)
   const [archiveFilter, setArchiveFilter] = useState('');
+  const [archiveViewMode, setArchiveViewMode] = useState<ArchiveViewMode>('grid');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const saved = window.localStorage.getItem(ARCHIVE_VIEW_MODE_STORAGE_KEY);
+    if (saved === 'grid' || saved === 'list') {
+      setArchiveViewMode(saved);
+      return;
+    }
+
+    const mobileDefault = typeof window.matchMedia === 'function'
+      ? window.matchMedia(MOBILE_BREAKPOINT_MEDIA_QUERY).matches
+      : false;
+    setArchiveViewMode(mobileDefault ? 'list' : 'grid');
+  }, []);
+
+  const handleArchiveViewModeChange = useCallback((mode: ArchiveViewMode) => {
+    setArchiveViewMode(mode);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(ARCHIVE_VIEW_MODE_STORAGE_KEY, mode);
+    }
+  }, []);
 
   // Fetch tankoubon details
   const fetchTankoubon = useCallback(async () => {
@@ -141,6 +173,7 @@ function TankoubonDetailContent() {
           .map((tag) => tag.trim())
           .filter((tag) => tag)
       );
+      setEditCover('');
     } catch (error) {
       logger.apiError('fetch tankoubon', error);
     } finally {
@@ -251,6 +284,7 @@ function TankoubonDetailContent() {
         name: editName,
         summary: editSummary,
         tags: editTags.join(', '),
+        cover: editCover || undefined,
         archives: metadataArchivePatches,
       });
       setEditDialogOpen(false);
@@ -327,6 +361,7 @@ function TankoubonDetailContent() {
         const nextTitle = typeof data.title === 'string' ? data.title : '';
         const nextSummary = typeof data.summary === 'string' ? data.summary : '';
         const nextTags = typeof data.tags === 'string' ? data.tags : '';
+        const nextCover = typeof data.cover === 'string' ? data.cover : '';
         const nextArchives = Array.isArray(data.archives) ? data.archives : [];
 
         if (nextTitle.trim()) setEditName(nextTitle);
@@ -339,6 +374,7 @@ function TankoubonDetailContent() {
               .filter((tag: string) => tag)
           );
         }
+        if (nextCover.trim()) setEditCover(nextCover.trim());
 
         setMetadataArchivePatches(
           nextArchives
@@ -349,6 +385,7 @@ function TankoubonDetailContent() {
               summary: typeof item?.summary === 'string' ? item.summary : undefined,
               tags: typeof item?.tags === 'string' ? item.tags : undefined,
               updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
+              cover: typeof item?.cover === 'string' ? item.cover : undefined,
             }))
             .filter((item: any) => item.archive_id || item.volume_no)
         );
@@ -714,11 +751,25 @@ function TankoubonDetailContent() {
 
         {/* Archives section */}
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-2">
             <h2 className="text-xl font-semibold">{t('tankoubon.archivesTitle')}</h2>
             <Badge variant="secondary" className="tabular-nums">
               {archiveFilter.trim() ? `${filteredArchives.length}/${archives.length}` : String(archives.length)}
             </Badge>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 border-0 shadow-none"
+              onClick={() => handleArchiveViewModeChange(archiveViewMode === 'grid' ? 'list' : 'grid')}
+              title={archiveViewMode === 'grid' ? t('tankoubon.switchToListView') : t('tankoubon.switchToGridView')}
+              aria-label={archiveViewMode === 'grid' ? t('tankoubon.switchToListView') : t('tankoubon.switchToGridView')}
+            >
+              {archiveViewMode === 'grid' ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+              <span className="hidden sm:inline">
+                {archiveViewMode === 'grid' ? t('tankoubon.listView') : t('tankoubon.gridView')}
+              </span>
+            </Button>
           </div>
 
           <div className="flex w-full gap-2 sm:w-auto">
@@ -757,7 +808,7 @@ function TankoubonDetailContent() {
               {t('common.reset')}
             </Button>
           </div>
-        ) : (
+        ) : archiveViewMode === 'grid' ? (
           <div className="space-y-4">
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
               {filteredArchives.map((archive, index) => {
@@ -783,6 +834,75 @@ function TankoubonDetailContent() {
                 );
               })}
             </div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filteredArchives.map((archive) => {
+              const isRemoving = removingArcids.has(archive.arcid);
+              const parsedTags = parseTags(archive.tags).map(stripNamespace).slice(0, 8);
+              return (
+                <div key={archive.arcid} className="rounded-lg border bg-card p-3 sm:p-4">
+                  <div className="flex gap-3 sm:gap-4">
+                    <Link href={`/archive?id=${archive.arcid}`} prefetch={false} className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
+                      <Image
+                        src={ArchiveService.getThumbnailUrl(archive.arcid)}
+                        alt={archive.title}
+                        fill
+                        className="object-cover"
+                        sizes="96px"
+                        decoding="async"
+                      />
+                    </Link>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <div className="min-w-0 flex-1">
+                          <Link href={`/archive?id=${archive.arcid}`} prefetch={false} className="hover:text-primary transition-colors">
+                            <h3 className="font-semibold leading-tight line-clamp-2" title={archive.title}>{archive.title}</h3>
+                          </Link>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {t('archive.pages').replace('{count}', String(archive.pagecount))}
+                            {archive.progress > 0 && archive.pagecount > 0
+                              ? ` • ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}`
+                              : ''}
+                          </div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="icon"
+                          className="h-8 w-8 shrink-0"
+                          title={t('tankoubon.removeArchive')}
+                          disabled={isRemoving}
+                          onClick={() => {
+                            setRemoveTarget(archive);
+                            setRemoveDialogOpen(true);
+                          }}
+                        >
+                          {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
+                        </Button>
+                      </div>
+
+                      {archive.summary && (
+                        <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={archive.summary}>
+                          {archive.summary}
+                        </p>
+                      )}
+
+                      {parsedTags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {parsedTags.map((tag) => (
+                            <Badge key={`${archive.arcid}-${tag}`} variant="secondary" className="max-w-full text-[10px] sm:text-xs" title={tag}>
+                              <span className="truncate">{tag}</span>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
 
