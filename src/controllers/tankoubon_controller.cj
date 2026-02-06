@@ -4,9 +4,11 @@ import cjoy.*
 import lanlu.models.*
 import lanlu.dao.*
 import lanlu.middleware.*
+import lanlu.services.*
 import lanlu.utils.*
 import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
+import std.time.*
 import stdx.net.http.HttpStatusCode
 import stdx.encoding.json.stream.*
 
@@ -266,12 +268,14 @@ public class TankoubonController {
             }
         }
 
-        var patchedCount: Int64 = 0
-        var skippedCount: Int64 = 0
+        var queuedCount: Int64 = 0
+        var callbackTaskId: Int64 = 0
+        var callbackTaskErr = ""
         if (success && archivePatches.size > 0) {
-            let (patched, skipped) = applyArchivePatchesForTankoubon(id, archivePatches.toArray())
-            patchedCount = patched
-            skippedCount = skipped
+            queuedCount = Int64(archivePatches.size)
+            let (taskId, err) = enqueueArchivePatchCallback(id, archivePatches.toArray())
+            callbackTaskId = taskId
+            callbackTaskErr = err
         }
 
         if (success) {
@@ -282,8 +286,9 @@ public class TankoubonController {
             w.writeName("operation").writeValue("update_tankoubon")
             w.writeName("success").writeValue(1)
             w.writeName("successMessage").writeValue("Updated tankoubon \"${effectiveName}\"!")
-            w.writeName("archives_patched").writeValue(patchedCount)
-            w.writeName("archives_skipped").writeValue(skippedCount)
+            w.writeName("archives_queued").writeValue(queuedCount)
+            w.writeName("archives_task_id").writeValue(callbackTaskId)
+            w.writeName("archives_task_error").writeValue(callbackTaskErr)
             w.endObject()
             w.flush()
             ctx.json(String.fromUtf8(readToEnd(out)))
@@ -291,6 +296,92 @@ public class TankoubonController {
             let errorResponse = "{\"error\":\"Tankoubon doesn't exist in the database!\",\"operation\":\"update_tankoubon\",\"success\":0}"
             ctx.json(errorResponse)
         }
+    }
+
+    private static func enqueueArchivePatchCallback(tankoubonId: String, patches: Array<ArchiveMetadataPatch>): (Int64, String) {
+        if (patches.size == 0) {
+            return (0, "")
+        }
+
+        let outputJson = buildMetadataFallbackOutput(patches)
+        if (outputJson.trimAscii().size == 0) {
+            return (0, "Failed to build metadata fallback output")
+        }
+
+        // Create a completed placeholder deno_task to store the plugin-like output.
+        let denoTaskIdOpt = TaskDao.createTaskDataFull(
+            "metadata_fallback_output",
+            "deno_task",
+            "completed",
+            100,
+            "metadata_fallback output ready",
+            "",
+            50,
+            "tankoubon:update"
+        )
+
+        let denoTaskId = match (denoTaskIdOpt) { case Some(id) => id case None => 0 }
+        if (denoTaskId <= 0) {
+            return (0, "Failed to create fallback output task")
+        }
+
+        TaskIO.writeOutput(denoTaskId, outputJson)
+
+        let paramsOut = ByteBuffer()
+        let pw = JsonWriter(paramsOut)
+        pw.startObject()
+        pw.writeName("targetType").writeValue("tankoubon")
+        pw.writeName("targetId").writeValue(tankoubonId)
+        pw.writeName("archiveId").writeValue(tankoubonId)
+        pw.writeName("namespace").writeValue("")
+        pw.writeName("denoTaskId").writeValue(denoTaskId)
+        pw.endObject()
+        pw.flush()
+        let callbackParams = String.fromUtf8(readToEnd(paramsOut))
+
+        let groupId = "tankoubon_update_${tankoubonId}_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}"
+        let callbackTask = TaskModel.createTaskWithOptions(
+            "Tankoubon archive metadata fallback",
+            "metadata_plugin_callback",
+            callbackParams,
+            50,
+            groupId,
+            "tankoubon:update"
+        )
+
+        if (callbackTask.id <= 0) {
+            return (0, "Failed to create metadata_plugin_callback task")
+        }
+
+        TaskPoolService.getInstance().notifyTaskAvailable()
+        return (callbackTask.id, "")
+    }
+
+    private static func buildMetadataFallbackOutput(patches: Array<ArchiveMetadataPatch>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(true)
+        w.writeName("data")
+        w.startObject()
+        w.writeName("archives")
+        w.startArray()
+        for (patch in patches) {
+            w.startObject()
+            if (patch.archiveId.trimAscii().size > 0) { w.writeName("archive_id").writeValue(patch.archiveId.trimAscii()) }
+            if (patch.volumeNo > 0) { w.writeName("volume_no").writeValue(patch.volumeNo) }
+            if (patch.title.trimAscii().size > 0) { w.writeName("title").writeValue(patch.title.trimAscii()) }
+            if (patch.summary.trimAscii().size > 0) { w.writeName("summary").writeValue(patch.summary) }
+            if (patch.tags.trimAscii().size > 0) { w.writeName("tags").writeValue(patch.tags.trimAscii()) }
+            if (patch.updatedAt.trimAscii().size > 0) { w.writeName("updated_at").writeValue(patch.updatedAt.trimAscii()) }
+            if (patch.cover.trimAscii().size > 0) { w.writeName("cover").writeValue(patch.cover.trimAscii()) }
+            w.endObject()
+        }
+        w.endArray()
+        w.endObject()
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>): (Int64, Int64) {

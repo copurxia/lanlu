@@ -1,5 +1,13 @@
 import { apiClient } from '@/lib/api';
 import type { Tankoubon, TankoubonCreateRequest, TankoubonUpdateRequest, TankoubonResponse } from '@/types/tankoubon';
+import type { Task } from '@/types/task';
+import { TaskPoolService } from './taskpool-service';
+
+type TankoubonUpdateResponse = {
+  success?: number | boolean | string;
+  archives_task_id?: number | string;
+  archives_task_error?: string;
+};
 
 export class TankoubonService {
   private static baseUrl = '/api/tankoubons';
@@ -49,7 +57,30 @@ export class TankoubonService {
    * Update tankoubon metadata
    */
   static async updateTankoubon(id: string, data: TankoubonUpdateRequest): Promise<void> {
-    await apiClient.put(`${this.baseUrl}/${id}`, data);
+    const response = await apiClient.put<TankoubonUpdateResponse>(`${this.baseUrl}/${id}`, data);
+    const payload = response.data;
+
+    const rawTaskId = payload?.archives_task_id;
+    const taskId =
+      typeof rawTaskId === 'number'
+        ? rawTaskId
+        : typeof rawTaskId === 'string' && rawTaskId.trim() !== ''
+        ? Number(rawTaskId)
+        : 0;
+
+    if (!taskId || !Number.isFinite(taskId) || taskId <= 0) {
+      return;
+    }
+
+    const finalTask = await this.waitForTaskCompletion(taskId);
+    if (finalTask.status === 'failed' || finalTask.status === 'stopped') {
+      const err =
+        payload?.archives_task_error ||
+        finalTask.result ||
+        finalTask.message ||
+        'Archive metadata task failed';
+      throw new Error(err);
+    }
   }
 
   /**
@@ -123,5 +154,24 @@ export class TankoubonService {
     };
   }
 
+  private static async waitForTaskCompletion(
+    jobId: number,
+    options?: { intervalMs?: number; timeoutMs?: number }
+  ): Promise<Task> {
+    const intervalMs = options?.intervalMs ?? 800;
+    const timeoutMs = options?.timeoutMs ?? 10 * 60 * 1000;
+    const start = Date.now();
+
+    while (true) {
+      const task = await TaskPoolService.getTaskById(jobId);
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'stopped') {
+        return task;
+      }
+      if (Date.now() - start > timeoutMs) {
+        throw new Error(`Task ${jobId} timeout`);
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+  }
 
 }

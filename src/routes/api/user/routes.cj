@@ -28,15 +28,9 @@ public class UserRoutes {
         })
 
         // 获取阅读趋势
-        router.get("/api/user/reading-trend", { ctx =>
+        router.get("/api/user/trend", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            UserStatsController.getReadingTrend(ctx)
-        })
-
-        // 获取最近活动
-        router.get("/api/user/recent-activity", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            UserStatsController.getRecentActivity(ctx)
+            UserStatsController.getTrend(ctx)
         })
     }
 }
