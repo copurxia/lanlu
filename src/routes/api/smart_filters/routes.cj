@@ -8,8 +8,9 @@ import lanlu.middleware.*
  * 智能分类 API 路由
  */
 public func registerSmartFilterRoutes(router: JoyRouters) {
-    // 公开接口：获取启用的智能分类列表
+    // 获取启用的智能分类列表
     router.get("/api/smart_filters", { ctx =>
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         SmartFilterController.getEnabledFilters(ctx)
     })
 

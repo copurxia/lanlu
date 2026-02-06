@@ -8,10 +8,12 @@ import lanlu.middleware.*
  * 分类API路由（新结构）
  */
 public func registerCategoryRoutes(router: JoyRouters) {
-    // 获取所有分类
+    // 获取所有分类（管理员）
     router.get("/api/categories", { ctx =>
-        if (!AuthMiddleware.requiredAuth(ctx)) { return }
-        CategoryController.getCategories(ctx)
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => CategoryController.getCategories(ctx)
+            case None => return
+        }
     })
 
     // 创建新分类（需要管理员权限）

@@ -17,27 +17,45 @@ public class AuthMiddleware {
     private static func getBearerToken(ctx: JoyContext): Option<String> {
         let authHeader = ctx.getHeader("Authorization") ?? ""
         let trimmed = authHeader.trimAscii()
-        if (trimmed.size == 0) {
-            // Fallback: 从查询参数中读取 token
-            let tokenParam = ctx.getQuery("token") ?? ""
-            let tokenTrimmed = tokenParam.trimAscii()
-            if (tokenTrimmed.size > 0) {
-                return Some(tokenTrimmed)
+
+        // 优先读取 Authorization: Bearer <token>
+        if (trimmed.size > 0) {
+            if (trimmed.startsWith("Bearer ") || trimmed.startsWith("bearer ")) {
+                let bytes = trimmed.toArray()
+                if (bytes.size > 7) {
+                    let rest = bytes.slice(7, bytes.size - 7)
+                    let token = String.fromUtf8(rest).trimAscii()
+                    if (token.size > 0) { return Some(token) }
+                }
             }
+        }
+
+        // 回退到 Cookie: auth_token=<token>
+        let cookieHeader = ctx.getHeader("Cookie") ?? ""
+        let cookie = cookieHeader.trimAscii()
+        if (cookie.size == 0) {
             return None
         }
 
-        // 兼容大小写与格式问题
-        // 期望格式: "Bearer <token>"
-        if (trimmed.startsWith("Bearer ") || trimmed.startsWith("bearer ")) {
-            let bytes = trimmed.toArray()
-            if (bytes.size <= 7) { return None }
-            let rest = bytes.slice(7, bytes.size - 7)
-            let token = String.fromUtf8(rest).trimAscii()
-            if (token.size > 0) { return Some(token) }
+        let pairs = cookie.split(";")
+        for (pair in pairs) {
+            let kv = pair.trimAscii()
+            if (kv.size == 0) { continue }
+            let eqOpt = kv.indexOf("=")
+            match (eqOpt) {
+                case Some(eq) =>
+                    let name = kv[0..eq].trimAscii()
+                    let value = kv[(eq + 1)..].trimAscii()
+                    if (name == "auth_token" && value.size > 0) {
+                        return Some(value)
+                    }
+                case None => ()
+            }
         }
+
         return None
     }
+
 
     /**
      * 可选获取用户ID（不会返回401错误）
@@ -111,7 +129,7 @@ public class AuthMiddleware {
         }
 
         ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
-        ResponseView.errorJson(ctx, "This API is protected and requires login or an API Key.", 401)
+        ResponseView.errorJson(ctx, "This API is protected and requires login.", 401)
         return None
     }
 

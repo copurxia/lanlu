@@ -20,6 +20,17 @@ const getApiConfig = () => {
 const { baseURL, skipRequest } = getApiConfig();
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
+function setAuthTokenCookie(token: string | null): void {
+  if (typeof document === 'undefined') return;
+
+  if (!token) {
+    document.cookie = 'auth_token=; Path=/; Max-Age=0; SameSite=Lax';
+    return;
+  }
+
+  document.cookie = `auth_token=${token}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
+}
+
 /**
  * 获取认证 Token
  */
@@ -47,6 +58,7 @@ function handleResponseError(error: AxiosError, logPrefix: string = 'API'): Prom
   if (error?.response?.status === 401) {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth_token');
+      setAuthTokenCookie(null);
       window.dispatchEvent(new CustomEvent('auth:unauthorized'));
       const currentPath = window.location.pathname;
       const redirectParam = currentPath === '/' ? '' : `?redirect=${encodeURIComponent(currentPath)}`;
@@ -84,7 +96,7 @@ export const uploadClient = axios.create({
 setupInterceptors(apiClient, 'API');
 setupInterceptors(uploadClient, 'Upload API');
 
-export { skipRequest };
+export { skipRequest, setAuthTokenCookie };
 
 export const getApiUrl = (path: string): string => `${baseURL}${path}`;
 

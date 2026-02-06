@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import type { AuthUser } from '@/types/auth';
 import { AuthService } from '@/lib/services/auth-service';
+import { setAuthTokenCookie } from '@/lib/api';
 
 interface AuthContextType {
   token: string | null;
@@ -33,6 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window !== 'undefined') {
       const savedToken = localStorage.getItem('auth_token');
       setToken(savedToken);
+      setAuthTokenCookie(savedToken);
     }
   }, [mounted]);
 
@@ -60,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setToken(null);
           if (typeof window !== 'undefined') {
             localStorage.removeItem('auth_token');
+            setAuthTokenCookie(null);
           }
         }
       }
@@ -95,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', newToken);
+      setAuthTokenCookie(newToken);
       // 不再自动刷新页面，由路由跳转处理
     }
   };
@@ -105,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth_token');
+      setAuthTokenCookie(null);
       // 退出登录后跳转到登录页
       window.location.href = '/login';
     }

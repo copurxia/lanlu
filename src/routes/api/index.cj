@@ -14,6 +14,7 @@ import lanlu.routes.api.assets.*
 import lanlu.routes.api.smart_filters.*
 import lanlu.routes.api.cron.*
 import lanlu.controllers.*
+import lanlu.middleware.*
 
 /**
  * API路由注册
@@ -60,6 +61,7 @@ public func registerApiRoutes(router: JoyRouters) {
 
     // 注册服务器信息路由
     router.get("/api/info", { ctx =>
+        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         InfoController.getServerInfo(ctx)
     })
 }
@@ -70,27 +72,42 @@ public func registerApiRoutes(router: JoyRouters) {
 private func registerSystemSettingsRoutes(router: JoyRouters) {
     // 获取所有设置
     router.get("/api/system/settings", { ctx =>
-        SystemSettingsController.getAllSettings(ctx)
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => SystemSettingsController.getAllSettings(ctx)
+            case None => return
+        }
     })
 
     // 按分类获取设置
     // 更新单个设置
     router.put("/api/system/settings", { ctx =>
-        SystemSettingsController.updateSetting(ctx)
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => SystemSettingsController.updateSetting(ctx)
+            case None => return
+        }
     })
 
     // 批量更新设置
     router.put("/api/system/settings/batch", { ctx =>
-        SystemSettingsController.updateSettings(ctx)
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => SystemSettingsController.updateSettings(ctx)
+            case None => return
+        }
     })
 
     // 获取设置分类
     router.get("/api/system/settings/categories", { ctx =>
-        SystemSettingsController.getCategories(ctx)
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => SystemSettingsController.getCategories(ctx)
+            case None => return
+        }
     })
 
     // 重新加载设置缓存
     router.post("/api/system/settings/reload", { ctx =>
-        SystemSettingsController.reloadCache(ctx)
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => SystemSettingsController.reloadCache(ctx)
+            case None => return
+        }
     })
 }

@@ -1,4 +1,4 @@
-import { apiClient, getAuthToken } from '../api';
+import { apiClient } from '../api';
 import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } from '@/types/archive';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
@@ -153,22 +153,14 @@ export class ArchiveService {
   }
 
   static getDownloadUrl(id: string): string {
-    const token = getAuthToken();
-    if (token) {
-      return `/api/archives/${id}/download?token=${encodeURIComponent(token)}`;
-    }
     return `/api/archives/${id}/download`;
   }
 
   /**
-   * 为 URL 添加认证 token 参数
+   * Cookie 鉴权下无需再拼接 token query。
    */
   static addTokenToUrl(url: string): string {
-    const token = getAuthToken();
-    if (!token) return url;
-
-    const separator = url.includes('?') ? '&' : '?';
-    return `${url}${separator}token=${encodeURIComponent(token)}`;
+    return url;
   }
 
   static async getServerInfo(): Promise<ServerInfo> {
