@@ -146,65 +146,6 @@ export class TaskPoolService {
   }
 
   /**
-   * Get tasks by group ID
-   */
-  static async getTasksByGroup(groupId: string): Promise<Task[]> {
-    try {
-      const response = await api.get(`${this.BASE_URL}/group/${groupId}`);
-
-      if (response.success) {
-        return Array.isArray(response.data)
-          ? response.data.map((task: any) => this.normalizeTask(task))
-          : [];
-      } else {
-        throw new Error(response.error || 'Failed to fetch tasks by group');
-      }
-    } catch (error) {
-      console.error('Error fetching tasks by group:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Cancel all tasks in a group
-   */
-  static async cancelTasksByGroup(groupId: string): Promise<{ success: boolean; cancelled_count: number }> {
-    try {
-      const response = await api.post(`${this.BASE_URL}/group/${groupId}/cancel`);
-
-      if (response.success) {
-        return {
-          success: true,
-          cancelled_count: response.data?.cancelled_count || 0
-        };
-      } else {
-        throw new Error(response.error || 'Failed to cancel tasks by group');
-      }
-    } catch (error) {
-      console.error('Error cancelling tasks by group:', error);
-      return { success: false, cancelled_count: 0 };
-    }
-  }
-
-  /**
-   * Get task metrics
-   */
-  static async getMetrics(): Promise<any> {
-    try {
-      const response = await api.get(`${this.BASE_URL}/metrics`);
-
-      if (response.success) {
-        return response.data;
-      } else {
-        throw new Error(response.error || 'Failed to fetch metrics');
-      }
-    } catch (error) {
-      console.error('Error fetching metrics:', error);
-      return null;
-    }
-  }
-
-  /**
    * Get task status color for UI display
    */
   static getStatusColor(status: string): string {

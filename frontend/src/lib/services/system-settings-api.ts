@@ -10,7 +10,6 @@ export interface SystemSetting {
 
 export interface SystemSettingsApi {
   getAllSettings(): Promise<SystemSetting[]>;
-  getSettingsByCategory(category: string): Promise<SystemSetting[]>;
   updateSetting(key: string, value: string): Promise<boolean>;
   updateSettings(settings: Record<string, string>): Promise<boolean>;
   getCategories(): Promise<string[]>;
@@ -20,15 +19,6 @@ export interface SystemSettingsApi {
 export const SystemSettingsApi: SystemSettingsApi = {
   async getAllSettings() {
     const response = await fetch('/api/system/settings');
-    const data = await response.json();
-    if (data.success) {
-      return data.data;
-    }
-    throw new Error(data.message || '获取设置失败');
-  },
-
-  async getSettingsByCategory(category: string) {
-    const response = await fetch(`/api/system/settings/category/${category}`);
     const data = await response.json();
     if (data.success) {
       return data.data;

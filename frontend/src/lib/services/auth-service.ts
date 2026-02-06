@@ -2,17 +2,6 @@ import { apiClient } from '@/lib/api';
 import type { ApiEnvelope, AuthToken, AuthUser, AuthSession } from '@/types/auth';
 
 export class AuthService {
-  static async register(params: { username: string; password: string; tokenName?: string }) {
-    const res = await apiClient.post<
-      ApiEnvelope<{ user: AuthUser; token: AuthToken & { token: string } }>
-    >('/api/auth/register', {
-      username: params.username,
-      password: params.password,
-      tokenName: params.tokenName || 'default',
-    });
-    return res.data;
-  }
-
   static async login(params: { username: string; password: string; tokenName?: string }) {
     const res = await apiClient.post<
       ApiEnvelope<{ user: AuthUser; token: AuthToken & { token: string } }>

@@ -3,7 +3,7 @@ import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } 
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
 import { TaskPoolService } from './taskpool-service';
-import { isSuccessResponse, extractApiError } from '@/lib/utils/api-utils';
+import { isSuccessResponse } from '@/lib/utils/api-utils';
 import type { Task } from '@/types/task';
 
 // 下载相关接口定义
@@ -107,11 +107,6 @@ export class ArchiveService {
     };
   }
 
-  static async getArchive(id: string): Promise<any> {
-    const response = await apiClient.get(`/api/archives/${id}`);
-    return response.data.data;
-  }
-
   /**
    * 设置归档为新状态（PUT /api/archives/:id/isnew）
    */
@@ -203,7 +198,6 @@ export class ArchiveService {
       callbacks || defaultCallbacks
     );
   }
-
 
   
   /**

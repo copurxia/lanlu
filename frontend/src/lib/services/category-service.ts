@@ -59,17 +59,6 @@ export class CategoryService {
   }
 
   /**
-   * Get category by ID
-   */
-  static async getCategoryById(catid: string): Promise<Category | null> {
-    const response = await apiClient.get<CategoryResponse>(`${this.baseUrl}/${catid}`);
-    if (isSuccessResponse(response.data.success)) {
-      return normalizeArrayResponse(response.data.data)[0] ?? null;
-    }
-    return null;
-  }
-
-  /**
    * Create a new category
    */
   static async createCategory(data: CategoryCreateRequest): Promise<{ success: boolean; category?: Category; error?: string }> {
