@@ -30,6 +30,7 @@ public class BackfillMetadataTaskRunner {
             var submitted: Int64 = 0
             var skipped: Int64 = 0
             var candidates: Int64 = 0
+            var processedTanks = HashSet<String>()
 
             TaskModel.updateTaskProgress(taskId, 5, "Dispatching metadata jobs")
 
@@ -67,30 +68,46 @@ public class BackfillMetadataTaskRunner {
                         continue
                     }
 
+                    let (autoTankId, autoRelPath, autoFullPath) = resolveAutoTankForArchive(archiveId)
+                    if (autoTankId.size > 0) {
+                        if (processedTanks.contains(autoTankId)) {
+                            skipped += 1
+                            continue
+                        }
+
+                        if (!TankoubonAutocreateService.hasAllCandidatesIndexed(autoRelPath, autoFullPath)) {
+                            TaskIO.appendLog(taskId,
+                                "SKIP archive=${archiveId}: auto Tankoubon not fully indexed (tankoubon_id=${autoTankId}, relative_path=${autoRelPath})")
+                            skipped += 1
+                            continue
+                        }
+
+                        var tankSubmitted: Int64 = 0
+                        for (ns in namespaces) {
+                            let namespace = ns.trimAscii()
+                            if (namespace.size == 0) { continue }
+
+                            if (submitMetadataPluginTaskForTarget("tankoubon", autoTankId, namespace, taskId, context)) {
+                                submitted += 1
+                                tankSubmitted += 1
+                            } else {
+                                TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin tankoubon=${autoTankId} namespace=${namespace}")
+                                skipped += 1
+                            }
+                        }
+
+                        if (tankSubmitted > 0) {
+                            processedTanks.add(autoTankId)
+                        }
+                        continue
+                    }
+
                     for (ns in namespaces) {
                         let namespace = ns.trimAscii()
                         if (namespace.size == 0) { continue }
 
-                        let out = ByteBuffer()
-                        let w = JsonWriter(out)
-                        w.startObject()
-                        w.writeName("archive_id").writeValue(archiveId)
-                        w.writeName("namespace").writeValue(namespace)
-                        w.endObject()
-                        w.flush()
-                        let params = String.fromUtf8(readToEnd(out))
-                        let child = TaskModel.createTaskWithOptions(
-                            "元数据补全: ${namespace}",
-                            "metadata_plugin",
-                            params,
-                            15i32,
-                            archiveId,
-                            "backfill_metadata:${taskId}"
-                        )
-
-                        if (child.id > 0) {
+                        if (submitMetadataPluginTaskForTarget("archive", archiveId, namespace, taskId, context)) {
                             submitted += 1
-                            context.notifyTaskAvailable()
                         } else {
                             TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin archive=${archiveId} namespace=${namespace}")
                             skipped += 1
@@ -178,6 +195,68 @@ public class BackfillMetadataTaskRunner {
 
     private static func fail(taskId: Int64, message: String): Unit {
         TaskRunnerOutput.fail(taskId, message)
+    }
+
+    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, taskId: Int64, context: TaskRunnerContext): Bool {
+        try {
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("target_type").writeValue(targetType)
+            w.writeName("target_id").writeValue(targetId)
+            if (targetType == "tankoubon" || targetType == "tank") {
+                w.writeName("tankoubon_id").writeValue(targetId)
+            } else {
+                w.writeName("archive_id").writeValue(targetId)
+            }
+            w.writeName("namespace").writeValue(namespace)
+            w.endObject()
+            w.flush()
+            let params = String.fromUtf8(readToEnd(out))
+            let child = TaskModel.createTaskWithOptions(
+                "元数据补全: ${namespace}",
+                "metadata_plugin",
+                params,
+                15i32,
+                targetId,
+                "backfill_metadata:${taskId}"
+            )
+
+            if (child.id > 0) {
+                context.notifyTaskAvailable()
+                return true
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    private static func resolveAutoTankForArchive(archiveId: String): (String, String, String) {
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) { return ("", "", "") }
+        if (archive.category_id <= 0) { return ("", "", "") }
+
+        let rel = archive.relative_path.trimAscii()
+        if (rel.size == 0) { return ("", "", "") }
+
+        let categoryOpt = CategoryDao.getCategoryByInternalId(archive.category_id)
+        let scanPath = match (categoryOpt) {
+            case Some(cat) => cat.scanPath
+            case None => ""
+        }
+        if (scanPath.size == 0) { return ("", "", "") }
+
+        let fullDirPath = FileUtils.joinPath(scanPath, rel)
+        let tankIds = TankoubonDao.getTankoubonsForArchive(archiveId)
+        for (tid in tankIds) {
+            match (TankoubonDao.getTankoubonById(tid)) {
+                case Some(tank) =>
+                    if (tank.auto_created && tank.source_category_id == archive.category_id && tank.source_relative_path.trimAscii() == rel) {
+                        return (tid, rel, fullDirPath)
+                    }
+                case None => ()
+            }
+        }
+        return ("", "", "")
     }
 
 }
