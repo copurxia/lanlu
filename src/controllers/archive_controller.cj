@@ -332,7 +332,8 @@ public class ArchiveController {
             println("Thumbnail exists, reading from: ${thumbnailPath}")
             try {
                 // 生成 ETag（统一使用 CacheUtils）
-                let etag = CacheUtils.generateETag(id)
+                let fileInfo = FileInfo(thumbnailPath)
+                let etag = CacheUtils.generateETag("${thumbnailPath}:${fileInfo.size}:${fileInfo.lastModificationTime}")
 
                 // 检查条件请求 - If-None-Match
                 if (CacheUtils.checkIfNoneMatch(ctx, etag)) {

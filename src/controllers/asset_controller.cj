@@ -51,7 +51,8 @@ public class AssetController {
         }
 
         try {
-            let etag = CacheUtils.generateETag("${asset.id}-${ext}")
+            let fileInfo = FileInfo(filePath)
+            let etag = CacheUtils.generateETag("${filePath}:${fileInfo.size}:${fileInfo.lastModificationTime}")
             if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
                 CacheUtils.sendNotModified(ctx, etag)
                 return
