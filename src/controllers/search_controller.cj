@@ -165,41 +165,84 @@ public class SearchController {
             return
         }
 
-        let (archives, totalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count), sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
-
-        // 如果启用了Tankoubon分组，获取归档到Tankoubon的映射
-        var tankoubonMapping: HashMap<String, String> = HashMap<String, String>()
-        var processedTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
-        var tankoubonDataCache: HashMap<String, TankoubonAggregatedData> = HashMap<String, TankoubonAggregatedData>()
+        var archives: Array<Archive> = Array<Archive>()
+        var totalCount: Int64 = 0
+        var responseItemTypes: ArrayList<String> = ArrayList<String>()
+        var responseItemIds: ArrayList<String> = ArrayList<String>()
+        var archiveMap: HashMap<String, Archive> = HashMap<String, Archive>()
         var tankoubonIdsList: ArrayList<String> = ArrayList<String>()
 
         if (groupByTanks) {
-            // 收集所有归档的arcid
-            var arcids: ArrayList<String> = ArrayList<String>()
-            for (archive in archives) {
-                arcids.add(archive.id)
+            // 先基于完整结果做分组，再进行分页，避免一个大合集挤占整页。
+            let (allArchives, _) = ArchiveModel.searchArchives(filter, category, -1, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
+
+            var allArcids: ArrayList<String> = ArrayList<String>()
+            for (archive in allArchives) {
+                allArcids.add(archive.id)
             }
+            let allTankoubonMapping = ArchiveDao.getArchiveTankoubonMapping(allArcids.toArray())
 
-            // 获取归档到Tankoubon的映射
-            tankoubonMapping = ArchiveDao.getArchiveTankoubonMapping(arcids.toArray())
+            var seenTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
+            var pagedArchives = ArrayList<Archive>()
+            var groupedIndex: Int32 = 0
 
-            // 收集所有唯一的 Tankoubon ID
-            for ((_, tankoubonId) in tankoubonMapping) {
-                match (processedTankoubons.get(tankoubonId)) {
-                    case Some(_) => ()  // 已处理，跳过
-                    case None =>
-                        processedTankoubons[tankoubonId] = true
-                        tankoubonIdsList.add(tankoubonId)
+            for (archive in allArchives) {
+                var itemType = "archive"
+                var itemId = archive.id
+
+                match (allTankoubonMapping.get(archive.id)) {
+                    case Some(tid) =>
+                        match (seenTankoubons.get(tid)) {
+                            case Some(_) => continue
+                            case None =>
+                                seenTankoubons[tid] = true
+                                itemType = "tankoubon"
+                                itemId = tid
+                        }
+                    case None => ()
                 }
+
+                totalCount += 1
+
+                let shouldInclude = if (start < 0) {
+                    true
+                } else if (count > 0) {
+                    groupedIndex >= start && groupedIndex < (start + count)
+                } else {
+                    false
+                }
+
+                if (shouldInclude) {
+                    responseItemTypes.add(itemType)
+                    responseItemIds.add(itemId)
+                    if (itemType == "archive") {
+                        pagedArchives.add(archive)
+                        archiveMap[archive.id] = archive
+                    } else {
+                        tankoubonIdsList.add(itemId)
+                    }
+                }
+
+                groupedIndex += 1
             }
 
-            // 批量获取所有 Tankoubon 的聚合数据
-            tankoubonDataCache = TankoubonDao.getBatchAggregatedMetadata(tankoubonIdsList.toArray(), userId)
+            archives = pagedArchives.toArray()
+        } else {
+            let (pagedArchives, pagedTotalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count), sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
+            archives = pagedArchives
+            totalCount = pagedTotalCount
+            for (archive in archives) {
+                responseItemTypes.add("archive")
+                responseItemIds.add(archive.id)
+                archiveMap[archive.id] = archive
+            }
         }
 
-        // 批量获取Tankoubon收藏状态和收藏时间
+        // 批量获取当前页 Tankoubon 聚合数据 / 收藏信息。
+        let tankoubonDataCache = TankoubonDao.getBatchAggregatedMetadata(tankoubonIdsList.toArray(), userId)
         let tankFavoriteMap = UserTankoubonFavoriteDao.getBatchFavoriteStatus(userId, tankoubonIdsList.toArray())
         let tankFavoriteTimeMap = UserTankoubonFavoriteDao.getBatchFavoriteTime(userId, tankoubonIdsList.toArray())
+        let tankoubonArchivesCache = TankoubonDao.getBatchArchivesInTankoubon(tankoubonIdsList.toArray())
 
         // 批量获取用户的 isNew 状态、收藏状态和收藏时间
         var isNewMap = HashMap<Int64, Bool>()
@@ -208,7 +251,6 @@ public class SearchController {
         var progressMap = HashMap<Int64, Int32>()
         var lastReadTimeMap = HashMap<Int64, Int64>()
         if (userId > 0) {
-            // 使用 archive.internalId，无需额外查询
             var archiveIds = ArrayList<Int64>()
             for (archive in archives) {
                 if (archive.internalId > 0) {
@@ -225,12 +267,6 @@ public class SearchController {
             }
         }
 
-        // 使用 JsonWriter 构建响应，避免手写 JSON/转义。
-        var alreadyAddedTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
-
-        // 批量获取所有 Tankoubon 的归档列表
-        let tankoubonArchivesCache = TankoubonDao.getBatchArchivesInTankoubon(tankoubonIdsList.toArray())
-
         // 批量获取标签翻译映射（按请求维度一次查询）
         var tagTranslations: HashMap<String, String> = HashMap<String, String>()
         if (lang.size > 0) {
@@ -239,10 +275,8 @@ public class SearchController {
             for (archive in archives) {
                 collectUniqueTags(archive.tags, seenTags, uniqueTags)
             }
-            if (groupByTanks) {
-                for ((_, tank) in tankoubonDataCache) {
-                    collectUniqueTags(tank.tags, seenTags, uniqueTags)
-                }
+            for ((_, tank) in tankoubonDataCache) {
+                collectUniqueTags(tank.tags, seenTags, uniqueTags)
             }
             if (uniqueTags.size > 0) {
                 tagTranslations = TagDao.batchGetTranslations(uniqueTags.toArray(), lang)
@@ -254,34 +288,14 @@ public class SearchController {
         w.startObject()
         w.writeName("data")
         w.startArray()
-        for (archive in archives) {
-            // 检查此归档是否属于某个Tankoubon
-            var belongsToTankoubon = false
-            var tankoubonId = ""
 
-            if (groupByTanks) {
-                match (tankoubonMapping.get(archive.id)) {
-                    case Some(tid) =>
-                        tankoubonId = tid
-                        belongsToTankoubon = true
-                    case None => ()
-                }
-            }
+        for (i in 0..responseItemTypes.size) {
+            let itemType = responseItemTypes[i]
+            let itemId = responseItemIds[i]
 
-            // 如果归档属于Tankoubon且该Tankoubon尚未添加，则添加Tankoubon
-            var tankoubonAlreadyAdded = false
-            if (belongsToTankoubon) {
-                match (alreadyAddedTankoubons.get(tankoubonId)) {
-                    case Some(_) => tankoubonAlreadyAdded = true
-                    case None => ()
-                }
-            }
-
-            if (belongsToTankoubon && !tankoubonAlreadyAdded) {
-                var tankoubonInserted = false
-                match (tankoubonDataCache.get(tankoubonId)) {
+            if (itemType == "tankoubon") {
+                match (tankoubonDataCache.get(itemId)) {
                     case Some(tankoubon) =>
-                        // 翻译标签
                         let translatedTankTags = if (lang.size > 0) {
                             TagDao.translateTagsString(tankoubon.tags, lang, tagTranslations)
                         } else {
@@ -289,16 +303,16 @@ public class SearchController {
                         }
 
                         var isTankFavorite = false
-                        match (tankFavoriteMap.get(tankoubonId)) {
+                        match (tankFavoriteMap.get(itemId)) {
                             case Some(status) => isTankFavorite = status
                             case None => isTankFavorite = false
                         }
                         var tankFavoriteTime = 0
-                        match (tankFavoriteTimeMap.get(tankoubonId)) {
+                        match (tankFavoriteTimeMap.get(itemId)) {
                             case Some(time) => tankFavoriteTime = time
                             case None => tankFavoriteTime = 0
                         }
-                        // 添加Tankoubon条目
+
                         w.startObject()
                         w.writeName("type").writeValue("tankoubon")
                         w.writeName("tankoubon_id").writeValue(tankoubon.tankoubon_id)
@@ -307,7 +321,7 @@ public class SearchController {
                         w.writeName("tags").writeValue(translatedTankTags)
                         w.writeName("archives")
                         w.startArray()
-                        match (tankoubonArchivesCache.get(tankoubonId)) {
+                        match (tankoubonArchivesCache.get(itemId)) {
                             case Some(tankoubonArchives) =>
                                 for (archiveId in tankoubonArchives) {
                                     w.writeValue(archiveId)
@@ -317,87 +331,78 @@ public class SearchController {
                         w.endArray()
                         w.writeName("pagecount").writeValue(tankoubon.pagecount)
                         w.writeName("progress").writeValue(tankoubon.progress)
-                        // Keep consistent with other endpoints: lastreadtime is a number.
                         w.writeName("lastreadtime").writeValue(tankoubon.last_read_time)
                         w.writeName("isnew").writeValue(tankoubon.isnew)
                         w.writeName("archive_count").writeValue(tankoubon.archive_count)
                         w.writeName("isfavorite").writeValue(isTankFavorite)
                         w.writeName("favoritetime").writeValue(tankFavoriteTime)
                         w.endObject()
-
-                        alreadyAddedTankoubons[tankoubonId] = true
-                        tankoubonInserted = true
                     case None => ()
                 }
-                // 只有当成功插入Tankoubon条目时才跳过当前归档；否则回退为普通归档展示
-                if (tankoubonInserted) {
-                    continue
-                }
-            }
-
-            // 如果归档属于已添加的Tankoubon，跳过
-            if (belongsToTankoubon && tankoubonAlreadyAdded) {
                 continue
             }
 
-            // 获取用户级别的 isNew 状态、收藏状态和收藏时间
-            let internalId = archive.internalId
-            var isNew = true  // 默认为新
-            var isFavorite = false  // 默认未收藏
-            var favoriteTime: Int64 = 0  // 收藏时间，默认为0
-            var progress: Int32 = 0  // 阅读进度，默认为0
-            var lastReadTime: Int64 = 0  // 最后阅读时间，默认为0
-            if (internalId > 0) {
-                match (isNewMap.get(internalId)) {
-                    case Some(status) => isNew = status
-                    case None => isNew = true  // 没有记录，默认为新
-                }
-                match (isFavoriteMap.get(internalId)) {
-                    case Some(status) => isFavorite = status
-                    case None => isFavorite = false  // 没有记录，默认未收藏
-                }
-                match (favoriteTimeMap.get(internalId)) {
-                    case Some(time) => favoriteTime = time
-                    case None => favoriteTime = 0
-                }
-                if (progressMap.contains(internalId)) {
-                    match (progressMap.get(internalId)) {
-                        case Some(p) => if (p > 0i32) { progress = p }
-                        case None => ()
+            match (archiveMap.get(itemId)) {
+                case Some(archive) =>
+                    let internalId = archive.internalId
+                    var isNew = true
+                    var isFavorite = false
+                    var favoriteTime: Int64 = 0
+                    var progress: Int32 = 0
+                    var lastReadTime: Int64 = 0
+                    if (internalId > 0) {
+                        match (isNewMap.get(internalId)) {
+                            case Some(status) => isNew = status
+                            case None => isNew = true
+                        }
+                        match (isFavoriteMap.get(internalId)) {
+                            case Some(status) => isFavorite = status
+                            case None => isFavorite = false
+                        }
+                        match (favoriteTimeMap.get(internalId)) {
+                            case Some(time) => favoriteTime = time
+                            case None => favoriteTime = 0
+                        }
+                        if (progressMap.contains(internalId)) {
+                            match (progressMap.get(internalId)) {
+                                case Some(p) => if (p > 0i32) { progress = p }
+                                case None => ()
+                            }
+                        }
+                        if (lastReadTimeMap.contains(internalId)) {
+                            match (lastReadTimeMap.get(internalId)) {
+                                case Some(t) => lastReadTime = t
+                                case None => ()
+                            }
+                        }
                     }
-                }
-                if (lastReadTimeMap.contains(internalId)) {
-                    match (lastReadTimeMap.get(internalId)) {
-                        case Some(t) => lastReadTime = t
-                        case None => ()
+
+                    let translatedArchiveTags = if (lang.size > 0) {
+                        TagDao.translateTagsString(archive.tags, lang, tagTranslations)
+                    } else {
+                        archive.tags
                     }
-                }
-            }
 
-            // 翻译标签
-            let translatedArchiveTags = if (lang.size > 0) {
-                TagDao.translateTagsString(archive.tags, lang, tagTranslations)
-            } else {
-                archive.tags
+                    w.startObject()
+                    w.writeName("type").writeValue("archive")
+                    w.writeName("arcid").writeValue(archive.id)
+                    w.writeName("archivetype").writeValue(archive.archive_type)
+                    w.writeName("filename").writeValue(archive.filename)
+                    w.writeName("isnew").writeValue(isNew)
+                    w.writeName("isfavorite").writeValue(isFavorite)
+                    w.writeName("favoritetime").writeValue(favoriteTime)
+                    w.writeName("lastreadtime").writeValue(lastReadTime)
+                    w.writeName("pagecount").writeValue(archive.pagecount)
+                    w.writeName("progress").writeValue(progress)
+                    w.writeName("size").writeValue(archive.size())
+                    w.writeName("summary").writeValue(archive.summary)
+                    w.writeName("tags").writeValue(translatedArchiveTags)
+                    w.writeName("title").writeValue(archive.title)
+                    w.endObject()
+                case None => ()
             }
-
-            w.startObject()
-            w.writeName("type").writeValue("archive")
-            w.writeName("arcid").writeValue(archive.id)
-            w.writeName("archivetype").writeValue(archive.archive_type)
-            w.writeName("filename").writeValue(archive.filename)
-            w.writeName("isnew").writeValue(isNew)
-            w.writeName("isfavorite").writeValue(isFavorite)
-            w.writeName("favoritetime").writeValue(favoriteTime)
-            w.writeName("lastreadtime").writeValue(lastReadTime)
-            w.writeName("pagecount").writeValue(archive.pagecount)
-            w.writeName("progress").writeValue(progress)
-            w.writeName("size").writeValue(archive.size())
-            w.writeName("summary").writeValue(archive.summary)
-            w.writeName("tags").writeValue(translatedArchiveTags)
-            w.writeName("title").writeValue(archive.title)
-            w.endObject()
         }
+
         w.endArray()
         w.writeName("draw").writeValue(0)
         w.writeName("recordsFiltered").writeValue(totalCount)
