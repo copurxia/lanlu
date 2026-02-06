@@ -543,7 +543,11 @@ function TankoubonDetailContent() {
 
   const archiveCount = typeof tankoubon.archive_count === 'number' ? tankoubon.archive_count : archives.length;
   const totalPages = typeof tankoubon.pagecount === 'number' ? tankoubon.pagecount : 0;
-  const progressPercent = Math.max(0, Math.min(100, Math.round(tankoubon.progress ?? 0)));
+  const totalProgress = typeof tankoubon.progress === 'number' ? tankoubon.progress : 0;
+  const progressPercent =
+    totalPages > 0 && totalProgress > 0
+      ? Math.max(0, Math.min(100, Math.round((totalProgress / totalPages) * 100)))
+      : 0;
   const coverUrl = `/api/tankoubons/${tankoubon.tankoubon_id}/thumbnail`;
 
   return (
@@ -607,7 +611,9 @@ function TankoubonDetailContent() {
                         {t('tankoubon.progress')} {progressPercent}%
                       </span>
                     </div>
-                    <Progress className="mt-2 h-1.5" value={progressPercent} />
+                    {progressPercent > 0 ? (
+                      <Progress className="mt-2 h-1.5" value={progressPercent} />
+                    ) : null}
                   </div>
 
                   {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}

@@ -68,6 +68,13 @@ export function ArchiveDetailContent() {
       .filter((tag) => tag);
   }, [metadata?.tags]);
 
+  const progressPercent = useMemo(() => {
+    const pagecount = typeof metadata?.pagecount === 'number' ? metadata.pagecount : 0;
+    const progress = typeof metadata?.progress === 'number' ? metadata.progress : 0;
+    if (!pagecount || !progress) return 0;
+    return Math.max(0, Math.min(100, Math.round((progress / pagecount) * 100)));
+  }, [metadata?.pagecount, metadata?.progress]);
+
   // metadata.tags can be translated by backend (via ?lang=).
   // Build a reverse map so hover/click can still target the canonical tag stored in DB.
   const [tagTranslationMap, setTagTranslationMap] = useState<Record<string, string>>({});
@@ -450,14 +457,11 @@ export function ArchiveDetailContent() {
                           </span>
                           <span className="text-muted-foreground/60">•</span>
                           <span className="tabular-nums">
-                            {t('archive.progress')} {Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}%
+                            {t('archive.progress')} {progressPercent}%
                           </span>
                         </div>
-                        {Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0))) > 0 ? (
-                          <Progress
-                            className="mt-2 h-1.5"
-                            value={Math.max(0, Math.min(100, Math.round(metadata.progress ?? 0)))}
-                          />
+                        {progressPercent > 0 ? (
+                          <Progress className="mt-2 h-1.5" value={progressPercent} />
                         ) : null}
                       </div>
 

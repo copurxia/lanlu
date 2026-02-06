@@ -243,7 +243,7 @@ public class ArchiveModel {
      * 获取归档缩略图的文件系统路径
      * 缩略图文件存储在 assets：{ASSET_PATH}/{assetId}.avif
      */
-    public static func getThumbnailFilePath(id: String, _: Int32): String {
+    public static func getThumbnailFilePath(id: String): String {
         let coverAssetId = ArchiveDao.getCoverAssetId(id)
         if (coverAssetId <= 0) { return "" }
         let assetDir = SystemSettingsService.getPath("ASSET_PATH")
@@ -266,7 +266,7 @@ public class ArchiveModel {
      * 检查缩略图文件是否存在
      * 缩略图文件存储在 assets：{ASSET_PATH}/{assetId}.avif
      */
-    public static func thumbnailExists(id: String, _: Int32): Bool {
+    public static func thumbnailExists(id: String): Bool {
         let coverAssetId = ArchiveDao.getCoverAssetId(id)
         if (coverAssetId <= 0) { return false }
         let assetDir = SystemSettingsService.getPath("ASSET_PATH")

@@ -386,17 +386,7 @@ public class ArchiveController {
         }
         
         // 获取查询参数
-        let pageParam = ctx.getQuery("page")
         let noFallbackParam = ctx.getQuery("no_fallback")
-        
-        let page = match (pageParam) {
-            case Some(p) => try {
-                Int32.parse(p)
-            } catch (e: Exception) {
-                1i32  // 默认为第1页
-            }
-            case None => 1i32
-        }
         
         let noFallback = match (noFallbackParam) {
             case Some(p) => p == "true" || p == "1"
@@ -414,7 +404,7 @@ public class ArchiveController {
             return
         }
         
-        println("About to check if thumbnail exists for archive: ${id}, page: ${page}")
+        println("About to check if thumbnail exists for archive: ${id}")
 
         // Prefer serving cover from assets table.
         let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
@@ -433,7 +423,7 @@ public class ArchiveController {
                 let etag = if (archive.thumbhash.size > 0) {
                     "\"${archive.thumbhash}\""
                 } else {
-                    CacheUtils.generateETag("${id}-${page}")
+                    CacheUtils.generateETag(id)
                 }
 
                 // 检查条件请求 - If-None-Match
