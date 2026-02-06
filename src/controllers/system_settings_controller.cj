@@ -34,30 +34,6 @@ public class SystemSettingsController {
     }
 
     /**
-     * 按分类获取设置
-     * GET /api/system/settings/category/{category}
-     */
-    public static func getSettingsByCategory(ctx: JoyContext) {
-        let category = ctx.getParam("category") ?? ""
-        if (category.size == 0) {
-            ctx.status(400)
-            ctx.json("{\"success\":false,\"message\":\"分类参数不能为空\"}")
-            return
-        }
-
-        let logger = getLogger("system_settings_controller")
-        try {
-            let settings = SystemSettingsService.getSettingsByCategory(category)
-            let json = settingsToJson(settings)
-            ctx.json("{\"success\":true,\"data\":${json}}")
-        } catch (e: Exception) {
-            logger.error("获取系统设置失败", ("category", category), ("error", e.message))
-            ctx.status(500)
-            ctx.json("{\"success\":false,\"message\":\"获取系统设置失败: ${e.message}\"}")
-        }
-    }
-
-    /**
      * 更新单个设置
      * PUT /api/system/settings
      */

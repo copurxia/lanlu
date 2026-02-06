@@ -128,30 +128,6 @@ public class CategoryController {
     }
 
     /**
-     * GET /api/categories/{id} - 获取分类详情
-     */
-    public static func getCategoryById(ctx: JoyContext) {
-        let catid = ctx.getParam("id") ?? ""
-
-        match (CategoryDao.getCategoryById(catid)) {
-            case Some(cat) =>
-                let out = ByteBuffer()
-                let w = JsonWriter(out)
-                w.startObject()
-                w.writeName("operation").writeValue("get_category")
-                w.writeName("data")
-                writeCategoryJson(w, cat)
-                w.writeName("success").writeValue(1)
-                w.endObject()
-                w.flush()
-                ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
-            case None =>
-                ctx.status(404)
-                ResponseView.json(ctx, "{\"success\":0,\"error\":\"Category not found\"}")
-        }
-    }
-
-    /**
      * POST /api/categories - 创建分类
      */
     public static func createCategory(ctx: JoyContext) {

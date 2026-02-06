@@ -291,57 +291,6 @@ public class AuthController {
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
-    public static func register(ctx: JoyContext): Unit {
-        let logger = getLogger("auth_controller")
-        try {
-            let requestBody = ctx.readString()
-            var username = ""
-            var password = ""
-            var tokenName = "default"
-
-            if (requestBody.trimAscii().size > 0) {
-                try {
-                    let req = JsonCodec.decode<AuthCredentialsReq>(requestBody)
-                    username = req.username
-                    password = req.password
-                    if (req.tokenName.size > 0) { tokenName = req.tokenName }
-                } catch (e: Exception) {
-                    logger.warn("解析 register 请求JSON失败", ("error", e.message))
-                }
-            }
-
-            if (username.size == 0 || password.size == 0) {
-                reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "username and password are required", None))
-                return
-            }
-
-            let userIdOpt = UserDao.createUser(username, password, AuthConfig.tokenPepper, false)
-            match (userIdOpt) {
-                case Some(userId) =>
-                    match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
-                        case Some(tokenRes) =>
-                            let row = UserDao.getById(userId)
-                            let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
-                            let user = UserView(userId, username.trimAscii(), None, Some(avatarAssetId), None)
-                            let token = TokenView(tokenRes.tokenId, tokenName, tokenRes.prefix, Some(tokenRes.token), None, None, None)
-                            reply<UserTokenPairView>(ctx, HttpStatusCode.STATUS_CREATED, ApiResponse<UserTokenPairView>(201, "created", Some(UserTokenPairView(user, token))))
-                        case None =>
-                            reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to create token", None))
-                    }
-                case None =>
-                    // 可能是重复用户名或参数不合法
-                    let existing = UserDao.getByUsername(username)
-                    if (existing.id > 0) {
-                        reply<String>(ctx, UInt16(409), ApiResponse<String>(409, "username already exists", None))
-                    } else {
-                        reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "invalid username or password", None))
-                    }
-            }
-        } catch (e: Exception) {
-            reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, e.message, None))
-        }
-    }
-
     public static func login(ctx: JoyContext): Unit {
         let logger = getLogger("auth_controller")
         try {

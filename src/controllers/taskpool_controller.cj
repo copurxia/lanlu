@@ -156,21 +156,6 @@ public class TaskPoolController {
     }
 
     /**
-     * 批量取消任务（按 group_id）
-     */
-    public static func cancelTasksByGroup(ctx: JoyContext) {
-        let groupId = ctx.getParam("groupId") ?? ""
-        if (groupId.size == 0) {
-            ctx.status(400)
-            ctx.json("{\"error\":\"Invalid group ID\"}")
-            return
-        }
-
-        let cancelledCount = TaskDao.updateTaskStatusByGroupId(groupId, "stopped", "Tasks cancelled by user")
-        ctx.json("{\"success\":1,\"cancelled_count\":${cancelledCount}}")
-    }
-
-    /**
      * 重试失败的任务
      */
     public static func retryTask(ctx: JoyContext) {
@@ -217,31 +202,6 @@ public class TaskPoolController {
     }
 
     /**
-     * 获取任务监控指标
-     */
-    public static func getMetrics(ctx: JoyContext) {
-        // 获取各状态的任务数量
-        let metrics = calculateMetrics()
-        ctx.json(metrics)
-    }
-
-    /**
-     * 按 group_id 查询任务列表
-     */
-    public static func getTasksByGroup(ctx: JoyContext) {
-        let groupId = ctx.getParam("groupId") ?? ""
-        if (groupId.size == 0) {
-            ctx.status(400)
-            ctx.json("{\"error\":\"Invalid group ID\"}")
-            return
-        }
-
-        let tasks = TaskDao.getTasksByGroupId(groupId)
-        let json = tasksArrayToJson(tasks)
-        ctx.json(json)
-    }
-
-    /**
      * 将任务数据转换为JSON
      */
     private static func writeTaskDataJson(w: JsonWriter, task: TaskData): Unit {
@@ -263,34 +223,6 @@ public class TaskPoolController {
         w.writeName("started_at").writeValue(task.startedAt)
         w.writeName("completed_at").writeValue(task.completedAt)
         w.endObject()
-    }
-
-    /**
-     * 将任务数组转换为JSON
-     */
-    private static func tasksArrayToJson(tasks: Array<TaskData>): String {
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startArray()
-        for (t in tasks) {
-            writeTaskDataJson(w, t)
-        }
-        w.endArray()
-        w.flush()
-        return String.fromUtf8(readToEnd(out))
-    }
-
-    /**
-     * 计算任务监控指标
-     */
-    private static func calculateMetrics(): String {
-        // 这里简化实现，实际应该从数据库查询统计信息
-        // 为了性能考虑，可以考虑缓存这些指标
-        return """
-            {
-            "message":"Metrics calculation not fully implemented yet",
-            "note":"Use database queries to get real-time statistics"
-            }"""
     }
 
 }
