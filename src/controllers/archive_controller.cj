@@ -225,13 +225,20 @@ public class ArchiveController {
             case None => ()
         }
 
-        var result = "{\"filtered\":${tankoubons.size},\"result\":["
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("filtered").writeValue(tankoubons.size)
+        w.writeName("result")
+        w.startArray()
         for (i in 0..tankoubons.size) {
-            if (i > 0) { result += "," }
-            result += tankoubons[i].toJson()
+            tankoubons[i].writeJson(w)
         }
-        result += "],\"total\":${tankoubons.size}}"
-        ResponseView.json(ctx, result)
+        w.endArray()
+        w.writeName("total").writeValue(tankoubons.size)
+        w.endObject()
+        w.flush()
+        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
     
     // PUT /api/archives/{id}/metadata

@@ -4,7 +4,9 @@ import cjoy.*
 import lanlu.models.*
 import lanlu.dao.*
 import lanlu.middleware.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.net.http.HttpStatusCode
+import stdx.encoding.json.stream.*
 
 /**
  * 单行本控制器
@@ -19,14 +21,20 @@ public class TankoubonController {
             case Some(userId) => TankoubonModel.getAllTankoubonsWithUser(userId)
             case None => TankoubonModel.getAllTankoubonsWithUser(0)
         }
-        var result = "{\"filtered\":${tankoubons.size},\"result\":["
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("filtered").writeValue(tankoubons.size)
+        w.writeName("result")
+        w.startArray()
         for (i in 0..tankoubons.size) {
-            if (i > 0) { result += "," }
-            result += tankoubons[i].toJson()
+            tankoubons[i].writeJson(w)
         }
-        result += "],\"total\":${tankoubons.size}}"
-        
-        ctx.json(result)
+        w.endArray()
+        w.writeName("total").writeValue(tankoubons.size)
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
     }
     
     /**
@@ -52,8 +60,16 @@ public class TankoubonController {
             case None => tankoubon.isfavorite = false
         }
         
-        var result = "{\"filtered\":${tankoubon.archives.size},\"result\":${tankoubon.toJson()},\"total\":${tankoubon.archives.size}}"
-        ctx.json(result)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("filtered").writeValue(tankoubon.archives.size)
+        w.writeName("result")
+        tankoubon.writeJson(w)
+        w.writeName("total").writeValue(tankoubon.archives.size)
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
     }
     
     /**

@@ -2,6 +2,8 @@ package lanlu.models
 
 import lanlu.dao.*
 import std.collection.*
+import std.io.{ByteBuffer, readToEnd}
+import stdx.encoding.json.stream.*
 
 /**
  * 单行本数据模型
@@ -33,26 +35,57 @@ public class Tankoubon {
     /**
      * 转换为JSON字符串
      */
-    public func toJson(): String {
-        var archivesJson = "["
-        var isFirst = true
+    public func writeJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("tankoubon_id").writeValue(id)
+        w.writeName("name").writeValue(name)
+        w.writeName("summary").writeValue(summary)
+        w.writeName("tags").writeValue(tags)
+        w.writeName("cover_asset_id").writeValue(cover_asset_id)
+        w.writeName("archives")
+        w.startArray()
         for (archive in archives) {
-            if (!isFirst) {
-                archivesJson += ","
-            }
-            archivesJson += "\"${archive}\""
-            isFirst = false
+            w.writeValue(archive)
         }
-        archivesJson += "]"
+        w.endArray()
+        w.writeName("archive_count").writeValue(archive_count)
+        w.writeName("pagecount").writeValue(pagecount)
+        w.writeName("progress").writeValue(progress)
+        w.writeName("lastreadtime").writeValue(last_read_time)
+        w.writeName("isnew").writeValue(isnew)
+        w.writeName("isfavorite").writeValue(isfavorite)
+        w.endObject()
+    }
 
-        return "{\"tankoubon_id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"cover_asset_id\":${cover_asset_id},\"archives\":${archivesJson},\"archive_count\":${archive_count},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"isfavorite\":${isfavorite}}"
+    public func toJson(): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        writeJson(w)
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     /**
      * 转换为带聚合数据的JSON字符串（用于搜索结果）
      */
     public func toAggregatedJson(): String {
-        return "{\"id\":\"${id}\",\"name\":\"${name}\",\"summary\":\"${summary}\",\"tags\":\"${tags}\",\"cover_asset_id\":${cover_asset_id},\"pagecount\":${pagecount},\"progress\":${progress},\"lastreadtime\":\"${last_read_time}\",\"isnew\":${isnew},\"archive_count\":${archive_count},\"isfavorite\":${isfavorite}}"
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("id").writeValue(id)
+        w.writeName("name").writeValue(name)
+        w.writeName("summary").writeValue(summary)
+        w.writeName("tags").writeValue(tags)
+        w.writeName("cover_asset_id").writeValue(cover_asset_id)
+        w.writeName("pagecount").writeValue(pagecount)
+        w.writeName("progress").writeValue(progress)
+        w.writeName("lastreadtime").writeValue(last_read_time)
+        w.writeName("isnew").writeValue(isnew)
+        w.writeName("archive_count").writeValue(archive_count)
+        w.writeName("isfavorite").writeValue(isfavorite)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 }
 
