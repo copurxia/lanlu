@@ -12,6 +12,7 @@ export interface Archive {
   archivetype: string;
   lastreadtime: number;
   size: number;
+  cover_asset_id?: number;
 }
 
 export interface SearchResponse {
@@ -61,6 +62,7 @@ export interface ArchiveMetadata {
   lastreadtime: number;
   file_size: number;
   size: number;
+  cover_asset_id?: number;
   archivetype: string;
   created_at: string;
   updated_at: string;

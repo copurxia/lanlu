@@ -19,6 +19,7 @@ public class ArchiveData {
     public var filename: String = ""
     public var summary: String = ""
     public var thumbhash: String = ""
+    public var cover_asset_id: Int64 = 0
     public var created_at: String = ""
     public var updated_at: String = ""
     public var relative_path: String = ""
@@ -157,7 +158,7 @@ public class ArchiveDao {
                 var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -168,13 +169,14 @@ public class ArchiveDao {
                                 archive.filename = rs.getOrNull<String>(2) ?? ""
                                 archive.summary = rs.getOrNull<String>(3) ?? ""
                                 archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.created_at = rs.getOrNull<String>(5) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                                archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
-                                archive.category_id = rs.getOrNull<Int64>(11) ?? 0
+                                archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                                archive.created_at = rs.getOrNull<String>(6) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
+                                archive.category_id = rs.getOrNull<Int64>(12) ?? 0
                                 archives.add(archive)
                             }
                         } finally {
@@ -206,7 +208,7 @@ public class ArchiveDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives WHERE arcid = ?")
+                        "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives WHERE arcid = ?")
                     try {
                         stmt.set(0, id)
                         let rs = stmt.query()
@@ -218,13 +220,14 @@ public class ArchiveDao {
                                 archive.filename = rs.getOrNull<String>(2) ?? ""
                                 archive.summary = rs.getOrNull<String>(3) ?? ""
                                 archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.created_at = rs.getOrNull<String>(5) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                                archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
-                                archive.category_id = rs.getOrNull<Int64>(11) ?? 0
+                                archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                                archive.created_at = rs.getOrNull<String>(6) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
+                                archive.category_id = rs.getOrNull<Int64>(12) ?? 0
                                 return archive
                             }
                         } finally {
@@ -574,7 +577,7 @@ public class ArchiveDao {
                 }
 
                 // 然后查询分页数据，使用archives_with_tags视图获取标签信息
-                var sql = "SELECT id, arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags"
+                var sql = "SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags"
 
                 // 使用相同的 WHERE 条件（包含相关度阈值过滤）
                 if (whereConditions.size > 0 || filter.size > 0) {
@@ -662,13 +665,14 @@ public class ArchiveDao {
                             archive.title = rs.getOrNull<String>(3) ?? ""
                             archive.summary = rs.getOrNull<String>(4) ?? ""
                             archive.thumbhash = rs.getOrNull<String>(5) ?? ""
-                            archive.created_at = rs.getOrNull<String>(6) ?? ""
-                            archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                            archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                            archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                            archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
-                            archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
-                            archive.tags = rs.getOrNull<String>(12) ?? ""
+                            archive.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
+                            archive.created_at = rs.getOrNull<String>(7) ?? ""
+                            archive.updated_at = rs.getOrNull<String>(8) ?? ""
+                            archive.relative_path = rs.getOrNull<String>(9) ?? ""
+                            archive.file_size = rs.getOrNull<Int64>(10) ?? 0
+                            archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
+                            archive.archive_type = rs.getOrNull<String>(12) ?? "archive"
+                            archive.tags = rs.getOrNull<String>(13) ?? ""
                             archives.add(archive)
                         } catch (e: Exception) {
                             getLogger("archive_dao").error("读取字段时出错", ("error", e.message))
@@ -1041,7 +1045,7 @@ public class ArchiveDao {
                 try {
                     var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE thumbhash = '' OR thumbhash IS NULL ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE thumbhash = '' OR thumbhash IS NULL ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -1052,12 +1056,13 @@ public class ArchiveDao {
                                 archive.filename = rs.getOrNull<String>(2) ?? ""
                                 archive.summary = rs.getOrNull<String>(3) ?? ""
                                 archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.created_at = rs.getOrNull<String>(5) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                                archive.category_id = rs.getOrNull<Int64>(10) ?? 0
+                                archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                                archive.created_at = rs.getOrNull<String>(6) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                                archive.category_id = rs.getOrNull<Int64>(11) ?? 0
                                 archives.add(archive)
                             }
                         } finally {
@@ -1119,7 +1124,7 @@ public class ArchiveDao {
             case Some(conn) =>
                 
                 try {
-                let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE relative_path = ?")
+                let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE relative_path = ?")
                 stmt.set(0, filePath)
                 let rs = stmt.query()
 
@@ -1130,12 +1135,13 @@ public class ArchiveDao {
                     archive.filename = rs.getOrNull<String>(2) ?? ""
                     archive.summary = rs.getOrNull<String>(3) ?? ""
                     archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                    archive.created_at = rs.getOrNull<String>(5) ?? ""
-                    archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                    archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                    archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                    archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                    archive.category_id = rs.getOrNull<Int64>(10) ?? 0
+                        archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                        archive.created_at = rs.getOrNull<String>(6) ?? ""
+                        archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                        archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                        archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                        archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                        archive.category_id = rs.getOrNull<Int64>(11) ?? 0
 
                     conn.close()
                     return Some(archive)
@@ -1163,7 +1169,7 @@ public class ArchiveDao {
             case Some(conn) =>
                 
                 try {
-                    let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE relative_path = ? AND filename = ?")
+                    let stmt = conn.prepareStatement("SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, category_id FROM archives WHERE relative_path = ? AND filename = ?")
                     try {
                         stmt.set(0, relativePath)
                         stmt.set(1, filename)
@@ -1176,12 +1182,13 @@ public class ArchiveDao {
                                 archive.filename = rs.getOrNull<String>(2) ?? ""
                                 archive.summary = rs.getOrNull<String>(3) ?? ""
                                 archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.created_at = rs.getOrNull<String>(5) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                                archive.category_id = rs.getOrNull<Int64>(10) ?? 0
+                                archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                                archive.created_at = rs.getOrNull<String>(6) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                                archive.category_id = rs.getOrNull<Int64>(11) ?? 0
                                 return Some(archive)
                             }
                             return None
@@ -1397,7 +1404,7 @@ public class ArchiveDao {
                 try {
                 // 使用 archives_with_tags 视图获取包含标签的数据
                 let stmt = conn.prepareStatement(
-                    "SELECT arcid, filename, title, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags WHERE arcid = ?")
+                    "SELECT arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags WHERE arcid = ?")
                 stmt.set(0, id)
                 let rs = stmt.query()
 
@@ -1408,13 +1415,14 @@ public class ArchiveDao {
                     archive.title = rs.getOrNull<String>(2) ?? ""
                     archive.summary = rs.getOrNull<String>(3) ?? ""
                     archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                    archive.created_at = rs.getOrNull<String>(5) ?? ""
-                    archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                    archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                    archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                    archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                    archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
-                    archive.tags = rs.getOrNull<String>(11) ?? ""
+                    archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                    archive.created_at = rs.getOrNull<String>(6) ?? ""
+                    archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                    archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                    archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                    archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                    archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
+                    archive.tags = rs.getOrNull<String>(12) ?? ""
 
                     // 关闭查询的资源
                     rs.close()

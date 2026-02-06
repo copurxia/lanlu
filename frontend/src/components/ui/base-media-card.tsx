@@ -17,6 +17,7 @@ export interface BaseMediaCardProps {
   id: string
   title: string
   thumbnailId: string
+  thumbnailAssetId?: number
   thumbnailUrl?: string
   tags?: string
   summary?: string
@@ -45,6 +46,7 @@ export function BaseMediaCard({
   id,
   title,
   thumbnailId,
+  thumbnailAssetId,
   thumbnailUrl,
   tags,
   summary,
@@ -106,7 +108,9 @@ export function BaseMediaCard({
   const readerPath = `/reader?id=${thumbnailId}`
   const imageSrc = thumbnailUrl && thumbnailUrl.trim().length > 0
     ? thumbnailUrl
-    : ArchiveService.getThumbnailUrl(thumbnailId)
+    : ArchiveService.getAssetUrl(thumbnailAssetId)
+
+  const hasImage = imageSrc.trim().length > 0
 
   return (
     <div
@@ -125,7 +129,7 @@ export function BaseMediaCard({
     >
       <Card className="overflow-hidden transition-shadow hover:shadow-lg">
         <div className="aspect-[3/4] bg-muted relative">
-          {!imageError ? (
+          {!imageError && hasImage ? (
             <Image
               src={imageSrc}
               alt={title}

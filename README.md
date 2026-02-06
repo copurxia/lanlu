@@ -134,7 +134,6 @@ docker run -d \
 | `/api/archives` | GET | 归档列表 |
 | `/api/archives/:id` | GET | 归档详情 |
 | `/api/archives/:id/files` | GET | 归档文件列表 |
-| `/api/archives/:id/thumbnail` | GET | 归档缩略图 |
 | `/api/search` | GET | 搜索归档 |
 | `/api/tags` | GET | 标签列表 |
 | `/api/tankoubons` | GET | 合集列表 |

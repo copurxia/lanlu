@@ -18,6 +18,7 @@ export function ArchiveCard({ archive, index = 0, priority = false }: ArchiveCar
       id={archive.arcid}
       title={archive.title}
       thumbnailId={archive.arcid}
+      thumbnailAssetId={archive.cover_asset_id}
       tags={archive.tags}
       summary={archive.summary}
       pagecount={archive.pagecount}

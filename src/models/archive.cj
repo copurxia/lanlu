@@ -18,6 +18,7 @@ public class Archive {
     public var filename: String = ""
     public var summary: String = ""
     public var thumbhash: String = ""
+    public var cover_asset_id: Int64 = 0
     public var created_at: String = ""
     public var updated_at: String = ""
     public var relative_path: String = ""
@@ -74,7 +75,7 @@ public class ArchiveModel {
                 var archives: ArrayList<Archive> = ArrayList<Archive>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives ORDER BY id")
+                        "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -85,12 +86,13 @@ public class ArchiveModel {
                                 archive.filename = rs.getOrNull<String>(2) ?? ""
                                 archive.summary = rs.getOrNull<String>(3) ?? ""
                                 archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.created_at = rs.getOrNull<String>(5) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(6) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(7) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(8) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(9) ?? 0
-                                archive.archive_type = rs.getOrNull<String>(10) ?? "archive"
+                                archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
+                                archive.created_at = rs.getOrNull<String>(6) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(7) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(8) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(9) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
                                 archives.add(archive)
                             }
                         } finally {
@@ -123,6 +125,7 @@ public class ArchiveModel {
         archive.filename = archiveData.filename
         archive.summary = archiveData.summary
         archive.thumbhash = archiveData.thumbhash
+        archive.cover_asset_id = archiveData.cover_asset_id
         archive.created_at = archiveData.created_at
         archive.updated_at = archiveData.updated_at
         archive.relative_path = archiveData.relative_path
@@ -157,6 +160,7 @@ public class ArchiveModel {
             archive.filename = data.filename
             archive.summary = data.summary
             archive.thumbhash = data.thumbhash
+            archive.cover_asset_id = data.cover_asset_id
             archive.created_at = data.created_at
             archive.updated_at = data.updated_at
             archive.relative_path = data.relative_path
@@ -211,6 +215,7 @@ public class ArchiveModel {
             archive.filename = data.filename
             archive.summary = data.summary
             archive.thumbhash = data.thumbhash
+            archive.cover_asset_id = data.cover_asset_id
             archive.created_at = data.created_at
             archive.updated_at = data.updated_at
             archive.relative_path = data.relative_path
@@ -236,7 +241,9 @@ public class ArchiveModel {
      * 获取归档缩略图
      */
     public static func getArchiveThumbnail(id: String): String {
-        return "/api/archives/${id}/thumbnail"
+        let coverAssetId = ArchiveDao.getCoverAssetId(id)
+        if (coverAssetId <= 0) { return "" }
+        return "/api/assets/${coverAssetId}"
     }
 
     /**

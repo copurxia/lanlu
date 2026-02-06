@@ -257,7 +257,7 @@ public class UserStatsDao {
                 
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash,
+                        SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash, awt.cover_asset_id,
                                awt.created_at, awt.updated_at, awt.relative_path, awt.file_size,
                                awt.pagecount, uas.updated_at as last_read_time,
                                COALESCE(uas.progress, 0) as progress, awt.tags
@@ -308,7 +308,7 @@ public class UserStatsDao {
                 
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash,
+                        SELECT awt.arcid, awt.filename, awt.title, awt.summary, awt.thumbhash, awt.cover_asset_id,
                                awt.created_at, awt.updated_at, awt.relative_path, awt.file_size,
                                awt.pagecount,
                                COALESCE(uas.updated_at, '1970-01-01 00:00:00') as last_read_time,

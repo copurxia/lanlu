@@ -820,6 +820,7 @@ public class V001_InitialSchema <: Migration {
                 a.title,
                 a.summary,
                 a.thumbhash,
+                a.cover_asset_id,
                 a.created_at,
                 a.updated_at,
                 a.relative_path,
@@ -842,7 +843,7 @@ public class V001_InitialSchema <: Migration {
             LEFT JOIN archive_tags atg ON atg.archive_id = a.id
             LEFT JOIN tags t ON t.id = atg.tag_id
             GROUP BY
-                a.id, a.arcid, a.filename, a.title, a.summary, a.thumbhash,
+                a.id, a.arcid, a.filename, a.title, a.summary, a.thumbhash, a.cover_asset_id,
                 a.created_at, a.updated_at, a.relative_path, a.file_size,
                 a.pagecount, a.archive_type, a.category_id, a.title_tsv
         """)

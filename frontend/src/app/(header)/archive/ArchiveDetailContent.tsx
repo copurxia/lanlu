@@ -424,14 +424,20 @@ export function ArchiveDetailContent() {
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">
                     <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
-                      <Image
-                        src={`/api/archives/${metadata.arcid}/thumbnail`}
-                        alt={metadata.title || ''}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
-                        unoptimized
-                      />
+                      {metadata.cover_asset_id ? (
+                        <Image
+                          src={`/api/assets/${metadata.cover_asset_id}`}
+                          alt={metadata.title || ''}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
+                          unoptimized
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                          {t('archive.noCover')}
+                        </div>
+                      )}
                     </div>
 
                     <div className="min-w-0 flex-1">

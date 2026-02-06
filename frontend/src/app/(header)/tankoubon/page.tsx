@@ -140,14 +140,20 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
 
       <div className="flex gap-3 sm:gap-4">
         <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
-          <Image
-            src={ArchiveService.getThumbnailUrl(archive.arcid)}
-            alt={archive.title}
-            fill
-            className="object-cover"
-            sizes="96px"
-            decoding="async"
-          />
+          {archive.cover_asset_id ? (
+            <Image
+              src={`/api/assets/${archive.cover_asset_id}`}
+              alt={archive.title}
+              fill
+              className="object-cover"
+              sizes="96px"
+              decoding="async"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
+              {t('archive.noCover')}
+            </div>
+          )}
         </div>
 
         <div className="min-w-0 flex-1 pr-28">
@@ -680,7 +686,9 @@ function TankoubonDetailContent() {
     totalPages > 0 && totalProgress > 0
       ? Math.max(0, Math.min(100, Math.round((totalProgress / totalPages) * 100)))
       : 0;
-  const coverUrl = `/api/tankoubons/${tankoubon.tankoubon_id}/thumbnail`;
+  const coverUrl = typeof tankoubon.cover_asset_id === 'number' && tankoubon.cover_asset_id > 0
+    ? `/api/assets/${tankoubon.cover_asset_id}`
+    : '';
 
   return (
     <div className="min-h-dvh bg-background pb-20 lg:pb-0">
@@ -705,16 +713,20 @@ function TankoubonDetailContent() {
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-4">
                   <div className="relative h-44 w-32 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-48 sm:w-36 md:h-56 md:w-40 lg:h-60 lg:w-44">
-                    <Image
-                      src={coverUrl}
-                      alt={tankoubon.name}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 640px) 128px, (max-width: 768px) 144px, (max-width: 1024px) 160px, 176px"
-                      // Tankoubon thumbnail endpoint may redirect (to assets or archive thumbnail),
-                      // and may serve non-avif images; bypass optimizer to avoid strict content-type checks.
-                      unoptimized
-                    />
+                    {coverUrl ? (
+                      <Image
+                        src={coverUrl}
+                        alt={tankoubon.name}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 128px, (max-width: 768px) 144px, (max-width: 1024px) 160px, 176px"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                        {t('archive.noCover')}
+                      </div>
+                    )}
                   </div>
 
                   <div className="min-w-0 flex-1">

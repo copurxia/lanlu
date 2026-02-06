@@ -32,6 +32,7 @@ public class TankoubonAggregatedData {
     public var tankoubon_id: String = ""
     public var name: String = ""
     public var summary: String = ""
+    public var cover_asset_id: Int64 = 0
     public var tags: String = ""  // 合并的标签：tankoubon tags + 所有 archive tags
     public var pagecount: Int32 = 0  // 所有归档的页数总和
     public var progress: Int32 = 0  // 所有归档的平均进度
@@ -801,6 +802,7 @@ public class TankoubonDao {
                             t.tankoubon_id,
                             t.name,
                             t.summary,
+                            COALESCE(t.cover_asset_id, 0) as cover_asset_id,
                             COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
                             COUNT(a.id)::INT as archive_count,
                             COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
@@ -811,7 +813,7 @@ public class TankoubonDao {
                         JOIN archives a ON a.id = ta.archive_id
                         LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
                         WHERE t.tankoubon_id = ?
-                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary
+                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary, t.cover_asset_id
                     """)
                     try {
                         stmt.set(0, userId)
@@ -825,11 +827,12 @@ public class TankoubonDao {
                                 data.tankoubon_id = rs.getOrNull<String>(0) ?? ""
                                 data.name = rs.getOrNull<String>(1) ?? ""
                                 data.summary = rs.getOrNull<String>(2) ?? ""
-                                data.pagecount = rs.getOrNull<Int32>(3) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(4) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(5) ?? ""
-                                data.progress = rs.getOrNull<Int32>(6) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(7) ?? true
+                                data.cover_asset_id = rs.getOrNull<Int64>(3) ?? 0
+                                data.pagecount = rs.getOrNull<Int32>(4) ?? 0
+                                data.archive_count = rs.getOrNull<Int32>(5) ?? 0
+                                data.last_read_time = rs.getOrNull<String>(6) ?? ""
+                                data.progress = rs.getOrNull<Int32>(7) ?? 0
+                                data.isnew = rs.getOrNull<Bool>(8) ?? true
                                 dataOpt = Some(data)
                             }
                         } finally {
@@ -1193,6 +1196,7 @@ public class TankoubonDao {
                             t.tankoubon_id,
                             t.name,
                             t.summary,
+                            COALESCE(t.cover_asset_id, 0) as cover_asset_id,
                             COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
                             COUNT(a.id)::INT as archive_count,
                             COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
@@ -1203,7 +1207,7 @@ public class TankoubonDao {
                         JOIN archives a ON a.id = ta.archive_id
                         LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
                         WHERE t.tankoubon_id IN (${placeholders})
-                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary
+                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary, t.cover_asset_id
                     """)
                     try {
                         stmt.set(0, userId)
@@ -1221,11 +1225,12 @@ public class TankoubonDao {
                                 data.tankoubon_id = rs.getOrNull<String>(0) ?? ""
                                 data.name = rs.getOrNull<String>(1) ?? ""
                                 data.summary = rs.getOrNull<String>(2) ?? ""
-                                data.pagecount = rs.getOrNull<Int32>(3) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(4) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(5) ?? ""
-                                data.progress = rs.getOrNull<Int32>(6) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(7) ?? true
+                                data.cover_asset_id = rs.getOrNull<Int64>(3) ?? 0
+                                data.pagecount = rs.getOrNull<Int32>(4) ?? 0
+                                data.archive_count = rs.getOrNull<Int32>(5) ?? 0
+                                data.last_read_time = rs.getOrNull<String>(6) ?? ""
+                                data.progress = rs.getOrNull<Int32>(7) ?? 0
+                                data.isnew = rs.getOrNull<Bool>(8) ?? true
                                 tempData[data.tankoubon_id] = data
                             }
                         } finally {

@@ -135,9 +135,11 @@ export class ArchiveService {
     await apiClient.delete(`/api/archives/${id}`);
   }
 
-  static getThumbnailUrl(id: string): string {
-    // 使用相对路径，因为前端和后端部署在一起
-    return `/api/archives/${id}/thumbnail`;
+  static getAssetUrl(assetId?: number): string {
+    if (!assetId || assetId <= 0) {
+      return '';
+    }
+    return `/api/assets/${assetId}`;
   }
 
   static getPageUrl(id: string, path: string): string {

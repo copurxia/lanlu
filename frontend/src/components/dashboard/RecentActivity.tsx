@@ -17,6 +17,7 @@ interface RecentActivitySectionProps {
 }
 
 function RecentActivitySection({ title, icon, archives, loading = false, emptyMessage }: RecentActivitySectionProps) {
+  const { t } = useLanguage();
   if (loading) {
     return (
       <Card>
@@ -58,13 +59,19 @@ function RecentActivitySection({ title, icon, archives, loading = false, emptyMe
                 className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors"
               >
                 <div className="relative w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-muted">
-                  <Image
-                    src={`/api/archives/${archive.arcid}/thumbnail`}
-                    alt={archive.title}
-                    fill
-                    className="object-cover"
-                    sizes="48px"
-                  />
+                  {archive.cover_asset_id ? (
+                    <Image
+                      src={`/api/assets/${archive.cover_asset_id}`}
+                      alt={archive.title}
+                      fill
+                      className="object-cover"
+                      sizes="48px"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
+                      {t('archive.noCover')}
+                    </div>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium leading-tight break-words">{archive.title}</p>

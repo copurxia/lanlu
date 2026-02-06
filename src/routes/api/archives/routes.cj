@@ -27,12 +27,6 @@ public class ArchiveRoutes {
             ArchiveController.updateMetadata(ctx)
         })
 
-        // 获取归档缩略图
-        router.get("/api/archives/{id}/thumbnail", { ctx =>
-            if (!AuthMiddleware.requiredAuth(ctx)) { return }
-            ArchiveController.getThumbnail(ctx)
-        })
-
         // 获取归档文件列表
         router.get("/api/archives/{id}/files", { ctx =>
             if (!AuthMiddleware.requiredAuth(ctx)) { return }

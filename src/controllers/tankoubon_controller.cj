@@ -592,42 +592,4 @@ public class TankoubonController {
         }
     }
 
-    /**
-     * GET /api/tankoubons/{id}/thumbnail
-     * - If Tankoubon cover_asset_id is set, redirect to /api/assets/{cover_asset_id}
-     * - Else fallback to first archive thumbnail
-     */
-    public static func getThumbnail(ctx: JoyContext): Unit {
-        let id = ctx.getParam("id") ?? ""
-        if (id.size == 0) {
-            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ctx.json("{\"success\":0,\"error\":\"No tankoubon ID specified\"}")
-            return
-        }
-
-        let tank = TankoubonModel.getTankoubonById(id)
-        if (tank.id.size == 0) {
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ctx.json("{\"success\":0,\"error\":\"Tankoubon not found\"}")
-            return
-        }
-
-        let coverAssetId = TankoubonDao.getTankoubonCoverAssetId(id)
-        if (coverAssetId > 0) {
-            // Redirect to assets endpoint (supports arbitrary content types).
-            ctx.status(HttpStatusCode.STATUS_FOUND)
-            ctx.header("Location", "/api/assets/${coverAssetId}")
-            return
-        }
-
-        if (tank.archives.size > 0) {
-            ctx.status(HttpStatusCode.STATUS_FOUND)
-            ctx.header("Location", "/api/archives/${tank.archives[0]}/thumbnail")
-            return
-        }
-
-        // No cover and no archives: redirect to placeholder archive thumbnail (will fallback to placeholder).
-        ctx.status(HttpStatusCode.STATUS_FOUND)
-        ctx.header("Location", "/api/archives/unknown/thumbnail")
-    }
 }

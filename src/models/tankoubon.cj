@@ -190,6 +190,9 @@ public class TankoubonModel {
                 if (agg.tags.size > 0) {
                     tankoubon.tags = agg.tags
                 }
+                if (agg.cover_asset_id > 0) {
+                    tankoubon.cover_asset_id = agg.cover_asset_id
+                }
                 tankoubon.pagecount = agg.pagecount
                 tankoubon.archive_count = agg.archive_count
                 tankoubon.progress = agg.progress
@@ -207,6 +210,7 @@ public class TankoubonModel {
         match (aggDataOpt) {
             case Some(aggData) =>
                 let tankoubon = Tankoubon(aggData.tankoubon_id, aggData.name, aggData.summary, aggData.tags, [])
+                tankoubon.cover_asset_id = aggData.cover_asset_id
                 tankoubon.pagecount = aggData.pagecount
                 tankoubon.progress = aggData.progress
                 tankoubon.last_read_time = aggData.last_read_time
