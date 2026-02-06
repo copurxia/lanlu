@@ -555,8 +555,8 @@ function TankoubonDetailContent() {
                     </h1>
                   </div>
 
-                  {/* Mobile: compact stats under the title (desktop keeps the cards below). */}
-                  <div className="sm:hidden mt-2">
+                  {/* Keep stats directly under title on all screen sizes (same as mobile). */}
+                  <div className="mt-2">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       <span className="tabular-nums">
                         {t('tankoubon.archiveCount')} {archiveCount}
@@ -638,23 +638,7 @@ function TankoubonDetailContent() {
                 ) : null}
               </div>
 
-              <div className="mt-4 hidden sm:grid gap-2 sm:grid-cols-3">
-                <div className="rounded-xl border bg-background/60 p-3">
-                  <p className="text-xs text-muted-foreground">{t('tankoubon.archiveCount')}</p>
-                  <p className="mt-0.5 text-xl font-semibold tabular-nums">{archiveCount}</p>
-                </div>
-                <div className="rounded-xl border bg-background/60 p-3">
-                  <p className="text-xs text-muted-foreground">{t('tankoubon.totalPagesLabel')}</p>
-                  <p className="mt-0.5 text-xl font-semibold tabular-nums">{totalPages}</p>
-                </div>
-                <div className="rounded-xl border bg-background/60 p-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-muted-foreground">{t('tankoubon.progress')}</p>
-                    <p className="text-xs text-muted-foreground tabular-nums">{progressPercent}%</p>
-                  </div>
-                  <Progress className="mt-1.5" value={progressPercent} />
-                </div>
-              </div>
+
             </div>
           </div>
         </div>
