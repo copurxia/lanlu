@@ -48,6 +48,7 @@ public class MetadataPluginCallbackRunner {
         let newTitle = parsed.title
         var newTags = parsed.tags
         let newSummary = parsed.summary
+        let archivePatches = parsed.archives
         // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
         // Map it to archives.updated_at and prevent it from being stored as a normal tag.
         let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(newTags)
@@ -77,6 +78,10 @@ public class MetadataPluginCallbackRunner {
                             let _ = TankoubonDao.updateTankoubonTags(targetId, newTags)
                         }
                     }
+
+                    // Optional: plugin can return per-archive metadata patches for this Tankoubon.
+                    let (patchedCount, skippedCount) = applyArchivePatchesForTankoubon(targetId, archivePatches, taskId)
+                    TaskIO.appendLog(taskId, "archive patches applied: patched=${patchedCount}, skipped=${skippedCount}")
             }
         } else {
             // Default: archive write-back.
@@ -118,9 +123,90 @@ public class MetadataPluginCallbackRunner {
 
         // 完成任务
         TaskModel.updateTaskProgress(taskId, 100, "元数据回调完成")
-        let resultJson = buildResultJson(targetId, namespace, newTitle, newSummary, newTags, output)
+        let resultJson = buildResultJson(targetId, namespace, newTitle, newSummary, newTags, output, archivePatches.size)
         TaskModel.completeTask(taskId, "metadata_plugin_callback completed")
         TaskIO.writeOutput(taskId, resultJson)
+    }
+
+    private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64): (Int64, Int64) {
+        if (patches.size == 0) {
+            return (0, 0)
+        }
+
+        let memberArchiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+        if (memberArchiveIds.size == 0) {
+            return (0, Int64(patches.size))
+        }
+
+        var memberSet = HashSet<String>()
+        for (arcid in memberArchiveIds) {
+            memberSet.add(arcid)
+        }
+
+        var patched: Int64 = 0
+        var skipped: Int64 = 0
+
+        for (patch in patches) {
+            var targetArchiveId = patch.archiveId.trimAscii()
+
+            // Match by volume number when archive id is absent.
+            if (targetArchiveId.size == 0 && patch.volumeNo > 0) {
+                let idx = Int64(patch.volumeNo - 1)
+                if (idx >= 0 && idx < Int64(memberArchiveIds.size)) {
+                    targetArchiveId = memberArchiveIds[idx]
+                }
+            }
+
+            if (targetArchiveId.size == 0 || !memberSet.contains(targetArchiveId)) {
+                skipped += 1
+                TaskIO.appendLog(taskId, "skip archive patch: unresolved archive target (archive_id=${patch.archiveId}, volume_no=${patch.volumeNo.toString()})")
+                continue
+            }
+
+            var archive = ArchiveDao.getArchiveById(targetArchiveId)
+            if (archive.id.size == 0) {
+                skipped += 1
+                TaskIO.appendLog(taskId, "skip archive patch: archive not found id=${targetArchiveId}")
+                continue
+            }
+
+            let (updatedAtFromTags, cleanedPatchTags) = extractUpdatedAtFromTags(patch.tags)
+            let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
+
+            var changed = false
+            if (patch.title.trimAscii().size > 0) {
+                archive.title = patch.title.trimAscii()
+                changed = true
+            }
+            if (patch.summary.trimAscii().size > 0) {
+                archive.summary = patch.summary
+                changed = true
+            }
+            if (effectiveUpdatedAt.size > 0) {
+                archive.updated_at = effectiveUpdatedAt
+                changed = true
+            }
+
+            if (changed) {
+                let ok = ArchiveDao.update(archive)
+                if (!ok) {
+                    skipped += 1
+                    TaskIO.appendLog(taskId, "skip archive patch: archive update failed id=${targetArchiveId}")
+                    continue
+                }
+            }
+
+            if (cleanedPatchTags.trimAscii().size > 0) {
+                let tagOk = TagDao.updateArchiveTags(targetArchiveId, cleanedPatchTags)
+                if (!tagOk) {
+                    TaskIO.appendLog(taskId, "WARN: archive tag update failed id=${targetArchiveId}")
+                }
+            }
+
+            patched += 1
+        }
+
+        return (patched, skipped)
     }
 
     private static func parseParameters(parameters: String): (String, String, String, Int64) {
@@ -191,6 +277,57 @@ public class MetadataPluginCallbackRunner {
             var title = ""
             var summary = ""
             var tags = ""
+            var archives = ArrayList<ArchiveMetadataPatch>()
+
+            func readStringFlexible(): String {
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(BeginArray) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(_) => return r.readValue<String>()
+                    case None => return ""
+                }
+            }
+
+            func readInt32Flexible(): Int32 {
+                let s = readStringFlexible().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return 0 }
+            }
+
+            func parseArchivePatchObject(): ArchiveMetadataPatch {
+                let patch = ArchiveMetadataPatch()
+                if (r.peek() != Some(BeginObject)) {
+                    return patch
+                }
+
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let ak = r.readName()
+                    match (ak) {
+                        case "archive_id" => patch.archiveId = r.readValue<String>().trimAscii()
+                        case "archiveId" => patch.archiveId = r.readValue<String>().trimAscii()
+                        case "target_id" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "targetId" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "id" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "volume_no" => patch.volumeNo = readInt32Flexible()
+                        case "volumeNo" => patch.volumeNo = readInt32Flexible()
+                        case "title" => patch.title = r.readValue<String>()
+                        case "summary" => patch.summary = r.readValue<String>()
+                        case "tags" => patch.tags = readStringFlexible().trimAscii()
+                        case "updated_at" => patch.updatedAt = readStringFlexible().trimAscii()
+                        case "updatedAt" => patch.updatedAt = readStringFlexible().trimAscii()
+                        case _ => r.skip()
+                    }
+                }
+                r.endObject()
+                return patch
+            }
 
             r.startObject()
             while (r.peek() != EndObject) {
@@ -210,7 +347,38 @@ public class MetadataPluginCallbackRunner {
                                     match (dk) {
                                         case "title" => title = r.readValue<String>()
                                         case "summary" => summary = r.readValue<String>()
-                                        case "tags" => tags = r.readValue<String>()
+                                        case "tags" => tags = readStringFlexible()
+                                        case "tankoubon" =>
+                                            match (r.peek()) {
+                                                case Some(BeginObject) =>
+                                                    r.startObject()
+                                                    while (r.peek() != EndObject) {
+                                                        let tk = r.readName()
+                                                        match (tk) {
+                                                            case "title" => title = r.readValue<String>()
+                                                            case "summary" => summary = r.readValue<String>()
+                                                            case "tags" => tags = readStringFlexible()
+                                                            case _ => r.skip()
+                                                        }
+                                                    }
+                                                    r.endObject()
+                                                case Some(_) => r.skip()
+                                                case None => ()
+                                            }
+                                        case "archives" =>
+                                            match (r.peek()) {
+                                                case Some(BeginArray) =>
+                                                    r.startArray()
+                                                    while (r.peek() != EndArray) {
+                                                        let patch = parseArchivePatchObject()
+                                                        if (patch.archiveId.trimAscii().size > 0 || patch.volumeNo > 0) {
+                                                            archives.add(patch)
+                                                        }
+                                                    }
+                                                    r.endArray()
+                                                case Some(_) => r.skip()
+                                                case None => ()
+                                            }
                                         case _ => r.skip()
                                     }
                                 }
@@ -227,7 +395,7 @@ public class MetadataPluginCallbackRunner {
                 let msg = if (err.trimAscii().size > 0) { err.trimAscii() } else { "Plugin returned success=false" }
                 return ParsedMetadataResult(false, msg, "", "", "")
             }
-            return ParsedMetadataResult(true, "", title, summary, tags)
+            return ParsedMetadataResult(true, "", title, summary, tags, archives.toArray())
         } catch (e: Exception) {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
         }
@@ -237,7 +405,7 @@ public class MetadataPluginCallbackRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, output: String): String {
+    private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, output: String, archivesCount: Int64): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -247,6 +415,7 @@ public class MetadataPluginCallbackRunner {
         w.writeName("title").writeValue(title)
         w.writeName("summary").writeValue(summary)
         w.writeName("tags").writeValue(tags)
+        w.writeName("archives_count").writeValue(archivesCount)
         w.writeName("plugin_output").writeValue(output)
         w.endObject()
         w.flush()

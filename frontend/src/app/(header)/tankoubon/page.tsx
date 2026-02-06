@@ -71,6 +71,14 @@ function TankoubonDetailContent() {
   const [isMetadataPluginRunning, setIsMetadataPluginRunning] = useState(false);
   const [metadataPluginProgress, setMetadataPluginProgress] = useState<number | null>(null);
   const [metadataPluginMessage, setMetadataPluginMessage] = useState<string>('');
+  const [metadataArchivePatches, setMetadataArchivePatches] = useState<Array<{
+    archive_id?: string;
+    volume_no?: number;
+    title?: string;
+    summary?: string;
+    tags?: string;
+    updated_at?: string;
+  }>>([]);
 
   // Delete dialog state
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -213,8 +221,10 @@ function TankoubonDetailContent() {
         name: editName,
         summary: editSummary,
         tags: editTags.join(', '),
+        archives: metadataArchivePatches,
       });
       setEditDialogOpen(false);
+      setMetadataArchivePatches([]);
       fetchTankoubon();
     } catch (error) {
       logger.operationFailed('update tankoubon', error);
@@ -287,6 +297,7 @@ function TankoubonDetailContent() {
         const nextTitle = typeof data.title === 'string' ? data.title : '';
         const nextSummary = typeof data.summary === 'string' ? data.summary : '';
         const nextTags = typeof data.tags === 'string' ? data.tags : '';
+        const nextArchives = Array.isArray(data.archives) ? data.archives : [];
 
         if (nextTitle.trim()) setEditName(nextTitle);
         if (nextSummary.trim()) setEditSummary(nextSummary);
@@ -298,6 +309,19 @@ function TankoubonDetailContent() {
               .filter((tag: string) => tag)
           );
         }
+
+        setMetadataArchivePatches(
+          nextArchives
+            .map((item: any) => ({
+              archive_id: typeof item?.archive_id === 'string' ? item.archive_id : undefined,
+              volume_no: typeof item?.volume_no === 'number' ? item.volume_no : undefined,
+              title: typeof item?.title === 'string' ? item.title : undefined,
+              summary: typeof item?.summary === 'string' ? item.summary : undefined,
+              tags: typeof item?.tags === 'string' ? item.tags : undefined,
+              updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
+            }))
+            .filter((item: any) => item.archive_id || item.volume_no)
+        );
       } catch {
         // ignore parse errors
       }

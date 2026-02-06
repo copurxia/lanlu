@@ -4,6 +4,8 @@ import cjoy.*
 import lanlu.models.*
 import lanlu.dao.*
 import lanlu.middleware.*
+import lanlu.utils.*
+import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.net.http.HttpStatusCode
 import stdx.encoding.json.stream.*
@@ -94,12 +96,126 @@ public class TankoubonController {
      */
     public static func updateTankoubon(ctx: JoyContext) {
         let id = ctx.getParam("id") ?? ""
-        let name = ctx.getQuery("name") ?? ""
-        let summary = ctx.getQuery("summary") ?? ""
-        let tagsOpt = ctx.getQuery("tags")
-        let tags = tagsOpt ?? ""
-        let coverAssetIdStr = ctx.getQuery("cover_asset_id") ?? (ctx.getQuery("coverAssetId") ?? "")
-        let coverAssetId = try { Int64.parse(coverAssetIdStr) } catch (_: Exception) { -1i64 }
+        let requestBody = (ctx.readString()).trimAscii()
+        if (requestBody.size == 0) {
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.json("{\"error\":\"Request body is required\",\"operation\":\"update_tankoubon\",\"success\":0}")
+            return
+        }
+
+        var hasName = false
+        var hasSummary = false
+        var hasTags = false
+        var hasCoverAssetId = false
+        var name = ""
+        var summary = ""
+        var tags = ""
+        var coverAssetId: Int64 = -1i64
+        var archivePatches = ArrayList<ArchiveMetadataPatch>()
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(requestBody.rawData()) }
+            let r = JsonReader(buf)
+
+            func readStringFlexible(): String {
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(BeginArray) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(_) => return r.readValue<String>()
+                    case None => return ""
+                }
+            }
+
+            func readInt64Flexible(): Int64 {
+                let s = readStringFlexible().trimAscii()
+                try { return Int64.parse(s) } catch (_: Exception) { return -1i64 }
+            }
+
+            func readInt32Flexible(): Int32 {
+                let s = readStringFlexible().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return 0 }
+            }
+
+            func parseArchivePatchObject(): ArchiveMetadataPatch {
+                let patch = ArchiveMetadataPatch()
+                if (r.peek() != Some(BeginObject)) {
+                    return patch
+                }
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let ak = r.readName()
+                    match (ak) {
+                        case "archive_id" => patch.archiveId = r.readValue<String>().trimAscii()
+                        case "archiveId" => patch.archiveId = r.readValue<String>().trimAscii()
+                        case "target_id" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "targetId" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "id" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
+                        case "volume_no" => patch.volumeNo = readInt32Flexible()
+                        case "volumeNo" => patch.volumeNo = readInt32Flexible()
+                        case "title" => patch.title = r.readValue<String>()
+                        case "summary" => patch.summary = r.readValue<String>()
+                        case "tags" => patch.tags = readStringFlexible().trimAscii()
+                        case "updated_at" => patch.updatedAt = readStringFlexible().trimAscii()
+                        case "updatedAt" => patch.updatedAt = readStringFlexible().trimAscii()
+                        case _ => r.skip()
+                    }
+                }
+                r.endObject()
+                return patch
+            }
+
+            if (r.peek() == Some(BeginObject)) {
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    match (k) {
+                        case "name" =>
+                            hasName = true
+                            name = r.readValue<String>()
+                        case "summary" =>
+                            hasSummary = true
+                            summary = r.readValue<String>()
+                        case "tags" =>
+                            hasTags = true
+                            tags = readStringFlexible().trimAscii()
+                        case "cover_asset_id" =>
+                            hasCoverAssetId = true
+                            coverAssetId = readInt64Flexible()
+                        case "coverAssetId" =>
+                            hasCoverAssetId = true
+                            coverAssetId = readInt64Flexible()
+                        case "archives" =>
+                            match (r.peek()) {
+                                case Some(BeginArray) =>
+                                    r.startArray()
+                                    while (r.peek() != EndArray) {
+                                        let patch = parseArchivePatchObject()
+                                        if (patch.archiveId.trimAscii().size > 0 || patch.volumeNo > 0) {
+                                            archivePatches.add(patch)
+                                        }
+                                    }
+                                    r.endArray()
+                                case Some(_) => r.skip()
+                                case None => ()
+                            }
+                        case _ => r.skip()
+                    }
+                }
+                r.endObject()
+            }
+        } catch (_: Exception) {
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ctx.json("{\"error\":\"Invalid JSON body\",\"operation\":\"update_tankoubon\",\"success\":0}")
+            return
+        }
 
         // Partial update support: keep existing values when not provided.
         let existing = TankoubonModel.getTankoubonById(id)
@@ -109,28 +225,118 @@ public class TankoubonController {
             return
         }
 
-        let effectiveName = if (name.size > 0) { name } else { existing.name }
-        let effectiveSummary = if (summary.size > 0) { summary } else { existing.summary }
+        let effectiveName = if (hasName) { name } else { existing.name }
+        let effectiveSummary = if (hasSummary) { summary } else { existing.summary }
         
         var success = TankoubonModel.updateTankoubon(id, effectiveName, effectiveSummary, "", [])
-        // If tags param is present (even empty), update tank tags accordingly.
-        match (tagsOpt) {
-            case Some(_) =>
-                if (success) { success = TankoubonModel.updateTankoubonTags(id, tags) }
-            case None => ()
+        // If tags key is present (even empty), update tank tags accordingly.
+        if (success && hasTags) {
+            success = TankoubonModel.updateTankoubonTags(id, tags)
         }
 
         // cover_asset_id: only update when provided and non-negative
-        if (success && coverAssetId >= 0) {
+        if (success && hasCoverAssetId && coverAssetId >= 0) {
             let _ = TankoubonModel.updateTankoubonCover(id, coverAssetId)
         }
+
+        var patchedCount: Int64 = 0
+        var skippedCount: Int64 = 0
+        if (success && archivePatches.size > 0) {
+            let (patched, skipped) = applyArchivePatchesForTankoubon(id, archivePatches.toArray())
+            patchedCount = patched
+            skippedCount = skipped
+        }
+
         if (success) {
-            let successResponse = "{\"error\":\"\",\"operation\":\"update_tankoubon\",\"success\":1,\"successMessage\":\"Updated tankoubon \\\"${effectiveName}\\\"!\"}"
-            ctx.json(successResponse)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("error").writeValue("")
+            w.writeName("operation").writeValue("update_tankoubon")
+            w.writeName("success").writeValue(1)
+            w.writeName("successMessage").writeValue("Updated tankoubon \"${effectiveName}\"!")
+            w.writeName("archives_patched").writeValue(patchedCount)
+            w.writeName("archives_skipped").writeValue(skippedCount)
+            w.endObject()
+            w.flush()
+            ctx.json(String.fromUtf8(readToEnd(out)))
         } else {
             let errorResponse = "{\"error\":\"Tankoubon doesn't exist in the database!\",\"operation\":\"update_tankoubon\",\"success\":0}"
             ctx.json(errorResponse)
         }
+    }
+
+    private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>): (Int64, Int64) {
+        if (patches.size == 0) {
+            return (0, 0)
+        }
+
+        let memberArchiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+        if (memberArchiveIds.size == 0) {
+            return (0, Int64(patches.size))
+        }
+
+        var memberSet = HashSet<String>()
+        for (arcid in memberArchiveIds) {
+            memberSet.add(arcid)
+        }
+
+        var patched: Int64 = 0
+        var skipped: Int64 = 0
+
+        for (patch in patches) {
+            var targetArchiveId = patch.archiveId.trimAscii()
+            if (targetArchiveId.size == 0 && patch.volumeNo > 0) {
+                let idx = Int64(patch.volumeNo - 1)
+                if (idx >= 0 && idx < Int64(memberArchiveIds.size)) {
+                    targetArchiveId = memberArchiveIds[idx]
+                }
+            }
+
+            if (targetArchiveId.size == 0 || !memberSet.contains(targetArchiveId)) {
+                skipped += 1
+                continue
+            }
+
+            var archive = ArchiveDao.getArchiveById(targetArchiveId)
+            if (archive.id.size == 0) {
+                skipped += 1
+                continue
+            }
+
+            let (updatedAtFromTags, cleanedPatchTags) = extractUpdatedAtFromTags(patch.tags)
+            let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
+
+            var changed = false
+            if (patch.title.trimAscii().size > 0) {
+                archive.title = patch.title.trimAscii()
+                changed = true
+            }
+            if (patch.summary.trimAscii().size > 0) {
+                archive.summary = patch.summary
+                changed = true
+            }
+            if (effectiveUpdatedAt.size > 0) {
+                archive.updated_at = effectiveUpdatedAt
+                changed = true
+            }
+
+            if (changed) {
+                let ok = ArchiveDao.update(archive)
+                if (!ok) {
+                    skipped += 1
+                    continue
+                }
+            }
+
+            if (cleanedPatchTags.trimAscii().size > 0) {
+                let _ = TagDao.updateArchiveTags(targetArchiveId, cleanedPatchTags)
+            }
+
+            patched += 1
+        }
+
+        return (patched, skipped)
     }
     
     /**

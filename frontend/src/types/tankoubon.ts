@@ -31,6 +31,14 @@ export interface TankoubonUpdateRequest {
   summary?: string;
   tags?: string;
   cover_asset_id?: number;
+  archives?: Array<{
+    archive_id?: string;
+    volume_no?: number;
+    title?: string;
+    summary?: string;
+    tags?: string;
+    updated_at?: string;
+  }>;
 }
 
 export interface TankoubonResponse {
