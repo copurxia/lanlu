@@ -42,9 +42,11 @@ public class ScanSingleCategoryTaskRunner {
 
             // 获取分类信息
             var scanPath = ""
+            var categoryName = ""
             match (CategoryDao.getCategoryById(catidParam)) {
                 case Some(cat) =>
                     scanPath = cat.scanPath
+                    categoryName = cat.name
                     TaskIO.appendLog(taskId, "Got category: ${cat.name} -> ${scanPath}")
                 case None =>
                     let errorMsg = "Category not found: ${catidParam}"
@@ -83,6 +85,18 @@ public class ScanSingleCategoryTaskRunner {
             TaskModel.completeTask(taskId, summary)
             TaskIO.writeOutput(taskId, summary)
             TaskIO.appendLog(taskId, "scan_single_category task completed: created=${created}, total=${total}")
+
+            // After scan completes, submit a category cover generation task if new tasks were created.
+            if (created > 0) {
+                let coverTaskId = submitCategoryCoverTask(catidParam, categoryName, triggerSource, context.notifyTaskAvailable)
+                if (coverTaskId > 0) {
+                    TaskIO.appendLog(taskId, "Submitted generate_category_cover task: ${coverTaskId}")
+                } else {
+                    TaskIO.appendLog(taskId, "WARN: failed to submit generate_category_cover task")
+                }
+            } else {
+                TaskIO.appendLog(taskId, "No new archives; skip generate_category_cover task")
+            }
         } catch (e: Exception) {
             let errorMsg = "Unexpected error: ${e.message}"
             logger.error(errorMsg, ("exception", e.message), ("stack", e.toString()))
@@ -300,6 +314,30 @@ public class ScanSingleCategoryTaskRunner {
             getLogger("scan_single_category").error("Exception submitting thumbnail task")
             return false
         }
+    }
+
+    private static func submitCategoryCoverTask(catid: String, categoryName: String, triggerSource: String, notifier: TaskNotifier): Int64 {
+        if (catid.trimAscii().size == 0) { return 0 }
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("category_id").writeValue(catid)
+        w.endObject()
+        w.flush()
+        let params = String.fromUtf8(readToEnd(out))
+        let taskName = if (categoryName.trimAscii().size > 0) { "生成分类封面: ${categoryName}" } else { "生成分类封面" }
+        let task = TaskModel.createTaskWithOptions(
+            taskName,
+            "generate_category_cover",
+            params,
+            40i32,
+            "category_cover:${catid}",
+            triggerSource
+        )
+        if (task.id > 0) {
+            notifier()
+        }
+        return task.id
     }
 
 }
