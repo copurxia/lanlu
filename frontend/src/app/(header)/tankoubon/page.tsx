@@ -456,8 +456,8 @@ function TankoubonDetailContent() {
   const coverUrl = `/api/tankoubons/${tankoubon.tankoubon_id}/thumbnail`;
 
   return (
-    <div className="min-h-screen bg-background pb-20 lg:pb-0">
-      <main className="container mx-auto px-4 py-8">
+    <div className="min-h-dvh bg-background pb-20 lg:pb-0">
+      <main className="container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
         {/* Header / hero */}
         <div className="relative mb-8">
           <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
@@ -475,15 +475,15 @@ function TankoubonDetailContent() {
                 </Button>
               </div>
 
-              <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-4">
-                  <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
+                  <div className="relative h-44 w-32 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-48 sm:w-36 md:h-56 md:w-40 lg:h-60 lg:w-44">
                     <Image
                       src={coverUrl}
                       alt={tankoubon.name}
                       fill
                       className="object-cover"
-                      sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
+                      sizes="(max-width: 640px) 128px, (max-width: 768px) 144px, (max-width: 1024px) 160px, 176px"
                       // Tankoubon thumbnail endpoint may redirect (to assets or archive thumbnail),
                       // and may serve non-avif images; bypass optimizer to avoid strict content-type checks.
                       unoptimized
