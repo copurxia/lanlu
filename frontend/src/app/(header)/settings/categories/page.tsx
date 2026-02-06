@@ -120,7 +120,11 @@ export default function CategoriesSettingsPage() {
     setLoading(true);
 
     try {
-      await CategoryService.createCategory(createForm);
+      const result = await CategoryService.createCategory(createForm);
+      if (!result.success) {
+        showError(result.error || t('settings.categoryCreateFailed'));
+        return;
+      }
       setCreateForm({
         name: '',
         scan_path: '',
@@ -163,7 +167,11 @@ export default function CategoriesSettingsPage() {
     setLoading(true);
 
     try {
-      await CategoryService.updateCategory(editingCategory.catid, editForm);
+      const result = await CategoryService.updateCategory(editingCategory.catid, editForm);
+      if (!result.success) {
+        showError(result.error || t('settings.categoryUpdateFailed'));
+        return;
+      }
       setEditDialogOpen(false);
       setEditingCategory(null);
       await loadCategories();

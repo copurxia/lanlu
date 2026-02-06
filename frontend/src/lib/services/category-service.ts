@@ -78,7 +78,7 @@ export class CategoryService {
       if (isSuccessResponse(response.data.success)) {
         return { success: true, category: normalizeArrayResponse(response.data.data)[0] };
       }
-      return { success: false, error: 'Failed to create category' };
+      return { success: false, error: (response.data as any)?.error || (response.data as any)?.message || 'Failed to create category' };
     } catch (error: unknown) {
       return { success: false, error: extractApiError(error, 'Failed to create category') };
     }
@@ -89,8 +89,11 @@ export class CategoryService {
    */
   static async updateCategory(catid: string, data: CategoryUpdateRequest): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await apiClient.put<{ success: number; error?: string }>(`${this.baseUrl}/${catid}`, data);
-      return { success: isSuccessResponse(response.data.success), error: response.data.error };
+      const response = await apiClient.put<{ success: number; error?: string; message?: string }>(`${this.baseUrl}/${catid}`, data);
+      return {
+        success: isSuccessResponse(response.data.success),
+        error: response.data.error || response.data.message
+      };
     } catch (error: unknown) {
       return { success: false, error: extractApiError(error, 'Failed to update category') };
     }
@@ -101,8 +104,8 @@ export class CategoryService {
    */
   static async deleteCategory(catid: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await apiClient.delete<{ success: number; error?: string }>(`${this.baseUrl}/${catid}`);
-      return { success: isSuccessResponse(response.data.success), error: response.data.error };
+      const response = await apiClient.delete<{ success: number; error?: string; message?: string }>(`${this.baseUrl}/${catid}`);
+      return { success: isSuccessResponse(response.data.success), error: response.data.error || response.data.message };
     } catch (error: unknown) {
       return { success: false, error: extractApiError(error, 'Failed to delete category') };
     }
@@ -113,13 +116,13 @@ export class CategoryService {
    */
   static async scanCategory(catid: string): Promise<{ success: boolean; task_id?: number; error?: string }> {
     try {
-      const response = await apiClient.post<{ success: number; task_id?: number; error?: string }>(
+      const response = await apiClient.post<{ success: number; task_id?: number; error?: string; message?: string }>(
         `${this.baseUrl}/${catid}/scan`
       );
       return {
         success: isSuccessResponse(response.data.success),
         task_id: response.data.task_id,
-        error: response.data.error
+        error: response.data.error || response.data.message
       };
     } catch (error: unknown) {
       return { success: false, error: extractApiError(error, 'Failed to trigger scan') };

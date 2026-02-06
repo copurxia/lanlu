@@ -19,10 +19,6 @@ export function extractApiError(
 ): string {
   if (!error) return defaultMessage;
 
-  if (error instanceof Error) {
-    return error.message;
-  }
-
   if (typeof error === 'string') {
     return error;
   }
@@ -32,12 +28,15 @@ export function extractApiError(
     message?: string;
   };
 
-  return (
-    e.response?.data?.error ||
-    e.response?.data?.message ||
-    e.message ||
-    defaultMessage
-  );
+  if (e.response?.data?.error || e.response?.data?.message) {
+    return e.response?.data?.error || e.response?.data?.message || defaultMessage;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return e.message || defaultMessage;
 }
 
 /**
