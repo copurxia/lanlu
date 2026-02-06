@@ -70,14 +70,15 @@ export function BaseMediaCard({
 
   const allTags = React.useMemo(() => parseTags(tags), [tags])
   const displayAllTags = React.useMemo(() => allTags.map(stripNamespace), [allTags])
+  const maxHoverTags = React.useMemo(() => (summary ? 5 : 8), [summary])
   const hoverTags = React.useMemo(() => {
     return allTags
       .filter(tag => {
         const stripped = stripNamespace(tag).toLowerCase()
         return !stripped.includes('source') && !tag.toLowerCase().includes('source')
       })
-      .slice(0, 8)
-  }, [allTags])
+      .slice(0, maxHoverTags)
+  }, [allTags, maxHoverTags])
 
   const hoverTitleParts = React.useMemo(() => [
     displayAllTags.length > 0 ? `${t('archive.tags')}: ${displayAllTags.join(', ')}` : '',
@@ -204,7 +205,12 @@ export function BaseMediaCard({
               <div className="w-full p-3 pb-12 space-y-2">
                 {/* Reserve space for the floating action buttons on all viewports (mobile has no hover). */}
                 {allTags.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
+                  <div
+                    className={[
+                      "flex flex-wrap gap-1 overflow-hidden",
+                      summary ? "max-h-[48px]" : "max-h-[72px]",
+                    ].join(" ")}
+                  >
                     {hoverTags.map((tag) => (
                       <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
                         {stripNamespace(tag)}
