@@ -38,7 +38,7 @@ import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/utils/logger';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X } from 'lucide-react';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import Image from 'next/image';
@@ -194,6 +194,36 @@ function TankoubonDetailContent() {
     const idx = key.indexOf(':');
     return idx > 0 ? key.slice(idx + 1) : key;
   }, []);
+
+  const renderTagBadge = useCallback((tag: string, index: number) => {
+    const key = String(tag || '').trim();
+    const idx = key.indexOf(':');
+    const namespace = idx > 0 ? key.slice(0, idx).trim().toLowerCase() : '';
+    const isSource = namespace === 'source';
+    const sourceValue = isSource ? displayTag(key).trim() : '';
+    const hasScheme = sourceValue.startsWith('http://') || sourceValue.startsWith('https://');
+    const sourceUrl = isSource && sourceValue ? (hasScheme ? sourceValue : `https://${sourceValue}`) : '';
+
+    return (
+      <Badge key={`${tag}-${index}`} variant="secondary" className="max-w-full" title={tag}>
+        <span className="flex items-center gap-1 max-w-full">
+          <span className="truncate">{displayTag(tag)}</span>
+          {isSource && sourceValue && (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-primary transition-colors shrink-0"
+              title={sourceUrl}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </span>
+      </Badge>
+    );
+  }, [displayTag]);
 
   const handleFavoriteClick = async () => {
     if (!tankoubon || favoriteLoading) return;
@@ -553,11 +583,7 @@ function TankoubonDetailContent() {
 
                     {allTags.length > 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        {allTags.map((tag, index) => (
-                          <Badge key={index} variant="secondary" className="max-w-full" title={tag}>
-                            <span className="truncate">{displayTag(tag)}</span>
-                          </Badge>
-                        ))}
+                        {allTags.map((tag, index) => renderTagBadge(tag, index))}
                       </div>
                     ) : null}
                   </div>
@@ -607,11 +633,7 @@ function TankoubonDetailContent() {
 
                 {allTags.length > 0 ? (
                   <div className="mt-3 flex flex-wrap gap-2 w-full">
-                    {allTags.map((tag, index) => (
-                      <Badge key={index} variant="secondary" className="max-w-full" title={tag}>
-                        <span className="truncate">{displayTag(tag)}</span>
-                      </Badge>
-                    ))}
+                    {allTags.map((tag, index) => renderTagBadge(tag, index))}
                   </div>
                 ) : null}
               </div>
