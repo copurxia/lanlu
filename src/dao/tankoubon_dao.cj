@@ -1000,12 +1000,12 @@ public class TankoubonDao {
     private static func mergeTags(tankoubonTags: String, archiveTags: String): String {
         var tagSet: HashMap<String, Bool> = HashMap<String, Bool>()
 
-        // 添加tankoubon标签
+        // 添加tankoubon标签（保留 source 标签）
         if (tankoubonTags != "") {
             let tags = tankoubonTags.split(",")
             for (tag in tags) {
                 let trimmed = tag.trimAscii()
-                if (trimmed != "" && !TagDao.isSourceTag(trimmed)) {
+                if (trimmed != "") {
                     tagSet[trimmed] = true
                 }
             }
