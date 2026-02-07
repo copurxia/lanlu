@@ -80,8 +80,34 @@ public class DownloadUrlCallbackRunner {
         }
 
         let downloadedRelativePath = downloadedRelativePaths.get(0).getOrThrow()
-        if (downloadedRelativePath.contains("..") || downloadedRelativePath.startsWith("/") ||
-            !downloadedRelativePath.startsWith("plugins/${pluginNamespace}/")) {
+        // Validate plugin output path:
+        // - must be a relative path under plugins/<namespace>/
+        // - must not contain path traversal segments (.. or .) or empty segments
+        // NOTE: do NOT use substring checks like `contains("..")` because filenames may legally contain "..."
+        // (which would otherwise be falsely rejected).
+        let expectedPrefix = "plugins/${pluginNamespace}/"
+        var invalidPath = false
+        if (downloadedRelativePath.trimAscii().size == 0 ||
+            downloadedRelativePath.startsWith("/") || downloadedRelativePath.startsWith("\\") ||
+            downloadedRelativePath.contains("\\") ||
+            !downloadedRelativePath.startsWith(expectedPrefix)) {
+            invalidPath = true
+        } else {
+            let parts = downloadedRelativePath.split("/")
+            // Expect at least: plugins / <namespace> / <filename>
+            if (parts.size < 3 || parts[0] != "plugins" || parts[1] != pluginNamespace) {
+                invalidPath = true
+            } else {
+                for (p in parts) {
+                    if (p.size == 0 || p == "." || p == "..") {
+                        invalidPath = true
+                        break
+                    }
+                }
+            }
+        }
+
+        if (invalidPath) {
             let errMsg = "Plugin returned invalid relative_path"
             TaskModel.failTask(downloadTaskId, errMsg)
             writeErrorOutput(downloadTaskId, errMsg)
