@@ -1107,8 +1107,9 @@ public class TagDao {
             case Some(conn) =>
                 
                 try {
-                    // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索
-                    let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ?"
+                    // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索。
+                    // Add a LIMIT to cap worst-case work and response size (caller expands matches into OR tags LIKE ...).
+                    let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ? LIMIT 200"
                     let stmt = conn.prepareStatement(sql)
                     try {
                         let pattern = "%" + searchTerm + "%"

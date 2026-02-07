@@ -308,7 +308,7 @@ public class ArchiveDao {
      * @param filter 搜索词
      * @return 相关度评分表达式字符串
      */
-    private static func buildRelevanceExpr(filter: String): String {
+    private static func buildRelevanceExpr(filter: String, tablePrefix: String): String {
         // 使用 SearchFilter 解析搜索语法
         let searchResult = SearchFilter.parse(filter)
 
@@ -329,9 +329,9 @@ public class ArchiveDao {
         var ilikeScoreExpr = "0"
         for (term in relevanceTerms) {
             let escapedTerm = term.replace("'", "''")
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN title ILIKE '%" + escapedTerm + "%' THEN 0.15 ELSE 0 END"
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN filename ILIKE '%" + escapedTerm + "%' THEN 0.1 ELSE 0 END"
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN tags ILIKE '%" + escapedTerm + "%' THEN 0.05 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + tablePrefix + "title ILIKE '%" + escapedTerm + "%' THEN 0.15 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + tablePrefix + "filename ILIKE '%" + escapedTerm + "%' THEN 0.1 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + tablePrefix + "tags ILIKE '%" + escapedTerm + "%' THEN 0.05 ELSE 0 END"
         }
 
         // 构建用于全文搜索的查询字符串
@@ -342,7 +342,7 @@ public class ArchiveDao {
         let tsQueryStr = String.join(tsQueryTerms.toArray(), delimiter: " ")
 
         // 构建完整的评分表达式（全文搜索 + ILIKE 匹配）
-        let relevanceExpr = "COALESCE(ts_rank(search_tsv, websearch_to_tsquery('simple', '" + tsQueryStr + "')) * 2, 0) + (" + ilikeScoreExpr + ")"
+        let relevanceExpr = "COALESCE(ts_rank(" + tablePrefix + "search_tsv, websearch_to_tsquery('simple', '" + tsQueryStr + "')) * 2, 0) + (" + ilikeScoreExpr + ")"
 
         return relevanceExpr
     }
@@ -525,44 +525,49 @@ public class ArchiveDao {
                     filterParams.add(tankoubonId)
                 }
 
-                // 日期范围过滤
-                if (dateFrom.size > 0) {
-                    whereConditions.add("created_at >= ?")
-                    filterParams.add(dateFrom)
-                }
-                if (dateTo.size > 0) {
-                    whereConditions.add("created_at <= ?")
-                    filterParams.add(dateTo + " 23:59:59")
-                }
+	                // 日期范围过滤
+	                if (dateFrom.size > 0) {
+	                    whereConditions.add("created_at >= ?")
+	                    filterParams.add(dateFrom)
+	                }
+	                if (dateTo.size > 0) {
+	                    whereConditions.add("created_at <= ?")
+	                    filterParams.add(dateTo + " 23:59:59")
+	                }
 
-                // 构建相关度评分表达式（用于过滤）
-                let relevanceExpr = buildRelevanceExpr(filter)
-                let minRelevanceThreshold = 0.05  // 最低相关度阈值
+	                // 构建相关度评分表达式。
+	                // 优化：当存在 relevance 时，在 SQL 内部用 CTE 计算一次 relevance_score，
+	                // 然后复用于阈值过滤/排序，避免重复拼接/重复计算表达式。
+	                let relevanceExpr = buildRelevanceExpr(filter, "")
+	                let hasRelevance = filter.size > 0 && relevanceExpr != "1"
+	                let minRelevanceThreshold = 0.05  // 最低相关度阈值
 
-                // 组合 WHERE 条件
-                if (whereConditions.size > 0 || filter.size > 0) {
-                    var whereClause = ""
-                    for (i in 0..whereConditions.size) {
-                        if (i > 0) {
-                            whereClause += " AND "
-                        }
-                        whereClause += whereConditions[i]
-                    }
+	                // 组合基础 WHERE（不包含相关度阈值）
+	                var baseWhereClause = ""
+	                for (i in 0..whereConditions.size) {
+	                    if (i > 0) {
+	                        baseWhereClause += " AND "
+	                    }
+	                    baseWhereClause += whereConditions[i]
+	                }
 
-                    // 当有搜索词时，添加相关度阈值过滤
-                    if (filter.size > 0 && relevanceExpr != "1") {
-                        if (whereClause.size > 0) {
-                            whereClause += " AND "
-                        }
-                        whereClause += "(" + relevanceExpr + ") >= " + minRelevanceThreshold.toString()
-                    }
-
-                    countSql += " WHERE " + whereClause
-                }
-                
-                getLogger("archive_dao").debug("执行计数SQL", ("sql", countSql))
-                let countStmt = conn.prepareStatement(countSql)
-                var totalCount = 0
+	                // 构建计数 SQL
+	                if (!hasRelevance) {
+	                    if (baseWhereClause.size > 0) {
+	                        countSql += " WHERE " + baseWhereClause
+	                    }
+	                } else {
+	                    // relevance_score 只在本语句内计算一次
+	                    countSql = "WITH base AS (SELECT (" + relevanceExpr + ") AS relevance_score FROM archives_with_tags"
+	                    if (baseWhereClause.size > 0) {
+	                        countSql += " WHERE " + baseWhereClause
+	                    }
+	                    countSql += ") SELECT COUNT(*) FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
+	                }
+	                
+	                getLogger("archive_dao").debug("执行计数SQL", ("sql", countSql))
+	                let countStmt = conn.prepareStatement(countSql)
+	                var totalCount = 0
 
                 // 绑定搜索过滤器参数
                 for (i in 0..filterParams.size) {
@@ -580,34 +585,27 @@ public class ArchiveDao {
                 } finally {
                     countRs.close()
                     countStmt.close()
-                }
+	                }
 
-                // 然后查询分页数据，使用archives_with_tags视图获取标签信息
-                var sql = "SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags"
-
-                // 使用相同的 WHERE 条件（包含相关度阈值过滤）
-                if (whereConditions.size > 0 || filter.size > 0) {
-                    var whereClause = ""
-                    for (i in 0..whereConditions.size) {
-                        if (i > 0) {
-                            whereClause += " AND "
-                        }
-                        whereClause += whereConditions[i]
-                    }
-
-                    // 当有搜索词时，添加相关度阈值过滤
-                    if (filter.size > 0 && relevanceExpr != "1") {
-                        if (whereClause.size > 0) {
-                            whereClause += " AND "
-                        }
-                        whereClause += "(" + relevanceExpr + ") >= " + minRelevanceThreshold.toString()
-                    }
-
-                    sql += " WHERE " + whereClause
-                }
-                
-                // 处理排序参数
-                if (sortby == "RANDOM()") {
+	                // 然后查询分页数据
+	                var sql = ""
+	                if (!hasRelevance) {
+	                    // 无 relevance：保持原查询形态
+	                    sql = "SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags"
+	                    if (baseWhereClause.size > 0) {
+	                        sql += " WHERE " + baseWhereClause
+	                    }
+	                } else {
+	                    // 有 relevance：在 base CTE 里计算 relevance_score，并在外层应用阈值过滤
+	                    sql = "WITH base AS (SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags, (" + relevanceExpr + ") AS relevance_score FROM archives_with_tags"
+	                    if (baseWhereClause.size > 0) {
+	                        sql += " WHERE " + baseWhereClause
+	                    }
+	                    sql += ") SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
+	                }
+	                
+	                // 处理排序参数
+	                if (sortby == "RANDOM()") {
                     // 对于随机排序，使用 RANDOM() 函数
                     // 为了确保每次查询都有不同的随机结果，使用 ORDER BY RANDOM() DESC
                     // 这样可以避免某些数据库版本中 RANDOM() 的缓存问题
@@ -615,32 +613,36 @@ public class ArchiveDao {
                 } else if (sortby == "title") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY title ${orderDirection}"
-                } else if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
-                    // 按用户最后阅读时间排序，使用 user_archive_status.updated_at
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY (SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archives_with_tags.arcid AND uas.user_id = ${userId}) ${orderDirection}"
-                } else if (sortby == "date_added") {
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY created_at ${orderDirection}"
+	                } else if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
+	                    // 按用户最后阅读时间排序，使用 user_archive_status.updated_at
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY (SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = arcid AND uas.user_id = ${userId}) ${orderDirection}"
+	                } else if (sortby == "date_added") {
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY created_at ${orderDirection}"
                 } else if (sortby == "pagecount") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY pagecount ${orderDirection}"
-                } else if (sortby == "tank_order" && tankoubonId.size > 0) {
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY (SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archives_with_tags.id LIMIT 1) ${orderDirection}, created_at DESC"
-                    // ORDER BY 子查询需要再次绑定 tankId
-                    filterParams.add(tankoubonId)
-                } else if (sortby == "size") {
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY file_size ${orderDirection}"
-                } else if (sortby == "relevance" && filter.size > 0 && relevanceExpr != "1") {
-                    // 相关度排序：使用已构建的评分表达式
-                    sql += " ORDER BY (" + relevanceExpr + ") DESC, created_at DESC"
-                } else {
-                    // 默认按标题排序
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY title ${orderDirection}"
-                }
+	                } else if (sortby == "tank_order" && tankoubonId.size > 0) {
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY (SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = id LIMIT 1) ${orderDirection}, created_at DESC"
+	                    // ORDER BY 子查询需要再次绑定 tankId
+	                    filterParams.add(tankoubonId)
+	                } else if (sortby == "size") {
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY file_size ${orderDirection}"
+	                } else if (sortby == "relevance" && filter.size > 0 && relevanceExpr != "1") {
+	                    // 相关度排序：使用 CTE 内计算的 relevance_score（避免重复计算表达式）
+	                    if (hasRelevance) {
+	                        sql += " ORDER BY relevance_score DESC, created_at DESC"
+	                    } else {
+	                        sql += " ORDER BY created_at DESC"
+	                    }
+	                } else {
+	                    // 默认按标题排序
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY title ${orderDirection}"
+	                }
                 
                 // start=-1 时不添加 LIMIT/OFFSET，返回全部数据
                 if (start >= 0) {
@@ -748,20 +750,6 @@ public class ArchiveDao {
                     var whereConditions: ArrayList<String> = ArrayList<String>()
                     let searchResult = SearchFilter.parse(filter)
                     var filterParams: ArrayList<String> = ArrayList<String>()
-
-                    // In grouped queries we join other tables that may also have columns like "summary",
-                    // so we must qualify all archives_with_tags columns to avoid ambiguity.
-                    func qualifyRelevanceExpr(expr: String): String {
-                        var e = expr
-                        // Order matters: qualify column names first, then qualify "search_tsv".
-                        // Otherwise replacing "tags" after "archives_with_tags.search_tsv" would
-                        // rewrite the table name itself ("archives_with_tags" contains "tags").
-                        e = e.replace("tags", "archives_with_tags.tags")
-                        e = e.replace("title", "archives_with_tags.title")
-                        e = e.replace("filename", "archives_with_tags.filename")
-                        e = e.replace("search_tsv", "archives_with_tags.search_tsv")
-                        return e
-                    }
 
                     func qualifyTagsCondition(cond: String): String {
                         return cond.replace("tags", "archives_with_tags.tags")
@@ -899,7 +887,7 @@ public class ArchiveDao {
                         filterParams.add(dateTo + " 23:59:59")
                     }
 
-                    let relevanceExpr = qualifyRelevanceExpr(buildRelevanceExpr(filter))
+                    let relevanceExpr = buildRelevanceExpr(filter, "archives_with_tags.")
                     let minRelevanceThreshold = 0.05
 
                     var whereClause = ""
@@ -1009,7 +997,7 @@ public class ArchiveDao {
                                 archives_with_tags.tags,
                                 CASE WHEN tb.tankoubon_id IS NOT NULL AND tb.tankoubon_id != '' THEN 'tankoubon' ELSE 'archive' END AS group_item_type,
                                 COALESCE(tb.tankoubon_id, archives_with_tags.arcid) AS group_item_id,
-                                CASE WHEN ${relevanceExpr} IS NULL THEN 0 ELSE (${relevanceExpr}) END AS relevance_score
+                                COALESCE((${relevanceExpr}), 0) AS relevance_score
                             FROM archives_with_tags
                             LEFT JOIN tankoubon_archives tba ON tba.archive_id = archives_with_tags.id
                             LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id

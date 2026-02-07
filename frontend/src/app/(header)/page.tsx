@@ -132,37 +132,9 @@ function HomePageContent() {
       let data: (Archive | Tankoubon)[] = [...result.data];
       let totalRecordsAdjusted = result.recordsTotal;
 
-      // 如果是搜索模式且启用了合集分组，手动搜索匹配的合集
-      if (input.searchQuery && input.groupByTanks) {
-        try {
-          // 获取所有合集并过滤
-          const allTanks = await TankoubonService.getAllTankoubons({ signal: controller.signal });
-          if (requestId !== archivesRequestIdRef.current) return;
-          const queryLower = input.searchQuery.toLowerCase();
-          const matchingTanks = allTanks.filter(tank => 
-            tank.name.toLowerCase().includes(queryLower) || 
-            (tank.tags && tank.tags.toLowerCase().includes(queryLower))
-          );
-
-          // 过滤掉已经在结果中的合集（避免重复）
-          const existingTankIds = new Set(
-            data.filter(item => 'tankoubon_id' in item).map(item => (item as any).tankoubon_id)
-          );
-          
-          const newTanks = matchingTanks.filter(tank => !existingTankIds.has(tank.tankoubon_id));
-          
-          // 调整总数
-          totalRecordsAdjusted += newTanks.length;
-
-          // 仅在第一页将匹配的合集插入到结果前面
-          if (input.page === 0) {
-            data = [...newTanks, ...data];
-          }
-        } catch (err) {
-          if (isAbortLikeError(err)) return;
-          logger.apiError('fetch matching tankoubons', err);
-        }
-      }
+      // NOTE: Previously we fetched ALL tankoubons to insert "name/tag-only matched" tankoubons
+      // into the search result when groupby_tanks=true. This extra full-list request becomes
+      // a major latency source on large libraries, so it was removed for performance.
 
       if (requestId !== archivesRequestIdRef.current) return;
       setArchives(data);
