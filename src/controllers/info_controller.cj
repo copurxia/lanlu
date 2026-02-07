@@ -27,6 +27,10 @@ public class InfoController {
             let serverName = SystemSettingsService.getString("SERVER_NAME")
             let serverMotd = SystemSettingsService.getString("SERVER_MOTD")
 
+            // DB extensions status (tracked list; can expand in the future).
+            let installedExts = DatabaseMetaDao.getInstalledExtensions()
+            let trackedExts: Array<String> = ["pg_trgm"]
+
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -37,6 +41,24 @@ public class InfoController {
             w.writeName("version").writeValue("0.9.50")
             w.writeName("version_desc").writeValue("Lanlu - Initial Release")
             w.writeName("version_name").writeValue("Cangjie")
+            w.writeName("db_extensions")
+            w.startArray()
+            for (extName in trackedExts) {
+                var enabled = false
+                var version = ""
+                match (installedExts.get(extName)) {
+                    case Some(v) =>
+                        enabled = true
+                        version = v
+                    case None => ()
+                }
+                w.startObject()
+                w.writeName("name").writeValue(extName)
+                w.writeName("enabled").writeValue(enabled)
+                w.writeName("version").writeValue(version)
+                w.endObject()
+            }
+            w.endArray()
             w.endObject()
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))

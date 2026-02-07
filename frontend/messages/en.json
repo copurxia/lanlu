@@ -484,6 +484,8 @@
     "stats": "Stats",
     "statsDescription": "View system info and tag cloud",
     "statsSystem": "System",
+    "dbExtensions": "Database Extensions",
+    "dbExtensionsEmpty": "No extensions detected",
     "serverName": "Server Name",
     "serverVersion": "Version",
     "serverArchives": "Total Archives",

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
@@ -122,6 +123,24 @@ export default function ServerInfoSettingsPage() {
             <div className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">{t('settings.serverPagesRead')}</span>
               <span>{serverInfo?.total_pages_read ?? '-'}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3 sm:col-span-2">
+              <span className="text-muted-foreground">{t('settings.dbExtensions')}</span>
+              {!serverInfo?.db_extensions || serverInfo.db_extensions.length === 0 ? (
+                <span>-</span>
+              ) : (
+                <span className="flex flex-wrap justify-end gap-1.5">
+                  {serverInfo.db_extensions.map((ext) => (
+                    <Badge
+                      key={ext.name}
+                      variant={ext.enabled ? 'default' : 'outline'}
+                      title={ext.enabled && ext.version ? `${ext.name} ${ext.version}` : ext.name}
+                    >
+                      {ext.name}
+                    </Badge>
+                  ))}
+                </span>
+              )}
             </div>
           </div>
           {serverInfo?.motd ? (

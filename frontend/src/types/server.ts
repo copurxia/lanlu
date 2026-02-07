@@ -6,4 +6,9 @@ export interface ServerInfo {
   version: string;
   version_desc: string;
   version_name: string;
+  db_extensions?: Array<{
+    name: string;
+    enabled: boolean;
+    version?: string;
+  }>;
 }
