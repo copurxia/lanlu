@@ -34,6 +34,12 @@ public class ArchiveData {
     public var progress: Int32 = 0
     // favorite_time 存储用户收藏该档案的时间，从 user_favorites 表获取
     public var favorite_time: String = ""
+
+    // When groupby_tanks=true, DAO can return one row per group with these fields populated.
+    // group_item_type: "archive" | "tankoubon"
+    // group_item_id: arcid (for archive) or tankoubon_id (for tankoubon)
+    public var group_item_type: String = ""
+    public var group_item_id: String = ""
     
     /**
      * 获取文件扩展名
@@ -693,6 +699,382 @@ public class ArchiveDao {
                 conn.close()
                 return (Array<ArchiveData>(), 0)
             }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return (Array<ArchiveData>(), 0)
+        }
+    }
+
+    /**
+     * Search archives but return a grouped list when groupby_tanks=true:
+     * - For each tankoubon, only the best (by current sort) representative archive is used for ordering.
+     * - Returned rows include `group_item_type` and `group_item_id` so the caller can emit either
+     *   a tankoubon item or an archive item without scanning all results in memory.
+     *
+     * This avoids the old behavior in SearchController that used start=-1 (no LIMIT/OFFSET) +
+     * getArchiveTankoubonMapping(IN huge list), which becomes very slow on large datasets.
+     */
+    public static func searchArchivesGrouped(
+        filter: String,
+        category: String,
+        start: Int32,
+        count: Int32,
+        sortby: String,
+        order: String,
+        newOnly: Bool,
+        untaggedOnly: Bool,
+        favoriteOnly: Bool,
+        dateFrom: String,
+        dateTo: String,
+        userId: Int64,
+        tankoubonId: String
+    ): (Array<ArchiveData>, Int64) {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                var archives: ArrayList<ArchiveData> = ArrayList<ArchiveData>()
+                try {
+                    getLogger("archive_dao").debug("开始分组搜索归档(groupby_tanks)",
+                        ("filter", filter),
+                        ("category", category),
+                        ("start", start.toString()),
+                        ("count", count.toString()),
+                        ("sortby", sortby),
+                        ("order", order),
+                        ("newOnly", newOnly.toString()),
+                        ("untaggedOnly", untaggedOnly.toString()))
+
+                    // Build WHERE conditions (mostly copied from searchArchives to keep semantics identical).
+                    var whereConditions: ArrayList<String> = ArrayList<String>()
+                    let searchResult = SearchFilter.parse(filter)
+                    var filterParams: ArrayList<String> = ArrayList<String>()
+
+                    // In grouped queries we join other tables that may also have columns like "summary",
+                    // so we must qualify all archives_with_tags columns to avoid ambiguity.
+                    func qualifyRelevanceExpr(expr: String): String {
+                        var e = expr
+                        // Order matters: qualify column names first, then qualify "search_tsv".
+                        // Otherwise replacing "tags" after "archives_with_tags.search_tsv" would
+                        // rewrite the table name itself ("archives_with_tags" contains "tags").
+                        e = e.replace("tags", "archives_with_tags.tags")
+                        e = e.replace("title", "archives_with_tags.title")
+                        e = e.replace("filename", "archives_with_tags.filename")
+                        e = e.replace("search_tsv", "archives_with_tags.search_tsv")
+                        return e
+                    }
+
+                    func qualifyTagsCondition(cond: String): String {
+                        return cond.replace("tags", "archives_with_tags.tags")
+                    }
+
+                    // 处理普通搜索词（支持通配符和翻译搜索）
+                    if (searchResult.terms.size > 0) {
+                        var termConditions: ArrayList<String> = ArrayList<String>()
+                        for (term in searchResult.terms) {
+                            let (termValue, isExactTag) = stripExactSuffix(term)
+                            if (termValue.size == 0) { continue }
+
+                            // `$`：标签完全匹配（硬性过滤条件，不参与 OR 相关度）
+                            if (isExactTag) {
+                                whereConditions.add(qualifyTagsCondition(buildExactTagMatchConditionWithTranslations(termValue, filterParams)))
+                                continue
+                            }
+
+                            let pattern = SearchFilter.toLikePattern(termValue)
+                            var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR tags LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\'"
+                            fieldCondition = "(archives_with_tags.title LIKE ? ESCAPE '\\' OR archives_with_tags.filename LIKE ? ESCAPE '\\' OR archives_with_tags.tags LIKE ? ESCAPE '\\' OR archives_with_tags.summary LIKE ? ESCAPE '\\'"
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+
+                            let translatedTags = TagDao.findTagsByTranslation(termValue)
+                            for (tagName in translatedTags) {
+                                fieldCondition += " OR archives_with_tags.tags LIKE ? ESCAPE '\\'"
+                                filterParams.add("%" + tagName + "%")
+                            }
+
+                            fieldCondition += ")"
+                            termConditions.add(fieldCondition)
+                        }
+                        if (termConditions.size > 0) {
+                            var combined = ""
+                            for (i in 0..termConditions.size) {
+                                if (i > 0) { combined += " OR " }
+                                combined += termConditions[i]
+                            }
+                            whereConditions.add("(" + combined + ")")
+                        }
+                    }
+
+                    // 处理精确短语（引号内的内容，支持翻译搜索）
+                    if (searchResult.exactTerms.size > 0) {
+                        for (phrase in searchResult.exactTerms) {
+                            let (phraseValue, isExactTag) = stripExactSuffix(phrase)
+                            if (phraseValue.size == 0) { continue }
+
+                            // `"xxx$"` 且不包含空格时，按标签完全匹配处理
+                            if (isExactTag && !phraseValue.contains(" ")) {
+                                whereConditions.add(qualifyTagsCondition(buildExactTagMatchConditionWithTranslations(phraseValue, filterParams)))
+                                continue
+                            }
+
+                            let pattern = SearchFilter.toLikePattern(phraseValue)
+                            var fieldCondition = "(archives_with_tags.title LIKE ? ESCAPE '\\' OR archives_with_tags.filename LIKE ? ESCAPE '\\' OR archives_with_tags.tags LIKE ? ESCAPE '\\' OR archives_with_tags.summary LIKE ? ESCAPE '\\'"
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+
+                            let translatedTags = TagDao.findTagsByTranslation(phraseValue)
+                            for (tagName in translatedTags) {
+                                fieldCondition += " OR archives_with_tags.tags LIKE ? ESCAPE '\\'"
+                                filterParams.add("%" + tagName + "%")
+                            }
+
+                            fieldCondition += ")"
+                            whereConditions.add(fieldCondition)
+                        }
+                    }
+
+                    // 处理排除词（支持翻译搜索）
+                    if (searchResult.excludeTerms.size > 0) {
+                        for (excludeTerm in searchResult.excludeTerms) {
+                            let (excludeValue, isExactTag) = stripExactSuffix(excludeTerm)
+                            if (excludeValue.size == 0) { continue }
+
+                            // `-xxx$`：排除包含该精确标签的归档
+                            if (isExactTag) {
+                                whereConditions.add("NOT " + qualifyTagsCondition(buildExactTagMatchConditionWithTranslations(excludeValue, filterParams)))
+                                continue
+                            }
+
+                            let pattern = SearchFilter.toLikePattern(excludeValue)
+                            var fieldCondition = "(archives_with_tags.title LIKE ? ESCAPE '\\' OR archives_with_tags.filename LIKE ? ESCAPE '\\' OR archives_with_tags.tags LIKE ? ESCAPE '\\' OR archives_with_tags.summary LIKE ? ESCAPE '\\'"
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+                            filterParams.add(pattern)
+
+                            let translatedTags = TagDao.findTagsByTranslation(excludeValue)
+                            for (tagName in translatedTags) {
+                                fieldCondition += " OR archives_with_tags.tags LIKE ? ESCAPE '\\'"
+                                filterParams.add("%" + tagName + "%")
+                            }
+
+                            fieldCondition += ")"
+                            whereConditions.add("NOT " + fieldCondition)
+                        }
+                    }
+
+                    // newOnly 过滤 - 使用用户级别的已读状态
+                    if (newOnly && userId > 0) {
+                        whereConditions.add("NOT EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archives_with_tags.arcid AND uas.user_id = ${userId} AND uas.is_new = false)")
+                    }
+
+                    // 按 lastread 排序时，移除从未阅读的记录
+                    if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
+                        whereConditions.add("EXISTS (SELECT 1 FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = archives_with_tags.arcid AND uas.user_id = ${userId} AND uas.is_new = false)")
+                    }
+
+                    if (untaggedOnly) {
+                        whereConditions.add("(archives_with_tags.tags IS NULL OR archives_with_tags.tags = '')")
+                    }
+
+                    if (favoriteOnly && userId > 0) {
+                        whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archives_with_tags.arcid AND uf.user_id = ${userId})")
+                    }
+
+                    if (tankoubonId.size > 0) {
+                        whereConditions.add("EXISTS (SELECT 1 FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archives_with_tags.id)")
+                        filterParams.add(tankoubonId)
+                    }
+
+                    if (dateFrom.size > 0) {
+                        whereConditions.add("archives_with_tags.created_at >= ?")
+                        filterParams.add(dateFrom)
+                    }
+                    if (dateTo.size > 0) {
+                        whereConditions.add("archives_with_tags.created_at <= ?")
+                        filterParams.add(dateTo + " 23:59:59")
+                    }
+
+                    let relevanceExpr = qualifyRelevanceExpr(buildRelevanceExpr(filter))
+                    let minRelevanceThreshold = 0.05
+
+                    var whereClause = ""
+                    if (whereConditions.size > 0 || filter.size > 0) {
+                        for (i in 0..whereConditions.size) {
+                            if (i > 0) { whereClause += " AND " }
+                            whereClause += whereConditions[i]
+                        }
+                        if (filter.size > 0 && relevanceExpr != "1") {
+                            if (whereClause.size > 0) { whereClause += " AND " }
+                            whereClause += "(" + relevanceExpr + ") >= " + minRelevanceThreshold.toString()
+                        }
+                    }
+
+                    // Count distinct groups (tankoubon_id or arcid).
+                    var countSql = """
+                        SELECT COUNT(DISTINCT COALESCE(tb.tankoubon_id, archives_with_tags.arcid))
+                        FROM archives_with_tags
+                        LEFT JOIN tankoubon_archives tba ON tba.archive_id = archives_with_tags.id
+                        LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
+                    """
+                    if (whereClause.size > 0) {
+                        countSql += " WHERE " + whereClause
+                    }
+
+                    getLogger("archive_dao").debug("执行分组计数SQL", ("sql", countSql))
+                    let countStmt = conn.prepareStatement(countSql)
+                    var totalGroups: Int64 = 0
+                    for (i in 0..filterParams.size) {
+                        countStmt.set<String>(i, filterParams[i])
+                    }
+                    let countRs = countStmt.query()
+                    try {
+                        if (countRs.next()) {
+                            totalGroups = countRs.getOrNull<Int64>(0) ?? 0
+                        }
+                    } finally {
+                        countRs.close()
+                        countStmt.close()
+                    }
+
+                    // Build ORDER BY for representative row selection (must match ungrouped search ordering).
+                    var windowOrderBy = ""
+                    var finalOrderBy = ""
+                    if (sortby == "RANDOM()") {
+                        windowOrderBy = "RANDOM() DESC"
+                        finalOrderBy = "RANDOM() DESC"
+                    } else if (sortby == "title") {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        windowOrderBy = "title ${dir}"
+                        finalOrderBy = "title ${dir}"
+                    } else if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        let windowExpr = "(SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = base.arcid AND uas.user_id = ${userId})"
+                        let finalExpr = "(SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = arcid AND uas.user_id = ${userId})"
+                        windowOrderBy = "${windowExpr} ${dir}"
+                        finalOrderBy = "${finalExpr} ${dir}"
+                    } else if (sortby == "date_added") {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        windowOrderBy = "created_at ${dir}"
+                        finalOrderBy = "created_at ${dir}"
+                    } else if (sortby == "pagecount") {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        windowOrderBy = "pagecount ${dir}"
+                        finalOrderBy = "pagecount ${dir}"
+                    } else if (sortby == "tank_order" && tankoubonId.size > 0) {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        let windowExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = base.id LIMIT 1)"
+                        let finalExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = id LIMIT 1)"
+                        windowOrderBy = "${windowExpr} ${dir}, created_at DESC"
+                        finalOrderBy = "${finalExpr} ${dir}, created_at DESC"
+                        // ORDER BY 子查询在 window / final ORDER BY 中各需要绑定一次 tankId
+                        filterParams.add(tankoubonId)
+                        filterParams.add(tankoubonId)
+                    } else if (sortby == "size") {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        windowOrderBy = "file_size ${dir}"
+                        finalOrderBy = "file_size ${dir}"
+                    } else if (sortby == "relevance" && filter.size > 0 && relevanceExpr != "1") {
+                        // base CTE computes relevance_score so we don't need to repeat the heavy expression.
+                        windowOrderBy = "relevance_score DESC, created_at DESC"
+                        finalOrderBy = "relevance_score DESC, created_at DESC"
+                    } else {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        windowOrderBy = "title ${dir}"
+                        finalOrderBy = "title ${dir}"
+                    }
+
+                    // Data query: rank within each group and take the first representative row.
+                    // Note: We compute relevance_score in base so ranking/ordering can reuse it.
+                    var dataSql = """
+                        WITH base AS (
+                            SELECT
+                                archives_with_tags.id,
+                                archives_with_tags.arcid,
+                                archives_with_tags.filename,
+                                archives_with_tags.title,
+                                archives_with_tags.summary,
+                                archives_with_tags.thumbhash,
+                                archives_with_tags.cover_asset_id,
+                                archives_with_tags.created_at,
+                                archives_with_tags.updated_at,
+                                archives_with_tags.relative_path,
+                                archives_with_tags.file_size,
+                                archives_with_tags.pagecount,
+                                archives_with_tags.archive_type,
+                                archives_with_tags.tags,
+                                CASE WHEN tb.tankoubon_id IS NOT NULL AND tb.tankoubon_id != '' THEN 'tankoubon' ELSE 'archive' END AS group_item_type,
+                                COALESCE(tb.tankoubon_id, archives_with_tags.arcid) AS group_item_id,
+                                CASE WHEN ${relevanceExpr} IS NULL THEN 0 ELSE (${relevanceExpr}) END AS relevance_score
+                            FROM archives_with_tags
+                            LEFT JOIN tankoubon_archives tba ON tba.archive_id = archives_with_tags.id
+                            LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
+                    """
+                    if (whereClause.size > 0) {
+                        dataSql += " WHERE " + whereClause
+                    }
+
+                    dataSql += """
+                        ),
+                        ranked AS (
+                            SELECT base.*,
+                                   ROW_NUMBER() OVER (PARTITION BY base.group_item_id ORDER BY ${windowOrderBy}) AS rn
+                            FROM base
+                        )
+                        SELECT
+                            id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at,
+                            relative_path, file_size, pagecount, archive_type, tags, group_item_type, group_item_id
+                        FROM ranked
+                        WHERE rn = 1
+                        ORDER BY ${finalOrderBy}
+                        LIMIT ${count} OFFSET ${start}
+                    """
+
+                    getLogger("archive_dao").debug("执行分组数据SQL", ("sql", dataSql))
+                    let stmt = conn.prepareStatement(dataSql)
+
+                    for (i in 0..filterParams.size) {
+                        stmt.set<String>(i, filterParams[i])
+                    }
+
+                    let rs = stmt.query()
+                    try {
+                        while (rs.next()) {
+                            let archive = ArchiveData()
+                            archive.internalId = rs.getOrNull<Int64>(0) ?? 0
+                            archive.id = rs.getOrNull<String>(1) ?? ""
+                            archive.filename = rs.getOrNull<String>(2) ?? ""
+                            archive.title = rs.getOrNull<String>(3) ?? ""
+                            archive.summary = rs.getOrNull<String>(4) ?? ""
+                            archive.thumbhash = rs.getOrNull<String>(5) ?? ""
+                            archive.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
+                            archive.created_at = rs.getOrNull<String>(7) ?? ""
+                            archive.updated_at = rs.getOrNull<String>(8) ?? ""
+                            archive.relative_path = rs.getOrNull<String>(9) ?? ""
+                            archive.file_size = rs.getOrNull<Int64>(10) ?? 0
+                            archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
+                            archive.archive_type = rs.getOrNull<String>(12) ?? "archive"
+                            archive.tags = rs.getOrNull<String>(13) ?? ""
+                            archive.group_item_type = rs.getOrNull<String>(14) ?? ""
+                            archive.group_item_id = rs.getOrNull<String>(15) ?? ""
+                            archives.add(archive)
+                        }
+                    } finally {
+                        rs.close()
+                        stmt.close()
+                    }
+
+                    conn.close()
+                    return (archives.toArray(), totalGroups)
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("分组搜索归档失败", ("error", e.message))
+                    try { conn.close() } catch (_: Exception) {}
+                    return (Array<ArchiveData>(), 0)
+                }
             case None =>
                 getLogger("archive_dao").error("无法连接到数据库")
                 return (Array<ArchiveData>(), 0)

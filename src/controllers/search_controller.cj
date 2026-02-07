@@ -188,59 +188,57 @@ public class SearchController {
         var tankoubonIdsList: ArrayList<String> = ArrayList<String>()
 
         if (groupByTanks) {
-            // 先基于完整结果做分组，再进行分页，避免一个大合集挤占整页。
-            let (allArchives, _) = ArchiveModel.searchArchives(filter, category, -1, count, sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
+            // 分组分页下推到数据库：避免 start=-1 全量拉取 + 大 IN 映射查询。
+            let (groupedRows, groupedTotal) = ArchiveDao.searchArchivesGrouped(
+                filter,
+                category,
+                Int32(start),
+                Int32(count),
+                sortby,
+                order,
+                newOnly,
+                untaggedOnly,
+                favoriteOnly,
+                dateFrom,
+                dateTo,
+                userId,
+                tankoubonId
+            )
 
-            var allArcids: ArrayList<String> = ArrayList<String>()
-            for (archive in allArchives) {
-                allArcids.add(archive.id)
-            }
-            let allTankoubonMapping = ArchiveDao.getArchiveTankoubonMapping(allArcids.toArray())
-
-            var seenTankoubons: HashMap<String, Bool> = HashMap<String, Bool>()
+            totalCount = groupedTotal
             var pagedArchives = ArrayList<Archive>()
-            var groupedIndex: Int32 = 0
+            for (row in groupedRows) {
+                let itemType = if (row.group_item_type.size > 0) { row.group_item_type } else { "archive" }
+                let itemId = if (row.group_item_id.size > 0) { row.group_item_id } else { row.id }
 
-            for (archive in allArchives) {
-                var itemType = "archive"
-                var itemId = archive.id
+                responseItemTypes.add(itemType)
+                responseItemIds.add(itemId)
 
-                match (allTankoubonMapping.get(archive.id)) {
-                    case Some(tid) =>
-                        match (seenTankoubons.get(tid)) {
-                            case Some(_) => continue
-                            case None =>
-                                seenTankoubons[tid] = true
-                                itemType = "tankoubon"
-                                itemId = tid
-                        }
-                    case None => ()
+                if (itemType == "tankoubon") {
+                    tankoubonIdsList.add(itemId)
+                    continue
                 }
 
-                totalCount += 1
+                // archive item
+                let archive = Archive()
+                archive.id = row.id
+                archive.internalId = row.internalId
+                archive.title = row.title
+                archive.filename = row.filename
+                archive.summary = row.summary
+                archive.thumbhash = row.thumbhash
+                archive.cover_asset_id = row.cover_asset_id
+                archive.created_at = row.created_at
+                archive.updated_at = row.updated_at
+                archive.relative_path = row.relative_path
+                archive.file_size = row.file_size
+                archive.pagecount = row.pagecount
+                archive.archive_type = row.archive_type
+                archive.tags = row.tags
 
-                let shouldInclude = if (start < 0) {
-                    true
-                } else if (count > 0) {
-                    groupedIndex >= start && groupedIndex < (start + count)
-                } else {
-                    false
-                }
-
-                if (shouldInclude) {
-                    responseItemTypes.add(itemType)
-                    responseItemIds.add(itemId)
-                    if (itemType == "archive") {
-                        pagedArchives.add(archive)
-                        archiveMap[archive.id] = archive
-                    } else {
-                        tankoubonIdsList.add(itemId)
-                    }
-                }
-
-                groupedIndex += 1
+                pagedArchives.add(archive)
+                archiveMap[archive.id] = archive
             }
-
             archives = pagedArchives.toArray()
         } else {
             let (pagedArchives, pagedTotalCount) = ArchiveModel.searchArchives(filter, category, Int32(start), Int32(count), sortby, order, newOnly, untaggedOnly, favoriteOnly, dateFrom, dateTo, userId, tankoubonId)
