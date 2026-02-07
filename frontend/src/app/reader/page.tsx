@@ -9,6 +9,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { MediaInfoOverlay } from '@/components/reader/components/MediaInfoOverlay';
 import { ReaderFloatingControls } from '@/components/reader/components/ReaderFloatingControls';
+import { ReaderCollectionEndPage } from '@/components/reader/components/ReaderCollectionEndPage';
 import { ReaderPreloadArea } from '@/components/reader/components/ReaderPreloadArea';
 import { ReaderSidebar } from '@/components/reader/components/ReaderSidebar';
 import { ReaderSingleModeView } from '@/components/reader/components/ReaderSingleModeView';
@@ -58,6 +59,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { useAppBack } from '@/hooks/use-app-back';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
+import type { Tankoubon } from '@/types/tankoubon';
 
 function ReaderContent() {
   const router = useRouter();
@@ -80,6 +83,8 @@ function ReaderContent() {
   const imageRefs = useRef<(HTMLImageElement | null)[]>([]);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
+  const [nextArchive, setNextArchive] = useState<{ id: string; title: string } | null>(null);
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -168,6 +173,20 @@ function ReaderContent() {
     return [currentPage];
   }, [currentPage, doublePageMode, pages.length, readingMode, splitCoverMode]);
 
+  const collectionEndPageEnabled = useMemo(() => {
+    // Collection (tankoubon) mode only makes sense in paged reader modes.
+    return Boolean(tankoubonContext && readingMode !== 'webtoon');
+  }, [tankoubonContext, readingMode]);
+
+  const totalPages = useMemo(() => {
+    if (readingMode === 'webtoon') return pages.length;
+    return pages.length + (collectionEndPageEnabled ? 1 : 0);
+  }, [collectionEndPageEnabled, pages.length, readingMode]);
+
+  const isCollectionEndPage = useMemo(() => {
+    return collectionEndPageEnabled && currentPage === pages.length;
+  }, [collectionEndPageEnabled, currentPage, pages.length]);
+
   const imageLoading = useReaderImageLoading({
     pages,
     readingMode,
@@ -253,6 +272,67 @@ function ReaderContent() {
 
     fetchPages();
   }, [id, pageParam, setImagesLoading]);
+
+  // When an archive belongs to a tankoubon, compute the next archive for "end page" navigation.
+  useEffect(() => {
+    if (!id) {
+      setTankoubonContext(null);
+      setNextArchive(null);
+      return;
+    }
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const tanks = await TankoubonService.getTankoubonsForArchive(id);
+        if (cancelled) return;
+
+        if (!tanks || tanks.length === 0) {
+          setTankoubonContext(null);
+          setNextArchive(null);
+          return;
+        }
+
+        // If an archive is in multiple tankoubons, prefer the favorited one (then the larger one).
+        const chosen = [...tanks].sort((a, b) => {
+          const fav = Number(Boolean(b.isfavorite)) - Number(Boolean(a.isfavorite));
+          if (fav !== 0) return fav;
+          const aCount = a.archives?.length ?? 0;
+          const bCount = b.archives?.length ?? 0;
+          return bCount - aCount;
+        })[0];
+
+        setTankoubonContext(chosen);
+
+        const idx = chosen.archives?.indexOf(id) ?? -1;
+        const nextId = idx >= 0 ? chosen.archives?.[idx + 1] : undefined;
+        if (!nextId) {
+          setNextArchive(null);
+          return;
+        }
+
+        try {
+          const meta = await ArchiveService.getMetadata(nextId, language);
+          if (cancelled) return;
+          const nextTitle = (meta.title && meta.title.trim()) ? meta.title : meta.filename || nextId;
+          setNextArchive({ id: nextId, title: nextTitle });
+        } catch (metaErr) {
+          logger.apiError('fetch next archive metadata', metaErr);
+          if (cancelled) return;
+          setNextArchive({ id: nextId, title: nextId });
+        }
+      } catch (err) {
+        logger.apiError('fetch tankoubons for archive', err);
+        if (cancelled) return;
+        setTankoubonContext(null);
+        setNextArchive(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, language]);
 
   // 单独处理错误消息的翻译
   useEffect(() => {
@@ -457,6 +537,25 @@ function ReaderContent() {
     splitCoverMode,
   });
 
+  // Sync URL `page` for paged modes so the current page can be shared/restored.
+  useEffect(() => {
+    if (!id) return;
+    if (readingMode === 'webtoon') return;
+    if (isCollectionEndPage) return;
+    if (pages.length <= 0) return;
+    if (currentPage < 0 || currentPage >= pages.length) return;
+
+    const currentUrlPage = searchParams?.get('page') ?? null;
+    const currentUrlId = searchParams?.get('id') ?? null;
+    const desiredPage = String(currentPage + 1);
+    if (currentUrlId === id && currentUrlPage === desiredPage) return;
+
+    const params = new URLSearchParams(searchParams?.toString() || '');
+    params.set('id', id);
+    params.set('page', desiredPage);
+    router.replace(`/reader?${params.toString()}`, { scroll: false });
+  }, [currentPage, id, isCollectionEndPage, pages.length, readingMode, router, searchParams]);
+
   // 加载HTML页面内容（单页模式：当前页；条漫模式：可见范围内）
   useEffect(() => {
     if (!id || pages.length === 0) return;
@@ -602,6 +701,28 @@ function ReaderContent() {
   }, []);
 
   const handlePrevPage = useCallback(() => {
+    if (isCollectionEndPage) {
+      // From the synthetic "end" page, go back to the last real page.
+      if (pages.length <= 0) return;
+
+      let target = pages.length - 1;
+      if (doublePageMode) {
+        if (splitCoverMode) {
+          // split-cover spreads start at 1: (1,2), (3,4)...
+          // When pages.length is odd, the last page is part of a spread starting at pages.length - 2.
+          if (pages.length % 2 === 1 && pages.length >= 2) target = pages.length - 2;
+        } else {
+          // Normal spreads start at 0: (0,1), (2,3)...
+          // When pages.length is even, the last page is part of a spread starting at pages.length - 2.
+          if (pages.length % 2 === 0 && pages.length >= 2) target = pages.length - 2;
+        }
+      }
+
+      setCurrentPage(Math.max(0, target));
+      resetTransform();
+      return;
+    }
+
     if (currentPage > 0) {
       if (doublePageMode && splitCoverMode) {
         // 拆分封面模式：第1页单独显示，其他页面正常拼合
@@ -626,9 +747,34 @@ function ReaderContent() {
       }
       resetTransform();
     }
-  }, [currentPage, resetTransform, doublePageMode, splitCoverMode]);
+  }, [currentPage, isCollectionEndPage, pages.length, resetTransform, doublePageMode, splitCoverMode]);
 
   const handleNextPage = useCallback(() => {
+    if (isCollectionEndPage) {
+      // Continue flipping from the synthetic "end" page to the next archive.
+      if (nextArchive?.id) {
+        router.push(`/reader?id=${nextArchive.id}`);
+      }
+      return;
+    }
+
+    // When in a collection (tankoubon), append a synthetic end page after the last real page.
+    if (collectionEndPageEnabled && pages.length > 0) {
+      const viewShowsTwoPages =
+        doublePageMode &&
+        !(splitCoverMode && currentPage === 0) &&
+        currentPage + 1 < pages.length;
+      const viewIncludesLastPage =
+        currentPage === pages.length - 1 ||
+        (viewShowsTwoPages && currentPage + 1 === pages.length - 1);
+
+      if (viewIncludesLastPage) {
+        setCurrentPage(pages.length);
+        resetTransform();
+        return;
+      }
+    }
+
     if (currentPage < pages.length - 1) {
       if (doublePageMode && splitCoverMode) {
         // 拆分封面模式：第1页单独显示，其他页面正常拼合
@@ -658,7 +804,17 @@ function ReaderContent() {
       }
       resetTransform();
     }
-  }, [currentPage, pages.length, resetTransform, doublePageMode, splitCoverMode]);
+  }, [
+    collectionEndPageEnabled,
+    currentPage,
+    isCollectionEndPage,
+    nextArchive?.id,
+    pages.length,
+    resetTransform,
+    router,
+    doublePageMode,
+    splitCoverMode,
+  ]);
 
   const interactionHandlers = useReaderInteractionHandlers({
     readerAreaRef,
@@ -672,7 +828,7 @@ function ReaderContent() {
     onNextPage: handleNextPage,
     currentPage,
     setCurrentPage: (page) => setCurrentPage(page),
-    pagesLength: pages.length,
+    pagesLength: totalPages,
     webtoonContainerRef,
     imageHeights: webtoonVirtualization.imageHeights,
     containerHeight: webtoonVirtualization.containerHeight,
@@ -697,7 +853,7 @@ function ReaderContent() {
     webtoonContainerRef,
     imageHeights: webtoonVirtualization.imageHeights,
     currentPage,
-    pagesLength: pages.length,
+    pagesLength: totalPages,
     doublePageMode,
     splitCoverMode,
     onNextPage: handleNextPage,
@@ -820,7 +976,7 @@ function ReaderContent() {
 	      <ReaderFloatingControls
 	        showToolbar={toolbar.showToolbar}
 	        currentPage={currentPage}
-	        totalPages={pages.length}
+	        totalPages={totalPages}
 	        onChangePage={handleSliderChangePage}
 	        settingsOpen={settingsOpen}
 	        onSettingsOpenChange={setSettingsOpen}
@@ -871,7 +1027,7 @@ function ReaderContent() {
 
         {/* 单页模式 */}
  	        <ReaderSingleModeView
- 	          enabled={readingMode !== 'webtoon'}
+ 	          enabled={readingMode !== 'webtoon' && !isCollectionEndPage}
  	          sidebarOpen={sidebar.sidebarOpen}
             readerAreaRef={readerAreaRef}
             tapTurnPageEnabled={tapTurnPageEnabled}
@@ -899,9 +1055,16 @@ function ReaderContent() {
 	          t={t}
 	        />
 
+          <ReaderCollectionEndPage
+            enabled={isCollectionEndPage}
+            finishedTitle={archive.archiveTitle}
+            nextTitle={nextArchive?.title ?? null}
+            t={t}
+          />
+
         {/* 隐藏的预加载区域：前1页和后5页（仅单页/双页模式） */}
 	        <ReaderPreloadArea
-	          enabled={readingMode !== 'webtoon'}
+	          enabled={readingMode !== 'webtoon' && !isCollectionEndPage}
 	          imagesLoading={imageLoading.imagesLoading}
 	          currentPage={currentPage}
 	          doublePageMode={doublePageMode}

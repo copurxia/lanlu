@@ -55,7 +55,10 @@ export function useReaderProgressTracking({
       }
 
       imageLoadTimeoutRef.current = setTimeout(() => {
-        updateReadingProgress(currentPage);
+        // `currentPage` may temporarily point to a synthetic page (e.g. collection "end" page).
+        // Clamp to a valid page index so we never send an out-of-range progress to the API.
+        const clampedPage = Math.max(0, Math.min(currentPage, pagesLength - 1));
+        updateReadingProgress(clampedPage);
       }, 500);
 
       return () => {
@@ -69,9 +72,9 @@ export function useReaderProgressTracking({
   useEffect(() => {
     return () => {
       if (pagesLength > 0 && currentPageRef.current >= 0) {
-        updateReadingProgress(currentPageRef.current);
+        const clampedPage = Math.max(0, Math.min(currentPageRef.current, pagesLength - 1));
+        updateReadingProgress(clampedPage);
       }
     };
   }, [pagesLength, updateReadingProgress]);
 }
-
