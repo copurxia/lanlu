@@ -40,6 +40,7 @@ type QueueState = {
   entries: DownloadEntry[];
   add: (entry: Omit<DownloadEntry, "id" | "createdAt" | "updatedAt"> & { id?: string }) => void;
   update: (id: string, patch: Partial<DownloadEntry>) => void;
+  setEntries: (entries: DownloadEntry[]) => void;
   remove: (id: string) => void;
   clearCompleted: () => void;
   clearAll: () => void;
@@ -77,6 +78,7 @@ export const useDownloadQueueStore = create<QueueState>()(
           entries: get().entries.map((e) => (e.id === id ? { ...e, ...patch, updatedAt: now } : e)),
         });
       },
+      setEntries: (entries) => set({ entries }),
       remove: (id) => set({ entries: get().entries.filter((e) => e.id !== id) }),
       clearCompleted: () =>
         set({
