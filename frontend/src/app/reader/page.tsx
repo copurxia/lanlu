@@ -81,10 +81,19 @@ function ReaderContent() {
   const webtoonContainerRef = useRef<HTMLDivElement>(null);
   const webtoonPageElementRefs = useRef<(HTMLDivElement | null)[]>([]);
   const imageRefs = useRef<(HTMLImageElement | null)[]>([]);
+  const currentPageRef = useRef(0);
+  const pendingUrlPageIndexRef = useRef<number | null>(null);
+  const pendingUrlPageRawRef = useRef<number | null>(null);
+  const appliedVirtualFromUrlForIdRef = useRef<string | null>(null);
+  const urlSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWebtoonScrollToIndexRef = useRef<number | null>(null);
+  const pendingWebtoonScrollToEdgeRef = useRef<'top' | 'bottom' | null>(null);
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
+  const [prevArchiveId, setPrevArchiveId] = useState<string | null>(null);
   const [nextArchive, setNextArchive] = useState<{ id: string; title: string; coverAssetId?: number } | null>(null);
+  const archiveNavLockRef = useRef(0);
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -110,10 +119,27 @@ function ReaderContent() {
     router.push(`/archive?id=${id}`);
   }, [id, router]);
 
-  const navigateToNextArchive = useCallback(() => {
+  const pushReader = useCallback(
+    (targetId: string, page: number) => {
+      const now = Date.now();
+      // Prevent rapid repeat triggers (wheel/tap/keyboard) from causing push loops/flicker.
+      if (now - archiveNavLockRef.current < 250) return;
+      archiveNavLockRef.current = now;
+      router.push(`/reader?id=${targetId}&page=${page}`);
+    },
+    [router]
+  );
+
+  const navigateToNextArchiveStart = useCallback(() => {
     if (!nextArchive?.id) return;
-    router.push(`/reader?id=${nextArchive.id}`);
-  }, [nextArchive?.id, router]);
+    pushReader(nextArchive.id, 1);
+  }, [nextArchive?.id, pushReader]);
+
+  const navigateToPrevArchiveEnd = useCallback(() => {
+    if (!prevArchiveId) return;
+    // Use a huge page index; reader will clamp to the last real page and then sync URL to the clamped page.
+    pushReader(prevArchiveId, 999999);
+  }, [prevArchiveId, pushReader]);
 
   // 使用新的阅读设置hooks，统一管理所有localStorage逻辑
   const [readingMode, toggleReadingMode] = useReadingMode();
@@ -210,18 +236,33 @@ function ReaderContent() {
         return;
       }
 
+      setLoading(true);
+      setError(null);
+      appliedVirtualFromUrlForIdRef.current = null;
+
       try {
         const data = await ArchiveService.getFiles(id);
 
         // 计算初始页码
         let initialPage: number;
 
-        // URL的page参数优先级最高
-        if (pageParam) {
-          const urlPage = parseInt(pageParam, 10);
-          if (!isNaN(urlPage) && urlPage > 0 && urlPage <= data.pages.length) {
-            initialPage = urlPage - 1; // URL使用1-based，转换为0-based
+        // URL的page参数优先级最高（1-based，包含后续虚拟页；此处先按“真实页面”初始化，虚拟页在合集信息就绪后再补齐）
+        const pageParamSnapshot = searchParams?.get('page');
+        if (pageParamSnapshot) {
+          const urlPage = parseInt(pageParamSnapshot, 10);
+          if (!isNaN(urlPage) && urlPage > 0) {
+            pendingUrlPageRawRef.current = urlPage;
+            pendingUrlPageIndexRef.current = urlPage - 1;
+            if (urlPage - 1 >= 0 && urlPage - 1 < data.pages.length) {
+              initialPage = urlPage - 1;
+            } else {
+              initialPage = Math.max(0, data.pages.length - 1);
+              // For webtoon, an out-of-range page is treated as "jump to end".
+              pendingWebtoonScrollToEdgeRef.current = 'bottom';
+            }
           } else {
+            pendingUrlPageRawRef.current = null;
+            pendingUrlPageIndexRef.current = null;
             initialPage = 0;
           }
         } else if (data.progress > 0 && data.progress < data.pages.length) {
@@ -262,6 +303,12 @@ function ReaderContent() {
         // 原子性地设置状态，避免多次渲染
         setPages(data.pages);
         setCurrentPage(initialPage);
+        if (readingMode === 'webtoon') {
+          pendingWebtoonScrollToIndexRef.current = initialPage;
+          if (!pendingWebtoonScrollToEdgeRef.current && initialPage <= 0) {
+            pendingWebtoonScrollToEdgeRef.current = 'top';
+          }
+        }
 
         // 如果有进度且需要预加载图片，添加到加载队列（跳过 HTML 页，HTML 由 useReaderHtmlPages 加载）
         if (initialPage > 0 && data.pages[initialPage]?.type !== 'html') {
@@ -276,12 +323,18 @@ function ReaderContent() {
     }
 
     fetchPages();
-  }, [id, pageParam, setImagesLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, setImagesLoading]);
 
-  // When an archive belongs to a tankoubon, compute the next archive for "end page" navigation.
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  // When an archive belongs to a tankoubon, compute prev/next archives for "chapter" navigation.
   useEffect(() => {
     if (!id) {
       setTankoubonContext(null);
+      setPrevArchiveId(null);
       setNextArchive(null);
       return;
     }
@@ -294,6 +347,7 @@ function ReaderContent() {
 
         if (!tanks || tanks.length === 0) {
           setTankoubonContext(null);
+          setPrevArchiveId(null);
           setNextArchive(null);
           return;
         }
@@ -310,6 +364,8 @@ function ReaderContent() {
         setTankoubonContext(chosen);
 
         const idx = chosen.archives?.indexOf(id) ?? -1;
+        const prevId = idx > 0 ? chosen.archives?.[idx - 1] : undefined;
+        setPrevArchiveId(prevId ?? null);
         const nextId = idx >= 0 ? chosen.archives?.[idx + 1] : undefined;
         if (!nextId) {
           setNextArchive(null);
@@ -330,6 +386,7 @@ function ReaderContent() {
         logger.apiError('fetch tankoubons for archive', err);
         if (cancelled) return;
         setTankoubonContext(null);
+        setPrevArchiveId(null);
         setNextArchive(null);
       }
     })();
@@ -542,24 +599,83 @@ function ReaderContent() {
     splitCoverMode,
   });
 
-  // Sync URL `page` for paged modes so the current page can be shared/restored.
+  // Apply URL `page` -> state. This runs for all modes (including webtoon and the synthetic "end" page).
+  // IMPORTANT: Do NOT refetch pages when only `page` changes; otherwise every flip causes flicker.
   useEffect(() => {
     if (!id) return;
-    if (readingMode === 'webtoon') return;
-    if (isCollectionEndPage) return;
-    if (pages.length <= 0) return;
-    if (currentPage < 0 || currentPage >= pages.length) return;
+    if (!pageParam) return;
+    if (totalPages <= 0) return;
+    const urlPage = parseInt(pageParam, 10);
+    if (isNaN(urlPage) || urlPage <= 0) return;
 
-    const currentUrlPage = searchParams?.get('page') ?? null;
-    const currentUrlId = searchParams?.get('id') ?? null;
-    const desiredPage = String(currentPage + 1);
-    if (currentUrlId === id && currentUrlPage === desiredPage) return;
+    const desiredIndex = Math.max(0, Math.min(urlPage - 1, totalPages - 1));
+    if (desiredIndex === currentPageRef.current) return;
 
-    const params = new URLSearchParams(searchParams?.toString() || '');
-    params.set('id', id);
-    params.set('page', desiredPage);
-    router.replace(`/reader?${params.toString()}`, { scroll: false });
-  }, [currentPage, id, isCollectionEndPage, pages.length, readingMode, router, searchParams]);
+    setCurrentPage(desiredIndex);
+    setScale(1);
+    setTranslateX(0);
+    setTranslateY(0);
+
+    if (readingMode === 'webtoon') {
+      pendingWebtoonScrollToIndexRef.current = desiredIndex;
+      pendingWebtoonScrollToEdgeRef.current =
+        desiredIndex <= 0 ? 'top' : desiredIndex >= totalPages - 1 ? 'bottom' : null;
+    }
+  }, [id, pageParam, readingMode, totalPages]);
+
+  // Sync state -> URL `page` for all modes (including virtual page). Debounced to avoid rapid-flip flicker.
+  useEffect(() => {
+    if (!id) return;
+    if (totalPages <= 0) return;
+    if (currentPage < 0 || currentPage >= totalPages) return;
+
+    if (urlSyncTimerRef.current) clearTimeout(urlSyncTimerRef.current);
+    urlSyncTimerRef.current = setTimeout(() => {
+      const desiredPage = String(currentPage + 1);
+      const currentUrlPage = searchParams?.get('page') ?? null;
+      const currentUrlId = searchParams?.get('id') ?? null;
+      if (currentUrlId === id && currentUrlPage === desiredPage) return;
+
+      const params = new URLSearchParams(searchParams?.toString() || '');
+      params.set('id', id);
+      params.set('page', desiredPage);
+      router.replace(`/reader?${params.toString()}`, { scroll: false });
+    }, 120);
+
+    return () => {
+      if (urlSyncTimerRef.current) clearTimeout(urlSyncTimerRef.current);
+    };
+  }, [currentPage, id, router, searchParams, totalPages]);
+
+  // Webtoon: when the "current page" changes via URL/slider/initial load, scroll the container to match.
+  // (Scroll-driven currentPage updates do NOT set the pending refs, so user scrolling won't get interrupted.)
+  useEffect(() => {
+    if (readingMode !== 'webtoon') return;
+    const container = webtoonContainerRef.current;
+    if (!container) return;
+
+    const edge = pendingWebtoonScrollToEdgeRef.current;
+    const index = pendingWebtoonScrollToIndexRef.current;
+    if (!edge && index == null) return;
+
+    pendingWebtoonScrollToEdgeRef.current = null;
+    pendingWebtoonScrollToIndexRef.current = null;
+
+    requestAnimationFrame(() => {
+      if (edge === 'top') {
+        container.scrollTop = 0;
+        return;
+      }
+      if (edge === 'bottom') {
+        container.scrollTop = container.scrollHeight;
+        return;
+      }
+      if (index != null) {
+        const offset = webtoonVirtualization.prefixHeights[index] || 0;
+        container.scrollTop = offset;
+      }
+    });
+  }, [readingMode, webtoonVirtualization.prefixHeights]);
 
   // 加载HTML页面内容（单页模式：当前页；条漫模式：可见范围内）
   useEffect(() => {
@@ -728,6 +844,12 @@ function ReaderContent() {
       return;
     }
 
+    // Collection: from the first page, flipping "prev" goes to previous chapter end (like HTML chapter navigation).
+    if (currentPage <= 0 && collectionEndPageEnabled && prevArchiveId) {
+      navigateToPrevArchiveEnd();
+      return;
+    }
+
     if (currentPage > 0) {
       if (doublePageMode && splitCoverMode) {
         // 拆分封面模式：第1页单独显示，其他页面正常拼合
@@ -752,12 +874,22 @@ function ReaderContent() {
       }
       resetTransform();
     }
-  }, [currentPage, isCollectionEndPage, pages.length, resetTransform, doublePageMode, splitCoverMode]);
+  }, [
+    collectionEndPageEnabled,
+    currentPage,
+    isCollectionEndPage,
+    navigateToPrevArchiveEnd,
+    pages.length,
+    prevArchiveId,
+    resetTransform,
+    doublePageMode,
+    splitCoverMode,
+  ]);
 
   const handleNextPage = useCallback(() => {
     if (isCollectionEndPage) {
       // Continue flipping from the synthetic "end" page to the next archive.
-      navigateToNextArchive();
+      navigateToNextArchiveStart();
       return;
     }
 
@@ -812,7 +944,7 @@ function ReaderContent() {
     currentPage,
     isCollectionEndPage,
     pages.length,
-    navigateToNextArchive,
+    navigateToNextArchiveStart,
     resetTransform,
     doublePageMode,
     splitCoverMode,
@@ -828,7 +960,8 @@ function ReaderContent() {
     onHideToolbar: toolbar.hideToolbar,
     onPrevPage: handlePrevPage,
     onNextPage: handleNextPage,
-    onWebtoonEndNext: collectionEndPageEnabled ? navigateToNextArchive : undefined,
+    onWebtoonStartPrev: collectionEndPageEnabled ? navigateToPrevArchiveEnd : undefined,
+    onWebtoonEndNext: collectionEndPageEnabled ? navigateToNextArchiveStart : undefined,
     currentPage,
     setCurrentPage: (page) => setCurrentPage(page),
     pagesLength: totalPages,
@@ -849,7 +982,8 @@ function ReaderContent() {
     onNextPage: handleNextPage,
     webtoonContainerRef,
     isCollectionEndPage,
-    onWebtoonEndNext: navigateToNextArchive,
+    onWebtoonStartPrev: collectionEndPageEnabled ? navigateToPrevArchiveEnd : undefined,
+    onWebtoonEndNext: collectionEndPageEnabled ? navigateToNextArchiveStart : undefined,
   });
 
   useReaderAutoPlay({

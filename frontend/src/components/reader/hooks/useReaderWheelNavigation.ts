@@ -18,6 +18,7 @@ export function useReaderWheelNavigation({
   onNextPage,
   webtoonContainerRef,
   isCollectionEndPage,
+  onWebtoonStartPrev,
   onWebtoonEndNext,
 }: {
   pages: PageInfo[];
@@ -30,6 +31,7 @@ export function useReaderWheelNavigation({
   onNextPage: () => void;
   webtoonContainerRef?: React.RefObject<HTMLDivElement | null>;
   isCollectionEndPage?: boolean;
+  onWebtoonStartPrev?: () => void;
   onWebtoonEndNext?: () => void;
 }) {
   const [showAutoNextCountdown, setShowAutoNextCountdown] = useState(false);
@@ -110,10 +112,18 @@ export function useReaderWheelNavigation({
       if (readingMode === 'webtoon') {
         if (showAutoNextCountdown) clearCountdown();
 
+        const container = webtoonContainerRef?.current;
+        if (!container) return;
+        const atTop = container.scrollTop <= 5;
+        const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 5;
+
+        if (currentPage <= 0 && atTop && e.deltaY < 0 && onWebtoonStartPrev) {
+          e.preventDefault();
+          onWebtoonStartPrev();
+          return;
+        }
+
         if (isCollectionEndPage && onWebtoonEndNext) {
-          const container = webtoonContainerRef?.current;
-          if (!container) return;
-          const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 5;
           if (atBottom && e.deltaY > 0) {
             e.preventDefault();
             onWebtoonEndNext();
@@ -331,6 +341,7 @@ export function useReaderWheelNavigation({
       onNextPage,
       webtoonContainerRef,
       isCollectionEndPage,
+      onWebtoonStartPrev,
       onWebtoonEndNext,
     ]
   );
