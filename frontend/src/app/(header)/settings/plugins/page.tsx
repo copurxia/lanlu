@@ -214,11 +214,35 @@ export default function SettingsPluginsPage() {
   };
 
   const actionButtons = (
-    <div className="flex items-center space-x-2">
+    <div className="flex items-center gap-2">
+      {/* Mobile: icon buttons */}
+      <Button
+        variant="default"
+        size="icon"
+        onClick={() => setInstallDialogOpen(true)}
+        className="sm:hidden shrink-0"
+        aria-label={t('settings.pluginInstall')}
+        title={t('settings.pluginInstall')}
+      >
+        <Download className="w-4 h-4" />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={handleRefresh}
+        disabled={refreshing}
+        className="sm:hidden shrink-0"
+        aria-label={t('common.refresh')}
+        title={t('common.refresh')}
+      >
+        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+      </Button>
+
+      {/* Desktop: text buttons */}
       <Button
         variant="default"
         onClick={() => setInstallDialogOpen(true)}
-        className="flex items-center space-x-2"
+        className="hidden sm:inline-flex items-center space-x-2 shrink-0"
       >
         <Download className="w-4 h-4" />
         <span>{t('settings.pluginInstall')}</span>
@@ -227,7 +251,7 @@ export default function SettingsPluginsPage() {
         variant="outline"
         onClick={handleRefresh}
         disabled={refreshing}
-        className="flex items-center space-x-2"
+        className="hidden sm:inline-flex items-center space-x-2 shrink-0"
       >
         <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         <span>{t('common.refresh')}</span>
