@@ -130,7 +130,7 @@ export function ReaderCollectionEndPage({
                   ) : null}
                   {nextId ? (
                     <Button asChild size="sm" className="flex-1">
-                      <Link href={`/reader?id=${nextId}`} prefetch={false}>
+                      <Link href={`/reader?id=${nextId}&page=1`} prefetch={false}>
                         {t('common.read')}
                       </Link>
                     </Button>

@@ -61,6 +61,7 @@ import Link from 'next/link';
 import { useAppBack } from '@/hooks/use-app-back';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import type { Tankoubon } from '@/types/tankoubon';
+import { toast } from 'sonner';
 
 function ReaderContent() {
   const router = useRouter();
@@ -94,6 +95,11 @@ function ReaderContent() {
   const [prevArchiveId, setPrevArchiveId] = useState<string | null>(null);
   const [nextArchive, setNextArchive] = useState<{ id: string; title: string; coverAssetId?: number } | null>(null);
   const archiveNavLockRef = useRef(0);
+  const chapterJumpCountdownRef = useRef<{
+    seconds: number;
+    timerId: ReturnType<typeof setInterval> | null;
+    toastId: string | number | null;
+  }>({ seconds: 0, timerId: null, toastId: null });
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -128,6 +134,60 @@ function ReaderContent() {
       router.push(`/reader?id=${targetId}&page=${page}`);
     },
     [router]
+  );
+
+  const clearChapterJumpCountdown = useCallback(() => {
+    const state = chapterJumpCountdownRef.current;
+    if (state.timerId) {
+      clearInterval(state.timerId);
+      state.timerId = null;
+    }
+    if (state.toastId != null) {
+      toast.dismiss(state.toastId);
+      state.toastId = null;
+    }
+    state.seconds = 0;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearChapterJumpCountdown();
+    };
+  }, [clearChapterJumpCountdown]);
+
+  const requestChapterJump = useCallback(
+    (direction: 'prev' | 'next', jump: () => void) => {
+      const state = chapterJumpCountdownRef.current;
+      if (state.timerId) return; // already counting down
+
+      const COUNTDOWN_SECONDS = 3;
+      state.seconds = COUNTDOWN_SECONDS;
+
+      const label = direction === 'next' ? '下一话' : '上一话';
+      const renderText = (s: number) => `即将跳转到${label}（${s}秒后）`;
+
+      state.toastId = toast.loading(renderText(COUNTDOWN_SECONDS), {
+        duration: COUNTDOWN_SECONDS * 1000,
+        action: { label: '取消', onClick: () => clearChapterJumpCountdown() },
+      });
+
+      state.timerId = setInterval(() => {
+        state.seconds -= 1;
+        if (state.seconds <= 0) {
+          clearChapterJumpCountdown();
+          jump();
+          return;
+        }
+        if (state.toastId != null) {
+          toast.loading(renderText(state.seconds), {
+            id: state.toastId,
+            duration: state.seconds * 1000,
+            action: { label: '取消', onClick: () => clearChapterJumpCountdown() },
+          });
+        }
+      }, 1000);
+    },
+    [clearChapterJumpCountdown]
   );
 
   const navigateToNextArchiveStart = useCallback(() => {
@@ -846,7 +906,7 @@ function ReaderContent() {
 
     // Collection: from the first page, flipping "prev" goes to previous chapter end (like HTML chapter navigation).
     if (currentPage <= 0 && collectionEndPageEnabled && prevArchiveId) {
-      navigateToPrevArchiveEnd();
+      requestChapterJump('prev', navigateToPrevArchiveEnd);
       return;
     }
 
@@ -878,6 +938,7 @@ function ReaderContent() {
     collectionEndPageEnabled,
     currentPage,
     isCollectionEndPage,
+    requestChapterJump,
     navigateToPrevArchiveEnd,
     pages.length,
     prevArchiveId,
@@ -889,7 +950,7 @@ function ReaderContent() {
   const handleNextPage = useCallback(() => {
     if (isCollectionEndPage) {
       // Continue flipping from the synthetic "end" page to the next archive.
-      navigateToNextArchiveStart();
+      requestChapterJump('next', navigateToNextArchiveStart);
       return;
     }
 
@@ -944,6 +1005,7 @@ function ReaderContent() {
     currentPage,
     isCollectionEndPage,
     pages.length,
+    requestChapterJump,
     navigateToNextArchiveStart,
     resetTransform,
     doublePageMode,
@@ -960,8 +1022,8 @@ function ReaderContent() {
     onHideToolbar: toolbar.hideToolbar,
     onPrevPage: handlePrevPage,
     onNextPage: handleNextPage,
-    onWebtoonStartPrev: collectionEndPageEnabled ? navigateToPrevArchiveEnd : undefined,
-    onWebtoonEndNext: collectionEndPageEnabled ? navigateToNextArchiveStart : undefined,
+    onWebtoonStartPrev: collectionEndPageEnabled ? () => requestChapterJump('prev', navigateToPrevArchiveEnd) : undefined,
+    onWebtoonEndNext: collectionEndPageEnabled ? () => requestChapterJump('next', navigateToNextArchiveStart) : undefined,
     currentPage,
     setCurrentPage: (page) => setCurrentPage(page),
     pagesLength: totalPages,
@@ -982,8 +1044,8 @@ function ReaderContent() {
     onNextPage: handleNextPage,
     webtoonContainerRef,
     isCollectionEndPage,
-    onWebtoonStartPrev: collectionEndPageEnabled ? navigateToPrevArchiveEnd : undefined,
-    onWebtoonEndNext: collectionEndPageEnabled ? navigateToNextArchiveStart : undefined,
+    onWebtoonStartPrev: collectionEndPageEnabled ? () => requestChapterJump('prev', navigateToPrevArchiveEnd) : undefined,
+    onWebtoonEndNext: collectionEndPageEnabled ? () => requestChapterJump('next', navigateToNextArchiveStart) : undefined,
   });
 
   useReaderAutoPlay({
