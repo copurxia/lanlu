@@ -57,9 +57,11 @@ import {
   MousePointerClick
 } from 'lucide-react';
 import Link from 'next/link';
+import { useAppBack } from '@/hooks/use-app-back';
 
 function ReaderContent() {
   const router = useRouter();
+  const appBack = useAppBack();
   const searchParams = useSearchParams();
   const id = searchParams?.get('id') ?? null;
   const pageParam = searchParams?.get('page');
@@ -93,20 +95,9 @@ function ReaderContent() {
     return containerWidth * aspectRatio;
   }, [getDeviceInfo]);
 
-  // 智能返回逻辑：检查是否能安全返回站内页面
   const handleBack = useCallback(() => {
-    // 检查是否有历史记录且上一页是站内页面
-    const referrer = document.referrer;
-    const currentOrigin = window.location.origin;
-
-    // 如果有上一页且上一页是站内页面，则返回上一页
-    if (window.history.length > 1 && referrer && referrer.startsWith(currentOrigin)) {
-      window.history.back();
-    } else {
-      // 否则直接跳转到首页
-      router.push('/');
-    }
-  }, [router]);
+    appBack('/');
+  }, [appBack]);
 
   const handleNavigateToArchiveFromSettings = useCallback(() => {
     if (!id) return;

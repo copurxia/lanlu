@@ -12,6 +12,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useAppBack } from '@/hooks/use-app-back';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
@@ -29,6 +30,7 @@ export function Header() {
   const [mounted, setMounted] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
+  const appBack = useAppBack();
   const { token } = useAuth();
   const isSettingsPage = pathname?.startsWith('/settings');
   const isLibraryPage = pathname?.startsWith('/library');
@@ -72,11 +74,7 @@ export function Header() {
 
   const handleBack = () => {
     if (!mounted) return;
-    if (typeof window !== 'undefined' && window.history.length > 1) {
-      router.back();
-      return;
-    }
-    router.push('/');
+    appBack('/');
   };
 
   const handleRandomRead = async () => {

@@ -102,7 +102,7 @@ export default function SettingsPage() {
       {error ? <div className="text-xs text-red-600">错误：{error}</div> : null}
 
       <div className="text-xs text-muted-foreground">
-        提示：任务进度查询需要服务器开放 `/api/taskpool/*`，且 Token 具备访问权限。
+        提示：任务进度查询需要服务器开放 `/api/admin/taskpool/*`，且 Token 具备访问权限。
       </div>
     </div>
   );

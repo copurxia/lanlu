@@ -248,11 +248,11 @@ async function searchArchives(auth, params) {
 }
 
 async function getTaskById(auth, id) {
-  return requestJson(auth, `/api/taskpool/${id}`);
+  return requestJson(auth, `/api/admin/taskpool/${id}`);
 }
 
 async function getTasksByGroup(auth, groupId) {
-  return requestJson(auth, `/api/taskpool/group/${encodeURIComponent(groupId)}`);
+  return requestJson(auth, `/api/admin/taskpool/group/${encodeURIComponent(groupId)}`);
 }
 
 function ensureTaskPollerAlarm() {

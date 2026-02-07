@@ -142,7 +142,7 @@ function isTaskPoolTask(value: unknown): value is TaskPoolTask {
 }
 
 export async function getTaskById(auth: LanluAuth, id: number): Promise<TaskPoolTask> {
-  const data = await requestJson<unknown>(auth, `/api/taskpool/${id}`, { method: "GET" });
+  const data = await requestJson<unknown>(auth, `/api/admin/taskpool/${id}`, { method: "GET" });
   if (!isTaskPoolTask(data)) {
     throw new Error("任务数据格式错误");
   }
@@ -150,7 +150,7 @@ export async function getTaskById(auth: LanluAuth, id: number): Promise<TaskPool
 }
 
 export async function getTasksByGroup(auth: LanluAuth, groupId: string): Promise<TaskPoolTask[]> {
-  const data = await requestJson<unknown>(auth, `/api/taskpool/group/${encodeURIComponent(groupId)}`, {
+  const data = await requestJson<unknown>(auth, `/api/admin/taskpool/group/${encodeURIComponent(groupId)}`, {
     method: "GET",
   });
   if (!Array.isArray(data)) return [];

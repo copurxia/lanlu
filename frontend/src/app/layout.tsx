@@ -6,6 +6,7 @@ import { AuthProvider } from '@/contexts/AuthContext';
 import { ServerInfoProvider } from '@/contexts/ServerInfoContext';
 import { ConfirmProvider } from '@/contexts/ConfirmProvider';
 import { Toaster } from 'sonner';
+import { RouteHistoryTracker } from '@/components/navigation/RouteHistoryTracker';
 
 export const metadata: Metadata = {
   title: '兰鹿',
@@ -34,6 +35,7 @@ export default function RootLayout({
             <ServerInfoProvider>
               <ConfirmProvider>
                 <ThemeProvider defaultTheme="system">
+                  <RouteHistoryTracker />
                   {children}
                   <Toaster position="top-center" richColors />
                 </ThemeProvider>
