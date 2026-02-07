@@ -3,7 +3,7 @@
  * 运行在Chrome扩展的后台，与React组件解耦
  */
 
-import { getTaskById, getTasksByGroup } from '@/lib/lanlu-api';
+import { getTaskById } from '@/lib/lanlu-api';
 import { TaskEvents } from '@/lib/events';
 import type { DownloadEntry } from '@/store/download-queue';
 
@@ -36,6 +36,23 @@ function parseArchiveIdFromScanResult(raw: string): string | null {
   try {
     const obj = JSON.parse(raw) as { archive_id?: string };
     return typeof obj.archive_id === 'string' && obj.archive_id.trim() ? obj.archive_id : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseScanTaskIdFromDownloadResult(raw: string): number | null {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw) as { task_id?: string | number };
+    if (typeof obj.task_id === 'number' && Number.isFinite(obj.task_id)) return obj.task_id;
+    if (typeof obj.task_id === 'string') {
+      const trimmed = obj.task_id.trim();
+      if (!trimmed) return null;
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
   } catch {
     return null;
   }
@@ -237,18 +254,22 @@ export class TaskPollerService {
 
       // 下载完成后发现扫描任务
       if (task.status === 'completed' && !entry.scanTaskId) {
-        const groupId = `download_url:${entry.downloadTaskId}`;
-        const tasks = await getTasksByGroup(this.auth, groupId);
-        const scan = tasks.find((t) => t.task_type === 'scan_archive');
-        if (scan) {
-          const scanStatus = normalizeStatus(scan.status);
-          TaskEvents.discovered(entry.id, undefined, scan.id);
-          TaskEvents.update(entry.id, {
-            scanTaskId: scan.id,
-            scanProgress: clampProgress(scan.progress),
-            scanMessage: scan.message || '',
-            status: scanStatus === 'queued' ? 'queued' : scanStatus === 'running' ? 'running' : scanStatus,
-          });
+        const scanTaskId = parseScanTaskIdFromDownloadResult(task.result);
+        if (scanTaskId) {
+          try {
+            const scan = await getTaskById(this.auth, scanTaskId);
+            const scanStatus = normalizeStatus(scan.status);
+            TaskEvents.discovered(entry.id, undefined, scan.id);
+            TaskEvents.update(entry.id, {
+              scanTaskId: scan.id,
+              scanProgress: clampProgress(scan.progress),
+              scanMessage: scan.message || '',
+              status: scanStatus === 'queued' ? 'queued' : scanStatus === 'running' ? 'running' : scanStatus,
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '扫描任务查询失败';
+            TaskEvents.error(entry.id, message);
+          }
         }
       }
     } catch (error) {
@@ -307,27 +328,26 @@ export class TaskPollerService {
     if (!this.auth || !entry.downloadTaskId) return;
 
     try {
-      const groupId = `download_url:${entry.downloadTaskId}`;
-      const tasks = await getTasksByGroup(this.auth, groupId);
-      const scan = tasks.find((t) => t.task_type === 'scan_archive');
-      if (scan) {
-        const scanStatus = normalizeStatus(scan.status);
-        TaskEvents.discovered(entry.id, undefined, scan.id);
-        TaskEvents.update(entry.id, {
-          scanTaskId: scan.id,
-          scanProgress: clampProgress(scan.progress),
-          scanMessage: scan.message || '',
-          status:
-            scanStatus === 'queued'
-              ? 'queued'
-              : scanStatus === 'running'
-              ? 'running'
-              : scanStatus,
-        });
-      }
+      const downloadTask = await getTaskById(this.auth, entry.downloadTaskId);
+      const scanTaskId = parseScanTaskIdFromDownloadResult(downloadTask.result);
+      if (!scanTaskId) return;
+      const scan = await getTaskById(this.auth, scanTaskId);
+      const scanStatus = normalizeStatus(scan.status);
+      TaskEvents.discovered(entry.id, undefined, scan.id);
+      TaskEvents.update(entry.id, {
+        scanTaskId: scan.id,
+        scanProgress: clampProgress(scan.progress),
+        scanMessage: scan.message || '',
+        status:
+          scanStatus === 'queued'
+            ? 'queued'
+            : scanStatus === 'running'
+            ? 'running'
+            : scanStatus,
+      });
     } catch (error) {
       // 忽略组查找错误，避免下载完成后状态翻转
-      console.log('[TaskPollerService] Group lookup failed (ignored):', error);
+      console.log('[TaskPollerService] Scan task discovery failed (ignored):', error);
     }
   }
 

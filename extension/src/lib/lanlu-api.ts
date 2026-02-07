@@ -149,14 +149,6 @@ export async function getTaskById(auth: LanluAuth, id: number): Promise<TaskPool
   return data;
 }
 
-export async function getTasksByGroup(auth: LanluAuth, groupId: string): Promise<TaskPoolTask[]> {
-  const data = await requestJson<unknown>(auth, `/api/admin/taskpool/group/${encodeURIComponent(groupId)}`, {
-    method: "GET",
-  });
-  if (!Array.isArray(data)) return [];
-  return data.filter(isTaskPoolTask);
-}
-
 export async function enqueueDownloadUrl(
   ctx: LanluDownloadContext,
   req: LanluDownloadRequest

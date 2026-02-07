@@ -212,6 +212,24 @@ function parseArchiveIdFromScanResult(raw) {
   }
 }
 
+function parseScanTaskIdFromDownloadResult(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (!obj) return null;
+    if (typeof obj.task_id === "number" && Number.isFinite(obj.task_id)) return obj.task_id;
+    if (typeof obj.task_id === "string") {
+      const trimmed = obj.task_id.trim();
+      if (!trimmed) return null;
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function requestJson(auth, path) {
   const url = `${auth.serverUrl}${path}`;
   const resp = await fetch(url, {
@@ -249,10 +267,6 @@ async function searchArchives(auth, params) {
 
 async function getTaskById(auth, id) {
   return requestJson(auth, `/api/admin/taskpool/${id}`);
-}
-
-async function getTasksByGroup(auth, groupId) {
-  return requestJson(auth, `/api/admin/taskpool/group/${encodeURIComponent(groupId)}`);
 }
 
 function ensureTaskPollerAlarm() {
@@ -319,16 +333,18 @@ async function pollTasksOnce() {
       const id = entry.id;
       const patch = { updatedAt: now() };
       let effectiveStatus = entry.status;
+      let downloadTask = null;
 
       try {
         // 1) poll download task
         if (entry.downloadTaskId && (entry.status === "queued" || entry.status === "running")) {
-          const task = await getTaskById(auth, entry.downloadTaskId);
-          const status = task && typeof task.status === "string" ? normalizeQueueStatus(task.status) : "running";
+          downloadTask = await getTaskById(auth, entry.downloadTaskId);
+          const status =
+            downloadTask && typeof downloadTask.status === "string" ? normalizeQueueStatus(downloadTask.status) : "running";
           patch.status = status;
           effectiveStatus = status;
-          patch.downloadProgress = clampProgress(task?.progress);
-          patch.downloadMessage = typeof task?.message === "string" ? task.message : "";
+          patch.downloadProgress = clampProgress(downloadTask?.progress);
+          patch.downloadMessage = typeof downloadTask?.message === "string" ? downloadTask.message : "";
           if (status === "failed") patch.error = patch.downloadMessage || "任务失败";
         }
 
@@ -362,17 +378,20 @@ async function pollTasksOnce() {
           !entry.scanTaskId &&
           !entry.archiveId
         ) {
-          const groupId = `download_url:${entry.downloadTaskId}`;
-          const tasks = await getTasksByGroup(auth, groupId);
-          const listTasks = Array.isArray(tasks) ? tasks : [];
-          const scan = listTasks.find((t) => t && t.task_type === "scan_archive" && typeof t.id === "number");
-          if (scan) {
-            patch.scanTaskId = scan.id;
-            patch.scanProgress = clampProgress(scan.progress);
-            patch.scanMessage = typeof scan.message === "string" ? scan.message : "";
-            const scanStatus = typeof scan.status === "string" ? normalizeQueueStatus(scan.status) : "running";
-            patch.status = scanStatus;
-            effectiveStatus = scanStatus;
+          const scanTaskId = parseScanTaskIdFromDownloadResult(downloadTask?.result);
+          if (typeof scanTaskId === "number") {
+            patch.scanTaskId = scanTaskId;
+            try {
+              const scan = await getTaskById(auth, scanTaskId);
+              patch.scanProgress = clampProgress(scan?.progress);
+              patch.scanMessage = typeof scan?.message === "string" ? scan.message : "";
+              const scanStatus = typeof scan?.status === "string" ? normalizeQueueStatus(scan.status) : "running";
+              patch.status = scanStatus;
+              effectiveStatus = scanStatus;
+            } catch {
+              patch.status = "queued";
+              effectiveStatus = "queued";
+            }
           }
         }
       } catch (e) {
