@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type React from 'react';
 import { toast } from 'sonner';
 import type { PageInfo } from '@/lib/services/archive-service';
 
@@ -15,6 +16,9 @@ export function useReaderWheelNavigation({
   hideToolbar,
   onPrevPage,
   onNextPage,
+  webtoonContainerRef,
+  isCollectionEndPage,
+  onWebtoonEndNext,
 }: {
   pages: PageInfo[];
   currentPage: number;
@@ -24,6 +28,9 @@ export function useReaderWheelNavigation({
   hideToolbar: () => void;
   onPrevPage: () => void;
   onNextPage: () => void;
+  webtoonContainerRef?: React.RefObject<HTMLDivElement | null>;
+  isCollectionEndPage?: boolean;
+  onWebtoonEndNext?: () => void;
 }) {
   const [showAutoNextCountdown, setShowAutoNextCountdown] = useState(false);
   const countdownSecondsRef = useRef(COUNTDOWN_DURATION);
@@ -101,8 +108,16 @@ export function useReaderWheelNavigation({
       }
 
       if (readingMode === 'webtoon') {
-        if (showAutoNextCountdown) {
-          clearCountdown();
+        if (showAutoNextCountdown) clearCountdown();
+
+        if (isCollectionEndPage && onWebtoonEndNext) {
+          const container = webtoonContainerRef?.current;
+          if (!container) return;
+          const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 5;
+          if (atBottom && e.deltaY > 0) {
+            e.preventDefault();
+            onWebtoonEndNext();
+          }
         }
         return;
       }
@@ -314,6 +329,9 @@ export function useReaderWheelNavigation({
       currentPage,
       onPrevPage,
       onNextPage,
+      webtoonContainerRef,
+      isCollectionEndPage,
+      onWebtoonEndNext,
     ]
   );
 

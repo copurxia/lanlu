@@ -11,6 +11,10 @@ export function ReaderWebtoonModeView({
   sidebarOpen,
   onScroll,
   pages,
+  virtualLength,
+  collectionEndPageEnabled,
+  finishedTitle,
+  nextTitle,
   cachedPages,
   visibleRange,
   imageHeights,
@@ -41,6 +45,10 @@ export function ReaderWebtoonModeView({
   sidebarOpen: boolean;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   pages: PageInfo[];
+  virtualLength: number;
+  collectionEndPageEnabled: boolean;
+  finishedTitle: string;
+  nextTitle: string | null;
   cachedPages: string[];
   visibleRange: { start: number; end: number };
   imageHeights: number[];
@@ -72,7 +80,7 @@ export function ReaderWebtoonModeView({
   const transform = shouldTransform ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : undefined;
   const transformTransition = shouldTransform ? 'transform 0.1s ease-out' : undefined;
 
-  const estimatedTotalHeight = totalHeight || pages.length * (containerHeight || window.innerHeight * 0.7);
+  const estimatedTotalHeight = totalHeight || virtualLength * (containerHeight || window.innerHeight * 0.7);
   const topSpacerHeight = prefixHeights[visibleRange.start] || 0;
   const afterEndOffset = prefixHeights[visibleRange.end + 1] ?? estimatedTotalHeight;
   const bottomSpacerHeight = Math.max(0, estimatedTotalHeight - afterEndOffset);
@@ -220,6 +228,28 @@ export function ReaderWebtoonModeView({
                   </div>
                 </div>
               );
+            } else if (collectionEndPageEnabled && actualIndex === pages.length) {
+              elements.push(
+                <div
+                  key="collection-end-page"
+                  ref={(el) => {
+                    webtoonPageElementRefs.current[actualIndex] = el;
+                  }}
+                  className="w-full flex items-center justify-center bg-background text-foreground"
+                  style={{ height: `${imageHeight}px`, minHeight: '160px' }}
+                >
+                  <div className="text-center px-6">
+                    <div className="text-lg font-semibold">
+                      {t('reader.finishedReading').replace('{title}', finishedTitle || '')}
+                    </div>
+                    <div className="mt-2 text-sm text-muted-foreground">
+                      {nextTitle
+                        ? t('reader.nextChapter').replace('{title}', nextTitle)
+                        : t('reader.noNextChapter').replace('{title}', finishedTitle || '')}
+                    </div>
+                  </div>
+                </div>
+              );
             }
             i += 1;
           }
@@ -227,7 +257,7 @@ export function ReaderWebtoonModeView({
           return elements;
         })()}
 
-        {visibleRange.end < pages.length - 1 && (
+        {visibleRange.end < virtualLength - 1 && (
           <div
             style={{
               height: `${bottomSpacerHeight}px`,

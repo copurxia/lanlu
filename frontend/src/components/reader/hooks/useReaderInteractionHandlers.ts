@@ -60,6 +60,7 @@ export function useReaderInteractionHandlers({
   onHideToolbar,
   onPrevPage,
   onNextPage,
+  onWebtoonEndNext,
   currentPage,
   setCurrentPage,
   pagesLength,
@@ -77,6 +78,7 @@ export function useReaderInteractionHandlers({
   onHideToolbar: () => void;
   onPrevPage: () => void;
   onNextPage: () => void;
+  onWebtoonEndNext?: () => void;
   currentPage: number;
   setCurrentPage: (page: number) => void;
   pagesLength: number;
@@ -100,6 +102,11 @@ export function useReaderInteractionHandlers({
       }
 
       if (readingMode === 'webtoon' && webtoonContainerRef.current) {
+        if (action === 'next' && currentPage >= pagesLength - 1 && onWebtoonEndNext) {
+          onWebtoonEndNext();
+          return;
+        }
+
         const nextPage =
           action === 'prev'
             ? Math.max(0, currentPage - 1)
@@ -134,6 +141,7 @@ export function useReaderInteractionHandlers({
       webtoonContainerRef,
       currentPage,
       pagesLength,
+      onWebtoonEndNext,
       setCurrentPage,
       imageHeights,
       containerHeight,

@@ -110,6 +110,11 @@ function ReaderContent() {
     router.push(`/archive?id=${id}`);
   }, [id, router]);
 
+  const navigateToNextArchive = useCallback(() => {
+    if (!nextArchive?.id) return;
+    router.push(`/reader?id=${nextArchive.id}`);
+  }, [nextArchive?.id, router]);
+
   // 使用新的阅读设置hooks，统一管理所有localStorage逻辑
   const [readingMode, toggleReadingMode] = useReadingMode();
   const [doublePageMode, setDoublePageMode] = useDoublePageMode();
@@ -134,11 +139,25 @@ function ReaderContent() {
 
   const toolbar = useReaderToolbarAutoHide({ autoHideEnabled, delayMs: 3000 });
 
+  const collectionEndPageEnabled = useMemo(() => {
+    return Boolean(tankoubonContext);
+  }, [tankoubonContext]);
+
+  const totalPages = useMemo(() => {
+    if (readingMode === 'webtoon') return pages.length + (collectionEndPageEnabled ? 1 : 0);
+    return pages.length + (collectionEndPageEnabled ? 1 : 0);
+  }, [collectionEndPageEnabled, pages.length, readingMode]);
+
+  const isCollectionEndPage = useMemo(() => {
+    return collectionEndPageEnabled && currentPage === pages.length;
+  }, [collectionEndPageEnabled, currentPage, pages.length]);
+
   const webtoonVirtualization = useReaderWebtoonVirtualization({
     readingMode,
     pages,
     currentPage,
     setCurrentPage,
+    virtualLength: readingMode === 'webtoon' ? totalPages : pages.length,
     getDeviceInfo,
     getImageHeight,
     webtoonPageElementRefs,
@@ -172,20 +191,6 @@ function ReaderContent() {
     }
     return [currentPage];
   }, [currentPage, doublePageMode, pages.length, readingMode, splitCoverMode]);
-
-  const collectionEndPageEnabled = useMemo(() => {
-    // Collection (tankoubon) mode only makes sense in paged reader modes.
-    return Boolean(tankoubonContext && readingMode !== 'webtoon');
-  }, [tankoubonContext, readingMode]);
-
-  const totalPages = useMemo(() => {
-    if (readingMode === 'webtoon') return pages.length;
-    return pages.length + (collectionEndPageEnabled ? 1 : 0);
-  }, [collectionEndPageEnabled, pages.length, readingMode]);
-
-  const isCollectionEndPage = useMemo(() => {
-    return collectionEndPageEnabled && currentPage === pages.length;
-  }, [collectionEndPageEnabled, currentPage, pages.length]);
 
   const imageLoading = useReaderImageLoading({
     pages,
@@ -752,9 +757,7 @@ function ReaderContent() {
   const handleNextPage = useCallback(() => {
     if (isCollectionEndPage) {
       // Continue flipping from the synthetic "end" page to the next archive.
-      if (nextArchive?.id) {
-        router.push(`/reader?id=${nextArchive.id}`);
-      }
+      navigateToNextArchive();
       return;
     }
 
@@ -808,10 +811,9 @@ function ReaderContent() {
     collectionEndPageEnabled,
     currentPage,
     isCollectionEndPage,
-    nextArchive?.id,
     pages.length,
+    navigateToNextArchive,
     resetTransform,
-    router,
     doublePageMode,
     splitCoverMode,
   ]);
@@ -826,6 +828,7 @@ function ReaderContent() {
     onHideToolbar: toolbar.hideToolbar,
     onPrevPage: handlePrevPage,
     onNextPage: handleNextPage,
+    onWebtoonEndNext: collectionEndPageEnabled ? navigateToNextArchive : undefined,
     currentPage,
     setCurrentPage: (page) => setCurrentPage(page),
     pagesLength: totalPages,
@@ -844,6 +847,9 @@ function ReaderContent() {
     hideToolbar: toolbar.hideToolbar,
     onPrevPage: handlePrevPage,
     onNextPage: handleNextPage,
+    webtoonContainerRef,
+    isCollectionEndPage,
+    onWebtoonEndNext: navigateToNextArchive,
   });
 
   useReaderAutoPlay({
@@ -1055,8 +1061,8 @@ function ReaderContent() {
 	          t={t}
 	        />
 
-          <ReaderCollectionEndPage
-            enabled={isCollectionEndPage}
+	          <ReaderCollectionEndPage
+            enabled={isCollectionEndPage && readingMode !== 'webtoon'}
             finishedTitle={archive.archiveTitle}
             nextTitle={nextArchive?.title ?? null}
             t={t}
@@ -1082,6 +1088,10 @@ function ReaderContent() {
 	          sidebarOpen={sidebar.sidebarOpen}
 	          onScroll={webtoonVirtualization.handleWebtoonScroll}
 	          pages={pages}
+	          virtualLength={totalPages}
+	          collectionEndPageEnabled={collectionEndPageEnabled}
+	          finishedTitle={archive.archiveTitle}
+	          nextTitle={nextArchive?.title ?? null}
 	          cachedPages={imageLoading.cachedPages}
 	          visibleRange={webtoonVirtualization.visibleRange}
 	          imageHeights={webtoonVirtualization.imageHeights}
