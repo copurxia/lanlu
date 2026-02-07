@@ -2,6 +2,7 @@
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { ReaderCollectionEndPage } from '@/components/reader/components/ReaderCollectionEndPage';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
@@ -13,8 +14,12 @@ export function ReaderWebtoonModeView({
   pages,
   virtualLength,
   collectionEndPageEnabled,
+  finishedId,
   finishedTitle,
+  finishedCoverAssetId,
+  nextId,
   nextTitle,
+  nextCoverAssetId,
   cachedPages,
   visibleRange,
   imageHeights,
@@ -47,8 +52,12 @@ export function ReaderWebtoonModeView({
   pages: PageInfo[];
   virtualLength: number;
   collectionEndPageEnabled: boolean;
+  finishedId: string | null;
   finishedTitle: string;
+  finishedCoverAssetId?: number;
+  nextId: string | null;
   nextTitle: string | null;
+  nextCoverAssetId?: number;
   cachedPages: string[];
   visibleRange: { start: number; end: number };
   imageHeights: number[];
@@ -238,16 +247,17 @@ export function ReaderWebtoonModeView({
                   className="w-full flex items-center justify-center bg-background text-foreground"
                   style={{ height: `${imageHeight}px`, minHeight: '160px' }}
                 >
-                  <div className="text-center px-6">
-                    <div className="text-lg font-semibold">
-                      {t('reader.finishedReading').replace('{title}', finishedTitle || '')}
-                    </div>
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      {nextTitle
-                        ? t('reader.nextChapter').replace('{title}', nextTitle)
-                        : t('reader.noNextChapter').replace('{title}', finishedTitle || '')}
-                    </div>
-                  </div>
+                  <ReaderCollectionEndPage
+                    enabled
+                    mode="inline"
+                    finishedId={finishedId}
+                    finishedTitle={finishedTitle}
+                    finishedCoverAssetId={finishedCoverAssetId}
+                    nextId={nextId}
+                    nextTitle={nextTitle}
+                    nextCoverAssetId={nextCoverAssetId}
+                    t={t}
+                  />
                 </div>
               );
             }

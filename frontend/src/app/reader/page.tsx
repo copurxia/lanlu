@@ -84,7 +84,7 @@ function ReaderContent() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
-  const [nextArchive, setNextArchive] = useState<{ id: string; title: string } | null>(null);
+  const [nextArchive, setNextArchive] = useState<{ id: string; title: string; coverAssetId?: number } | null>(null);
 
   // 提取设备检测和宽度计算的通用函数
   const getDeviceInfo = useCallback(() => {
@@ -320,7 +320,7 @@ function ReaderContent() {
           const meta = await ArchiveService.getMetadata(nextId, language);
           if (cancelled) return;
           const nextTitle = (meta.title && meta.title.trim()) ? meta.title : meta.filename || nextId;
-          setNextArchive({ id: nextId, title: nextTitle });
+          setNextArchive({ id: nextId, title: nextTitle, coverAssetId: meta.cover_asset_id });
         } catch (metaErr) {
           logger.apiError('fetch next archive metadata', metaErr);
           if (cancelled) return;
@@ -1061,10 +1061,14 @@ function ReaderContent() {
 	          t={t}
 	        />
 
-	          <ReaderCollectionEndPage
+          <ReaderCollectionEndPage
             enabled={isCollectionEndPage && readingMode !== 'webtoon'}
+            finishedId={id}
             finishedTitle={archive.archiveTitle}
+            finishedCoverAssetId={archive.archiveMetadata?.cover_asset_id}
+            nextId={nextArchive?.id ?? null}
             nextTitle={nextArchive?.title ?? null}
+            nextCoverAssetId={nextArchive?.coverAssetId}
             t={t}
           />
 
@@ -1090,8 +1094,12 @@ function ReaderContent() {
 	          pages={pages}
 	          virtualLength={totalPages}
 	          collectionEndPageEnabled={collectionEndPageEnabled}
+	          finishedId={id}
 	          finishedTitle={archive.archiveTitle}
+	          finishedCoverAssetId={archive.archiveMetadata?.cover_asset_id}
+	          nextId={nextArchive?.id ?? null}
 	          nextTitle={nextArchive?.title ?? null}
+	          nextCoverAssetId={nextArchive?.coverAssetId}
 	          cachedPages={imageLoading.cachedPages}
 	          visibleRange={webtoonVirtualization.visibleRange}
 	          imageHeights={webtoonVirtualization.imageHeights}

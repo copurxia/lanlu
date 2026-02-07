@@ -210,6 +210,7 @@
     "exitFullscreen": "Exit Fullscreen",
     "prevPage": "Previous Page",
     "nextPage": "Next Page",
+    "nextChapterLabel": "Next",
     "missingId": "Missing archive ID parameter",
     "fetchError": "Failed to fetch archive pages",
     "noPages": "No displayable pages",

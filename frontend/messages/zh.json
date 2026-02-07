@@ -216,6 +216,7 @@
     "exitFullscreen": "退出全屏",
     "prevPage": "上一页",
     "nextPage": "下一页",
+    "nextChapterLabel": "下一话",
     "missingId": "缺少归档ID参数",
     "fetchError": "获取归档页面失败",
     "noPages": "没有可显示的页面",
