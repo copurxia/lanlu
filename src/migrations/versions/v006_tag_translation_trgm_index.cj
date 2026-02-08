@@ -18,11 +18,6 @@ public class V006_TagTranslationTrgmIndex <: Migration {
     }
 
     public func up(conn: Connection): Bool {
-        if (!MigrationHelpers.tableExists(conn, "tags")) {
-            logger.warn("tags table missing; skipping V006")
-            return true
-        }
-
         // Avoid CREATE EXTENSION here; some drivers/DBs error on it and poison the connection.
         // If pg_trgm isn't already installed, skip index creation (best-effort optimization).
         if (!isExtensionInstalled(conn, "pg_trgm")) {
@@ -30,18 +25,81 @@ public class V006_TagTranslationTrgmIndex <: Migration {
             return true
         }
 
-        let indexName = "idx_tags_translations_trgm"
-        if (MigrationHelpers.indexExists(conn, indexName)) {
-            logger.debug("Index ${indexName} already exists")
+        if (!MigrationHelpers.tableExists(conn, "tags")) {
+            logger.warn("tags table missing; skipping V006")
             return true
         }
 
-        logger.info("Creating trigram index ${indexName} on tags(translations::text)")
-        if (!MigrationHelpers.execUpdate(conn,
-            "CREATE INDEX ${indexName} ON tags USING GIN ((translations::text) gin_trgm_ops)"
-        )) {
-            logger.warn("Failed to create trigram index; skipping")
+        let indexName = "idx_tags_translations_trgm"
+        if (MigrationHelpers.indexExists(conn, indexName)) {
+            logger.debug("Index ${indexName} already exists")
+        } else {
+            logger.info("Creating trigram index ${indexName} on tags(translations::text)")
+            if (!MigrationHelpers.execUpdate(conn,
+                "CREATE INDEX ${indexName} ON tags USING GIN ((translations::text) gin_trgm_ops)"
+            )) {
+                logger.warn("Failed to create trigram index; skipping")
+                return true
+            }
+        }
+
+        // tags.name ILIKE '%...%' acceleration
+        let nameIndex = "idx_tags_name_trgm"
+        if (MigrationHelpers.indexExists(conn, nameIndex)) {
+            logger.debug("Index ${nameIndex} already exists")
+        } else {
+            logger.info("Creating trigram index ${nameIndex} on tags(name)")
+            if (!MigrationHelpers.execUpdate(conn,
+                "CREATE INDEX ${nameIndex} ON tags USING GIN (name gin_trgm_ops)"
+            )) {
+                logger.warn("Failed to create trigram index on tags.name; skipping")
+                return true
+            }
+        }
+
+        // archives title/filename/summary ILIKE '%...%' acceleration
+        if (!MigrationHelpers.tableExists(conn, "archives")) {
+            logger.warn("archives table missing; skipping archive trigram indexes")
             return true
+        }
+
+        let titleIndex = "idx_archives_title_trgm"
+        if (MigrationHelpers.indexExists(conn, titleIndex)) {
+            logger.debug("Index ${titleIndex} already exists")
+        } else {
+            logger.info("Creating trigram index ${titleIndex} on archives(title)")
+            if (!MigrationHelpers.execUpdate(conn,
+                "CREATE INDEX ${titleIndex} ON archives USING GIN (title gin_trgm_ops)"
+            )) {
+                logger.warn("Failed to create trigram index on archives.title; skipping")
+                return true
+            }
+        }
+
+        let filenameIndex = "idx_archives_filename_trgm"
+        if (MigrationHelpers.indexExists(conn, filenameIndex)) {
+            logger.debug("Index ${filenameIndex} already exists")
+        } else {
+            logger.info("Creating trigram index ${filenameIndex} on archives(filename)")
+            if (!MigrationHelpers.execUpdate(conn,
+                "CREATE INDEX ${filenameIndex} ON archives USING GIN (filename gin_trgm_ops)"
+            )) {
+                logger.warn("Failed to create trigram index on archives.filename; skipping")
+                return true
+            }
+        }
+
+        let summaryIndex = "idx_archives_summary_trgm"
+        if (MigrationHelpers.indexExists(conn, summaryIndex)) {
+            logger.debug("Index ${summaryIndex} already exists")
+        } else {
+            logger.info("Creating trigram index ${summaryIndex} on archives(summary)")
+            if (!MigrationHelpers.execUpdate(conn,
+                "CREATE INDEX ${summaryIndex} ON archives USING GIN (summary gin_trgm_ops)"
+            )) {
+                logger.warn("Failed to create trigram index on archives.summary; skipping")
+                return true
+            }
         }
         return true
     }
