@@ -51,6 +51,7 @@ export interface PluginResult {
 export interface HostSelectOption {
   label: string;
   description?: string;
+  cover?: string;
 }
 
 export interface HostSelectResult {

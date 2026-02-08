@@ -295,6 +295,7 @@ export default function SmartFiltersPage() {
     if (!sortBy) return t('settings.smartFilterDefault');
     switch (sortBy) {
       case 'date_added': return t('home.dateAdded');
+      case 'updated_at': return t('home.updatedAt');
       case 'lastread': return t('home.lastRead');
       case 'title': return t('home.titleSort');
       case 'pagecount': return t('home.pageCount');

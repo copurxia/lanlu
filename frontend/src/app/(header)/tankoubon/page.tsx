@@ -52,6 +52,7 @@ type RpcSelectOption = {
   index: number;
   label: string;
   description?: string;
+  cover?: string;
 };
 
 type RpcSelectRequest = {
@@ -1211,7 +1212,15 @@ function TankoubonDetailContent() {
               <DialogTitle>{rpcSelectRequest?.title || '请选择元数据匹配项'}</DialogTitle>
             </DialogHeader>
             <DialogBody className="pt-0">
-              <div className="space-y-3">
+              <div
+                className="space-y-3"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && rpcSelectSelectedIndex != null) {
+                    e.preventDefault();
+                    void submitRpcSelect();
+                  }
+                }}
+              >
                 {rpcSelectRequest?.message ? (
                   <p className="text-sm text-muted-foreground">{rpcSelectRequest.message}</p>
                 ) : null}
@@ -1224,10 +1233,22 @@ function TankoubonDetailContent() {
                       className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left"
                       onClick={() => setRpcSelectSelectedIndex(opt.index)}
                     >
-                      <span className="font-medium">{opt.label || `候选 ${opt.index + 1}`}</span>
-                      {opt.description ? (
-                        <span className="text-xs text-muted-foreground whitespace-normal">{opt.description}</span>
-                      ) : null}
+                      <div className="flex w-full items-start gap-3">
+                        {opt.cover ? (
+                          <img
+                            src={opt.cover}
+                            alt={opt.label || `候选 ${opt.index + 1}`}
+                            className="w-20 h-28 shrink-0 object-cover rounded border"
+                            loading="lazy"
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1 text-left">
+                          <div className="font-medium">{opt.label || `候选 ${opt.index + 1}`}</div>
+                          {opt.description ? (
+                            <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
+                          ) : null}
+                        </div>
+                      </div>
                     </Button>
                   ))}
                 </div>

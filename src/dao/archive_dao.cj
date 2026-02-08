@@ -646,9 +646,12 @@ public class ArchiveDao {
 	                    // 按用户最后阅读时间排序，使用 user_archive_status.updated_at
 	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
 	                    sql += " ORDER BY (SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = arcid AND uas.user_id = ${userId}) ${orderDirection}"
-	                } else if (sortby == "date_added") {
-	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-	                    sql += " ORDER BY created_at ${orderDirection}"
+                } else if (sortby == "date_added") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY created_at ${orderDirection}"
+                } else if (sortby == "updated_at") {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY updated_at ${orderDirection}"
                 } else if (sortby == "pagecount") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY pagecount ${orderDirection}"
@@ -973,6 +976,10 @@ public class ArchiveDao {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }
                         windowOrderBy = "created_at ${dir}"
                         finalOrderBy = "created_at ${dir}"
+                    } else if (sortby == "updated_at") {
+                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+                        windowOrderBy = "updated_at ${dir}"
+                        finalOrderBy = "updated_at ${dir}"
                     } else if (sortby == "pagecount") {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }
                         windowOrderBy = "pagecount ${dir}"

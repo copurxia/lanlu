@@ -35,6 +35,7 @@ export interface SortOption {
 export const SORT_BY_OPTIONS: SortOption[] = [
   { value: '_default', label: 'default' },
   { value: 'date_added', label: 'dateAdded' },
+  { value: 'updated_at', label: 'updatedAt' },
   { value: 'lastread', label: 'lastRead' },
   { value: 'title', label: 'title' },
   { value: 'pagecount', label: 'pageCount' },

@@ -47,13 +47,15 @@ class RpcSelectOption {
     var index: Int32 = 0
     var label: String = ""
     var description: String = ""
+    var cover: String = ""
 
     public init() {}
 
-    public init(index: Int32, label: String, description: String) {
+    public init(index: Int32, label: String, description: String, cover: String) {
         this.index = index
         this.label = label
         this.description = description
+        this.cover = cover
     }
 }
 
@@ -148,6 +150,7 @@ public class DenoTaskRunner {
             w.writeName("index").writeValue(opt.index)
             w.writeName("label").writeValue(opt.label)
             w.writeName("description").writeValue(opt.description)
+            w.writeName("cover").writeValue(opt.cover)
             w.endObject()
         }
         w.endArray()
@@ -781,6 +784,7 @@ public class DenoTaskRunner {
                                     while (r.peek() != EndArray) {
                                         var label = ""
                                         var desc = ""
+                                        var cover = ""
                                         match (r.peek()) {
                                             case Some(BeginObject) =>
                                                 r.startObject()
@@ -789,6 +793,7 @@ public class DenoTaskRunner {
                                                     match (k) {
                                                         case "label" => label = r.readValue<String>()
                                                         case "description" => desc = r.readValue<String>()
+                                                        case "cover" => cover = r.readValue<String>()
                                                         case _ => r.skip()
                                                     }
                                                 }
@@ -797,9 +802,9 @@ public class DenoTaskRunner {
                                                 label = r.readValue<String>()
                                             case None => ()
                                         }
-
+                                        
                                         let fallbackLabel = if (label.trimAscii().size > 0) { label } else { "选项 ${idx + 1}" }
-                                        options.add(RpcSelectOption(idx, fallbackLabel, desc))
+                                        options.add(RpcSelectOption(idx, fallbackLabel, desc, cover))
                                         idx += 1
                                     }
                                     r.endArray()
@@ -1969,6 +1974,8 @@ public class DenoTaskRunner {
         // 合并参数
         let baseParams = buildPluginParametersJson(plugin)
         let mergedParams = mergeParamsJson(baseParams, extraParams)
+        let contextParams = "{\"__target_type\":\"${effectiveType}\",\"__target_id\":\"${effectiveId}\"}"
+        let finalParams = mergeParamsJson(mergedParams, contextParams)
 
         // 构建 stdin JSON
         let inputJson = buildStdinJson(
@@ -1980,7 +1987,7 @@ public class DenoTaskRunner {
             tagsString,
             thumbhash,
             oneshotParam,
-            mergedParams,
+            finalParams,
             loginCookiesJson,
             ""
         )

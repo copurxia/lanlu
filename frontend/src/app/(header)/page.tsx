@@ -430,6 +430,7 @@ function HomePageContent() {
                       <SelectValue>
                         {sortBy === 'lastread' && t('home.lastRead')}
                         {sortBy === 'date_added' && t('home.dateAdded')}
+                        {sortBy === 'updated_at' && t('home.updatedAt')}
                         {sortBy === 'title' && t('home.titleSort')}
                         {sortBy === 'relevance' && t('home.relevance')}
                         {sortBy === 'pagecount' && t('home.pageCount')}
@@ -440,6 +441,7 @@ function HomePageContent() {
                       <SelectItem value="relevance">{t('home.relevance')}</SelectItem>
                       <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
                       <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+                      <SelectItem value="updated_at">{t('home.updatedAt')}</SelectItem>
                       <SelectItem value="title">{t('home.titleSort')}</SelectItem>
                       <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>
                       <SelectItem value="_default">{t('settings.smartFilterDefault')}</SelectItem>
