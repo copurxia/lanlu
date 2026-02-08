@@ -2,6 +2,9 @@ package lanlu.middleware
 
 import cjoy.*
 import stdx.net.http.HttpStatusCode
+import std.time.DateTime
+import std.collection.*
+import std.sync.*
 import lanlu.views.*
 import lanlu.config.*
 import lanlu.dao.*
@@ -11,6 +14,11 @@ import lanlu.utils.*
  * 认证中间件
  */
 public class AuthMiddleware {
+    // Throttle token last_used_at updates to reduce write load.
+    private static let tokenTouchThrottleSeconds: Int64 = 300  // 5 minutes
+    private static var tokenTouchCache: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
+    private static let tokenTouchMutex: Mutex = Mutex()
+
     /**
      * 从请求中解析 Bearer token
      */
@@ -166,8 +174,24 @@ public class AuthMiddleware {
         let tokenHash = AuthUtils.sha256Hex("${trimmed}:${AuthConfig.tokenPepper}")
         let row = UserTokenDao.findActiveByHash(tokenHash)
         if (row.id > 0 && row.userId > 0) {
-            // 轻量触达，记录 last_used
-            UserTokenDao.touch(row.id)
+            // 轻量触达，记录 last_used（节流）
+            let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
+            var shouldTouch = false
+            tokenTouchMutex.lock()
+            match (tokenTouchCache.get(row.id)) {
+                case Some(last) =>
+                    if (nowSec - last >= tokenTouchThrottleSeconds) {
+                        tokenTouchCache[row.id] = nowSec
+                        shouldTouch = true
+                    }
+                case None =>
+                    tokenTouchCache[row.id] = nowSec
+                    shouldTouch = true
+            }
+            tokenTouchMutex.unlock()
+            if (shouldTouch) {
+                UserTokenDao.touch(row.id)
+            }
             return Some(row.userId)
         }
         return None
