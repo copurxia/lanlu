@@ -238,9 +238,12 @@ public class ScheduledTaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
                                priority, timeout_seconds,
-                               last_run_at, last_run_status, last_error, next_run_at,
+                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
+                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
                                run_count, success_count, failure_count,
-                               created_at, updated_at, created_by, updated_by
+                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               created_by, updated_by
                         FROM scheduled_tasks WHERE id = ?
                     """)
                     try {
@@ -290,9 +293,12 @@ public class ScheduledTaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
                                priority, timeout_seconds,
-                               last_run_at, last_run_status, last_error, next_run_at,
+                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
+                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
                                run_count, success_count, failure_count,
-                               created_at, updated_at, created_by, updated_by
+                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               created_by, updated_by
                         FROM scheduled_tasks
                         WHERE name = ?
                         ORDER BY id ASC
@@ -342,9 +348,12 @@ public class ScheduledTaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
                                priority, timeout_seconds,
-                               last_run_at, last_run_status, last_error, next_run_at,
+                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
+                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
                                run_count, success_count, failure_count,
-                               created_at, updated_at, created_by, updated_by
+                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               created_by, updated_by
                         FROM scheduled_tasks
                         WHERE enabled = TRUE
                         ORDER BY priority ASC, id ASC
@@ -384,14 +393,17 @@ public class ScheduledTaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
                                priority, timeout_seconds,
-                               last_run_at, last_run_status, last_error, next_run_at,
+                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
+                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
                                run_count, success_count, failure_count,
-                               created_at, updated_at, created_by, updated_by
+                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               created_by, updated_by
                         FROM scheduled_tasks
                         WHERE enabled = TRUE
                           AND next_run_at IS NOT NULL
                           AND next_run_at <= NOW()
-                        ORDER BY next_run_at ASC, priority ASC
+                        ORDER BY scheduled_tasks.next_run_at ASC, priority ASC
                         LIMIT 100
                     """)
                     try {
@@ -429,9 +441,12 @@ public class ScheduledTaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, cron_expression, task_type, task_parameters, enabled,
                                priority, timeout_seconds,
-                               last_run_at, last_run_status, last_error, next_run_at,
+                               to_char(last_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'), last_run_status, last_error,
+                               to_char(next_run_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
                                run_count, success_count, failure_count,
-                               created_at, updated_at, created_by, updated_by
+                               to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               to_char(updated_at, 'YYYY-MM-DD"T"HH24:MI:SSTZH:TZM'),
+                               created_by, updated_by
                         FROM scheduled_tasks
                         ORDER BY id DESC
                         LIMIT ? OFFSET ?
