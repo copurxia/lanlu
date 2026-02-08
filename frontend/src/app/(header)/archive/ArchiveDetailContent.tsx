@@ -846,7 +846,7 @@ export function ArchiveDetailContent() {
                         key={`${rpcSelectRequest?.request_id}-${opt.index}`}
                         type="button"
                         variant={rpcSelectSelectedIndex === opt.index ? 'default' : 'outline'}
-                        className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left"
+                        className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left whitespace-normal"
                         onClick={() => setRpcSelectSelectedIndex(opt.index)}
                       >
                         <div className="flex w-full items-start gap-3">
@@ -859,7 +859,7 @@ export function ArchiveDetailContent() {
                             />
                           ) : null}
                           <div className="min-w-0 flex-1 text-left">
-                            <div className="font-medium">{opt.label || `候选 ${opt.index + 1}`}</div>
+                            <div className="font-medium whitespace-normal break-words">{opt.label || `候选 ${opt.index + 1}`}</div>
                             {opt.description ? (
                               <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
                             ) : null}
