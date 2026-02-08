@@ -46,4 +46,12 @@ private func registerTaskPoolRoutesAt(router: JoyRouters, basePath: String) {
             case None => return
         }
     })
+
+    // 响应运行中任务的 RPC 选择请求（用于 metadata preview 人工选择）
+    router.post("${basePath}/{taskId}/rpc/select", { ctx =>
+        match (AuthMiddleware.requireAdmin(ctx)) {
+            case Some(_) => TaskPoolController.respondRpcSelect(ctx)
+            case None => return
+        }
+    })
 }

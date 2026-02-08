@@ -43,6 +43,35 @@ public class DenoExecutionResult {
     }
 }
 
+class RpcSelectOption {
+    var index: Int32 = 0
+    var label: String = ""
+    var description: String = ""
+
+    public init() {}
+
+    public init(index: Int32, label: String, description: String) {
+        this.index = index
+        this.label = label
+        this.description = description
+    }
+}
+
+class RpcSelectRequest {
+    var taskId: Int64 = 0
+    var requestId: String = ""
+    var title: String = "请选择候选项"
+    var message: String = ""
+    var defaultIndex: Int32 = 0
+    var timeoutSeconds: Int32 = 90
+    var options: Array<RpcSelectOption> = Array<RpcSelectOption>()
+    var createdAtSeconds: Int64 = 0
+    var responded: Bool = false
+    var selectedIndex: Int32 = -1
+
+    public init() {}
+}
+
 class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
     var pluginNamespace: String = ""
     var pluginType: String = ""
@@ -95,6 +124,91 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
  * 统一处理所有 Deno 插件执行
  */
 public class DenoTaskRunner {
+    private static let rpcSelectMutex: Mutex = Mutex()
+    private static var rpcSelectPending: HashMap<String, RpcSelectRequest> = HashMap<String, RpcSelectRequest>()
+
+    private static func buildRpcSelectKey(taskId: Int64, requestId: String): String {
+        return "${taskId}:${requestId.trimAscii()}"
+    }
+
+    private static func buildRpcSelectMessage(request: RpcSelectRequest): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("type").writeValue("rpc_select")
+        w.writeName("request_id").writeValue(request.requestId)
+        w.writeName("title").writeValue(request.title)
+        w.writeName("message").writeValue(request.message)
+        w.writeName("default_index").writeValue(request.defaultIndex)
+        w.writeName("timeout_seconds").writeValue(request.timeoutSeconds)
+        w.writeName("options")
+        w.startArray()
+        for (opt in request.options) {
+            w.startObject()
+            w.writeName("index").writeValue(opt.index)
+            w.writeName("label").writeValue(opt.label)
+            w.writeName("description").writeValue(opt.description)
+            w.endObject()
+        }
+        w.endArray()
+        w.endObject()
+        w.flush()
+        return "[RPC_SELECT]" + String.fromUtf8(readToEnd(out))
+    }
+
+    public static func resolveRpcSelect(taskId: Int64, requestId: String, selectedIndex: Int32): (Bool, String) {
+        let rid = requestId.trimAscii()
+        if (taskId <= 0 || rid.size == 0) {
+            return (false, "invalid task_id/request_id")
+        }
+
+        let key = buildRpcSelectKey(taskId, rid)
+        rpcSelectMutex.lock()
+        match (rpcSelectPending.get(key)) {
+            case Some(req) =>
+                if (req.responded) {
+                    rpcSelectMutex.unlock()
+                    return (false, "request already resolved")
+                }
+                if (selectedIndex < 0 || Int64(selectedIndex) >= req.options.size) {
+                    rpcSelectMutex.unlock()
+                    return (false, "selected_index out of range")
+                }
+                req.responded = true
+                req.selectedIndex = selectedIndex
+                rpcSelectPending[key] = req
+                rpcSelectMutex.unlock()
+                return (true, "ok")
+            case None =>
+                rpcSelectMutex.unlock()
+                return (false, "request not found or expired")
+        }
+    }
+
+    public static func abortRpcSelect(taskId: Int64, requestId: String): (Bool, String) {
+        let rid = requestId.trimAscii()
+        if (taskId <= 0 || rid.size == 0) {
+            return (false, "invalid task_id/request_id")
+        }
+
+        let key = buildRpcSelectKey(taskId, rid)
+        rpcSelectMutex.lock()
+        match (rpcSelectPending.get(key)) {
+            case Some(req) =>
+                if (req.responded) {
+                    rpcSelectMutex.unlock()
+                    return (false, "request already resolved")
+                }
+                req.responded = true
+                req.selectedIndex = -1
+                rpcSelectPending[key] = req
+                rpcSelectMutex.unlock()
+                return (true, "ok")
+            case None =>
+                rpcSelectMutex.unlock()
+                return (false, "request not found or expired")
+        }
+    }
 
     /**
      * 任务入口
@@ -117,6 +231,9 @@ public class DenoTaskRunner {
         if (groupId.size > 0) {
             kvStore.acquireGroup(groupId)
         }
+
+        let taskData = TaskDao.getTaskDataById(taskId)
+        let interactiveSelectEnabled = taskData.triggerSource.trimAscii() == "metadata_plugin_preview"
 
         try {
             // 获取插件
@@ -152,10 +269,10 @@ public class DenoTaskRunner {
 
             // 根据类型执行插件
             let result = match (pluginType) {
-                case "Metadata" => executeMetadataPlugin(taskId, plugin, targetType, targetId, oneshotParam, extraParams, loginCookiesJson)
-                case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson, parentTaskId)
-                case "Login" => executeLoginPluginDirect(taskId, plugin)
-                case "Script" => executeScriptPlugin(taskId, plugin, oneshotParam, extraParams, loginCookiesJson)
+                case "Metadata" => executeMetadataPlugin(taskId, plugin, targetType, targetId, oneshotParam, extraParams, loginCookiesJson, interactiveSelectEnabled)
+                case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson, parentTaskId, interactiveSelectEnabled)
+                case "Login" => executeLoginPluginDirect(taskId, plugin, interactiveSelectEnabled)
+                case "Script" => executeScriptPlugin(taskId, plugin, oneshotParam, extraParams, loginCookiesJson, interactiveSelectEnabled)
                 case _ =>
                     fail(taskId, "Unknown plugin type: ${pluginType}")
                     return
@@ -304,7 +421,7 @@ public class DenoTaskRunner {
         }
 
         // 执行登录插件
-        let loginResult = executeLoginPluginDirect(taskId, loginPlugin)
+        let loginResult = executeLoginPluginDirect(taskId, loginPlugin, false)
         if (!loginResult.success) {
             return loginResult
         }
@@ -630,11 +747,152 @@ public class DenoTaskRunner {
         try { return Int64.parse(v) } catch (_: Exception) { return defaultValue }
     }
 
-    private static func handleHostRpcCall(method: String, paramsRaw: String, pluginNamespace: String): (Bool, String, String) {
+    private static func handleHostRpcCall(taskId: Int64, method: String, paramsRaw: String, pluginNamespace: String, interactiveSelectEnabled: Bool): (Bool, String, String) {
         // returns: (success, dataJson, error)
         let m = method.trimAscii()
         let paramsTrimmed = paramsRaw.trimAscii()
         let effectiveParams = if (paramsTrimmed.size > 0) { paramsTrimmed } else { "{}" }
+
+        if (m == "ui.select") {
+            var title = "请选择候选项"
+            var message = ""
+            var defaultIndex = 0i32
+            var timeoutSeconds = 90i32
+            var options = ArrayList<RpcSelectOption>()
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "title" => title = r.readValue<String>()
+                            case "message" => message = r.readValue<String>()
+                            case "defaultIndex" => defaultIndex = Int32(parseInt64Loose(r.readValue<String>(), 0i64))
+                            case "timeoutSeconds" => timeoutSeconds = Int32(parseInt64Loose(r.readValue<String>(), 90i64))
+                            case "options" =>
+                                if (r.peek() == Some(BeginArray)) {
+                                    var idx = 0i32
+                                    r.startArray()
+                                    while (r.peek() != EndArray) {
+                                        var label = ""
+                                        var desc = ""
+                                        match (r.peek()) {
+                                            case Some(BeginObject) =>
+                                                r.startObject()
+                                                while (r.peek() != EndObject) {
+                                                    let k = r.readName()
+                                                    match (k) {
+                                                        case "label" => label = r.readValue<String>()
+                                                        case "description" => desc = r.readValue<String>()
+                                                        case _ => r.skip()
+                                                    }
+                                                }
+                                                r.endObject()
+                                            case Some(_) =>
+                                                label = r.readValue<String>()
+                                            case None => ()
+                                        }
+
+                                        let fallbackLabel = if (label.trimAscii().size > 0) { label } else { "选项 ${idx + 1}" }
+                                        options.add(RpcSelectOption(idx, fallbackLabel, desc))
+                                        idx += 1
+                                    }
+                                    r.endArray()
+                                } else {
+                                    r.skip()
+                                }
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (options.size <= 0) {
+                return (false, "{}", "ui.select requires non-empty options")
+            }
+            if (defaultIndex < 0 || Int64(defaultIndex) >= options.size) {
+                defaultIndex = 0
+            }
+            if (timeoutSeconds < 10) { timeoutSeconds = 10 }
+            if (timeoutSeconds > 900) { timeoutSeconds = 900 }
+
+            if (!interactiveSelectEnabled) {
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("index").writeValue(defaultIndex)
+                w.endObject()
+                w.flush()
+                return (true, String.fromUtf8(readToEnd(out)), "")
+            }
+
+            let request = RpcSelectRequest()
+            request.taskId = taskId
+            request.requestId = "${DateTime.now().toUnixTimeStamp().toMilliseconds()}_${taskId}"
+            request.title = if (title.trimAscii().size > 0) { title } else { "请选择候选项" }
+            request.message = message
+            request.defaultIndex = defaultIndex
+            request.timeoutSeconds = timeoutSeconds
+            request.options = options.toArray()
+            request.createdAtSeconds = DateTime.now().toUnixTimeStamp().toSeconds()
+
+            let key = buildRpcSelectKey(taskId, request.requestId)
+            rpcSelectMutex.lock()
+            rpcSelectPending[key] = request
+            rpcSelectMutex.unlock()
+
+            let currentProgress = TaskDao.getTaskDataById(taskId).progress
+            TaskModel.updateTaskProgress(taskId, currentProgress, buildRpcSelectMessage(request))
+
+            let deadline = DateTime.now().toUnixTimeStamp().toSeconds() + Int64(timeoutSeconds)
+            while (true) {
+                var selected = -1i32
+                var done = false
+                rpcSelectMutex.lock()
+                match (rpcSelectPending.get(key)) {
+                    case Some(req) =>
+                        if (req.responded) {
+                            selected = req.selectedIndex
+                            done = true
+                            rpcSelectPending.remove(key)
+                        }
+                    case None =>
+                        done = true
+                }
+                rpcSelectMutex.unlock()
+
+                if (done) {
+                    if (selected >= 0) {
+                        let out = ByteBuffer()
+                        let w = JsonWriter(out)
+                        w.startObject()
+                        w.writeName("index").writeValue(selected)
+                        w.endObject()
+                        w.flush()
+                        TaskModel.updateTaskProgress(taskId, currentProgress, "已接收人工选择结果")
+                        return (true, String.fromUtf8(readToEnd(out)), "")
+                    }
+                    if (selected == -1) {
+                        return (false, "{}", "ui.select cancelled by user")
+                    }
+                }
+
+                if (DateTime.now().toUnixTimeStamp().toSeconds() >= deadline) {
+                    rpcSelectMutex.lock()
+                    rpcSelectPending.remove(key)
+                    rpcSelectMutex.unlock()
+                    return (false, "{}", "ui.select timeout: no response")
+                }
+
+                sleep(Duration.second)
+            }
+        }
 
         // Resolve archiveId -> (archiveType, actualPath).
         func resolveArchiveActualPath(archiveId: String): Option<(String, String)> {
@@ -1343,7 +1601,8 @@ public class DenoTaskRunner {
         args: ArrayList<String>,
         inputJson: String,
         parentTaskId: Int64,
-        pluginNamespace: String
+        pluginNamespace: String,
+        interactiveSelectEnabled: Bool
     ): DenoExecutionResult {
         let logger = getLogger("deno_task")
 
@@ -1397,7 +1656,7 @@ public class DenoTaskRunner {
                         let id = a
                         let method = b
                         let paramsRaw = payload
-                        let (ok, dataJson, err) = handleHostRpcCall(method, paramsRaw, pluginNamespace)
+                        let (ok, dataJson, err) = handleHostRpcCall(taskId, method, paramsRaw, pluginNamespace, interactiveSelectEnabled)
                         let respLine = buildHostCallResultLine(id, ok, dataJson, err)
                         process.stdInPipe.write(respLine.toArray())
                         process.stdInPipe.write("\n".toArray())
@@ -1481,7 +1740,7 @@ public class DenoTaskRunner {
     /**
      * 执行登录插件
      */
-    private static func executeLoginPluginDirect(taskId: Int64, plugin: PluginData): DenoExecutionResult {
+    private static func executeLoginPluginDirect(taskId: Int64, plugin: PluginData, interactiveSelectEnabled: Bool): DenoExecutionResult {
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
         let pluginFile = "${pluginDir}/Login.ts"
 
@@ -1508,7 +1767,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        return executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace)
+        return executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace, interactiveSelectEnabled)
     }
 
     /**
@@ -1519,7 +1778,8 @@ public class DenoTaskRunner {
         plugin: PluginData,
         oneshotParam: String,
         extraParams: String,
-        loginCookiesJson: String
+        loginCookiesJson: String,
+        interactiveSelectEnabled: Bool
     ): DenoExecutionResult {
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
         let pluginFile = "${pluginDir}/Script.ts"
@@ -1550,7 +1810,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace, interactiveSelectEnabled)
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
 
@@ -1654,7 +1914,8 @@ public class DenoTaskRunner {
         targetId: String,
         oneshotParam: String,
         extraParams: String,
-        loginCookiesJson: String
+        loginCookiesJson: String,
+        interactiveSelectEnabled: Bool
     ): DenoExecutionResult {
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
         let pluginFile = "${pluginDir}/Metadata.ts"
@@ -1724,7 +1985,7 @@ public class DenoTaskRunner {
             ""
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace, interactiveSelectEnabled)
         // 保留 loginCookiesJson 用于后续处理
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
@@ -1795,7 +2056,8 @@ public class DenoTaskRunner {
         plugin: PluginData,
         url: String,
         loginCookiesJson: String,
-        parentTaskId: Int64
+        parentTaskId: Int64,
+        interactiveSelectEnabled: Bool
     ): DenoExecutionResult {
         let pluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${plugin.namespace}"
         let pluginFile = "${pluginDir}/Download.ts"
@@ -1823,7 +2085,7 @@ public class DenoTaskRunner {
             url
         )
 
-        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, parentTaskId, plugin.namespace)
+        let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, parentTaskId, plugin.namespace, interactiveSelectEnabled)
         return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
     }
 

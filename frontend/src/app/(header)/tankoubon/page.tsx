@@ -35,6 +35,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -46,6 +47,34 @@ import type { Archive } from '@/types/archive';
 import Image from 'next/image';
 
 type ArchiveViewMode = 'grid' | 'list';
+
+type RpcSelectOption = {
+  index: number;
+  label: string;
+  description?: string;
+};
+
+type RpcSelectRequest = {
+  request_id: string;
+  title: string;
+  message?: string;
+  default_index?: number;
+  options: RpcSelectOption[];
+};
+
+function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
+  const prefix = '[RPC_SELECT]';
+  if (!message?.startsWith(prefix)) return null;
+  try {
+    const parsed = JSON.parse(message.slice(prefix.length)) as RpcSelectRequest;
+    if (!parsed?.request_id || !Array.isArray(parsed?.options) || parsed.options.length === 0) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 const ARCHIVE_VIEW_MODE_STORAGE_KEY = 'tankoubon_archive_view_mode';
 const MOBILE_BREAKPOINT_MEDIA_QUERY = '(max-width: 639px)';
@@ -217,6 +246,9 @@ function TankoubonDetailContent() {
   const [isMetadataPluginRunning, setIsMetadataPluginRunning] = useState(false);
   const [metadataPluginProgress, setMetadataPluginProgress] = useState<number | null>(null);
   const [metadataPluginMessage, setMetadataPluginMessage] = useState<string>('');
+  const [rpcSelectTaskId, setRpcSelectTaskId] = useState<number | null>(null);
+  const [rpcSelectRequest, setRpcSelectRequest] = useState<RpcSelectRequest | null>(null);
+  const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = useState<number | null>(null);
   const [metadataArchivePatches, setMetadataArchivePatches] = useState<Array<{
     archive_id?: string;
     volume_no?: number;
@@ -472,6 +504,30 @@ function TankoubonDetailContent() {
     };
   }, [editDialogOpen, selectedMetadataPlugin]);
 
+  const submitRpcSelect = useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return;
+    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, rpcSelectRequest.request_id, rpcSelectSelectedIndex);
+    if (!ok) {
+      logger.operationFailed('respond metadata rpc select (tankoubon)', new Error('rpc select response failed'));
+      return;
+    }
+    setRpcSelectRequest(null);
+    setRpcSelectTaskId(null);
+    setRpcSelectSelectedIndex(null);
+  }, [rpcSelectRequest, rpcSelectSelectedIndex, rpcSelectTaskId]);
+
+  const abortRpcSelect = useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest) return;
+    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, rpcSelectRequest.request_id);
+    if (!ok) {
+      logger.operationFailed('abort metadata rpc select (tankoubon)', new Error('rpc select abort failed'));
+      return;
+    }
+    setRpcSelectRequest(null);
+    setRpcSelectTaskId(null);
+    setRpcSelectSelectedIndex(null);
+  }, [rpcSelectRequest, rpcSelectTaskId]);
+
   const runMetadataPlugin = useCallback(async () => {
     if (!tankoubon) return;
     if (!selectedMetadataPlugin) return;
@@ -479,6 +535,9 @@ function TankoubonDetailContent() {
     setIsMetadataPluginRunning(true);
     setMetadataPluginProgress(0);
     setMetadataPluginMessage(t('archive.metadataPluginEnqueued'));
+    setRpcSelectRequest(null);
+    setRpcSelectTaskId(null);
+    setRpcSelectSelectedIndex(null);
 
     try {
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
@@ -490,6 +549,17 @@ function TankoubonDetailContent() {
           onUpdate: (task) => {
             setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0);
             setMetadataPluginMessage(task.message || '');
+
+            const req = parseRpcSelectRequest(task.message || '');
+            if (req) {
+              setRpcSelectTaskId(task.id);
+              setRpcSelectRequest((current) => {
+                if (current?.request_id === req.request_id) return current;
+                const defaultIndex = typeof req.default_index === 'number' ? req.default_index : 0;
+                setRpcSelectSelectedIndex(defaultIndex >= 0 && defaultIndex < req.options.length ? defaultIndex : 0);
+                return req;
+              });
+            }
           },
         },
         { writeBack: false }
@@ -553,6 +623,9 @@ function TankoubonDetailContent() {
       logger.operationFailed('run metadata plugin (tankoubon)', e);
     } finally {
       setIsMetadataPluginRunning(false);
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
     }
   }, [tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
 
@@ -1129,6 +1202,46 @@ function TankoubonDetailContent() {
                 {t('common.save')}
               </Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!rpcSelectRequest} onOpenChange={() => {}}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{rpcSelectRequest?.title || '请选择元数据匹配项'}</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="pt-0">
+              <div className="space-y-3">
+                {rpcSelectRequest?.message ? (
+                  <p className="text-sm text-muted-foreground">{rpcSelectRequest.message}</p>
+                ) : null}
+                <div className="max-h-80 overflow-y-auto space-y-2">
+                  {(rpcSelectRequest?.options || []).map((opt) => (
+                    <Button
+                      key={`${rpcSelectRequest?.request_id}-${opt.index}`}
+                      type="button"
+                      variant={rpcSelectSelectedIndex === opt.index ? 'default' : 'outline'}
+                      className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left"
+                      onClick={() => setRpcSelectSelectedIndex(opt.index)}
+                    >
+                      <span className="font-medium">{opt.label || `候选 ${opt.index + 1}`}</span>
+                      {opt.description ? (
+                        <span className="text-xs text-muted-foreground whitespace-normal">{opt.description}</span>
+                      ) : null}
+                    </Button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">如果长时间不选择，本次预览任务会超时失败。</p>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => void abortRpcSelect()}>
+                    放弃
+                  </Button>
+                  <Button type="button" disabled={rpcSelectSelectedIndex == null} onClick={() => void submitRpcSelect()}>
+                    选择并提交
+                  </Button>
+                </div>
+              </div>
+            </DialogBody>
           </DialogContent>
         </Dialog>
 

@@ -146,6 +146,35 @@ export class TaskPoolService {
   }
 
   /**
+   * Respond to a running task rpc select request.
+   */
+  static async respondRpcSelect(taskId: number, requestId: string, selectedIndex: number): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/${taskId}/rpc/select`, {
+        request_id: requestId,
+        selected_index: selectedIndex,
+      });
+      return !!response.success;
+    } catch (error) {
+      console.error('Error responding rpc select:', error);
+      return false;
+    }
+  }
+
+  static async abortRpcSelect(taskId: number, requestId: string): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/${taskId}/rpc/select`, {
+        request_id: requestId,
+        abort: 1,
+      });
+      return !!response.success;
+    } catch (error) {
+      console.error('Error aborting rpc select:', error);
+      return false;
+    }
+  }
+
+  /**
    * Get task status color for UI display
    */
   static getStatusColor(status: string): string {

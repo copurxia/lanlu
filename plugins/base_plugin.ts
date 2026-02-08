@@ -47,6 +47,15 @@ export interface PluginResult {
 /**
  * 插件输入（从 stdin 读取）
  */
+
+export interface HostSelectOption {
+  label: string;
+  description?: string;
+}
+
+export interface HostSelectResult {
+  index: number;
+}
 export interface PluginInput {
   action: 'plugin_info' | 'run';
   pluginType: string;
@@ -143,6 +152,29 @@ export abstract class BasePlugin {
       if (msg?.success) return msg.data as T;
       throw new Error(String(msg?.error ?? 'host call failed'));
     }
+  }
+
+
+  protected async hostSelect(
+    title: string,
+    options: HostSelectOption[],
+    options2?: { message?: string; defaultIndex?: number; timeoutSeconds?: number }
+  ): Promise<number> {
+    if (!Array.isArray(options) || options.length === 0) {
+      throw new Error('hostSelect requires at least one option');
+    }
+    const res = await this.callHost<HostSelectResult>('ui.select', {
+      title,
+      message: options2?.message || '',
+      options,
+      defaultIndex: Number.isFinite(options2?.defaultIndex as number) ? Math.trunc(options2!.defaultIndex as number) : 0,
+      timeoutSeconds: Number.isFinite(options2?.timeoutSeconds as number) ? Math.trunc(options2!.timeoutSeconds as number) : 90,
+    });
+    const idx = Number((res as any)?.index);
+    if (!Number.isFinite(idx)) return 0;
+    const n = Math.trunc(idx);
+    if (n < 0 || n >= options.length) return 0;
+    return n;
   }
 
   /**

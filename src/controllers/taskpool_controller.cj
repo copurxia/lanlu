@@ -7,6 +7,7 @@ import stdx.encoding.json.stream.*
 import lanlu.models.*
 import lanlu.dao.*
 import lanlu.services.*
+import lanlu.task_runners.*
 import lanlu.utils.*
 
 /**
@@ -199,6 +200,84 @@ public class TaskPoolController {
             ctx.status(500)
             ctx.json("{\"error\":\"Failed to create retry task\"}")
         }
+    }
+
+    /**
+     * 回应运行中 deno_task 发起的 rpc 选择请求
+     * POST /api/admin/taskpool/{taskId}/rpc/select
+     * body: { request_id: string, selected_index: number }
+     */
+    public static func respondRpcSelect(ctx: JoyContext) {
+        let taskIdStr = ctx.getParam("taskId") ?? ""
+        let taskId = try {
+            Int64.parse(taskIdStr)
+        } catch (_: Exception) {
+            ctx.status(400)
+            ctx.json("{\"success\":0,\"error\":\"Invalid task ID\"}")
+            return
+        }
+
+        let body = ctx.readString().trimAscii()
+        var requestId = ""
+        var selectedIndex = -1i32
+        var abort = false
+        if (body.size > 0) {
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(body.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "request_id" => requestId = r.readValue<String>().trimAscii()
+                            case "requestId" => requestId = r.readValue<String>().trimAscii()
+                            case "selected_index" => selectedIndex = Int32.parse(r.readValue<String>().trimAscii())
+                            case "selectedIndex" => selectedIndex = Int32.parse(r.readValue<String>().trimAscii())
+                            case "abort" =>
+                                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                                abort = v == "1" || v == "true" || v == "yes" || v == "y"
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (requestId.size == 0 || (!abort && selectedIndex < 0)) {
+            ctx.status(400)
+            ctx.json("{\"success\":0,\"error\":\"request_id and (selected_index or abort) are required\"}")
+            return
+        }
+
+        let (ok, msg) = if (abort) {
+            DenoTaskRunner.abortRpcSelect(taskId, requestId)
+        } else {
+            DenoTaskRunner.resolveRpcSelect(taskId, requestId, selectedIndex)
+        }
+        if (!ok) {
+            ctx.status(404)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(0)
+            w.writeName("error").writeValue(msg)
+            w.endObject()
+            w.flush()
+            ctx.json(String.fromUtf8(readToEnd(out)))
+            return
+        }
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("success").writeValue(1)
+        w.writeName("message").writeValue("ok")
+        w.endObject()
+        w.flush()
+        ctx.json(String.fromUtf8(readToEnd(out)))
     }
 
     /**
