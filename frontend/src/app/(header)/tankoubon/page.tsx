@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, Suspense, useMemo } from 'react';
+import { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
@@ -60,6 +60,7 @@ type RpcSelectRequest = {
   title: string;
   message?: string;
   default_index?: number;
+  timeout_seconds?: number;
   options: RpcSelectOption[];
 };
 
@@ -250,6 +251,29 @@ function TankoubonDetailContent() {
   const [rpcSelectTaskId, setRpcSelectTaskId] = useState<number | null>(null);
   const [rpcSelectRequest, setRpcSelectRequest] = useState<RpcSelectRequest | null>(null);
   const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = useState<number | null>(null);
+  const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = useState<number | null>(null);
+  const resolvedRpcSelectRequestIdsRef = useRef<Set<string>>(new Set());
+
+
+  useEffect(() => {
+    if (!rpcSelectRequest || rpcSelectRemainingSeconds == null) return;
+    if (rpcSelectRemainingSeconds <= 0) {
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setRpcSelectRemainingSeconds((current) => {
+        if (current == null) return null;
+        return Math.max(0, current - 1);
+      });
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [rpcSelectRemainingSeconds, rpcSelectRequest]);
   const [metadataArchivePatches, setMetadataArchivePatches] = useState<Array<{
     archive_id?: string;
     volume_no?: number;
@@ -507,38 +531,54 @@ function TankoubonDetailContent() {
 
   const submitRpcSelect = useCallback(async () => {
     if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return;
-    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, rpcSelectRequest.request_id, rpcSelectSelectedIndex);
+    const requestId = rpcSelectRequest.request_id;
+    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, requestId, rpcSelectSelectedIndex);
+    resolvedRpcSelectRequestIdsRef.current.add(requestId);
     if (!ok) {
       logger.operationFailed('respond metadata rpc select (tankoubon)', new Error('rpc select response failed'));
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
       return;
     }
     setRpcSelectRequest(null);
     setRpcSelectTaskId(null);
     setRpcSelectSelectedIndex(null);
+    setRpcSelectRemainingSeconds(null);
   }, [rpcSelectRequest, rpcSelectSelectedIndex, rpcSelectTaskId]);
 
   const abortRpcSelect = useCallback(async () => {
     if (rpcSelectTaskId == null || !rpcSelectRequest) return;
-    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, rpcSelectRequest.request_id);
+    const requestId = rpcSelectRequest.request_id;
+    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, requestId);
+    resolvedRpcSelectRequestIdsRef.current.add(requestId);
     if (!ok) {
       logger.operationFailed('abort metadata rpc select (tankoubon)', new Error('rpc select abort failed'));
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
       return;
     }
     setRpcSelectRequest(null);
     setRpcSelectTaskId(null);
     setRpcSelectSelectedIndex(null);
+    setRpcSelectRemainingSeconds(null);
   }, [rpcSelectRequest, rpcSelectTaskId]);
 
   const runMetadataPlugin = useCallback(async () => {
     if (!tankoubon) return;
     if (!selectedMetadataPlugin) return;
 
+    resolvedRpcSelectRequestIdsRef.current.clear();
     setIsMetadataPluginRunning(true);
     setMetadataPluginProgress(0);
     setMetadataPluginMessage(t('archive.metadataPluginEnqueued'));
     setRpcSelectRequest(null);
     setRpcSelectTaskId(null);
     setRpcSelectSelectedIndex(null);
+    setRpcSelectRemainingSeconds(null);
 
     try {
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
@@ -553,11 +593,14 @@ function TankoubonDetailContent() {
 
             const req = parseRpcSelectRequest(task.message || '');
             if (req) {
+              if (resolvedRpcSelectRequestIdsRef.current.has(req.request_id)) return;
               setRpcSelectTaskId(task.id);
               setRpcSelectRequest((current) => {
                 if (current?.request_id === req.request_id) return current;
                 const defaultIndex = typeof req.default_index === 'number' ? req.default_index : 0;
                 setRpcSelectSelectedIndex(defaultIndex >= 0 && defaultIndex < req.options.length ? defaultIndex : 0);
+                const timeout = typeof req.timeout_seconds === 'number' && req.timeout_seconds > 0 ? Math.floor(req.timeout_seconds) : 90;
+                setRpcSelectRemainingSeconds(timeout);
                 return req;
               });
             }
@@ -627,6 +670,7 @@ function TankoubonDetailContent() {
       setRpcSelectRequest(null);
       setRpcSelectTaskId(null);
       setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
     }
   }, [tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
 
@@ -1215,7 +1259,7 @@ function TankoubonDetailContent() {
               <div
                 className="space-y-3 h-full flex flex-col"
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && rpcSelectSelectedIndex != null) {
+                  if (e.key === 'Enter' && rpcSelectSelectedIndex != null && (rpcSelectRemainingSeconds ?? 1) > 0) {
                     e.preventDefault();
                     void submitRpcSelect();
                   }
@@ -1252,12 +1296,19 @@ function TankoubonDetailContent() {
                     </Button>
                   ))}
                 </div>
-                <p className="text-xs text-muted-foreground">如果长时间不选择，本次预览任务会超时失败。</p>
+                <p className="text-xs text-muted-foreground">
+                  如果长时间不选择，本次预览任务会超时失败。
+                  {rpcSelectRemainingSeconds != null ? ` 剩余 ${Math.max(0, rpcSelectRemainingSeconds)} 秒。` : ''}
+                </p>
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" onClick={() => void abortRpcSelect()}>
                     放弃
                   </Button>
-                  <Button type="button" disabled={rpcSelectSelectedIndex == null} onClick={() => void submitRpcSelect()}>
+                  <Button
+                    type="button"
+                    disabled={rpcSelectSelectedIndex == null || (rpcSelectRemainingSeconds ?? 1) <= 0}
+                    onClick={() => void submitRpcSelect()}
+                  >
                     选择并提交
                   </Button>
                 </div>
