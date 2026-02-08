@@ -61,7 +61,6 @@ public func registerApiRoutes(router: JoyRouters) {
 
     // 注册服务器信息路由
     router.get("/api/info", { ctx =>
-        if (!AuthMiddleware.requiredAuth(ctx)) { return }
         InfoController.getServerInfo(ctx)
     })
 }
