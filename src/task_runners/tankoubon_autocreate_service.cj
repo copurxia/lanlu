@@ -119,6 +119,18 @@ public class TankoubonAutocreateService {
             }
         }
 
+        // Default cover: use the first archive's cover if tank has no cover yet.
+        if (desired.size > 0) {
+            let currentCover = TankoubonDao.getTankoubonCoverAssetId(tankoubonId)
+            if (currentCover <= 0) {
+                let firstArchiveId = desired[0]
+                let firstCover = ArchiveDao.getCoverAssetId(firstArchiveId)
+                if (firstCover > 0) {
+                    let _ = TankoubonDao.updateTankoubonCover(tankoubonId, firstCover)
+                }
+            }
+        }
+
         // Remove members no longer present in this directory.
         for (arcid in current) {
             if (!desiredSet.contains(arcid)) {
