@@ -602,21 +602,36 @@ public class ArchiveDao {
 	                }
 
 	                // 然后查询分页数据
-	                var sql = ""
-	                if (!hasRelevance) {
-	                    // 无 relevance：保持原查询形态
-	                    sql = "SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM archives_with_tags"
-	                    if (baseWhereClause.size > 0) {
-	                        sql += " WHERE " + baseWhereClause
-	                    }
-	                } else {
-	                    // 有 relevance：在 base CTE 里计算 relevance_score，并在外层应用阈值过滤
-	                    sql = "WITH base AS (SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags, (" + relevanceExpr + ") AS relevance_score FROM archives_with_tags"
-	                    if (baseWhereClause.size > 0) {
-	                        sql += " WHERE " + baseWhereClause
-	                    }
-	                    sql += ") SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
-	                }
+                var sql = ""
+                var orderJoinPrefix: ArrayList<String> = ArrayList<String>()
+                if (!hasRelevance) {
+                    // 无 relevance：保持原查询形态
+                    sql = "SELECT archives_with_tags.id, archives_with_tags.arcid, archives_with_tags.filename, archives_with_tags.title, archives_with_tags.summary, archives_with_tags.thumbhash, archives_with_tags.cover_asset_id, archives_with_tags.created_at, archives_with_tags.updated_at, archives_with_tags.relative_path, archives_with_tags.file_size, archives_with_tags.pagecount, archives_with_tags.archive_type, archives_with_tags.tags FROM archives_with_tags"
+                    if (sortby == "tank_order" && tankoubonId.size > 0) {
+                        sql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
+                        sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archives_with_tags.id"
+                        orderJoinPrefix.add(tankoubonId)
+                    }
+                    if (baseWhereClause.size > 0) {
+                        sql += " WHERE " + baseWhereClause
+                    }
+                } else {
+                    // 有 relevance：在 base CTE 里计算 relevance_score，并在外层应用阈值过滤
+                    sql = "WITH base AS (SELECT archives_with_tags.id, archives_with_tags.arcid, archives_with_tags.filename, archives_with_tags.title, archives_with_tags.summary, archives_with_tags.thumbhash, archives_with_tags.cover_asset_id, archives_with_tags.created_at, archives_with_tags.updated_at, archives_with_tags.relative_path, archives_with_tags.file_size, archives_with_tags.pagecount, archives_with_tags.archive_type, archives_with_tags.tags, (" + relevanceExpr + ") AS relevance_score"
+                    if (sortby == "tank_order" && tankoubonId.size > 0) {
+                        sql += ", ta_order.sort_order AS tank_sort_order"
+                    }
+                    sql += " FROM archives_with_tags"
+                    if (sortby == "tank_order" && tankoubonId.size > 0) {
+                        sql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
+                        sql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archives_with_tags.id"
+                        orderJoinPrefix.add(tankoubonId)
+                    }
+                    if (baseWhereClause.size > 0) {
+                        sql += " WHERE " + baseWhereClause
+                    }
+                    sql += ") SELECT id, arcid, filename, title, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, tags FROM base WHERE relevance_score >= " + minRelevanceThreshold.toString()
+                }
 	                
 	                // 处理排序参数
 	                if (sortby == "RANDOM()") {
@@ -639,13 +654,11 @@ public class ArchiveDao {
                     sql += " ORDER BY pagecount ${orderDirection}"
                 } else if (sortby == "tank_order" && tankoubonId.size > 0) {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    let idRef = if (hasRelevance) { "base.id" } else { "archives_with_tags.id" }
-                    sql += " ORDER BY (SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = ${idRef} LIMIT 1) ${orderDirection}, created_at DESC"
-                    // ORDER BY 子查询需要再次绑定 tankId
-                    filterParams.add(tankoubonId)
+                    let orderExpr = if (hasRelevance) { "tank_sort_order" } else { "ta_order.sort_order" }
+                    sql += " ORDER BY ${orderExpr} ${orderDirection} NULLS LAST, created_at DESC"
                 } else if (sortby == "size") {
-	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-	                    sql += " ORDER BY file_size ${orderDirection}"
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    sql += " ORDER BY file_size ${orderDirection}"
 	                } else if (sortby == "relevance" && filter.size > 0 && relevanceExpr != "1") {
 	                    // 相关度排序：使用 CTE 内计算的 relevance_score（避免重复计算表达式）
 	                    if (hasRelevance) {
@@ -671,8 +684,14 @@ public class ArchiveDao {
                 let stmt = conn.prepareStatement(sql)
 
                 // 绑定搜索过滤器参数
+                var bindIndex = 0
+                for (i in 0..orderJoinPrefix.size) {
+                    stmt.set<String>(bindIndex, orderJoinPrefix[i])
+                    bindIndex++
+                }
                 for (i in 0..filterParams.size) {
-                    stmt.set<String>(i, filterParams[i])
+                    stmt.set<String>(bindIndex, filterParams[i])
+                    bindIndex++
                 }
                 
                 let rs = stmt.query()
@@ -936,6 +955,7 @@ public class ArchiveDao {
                     // Build ORDER BY for representative row selection (must match ungrouped search ordering).
                     var windowOrderBy = ""
                     var finalOrderBy = ""
+                    var orderJoinPrefix: ArrayList<String> = ArrayList<String>()
                     if (sortby == "RANDOM()") {
                         windowOrderBy = "RANDOM() DESC"
                         finalOrderBy = "RANDOM() DESC"
@@ -959,13 +979,10 @@ public class ArchiveDao {
                         finalOrderBy = "pagecount ${dir}"
                     } else if (sortby == "tank_order" && tankoubonId.size > 0) {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }
-                        let windowExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = base.id LIMIT 1)"
-                        let finalExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = ranked.id LIMIT 1)"
-                        windowOrderBy = "${windowExpr} ${dir}, created_at DESC"
-                        finalOrderBy = "${finalExpr} ${dir}, created_at DESC"
-                        // ORDER BY 子查询在 window / final ORDER BY 中各需要绑定一次 tankId
-                        filterParams.add(tankoubonId)
-                        filterParams.add(tankoubonId)
+                        windowOrderBy = "tank_sort_order ${dir} NULLS LAST, created_at DESC"
+                        finalOrderBy = "tank_sort_order ${dir} NULLS LAST, created_at DESC"
+                        // JOIN tank id param comes before WHERE params in SQL
+                        orderJoinPrefix.add(tankoubonId)
                     } else if (sortby == "size") {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }
                         windowOrderBy = "file_size ${dir}"
@@ -1002,10 +1019,19 @@ public class ArchiveDao {
                                 CASE WHEN tb.tankoubon_id IS NOT NULL AND tb.tankoubon_id != '' THEN 'tankoubon' ELSE 'archive' END AS group_item_type,
                                 COALESCE(tb.tankoubon_id, archives_with_tags.arcid) AS group_item_id,
                                 COALESCE((${relevanceExpr}), 0) AS relevance_score
+                    """
+                    if (sortby == "tank_order" && tankoubonId.size > 0) {
+                        dataSql += ", ta_order.sort_order AS tank_sort_order"
+                    }
+                    dataSql += """
                             FROM archives_with_tags
                             LEFT JOIN tankoubon_archives tba ON tba.archive_id = archives_with_tags.id
                             LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
                     """
+                    if (sortby == "tank_order" && tankoubonId.size > 0) {
+                        dataSql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
+                        dataSql += " LEFT JOIN tankoubon_archives ta_order ON ta_order.tankoubon_id = t_order.id AND ta_order.archive_id = archives_with_tags.id"
+                    }
                     if (whereClause.size > 0) {
                         dataSql += " WHERE " + whereClause
                     }
@@ -1029,8 +1055,14 @@ public class ArchiveDao {
                     getLogger("archive_dao").debug("执行分组数据SQL", ("sql", dataSql))
                     let stmt = conn.prepareStatement(dataSql)
 
+                    var bindIndex = 0
+                    for (i in 0..orderJoinPrefix.size) {
+                        stmt.set<String>(bindIndex, orderJoinPrefix[i])
+                        bindIndex++
+                    }
                     for (i in 0..filterParams.size) {
-                        stmt.set<String>(i, filterParams[i])
+                        stmt.set<String>(bindIndex, filterParams[i])
+                        bindIndex++
                     }
 
                     let rs = stmt.query()

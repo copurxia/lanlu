@@ -57,6 +57,7 @@ main(): Int64 {
     MigrationRegistry.register(V004_TankoubonCoverAssetGuard())
     MigrationRegistry.register(V005_ArchivesWithTagsCoverAsset())
     MigrationRegistry.register(V006_TagTranslationTrgmIndex())
+    MigrationRegistry.register(V007_TankoubonArchivesOrderIndex())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {
