@@ -23,18 +23,12 @@ public class V006_TagTranslationTrgmIndex <: Migration {
             return true
         }
 
-        // Some databases disallow CREATE EXTENSION or have it disabled. When that happens,
-        // the failing statement may abort the current transaction and prevent recording the
-        // migration. Use a SAVEPOINT so we can safely continue and still mark the migration
-        // as applied (best-effort optimization).
-        MigrationHelpers.execUpdate(conn, "SAVEPOINT v006_pg_trgm")
-        if (!MigrationHelpers.execUpdate(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")) {
-            MigrationHelpers.execUpdate(conn, "ROLLBACK TO SAVEPOINT v006_pg_trgm")
-            MigrationHelpers.execUpdate(conn, "RELEASE SAVEPOINT v006_pg_trgm")
-            logger.warn("Failed to enable pg_trgm; skipping trigram index creation")
+        // Avoid CREATE EXTENSION here; some drivers/DBs error on it and poison the connection.
+        // If pg_trgm isn't already installed, skip index creation (best-effort optimization).
+        if (!isExtensionInstalled(conn, "pg_trgm")) {
+            logger.warn("pg_trgm not installed; skipping trigram index creation")
             return true
         }
-        MigrationHelpers.execUpdate(conn, "RELEASE SAVEPOINT v006_pg_trgm")
 
         let indexName = "idx_tags_translations_trgm"
         if (MigrationHelpers.indexExists(conn, indexName)) {
@@ -43,16 +37,34 @@ public class V006_TagTranslationTrgmIndex <: Migration {
         }
 
         logger.info("Creating trigram index ${indexName} on tags(translations::text)")
-        MigrationHelpers.execUpdate(conn, "SAVEPOINT v006_idx")
         if (!MigrationHelpers.execUpdate(conn,
             "CREATE INDEX ${indexName} ON tags USING GIN ((translations::text) gin_trgm_ops)"
         )) {
-            MigrationHelpers.execUpdate(conn, "ROLLBACK TO SAVEPOINT v006_idx")
-            MigrationHelpers.execUpdate(conn, "RELEASE SAVEPOINT v006_idx")
             logger.warn("Failed to create trigram index; skipping")
             return true
         }
-        MigrationHelpers.execUpdate(conn, "RELEASE SAVEPOINT v006_idx")
         return true
+    }
+
+    private func isExtensionInstalled(conn: Connection, name: String): Bool {
+        try {
+            let stmt = conn.prepareStatement(
+                "SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1"
+            )
+            try {
+                stmt.set(0, name)
+                let rs = stmt.query()
+                try {
+                    return rs.next()
+                } finally {
+                    rs.close()
+                }
+            } finally {
+                stmt.close()
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to query pg_extension", ("error", e.message))
+            return false
+        }
     }
 }
