@@ -3,6 +3,9 @@ package archive_ffi
 import std.collection.*
 import std.sort.*
 
+foreign func strlen(arg1: CString): UIntNative
+foreign func memcpy(dest: CPointer<Unit>, src: CString, n: UIntNative): CPointer<Unit>
+
 /**
  * 压缩包条目流式读取器
  * 支持从压缩包中按需分块读取数据，避免一次性加载整个文件到内存
@@ -65,17 +68,54 @@ public class ArchiveEntryReader {
 }
 
 public class Archive {
+    private static func getEntryName(entry: CPointer<archive_entry>): String {
+        let rawPathname = unsafe { archive_entry_pathname(entry) }
+        if (rawPathname.isNull()) {
+            return ""
+        }
+        let bytes = cStringToBytes(rawPathname)
+        if (bytes.size == 0) {
+            return ""
+        }
+        return decodeLatin1(bytes)
+    }
+
+    private static func cStringToBytes(ptr: CString): Array<UInt8> {
+        let len = unsafe { strlen(ptr) }
+        if (len == 0) {
+            return Array<UInt8>()
+        }
+        let n = Int64(len)
+        let buf = unsafe { LibC.malloc<UInt8>(count: n) }
+        unsafe { memcpy(CPointer<Unit>(buf), ptr, len) }
+        var out = Array<UInt8>(n, repeat: 0u8)
+        for (i in 0..n) {
+            out[i] = unsafe { (buf + i).read() }
+        }
+        unsafe { LibC.free(buf) }
+        return out
+    }
+
+    private static func decodeLatin1(bytes: Array<UInt8>): String {
+        var out = ""
+        for (b in bytes) {
+            out += Rune(UInt32(b)).toString()
+        }
+        return out
+    }
+
     /**
      * 列出压缩包内所有条目的路径名
      * @param archivePath 压缩包文件路径
      * @return 条目路径名数组
      */
-    public static func listEntries(archivePath: String): Array<String> {
+    private static func scanEntries(archivePath: String): (Array<String>, Int32) {
         let entries = ArrayList<String>()
+        var mediaCount: Int32 = 0
 
         let a = unsafe { archive_read_new() }
         if (a.isNull()) {
-            return entries.toArray()
+            return (entries.toArray(), 0)
         }
 
         unsafe {
@@ -89,12 +129,10 @@ public class Archive {
 
         if (openResult != Int32(ARCHIVE_OK)) {
             unsafe { archive_read_free(a) }
-            return entries.toArray()
+            return (entries.toArray(), 0)
         }
 
         let entry = unsafe { archive_entry_new2(a) }
-        var entryCount: Int64 = 0
-
         while (true) {
             let r = unsafe { archive_read_next_header2(a, entry) }
             if (r == Int32(ARCHIVE_EOF)) {
@@ -104,11 +142,12 @@ public class Archive {
                 break
             }
 
-            let pathname = unsafe { archive_entry_pathname(entry) }
-            if (!pathname.isNull()) {
-                let name = unsafe { pathname.toString() }
+            let name = getEntryName(entry)
+            if (name.size > 0) {
                 entries.add(name)
-                entryCount += 1
+                if (isMediaEntryName(name)) {
+                    mediaCount += 1
+                }
             }
         }
 
@@ -118,7 +157,12 @@ public class Archive {
             archive_read_free(a)
         }
 
-        return entries.toArray()
+        return (entries.toArray(), mediaCount)
+    }
+
+    public static func listEntries(archivePath: String): Array<String> {
+        let (entries, _) = scanEntries(archivePath)
+        return entries
     }
 
     /**
@@ -151,7 +195,7 @@ public class Archive {
         }
 
         let entry = unsafe { archive_entry_new2(a) }
-        var best = ""
+        var localBest = ""
 
         while (true) {
             let r = unsafe { archive_read_next_header2(a, entry) }
@@ -162,22 +206,17 @@ public class Archive {
                 break
             }
 
-            let pathname = unsafe { archive_entry_pathname(entry) }
-            if (pathname.isNull()) {
+            let name = getEntryName(entry)
+            if (name.size == 0) {
                 continue
             }
-
-            let name = unsafe { pathname.toString() }
             if (!isImageEntryName(name)) {
                 continue
             }
-
-            if (best.size == 0) {
-                best = name
-            } else {
-                if (naturalCompare(name, best) == Ordering.LT) {
-                    best = name
-                }
+            if (localBest.size == 0) {
+                localBest = name
+            } else if (naturalCompare(name, localBest) == Ordering.LT) {
+                localBest = name
             }
         }
 
@@ -187,7 +226,7 @@ public class Archive {
             archive_read_free(a)
         }
 
-        return best
+        return localBest
     }
 
     /**
@@ -217,8 +256,6 @@ public class Archive {
         }
 
         let entry = unsafe { archive_entry_new2(a) }
-        var scannedEntries: Int64 = 0
-
         while (true) {
             let r = unsafe { archive_read_next_header2(a, entry) }
             if (r == Int32(ARCHIVE_EOF)) {
@@ -228,13 +265,10 @@ public class Archive {
                 break
             }
 
-            let pathname = unsafe { archive_entry_pathname(entry) }
-            if (pathname.isNull()) {
+            let name = getEntryName(entry)
+            if (name.size == 0) {
                 continue
             }
-
-            let name = unsafe { pathname.toString() }
-            scannedEntries += 1
 
             if (name != entryName) {
                 continue
@@ -253,7 +287,6 @@ public class Archive {
             let result = ArrayList<UInt8>()
             let bufSize: Int64 = 8192
             let buf = unsafe { LibC.malloc<UInt8>(count: bufSize) }
-            var totalRead: Int64 = 0
 
             while (true) {
                 let readLen = unsafe {
@@ -266,7 +299,6 @@ public class Archive {
                     let byte = unsafe { (buf + i).read() }
                     result.add(byte)
                 }
-                totalRead += Int64(readLen)
             }
 
             unsafe {
@@ -289,6 +321,22 @@ public class Archive {
     }
 
     // ---- helpers ----
+
+    private static func isMediaEntryName(name: String): Bool {
+        return isImageEntryName(name) || isVideoEntryName(name)
+    }
+
+    private static func isVideoEntryName(name: String): Bool {
+        if (name.size == 0) {
+            return false
+        }
+        let parts = name.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let ext = parts[parts.size - 1].toAsciiLower()
+        return ext == "mp4" || ext == "webm" || ext == "mkv" || ext == "avi" || ext == "mov" || ext == "m4v"
+    }
 
     private static func isImageEntryName(name: String): Bool {
         if (name.size == 0) {
@@ -409,7 +457,7 @@ public class Archive {
     public static func openEntryReader(archivePath: String, entryName: String): (Bool, Option<ArchiveEntryReader>, Int64, String) {
         let a = unsafe { archive_read_new() }
         if (a.isNull()) {
-            return (false, None, 0, "Failed to create archive reader")
+            return (false, None, 0, "Archive open failed: ${archivePath}")
         }
 
         unsafe {
@@ -423,11 +471,10 @@ public class Archive {
 
         if (openResult != Int32(ARCHIVE_OK)) {
             unsafe { archive_read_free(a) }
-            return (false, None, 0, "Failed to open archive")
+            return (false, None, 0, "Archive open failed: ${archivePath}")
         }
 
         let entry = unsafe { archive_entry_new2(a) }
-
         while (true) {
             let r = unsafe { archive_read_next_header2(a, entry) }
             if (r == Int32(ARCHIVE_EOF)) {
@@ -437,12 +484,10 @@ public class Archive {
                 break
             }
 
-            let pathname = unsafe { archive_entry_pathname(entry) }
-            if (pathname.isNull()) {
+            let name = getEntryName(entry)
+            if (name.size == 0) {
                 continue
             }
-
-            let name = unsafe { pathname.toString() }
 
             if (name == entryName) {
                 let size = unsafe { archive_entry_size(entry) }
