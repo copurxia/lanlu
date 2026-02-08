@@ -11,7 +11,6 @@ import lanlu.utils.*
  */
 public class PoolConfig {
     public var maxConnections: Int32 = 10
-    public var maxIdleConnections: Int32 = 5
     public var connectionTimeoutMs: Int64 = 5000      // 获取连接超时 ms
     public var idleTimeoutMs: Int64 = 300000          // 空闲超时 ms（5分钟）
     public var maxLifeTimeMs: Int64 = 1800000         // 连接最大生命周期 ms（30分钟）
@@ -22,10 +21,6 @@ public class PoolConfig {
         let maxStr = getVariable("POOL_MAX") ?? ""
         if (!maxStr.isEmpty()) {
             try { this.maxConnections = Int32.parse(maxStr) } catch (_: Exception) {}
-        }
-        let maxIdleStr = getVariable("POOL_MAX_IDLE") ?? ""
-        if (!maxIdleStr.isEmpty()) {
-            try { this.maxIdleConnections = Int32.parse(maxIdleStr) } catch (_: Exception) {}
         }
         let timeoutStr = getVariable("POOL_ACQUIRE_TIMEOUT") ?? ""
         if (!timeoutStr.isEmpty()) {
@@ -90,7 +85,7 @@ public class ConnectionPool {
         }
 
         let logger = getLogger("connection_pool")
-        logger.info("初始化连接池: max=${config.maxConnections}, maxIdle=${config.maxIdleConnections}")
+        logger.info("初始化连接池: max=${config.maxConnections}, maxIdle=0(unlimited)")
 
         let drvopt = DatabaseConfig.getDriver()
         match (drvopt) {
@@ -101,7 +96,8 @@ public class ConnectionPool {
 
                 // 配置连接池参数
                 pool.maxSize = config.maxConnections
-                pool.maxIdleSize = config.maxIdleConnections
+                // 0 means no max-idle cap for this pool implementation.
+                pool.maxIdleSize = 0
                 pool.connectionTimeout = Duration.millisecond * config.connectionTimeoutMs
                 pool.idleTimeout = Duration.millisecond * config.idleTimeoutMs
                 pool.maxLifeTime = Duration.millisecond * config.maxLifeTimeMs
