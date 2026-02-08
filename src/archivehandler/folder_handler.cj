@@ -92,8 +92,8 @@ public class FolderHandler <: ArchiveHandler {
      */
     public static func isAllowedAuxFileName(entryName: String): Bool {
         let lower = entryName.toAsciiLower()
-        // Keep it narrow: allow JSON metadata files.
-        return lower.endsWith(".json")
+        // Keep it narrow: allow common sidecar metadata files.
+        return lower.endsWith(".json") || lower.endsWith(".opf")
     }
 
     public func listEntries(archivePath: String): Array<String> {

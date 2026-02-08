@@ -921,6 +921,188 @@ public class DenoTaskRunner {
             }
         }
 
+        // List files adjacent to an archive on disk.
+        // - For file archives (cbz/pdf/epub/...): list files in the parent directory.
+        // - For folder archives: list files directly inside that folder.
+        if (m == "archive.listAdjacentFiles") {
+            var archiveId = ""
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (archiveId.size == 0) {
+                return (false, "{}", "missing archiveId")
+            }
+
+            let resolved = resolveArchiveActualPath(archiveId)
+            match (resolved) {
+                case None => return (false, "{}", "archive not found or path unresolved")
+                case Some((archiveType, actualPath)) =>
+                    var baseDir = ""
+                    if (archiveType == ArchiveTypes.FOLDER) {
+                        baseDir = actualPath
+                    } else {
+                        let p = Path(actualPath)
+                        baseDir = p.parent.toString().trimAscii()
+                    }
+
+                    if (baseDir.size == 0 || !DirectoryScanner.directoryExists(baseDir)) {
+                        return (false, "{}", "adjacent directory not found")
+                    }
+
+                    let entries = DirectoryScanner.listDirectory(baseDir)
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archiveId").writeValue(archiveId)
+                    w.writeName("baseDir").writeValue(baseDir)
+                    w.writeName("files")
+                    w.startArray()
+                    var count: Int64 = 0
+                    for (e in entries) {
+                        let fullPath = FileUtils.joinPath(baseDir, e)
+                        if (DirectoryScanner.fileExists(fullPath)) {
+                            w.writeValue(e)
+                            count += 1
+                        }
+                    }
+                    w.endArray()
+                    w.writeName("count").writeValue(count)
+                    w.endObject()
+                    w.flush()
+                    return (true, String.fromUtf8(readToEnd(out)), "")
+            }
+        }
+
+        // Copy a sidecar file located next to an archive into plugin cache.
+        if (m == "archive.extractAdjacentFileToCache") {
+            var archiveId = ""
+            var fileName = ""
+            var pluginDir = ""
+            var cacheSubdir = "cache"
+            var overwrite = true
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case "fileName" => fileName = r.readValue<String>()
+                            case "pluginDir" => pluginDir = r.readValue<String>().trimAscii()
+                            case "cacheSubdir" => cacheSubdir = r.readValue<String>().trimAscii()
+                            case "overwrite" => overwrite = parseBoolLoose(r.readValue<String>())
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (archiveId.size == 0 || fileName.trimAscii().size == 0) {
+                return (false, "{}", "missing archiveId/fileName")
+            }
+
+            // Never trust plugin-provided pluginDir; derive it from the caller namespace.
+            let expectedPluginDir = "${PluginPaths.getPluginRuntimeRoot()}/${pluginNamespace.trimAscii()}"
+            if (pluginNamespace.trimAscii().size == 0) {
+                return (false, "{}", "missing pluginNamespace context")
+            }
+            if (pluginDir.size > 0) {
+                if (pluginDir.trimAscii() != expectedPluginDir) {
+                    return (false, "{}", "invalid pluginDir (must match expected plugin runtime dir)")
+                }
+            }
+            pluginDir = expectedPluginDir
+            if (!ensureUnderRuntimeRoot(pluginDir)) {
+                return (false, "{}", "invalid pluginDir (not under runtime root)")
+            }
+
+            let safeFileName = normalizeSafeRelPath(fileName)
+            if (safeFileName.size == 0 || safeFileName.contains("/")) {
+                return (false, "{}", "invalid fileName")
+            }
+
+            var sub = cacheSubdir.trimAscii()
+            if (sub.size == 0) { sub = "cache" }
+            sub = normalizeSafeRelPath(sub)
+            if (sub.size == 0) { sub = "cache" }
+
+            let safeArchiveId = normalizeSafeRelPath(archiveId)
+            if (safeArchiveId.size == 0 || safeArchiveId != archiveId.trimAscii()) {
+                return (false, "{}", "invalid archiveId")
+            }
+
+            let resolved = resolveArchiveActualPath(archiveId)
+            match (resolved) {
+                case None => return (false, "{}", "archive not found or path unresolved")
+                case Some((archiveType, actualPath)) =>
+                    var baseDir = ""
+                    if (archiveType == ArchiveTypes.FOLDER) {
+                        baseDir = actualPath
+                    } else {
+                        let p = Path(actualPath)
+                        baseDir = p.parent.toString().trimAscii()
+                    }
+
+                    if (baseDir.size == 0 || !DirectoryScanner.directoryExists(baseDir)) {
+                        return (false, "{}", "adjacent directory not found")
+                    }
+
+                    let sourcePath = FileUtils.joinPath(baseDir, safeFileName)
+                    if (!DirectoryScanner.fileExists(sourcePath)) {
+                        return (false, "{}", "adjacent file not found")
+                    }
+
+                    let outPath = "${pluginDir}/${sub}/${archiveId}/${safeFileName}"
+                    let outFile = Path(outPath)
+                    try {
+                        if (!overwrite && exists(outFile)) {
+                            // Keep existing.
+                        } else {
+                            FileUtils.ensureDirectoryExists(outFile.parent)
+                            copy(Path(sourcePath), to: outFile, overwrite: true)
+                        }
+                    } catch (e: Exception) {
+                        return (false, "{}", "copy failed: ${e.message}")
+                    }
+
+                    let size = try {
+                        FileInfo(Path(sourcePath)).size
+                    } catch (_: Exception) { 0i64 }
+                    let rel = "${sub}/${archiveId}/${safeFileName}"
+
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archiveId").writeValue(archiveId)
+                    w.writeName("fileName").writeValue(safeFileName)
+                    w.writeName("outputPath").writeValue(outPath)
+                    w.writeName("relativePath").writeValue(rel)
+                    w.writeName("size").writeValue(size)
+                    w.endObject()
+                    w.flush()
+                    return (true, String.fromUtf8(readToEnd(out)), "")
+            }
+        }
+
         // Export the first image ("cover") from an archive into the plugin runtime directory,
         // compute its SHA-1 (LANraragi-style thumbnail_hash), and optionally generate a JPEG for upload.
         if (m == "archive.exportCoverForSearch") {
