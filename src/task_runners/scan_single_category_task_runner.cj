@@ -14,6 +14,8 @@ import lanlu.archivehandler.*
  * 负责扫描一个具体分类的目录并创建 scan_archive 子任务
  */
 public class ScanSingleCategoryTaskRunner {
+    private static let notifyBatchSize: Int32 = 50
+
     private static func summaryJsonString(created: Int64, total: Int64): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -78,6 +80,7 @@ public class ScanSingleCategoryTaskRunner {
             let (scannedTotal, createdCount) = scanDirectoryRecursive(scanPath, scanContext)
             total = scannedTotal
             created = createdCount
+            flushPendingNotifications(scanContext)
 
             let summary = summaryJsonString(created, total)
             TaskIO.appendLog(taskId, "Task creation completed: created=${created}, total=${total}")
@@ -230,10 +233,25 @@ public class ScanSingleCategoryTaskRunner {
         let params = String.fromUtf8(readToEnd(out))
         let childTask = TaskModel.createTaskWithOptions("扫描档案", "scan_archive", params, ctx.priority, ctx.groupId, ctx.triggerSource)
         if (childTask.id > 0) {
-            ctx.notifier()
+            notifyTaskEnqueued(ctx)
             return true
         }
         return false
+    }
+
+    private static func notifyTaskEnqueued(ctx: ScanContext): Unit {
+        ctx.enqueuedSinceNotify += 1
+        if (ctx.enqueuedSinceNotify >= notifyBatchSize) {
+            ctx.notifier()
+            ctx.enqueuedSinceNotify = 0
+        }
+    }
+
+    private static func flushPendingNotifications(ctx: ScanContext): Unit {
+        if (ctx.enqueuedSinceNotify > 0) {
+            ctx.notifier()
+            ctx.enqueuedSinceNotify = 0
+        }
     }
 
     private static func parseParameters(parameters: String): (String, String, Int32) {
@@ -303,7 +321,7 @@ public class ScanSingleCategoryTaskRunner {
             )
 
             if (task.id > 0) {
-                ctx.notifier()
+                notifyTaskEnqueued(ctx)
                 getLogger("scan_single_category").debug("Submitted thumbnail generation task for existing archive")
                 return true
             } else {
@@ -352,6 +370,7 @@ class ScanContext {
     public let categoryId: Int64
     public let basePath: String
     public let notifier: TaskNotifier
+    public var enqueuedSinceNotify: Int32 = 0
 
     public init(groupId: String, triggerSource: String, priority: Int32, categoryId: Int64, basePath: String, notifier: TaskNotifier) {
         this.groupId = groupId
