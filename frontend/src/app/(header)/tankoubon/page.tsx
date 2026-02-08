@@ -1077,7 +1077,7 @@ function TankoubonDetailContent() {
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-3 h-full flex flex-col">
             {filteredArchives.map((archive) => {
               const isRemoving = removingArcids.has(archive.arcid);
               return (
@@ -1207,13 +1207,13 @@ function TankoubonDetailContent() {
         </Dialog>
 
         <Dialog open={!!rpcSelectRequest} onOpenChange={() => {}}>
-          <DialogContent>
+          <DialogContent className="max-w-4xl h-[75vh] flex flex-col">
             <DialogHeader>
               <DialogTitle>{rpcSelectRequest?.title || '请选择元数据匹配项'}</DialogTitle>
             </DialogHeader>
-            <DialogBody className="pt-0">
+            <DialogBody className="pt-0 flex-1 min-h-0">
               <div
-                className="space-y-3"
+                className="space-y-3 h-full flex flex-col"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && rpcSelectSelectedIndex != null) {
                     e.preventDefault();
@@ -1224,7 +1224,7 @@ function TankoubonDetailContent() {
                 {rpcSelectRequest?.message ? (
                   <p className="text-sm text-muted-foreground">{rpcSelectRequest.message}</p>
                 ) : null}
-                <div className="max-h-80 overflow-y-auto space-y-2">
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
                   {(rpcSelectRequest?.options || []).map((opt) => (
                     <Button
                       key={`${rpcSelectRequest?.request_id}-${opt.index}`}
