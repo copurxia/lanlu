@@ -76,7 +76,7 @@ public class TagController {
         let arcid = (ctx.getQuery("arcid") ?? "").trimAscii()
         let tankoubonId = (ctx.getQuery("tankoubon_id") ?? "").trimAscii()
 
-        var translationsMap = TagDao.getTranslationsMap(lang)
+        var translationsMap = HashMap<String, String>()
 
         // 如果指定了 arcid，则只返回该档案相关的 tag 翻译
         if (arcid.size > 0) {
@@ -108,14 +108,11 @@ public class TagController {
                 }
             }
 
-            // 过滤：只保留档案拥有的 tag
-            var filteredMap = HashMap<String, String>()
-            for ((tag, text) in translationsMap) {
-                if (tagSet.contains(tag)) {
-                    filteredMap[tag] = text
-                }
+            if (tagSet.size > 0) {
+                var tagList = ArrayList<String>()
+                for (t in tagSet) { tagList.add(t) }
+                translationsMap = TagDao.batchGetTranslations(tagList.toArray(), lang)
             }
-            translationsMap = filteredMap
         }
         // 如果指定了 tankoubon_id，则返回该合集相关的所有 tag 翻译
         else if (tankoubonId.size > 0) {
@@ -137,14 +134,11 @@ public class TagController {
                         }
                     }
 
-                    // 过滤：只保留合集相关的 tag
-                    var filteredMap = HashMap<String, String>()
-                    for ((tag, text) in translationsMap) {
-                        if (tagSet.contains(tag)) {
-                            filteredMap[tag] = text
-                        }
+                    if (tagSet.size > 0) {
+                        var tagList = ArrayList<String>()
+                        for (t in tagSet) { tagList.add(t) }
+                        translationsMap = TagDao.batchGetTranslations(tagList.toArray(), lang)
                     }
-                    translationsMap = filteredMap
                 case None =>
                     // tankoubon 不存在，返回空映射
                     let out = ByteBuffer()
@@ -159,6 +153,9 @@ public class TagController {
                     ResponseView.successJson(ctx, String.fromUtf8(readToEnd(out)), "获取标签翻译成功")
                     return
             }
+        } else {
+            // 全量请求：返回所有翻译
+            translationsMap = TagDao.getTranslationsMap(lang)
         }
 
         let out = ByteBuffer()
