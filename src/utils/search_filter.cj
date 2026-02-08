@@ -53,81 +53,76 @@ public class SearchFilter {
 
     /**
      * 分词，支持引号短语
-     * 使用基于引号位置的分词策略，正确处理 Unicode 字符（包括 CJK 字符）
+     * - 引号内内容作为整体 token
+     * - 当包含 `$` 且形如 `namespace:...$` 时，优先整体提取（允许 value 中含空格）
      */
     private static func tokenize(input: String): ArrayList<String> {
         let tokens = ArrayList<String>()
+        let s = input
+        let n = s.size
+        var i: Int64 = 0
 
-        // 检查是否包含引号
-        if (!input.contains("\"")) {
-            // 没有引号，直接按空格分词
-            let parts = input.split(" ", removeEmpty: true)
-            for (part in parts) {
-                let trimmed = part.trimAscii()
-                if (trimmed.size > 0) {
-                    tokens.add(trimmed)
-                }
-            }
-            return tokens
+        func isSpace(ch: UInt8): Bool {
+            return ch == 32u8
         }
 
-        // 包含引号，需要特殊处理
-        // 策略：找到所有引号对，提取引号内的内容，然后处理剩余部分
-        var remaining = input
-        var quoteStartOpt = remaining.indexOf("\"")
+        while (i < n) {
+            // skip spaces
+            while (i < n && isSpace(s[i])) { i += 1 }
+            if (i >= n) { break }
 
-        while (true) {
-            let quoteStart: Int64 = match (quoteStartOpt) {
-                case Some(idx) => idx
-                case None => break
-            }
-
-            // 处理引号前的内容
-            if (quoteStart > 0) {
-                let before = remaining[0..quoteStart]
-                let beforeParts = before.split(" ", removeEmpty: true)
-                for (part in beforeParts) {
-                    let trimmed = part.trimAscii()
-                    if (trimmed.size > 0) {
-                        tokens.add(trimmed)
-                    }
-                }
-            }
-
-            // 找到配对的结束引号
-            let afterQuote = remaining[quoteStart + 1..]
-            let quoteEndOpt = afterQuote.indexOf("\"")
-
-            match (quoteEndOpt) {
-                case Some(quoteEnd) =>
-                    // 找到配对引号，提取引号内容（包含引号）
-                    let quoted = "\"" + afterQuote[0..quoteEnd] + "\""
-                    tokens.add(quoted)
-                    remaining = afterQuote[quoteEnd + 1..]
-                case None =>
-                    // 没有配对引号，将剩余内容作为普通词处理
-                    let restParts = afterQuote.split(" ", removeEmpty: true)
-                    for (part in restParts) {
-                        let trimmed = part.trimAscii()
-                        if (trimmed.size > 0) {
-                            tokens.add(trimmed)
+            // quoted phrase
+            if (s[i] == 34u8) {
+                let rest = s[i + 1..]
+                let quoteEndOpt = rest.indexOf("\"")
+                match (quoteEndOpt) {
+                    case Some(qend) =>
+                        let quoted = "\"" + rest[0..qend] + "\""
+                        tokens.add(quoted)
+                        i = i + 1 + qend + 1
+                        continue
+                    case None =>
+                        // no closing quote, fallback to split the rest by spaces
+                        let restParts = rest.split(" ", removeEmpty: true)
+                        for (part in restParts) {
+                            let trimmed = part.trimAscii()
+                            if (trimmed.size > 0) {
+                                tokens.add(trimmed)
+                            }
                         }
-                    }
-                    return tokens
-            }
-
-            quoteStartOpt = remaining.indexOf("\"")
-        }
-
-        // 处理最后剩余的内容
-        if (remaining.size > 0) {
-            let restParts = remaining.split(" ", removeEmpty: true)
-            for (part in restParts) {
-                let trimmed = part.trimAscii()
-                if (trimmed.size > 0) {
-                    tokens.add(trimmed)
+                        return tokens
                 }
             }
+
+            // try to capture namespace:...$ as a whole token
+            var j = i
+            var colonIdx: Int64 = -1
+            while (j < n && !isSpace(s[j])) {
+                if (s[j] == 58u8) { colonIdx = j }
+                j += 1
+            }
+            if (colonIdx >= 0) {
+                let afterColon = s[colonIdx + 1..]
+                let dollarOpt = afterColon.indexOf("$")
+                match (dollarOpt) {
+                    case Some(didx) =>
+                        let endIdx = colonIdx + 1 + didx + 1
+                        let token = s[i..endIdx].trimAscii()
+                        if (token.size > 0) {
+                            tokens.add(token)
+                        }
+                        i = endIdx
+                        continue
+                    case None => ()
+                }
+            }
+
+            // normal token up to next space
+            let token = s[i..j].trimAscii()
+            if (token.size > 0) {
+                tokens.add(token)
+            }
+            i = j
         }
 
         return tokens
