@@ -623,12 +623,13 @@ public class ArchiveDao {
                 } else if (sortby == "pagecount") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY pagecount ${orderDirection}"
-	                } else if (sortby == "tank_order" && tankoubonId.size > 0) {
-	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-	                    sql += " ORDER BY (SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = id LIMIT 1) ${orderDirection}, created_at DESC"
-	                    // ORDER BY 子查询需要再次绑定 tankId
-	                    filterParams.add(tankoubonId)
-	                } else if (sortby == "size") {
+                } else if (sortby == "tank_order" && tankoubonId.size > 0) {
+                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+                    let idRef = if (hasRelevance) { "base.id" } else { "archives_with_tags.id" }
+                    sql += " ORDER BY (SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = ${idRef} LIMIT 1) ${orderDirection}, created_at DESC"
+                    // ORDER BY 子查询需要再次绑定 tankId
+                    filterParams.add(tankoubonId)
+                } else if (sortby == "size") {
 	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
 	                    sql += " ORDER BY file_size ${orderDirection}"
 	                } else if (sortby == "relevance" && filter.size > 0 && relevanceExpr != "1") {
@@ -956,7 +957,7 @@ public class ArchiveDao {
                     } else if (sortby == "tank_order" && tankoubonId.size > 0) {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }
                         let windowExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = base.id LIMIT 1)"
-                        let finalExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = id LIMIT 1)"
+                        let finalExpr = "(SELECT ta.sort_order FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = ranked.id LIMIT 1)"
                         windowOrderBy = "${windowExpr} ${dir}, created_at DESC"
                         finalOrderBy = "${finalExpr} ${dir}, created_at DESC"
                         // ORDER BY 子查询在 window / final ORDER BY 中各需要绑定一次 tankId
