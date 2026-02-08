@@ -960,33 +960,26 @@ public class TankoubonDao {
     private static func getArchiveTagsForTankoubon(conn: Connection, tankoubonId: String): String {
         try {
             let stmt = conn.prepareStatement("""
-                SELECT DISTINCT awt.tags
+                SELECT COALESCE(string_agg(DISTINCT
+                    CASE
+                        WHEN tg.namespace != '' AND tg.namespace IS NOT NULL
+                        THEN tg.namespace || ':' || tg.name
+                        ELSE tg.name
+                    END, ','), '')
                 FROM tankoubon_archives ta
                 JOIN tankoubons t ON t.id = ta.tankoubon_id
-                JOIN archives a ON a.id = ta.archive_id
-                JOIN archives_with_tags awt ON awt.arcid = a.arcid
-                WHERE t.tankoubon_id = ? AND awt.tags != ''
+                JOIN archive_tags atg ON atg.archive_id = ta.archive_id
+                JOIN tags tg ON tg.id = atg.tag_id
+                WHERE t.tankoubon_id = ?
             """)
             try {
                 stmt.set(0, tankoubonId)
                 let rs = stmt.query()
                 try {
-                    var allTags: ArrayList<String> = ArrayList<String>()
-                    while (rs.next()) {
-                        let tags = rs.getOrNull<String>(0) ?? ""
-                        if (tags != "") {
-                            allTags.add(tags)
-                        }
+                    if (rs.next()) {
+                        return rs.getOrNull<String>(0) ?? ""
                     }
-                    // 合并所有标签字符串
-                    var combined = ""
-                    for (i in 0..allTags.size) {
-                        if (i > 0) {
-                            combined += ","
-                        }
-                        combined += allTags[i]
-                    }
-                    return combined
+                    return ""
                 } finally {
                     rs.close()
                 }
@@ -1121,12 +1114,20 @@ public class TankoubonDao {
             }
 
             let stmt = conn.prepareStatement("""
-                SELECT t.tankoubon_id, awt.tags
+                SELECT
+                    t.tankoubon_id,
+                    COALESCE(string_agg(DISTINCT
+                        CASE
+                            WHEN tg.namespace != '' AND tg.namespace IS NOT NULL
+                            THEN tg.namespace || ':' || tg.name
+                            ELSE tg.name
+                        END, ','), '') AS tags
                 FROM tankoubon_archives ta
                 JOIN tankoubons t ON t.id = ta.tankoubon_id
-                JOIN archives a ON a.id = ta.archive_id
-                JOIN archives_with_tags awt ON awt.arcid = a.arcid
-                WHERE t.tankoubon_id IN (${placeholders}) AND awt.tags != ''
+                JOIN archive_tags atg ON atg.archive_id = ta.archive_id
+                JOIN tags tg ON tg.id = atg.tag_id
+                WHERE t.tankoubon_id IN (${placeholders})
+                GROUP BY t.tankoubon_id
             """)
             try {
                 for (i in 0..tankoubonIds.size) {
@@ -1134,29 +1135,12 @@ public class TankoubonDao {
                 }
                 let rs = stmt.query()
                 try {
-                    // 按 tankoubon_id 收集所有标签
-                    var tagsMap: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
                     while (rs.next()) {
                         let tid = rs.getOrNull<String>(0) ?? ""
                         let tags = rs.getOrNull<String>(1) ?? ""
-                        if (tid != "" && tags != "") {
-                            match (tagsMap.get(tid)) {
-                                case Some(list) => list.add(tags)
-                                case None =>
-                                    let list = ArrayList<String>()
-                                    list.add(tags)
-                                    tagsMap[tid] = list
-                            }
+                        if (tid != "") {
+                            result[tid] = tags
                         }
-                    }
-                    // 合并每个 tankoubon 的标签
-                    for ((tid, tagsList) in tagsMap) {
-                        var combined = ""
-                        for (i in 0..tagsList.size) {
-                            if (i > 0) { combined += "," }
-                            combined += tagsList[i]
-                        }
-                        result[tid] = combined
                     }
                 } finally {
                     rs.close()
