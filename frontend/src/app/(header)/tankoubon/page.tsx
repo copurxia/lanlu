@@ -366,6 +366,16 @@ function TankoubonDetailContent() {
     return idx > 0 ? key.slice(idx + 1) : key;
   }, []);
 
+  const handleTagClick = useCallback((tag: string) => {
+    const canonical = String(tag || '').trim();
+    if (!canonical) return;
+    const q = canonical.includes(':') ? canonical : displayTag(canonical);
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    const exactQuery = trimmed.endsWith('$') ? trimmed : `${trimmed}$`;
+    router.push(`/?q=${encodeURIComponent(exactQuery)}`);
+  }, [displayTag, router]);
+
   const renderTagBadge = useCallback((tag: string, index: number) => {
     const key = String(tag || '').trim();
     const idx = key.indexOf(':');
@@ -376,7 +386,13 @@ function TankoubonDetailContent() {
     const sourceUrl = isSource && sourceValue ? (hasScheme ? sourceValue : `https://${sourceValue}`) : '';
 
     return (
-      <Badge key={`${tag}-${index}`} variant="secondary" className="max-w-full" title={tag}>
+      <Badge
+        key={`${tag}-${index}`}
+        variant="secondary"
+        className="max-w-full cursor-pointer"
+        title={tag}
+        onClick={() => handleTagClick(tag)}
+      >
         <span className="flex items-center gap-1 max-w-full">
           <span className="truncate">{displayTag(tag)}</span>
           {isSource && sourceValue && (
@@ -394,7 +410,7 @@ function TankoubonDetailContent() {
         </span>
       </Badge>
     );
-  }, [displayTag]);
+  }, [displayTag, handleTagClick]);
 
   const handleFavoriteClick = async () => {
     if (!tankoubon || favoriteLoading) return;

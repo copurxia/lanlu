@@ -121,7 +121,10 @@ export function ArchiveDetailContent() {
       const canonical = toCanonicalTag(fullTag);
       // Preserve namespace for precise matching (e.g. "artist:kyockcho").
       const q = canonical.includes(':') ? canonical : stripNamespace(canonical);
-      router.push(`/?q=${encodeURIComponent(q)}`);
+      const trimmed = q.trim();
+      if (!trimmed) return;
+      const exactQuery = trimmed.endsWith('$') ? trimmed : `${trimmed}$`;
+      router.push(`/?q=${encodeURIComponent(exactQuery)}`);
     },
     [router, toCanonicalTag]
   );
