@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Edit2, Trash2, Play, FolderOpen, RotateCcw } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Play, FolderOpen, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { CategoryService, type Category, type CategoryCreateRequest, type CategoryUpdateRequest } from '@/lib/services/category-service';
@@ -110,6 +110,40 @@ export default function CategoriesSettingsPage() {
       void loadMetadataPlugins();
     }
   }, [isAuthenticated]);
+
+  const metadataPluginMap = useMemo(() => {
+    return new Map(metadataPlugins.map((plugin) => [plugin.namespace, plugin]));
+  }, [metadataPlugins]);
+
+  const togglePlugin = (current: string[] | undefined, namespace: string, checked: boolean): string[] => {
+    const selected = current || [];
+    if (checked) {
+      return selected.includes(namespace) ? selected : [...selected, namespace];
+    }
+    return selected.filter((item) => item !== namespace);
+  };
+
+  const getOrderedPluginNamespaces = (current: string[] | undefined): string[] => {
+    const selected = (current || []).filter((item) => item.trim().length > 0);
+    const selectedSet = new Set(selected);
+    const unselected = metadataPlugins
+      .map((plugin) => plugin.namespace)
+      .filter((namespace) => !selectedSet.has(namespace));
+    return [...selected, ...unselected];
+  };
+
+  const movePlugin = (current: string[] | undefined, namespace: string, direction: -1 | 1): string[] => {
+    const selected = [...(current || [])];
+    const index = selected.indexOf(namespace);
+    const target = index + direction;
+    if (index < 0 || target < 0 || index >= selected.length || target >= selected.length) {
+      return selected;
+    }
+    const temp = selected[index];
+    selected[index] = selected[target];
+    selected[target] = temp;
+    return selected;
+  };
 
   const handleCreateCategory = async () => {
     if (!createForm.name.trim() || !createForm.scan_path.trim()) {
@@ -542,27 +576,58 @@ export default function CategoriesSettingsPage() {
                 <p className="text-xs text-muted-foreground mb-2">
                   {t('settings.categoryPluginsDescription')}
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {metadataPlugins.map((plugin) => (
-                    <div key={plugin.namespace} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={`create-plugin-${plugin.namespace}`}
-                        checked={createForm.plugins?.includes(plugin.namespace) || false}
-                        onCheckedChange={(checked) => {
-                          const current = createForm.plugins || [];
-                          if (checked) {
-                            setCreateForm({ ...createForm, plugins: [...current, plugin.namespace] });
-                          } else {
-                            setCreateForm({ ...createForm, plugins: current.filter(p => p !== plugin.namespace) });
-                          }
-                        }}
-                        disabled={loading}
-                      />
-                      <Label htmlFor={`create-plugin-${plugin.namespace}`} className="text-sm cursor-pointer">
-                        {plugin.name}
-                      </Label>
-                    </div>
-                  ))}
+                <p className="text-xs text-muted-foreground">{t("settings.categoryPluginsOrderHint")}</p>
+                <div className="space-y-1">
+                  {getOrderedPluginNamespaces(createForm.plugins).map((namespace) => {
+                    const plugin = metadataPluginMap.get(namespace);
+                    const selected = createForm.plugins || [];
+                    const selectedIndex = selected.indexOf(namespace);
+                    const checked = selectedIndex >= 0;
+                    return (
+                      <div key={"create-plugin-row-" + namespace} className="flex items-center justify-between rounded-md border px-2 py-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Checkbox
+                            id={"create-plugin-" + namespace}
+                            checked={checked}
+                            onCheckedChange={(nextChecked) => {
+                              setCreateForm({
+                                ...createForm,
+                                plugins: togglePlugin(createForm.plugins, namespace, !!nextChecked),
+                              });
+                            }}
+                            disabled={loading}
+                          />
+                          <Label htmlFor={"create-plugin-" + namespace} className="text-sm cursor-pointer truncate">
+                            {checked ? (selectedIndex + 1) + ". " : ""}{plugin?.name || namespace}
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            aria-label={t("settings.categoryPluginMoveUp")}
+                            onClick={() => setCreateForm({ ...createForm, plugins: movePlugin(createForm.plugins, namespace, -1) })}
+                            disabled={loading || !checked || selectedIndex <= 0}
+                          >
+                            <ChevronUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            aria-label={t("settings.categoryPluginMoveDown")}
+                            onClick={() => setCreateForm({ ...createForm, plugins: movePlugin(createForm.plugins, namespace, 1) })}
+                            disabled={loading || !checked || selectedIndex === selected.length - 1}
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -657,27 +722,58 @@ export default function CategoriesSettingsPage() {
                 <p className="text-xs text-muted-foreground mb-2">
                   {t('settings.categoryPluginsDescription')}
                 </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {metadataPlugins.map((plugin) => (
-                    <div key={plugin.namespace} className="flex items-center space-x-2">
-                      <Checkbox
-                        id={`edit-plugin-${plugin.namespace}`}
-                        checked={editForm.plugins?.includes(plugin.namespace) || false}
-                        onCheckedChange={(checked) => {
-                          const current = editForm.plugins || [];
-                          if (checked) {
-                            setEditForm({ ...editForm, plugins: [...current, plugin.namespace] });
-                          } else {
-                            setEditForm({ ...editForm, plugins: current.filter(p => p !== plugin.namespace) });
-                          }
-                        }}
-                        disabled={loading}
-                      />
-                      <Label htmlFor={`edit-plugin-${plugin.namespace}`} className="text-sm cursor-pointer">
-                        {plugin.name}
-                      </Label>
-                    </div>
-                  ))}
+                <p className="text-xs text-muted-foreground">{t("settings.categoryPluginsOrderHint")}</p>
+                <div className="space-y-1">
+                  {getOrderedPluginNamespaces(editForm.plugins).map((namespace) => {
+                    const plugin = metadataPluginMap.get(namespace);
+                    const selected = editForm.plugins || [];
+                    const selectedIndex = selected.indexOf(namespace);
+                    const checked = selectedIndex >= 0;
+                    return (
+                      <div key={"edit-plugin-row-" + namespace} className="flex items-center justify-between rounded-md border px-2 py-1">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Checkbox
+                            id={"edit-plugin-" + namespace}
+                            checked={checked}
+                            onCheckedChange={(nextChecked) => {
+                              setEditForm({
+                                ...editForm,
+                                plugins: togglePlugin(editForm.plugins, namespace, !!nextChecked),
+                              });
+                            }}
+                            disabled={loading}
+                          />
+                          <Label htmlFor={"edit-plugin-" + namespace} className="text-sm cursor-pointer truncate">
+                            {checked ? (selectedIndex + 1) + ". " : ""}{plugin?.name || namespace}
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            aria-label={t("settings.categoryPluginMoveUp")}
+                            onClick={() => setEditForm({ ...editForm, plugins: movePlugin(editForm.plugins, namespace, -1) })}
+                            disabled={loading || !checked || selectedIndex <= 0}
+                          >
+                            <ChevronUp className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            aria-label={t("settings.categoryPluginMoveDown")}
+                            onClick={() => setEditForm({ ...editForm, plugins: movePlugin(editForm.plugins, namespace, 1) })}
+                            disabled={loading || !checked || selectedIndex === selected.length - 1}
+                          >
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

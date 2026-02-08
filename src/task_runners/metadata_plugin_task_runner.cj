@@ -1,6 +1,7 @@
 package lanlu.task_runners
 
 import std.time.*
+import std.collection.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lanlu.dao.*
@@ -17,7 +18,7 @@ public class MetadataPluginTaskRunner {
         TaskModel.updateTaskProgress(taskId, 1, "元数据插件任务开始")
         TaskIO.appendLog(taskId, "metadata_plugin: about to parse parameters")
 
-        let (targetType, targetId, namespace, param) = parseParameters(parameters)
+        let (targetType, targetId, namespace, param, fallbackNamespaces) = parseParameters(parameters)
         TaskIO.appendLog(taskId, "metadata_plugin: parameters parsed")
         if (targetId.size == 0 || namespace.size == 0) {
             fail(taskId, "target_id and namespace are required")
@@ -32,7 +33,7 @@ public class MetadataPluginTaskRunner {
             match (TankoubonDao.getTankoubonById(targetId)) {
                 case Some(_) => ()
                 case None =>
-                    fail(taskId, "Tankoubon not found")
+                    failAndMaybeEnqueueFallback(taskId, "Tankoubon not found", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
                     return
             }
         } else {
@@ -40,7 +41,7 @@ public class MetadataPluginTaskRunner {
             let archive = ArchiveDao.getArchiveById(targetId)
             TaskIO.appendLog(taskId, "metadata_plugin: archive retrieved")
             if (archive.id.size == 0) {
-                fail(taskId, "Archive not found")
+                failAndMaybeEnqueueFallback(taskId, "Archive not found", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
                 return
             }
         }
@@ -51,12 +52,12 @@ public class MetadataPluginTaskRunner {
         TaskIO.appendLog(taskId, "metadata_plugin: plugin retrieved")
         TaskIO.appendLog(taskId, "metadata_plugin: namespace=${plugin.namespace}, type=${plugin.plugin_type}, enabled=${plugin.enabled}")
         if (plugin.namespace.size == 0) {
-            fail(taskId, "Plugin not found")
+            failAndMaybeEnqueueFallback(taskId, "Plugin not found", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
         TaskIO.appendLog(taskId, "metadata_plugin: namespace check passed")
         if (plugin.plugin_type != "Metadata") {
-            fail(taskId, "Plugin is not a Metadata plugin")
+            failAndMaybeEnqueueFallback(taskId, "Plugin is not a Metadata plugin", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
         TaskIO.appendLog(taskId, "metadata_plugin: type check passed")
@@ -115,7 +116,7 @@ public class MetadataPluginTaskRunner {
         )
 
         if (denoTask.id <= 0) {
-            fail(taskId, "Failed to create deno_task")
+            failAndMaybeEnqueueFallback(taskId, "Failed to create deno_task", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
 
@@ -123,7 +124,7 @@ public class MetadataPluginTaskRunner {
 
         // 创建回调任务（等待 deno_task 完成后自动触发）
         TaskModel.updateTaskProgress(taskId, 20, "创建回调任务")
-        let callbackParams = buildCallbackParams(effectiveType, targetId, plugin.namespace, denoTask.id)
+        let callbackParams = buildCallbackParams(effectiveType, targetId, plugin.namespace, denoTask.id, param, fallbackNamespaces)
         let callbackTask = TaskModel.createWaitingTask(
             "元数据写回",
             "metadata_plugin_callback",
@@ -134,7 +135,7 @@ public class MetadataPluginTaskRunner {
         )
 
         if (callbackTask.id <= 0) {
-            fail(taskId, "Failed to create callback task")
+            failAndMaybeEnqueueFallback(taskId, "Failed to create callback task", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
 
@@ -153,7 +154,7 @@ public class MetadataPluginTaskRunner {
     /**
      * 构建回调任务参数
      */
-    private static func buildCallbackParams(targetType: String, targetId: String, namespace: String, denoTaskId: Int64): String {
+    private static func buildCallbackParams(targetType: String, targetId: String, namespace: String, denoTaskId: Int64, param: String, fallbackNamespaces: Array<String>): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -162,22 +163,34 @@ public class MetadataPluginTaskRunner {
         // Backward-compatible field.
         w.writeName("archiveId").writeValue(targetId)
         w.writeName("namespace").writeValue(namespace)
+        if (param.trimAscii().size > 0) {
+            writeParamField(w, param)
+        }
+        if (fallbackNamespaces.size > 0) {
+            w.writeName("fallback_namespaces")
+            w.startArray()
+            for (ns in fallbackNamespaces) {
+                w.writeValue(ns)
+            }
+            w.endArray()
+        }
         w.writeName("denoTaskId").writeValue(denoTaskId)
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String, Array<String>) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return ("", "", "", "")
+            return ("", "", "", "", Array<String>())
         }
 
         var targetType = ""
         var targetId = ""
         var namespace = ""
         var param = ""
+        var fallbackNamespaces = ArrayList<String>()
 
         try {
             var buf = ByteBuffer()
@@ -219,6 +232,21 @@ public class MetadataPluginTaskRunner {
                             if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
                         case "param" => param = readRawJson()
+                        case "fallback_namespaces" =>
+                            if (r.peek() == Some(BeginArray)) {
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    match (r.peek()) {
+                                        case Some(_) =>
+                                            let v = r.readValue<String>().trimAscii()
+                                            if (v.size > 0) { fallbackNamespaces.add(v) }
+                                        case None => break
+                                    }
+                                }
+                                r.endArray()
+                            } else {
+                                r.skip()
+                            }
                         case _ => r.skip()
                     }
                 }
@@ -227,7 +255,91 @@ public class MetadataPluginTaskRunner {
         } catch (_: Exception) {}
 
         if (targetType.size == 0) { targetType = "archive" }
-        return (targetType.trimAscii(), targetId.trimAscii(), namespace, param.trimAscii())
+        return (targetType.trimAscii(), targetId.trimAscii(), namespace, param.trimAscii(), fallbackNamespaces.toArray())
+    }
+
+    private static func writeParamField(w: JsonWriter, param: String): Unit {
+        let trimmed = param.trimAscii()
+        if (trimmed.size == 0) { return }
+
+        w.writeName("param")
+        if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+            w.jsonValue(trimmed)
+        } else {
+            w.writeValue(trimmed)
+        }
+    }
+
+    private static func enqueueFallbackTask(targetType: String, targetId: String, param: String, fallbackNamespaces: Array<String>, taskId: Int64, notifier: TaskNotifier): Bool {
+        if (fallbackNamespaces.size == 0 || targetId.trimAscii().size == 0) { return false }
+
+        let nextNamespace = fallbackNamespaces[0].trimAscii()
+        if (nextNamespace.size == 0) { return false }
+
+        var remainingBuilder = ArrayList<String>()
+        for (i in 1..fallbackNamespaces.size) {
+            let value = fallbackNamespaces[i].trimAscii()
+            if (value.size > 0) {
+                remainingBuilder.add(value)
+            }
+        }
+        let remaining = remainingBuilder.toArray()
+
+        try {
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("target_type").writeValue(targetType)
+            w.writeName("target_id").writeValue(targetId)
+            if (targetType == "tankoubon" || targetType == "tank") {
+                w.writeName("tankoubon_id").writeValue(targetId)
+            } else {
+                w.writeName("archive_id").writeValue(targetId)
+            }
+            w.writeName("namespace").writeValue(nextNamespace)
+            writeParamField(w, param)
+            if (remaining.size > 0) {
+                w.writeName("fallback_namespaces")
+                w.startArray()
+                for (ns in remaining) {
+                    let value = ns.trimAscii()
+                    if (value.size > 0) {
+                        w.writeValue(value)
+                    }
+                }
+                w.endArray()
+            }
+            w.endObject()
+            w.flush()
+
+            let params = String.fromUtf8(readToEnd(out))
+            let fallbackTask = TaskModel.createTaskWithOptions(
+                "元数据扫描: ${nextNamespace}",
+                "metadata_plugin",
+                params,
+                15i32,
+                targetId,
+                "metadata_plugin_fallback:${taskId}"
+            )
+
+            if (fallbackTask.id > 0) {
+                notifier()
+                TaskIO.appendLog(taskId, "enqueued fallback metadata plugin namespace=${nextNamespace} task_id=${fallbackTask.id}")
+                return true
+            }
+        } catch (e: Exception) {
+            TaskIO.appendLog(taskId, "WARN: failed to enqueue fallback metadata plugin: ${e.message}")
+        }
+
+        return false
+    }
+
+    private static func failAndMaybeEnqueueFallback(taskId: Int64, message: String, targetType: String, targetId: String, param: String, fallbackNamespaces: Array<String>, notifier: TaskNotifier): Unit {
+        let enqueued = enqueueFallbackTask(targetType, targetId, param, fallbackNamespaces, taskId, notifier)
+        if (enqueued) {
+            TaskIO.appendLog(taskId, "current plugin failed, fallback plugin has been scheduled")
+        }
+        fail(taskId, message)
     }
 
     /**

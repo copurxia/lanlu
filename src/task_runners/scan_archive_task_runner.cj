@@ -330,11 +330,8 @@ public class ScanArchiveTaskRunner {
         match (categoryOpt) {
             case Some(category) =>
                 let pluginNamespaces = parsePluginsArray(category.plugins)
-                for (namespace in pluginNamespaces) {
-                    let submitted = submitMetadataPluginTask(archiveId, namespace, notifier)
-                    if (!submitted) {
-                        logger.error("Failed to submit metadata plugin task", ("archive_id", archiveId), ("namespace", namespace))
-                    }
+                if (!submitMetadataPluginChainTask("archive", archiveId, pluginNamespaces, notifier)) {
+                    logger.error("Failed to submit metadata plugin chain task", ("archive_id", archiveId))
                 }
             case None =>
                 logger.debug("Category not found for metadata plugin tasks", ("category_id", categoryId))
@@ -348,12 +345,8 @@ public class ScanArchiveTaskRunner {
         match (categoryOpt) {
             case Some(category) =>
                 let pluginNamespaces = parsePluginsArray(category.plugins)
-                for (namespace in pluginNamespaces) {
-                    let submitted = submitMetadataPluginTaskForTarget("tankoubon", tankoubonId, namespace, notifier)
-                    if (!submitted) {
-                        logger.error("Failed to submit tankoubon metadata plugin task",
-                            ("tankoubon_id", tankoubonId), ("namespace", namespace))
-                    }
+                if (!submitMetadataPluginChainTask("tankoubon", tankoubonId, pluginNamespaces, notifier)) {
+                    logger.error("Failed to submit tankoubon metadata plugin chain task", ("tankoubon_id", tankoubonId))
                 }
             case None =>
                 logger.debug("Category not found for tankoubon metadata plugin tasks", ("category_id", categoryId))
@@ -380,14 +373,31 @@ public class ScanArchiveTaskRunner {
         return namespaces.toArray()
     }
 
-    /**
-     * 提交单个元数据插件任务
-     */
-    private static func submitMetadataPluginTask(archiveId: String, namespace: String, notifier: TaskNotifier): Bool {
-        return submitMetadataPluginTaskForTarget("archive", archiveId, namespace, notifier)
+    private static func submitMetadataPluginChainTask(targetType: String, targetId: String, namespaces: Array<String>, notifier: TaskNotifier): Bool {
+        let normalized = normalizeNamespaces(namespaces)
+        if (normalized.size == 0) { return true }
+
+        let firstNamespace = normalized[0]
+        var fallbackBuilder = ArrayList<String>()
+        for (i in 1..normalized.size) {
+            fallbackBuilder.add(normalized[i])
+        }
+        let fallback = fallbackBuilder.toArray()
+        return submitMetadataPluginTaskForTarget(targetType, targetId, firstNamespace, fallback, notifier)
     }
 
-    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, notifier: TaskNotifier): Bool {
+    private static func normalizeNamespaces(namespaces: Array<String>): Array<String> {
+        var normalized = ArrayList<String>()
+        for (ns in namespaces) {
+            let namespace = ns.trimAscii()
+            if (namespace.size > 0) {
+                normalized.add(namespace)
+            }
+        }
+        return normalized.toArray()
+    }
+
+    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, fallbackNamespaces: Array<String>, notifier: TaskNotifier): Bool {
         try {
             let out = ByteBuffer()
             let w = JsonWriter(out)
@@ -401,6 +411,14 @@ public class ScanArchiveTaskRunner {
                 w.writeName("archive_id").writeValue(targetId)
             }
             w.writeName("namespace").writeValue(namespace)
+            if (fallbackNamespaces.size > 0) {
+                w.writeName("fallback_namespaces")
+                w.startArray()
+                for (ns in fallbackNamespaces) {
+                    w.writeValue(ns)
+                }
+                w.endArray()
+            }
             w.endObject()
             w.flush()
             let parameters = String.fromUtf8(readToEnd(out))

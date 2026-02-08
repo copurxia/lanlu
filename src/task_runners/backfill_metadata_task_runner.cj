@@ -82,36 +82,21 @@ public class BackfillMetadataTaskRunner {
                             continue
                         }
 
-                        var tankSubmitted: Int64 = 0
-                        for (ns in namespaces) {
-                            let namespace = ns.trimAscii()
-                            if (namespace.size == 0) { continue }
-
-                            if (submitMetadataPluginTaskForTarget("tankoubon", autoTankId, namespace, taskId, context)) {
-                                submitted += 1
-                                tankSubmitted += 1
-                            } else {
-                                TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin tankoubon=${autoTankId} namespace=${namespace}")
-                                skipped += 1
-                            }
-                        }
-
-                        if (tankSubmitted > 0) {
+                        if (submitMetadataPluginChainTaskForTarget("tankoubon", autoTankId, namespaces, taskId, context)) {
+                            submitted += 1
                             processedTanks.add(autoTankId)
+                        } else {
+                            TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin chain task for tankoubon=${autoTankId}")
+                            skipped += 1
                         }
                         continue
                     }
 
-                    for (ns in namespaces) {
-                        let namespace = ns.trimAscii()
-                        if (namespace.size == 0) { continue }
-
-                        if (submitMetadataPluginTaskForTarget("archive", archiveId, namespace, taskId, context)) {
-                            submitted += 1
-                        } else {
-                            TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin archive=${archiveId} namespace=${namespace}")
-                            skipped += 1
-                        }
+                    if (submitMetadataPluginChainTaskForTarget("archive", archiveId, namespaces, taskId, context)) {
+                        submitted += 1
+                    } else {
+                        TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin chain task for archive=${archiveId}")
+                        skipped += 1
                     }
                 }
 
@@ -197,7 +182,31 @@ public class BackfillMetadataTaskRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, taskId: Int64, context: TaskRunnerContext): Bool {
+    private static func submitMetadataPluginChainTaskForTarget(targetType: String, targetId: String, namespaces: Array<String>, taskId: Int64, context: TaskRunnerContext): Bool {
+        let normalized = normalizeNamespaces(namespaces)
+        if (normalized.size == 0) { return true }
+
+        let firstNamespace = normalized[0]
+        var fallbackBuilder = ArrayList<String>()
+        for (i in 1..normalized.size) {
+            fallbackBuilder.add(normalized[i])
+        }
+        let fallback = fallbackBuilder.toArray()
+        return submitMetadataPluginTaskForTarget(targetType, targetId, firstNamespace, fallback, taskId, context)
+    }
+
+    private static func normalizeNamespaces(namespaces: Array<String>): Array<String> {
+        var normalized = ArrayList<String>()
+        for (ns in namespaces) {
+            let namespace = ns.trimAscii()
+            if (namespace.size > 0) {
+                normalized.add(namespace)
+            }
+        }
+        return normalized.toArray()
+    }
+
+    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, fallbackNamespaces: Array<String>, taskId: Int64, context: TaskRunnerContext): Bool {
         try {
             let out = ByteBuffer()
             let w = JsonWriter(out)
@@ -210,6 +219,14 @@ public class BackfillMetadataTaskRunner {
                 w.writeName("archive_id").writeValue(targetId)
             }
             w.writeName("namespace").writeValue(namespace)
+            if (fallbackNamespaces.size > 0) {
+                w.writeName("fallback_namespaces")
+                w.startArray()
+                for (ns in fallbackNamespaces) {
+                    w.writeValue(ns)
+                }
+                w.endArray()
+            }
             w.endObject()
             w.flush()
             let params = String.fromUtf8(readToEnd(out))
