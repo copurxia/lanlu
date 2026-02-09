@@ -11,8 +11,7 @@ const SETTINGS_KEY = "lanlu_settings";
 const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
 const REMOTE_CHECK_MIN_INTERVAL_MS = 60 * 1000;
 const TASK_POLL_ALARM = "lanlu_task_poll_alarm";
-const TASK_POLL_INTERVAL_MINUTES = 3;
-const TASK_POLL_MIN_INTERVAL_MS = 30 * 1000;
+const TASK_POLL_INTERVAL_MINUTES = 0.5;
 
 const STATUS = {
   NOT_FOUND: "not_found",
@@ -290,15 +289,9 @@ function ensureTaskPollerAlarm() {
 }
 
 let taskPollInFlight = false;
-let lastTaskPollAt = 0;
-async function pollTasksOnce(options = {}) {
-  const force = !!options.force;
-  const now = Date.now();
-  if (!force && now - lastTaskPollAt < TASK_POLL_MIN_INTERVAL_MS) return;
+async function pollTasksOnce() {
   if (taskPollInFlight) return;
-
   taskPollInFlight = true;
-  lastTaskPollAt = now;
 
   try {
     const auth = await getAuth();
@@ -617,18 +610,18 @@ async function updateBadgeForActiveTab() {
 chrome.runtime.onInstalled.addListener(() => {
   ensureTaskPollerAlarm();
   updateBadgeForActiveTab();
-  pollTasksOnce({ force: true });
+  // Keep fixed cadence via alarm; do not poll immediately on actions.
 });
 
 chrome.runtime.onStartup?.addListener(() => {
   ensureTaskPollerAlarm();
   updateBadgeForActiveTab();
-  pollTasksOnce({ force: true });
+  // Keep fixed cadence via alarm; do not poll immediately on actions.
 });
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {
   if (alarm && alarm.name === TASK_POLL_ALARM) {
-    pollTasksOnce({ force: true });
+    pollTasksOnce();
   }
 });
 
@@ -636,9 +629,6 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   const tabId = activeInfo && typeof activeInfo.tabId === "number" ? activeInfo.tabId : null;
   if (tabId == null) return;
   const tab = await getTabById(tabId);
-  if (tab && typeof tab.url === "string") {
-    await ensureRemoteStatusForUrl(tabId, tab.url);
-  }
   await updateBadgeForTab(tabId, tab && typeof tab.url === "string" ? tab.url : "");
 });
 
@@ -646,7 +636,6 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   // Only refresh when URL changes or load finishes, otherwise this can be noisy.
   if (changeInfo.url || changeInfo.status === "complete") {
     const url = typeof changeInfo.url === "string" ? changeInfo.url : typeof tab?.url === "string" ? tab.url : "";
-    await ensureRemoteStatusForUrl(tabId, url);
     await updateBadgeForTab(tabId, url);
   }
 });
@@ -657,9 +646,6 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     ((areaName === "local" || areaName === "sync") && changes[SETTINGS_KEY]);
   if (isRelevant) updateBadgeForActiveTab();
 
-  // Keep task progress up-to-date even when popup is closed.
-  const taskRelevant = (areaName === "local" && changes[QUEUE_KEY]) || ((areaName === "local" || areaName === "sync") && changes[SETTINGS_KEY]);
-  if (taskRelevant) pollTasksOnce();
 });
 
 // Ensure the alarm exists even if the worker starts from other events.
