@@ -176,14 +176,14 @@ $:
       env:
         NEXT_TELEMETRY_DISABLED: "1"
       stages:
-        - name: Build & lint extension
+        - name: Build extension
           script: |
             bash -lc '
               set -eux
               cd extension
               pnpm install --frozen-lockfile
+              pnpm run typecheck
               pnpm run build
-              pnpm run lint
             '
 
         - name: Package extension artifacts (zip)
@@ -193,7 +193,7 @@ $:
               command -v zip >/dev/null 2>&1 || (apt-get update && apt-get install -y --no-install-recommends zip && rm -rf /var/lib/apt/lists/*)
               mkdir -p dist
               rm -f "dist/extension-${CNB_COMMIT_SHORT:-latest}.zip"
-              (cd extension/out && zip -qr "../../dist/extension-${CNB_COMMIT_SHORT:-latest}.zip" .)
+              (cd extension/build/chrome-mv3-prod && zip -qr "../../../dist/extension-${CNB_COMMIT_SHORT:-latest}.zip" .)
               ls -lah dist
             '
 
