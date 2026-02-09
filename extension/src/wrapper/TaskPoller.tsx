@@ -46,8 +46,10 @@ export default function TaskPoller({ enabled = true, onError }: TaskPollerProps)
             if (payload) {
               update(id, {
                 status: payload.status as "exists" | "queued" | "running" | "completed" | "failed" | "stopped",
-                downloadProgress: payload.progress,
-                downloadMessage: payload.message,
+                downloadProgress: payload.downloadProgress,
+                downloadMessage: payload.downloadMessage,
+                scanProgress: payload.scanProgress,
+                scanMessage: payload.scanMessage,
                 error: payload.error,
                 archiveId: payload.archiveId,
                 scanTaskId: payload.scanTaskId,
@@ -70,15 +72,12 @@ export default function TaskPoller({ enabled = true, onError }: TaskPollerProps)
             break;
 
           case 'task-progress':
-            // 进度更新可以用于实时UI反馈
-            // 更新下载进度和扫描进度
             if (payload) {
               update(id, {
                 downloadProgress: payload.downloadProgress,
                 downloadMessage: payload.downloadMessage,
                 scanProgress: payload.scanProgress,
                 scanMessage: payload.scanMessage,
-                // 保持其他状态不变
               });
             }
             break;

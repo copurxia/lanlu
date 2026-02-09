@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from "react"
 import BottomNav from "~/components/BottomNav"
 import { useQueueStorageSync } from "~/hooks/useQueueStorageSync"
 import { useSettingsStore } from "~/store/settings"
-import TaskPoller from "~/wrapper/TaskPoller"
 import AddPage from "~/popup-pages/AddPage"
 import SettingsPage from "~/popup-pages/SettingsPage"
 import TasksPage from "~/popup-pages/TasksPage"
@@ -64,7 +63,6 @@ export default function PopupApp() {
         )}
       </main>
       <BottomNav route={route} onNavigate={navigate} />
-      <TaskPoller />
     </div>
   )
 }

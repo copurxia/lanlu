@@ -11,7 +11,8 @@ const SETTINGS_KEY = "lanlu_settings";
 const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
 const REMOTE_CHECK_MIN_INTERVAL_MS = 60 * 1000;
 const TASK_POLL_ALARM = "lanlu_task_poll_alarm";
-const TASK_POLL_INTERVAL_MINUTES = 1;
+const TASK_POLL_INTERVAL_MINUTES = 3;
+const TASK_POLL_MIN_INTERVAL_MS = 30 * 1000;
 
 const STATUS = {
   NOT_FOUND: "not_found",
@@ -74,19 +75,30 @@ function getSourceSearchCandidates(input) {
   }
 }
 
+async function readSettingsRaw() {
+  const local = await chromeGet("local", SETTINGS_KEY);
+  const localValue = local[SETTINGS_KEY];
+  if (localValue && typeof localValue === "object") return localValue;
+
+  // Backward compatibility: older versions stored settings in sync storage.
+  const legacy = await chromeGet("sync", SETTINGS_KEY);
+  const legacyValue = legacy[SETTINGS_KEY];
+  if (legacyValue && typeof legacyValue === "object") return legacyValue;
+
+  return null;
+}
+
 async function getAuthConfigured() {
-  const items = await chromeGet("sync", SETTINGS_KEY);
-  const v = items[SETTINGS_KEY];
-  if (!v || typeof v !== "object") return false;
+  const v = await readSettingsRaw();
+  if (!v) return false;
   const serverUrl = normalizeServerUrl(v.serverUrl);
   const token = typeof v.token === "string" ? v.token.trim() : "";
   return !!(serverUrl && token);
 }
 
 async function getAuth() {
-  const items = await chromeGet("sync", SETTINGS_KEY);
-  const v = items[SETTINGS_KEY];
-  if (!v || typeof v !== "object") return null;
+  const v = await readSettingsRaw();
+  if (!v) return null;
   const serverUrl = normalizeServerUrl(v.serverUrl);
   const token = typeof v.token === "string" ? v.token.trim() : "";
   if (!serverUrl || !token) return null;
@@ -94,9 +106,8 @@ async function getAuth() {
 }
 
 async function getAutoCloseEnabled() {
-  const items = await chromeGet("sync", SETTINGS_KEY);
-  const v = items[SETTINGS_KEY];
-  if (!v || typeof v !== "object") return false;
+  const v = await readSettingsRaw();
+  if (!v) return false;
   return !!v.autoCloseTabOnComplete;
 }
 
@@ -279,9 +290,15 @@ function ensureTaskPollerAlarm() {
 }
 
 let taskPollInFlight = false;
-async function pollTasksOnce() {
+let lastTaskPollAt = 0;
+async function pollTasksOnce(options = {}) {
+  const force = !!options.force;
+  const now = Date.now();
+  if (!force && now - lastTaskPollAt < TASK_POLL_MIN_INTERVAL_MS) return;
   if (taskPollInFlight) return;
+
   taskPollInFlight = true;
+  lastTaskPollAt = now;
 
   try {
     const auth = await getAuth();
@@ -600,18 +617,18 @@ async function updateBadgeForActiveTab() {
 chrome.runtime.onInstalled.addListener(() => {
   ensureTaskPollerAlarm();
   updateBadgeForActiveTab();
-  pollTasksOnce();
+  pollTasksOnce({ force: true });
 });
 
 chrome.runtime.onStartup?.addListener(() => {
   ensureTaskPollerAlarm();
   updateBadgeForActiveTab();
-  pollTasksOnce();
+  pollTasksOnce({ force: true });
 });
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {
   if (alarm && alarm.name === TASK_POLL_ALARM) {
-    pollTasksOnce();
+    pollTasksOnce({ force: true });
   }
 });
 
@@ -637,11 +654,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   const isRelevant =
     (areaName === "local" && (changes[QUEUE_KEY] || changes[STATUS_CACHE_KEY])) ||
-    (areaName === "sync" && changes[SETTINGS_KEY]);
+    ((areaName === "local" || areaName === "sync") && changes[SETTINGS_KEY]);
   if (isRelevant) updateBadgeForActiveTab();
 
   // Keep task progress up-to-date even when popup is closed.
-  const taskRelevant = (areaName === "local" && changes[QUEUE_KEY]) || (areaName === "sync" && changes[SETTINGS_KEY]);
+  const taskRelevant = (areaName === "local" && changes[QUEUE_KEY]) || ((areaName === "local" || areaName === "sync") && changes[SETTINGS_KEY]);
   if (taskRelevant) pollTasksOnce();
 });
 

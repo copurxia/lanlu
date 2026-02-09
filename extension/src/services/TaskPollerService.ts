@@ -240,17 +240,15 @@ export class TaskPollerService {
       const task = await getTaskById(this.auth, entry.downloadTaskId);
       const status = normalizeStatus(task.status);
 
-      // 发布进度更新事件
-      TaskEvents.progress(entry.id, clampProgress(task.progress), task.message || '');
+      const downloadProgress = clampProgress(task.progress);
+      const downloadMessage = task.message || '';
 
-      if (status !== entry.status) {
-        TaskEvents.update(entry.id, {
-          status,
-          downloadProgress: clampProgress(task.progress),
-          downloadMessage: task.message || '',
-          error: status === 'failed' ? task.message || '任务失败' : undefined,
-        });
-      }
+      TaskEvents.update(entry.id, {
+        status,
+        downloadProgress,
+        downloadMessage,
+        error: status === 'failed' ? downloadMessage || '任务失败' : undefined,
+      });
 
       // 下载完成后发现扫描任务
       if (task.status === 'completed' && !entry.scanTaskId) {
@@ -292,24 +290,21 @@ export class TaskPollerService {
           ? parseArchiveIdFromScanResult(scanTask.result)
           : null;
 
-      // 发布进度更新事件
-      TaskEvents.progress(entry.id, clampProgress(scanTask.progress), scanTask.message || '');
+      const scanProgress = clampProgress(scanTask.progress);
+      const scanMessage = scanTask.message || '';
 
-      if (scanStatus !== entry.status || archiveId !== entry.archiveId) {
-        TaskEvents.update(entry.id, {
-          scanProgress: clampProgress(scanTask.progress),
-          scanMessage: scanTask.message || '',
-          archiveId: archiveId ?? entry.archiveId,
-          status:
-            scanStatus === 'queued'
-              ? 'queued'
-              : scanStatus === 'running'
-              ? 'running'
-              : scanStatus,
-          error:
-            scanStatus === 'failed' ? scanTask.message || '扫描失败' : undefined,
-        });
-      }
+      TaskEvents.update(entry.id, {
+        scanProgress,
+        scanMessage,
+        archiveId: archiveId ?? entry.archiveId,
+        status:
+          scanStatus === 'queued'
+            ? 'queued'
+            : scanStatus === 'running'
+            ? 'running'
+            : scanStatus,
+        error: scanStatus === 'failed' ? scanMessage || '扫描失败' : undefined,
+      });
 
       // 任务完成
       if (scanStatus === 'completed' && archiveId) {

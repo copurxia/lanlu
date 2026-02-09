@@ -140,13 +140,18 @@ export function useTaskEvents(options: UseTaskEventsOptions = {}): UseTaskEvents
   const [events, setEvents] = useState<TaskEventData[]>([]);
 
   useEffect(() => {
-    const unsubscribe = eventBus.on('task-update', (event) => {
-      if (!taskId || event.id === taskId) {
-        setEvents((prev) => [...prev, event]);
-      }
-    });
+    const eventTypes = ['task-update', 'task-complete', 'task-error', 'task-progress', 'task-discovered'] as const;
+    const unsubscribers = eventTypes.map((type) =>
+      eventBus.on(type, (event) => {
+        if (!taskId || event.id === taskId) {
+          setEvents((prev) => [...prev, event]);
+        }
+      })
+    );
 
-    return unsubscribe;
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+    };
   }, [taskId]);
 
   const clear = useCallback(() => {

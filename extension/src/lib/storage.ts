@@ -14,15 +14,16 @@ const DEFAULT_SETTINGS: ExtensionSettings = {
   autoCloseTabOnComplete: false,
 };
 
-function hasChromeStorage(): boolean {
-  return typeof chrome !== "undefined" && !!chrome.storage?.sync;
+function hasChromeStorage(area: "local" | "sync"): boolean {
+  return typeof chrome !== "undefined" && !!chrome.storage?.[area];
 }
 
-export async function loadSettings(): Promise<ExtensionSettings> {
-  if (!hasChromeStorage()) return DEFAULT_SETTINGS;
+async function readFromArea(area: "local" | "sync"): Promise<Partial<ExtensionSettings> | null> {
+  if (!hasChromeStorage(area)) return null;
+
   const stored = await new Promise<Record<string, unknown>>((resolve, reject) => {
     try {
-      chrome.storage.sync.get(STORAGE_KEY, (items) => {
+      chrome.storage[area].get(STORAGE_KEY, (items) => {
         const err = chrome.runtime?.lastError;
         if (err?.message) reject(new Error(err.message));
         else resolve(items as Record<string, unknown>);
@@ -31,7 +32,12 @@ export async function loadSettings(): Promise<ExtensionSettings> {
       reject(e);
     }
   });
-  const raw = stored?.[STORAGE_KEY] as Partial<ExtensionSettings> | undefined;
+
+  const raw = stored?.[STORAGE_KEY];
+  return raw && typeof raw === "object" ? (raw as Partial<ExtensionSettings>) : null;
+}
+
+function normalizeSettings(raw: Partial<ExtensionSettings> | null): ExtensionSettings {
   return {
     serverUrl: raw?.serverUrl || "",
     token: raw?.token || "",
@@ -40,11 +46,25 @@ export async function loadSettings(): Promise<ExtensionSettings> {
   };
 }
 
+export async function loadSettings(): Promise<ExtensionSettings> {
+  const local = await readFromArea("local");
+  if (local) return normalizeSettings(local);
+
+  // Backward-compatibility migration: old versions stored settings in sync.
+  const legacySync = await readFromArea("sync");
+  if (!legacySync) return DEFAULT_SETTINGS;
+
+  const migrated = normalizeSettings(legacySync);
+  await saveSettings(migrated);
+  return migrated;
+}
+
 export async function saveSettings(settings: ExtensionSettings): Promise<void> {
-  if (!hasChromeStorage()) return;
+  if (!hasChromeStorage("local")) return;
+
   await new Promise<void>((resolve, reject) => {
     try {
-      chrome.storage.sync.set({ [STORAGE_KEY]: settings }, () => {
+      chrome.storage.local.set({ [STORAGE_KEY]: settings }, () => {
         const err = chrome.runtime?.lastError;
         if (err?.message) reject(new Error(err.message));
         else resolve();
@@ -53,4 +73,13 @@ export async function saveSettings(settings: ExtensionSettings): Promise<void> {
       reject(e);
     }
   });
+
+  // Best-effort cleanup of legacy sync storage to reduce token exposure.
+  if (hasChromeStorage("sync")) {
+    try {
+      await new Promise<void>((resolve) => chrome.storage.sync.remove(STORAGE_KEY, () => resolve()));
+    } catch {
+      // ignore cleanup failure
+    }
+  }
 }
