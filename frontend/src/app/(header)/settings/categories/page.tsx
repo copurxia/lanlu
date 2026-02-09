@@ -408,14 +408,14 @@ export default function CategoriesSettingsPage() {
           {categories.map((category) => (
             <Card key={category.catid} className="overflow-hidden hover:shadow-md transition-shadow">
               {/* Cover */}
-              <div className="relative h-32">
+              <div className="relative aspect-[3/1]">
                 {(() => {
                   const bgId = category.cover_asset_id;
                   return (
                     <>
                       {bgId ? (
                         <div
-                          className="absolute inset-0 bg-cover bg-center"
+                          className="absolute inset-0 bg-center bg-no-repeat bg-contain sm:bg-cover"
                           style={{ backgroundImage: `url(/api/assets/${bgId})` }}
                         />
                       ) : (
