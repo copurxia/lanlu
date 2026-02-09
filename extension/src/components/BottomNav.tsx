@@ -1,34 +1,36 @@
-"use client";
+import type { PopupRoute } from "~/popup-pages/types"
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+type BottomNavProps = {
+  route: PopupRoute
+  onNavigate: (route: PopupRoute) => void
+}
 
-const items = [
-  { href: "/", label: "添加" },
-  { href: "/tasks", label: "任务" },
-  { href: "/settings", label: "设置" },
-] as const;
+const items: Array<{ route: PopupRoute; label: string }> = [
+  { route: "add", label: "添加" },
+  { route: "tasks", label: "任务" },
+  { route: "settings", label: "设置" }
+]
 
-export default function BottomNav() {
-  const pathname = usePathname();
+export default function BottomNav({ route, onNavigate }: BottomNavProps) {
   return (
     <nav className="h-12 border-t bg-card text-card-foreground flex items-stretch">
       {items.map((it) => {
-        const active = pathname === it.href;
+        const active = route === it.route
         return (
-          <Link
-            key={it.href}
-            href={it.href}
+          <button
+            key={it.route}
+            type="button"
             className={[
               "flex-1 flex items-center justify-center text-sm",
-              active ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground",
+              active
+                ? "text-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
             ].join(" ")}
-          >
+            onClick={() => onNavigate(it.route)}>
             {it.label}
-          </Link>
-        );
+          </button>
+        )
       })}
     </nav>
-  );
+  )
 }
-

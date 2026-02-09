@@ -1,23 +1,39 @@
-"use client";
+import { useMemo } from "react"
+import { useSettingsStore } from "~/store/settings"
+import type { PopupRoute } from "~/popup-pages/types"
 
-import { useMemo } from "react";
-import Link from "next/link";
-import { useSettingsStore } from "@/store/settings";
+type SettingsPageProps = {
+  navigate: (route: PopupRoute) => void
+}
 
-export default function SettingsPage() {
-  const { settings, setSettings, setCategoryId, setAutoCloseTabOnComplete, save, saving, categories, loadingCategories, error } = useSettingsStore();
+export default function SettingsPage({ navigate }: SettingsPageProps) {
+  const {
+    settings,
+    setSettings,
+    setCategoryId,
+    setAutoCloseTabOnComplete,
+    save,
+    saving,
+    categories,
+    loadingCategories,
+    error
+  } = useSettingsStore()
 
   const canConnect = useMemo(() => {
-    return !!settings.serverUrl.trim() && !!settings.token.trim();
-  }, [settings.serverUrl, settings.token]);
+    return !!settings.serverUrl.trim() && !!settings.token.trim()
+  }, [settings.serverUrl, settings.token])
 
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-base font-semibold tracking-tight">设置</div>
-        <Link className="text-xs text-muted-foreground hover:text-foreground" href="/">
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => navigate("add")}
+        >
           返回
-        </Link>
+        </button>
       </div>
 
       <div className="rounded-lg border bg-card text-card-foreground p-3 space-y-3">
@@ -105,5 +121,5 @@ export default function SettingsPage() {
         提示：任务进度查询需要服务器开放 `/api/admin/taskpool/*`，且 Token 具备访问权限。
       </div>
     </div>
-  );
+  )
 }

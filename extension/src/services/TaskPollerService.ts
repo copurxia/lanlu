@@ -3,9 +3,9 @@
  * 运行在Chrome扩展的后台，与React组件解耦
  */
 
-import { getTaskById } from '@/lib/lanlu-api';
-import { TaskEvents } from '@/lib/events';
-import type { DownloadEntry } from '@/store/download-queue';
+import { getTaskById } from '~/lib/lanlu-api';
+import { TaskEvents } from '~/lib/events';
+import type { DownloadEntry } from '~/store/download-queue';
 
 type QueueStatus = 'queued' | 'running' | 'completed' | 'failed' | 'stopped';
 

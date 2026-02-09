@@ -1,5 +1,0 @@
-#! /bin/bash
-
-mkdir -p out/next-assets
-mv out/_next out/next-assets
-node scripts/replace-inline-scripts.mjs

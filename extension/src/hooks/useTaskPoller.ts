@@ -3,11 +3,11 @@
  */
 
 import { useEffect, useRef, useCallback } from 'react';
-import { useSettingsStore } from '@/store/settings';
-import { useDownloadQueueStore } from '@/store/download-queue';
-import { taskPollerService, type TaskPollerConfig } from '@/services/TaskPollerService';
-import { eventBus } from '@/lib/events';
-import { normalizeUrl } from '@/lib/url';
+import { useSettingsStore } from '~/store/settings';
+import { useDownloadQueueStore } from '~/store/download-queue';
+import { taskPollerService, type TaskPollerConfig } from '~/services/TaskPollerService';
+import { eventBus } from '~/lib/events';
+import { normalizeUrl } from '~/lib/url';
 
 interface UseTaskPollerOptions {
   enabled?: boolean; // 是否启用轮询
@@ -123,7 +123,7 @@ export function useTaskPoller(options: UseTaskPollerOptions = {}): UseTaskPoller
  * 订阅任务事件的Hook
  */
 import { useState } from 'react';
-import type { TaskEventData } from '@/lib/events';
+import type { TaskEventData } from '~/lib/events';
 
 interface UseTaskEventsOptions {
   taskId?: string; // 特定任务ID，为空则监听所有任务

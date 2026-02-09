@@ -1,57 +1,63 @@
-"use client";
+import { useMemo } from "react"
+import { openInNewTab } from "~/lib/tabs"
+import { normalizeUrl } from "~/lib/url"
+import { ErrorBoundary } from "~/lib/error-boundary"
+import { ProgressBar } from "~/lib/progress-bar"
+import { useDownloadQueueStore } from "~/store/download-queue"
+import { useSettingsStore } from "~/store/settings"
+import type { PopupRoute } from "~/popup-pages/types"
 
-import Link from "next/link";
-import { useMemo } from "react";
-import { openInNewTab } from "@/lib/tabs";
-import { normalizeUrl } from "@/lib/url";
-import { useDownloadQueueStore } from "@/store/download-queue";
-import { useSettingsStore } from "@/store/settings";
-import { ErrorBoundary } from "@/lib/error-boundary";
-import { ProgressBar } from "@/lib/progress-bar";
+type TasksPageProps = {
+  navigate: (route: PopupRoute) => void
+}
 
 function formatTime(ts: number): string {
   try {
-    return new Date(ts).toLocaleString();
+    return new Date(ts).toLocaleString()
   } catch {
-    return "";
+    return ""
   }
 }
 
 function statusLabel(status: string): string {
   switch (status) {
     case "exists":
-      return "已存在";
+      return "已存在"
     case "queued":
-      return "排队中";
+      return "排队中"
     case "running":
-      return "进行中";
+      return "进行中"
     case "completed":
-      return "完成";
+      return "完成"
     case "failed":
-      return "失败";
+      return "失败"
     case "stopped":
-      return "已停止";
+      return "已停止"
     default:
-      return status;
+      return status
   }
 }
 
-export default function TasksPage() {
-  const entries = useDownloadQueueStore((s) => s.entries);
-  const remove = useDownloadQueueStore((s) => s.remove);
-  const clearCompleted = useDownloadQueueStore((s) => s.clearCompleted);
-  const clearAll = useDownloadQueueStore((s) => s.clearAll);
+export default function TasksPage({ navigate }: TasksPageProps) {
+  const entries = useDownloadQueueStore((s) => s.entries)
+  const remove = useDownloadQueueStore((s) => s.remove)
+  const clearCompleted = useDownloadQueueStore((s) => s.clearCompleted)
+  const clearAll = useDownloadQueueStore((s) => s.clearAll)
 
-  const { settings } = useSettingsStore();
-  const baseUrl = useMemo(() => normalizeUrl(settings.serverUrl), [settings.serverUrl]);
+  const { settings } = useSettingsStore()
+  const baseUrl = useMemo(() => normalizeUrl(settings.serverUrl), [settings.serverUrl])
 
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="text-base font-semibold tracking-tight">任务</div>
-        <Link className="text-xs text-muted-foreground hover:text-foreground" href="/">
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => navigate("add")}
+        >
           返回
-        </Link>
+        </button>
       </div>
 
       <div className="flex items-center justify-between gap-2">
@@ -81,9 +87,9 @@ export default function TasksPage() {
         <div className="rounded-lg border bg-card text-card-foreground overflow-hidden">
           <div className="max-h-[480px] overflow-y-auto">
             {entries.map((e) => {
-              const downloadP = typeof e.downloadProgress === "number" ? e.downloadProgress : null;
-              const scanP = typeof e.scanProgress === "number" ? e.scanProgress : null;
-              const activeP = scanP ?? downloadP;
+              const downloadP = typeof e.downloadProgress === "number" ? e.downloadProgress : null
+              const scanP = typeof e.scanProgress === "number" ? e.scanProgress : null
+              const activeP = scanP ?? downloadP
 
               return (
                 <div key={e.id} className="px-3 py-3 border-b last:border-b-0 space-y-2">
@@ -141,12 +147,11 @@ export default function TasksPage() {
                     </div>
                   ) : null}
                 </div>
-              );
+              )
             })}
           </div>
         </div>
       )}
     </div>
-  );
+  )
 }
-

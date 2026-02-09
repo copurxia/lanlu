@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
-import { useTaskPoller, useTaskEvents } from "@/hooks/useTaskPoller";
-import { useDownloadQueueStore } from "@/store/download-queue";
-import { ErrorBoundary } from "@/lib/error-boundary";
+import { useTaskPoller, useTaskEvents } from "~/hooks/useTaskPoller";
+import { useDownloadQueueStore } from "~/store/download-queue";
+import { ErrorBoundary } from "~/lib/error-boundary";
 
 interface TaskPollerProps {
   enabled?: boolean;

@@ -1,5 +1,5 @@
 export type TabScope = "current" | "left" | "right";
-import { chromeCall } from "@/lib/chrome-api";
+import { chromeCall } from "~/lib/chrome-api";
 
 function assertChromeTabs(): void {
   if (typeof chrome === "undefined" || !chrome.tabs?.query) {

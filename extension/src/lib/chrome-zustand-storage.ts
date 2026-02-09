@@ -1,5 +1,5 @@
 import type { StateStorage } from "zustand/middleware";
-import { chromeCall, chromeCallVoid } from "@/lib/chrome-api";
+import { chromeCall, chromeCallVoid } from "~/lib/chrome-api";
 
 function hasChromeStorage(area: "local" | "sync"): boolean {
   return typeof chrome !== "undefined" && !!chrome.storage?.[area];

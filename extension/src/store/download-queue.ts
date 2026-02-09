@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { createChromeStorage } from "@/lib/chrome-zustand-storage";
+import { createChromeStorage } from "~/lib/chrome-zustand-storage";
 
 function createId(): string {
   try {

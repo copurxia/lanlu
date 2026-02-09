@@ -3,7 +3,7 @@
  */
 
 import { useEffect } from "react";
-import { useDownloadQueueStore } from "@/store/download-queue";
+import { useDownloadQueueStore } from "~/store/download-queue";
 
 const QUEUE_KEY = "lanlu_download_queue";
 

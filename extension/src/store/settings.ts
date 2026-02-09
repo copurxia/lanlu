@@ -1,9 +1,9 @@
 "use client";
 
 import { create } from "zustand";
-import { getCategories, type LanluCategory } from "@/lib/lanlu-api";
-import { loadSettings, saveSettings, type ExtensionSettings } from "@/lib/storage";
-import { normalizeUrl } from "@/lib/url";
+import { getCategories, type LanluCategory } from "~/lib/lanlu-api";
+import { loadSettings, saveSettings, type ExtensionSettings } from "~/lib/storage";
+import { normalizeUrl } from "~/lib/url";
 
 type SettingsState = {
   settings: ExtensionSettings;
