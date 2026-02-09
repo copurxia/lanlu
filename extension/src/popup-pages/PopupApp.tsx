@@ -27,6 +27,14 @@ export default function PopupApp() {
 
   useEffect(() => {
     void useSettingsStore.getState().hydrate()
+
+    if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+      try {
+        chrome.runtime.sendMessage({ type: "lanlu_poll_now" })
+      } catch {
+        // ignore
+      }
+    }
   }, [])
 
   useQueueStorageSync()

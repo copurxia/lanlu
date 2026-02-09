@@ -640,6 +640,12 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
   }
 });
 
+chrome.runtime.onMessage?.addListener((message) => {
+  if (message?.type === "lanlu_poll_now") {
+    void pollTasksOnce();
+  }
+});
+
 chrome.storage.onChanged.addListener((changes, areaName) => {
   const isRelevant =
     (areaName === "local" && (changes[QUEUE_KEY] || changes[STATUS_CACHE_KEY])) ||
