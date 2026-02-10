@@ -46,6 +46,7 @@ export interface RandomParams {
   count?: number;
   newonly?: boolean;
   untaggedonly?: boolean;
+  groupby_tanks?: boolean;
   lang?: string;
 }
 

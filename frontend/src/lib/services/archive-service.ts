@@ -1,5 +1,6 @@
 import { apiClient } from '../api';
 import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } from '@/types/archive';
+import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
 import { TaskPoolService } from './taskpool-service';
@@ -52,7 +53,7 @@ export class ArchiveService {
     return response.data;
   }
 
-  static async getRandom(params: RandomParams = {}): Promise<Archive[]> {
+  static async getRandom(params: RandomParams = {}): Promise<Array<Archive | Tankoubon>> {
     const response = await apiClient.get('/api/search/random', {
       params: {
         count: params.count || 5,
@@ -60,6 +61,7 @@ export class ArchiveService {
         category: params.category,
         newonly: params.newonly,
         untaggedonly: params.untaggedonly,
+        groupby_tanks: params.groupby_tanks ?? true,
         lang: params.lang
       }
     });

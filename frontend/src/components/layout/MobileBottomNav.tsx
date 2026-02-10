@@ -21,9 +21,12 @@ export function MobileBottomNav() {
   const handleRandomRead = useCallback(async () => {
     try {
       setRandomLoading(true);
-      const randomArchives = await ArchiveService.getRandom({ count: 1 });
+      const randomArchives = await ArchiveService.getRandom({ count: 1, groupby_tanks: false });
       if (randomArchives.length > 0) {
-        router.push(`/reader?id=${randomArchives[0].arcid}`);
+        const randomItem = randomArchives[0];
+        if ('arcid' in randomItem) {
+          router.push(`/reader?id=${randomItem.arcid}`);
+        }
       }
     } catch (error) {
       console.error('Failed to get random archive:', error);
