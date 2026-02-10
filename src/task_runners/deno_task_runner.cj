@@ -1184,6 +1184,91 @@ public class DenoTaskRunner {
             }
         }
 
+        if (m == "archive.getMetadata") {
+            var archiveId = ""
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (archiveId.size == 0) {
+                return (false, "{}", "missing archiveId")
+            }
+
+            let archive = ArchiveDao.getArchiveById(archiveId)
+            if (archive.id.size == 0) {
+                return (false, "{}", "archive not found")
+            }
+
+            let tags = TagDao.getArchiveTags(archiveId)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archiveId").writeValue(archiveId)
+            w.writeName("title").writeValue(archive.title)
+            w.writeName("existingTags").writeValue(tags)
+            w.writeName("thumbnailHash").writeValue(archive.thumbhash)
+            w.endObject()
+            w.flush()
+            return (true, String.fromUtf8(readToEnd(out)), "")
+        }
+
+        if (m == "tankoubon.listArchives") {
+            var tankoubonId = ""
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "tankoubonId" => tankoubonId = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (tankoubonId.size == 0) {
+                return (false, "{}", "missing tankoubonId")
+            }
+
+            let archiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("tankoubonId").writeValue(tankoubonId)
+            w.writeName("archiveIds")
+            w.startArray()
+            for (arcid in archiveIds) {
+                let id = arcid.trimAscii()
+                if (id.size > 0) {
+                    w.writeValue(id)
+                }
+            }
+            w.endArray()
+            w.endObject()
+            w.flush()
+            return (true, String.fromUtf8(readToEnd(out)), "")
+        }
+
         // List files adjacent to an archive on disk.
         // - For file archives (cbz/pdf/epub/...): list files in the parent directory.
         // - For folder archives: list files directly inside that folder.
