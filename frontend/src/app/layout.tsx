@@ -11,8 +11,18 @@ import { RouteHistoryTracker } from '@/components/navigation/RouteHistoryTracker
 export const metadata: Metadata = {
   title: '兰鹿',
   description: '漫画归档管理系统',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'default',
+    title: '兰鹿',
+  },
   icons: {
-    icon: '/logo.svg',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon.png', type: 'image/png', sizes: '128x128' },
+    ],
+    apple: '/icon.png',
   },
 };
 
