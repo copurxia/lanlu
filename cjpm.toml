@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.0.3"
+  cjc-version = "1.0.5"
   name = "lanlu"
   description = "nothing here"
   version = "1.0.0"
