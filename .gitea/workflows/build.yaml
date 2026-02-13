@@ -57,6 +57,7 @@ jobs:
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx"
           export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
+          ln -s "$PWD/stdx/linux_x86_64_cjnative" "$PWD/stdx/linux_x86_64_llvm"
           source cangjie/envsetup.sh
           cjc -v
           cjpm build -V

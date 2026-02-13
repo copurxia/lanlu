@@ -74,6 +74,7 @@ $:
               export XMAKE_ROOT=y
               export CANGJIE_STDX_PATH="$PWD/stdx"
               export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
+              ln -s "$PWD/stdx/linux_x86_64_cjnative" "$PWD/stdx/linux_x86_64_llvm"
 
               # envsetup.sh references LD_LIBRARY_PATH and may fail under `set -u` if it is unset.
               export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
