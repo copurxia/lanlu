@@ -57,7 +57,7 @@ jobs:
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx"
           export CANGJIE_STDX="$PWD/stdx/linux_x86_64_llvm/dynamic/stdx"
-          ln -s "$PWD/stdx/linux_x86_64_cjnative" "$PWD/stdx/linux_x86_64_llvm"
+          # ln -s "$PWD/stdx/linux_x86_64_cjnative" "$PWD/stdx/linux_x86_64_llvm"
           source cangjie/envsetup.sh
           cjc -v
           cjpm build -V
@@ -84,7 +84,7 @@ jobs:
           cp -r plugins app/plugins
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3
         with:
           name: release
           path: |
