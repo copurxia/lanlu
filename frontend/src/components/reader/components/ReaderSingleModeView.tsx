@@ -3,6 +3,7 @@ import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import { getTapTurnAction } from '@/components/reader/hooks/useReaderInteractionHandlers';
+import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
 import type { PageInfo } from '@/lib/services/archive-service';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
@@ -68,6 +69,7 @@ export function ReaderSingleModeView({
   const [imageMeta, setImageMeta] = useState<Record<number, { w: number; h: number; isLong: boolean }>>({});
   const spreadViewportRef = useRef<HTMLDivElement | null>(null);
   const [spreadViewportSize, setSpreadViewportSize] = useState({ w: 0, h: 0 });
+  const htmlSpreadSnapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const registerImageMeta = useCallback((pageIndex: number, img: HTMLImageElement) => {
     const w = img.naturalWidth || img.width;
@@ -82,12 +84,18 @@ export function ReaderSingleModeView({
     });
   }, []);
 
-  const isSingleImageLayout = !doublePageMode || (doublePageMode && splitCoverMode && currentPage === 0);
+  const currentPageType = pages[currentPage]?.type;
+  const isHtmlSpreadView = doublePageMode && currentPageType === 'html';
+  const isSingleImageLayout =
+    !doublePageMode || isHtmlSpreadView || (doublePageMode && splitCoverMode && currentPage === 0);
   const currentMeta = imageMeta[currentPage];
   const useLongPageScroll = Boolean(longPageEnabled && isSingleImageLayout && currentMeta?.isLong);
   const shouldTransform = scale !== 1 || translateX !== 0 || translateY !== 0;
   const isDoubleSpread =
-    doublePageMode && !(splitCoverMode && currentPage === 0) && currentPage + 1 < pages.length;
+    doublePageMode &&
+    !isHtmlSpreadView &&
+    !(splitCoverMode && currentPage === 0) &&
+    currentPage + 1 < pages.length;
 
   useEffect(() => {
     const el = spreadViewportRef.current;
@@ -115,6 +123,45 @@ export function ReaderSingleModeView({
       window.removeEventListener('resize', update);
     };
   }, [sidebarOpen]);
+
+  useEffect(() => {
+    const current = htmlContainerRefs.current[currentPage];
+    if (!current) return;
+    if (pages[currentPage]?.type !== 'html') return;
+
+    current.scrollTop = 0;
+    if (doublePageMode) {
+      current.scrollLeft = 0;
+    }
+  }, [currentPage, doublePageMode, htmlContainerRefs, pages]);
+
+  useEffect(() => {
+    if (!isHtmlSpreadView) return;
+    const container = htmlContainerRefs.current[currentPage];
+    if (!container) return;
+
+    const snapToSpread = () => {
+      const metrics = getHtmlSpreadMetrics(container);
+      if (metrics.maxScrollLeft <= 1) return;
+      const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, metrics.currentSlot);
+      if (Math.abs(target - container.scrollLeft) <= 2) return;
+      container.scrollTo({ left: target, behavior: 'auto' });
+    };
+
+    const onScroll = () => {
+      if (htmlSpreadSnapTimerRef.current) clearTimeout(htmlSpreadSnapTimerRef.current);
+      htmlSpreadSnapTimerRef.current = setTimeout(snapToSpread, 120);
+    };
+
+    container.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', onScroll);
+      if (htmlSpreadSnapTimerRef.current) {
+        clearTimeout(htmlSpreadSnapTimerRef.current);
+        htmlSpreadSnapTimerRef.current = null;
+      }
+    };
+  }, [currentPage, htmlContainerRefs, isHtmlSpreadView]);
 
   const spreadLayout = useMemo(() => {
     if (!isDoubleSpread) return null;
@@ -244,6 +291,7 @@ export function ReaderSingleModeView({
     >
       <div ref={spreadViewportRef} className="flex items-center justify-center w-full h-full relative">
         {doublePageMode &&
+          !isHtmlSpreadView &&
           ((imagesLoading.has(currentPage) && !loadedImages.has(currentPage)) ||
             (currentPage + 1 < pages.length &&
               imagesLoading.has(currentPage + 1) &&
@@ -349,7 +397,7 @@ export function ReaderSingleModeView({
             <div className="relative w-full h-full flex">
               <div
                 className={`relative ${
-                  doublePageMode && !(splitCoverMode && currentPage === 0) ? 'flex-1' : 'w-full'
+                  doublePageMode && !isHtmlSpreadView && !(splitCoverMode && currentPage === 0) ? 'flex-1' : 'w-full'
                 } h-full min-w-0`}
               >
                 {pages[currentPage]?.type === 'video' ? (
@@ -361,11 +409,13 @@ export function ReaderSingleModeView({
                     }}
                     className={`
                       ${
-                        doublePageMode && !(splitCoverMode && currentPage === 0) ? 'object-cover' : 'object-contain'
+                        doublePageMode && !isHtmlSpreadView && !(splitCoverMode && currentPage === 0)
+                          ? 'object-cover'
+                          : 'object-contain'
                       } select-none touch-none
                       w-full h-full
                       transition-opacity duration-300 ease-in-out
-                      ${doublePageMode ? 'max-h-full' : ''}
+                      ${doublePageMode && !isHtmlSpreadView ? 'max-h-full' : ''}
                     `}
                     style={{
                       maxHeight: '100%',
@@ -382,9 +432,34 @@ export function ReaderSingleModeView({
                     ref={(el) => {
                       htmlContainerRefs.current[currentPage] = el;
                     }}
-                    className="w-full h-full overflow-auto bg-white"
+                    className={
+                      isHtmlSpreadView
+                        ? 'reader-html-page-container reader-html-spread-container w-full h-full overflow-x-auto overflow-y-hidden bg-white'
+                        : 'reader-html-page-container w-full h-full overflow-auto bg-white'
+                    }
                   >
-                    <HtmlRenderer html={htmlContents[currentPage] || ''} className="max-w-4xl mx-auto p-4" />
+                    <HtmlRenderer
+                      html={htmlContents[currentPage] || ''}
+                      scrollable={!isHtmlSpreadView}
+                      className={isHtmlSpreadView ? 'reader-html-spread-content' : 'max-w-4xl mx-auto p-4'}
+                      style={
+                        isHtmlSpreadView
+                          ? {
+                              width: '100%',
+                              maxWidth: '100%',
+                              height: '100%',
+                              minHeight: '100%',
+                              columnCount: 2,
+                              columnWidth: 'calc((100% - 36px) / 2)',
+                              columnGap: '36px',
+                              columnRule: '1px solid hsl(var(--border) / 0.65)',
+                              columnFill: 'auto',
+                              boxSizing: 'border-box',
+                              padding: '20px 24px',
+                            }
+                          : undefined
+                      }
+                    />
                   </div>
                 ) : (
                   <div
@@ -454,14 +529,14 @@ export function ReaderSingleModeView({
 	                            className={`
 	                              absolute inset-0
 	                              ${
-	                                doublePageMode && !(splitCoverMode && currentPage === 0)
+	                                doublePageMode && !isHtmlSpreadView && !(splitCoverMode && currentPage === 0)
 	                                  ? 'object-cover'
 	                                  : 'object-contain'
 	                              }
 	                              select-none touch-none
 	                              transition-opacity duration-300 ease-in-out
 	                              w-full h-full
-	                              ${doublePageMode ? 'max-h-full' : ''}
+	                              ${doublePageMode && !isHtmlSpreadView ? 'max-h-full' : ''}
 	                            `}
 	                            style={{
 	                              maxHeight: '100%',
@@ -495,7 +570,10 @@ export function ReaderSingleModeView({
 	                )}
 	              </div>
 
-              {doublePageMode && !(splitCoverMode && currentPage === 0) && currentPage + 1 < pages.length && (
+              {doublePageMode &&
+                !isHtmlSpreadView &&
+                !(splitCoverMode && currentPage === 0) &&
+                currentPage + 1 < pages.length && (
                 <div className="relative flex-1 h-full min-w-0">
                   {pages[currentPage + 1]?.type === 'video' ? (
                     <MemoizedVideo

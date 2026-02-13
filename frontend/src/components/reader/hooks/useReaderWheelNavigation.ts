@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { toast } from 'sonner';
 import type { PageInfo } from '@/lib/services/archive-service';
+import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
 
 const COUNTDOWN_DURATION = 3;
 
@@ -217,9 +218,106 @@ export function useReaderWheelNavigation({
       const isHtmlPage = pages[currentPage]?.type === 'html';
 
       if (isHtmlPage) {
-        const htmlContainer = targetEl?.closest?.('.html-content-container') as HTMLElement | null;
+        const htmlContainer =
+          (targetEl?.closest?.('.reader-html-page-container') as HTMLElement | null) ||
+          (targetEl?.closest?.('.html-content-container') as HTMLElement | null);
 
         if (htmlContainer) {
+          const startCountdown = (direction: 'prev' | 'next', onDone: () => void) => {
+            setShowAutoNextCountdown(true);
+            countdownSecondsRef.current = COUNTDOWN_DURATION;
+
+            const label = direction === 'next' ? '下一页' : '上一页';
+            countdownToastId.current = toast.loading(`即将跳转到${label}（${COUNTDOWN_DURATION}秒后）`, {
+              duration: COUNTDOWN_DURATION * 1000,
+              action: { label: '取消', onClick: () => clearCountdown() },
+            });
+
+            countdownTimeoutRef.current = setInterval(() => {
+              countdownSecondsRef.current -= 1;
+              if (countdownSecondsRef.current <= 0) {
+                clearCountdown();
+                onDone();
+                return;
+              }
+
+              if (countdownToastId.current !== null) {
+                toast.loading(`即将跳转到${label}（${countdownSecondsRef.current}秒后）`, {
+                  id: countdownToastId.current,
+                  duration: countdownSecondsRef.current * 1000,
+                  action: { label: '取消', onClick: () => clearCountdown() },
+                });
+              }
+            }, 1000);
+          };
+
+          const isHorizontalSpread = htmlContainer.classList.contains('reader-html-spread-container');
+          const primaryDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+
+          if (isHorizontalSpread) {
+            const metrics = getHtmlSpreadMetrics(htmlContainer);
+            const isAtStart = metrics.currentSlot <= 0 || metrics.scrollLeft <= 5;
+            const isNearStart = metrics.currentSlot <= 0 || metrics.scrollLeft <= 150;
+            const isNearEnd =
+              metrics.currentSlot >= metrics.maxSlot || metrics.scrollLeft >= metrics.maxScrollLeft - 150;
+            const isAtEnd = metrics.currentSlot >= metrics.maxSlot || metrics.scrollLeft >= metrics.maxScrollLeft - 5;
+
+            if (showAutoNextCountdown) {
+              e.preventDefault();
+              if (!((isAtStart && primaryDelta < 0) || (isAtEnd && primaryDelta > 0))) {
+                clearCountdown();
+              }
+              return;
+            }
+
+            if (primaryDelta < 0) {
+              e.preventDefault();
+              if (isNearStart) {
+                startCountdown('prev', () => {
+                  onPrevPage();
+                  setTimeout(() => {
+                    const el = document.querySelector('.reader-html-spread-container') as HTMLElement | null;
+                    if (el) {
+                      const endMetrics = getHtmlSpreadMetrics(el);
+                      el.scrollLeft = getHtmlSpreadSlotOffset(
+                        endMetrics.maxScrollLeft,
+                        endMetrics.step,
+                        endMetrics.maxSlot
+                      );
+                    }
+                  }, 100);
+                });
+                return;
+              }
+
+              const targetSlot = Math.max(0, metrics.currentSlot - 1);
+              const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
+              htmlContainer.scrollTo({ left: target, behavior: 'auto' });
+              return;
+            }
+
+            if (primaryDelta > 0) {
+              e.preventDefault();
+              if (isNearEnd) {
+                startCountdown('next', () => {
+                  onNextPage();
+                  setTimeout(() => {
+                    const el = document.querySelector('.reader-html-spread-container') as HTMLElement | null;
+                    if (el) el.scrollLeft = 0;
+                  }, 100);
+                });
+                return;
+              }
+
+              const targetSlot = Math.min(metrics.maxSlot, metrics.currentSlot + 1);
+              const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
+              htmlContainer.scrollTo({ left: target, behavior: 'auto' });
+              return;
+            }
+
+            return;
+          }
+
           const scrollTop = htmlContainer.scrollTop;
           const scrollHeight = htmlContainer.scrollHeight;
           const clientHeight = htmlContainer.clientHeight;
@@ -240,64 +338,22 @@ export function useReaderWheelNavigation({
 
           if (isNearTop && deltaY < 0) {
             e.preventDefault();
-            setShowAutoNextCountdown(true);
-            countdownSecondsRef.current = COUNTDOWN_DURATION;
-
-            countdownToastId.current = toast.loading(`即将跳转到上一页（${COUNTDOWN_DURATION}秒后）`, {
-              duration: COUNTDOWN_DURATION * 1000,
-              action: { label: '取消', onClick: () => clearCountdown() },
+            startCountdown('prev', () => {
+              onPrevPage();
+              setTimeout(() => {
+                const el = document.querySelector('.reader-html-page-container') as HTMLElement | null;
+                if (el) el.scrollTop = el.scrollHeight;
+              }, 100);
             });
-
-            countdownTimeoutRef.current = setInterval(() => {
-              countdownSecondsRef.current -= 1;
-              if (countdownSecondsRef.current <= 0) {
-                clearCountdown();
-                onPrevPage();
-                setTimeout(() => {
-                  const el = document.querySelector('.html-content-container') as HTMLElement | null;
-                  if (el) el.scrollTop = el.scrollHeight;
-                }, 100);
-                return;
-              }
-
-              if (countdownToastId.current !== null) {
-                toast.loading(`即将跳转到上一页（${countdownSecondsRef.current}秒后）`, {
-                  id: countdownToastId.current,
-                  duration: countdownSecondsRef.current * 1000,
-                  action: { label: '取消', onClick: () => clearCountdown() },
-                });
-              }
-            }, 1000);
           } else if (isNearBottom && deltaY > 0) {
             e.preventDefault();
-            setShowAutoNextCountdown(true);
-            countdownSecondsRef.current = COUNTDOWN_DURATION;
-
-            countdownToastId.current = toast.loading(`即将跳转到下一页（${COUNTDOWN_DURATION}秒后）`, {
-              duration: COUNTDOWN_DURATION * 1000,
-              action: { label: '取消', onClick: () => clearCountdown() },
+            startCountdown('next', () => {
+              onNextPage();
+              setTimeout(() => {
+                const el = document.querySelector('.reader-html-page-container') as HTMLElement | null;
+                if (el) el.scrollTop = 0;
+              }, 100);
             });
-
-            countdownTimeoutRef.current = setInterval(() => {
-              countdownSecondsRef.current -= 1;
-              if (countdownSecondsRef.current <= 0) {
-                clearCountdown();
-                onNextPage();
-                setTimeout(() => {
-                  const el = document.querySelector('.html-content-container') as HTMLElement | null;
-                  if (el) el.scrollTop = 0;
-                }, 100);
-                return;
-              }
-
-              if (countdownToastId.current !== null) {
-                toast.loading(`即将跳转到下一页（${countdownSecondsRef.current}秒后）`, {
-                  id: countdownToastId.current,
-                  duration: countdownSecondsRef.current * 1000,
-                  action: { label: '取消', onClick: () => clearCountdown() },
-                });
-              }
-            }, 1000);
           }
 
           return;

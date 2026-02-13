@@ -10,12 +10,14 @@ export function useReaderProgressTracking({
   pagesLength,
   doublePageMode,
   splitCoverMode,
+  isCurrentHtmlPage,
 }: {
   id: string | null;
   currentPage: number;
   pagesLength: number;
   doublePageMode: boolean;
   splitCoverMode: boolean;
+  isCurrentHtmlPage: boolean;
 }) {
   const imageLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentPageRef = useRef<number>(0);
@@ -26,7 +28,7 @@ export function useReaderProgressTracking({
 
       try {
         let actualPage = page;
-        if (doublePageMode && splitCoverMode) {
+        if (doublePageMode && splitCoverMode && !isCurrentHtmlPage) {
           if (page === 0) {
             actualPage = 0;
           } else if (page === 1) {
@@ -41,7 +43,7 @@ export function useReaderProgressTracking({
         logger.operationFailed('update reading progress', err);
       }
     },
-    [id, doublePageMode, splitCoverMode]
+    [id, doublePageMode, splitCoverMode, isCurrentHtmlPage]
   );
 
   useEffect(() => {

@@ -23,6 +23,7 @@ export function useMediaInfoOverlayLines({
   readingMode,
   doublePageMode,
   splitCoverMode,
+  isHtmlSpreadView,
   cachedPages,
   htmlContents,
   scale,
@@ -51,6 +52,7 @@ export function useMediaInfoOverlayLines({
   readingMode: ReadingMode;
   doublePageMode: boolean;
   splitCoverMode: boolean;
+  isHtmlSpreadView: boolean;
   cachedPages: string[];
   htmlContents: Record<number, string>;
   scale: number;
@@ -83,6 +85,7 @@ export function useMediaInfoOverlayLines({
     const showSecondPage =
       readingMode !== 'webtoon' &&
       doublePageMode &&
+      !isHtmlSpreadView &&
       !(splitCoverMode && currentPage === 0) &&
       currentPage + 1 < pages.length;
 
@@ -270,6 +273,7 @@ export function useMediaInfoOverlayLines({
     readingMode,
     doublePageMode,
     splitCoverMode,
+    isHtmlSpreadView,
     cachedPages,
     htmlContents,
     scale,

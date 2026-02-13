@@ -27,6 +27,7 @@ import { useReaderSidebar } from '@/components/reader/hooks/useReaderSidebar';
 import { useReaderToolbarAutoHide } from '@/components/reader/hooks/useReaderToolbarAutoHide';
 import { useReaderWebtoonVirtualization } from '@/components/reader/hooks/useReaderWebtoonVirtualization';
 import { useReaderWheelNavigation } from '@/components/reader/hooks/useReaderWheelNavigation';
+import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
 import { logger } from '@/lib/utils/logger';
 import {
   useReadingMode,
@@ -229,6 +230,13 @@ function ReaderContent() {
     return Boolean(tankoubonContext);
   }, [tankoubonContext]);
 
+  const currentPageType = pages[currentPage]?.type ?? null;
+  const isCurrentHtmlPage = currentPageType === 'html';
+  const isCurrentOrTailHtmlPage =
+    isCurrentHtmlPage ||
+    (currentPage >= pages.length && pages.length > 0 && pages[pages.length - 1]?.type === 'html');
+  const isHtmlSpreadView = readingMode !== 'webtoon' && doublePageMode && isCurrentHtmlPage;
+
   const totalPages = useMemo(() => {
     if (readingMode === 'webtoon') return pages.length + (collectionEndPageEnabled ? 1 : 0);
     return pages.length + (collectionEndPageEnabled ? 1 : 0);
@@ -270,13 +278,14 @@ function ReaderContent() {
     if (
       readingMode !== 'webtoon' &&
       doublePageMode &&
+      !isCurrentHtmlPage &&
       !(splitCoverMode && currentPage === 0) &&
       currentPage + 1 < pages.length
     ) {
       return [currentPage, currentPage + 1];
     }
     return [currentPage];
-  }, [currentPage, doublePageMode, pages.length, readingMode, splitCoverMode]);
+  }, [currentPage, doublePageMode, isCurrentHtmlPage, pages.length, readingMode, splitCoverMode]);
 
   const imageLoading = useReaderImageLoading({
     pages,
@@ -339,9 +348,10 @@ function ReaderContent() {
         const splitCoverModeFromStorage = typeof window !== 'undefined' 
           ? localStorage.getItem('splitCoverMode') === 'true' 
           : false;
+        const initialPageIsHtml = data.pages[initialPage]?.type === 'html';
           
-        // 在拆分封面模式下，需要调整恢复的页码
-        if (doublePageModeFromStorage && splitCoverModeFromStorage) {
+        // 在拆分封面模式下，需要调整恢复的页码（HTML 分页不使用 split-cover 规则）
+        if (doublePageModeFromStorage && splitCoverModeFromStorage && !initialPageIsHtml) {
           if (initialPage === 0) {
             // 第1页，在拆分封面模式下显示为封面
             initialPage = 0;
@@ -553,7 +563,7 @@ function ReaderContent() {
         label: t('reader.splitCover'),
         icon: Scissors,
         active: splitCoverMode,
-        disabled: !doublePageMode,
+        disabled: !doublePageMode || isCurrentOrTailHtmlPage,
         onClick: () => setSplitCoverMode((prev) => !prev),
         tooltip: t('reader.splitCoverTooltip'),
       },
@@ -625,6 +635,7 @@ function ReaderContent() {
       t,
       readingMode,
       doublePageMode,
+      isCurrentOrTailHtmlPage,
       splitCoverMode,
       setDoublePageMode,
       setSplitCoverMode,
@@ -657,6 +668,7 @@ function ReaderContent() {
     pagesLength: pages.length,
     doublePageMode,
     splitCoverMode,
+    isCurrentHtmlPage: isCurrentOrTailHtmlPage,
   });
 
   // Apply URL `page` -> state. This runs for all modes (including webtoon and the synthetic "end" page).
@@ -779,6 +791,7 @@ function ReaderContent() {
     readingMode,
     doublePageMode,
     splitCoverMode,
+    isHtmlSpreadView,
     cachedPages: imageLoading.cachedPages,
     htmlContents,
     scale,
@@ -881,13 +894,40 @@ function ReaderContent() {
     e.preventDefault();
   }, []);
 
+  const tryTurnHtmlSpread = useCallback(
+    (direction: 'prev' | 'next') => {
+      if (!isHtmlSpreadView) return false;
+
+      const container = htmlContainerRefs.current[currentPage];
+      if (!container) return false;
+
+      const metrics = getHtmlSpreadMetrics(container);
+      if (metrics.maxScrollLeft <= 1) return false;
+
+      if (direction === 'next') {
+        if (metrics.currentSlot >= metrics.maxSlot) return false;
+        const targetSlot = Math.min(metrics.maxSlot, metrics.currentSlot + 1);
+        const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
+        container.scrollTo({ left: target, behavior: 'auto' });
+        return true;
+      }
+
+      if (metrics.currentSlot <= 0) return false;
+      const targetSlot = Math.max(0, metrics.currentSlot - 1);
+      const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
+      container.scrollTo({ left: target, behavior: 'auto' });
+      return true;
+    },
+    [currentPage, htmlContainerRefs, isHtmlSpreadView]
+  );
+
   const handlePrevPage = useCallback(() => {
     if (isCollectionEndPage) {
       // From the synthetic "end" page, go back to the last real page.
       if (pages.length <= 0) return;
 
       let target = pages.length - 1;
-      if (doublePageMode) {
+      if (doublePageMode && pages[pages.length - 1]?.type !== 'html') {
         if (splitCoverMode) {
           // split-cover spreads start at 1: (1,2), (3,4)...
           // When pages.length is odd, the last page is part of a spread starting at pages.length - 2.
@@ -904,6 +944,8 @@ function ReaderContent() {
       return;
     }
 
+    if (tryTurnHtmlSpread('prev')) return;
+
     // Collection: from the first page, flipping "prev" goes to previous chapter end (like HTML chapter navigation).
     if (currentPage <= 0 && collectionEndPageEnabled && prevArchiveId) {
       requestChapterJump('prev', navigateToPrevArchiveEnd);
@@ -911,7 +953,10 @@ function ReaderContent() {
     }
 
     if (currentPage > 0) {
-      if (doublePageMode && splitCoverMode) {
+      if (isHtmlSpreadView) {
+        // HTML 双页模式按章节顺序逐章前进/后退（章节内由水平列分页处理）。
+        setCurrentPage(currentPage - 1);
+      } else if (doublePageMode && splitCoverMode) {
         // 拆分封面模式：第1页单独显示，其他页面正常拼合
         if (currentPage === 1) {
           // 从第2页回到封面
@@ -944,7 +989,9 @@ function ReaderContent() {
     prevArchiveId,
     resetTransform,
     doublePageMode,
+    isHtmlSpreadView,
     splitCoverMode,
+    tryTurnHtmlSpread,
   ]);
 
   const handleNextPage = useCallback(() => {
@@ -954,9 +1001,12 @@ function ReaderContent() {
       return;
     }
 
+    if (tryTurnHtmlSpread('next')) return;
+
     // When in a collection (tankoubon), append a synthetic end page after the last real page.
     if (collectionEndPageEnabled && pages.length > 0) {
       const viewShowsTwoPages =
+        !isHtmlSpreadView &&
         doublePageMode &&
         !(splitCoverMode && currentPage === 0) &&
         currentPage + 1 < pages.length;
@@ -972,7 +1022,9 @@ function ReaderContent() {
     }
 
     if (currentPage < pages.length - 1) {
-      if (doublePageMode && splitCoverMode) {
+      if (isHtmlSpreadView) {
+        setCurrentPage(currentPage + 1);
+      } else if (doublePageMode && splitCoverMode) {
         // 拆分封面模式：第1页单独显示，其他页面正常拼合
         if (currentPage === 0) {
           // 从封面跳到第2页（显示第2页和第3页）
@@ -1009,7 +1061,9 @@ function ReaderContent() {
     navigateToNextArchiveStart,
     resetTransform,
     doublePageMode,
+    isHtmlSpreadView,
     splitCoverMode,
+    tryTurnHtmlSpread,
   ]);
 
   const interactionHandlers = useReaderInteractionHandlers({
@@ -1091,6 +1145,8 @@ function ReaderContent() {
 
   // 处理拆分封面模式切换时的页面调整
   useEffect(() => {
+    if (isCurrentOrTailHtmlPage) return;
+
     if (doublePageMode && pages.length > 0) {
       // 使用ref来避免无限循环
       const prevSplitCoverMode = splitCoverModeRef.current;
@@ -1133,7 +1189,7 @@ function ReaderContent() {
         }
       }
     }
-  }, [splitCoverMode, doublePageMode, currentPage, pages.length]);
+  }, [splitCoverMode, doublePageMode, currentPage, pages.length, isCurrentOrTailHtmlPage]);
 
   if (loading) {
     return (

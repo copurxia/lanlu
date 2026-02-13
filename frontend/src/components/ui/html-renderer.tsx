@@ -1,14 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import type { CSSProperties } from 'react';
 
 interface HtmlRendererProps {
   html: string;
   className?: string;
   scrollable?: boolean;
+  style?: CSSProperties;
 }
 
-export function HtmlRenderer({ html, className, scrollable = true }: HtmlRendererProps) {
+export function HtmlRenderer({ html, className, scrollable = true, style }: HtmlRendererProps) {
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
@@ -34,14 +36,15 @@ export function HtmlRenderer({ html, className, scrollable = true }: HtmlRendere
   return (
     <div
       className={`html-content-container ${className || ''}`}
-      style={
-        scrollable
+      style={{
+        ...(scrollable
           ? {
               overflowY: 'auto',
               maxHeight: '100%',
             }
-          : undefined
-      }
+          : undefined),
+        ...style,
+      }}
       dangerouslySetInnerHTML={{ __html: html }}
     />
   );

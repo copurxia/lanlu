@@ -105,6 +105,26 @@
   overflow: hidden;
 }
 
+/* Reader: HTML content pagination for double-page mode */
+.reader-html-spread-content {
+  height: 100%;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+}
+
+.reader-html-spread-content > * {
+  max-width: 100%;
+}
+
+.reader-html-spread-content img,
+.reader-html-spread-content video,
+.reader-html-spread-content svg,
+.reader-html-spread-content iframe {
+  max-width: 100%;
+  height: auto;
+}
+
 /* 自定义滑动条样式 */
 input[type="range"] {
   -webkit-appearance: none;
