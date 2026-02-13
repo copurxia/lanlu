@@ -20,6 +20,12 @@ import lanlu.dao.*
 public class TankoubonAutocreateService {
     private static let logger = getLogger("tankoubon_autocreate")
 
+    private static func isCoverAssetMissing(coverAssetId: Int64): Bool {
+        if (coverAssetId <= 0) { return true }
+        let row = AssetDao.getById(coverAssetId)
+        return row.id <= 0
+    }
+
     public static func isLeafMediaFolder(dirPath: String): Bool {
         if (!DirectoryScanner.directoryExists(dirPath)) { return false }
         let entries = DirectoryScanner.listDirectory(dirPath)
@@ -122,7 +128,7 @@ public class TankoubonAutocreateService {
         // Default cover: use the first archive's cover if tank has no cover yet.
         if (desired.size > 0) {
             let currentCover = TankoubonDao.getTankoubonCoverAssetId(tankoubonId)
-            if (currentCover <= 0) {
+            if (isCoverAssetMissing(currentCover)) {
                 let firstArchiveId = desired[0]
                 let firstCover = ArchiveDao.getCoverAssetId(firstArchiveId)
                 if (firstCover > 0) {
@@ -142,6 +148,33 @@ public class TankoubonAutocreateService {
         for (i in 0..desired.size) {
             let arcid = desired[i]
             let _ = TankoubonDao.addArchiveToTankoubon(tankoubonId, arcid, Int32(i + 1))
+        }
+    }
+
+    /**
+     * Ensure default cover for auto-created tankoubon:
+     * - only when tank cover is missing/broken
+     * - only when this archive is the first member (natural order)
+     */
+    public static func ensureDefaultCoverFromArchive(archiveId: String): Unit {
+        let arcid = archiveId.trimAscii()
+        if (arcid.size == 0) { return }
+
+        let coverAssetId = ArchiveDao.getCoverAssetId(arcid)
+        if (coverAssetId <= 0) { return }
+
+        let tankIds = TankoubonDao.getTankoubonsForArchive(arcid)
+        for (tankId in tankIds) {
+            match (TankoubonDao.getTankoubonById(tankId)) {
+                case Some(tank) =>
+                    if (tank.auto_created &&
+                        isCoverAssetMissing(tank.cover_asset_id) &&
+                        tank.archives.size > 0 &&
+                        tank.archives[0] == arcid) {
+                        let _ = TankoubonDao.updateTankoubonCover(tankId, coverAssetId)
+                    }
+                case None => ()
+            }
         }
     }
 

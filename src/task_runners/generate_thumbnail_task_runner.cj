@@ -43,6 +43,13 @@ public class GenerateThumbnailTaskRunner {
             return
         }
 
+        // Cover backfill can run after auto Tankoubon is already created; sync default tank cover lazily.
+        try {
+            TankoubonAutocreateService.ensureDefaultCoverFromArchive(archiveId)
+        } catch (e: Exception) {
+            TaskIO.appendLog(taskId, "WARN: failed to sync auto tank cover for archive=${archiveId}: ${e.message}")
+        }
+
         let successJson = "{\"success\":1,\"archive_id\":\"${archiveId}\"}"
         TaskModel.updateTaskProgress(taskId, 100, "Thumbnail generated successfully")
         TaskModel.completeTask(taskId, successJson)
