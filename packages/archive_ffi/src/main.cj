@@ -2,9 +2,11 @@ package archive_ffi
 
 import std.collection.*
 import std.sort.*
+import std.sync.*
 
 foreign func strlen(arg1: CString): UIntNative
 foreign func memcpy(dest: CPointer<Unit>, src: CString, n: UIntNative): CPointer<Unit>
+foreign func setlocale(category: Int32, locale: CString): CString
 
 /**
  * 压缩包条目流式读取器
@@ -68,15 +70,58 @@ public class ArchiveEntryReader {
 }
 
 public class Archive {
+    private static let localeInitMutex: Mutex = Mutex()
+    private static var localeInitialized: Bool = false
+    private static let LC_CTYPE: Int32 = 0
+
+    private static func ensureLocaleInitialized(): Unit {
+        localeInitMutex.lock()
+        if (localeInitialized) {
+            localeInitMutex.unlock()
+            return
+        }
+
+        // libarchive relies on C locale for ZIP filename conversion.
+        // Adopt process locale from environment once (e.g. C.UTF-8).
+        let emptyLocale = unsafe { LibC.mallocCString("") }
+        unsafe {
+            let _ = setlocale(LC_CTYPE, emptyLocale)
+            LibC.free(emptyLocale)
+        }
+        localeInitialized = true
+        localeInitMutex.unlock()
+    }
+
     private static func getEntryName(entry: CPointer<archive_entry>): String {
+        // Prefer UTF-8 normalized entry names for non-ASCII archives.
+        let rawUtf8Pathname = unsafe { archive_entry_pathname_utf8(entry) }
+        if (!rawUtf8Pathname.isNull()) {
+            let utf8Name = decodeEntryName(rawUtf8Pathname, true)
+            if (utf8Name.size > 0) {
+                return utf8Name
+            }
+        }
+
         let rawPathname = unsafe { archive_entry_pathname(entry) }
         if (rawPathname.isNull()) {
             return ""
         }
-        let bytes = cStringToBytes(rawPathname)
+        return decodeEntryName(rawPathname, false)
+    }
+
+    private static func decodeEntryName(ptr: CString, utf8Guaranteed: Bool): String {
+        let bytes = cStringToBytes(ptr)
         if (bytes.size == 0) {
             return ""
         }
+
+        // archive_entry_pathname_utf8 guarantees UTF-8. For pathname(), try UTF-8 first
+        // and then fall back to Latin-1 to preserve old behavior for odd encodings.
+        if (utf8Guaranteed) {
+            try { return String.fromUtf8(bytes) } catch (_: Exception) { return decodeLatin1(bytes) }
+        }
+
+        try { return String.fromUtf8(bytes) } catch (_: Exception) {}
         return decodeLatin1(bytes)
     }
 
@@ -110,6 +155,7 @@ public class Archive {
      * @return 条目路径名数组
      */
     private static func scanEntries(archivePath: String): (Array<String>, Int32) {
+        ensureLocaleInitialized()
         let entries = ArrayList<String>()
         var mediaCount: Int32 = 0
 
@@ -175,6 +221,7 @@ public class Archive {
      * @return best-matching image entry name, or "" if none found / open fails.
      */
     public static func findFirstImageEntry(archivePath: String): String {
+        ensureLocaleInitialized()
         let a = unsafe { archive_read_new() }
         if (a.isNull()) {
             return ""
@@ -236,6 +283,7 @@ public class Archive {
      * @return 条目内容的字节数组，如果未找到则返回空数组
      */
     public static func extractEntry(archivePath: String, entryName: String): Array<UInt8> {
+        ensureLocaleInitialized()
         let a = unsafe { archive_read_new() }
         if (a.isNull()) {
             return Array<UInt8>()
@@ -455,6 +503,7 @@ public class Archive {
      * @return (成功标志, 读取器或None, 条目大小, 错误信息)
      */
     public static func openEntryReader(archivePath: String, entryName: String): (Bool, Option<ArchiveEntryReader>, Int64, String) {
+        ensureLocaleInitialized()
         let a = unsafe { archive_read_new() }
         if (a.isNull()) {
             return (false, None, 0, "Archive open failed: ${archivePath}")
