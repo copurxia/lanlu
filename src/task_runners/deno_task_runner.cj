@@ -87,9 +87,26 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
     var extraParams: String = ""
     var url: String = ""
     var parentTaskId: String = ""
+    var metadata: String = ""
 
     public static func fromJson(r: JsonReader): DenoTaskParametersReq {
         let res = DenoTaskParametersReq()
+
+        func readRawJsonFlexible(): String {
+            match (r.peek()) {
+                case Some(BeginObject) =>
+                    let bytes = r.readValueBytes()
+                    return String.fromUtf8(bytes)
+                case Some(BeginArray) =>
+                    let bytes = r.readValueBytes()
+                    return String.fromUtf8(bytes)
+                case Some(_) =>
+                    return r.readValue<String>()
+                case None =>
+                    return ""
+            }
+        }
+
         while (let Some(tok) <- r.peek()) {
             match (tok) {
                 case BeginObject =>
@@ -108,6 +125,9 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
                             case "extraParams" => res.extraParams = r.readValue<String>()
                             case "url" => res.url = r.readValue<String>().trimAscii()
                             case "parentTaskId" => res.parentTaskId = r.readValue<String>().trimAscii()
+                            case "metadata" => res.metadata = readRawJsonFlexible().trimAscii()
+                            case "metadata_input" => res.metadata = readRawJsonFlexible().trimAscii()
+                            case "metadataInput" => res.metadata = readRawJsonFlexible().trimAscii()
                             case _ => r.skip()
                         }
                     }
@@ -119,6 +139,17 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
         if (res.action.size == 0) { res.action = "run" }
         return res
     }
+}
+
+class MetadataInputOverrides {
+    var hasTitle: Bool = false
+    var hasSummary: Bool = false
+    var hasTags: Bool = false
+    var title: String = ""
+    var summary: String = ""
+    var tags: String = ""
+
+    public init() {}
 }
 
 /**
@@ -221,7 +252,7 @@ public class DenoTaskRunner {
         TaskModel.updateTaskProgress(taskId, 1, "Deno任务开始")
 
         // 解析参数
-        let (pluginNamespace, pluginType, _, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskIdRaw) = parseParameters(parameters)
+        let (pluginNamespace, pluginType, _, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskIdRaw, metadataJson) = parseParameters(parameters)
         let parentTaskId = parseInt64OrZero(parentTaskIdRaw)
 
         if (pluginNamespace.size == 0 || pluginType.size == 0) {
@@ -272,7 +303,7 @@ public class DenoTaskRunner {
 
             // 根据类型执行插件
             let result = match (pluginType) {
-                case "Metadata" => executeMetadataPlugin(taskId, plugin, targetType, targetId, oneshotParam, extraParams, loginCookiesJson, interactiveSelectEnabled)
+                case "Metadata" => executeMetadataPlugin(taskId, plugin, targetType, targetId, oneshotParam, extraParams, metadataJson, loginCookiesJson, interactiveSelectEnabled)
                 case "Download" => executeDownloadPlugin(taskId, plugin, url, loginCookiesJson, parentTaskId, interactiveSelectEnabled)
                 case "Login" => executeLoginPluginDirect(taskId, plugin, interactiveSelectEnabled)
                 case "Script" => executeScriptPlugin(taskId, plugin, oneshotParam, extraParams, loginCookiesJson, interactiveSelectEnabled)
@@ -304,7 +335,7 @@ public class DenoTaskRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String, String, String) {
         var pluginNamespace = ""
         var pluginType = ""
         var action = "run"
@@ -316,10 +347,11 @@ public class DenoTaskRunner {
         var extraParams = ""
         var url = ""
         var parentTaskId = ""
+        var metadata = ""
 
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId)
+            return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId, metadata)
         }
 
         try {
@@ -335,11 +367,12 @@ public class DenoTaskRunner {
             extraParams = req.extraParams
             url = req.url
             parentTaskId = req.parentTaskId
+            metadata = req.metadata
         } catch (_: Exception) {}
 
         if (targetType.size == 0) { targetType = "archive" }
         if (targetId.size == 0) { targetId = archiveId }
-        return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId)
+        return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId, metadata)
     }
 
     private static func parseInt64OrZero(s: String): Int64 {
@@ -350,6 +383,70 @@ public class DenoTaskRunner {
         } catch (_: Exception) {
             return 0
         }
+    }
+
+    private static func parseMetadataInputOverrides(rawMetadata: String): MetadataInputOverrides {
+        let overrides = MetadataInputOverrides()
+        let trimmed = rawMetadata.trimAscii()
+        if (trimmed.size == 0) {
+            return overrides
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readStringFlexible(): String {
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(BeginArray) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(_) =>
+                        return r.readValue<String>()
+                    case None => return ""
+                }
+            }
+
+            if (r.peek() != Some(BeginObject)) {
+                return overrides
+            }
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "title" =>
+                        overrides.hasTitle = true
+                        overrides.title = readStringFlexible()
+                    case "archiveTitle" =>
+                        overrides.hasTitle = true
+                        overrides.title = readStringFlexible()
+                    case "name" =>
+                        overrides.hasTitle = true
+                        overrides.title = readStringFlexible()
+                    case "summary" =>
+                        overrides.hasSummary = true
+                        overrides.summary = readStringFlexible()
+                    case "archiveSummary" =>
+                        overrides.hasSummary = true
+                        overrides.summary = readStringFlexible()
+                    case "tags" =>
+                        overrides.hasTags = true
+                        overrides.tags = readStringFlexible().trimAscii()
+                    case "existingTags" =>
+                        overrides.hasTags = true
+                        overrides.tags = readStringFlexible().trimAscii()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return overrides
     }
 
     /**
@@ -593,6 +690,7 @@ public class DenoTaskRunner {
         pluginDir: String,
         archiveId: String,
         archiveTitle: String,
+        archiveSummary: String,
         existingTags: String,
         thumbnailHash: String,
         oneshotParam: String,
@@ -609,6 +707,7 @@ public class DenoTaskRunner {
         w.writeName("pluginDir").writeValue(pluginDir)
         w.writeName("archiveId").writeValue(archiveId)
         w.writeName("archiveTitle").writeValue(archiveTitle)
+        w.writeName("archiveSummary").writeValue(archiveSummary)
         w.writeName("existingTags").writeValue(existingTags)
         w.writeName("thumbnailHash").writeValue(thumbnailHash)
         w.writeName("oneshotParam").writeValue(oneshotParam)
@@ -1852,6 +1951,7 @@ public class DenoTaskRunner {
             "",
             "",
             "",
+            "",
             paramsJson,
             "",
             ""
@@ -1890,6 +1990,7 @@ public class DenoTaskRunner {
             "run",
             "Script",
             pluginDir,
+            "",
             "",
             "",
             "",
@@ -2004,6 +2105,7 @@ public class DenoTaskRunner {
         targetId: String,
         oneshotParam: String,
         extraParams: String,
+        metadataJson: String,
         loginCookiesJson: String,
         interactiveSelectEnabled: Bool
     ): DenoExecutionResult {
@@ -2022,6 +2124,7 @@ public class DenoTaskRunner {
         }
 
         var title = ""
+        var summary = ""
         var tagsString = ""
         var thumbhash = ""
 
@@ -2030,6 +2133,7 @@ public class DenoTaskRunner {
             match (tankOpt) {
                 case Some(t) =>
                     title = t.name
+                    summary = t.summary
                     tagsString = TankoubonDao.getMergedTagsForTankoubon(effectiveId)
                     let coverAssetId = TankoubonDao.getTankoubonCoverAssetId(effectiveId)
                     if (coverAssetId > 0) {
@@ -2045,9 +2149,15 @@ public class DenoTaskRunner {
                 return DenoExecutionResult(false, "Archive not found", "")
             }
             title = archive.title
+            summary = archive.summary
             tagsString = TagDao.getArchiveTags(effectiveId)
             thumbhash = archive.thumbhash
         }
+
+        let overrides = parseMetadataInputOverrides(metadataJson)
+        if (overrides.hasTitle) { title = overrides.title }
+        if (overrides.hasSummary) { summary = overrides.summary }
+        if (overrides.hasTags) { tagsString = overrides.tags }
 
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
         // Allow reading the plugin runtime dir so plugins can consume files exported via host RPC
@@ -2069,6 +2179,7 @@ public class DenoTaskRunner {
             pluginDir,
             effectiveId,
             title,
+            summary,
             tagsString,
             thumbhash,
             oneshotParam,
@@ -2167,6 +2278,7 @@ public class DenoTaskRunner {
             "run",
             "Download",
             pluginDir,
+            "",
             "",
             "",
             "",

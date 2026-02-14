@@ -63,6 +63,7 @@ export interface PluginInput {
   pluginDir?: string;  // 插件工作目录，由系统传入
   archiveId?: string;
   archiveTitle?: string;
+  archiveSummary?: string;
   existingTags?: string;
   thumbnailHash?: string;
   oneshotParam?: string;

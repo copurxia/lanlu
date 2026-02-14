@@ -34,6 +34,24 @@ public class MetadataPluginController {
         return v == "true" || v == "1" || v == "yes" || v == "y"
     }
 
+    private static func normalizeMetadataJson(raw: String): String {
+        let trimmed = raw.trimAscii()
+        if (trimmed.size == 0) {
+            return ""
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() == Some(BeginObject)) {
+                return trimmed
+            }
+        } catch (_: Exception) {}
+
+        return ""
+    }
+
     /**
      * param 若是 JSON 对象字符串，则作为 extraParams；否则作为 oneshotParam
      */
@@ -75,6 +93,7 @@ public class MetadataPluginController {
             var targetId = ""
             var namespace = ""
             var param = ""
+            var metadataJson = ""
             var writeBack = false  // default: query/preview
 
             if (requestBody.trimAscii().size > 0) {
@@ -104,6 +123,9 @@ public class MetadataPluginController {
                                     if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                                 case "namespace" => namespace = r.readValue<String>().trimAscii()
                                 case "param" => param = readRawJson(r).trimAscii()
+                                case "metadata" => metadataJson = normalizeMetadataJson(readRawJson(r))
+                                case "metadata_input" => metadataJson = normalizeMetadataJson(readRawJson(r))
+                                case "metadataInput" => metadataJson = normalizeMetadataJson(readRawJson(r))
                                 case "write_back" => writeBack = readBoolFlexible(r)
                                 case "writeBack" => writeBack = readBoolFlexible(r)
                                 case "mode" =>
@@ -155,6 +177,10 @@ public class MetadataPluginController {
             }
             if (param.size == 0) {
                 param = ctx.getQuery("param") ?? ""
+            }
+            if (metadataJson.size == 0) {
+                let qMeta = ctx.getQuery("metadata") ?? (ctx.getQuery("metadata_input") ?? "")
+                metadataJson = normalizeMetadataJson(qMeta)
             }
             let writeBackQuery = ctx.getQuery("write_back") ?? (ctx.getQuery("writeBack") ?? "")
             if (writeBackQuery.trimAscii().size > 0) {
@@ -210,6 +236,9 @@ public class MetadataPluginController {
                     w.writeName("target_id").writeValue(targetId)
                     w.writeName("namespace").writeValue(namespace)
                     w.writeName("param").writeValue(param)
+                    if (metadataJson.size > 0) {
+                        w.writeName("metadata").jsonValue(metadataJson)
+                    }
                     w.writeName("write_back").writeValue(1)
                     w.endObject()
                     w.flush()
@@ -256,6 +285,9 @@ public class MetadataPluginController {
             match (extraParamsOpt) {
                 case Some(v) => w.writeName("extraParams").writeValue(v)
                 case None => ()
+            }
+            if (metadataJson.size > 0) {
+                w.writeName("metadata").jsonValue(metadataJson)
             }
             // groupId 仅用于任务运行期共享 KV（默认语义下任务结束会清理整组），这里用 archiveId 便于同归档并发共享。
             w.writeName("groupId").writeValue(targetId)

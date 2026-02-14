@@ -364,6 +364,7 @@ export function ArchiveDetailContent() {
     setRpcSelectRemainingSeconds(null);
 
     try {
+      const metadataTags = editTags.map((tag) => toCanonicalTag(tag)).join(', ');
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         'archive',
         metadata.arcid,
@@ -390,7 +391,14 @@ export function ArchiveDetailContent() {
           },
         },
         // Preview by default: fill edit form, don't persist automatically.
-        { writeBack: false }
+        {
+          writeBack: false,
+          metadata: {
+            title: editTitle,
+            summary: editSummary,
+            tags: metadataTags,
+          },
+        }
       );
 
       if (finalTask.status !== 'completed') {
@@ -443,7 +451,7 @@ export function ArchiveDetailContent() {
       setRpcSelectSelectedIndex(null);
       setRpcSelectRemainingSeconds(null);
     }
-  }, [isAuthenticated, metadata, metadataPluginParam, selectedMetadataPlugin, showError, t, toCanonicalTag]);
+  }, [editSummary, editTags, editTitle, isAuthenticated, metadata, metadataPluginParam, selectedMetadataPlugin, showError, t, toCanonicalTag]);
 
   const [isNewStatusLoading, setIsNewStatusLoading] = useState(false);
   const handleMarkAsRead = useCallback(async () => {

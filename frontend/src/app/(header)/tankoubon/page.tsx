@@ -581,6 +581,7 @@ function TankoubonDetailContent() {
     setRpcSelectRemainingSeconds(null);
 
     try {
+      const metadataTags = editTags.join(', ');
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         'tankoubon',
         tankoubon.tankoubon_id,
@@ -606,7 +607,14 @@ function TankoubonDetailContent() {
             }
           },
         },
-        { writeBack: false }
+        {
+          writeBack: false,
+          metadata: {
+            title: editName,
+            summary: editSummary,
+            tags: metadataTags,
+          },
+        }
       );
 
       if (finalTask.status !== 'completed') {
@@ -672,7 +680,7 @@ function TankoubonDetailContent() {
       setRpcSelectSelectedIndex(null);
       setRpcSelectRemainingSeconds(null);
     }
-  }, [tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
+  }, [editName, editSummary, editTags, tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
 
   // Handle delete
   const handleDelete = async () => {

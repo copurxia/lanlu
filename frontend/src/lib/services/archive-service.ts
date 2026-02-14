@@ -36,6 +36,17 @@ export interface MetadataPluginRunCallbacks {
   onUpdate?: (task: Task) => void;
 }
 
+export interface MetadataPluginInputMetadata {
+  title?: string;
+  summary?: string;
+  tags?: string;
+}
+
+export interface MetadataPluginRunOptions {
+  writeBack?: boolean;
+  metadata?: MetadataPluginInputMetadata;
+}
+
 // 页面信息接口（支持图片、视频和HTML）
 export interface PageInfo {
   url: string;
@@ -329,7 +340,7 @@ export class ArchiveService {
     namespace: string,
     param?: string,
     callbacks?: MetadataPluginRunCallbacks,
-    options?: { writeBack?: boolean }
+    options?: MetadataPluginRunOptions
   ): Promise<Task> {
     return await this.runMetadataPluginForTarget(
       'archive',
@@ -352,9 +363,9 @@ export class ArchiveService {
     namespace: string,
     param?: string,
     callbacks?: MetadataPluginRunCallbacks,
-    options?: { writeBack?: boolean }
+    options?: MetadataPluginRunOptions
   ): Promise<Task> {
-    const response = await apiClient.post('/api/metadata_plugin', {
+    const payload: Record<string, unknown> = {
       target_type: targetType,
       target_id: targetId,
       // Backward-compatible field; backend ignores it when target_* is present.
@@ -363,7 +374,12 @@ export class ArchiveService {
       param: param || '',
       // Default is preview/query (no persistence). Explicitly pass the flag so behavior is stable.
       write_back: options?.writeBack ? 1 : 0,
-    });
+    };
+    if (options?.metadata) {
+      payload.metadata = options.metadata;
+    }
+
+    const response = await apiClient.post('/api/metadata_plugin', payload);
 
     const rawSuccess = response.data?.success;
     const enqueueSuccess = isSuccessResponse(rawSuccess);

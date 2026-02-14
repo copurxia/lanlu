@@ -20,7 +20,7 @@ public class MetadataPluginCallbackRunner {
         TaskModel.updateTaskProgress(taskId, 10, "开始处理元数据回调")
 
         // 解析参数
-        let (targetType, targetId, namespace, denoTaskId, param, fallbackNamespaces) = parseParameters(parameters)
+        let (targetType, targetId, namespace, denoTaskId, param, metadataJson, fallbackNamespaces) = parseParameters(parameters)
         if (targetId.size == 0 || denoTaskId <= 0) {
             fail(taskId, "Invalid callback parameters: missing targetId or denoTaskId")
             return
@@ -32,7 +32,7 @@ public class MetadataPluginCallbackRunner {
         TaskModel.updateTaskProgress(taskId, 30, "读取插件输出")
         let output = TaskIO.readOutput(denoTaskId)
         if (output.size == 0) {
-            failAndMaybeEnqueueFallback(taskId, "Deno task output is empty", targetType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
+            failAndMaybeEnqueueFallback(taskId, "Deno task output is empty", targetType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
         TaskIO.appendLog(taskId, "plugin output: ${output}")
@@ -41,7 +41,7 @@ public class MetadataPluginCallbackRunner {
         TaskModel.updateTaskProgress(taskId, 50, "解析元数据")
         let parsed = parseMetadataOutput(output)
         if (!parsed.success) {
-            failAndMaybeEnqueueFallback(taskId, parsed.error, targetType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
+            failAndMaybeEnqueueFallback(taskId, parsed.error, targetType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
 
@@ -63,7 +63,7 @@ public class MetadataPluginCallbackRunner {
             // Write back to Tankoubon (name/summary/tankoubon_tags).
             match (TankoubonDao.getTankoubonById(targetId)) {
                 case None =>
-                    failAndMaybeEnqueueFallback(taskId, "Tankoubon not found when updating", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
+                    failAndMaybeEnqueueFallback(taskId, "Tankoubon not found when updating", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                     return
                 case Some(existing) =>
                     let updatedName = if (newTitle.size > 0) { newTitle } else { existing.name }
@@ -71,7 +71,7 @@ public class MetadataPluginCallbackRunner {
 
                     let ok = TankoubonDao.updateTankoubon(targetId, updatedName, updatedSummary)
                     if (!ok) {
-                        failAndMaybeEnqueueFallback(taskId, "Failed to update tankoubon metadata", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
+                        failAndMaybeEnqueueFallback(taskId, "Failed to update tankoubon metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                         return
                     }
                     if (newTags.size > 0 || parsed.tags.trimAscii().size == 0) {
@@ -112,7 +112,7 @@ public class MetadataPluginCallbackRunner {
             // Default: archive write-back.
             var archiveToUpdate = ArchiveDao.getArchiveById(targetId)
             if (archiveToUpdate.id.size == 0) {
-                failAndMaybeEnqueueFallback(taskId, "Archive not found when updating", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
+                failAndMaybeEnqueueFallback(taskId, "Archive not found when updating", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                 return
             }
 
@@ -133,7 +133,7 @@ public class MetadataPluginCallbackRunner {
             if (changed) {
                 let ok = ArchiveDao.update(archiveToUpdate)
                 if (!ok) {
-                    failAndMaybeEnqueueFallback(taskId, "Failed to update archive metadata", effectiveType, targetId, param, fallbackNamespaces, context.notifyTaskAvailable)
+                    failAndMaybeEnqueueFallback(taskId, "Failed to update archive metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                     return
                 }
             }
@@ -411,10 +411,10 @@ public class MetadataPluginCallbackRunner {
         }
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, Int64, String, Array<String>) {
+    private static func parseParameters(parameters: String): (String, String, String, Int64, String, String, Array<String>) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return ("", "", "", 0, "", Array<String>())
+            return ("", "", "", 0, "", "", Array<String>())
         }
 
         var targetType = ""
@@ -422,6 +422,7 @@ public class MetadataPluginCallbackRunner {
         var namespace = ""
         var denoTaskId: Int64 = 0
         var param = ""
+        var metadataJson = ""
         var fallbackNamespaces = ArrayList<String>()
 
         try {
@@ -460,6 +461,9 @@ public class MetadataPluginCallbackRunner {
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
                         case "denoTaskId" => denoTaskId = readInt64Flexible()
                         case "param" => param = readRawJson().trimAscii()
+                        case "metadata" => metadataJson = normalizeMetadataJson(readRawJson())
+                        case "metadata_input" => metadataJson = normalizeMetadataJson(readRawJson())
+                        case "metadataInput" => metadataJson = normalizeMetadataJson(readRawJson())
                         case "fallback_namespaces" =>
                             if (r.peek() == Some(BeginArray)) {
                                 r.startArray()
@@ -483,7 +487,7 @@ public class MetadataPluginCallbackRunner {
         } catch (_: Exception) {}
 
         if (targetType.size == 0) { targetType = "archive" }
-        return (targetType, targetId, namespace, denoTaskId, param, fallbackNamespaces.toArray())
+        return (targetType, targetId, namespace, denoTaskId, param, metadataJson, fallbackNamespaces.toArray())
     }
 
     private static func writeParamField(w: JsonWriter, param: String): Unit {
@@ -498,7 +502,28 @@ public class MetadataPluginCallbackRunner {
         }
     }
 
-    private static func enqueueFallbackTask(targetType: String, targetId: String, param: String, fallbackNamespaces: Array<String>, taskId: Int64, notifier: TaskNotifier): Bool {
+    private static func normalizeMetadataJson(raw: String): String {
+        let trimmed = raw.trimAscii()
+        if (trimmed.size == 0) { return "" }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() == Some(BeginObject)) {
+                return trimmed
+            }
+        } catch (_: Exception) {}
+        return ""
+    }
+
+    private static func writeMetadataField(w: JsonWriter, metadataJson: String): Unit {
+        let normalized = normalizeMetadataJson(metadataJson)
+        if (normalized.size == 0) { return }
+        w.writeName("metadata").jsonValue(normalized)
+    }
+
+    private static func enqueueFallbackTask(targetType: String, targetId: String, param: String, metadataJson: String, fallbackNamespaces: Array<String>, taskId: Int64, notifier: TaskNotifier): Bool {
         if (fallbackNamespaces.size == 0 || targetId.trimAscii().size == 0) { return false }
 
         let nextNamespace = fallbackNamespaces[0].trimAscii()
@@ -526,6 +551,7 @@ public class MetadataPluginCallbackRunner {
             }
             w.writeName("namespace").writeValue(nextNamespace)
             writeParamField(w, param)
+            writeMetadataField(w, metadataJson)
             if (remaining.size > 0) {
                 w.writeName("fallback_namespaces")
                 w.startArray()
@@ -562,8 +588,8 @@ public class MetadataPluginCallbackRunner {
         return false
     }
 
-    private static func failAndMaybeEnqueueFallback(taskId: Int64, message: String, targetType: String, targetId: String, param: String, fallbackNamespaces: Array<String>, notifier: TaskNotifier): Unit {
-        let enqueued = enqueueFallbackTask(targetType, targetId, param, fallbackNamespaces, taskId, notifier)
+    private static func failAndMaybeEnqueueFallback(taskId: Int64, message: String, targetType: String, targetId: String, param: String, metadataJson: String, fallbackNamespaces: Array<String>, notifier: TaskNotifier): Unit {
+        let enqueued = enqueueFallbackTask(targetType, targetId, param, metadataJson, fallbackNamespaces, taskId, notifier)
         if (enqueued) {
             TaskIO.appendLog(taskId, "current metadata callback failed, fallback plugin has been scheduled")
         }
