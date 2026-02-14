@@ -59,14 +59,13 @@ import {
   MousePointerClick
 } from 'lucide-react';
 import Link from 'next/link';
-import { useAppBack } from '@/hooks/use-app-back';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import type { Tankoubon } from '@/types/tankoubon';
 import { toast } from 'sonner';
+import { getStoredPath } from '@/lib/utils/navigation';
 
 function ReaderContent() {
   const router = useRouter();
-  const appBack = useAppBack();
   const searchParams = useSearchParams();
   const id = searchParams?.get('id') ?? null;
   const pageParam = searchParams?.get('page');
@@ -117,8 +116,25 @@ function ReaderContent() {
   }, [getDeviceInfo]);
 
   const handleBack = useCallback(() => {
-    appBack('/');
-  }, [appBack]);
+    const lastPath = getStoredPath('last');
+    if (lastPath && !lastPath.startsWith('/reader')) {
+      router.push(lastPath);
+      return;
+    }
+
+    const currentPath = getStoredPath('current');
+    if (currentPath && !currentPath.startsWith('/reader')) {
+      router.push(currentPath);
+      return;
+    }
+
+    if (id) {
+      router.push(`/archive?id=${id}`);
+      return;
+    }
+
+    router.push('/');
+  }, [id, router]);
 
   const handleNavigateToArchiveFromSettings = useCallback(() => {
     if (!id) return;
