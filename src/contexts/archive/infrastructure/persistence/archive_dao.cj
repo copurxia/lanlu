@@ -652,7 +652,7 @@ public class ArchiveDao {
 	                } else if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
 	                    // 按用户最后阅读时间排序，使用 user_archive_status.updated_at
 	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-	                    sql += " ORDER BY (SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = arcid AND uas.user_id = ${userId}) ${orderDirection}"
+	                    sql += " ORDER BY (SELECT MAX(uas.updated_at) FROM user_archive_status uas JOIN (SELECT id, arcid AS archive_arcid FROM archives) a ON a.id = uas.archive_id WHERE a.archive_arcid = arcid AND uas.user_id = ${userId}) ${orderDirection}"
                 } else if (sortby == "date_added") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY created_at ${orderDirection}"
@@ -980,8 +980,8 @@ public class ArchiveDao {
                         finalOrderBy = "title ${dir}"
                     } else if ((sortby == "lastread" || sortby == "lastreadtime") && userId > 0) {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }
-                        let windowExpr = "(SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = base.arcid AND uas.user_id = ${userId})"
-                        let finalExpr = "(SELECT uas.updated_at FROM user_archive_status uas JOIN archives a ON a.id = uas.archive_id WHERE a.arcid = arcid AND uas.user_id = ${userId})"
+                        let windowExpr = "(SELECT MAX(uas.updated_at) FROM user_archive_status uas JOIN (SELECT id, arcid AS archive_arcid FROM archives) a ON a.id = uas.archive_id WHERE a.archive_arcid = base.arcid AND uas.user_id = ${userId})"
+                        let finalExpr = "(SELECT MAX(uas.updated_at) FROM user_archive_status uas JOIN (SELECT id, arcid AS archive_arcid FROM archives) a ON a.id = uas.archive_id WHERE a.archive_arcid = arcid AND uas.user_id = ${userId})"
                         windowOrderBy = "${windowExpr} ${dir}"
                         finalOrderBy = "${finalExpr} ${dir}"
                     } else if (sortby == "date_added") {

@@ -71,7 +71,7 @@ export class UserStatsService {
     try {
       const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit || 5)));
 
-      const [recentReadResp, favoritesResp] = await Promise.all([
+      const [recentReadResp, favoritesResp] = await Promise.allSettled([
         apiClient.get('/api/search', {
           params: {
             sortby: 'lastread',
@@ -89,9 +89,14 @@ export class UserStatsService {
         }),
       ]);
 
-      const recentRead = normalizeSearchArchives(recentReadResp.data).slice(0, safeLimit);
+      const recentRead = recentReadResp.status === 'fulfilled'
+        ? normalizeSearchArchives(recentReadResp.value.data).slice(0, safeLimit)
+        : [];
 
-      const recentFavorites = normalizeSearchArchives(favoritesResp.data)
+      const recentFavoritesRaw = favoritesResp.status === 'fulfilled'
+        ? normalizeSearchArchives(favoritesResp.value.data)
+        : [];
+      const recentFavorites = recentFavoritesRaw
         .slice()
         .sort((a, b) => Number(b.favoritetime || 0) - Number(a.favoritetime || 0))
         .slice(0, safeLimit);
