@@ -40,38 +40,71 @@
 | Radix UI | 组件库 |
 | Axios | HTTP 客户端 |
 
-## 项目结构
+## 项目结构（DDD）
 
-```
-lrr4cj/
-├── src/                    # 仓颉后端源码
-│   ├── main.cj            # 应用入口
-│   ├── controllers/       # 控制器
-│   ├── services/          # 业务逻辑
-│   ├── dao/               # 数据访问层
-│   ├── models/            # 数据模型
-│   ├── routes/            # 路由定义
-│   └── utils/             # 工具函数
-├── frontend/              # Next.js 前端
+```text
+lanlu/
+├── src/                              # 仓颉后端源码
+│   ├── main.cj                       # 应用入口
+│   ├── contexts/                     # 领域上下文（按业务边界拆分）
+│   │   ├── archive/
+│   │   │   ├── domain/               # 领域模型与领域规则
+│   │   │   ├── infrastructure/       # 持久化与外部实现
+│   │   │   │   └── persistence/
+│   │   │   └── interfaces/           # 对外接口层
+│   │   │       └── http/
+│   │   ├── task/
+│   │   │   ├── domain/
+│   │   │   ├── application/          # 应用服务与用例编排
+│   │   │   │   └── runners/          # 各类任务执行器
+│   │   │   ├── infrastructure/
+│   │   │   │   └── persistence/
+│   │   │   └── interfaces/
+│   │   │       └── http/
+│   │   ├── plugin/
+│   │   │   ├── domain/
+│   │   │   ├── application/
+│   │   │   │   └── runners/
+│   │   │   ├── infrastructure/
+│   │   │   │   └── persistence/
+│   │   │   └── interfaces/
+│   │   │       └── http/
+│   │   └── asset / category / search / smart_filter / system / tag / tankoubon / user
+│   ├── routes/
+│   │   └── api/                      # API 路由注册
+│   ├── infrastructure/               # 跨上下文基础设施
+│   │   ├── archivehandler/
+│   │   ├── kv/
+│   │   ├── middleware/
+│   │   └── migrations/
+│   │       └── versions/
+│   └── shared/                       # 通用配置/工具/响应视图
+│       ├── config/
+│       ├── utils/
+│       └── views/
+├── frontend/                         # Next.js 前端
 │   ├── src/
-│   │   ├── app/          # 页面路由
-│   │   ├── components/   # React 组件
-│   │   ├── lib/          # 服务和工具
-│   │   ├── contexts/     # React Context
-│   │   └── types/        # TypeScript 类型
-│   └── messages/         # 国际化文件
-├── plugins/               # 插件目录
-│   ├── Download/         # 下载插件
-│   ├── Login/            # 登录插件
-│   └── Metadata/         # 元数据插件
-├── data/                  # 运行时数据
-│   ├── archive/          # 归档存储
-│   ├── thumb/            # 缩略图缓存
-│   └── logs/             # 日志文件
-├── cjpm.toml             # 仓颉包配置
-├── .env.example          # 环境变量模板
-└── Dockerfile            # Docker 配置
+│   │   ├── app/
+│   │   ├── components/
+│   │   ├── contexts/
+│   │   ├── hooks/
+│   │   ├── lib/
+│   │   └── types/
+│   └── messages/
+├── plugins/                          # Deno 插件目录（Download/Login/Metadata/Script）
+├── data/                             # 运行时数据目录
+│   ├── archive/
+│   ├── thumb/
+│   ├── plugins/
+│   ├── cache/
+│   └── logs/
+├── docker-compose.yml
+├── Dockerfile
+├── cjpm.toml
+└── .env.example
 ```
+
+> 注：并非每个上下文都严格包含四层目录，按业务复杂度逐步演进。
 
 ## 快速开始
 
@@ -108,21 +141,47 @@ npm run build
 
 访问 `http://localhost:8082`
 
-## Docker 部署
+## Docker 部署（推荐使用 Compose）
+
+请直接使用项目内的 `docker-compose.yml`，会同时启动：
+- `lanlu`：`docker.cnb.cool/copurx/lanlu:latest`
+- `postgres`：`postgres:18-alpine`
+
+### 1. 准备数据目录
 
 ```bash
-# 构建镜像
-docker build -t lrr4cj:latest .
-
-# 运行容器
-docker run -d \
-  -p 8082:8082 \
-  -e DB_STRING=postgres://user:password@postgres:5432/lanlu?sslmode=disable \
-  -e JWT_SECRET=d2015833994569e3a4e3 \
-  -e CORS_ORIGIN=* \
-  -v /path/to/archives:/app/data/archive \
-  lrr4cj:latest
+mkdir -p ./data/archive ./data/thumb ./data/logs ./data/plugins ./data/cache
 ```
+
+### 2. 启动服务
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### 3. 查看状态与日志
+
+```bash
+docker compose ps
+docker compose logs -f lanlu
+```
+
+### 4. 访问系统
+
+浏览器打开：`http://localhost:8082`
+
+### 注意事项
+
+- 首次启动且数据库 `users` 表为空时，系统会自动创建默认管理员账号。
+- 默认管理员账号和密码会写入 `./data/logs/system.log`。
+- 可用以下命令快速定位默认账号密码日志：
+
+```bash
+grep -nE "已创建默认管理员账户|用户名:|密码:" ./data/logs/system.log
+```
+
+- 若数据库中已存在用户，则不会再次自动生成默认管理员账号。
 
 ## API 文档
 
