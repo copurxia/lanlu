@@ -37,6 +37,7 @@ export interface BaseMediaCardProps {
   pagesLabel?: string
   priority?: boolean  // 优先加载图片（用于 LCP 优化）
   hideMetaOnMobile?: boolean
+  disableContentVisibility?: boolean
 
   // 收藏回调
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
@@ -62,6 +63,7 @@ export function BaseMediaCard({
   pagesLabel,
   priority = false,
   hideMetaOnMobile = false,
+  disableContentVisibility = false,
   onFavoriteToggle,
 }: BaseMediaCardProps) {
   const router = useRouter()
@@ -121,8 +123,12 @@ export function BaseMediaCard({
       // `content-visibility` acts like browser-level virtualization for large grids.
       style={{
         animationDelay: shouldEntranceAnimate ? `${animationDelay}ms` : undefined,
-        contentVisibility: 'auto',
-        containIntrinsicSize: '220px 420px',
+        ...(disableContentVisibility
+          ? {}
+          : {
+              contentVisibility: 'auto',
+              containIntrinsicSize: '220px 420px',
+            }),
       }}
       title={hoverTitleParts.length > 0 ? `${title}\n${hoverTitleParts.join('\n')}` : title}
       onClick={() => router.push(readerPath)}

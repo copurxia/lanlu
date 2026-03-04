@@ -6,9 +6,15 @@ interface ArchiveCardProps {
   archive: Archive;
   index?: number;
   priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
+  disableContentVisibility?: boolean;
 }
 
-export function ArchiveCard({ archive, index = 0, priority = false }: ArchiveCardProps) {
+export function ArchiveCard({
+  archive,
+  index = 0,
+  priority = false,
+  disableContentVisibility = false,
+}: ArchiveCardProps) {
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
     return await FavoriteService.toggleFavorite(id, isFavorite);
   };
@@ -28,6 +34,7 @@ export function ArchiveCard({ archive, index = 0, priority = false }: ArchiveCar
       type="archive"
       index={index}
       priority={priority}
+      disableContentVisibility={disableContentVisibility}
       onFavoriteToggle={handleFavoriteToggle}
     />
   );

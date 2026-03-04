@@ -554,16 +554,25 @@ function HomePageContent() {
             </div>
 
             {randomArchives.length > 0 ? (
-              <div className="flex gap-4 overflow-x-auto pb-2 pr-2">
+              <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
                 {randomArchives.map((item, index) => (
                   <div
                     key={isTankoubonItem(item) ? item.tankoubon_id : item.arcid}
                     className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0"
                   >
                     {isTankoubonItem(item) ? (
-                      <TankoubonCard tankoubon={item} priority={index < 2} />
+                      <TankoubonCard
+                        tankoubon={item}
+                        priority={index < 2}
+                        disableContentVisibility
+                      />
                     ) : (
-                      <ArchiveCard archive={item as Archive} index={index} priority={index < 2} />
+                      <ArchiveCard
+                        archive={item as Archive}
+                        index={index}
+                        priority={index < 2}
+                        disableContentVisibility
+                      />
                     )}
                   </div>
                 ))}
@@ -610,7 +619,7 @@ function HomePageContent() {
                   {[0, 1].map((idx) => (
                     <div key={idx} className="space-y-3">
                       <Skeleton className="h-6 w-32" />
-                      <div className="flex gap-4 overflow-x-auto pb-2 pr-2">
+                      <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
                         {Array.from({ length: 6 }).map((_, i) => (
                           <div key={i} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0 space-y-2">
                             <Skeleton className="aspect-[3/4] w-full" />
@@ -652,7 +661,7 @@ function HomePageContent() {
                       </div>
 
                       {rowLoading ? (
-                        <div className="flex gap-4 overflow-x-auto pb-2 pr-2">
+                        <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
                           {Array.from({ length: Math.min(6, categoryRowSize) }).map((_, idx) => (
                             <div key={idx} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0 space-y-2">
                               <Skeleton className="aspect-[3/4] w-full" />
@@ -662,16 +671,25 @@ function HomePageContent() {
                           ))}
                         </div>
                       ) : rowItems.length > 0 ? (
-                        <div className="flex gap-4 overflow-x-auto pb-2 pr-2">
+                        <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
                           {rowItems.map((item, index) => (
                             <div
                               key={isTankoubonItem(item) ? item.tankoubon_id : item.arcid}
                               className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0"
                             >
                               {isTankoubonItem(item) ? (
-                                <TankoubonCard tankoubon={item} priority={index < 2} />
+                                <TankoubonCard
+                                  tankoubon={item}
+                                  priority={index < 2}
+                                  disableContentVisibility
+                                />
                               ) : (
-                                <ArchiveCard archive={item as Archive} index={index} priority={index < 2} />
+                                <ArchiveCard
+                                  archive={item as Archive}
+                                  index={index}
+                                  priority={index < 2}
+                                  disableContentVisibility
+                                />
                               )}
                             </div>
                           ))}
