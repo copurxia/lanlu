@@ -1,0 +1,200 @@
+package lanlu.contexts.task.application.runners
+import lanlu.contexts.tankoubon.infrastructure.persistence.*
+
+import std.collection.*
+import lanlu.shared.utils.*
+import lanlu.shared.utils.NaturalSort
+import lanlu.infrastructure.archivehandler.*
+import lanlu.contexts.archive.infrastructure.persistence.*
+import lanlu.contexts.asset.infrastructure.persistence.*
+
+/**
+ * Directory-based Tankoubon auto-create + sync.
+ *
+ * Rules (as per user):
+ * - A directory qualifies if it contains 2+ "archives" and no other directories.
+ *   Child directories that are recognized as folder-type archives DO NOT count as "other directories".
+ * - Do not create at category root (relative_path == "").
+ * - Members are ordered by natural filename sort (same behavior as folder archives).
+ * - Tankoubon name uses the directory relative path.
+ */
+public class TankoubonAutocreateService {
+    private static func isCoverAssetMissing(coverAssetId: Int64): Bool {
+        if (coverAssetId <= 0) { return true }
+        let row = AssetDao.getById(coverAssetId)
+        return row.id <= 0
+    }
+
+    public static func isLeafMediaFolder(dirPath: String): Bool {
+        if (!DirectoryScanner.directoryExists(dirPath)) { return false }
+        let entries = DirectoryScanner.listDirectory(dirPath)
+        if (entries.size == 0) { return false }
+
+        var hasMedia = false
+        for (entry in entries) {
+            let full = DirectoryScanner.joinPath(dirPath, entry)
+            if (DirectoryScanner.isDirectory(full)) {
+                return false
+            }
+            if (!DirectoryScanner.fileExists(full)) {
+                return false
+            }
+            if (FolderHandler.isAllowedMediaFileName(entry)) {
+                hasMedia = true
+            } else if (FolderHandler.isAllowedAuxFileName(entry)) {
+                // allow
+            } else {
+                return false
+            }
+        }
+        return hasMedia
+    }
+
+    private static func isAllowedCollectionAuxFileName(entryName: String): Bool {
+        // Allow JSON metadata files and media/cover images alongside archives.
+        if (FolderHandler.isAllowedAuxFileName(entryName)) { return true }
+        if (FolderHandler.isAllowedMediaFileName(entryName)) { return true }
+        return false
+    }
+
+    public static func inspectDirectoryForTank(dirPath: String): (Bool, Array<String>) {
+        if (!DirectoryScanner.directoryExists(dirPath)) { return (false, []) }
+        let entries = DirectoryScanner.listDirectory(dirPath)
+        if (entries.size == 0) { return (false, []) }
+
+        let factory = ArchiveHandlerFactory.getInstance()
+        var candidates: ArrayList<String> = ArrayList<String>()
+        var hasOtherDirectory = false
+        var hasOtherFile = false
+        var hasTvShowNfo = false
+
+        for (entry in entries) {
+            let full = DirectoryScanner.joinPath(dirPath, entry)
+            if (DirectoryScanner.isDirectory(full)) {
+                if (isLeafMediaFolder(full)) {
+                    candidates.add(entry)
+                } else {
+                    hasOtherDirectory = true
+                }
+                continue
+            }
+
+            match (factory.getHandlerByPath(full)) {
+                case Some(_) => candidates.add(entry)
+                case None =>
+                    if (entry.toAsciiLower() == "tvshow.nfo") {
+                        hasTvShowNfo = true
+                    }
+                    if (!isAllowedCollectionAuxFileName(entry)) {
+                        hasOtherFile = true
+                    }
+            }
+        }
+
+        if (hasOtherDirectory || hasOtherFile) { return (false, []) }
+        let minCandidates = if (hasTvShowNfo) { 1 } else { 2 }
+        if (candidates.size < minCandidates) { return (false, []) }
+
+        NaturalSort.sortStrings(candidates)
+        return (true, candidates.toArray())
+    }
+
+    public static func ensureAndSync(categoryInternalId: Int64, dirRelativePath: String, dirFullPath: String): String {
+        let rel = dirRelativePath.trimAscii()
+        if (categoryInternalId <= 0) { return "" }
+        if (rel.size == 0) { return "" }
+
+        let (ok, candidates) = inspectDirectoryForTank(dirFullPath)
+        if (!ok) { return "" }
+
+        let tankId = TankoubonDao.getOrCreateAutoTankoubon(categoryInternalId, rel, rel)
+        if (tankId.size == 0) { return "" }
+
+        syncMembers(tankId, categoryInternalId, rel, candidates)
+        return tankId
+    }
+
+    private static func syncMembers(tankoubonId: String, categoryInternalId: Int64, dirRelativePath: String, candidatesInOrder: Array<String>): Unit {
+        let current = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+        var desired: ArrayList<String> = ArrayList<String>()
+        var desiredSet: HashSet<String> = HashSet<String>()
+
+        // Resolve archive ids in sorted filename order.
+        for (entryName in candidatesInOrder) {
+            match (ArchiveDao.getByCategoryPathAndFilename(categoryInternalId, dirRelativePath, entryName)) {
+                case Some(arch) =>
+                    desired.add(arch.id)
+                    desiredSet.add(arch.id)
+                case None => ()
+            }
+        }
+
+        // Default cover: use the first archive's cover if tank has no cover yet.
+        if (desired.size > 0) {
+            let currentCover = TankoubonDao.getTankoubonCoverAssetId(tankoubonId)
+            if (isCoverAssetMissing(currentCover)) {
+                let firstArchiveId = desired[0]
+                let firstCover = ArchiveDao.getCoverAssetId(firstArchiveId)
+                if (firstCover > 0) {
+                    let _ = TankoubonDao.updateTankoubonCover(tankoubonId, firstCover)
+                }
+            }
+        }
+
+        // Remove members no longer present in this directory.
+        for (arcid in current) {
+            if (!desiredSet.contains(arcid)) {
+                let _ = TankoubonDao.removeArchiveFromTankoubon(tankoubonId, arcid)
+            }
+        }
+
+        // Always enforce natural-sorted order for all members.
+        for (i in 0..desired.size) {
+            let arcid = desired[i]
+            let _ = TankoubonDao.addArchiveToTankoubon(tankoubonId, arcid, Int32(i + 1))
+        }
+    }
+
+    /**
+     * Ensure default cover for auto-created tankoubon:
+     * - only when tank cover is missing/broken
+     * - only when this archive is the first member (natural order)
+     */
+    public static func ensureDefaultCoverFromArchive(archiveId: String): Unit {
+        let arcid = archiveId.trimAscii()
+        if (arcid.size == 0) { return }
+
+        let coverAssetId = ArchiveDao.getCoverAssetId(arcid)
+        if (coverAssetId <= 0) { return }
+
+        let tankIds = TankoubonDao.getTankoubonsForArchive(arcid)
+        for (tankId in tankIds) {
+            match (TankoubonDao.getTankoubonById(tankId)) {
+                case Some(tank) =>
+                    if (tank.auto_created &&
+                        isCoverAssetMissing(tank.cover_asset_id) &&
+                        tank.archives.size > 0 &&
+                        tank.archives[0] == arcid) {
+                        let _ = TankoubonDao.updateTankoubonCover(tankId, coverAssetId)
+                    }
+                case None => ()
+            }
+        }
+    }
+
+    public static func hasAllCandidatesIndexed(categoryInternalId: Int64, dirRelativePath: String, dirFullPath: String): Bool {
+        let rel = dirRelativePath.trimAscii()
+        if (categoryInternalId <= 0 || rel.size == 0) { return false }
+
+        let (ok, candidates) = inspectDirectoryForTank(dirFullPath)
+        if (!ok) { return false }
+
+        for (entryName in candidates) {
+            match (ArchiveDao.getByCategoryPathAndFilename(categoryInternalId, rel, entryName)) {
+                case Some(_) => ()
+                case None => return false
+            }
+        }
+        return true
+    }
+}

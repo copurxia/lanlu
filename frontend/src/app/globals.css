@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222.2 84% 4.9%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222.2 84% 4.9%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 220 15% 10%;
+    --foreground: 220 10% 95%;
+    --card: 220 15% 13%;
+    --card-foreground: 220 10% 95%;
+    --popover: 220 15% 13%;
+    --popover-foreground: 220 10% 95%;
+    --primary: 217 70% 60%;
+    --primary-foreground: 220 10% 10%;
+    --secondary: 220 15% 18%;
+    --secondary-foreground: 220 10% 95%;
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 10% 65%;
+    --accent: 220 15% 18%;
+    --accent-foreground: 220 10% 95%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 220 10% 95%;
+    --border: 220 15% 23%;
+    --input: 220 15% 23%;
+    --ring: 217 70% 60%;
+  }
+
+  /* Modal Design Tokens - 统一弹窗样式 */
+  :root {
+    /* Spacing Scale - 基于4px网格系统 */
+    --modal-space-1: 0.25rem; /* 4px */
+    --modal-space-2: 0.5rem;  /* 8px */
+    --modal-space-3: 0.75rem; /* 12px */
+    --modal-space-4: 1rem;    /* 16px */
+    --modal-space-6: 1.5rem;  /* 24px */
+
+    /* Modal Layout - 统一内边距 */
+    --modal-padding-x: var(--modal-space-6);
+    --modal-padding-y: var(--modal-space-4);
+
+    /* Modal Sizes - 标准弹窗尺寸 */
+    --modal-size-sm: 24rem;  /* 384px */
+    --modal-size-md: 28rem;  /* 448px */
+    --modal-size-lg: 32rem;  /* 512px */
+    --modal-size-xl: 36rem;  /* 576px */
+
+    /* Modal Z-Index Stack - 层级管理 */
+    /*
+     * Keep modals above fixed UI like the mobile bottom nav (`z-50`).
+     * Note: dialog overlay/content live inside the same stacking context,
+     * so the outer overlay z-index must exceed the nav to avoid being covered.
+     */
+    --z-modal-overlay: 70;
+    --z-modal-content: 71;
+    --z-toast: 100;
+    --z-tooltip: 110;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* 自定义样式 */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Reader: HTML content pagination for double-page mode */
+.reader-html-spread-content {
+  height: 100%;
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+}
+
+.reader-html-spread-content > * {
+  max-width: 100%;
+}
+
+.reader-html-spread-content img,
+.reader-html-spread-content video,
+.reader-html-spread-content svg,
+.reader-html-spread-content iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+/* 自定义滑动条样式 */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-track {
+  background: hsl(var(--muted));
+  height: 0.25rem;
+  border-radius: 0.125rem;
+}
+
+input[type="range"]::-moz-range-track {
+  background: hsl(var(--muted));
+  height: 0.25rem;
+  border-radius: 0.125rem;
+}
+
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  background: hsl(var(--primary));
+  height: 0.75rem;
+  width: 0.75rem;
+  border-radius: 50%;
+  margin-top: -0.25rem;
+}
+
+input[type="range"]::-moz-range-thumb {
+  border: none;
+  background: hsl(var(--primary));
+  height: 0.75rem;
+  width: 0.75rem;
+  border-radius: 50%;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.3);
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}

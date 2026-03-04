@@ -1,0 +1,246 @@
+package lanlu.shared.utils
+
+import std.fs.*
+import stdx.log.*
+
+/**
+ * 文件工具类
+ */
+public class FileUtils {
+    private static let logger = getLogger("file_utils")
+    // Toggle for very verbose symlink resolution tracing.
+    private static var RESOLVE_PATH_DEBUG: Bool = false
+
+    /**
+     * 获取不包含点的文件扩展名
+     */
+    public static func getFileExtensionWithoutDot(fileName: String): String {
+        let ext = fileName.split(".")
+        if (ext.size > 1) {
+            return ext[ext.size - 1]
+        }
+        return ""
+    }
+    
+    /**
+     * 连接路径
+     */
+    public static func joinPath(base: String, part: String): String {
+        if (base.size == 0) {
+            return part
+        }
+        if (part.size == 0) {
+            return base
+        }
+
+        // Normalize to avoid accidental double slashes and handle root path correctly.
+        let cleanBase = if (base.endsWith("/") && base.size > 1) { base[0..base.size - 1] } else { base }
+        let cleanPart = if (part == "/") {
+            ""
+        } else if (part.startsWith("/") && part.size > 1) {
+            part[1..part.size]
+        } else {
+            part
+        }
+
+        if (cleanPart.size == 0) {
+            return cleanBase
+        }
+        if (cleanBase == "/") {
+            return "/${cleanPart}"
+        }
+        return "${cleanBase}/${cleanPart}"
+    }
+    
+    /**
+     * 确保目录存在，如果不存在则创建
+     */
+    public static func ensureDirectoryExists(path: Path): Unit {
+        try {
+            if (!exists(path)) {
+                // 使用 Directory.create 创建目录
+                Directory.create(path, recursive: true)
+                logger.info("Created directory", ("path", path.toString()))
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to create directory", ("path", path.toString()), ("error", e.message))
+        }
+    }
+    
+    /**
+     * 解析路径，如果是软链接则返回其目标路径，否则返回原路径
+     * 支持递归解析软链接（最多10层，防止循环）
+     */
+    public static func resolvePath(path: String): String {
+        if (RESOLVE_PATH_DEBUG) {
+            logger.debug("=== RESOLVE PATH START ===", ("original_path", path))
+        }
+
+        const MAX_SYMLINK_DEPTH = 10
+        var currentPath = path
+        var depth = 0
+
+        try {
+            while (depth < MAX_SYMLINK_DEPTH) {
+                if (RESOLVE_PATH_DEBUG) {
+                    logger.debug("resolvePath: Level", ("depth", depth.toString()), ("current_path", currentPath.toString()))
+                }
+
+                let filePath = Path(currentPath)
+                if (!exists(filePath)) {
+                    if (RESOLVE_PATH_DEBUG) {
+                        logger.debug("resolvePath: Path does not exist", ("path", currentPath.toString()))
+                    }
+                    break
+                }
+
+                let fileInfo = FileInfo(filePath)
+                if (RESOLVE_PATH_DEBUG) {
+                    logger.debug(
+                        "resolvePath: FileInfo",
+                        ("is_symbolic_link", fileInfo.isSymbolicLink().toString()),
+                        ("is_directory", fileInfo.isDirectory().toString())
+                    )
+                }
+
+                // 如果是软链接，获取其目标路径
+                if (fileInfo.isSymbolicLink()) {
+                    try {
+                        let targetPath = SymbolicLink.readFrom(currentPath, recursive: false)
+                        let newTarget = targetPath.toString()
+                        if (RESOLVE_PATH_DEBUG) {
+                            logger.debug("resolvePath: Symlink target", ("target", newTarget.toString()))
+                        }
+
+                        // 检查是否为绝对路径
+                        if (newTarget.startsWith("/")) {
+                            currentPath = newTarget
+                            if (RESOLVE_PATH_DEBUG) {
+                                logger.debug("resolvePath: Absolute target", ("new_path", currentPath.toString()))
+                            }
+                        } else {
+                            // 相对路径需要基于当前目录的父目录进行解析
+                            let parentDir = getParentDirectory(currentPath)
+                            currentPath = joinPath(parentDir, newTarget)
+                            if (RESOLVE_PATH_DEBUG) {
+                                logger.debug(
+                                    "resolvePath: Relative target",
+                                    ("parent", parentDir.toString()),
+                                    ("new_path", currentPath.toString())
+                                )
+                            }
+                        }
+
+                        depth++
+                        if (RESOLVE_PATH_DEBUG) {
+                            logger.debug(
+                                "resolvePath: Resolved symlink",
+                                ("depth", depth.toString()),
+                                ("path", currentPath.toString())
+                            )
+                        }
+                    } catch (e: FSException) {
+                        // 如果解析失败，返回当前路径
+                        logger.warn(
+                            "resolvePath: Failed to resolve symlink",
+                            ("path", currentPath.toString()),
+                            ("error", e.message)
+                        )
+                        break
+                    }
+                } else {
+                    // 不是软链接，停止解析
+                    if (RESOLVE_PATH_DEBUG) {
+                        logger.debug("resolvePath: Not a symlink", ("final_path", currentPath.toString()))
+                    }
+                    break
+                }
+            }
+
+            if (depth >= MAX_SYMLINK_DEPTH) {
+                logger.warn(
+                    "resolvePath: Maximum symlink depth reached",
+                    ("max_depth", MAX_SYMLINK_DEPTH.toString()),
+                    ("path", path)
+                )
+            }
+
+            if (RESOLVE_PATH_DEBUG) {
+                logger.debug("=== RESOLVE PATH END ===", ("final_resolved_path", currentPath.toString()))
+            }
+            return currentPath
+        } catch (e: Exception) {
+            // 如果出错，返回原路径
+            logger.error("resolvePath: Error resolving path", ("path", path), ("error", e.message))
+            if (RESOLVE_PATH_DEBUG) {
+                logger.debug("=== RESOLVE PATH END ===")
+            }
+            return path
+        }
+    }
+
+    /**
+     * 获取父目录路径
+     */
+    public static func getParentDirectory(filePath: String): String {
+        let parts = filePath.split("/")
+        if (parts.size > 1) {
+            var result = ""
+            for (i in 0..parts.size - 1) {
+                if (result.size > 0) {
+                    result += "/"
+                }
+                result += parts[i]
+            }
+            return result
+        }
+        return ""
+    }
+
+    /**
+     * Remove a file or directory recursively (best-effort).
+     * Returns true if the path does not exist or was removed successfully.
+     */
+    public static func removeFileOrDirectory(path: String): Bool {
+        try {
+            let p = Path(path)
+            if (!exists(p)) {
+                return true
+            }
+            let info = FileInfo(p)
+            if (info.isDirectory()) {
+                let entries = DirectoryScanner.listDirectory(path)
+                for (entry in entries) {
+                    let fullPath = joinPath(path, entry)
+                    if (!removeFileOrDirectory(fullPath)) {
+                        return false
+                    }
+                }
+                remove(p)
+                return true
+            }
+            remove(p)
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    /**
+     * Atomically replace a file by first removing the target (if present) and then renaming.
+     * Falls back to copy+remove if rename fails (e.g. cross-device).
+     */
+    public static func safeReplaceFile(target: Path, from: Path): Unit {
+        if (exists(target)) {
+            remove(target)
+        }
+        try {
+            rename(from, to: target)
+            return
+        } catch (_: Exception) {
+            // Fallback for cross-device moves.
+        }
+        copy(from, to: target, overwrite: true)
+        remove(from)
+    }
+}

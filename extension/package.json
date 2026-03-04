@@ -1,0 +1,45 @@
+{
+  "name": "lanlu-extension",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.27.0",
+  "scripts": {
+    "dev": "plasmo dev --src-path=.",
+    "build": "plasmo build --src-path=.",
+    "package": "plasmo package --src-path=.",
+    "typecheck": "tsc --noEmit",
+    "prebuild": "node scripts/sync-logo.mjs"
+  },
+  "manifest": {
+    "manifest_version": 3,
+    "name": "兰鹿",
+    "description": "将当前/左侧/右侧标签页添加到兰鹿服务器",
+    "version": "0.1.0",
+    "permissions": [
+      "storage",
+      "tabs",
+      "activeTab",
+      "alarms"
+    ],
+    "host_permissions": [
+      "<all_urls>"
+    ]
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
+    "plasmo": "^0.90.4",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2"
+  }
+}

@@ -1,0 +1,9 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "avif_ffi"
+  description = "AVIF image decoder FFI bindings"
+  version = "0.1.0"
+  output-type = "static"
+  link-option = "-lavif"
+
+[dependencies]

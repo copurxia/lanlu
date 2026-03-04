@@ -1,0 +1,1437 @@
+'use client';
+
+import { useState, useEffect, useCallback, Suspense, useMemo, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
+import { ArchiveCard } from '@/components/archive/ArchiveCard';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Spinner } from '@/components/ui/spinner';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Progress } from '@/components/ui/progress';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { TagInput } from '@/components/ui/tag-input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
+import { ArchiveService } from '@/lib/services/archive-service';
+import { TaskPoolService } from '@/lib/services/taskpool-service';
+import { FavoriteService } from '@/lib/services/favorite-service';
+import { PluginService, type Plugin } from '@/lib/services/plugin-service';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { logger } from '@/lib/utils/logger';
+import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
+import type { Tankoubon } from '@/types/tankoubon';
+import type { Archive } from '@/types/archive';
+import Image from 'next/image';
+
+type ArchiveViewMode = 'grid' | 'list';
+
+type RpcSelectOption = {
+  index: number;
+  label: string;
+  description?: string;
+  cover?: string;
+};
+
+type RpcSelectRequest = {
+  request_id: string;
+  title: string;
+  message?: string;
+  default_index?: number;
+  timeout_seconds?: number;
+  options: RpcSelectOption[];
+};
+
+function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
+  const prefix = '[RPC_SELECT]';
+  if (!message?.startsWith(prefix)) return null;
+  try {
+    const parsed = JSON.parse(message.slice(prefix.length)) as RpcSelectRequest;
+    if (!parsed?.request_id || !Array.isArray(parsed?.options) || parsed.options.length === 0) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+const ARCHIVE_VIEW_MODE_STORAGE_KEY = 'tankoubon_archive_view_mode';
+const MOBILE_BREAKPOINT_MEDIA_QUERY = '(max-width: 639px)';
+
+type ArchiveListItemProps = {
+  archive: Archive;
+  isRemoving: boolean;
+  onRemove: () => void;
+};
+
+function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps) {
+  const router = useRouter();
+  const { t } = useLanguage();
+  const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const parsedTags = useMemo(() => parseTags(archive.tags).map(stripNamespace).slice(0, 8), [archive.tags]);
+
+  useEffect(() => {
+    setIsFavorite(archive.isfavorite || false);
+  }, [archive.isfavorite]);
+
+  const handleFavoriteClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (favoriteLoading) return;
+    setFavoriteLoading(true);
+    try {
+      const success = await FavoriteService.toggleFavorite(archive.arcid, isFavorite);
+      if (success) setIsFavorite(!isFavorite);
+    } catch (error) {
+      logger.operationFailed('toggle archive favorite', error);
+    } finally {
+      setFavoriteLoading(false);
+    }
+  };
+
+  const handleNavigateToReader = () => {
+    router.push(`/reader?id=${archive.arcid}`);
+  };
+
+  return (
+    <div
+      className="relative rounded-lg border bg-card p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-sm"
+      role="button"
+      tabIndex={0}
+      onClick={handleNavigateToReader}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleNavigateToReader();
+        }
+      }}
+    >
+      <div className="absolute right-3 top-3 flex items-center gap-2">
+        <Button
+          asChild
+          variant="secondary"
+          size="icon"
+          className="h-8 w-8"
+          title={t('archive.details')}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Link href={`/archive?id=${archive.arcid}`} prefetch={false}>
+            <Eye className="h-4 w-4" />
+          </Link>
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className={`h-8 w-8 ${isFavorite ? 'text-red-500' : ''}`}
+          title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+          disabled={favoriteLoading}
+          onClick={handleFavoriteClick}
+        >
+          {favoriteLoading ? <Spinner size="sm" /> : <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon"
+          className="h-8 w-8"
+          title={t('tankoubon.removeArchive')}
+          disabled={isRemoving}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
+        </Button>
+      </div>
+
+      <div className="flex gap-3 sm:gap-4">
+        <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
+          {archive.cover_asset_id ? (
+            <Image
+              src={`/api/assets/${archive.cover_asset_id}`}
+              alt={archive.title}
+              fill
+              className="object-cover"
+              sizes="96px"
+              decoding="async"
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
+              {t('archive.noCover')}
+            </div>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1 pr-28">
+          <h3 className="font-semibold leading-tight line-clamp-2 hover:text-primary transition-colors" title={archive.title}>
+            {archive.title}
+          </h3>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {t('archive.pages').replace('{count}', String(archive.pagecount))}
+            {archive.progress > 0 && archive.pagecount > 0
+              ? ` • ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}`
+              : ''}
+          </div>
+
+          {archive.summary && (
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={archive.summary}>
+              {archive.summary}
+            </p>
+          )}
+
+          {parsedTags.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {parsedTags.map((tag) => (
+                <Badge key={`${archive.arcid}-${tag}`} variant="secondary" className="max-w-full text-[10px] sm:text-xs" title={tag}>
+                  <span className="truncate">{tag}</span>
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TankoubonDetailContent() {
+  const { t, language } = useLanguage();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const tankoubonId = searchParams?.get('id') ?? null;
+
+  const [tankoubon, setTankoubon] = useState<Tankoubon | null>(null);
+  const [archives, setArchives] = useState<Archive[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [archivesLoading, setArchivesLoading] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editSummary, setEditSummary] = useState('');
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [editCover, setEditCover] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  // Metadata plugin state (preview mode: fill edit form without DB write-back)
+  const [metadataPlugins, setMetadataPlugins] = useState<Plugin[]>([]);
+  const [selectedMetadataPlugin, setSelectedMetadataPlugin] = useState<string>('');
+  const [metadataPluginParam, setMetadataPluginParam] = useState<string>('');
+  const [isMetadataPluginRunning, setIsMetadataPluginRunning] = useState(false);
+  const [metadataPluginProgress, setMetadataPluginProgress] = useState<number | null>(null);
+  const [metadataPluginMessage, setMetadataPluginMessage] = useState<string>('');
+  const [rpcSelectTaskId, setRpcSelectTaskId] = useState<number | null>(null);
+  const [rpcSelectRequest, setRpcSelectRequest] = useState<RpcSelectRequest | null>(null);
+  const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = useState<number | null>(null);
+  const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = useState<number | null>(null);
+  const resolvedRpcSelectRequestIdsRef = useRef<Set<string>>(new Set());
+
+
+  useEffect(() => {
+    if (!rpcSelectRequest || rpcSelectRemainingSeconds == null) return;
+    if (rpcSelectRemainingSeconds <= 0) {
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setRpcSelectRemainingSeconds((current) => {
+        if (current == null) return null;
+        return Math.max(0, current - 1);
+      });
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [rpcSelectRemainingSeconds, rpcSelectRequest]);
+  const [metadataArchivePatches, setMetadataArchivePatches] = useState<Array<{
+    archive_id?: string;
+    volume_no?: number;
+    title?: string;
+    summary?: string;
+    tags?: string;
+    updated_at?: string;
+    cover?: string;
+  }>>([]);
+
+  // Delete dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  // Remove archive state
+  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<Archive | null>(null);
+  const [removingArcids, setRemovingArcids] = useState<Set<string>>(new Set());
+
+  // Add archive dialog state
+  const [addArchiveDialogOpen, setAddArchiveDialogOpen] = useState(false);
+  const [availableArchives, setAvailableArchives] = useState<Archive[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [selectedArchives, setSelectedArchives] = useState<Set<string>>(new Set());
+  const [addingArchives, setAddingArchives] = useState(false);
+
+  // Archive filter (within this collection)
+  const [archiveFilter, setArchiveFilter] = useState('');
+  const [archiveViewMode, setArchiveViewMode] = useState<ArchiveViewMode>('grid');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const saved = window.localStorage.getItem(ARCHIVE_VIEW_MODE_STORAGE_KEY);
+    if (saved === 'grid' || saved === 'list') {
+      setArchiveViewMode(saved);
+      return;
+    }
+
+    const mobileDefault = typeof window.matchMedia === 'function'
+      ? window.matchMedia(MOBILE_BREAKPOINT_MEDIA_QUERY).matches
+      : false;
+    setArchiveViewMode(mobileDefault ? 'list' : 'grid');
+  }, []);
+
+  const handleArchiveViewModeChange = useCallback((mode: ArchiveViewMode) => {
+    setArchiveViewMode(mode);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(ARCHIVE_VIEW_MODE_STORAGE_KEY, mode);
+    }
+  }, []);
+
+  // Fetch tankoubon details
+  const fetchTankoubon = useCallback(async () => {
+    if (!tankoubonId) return;
+
+    try {
+      setLoading(true);
+      const data = await TankoubonService.getTankoubonById(tankoubonId);
+
+      // Prefer translated tags coming from the search endpoint (avoids /api/tags/translations)
+      try {
+        const searchResult = await ArchiveService.search({
+          tankoubon_id: tankoubonId,
+          groupby_tanks: true,
+          page: 1,
+          pageSize: 1,
+          sortby: 'tank_order',
+          order: 'asc',
+          lang: language,
+        });
+        const tankItem = searchResult.data.find(
+          (item): item is Tankoubon => Boolean(item) && typeof item === 'object' && 'tankoubon_id' in item
+        );
+        if (tankItem && tankItem.tankoubon_id === tankoubonId && typeof tankItem.tags === 'string') {
+          data.tags = tankItem.tags;
+        }
+      } catch {
+        // Ignore; fall back to untranslated tags
+      }
+
+      setTankoubon(data);
+      setIsFavorite(data.isfavorite || false);
+
+      // Set edit form values
+      setEditName(data.name);
+      setEditSummary(data.summary || '');
+      setEditTags(
+        (data.tags || '')
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter((tag) => tag)
+      );
+      setEditCover('');
+    } catch (error) {
+      logger.apiError('fetch tankoubon', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [tankoubonId, language]);
+
+  // Fetch archives in tankoubon
+  const fetchArchives = useCallback(async () => {
+    if (!tankoubon?.tankoubon_id || !tankoubon?.archives || tankoubon.archives.length === 0) {
+      setArchives([]);
+      return;
+    }
+
+    try {
+      setArchivesLoading(true);
+      const result = await ArchiveService.search({
+        tankoubon_id: tankoubon.tankoubon_id,
+        sortby: 'tank_order',
+        order: 'asc',
+        page: 1,
+        pageSize: 10000,
+        groupby_tanks: false,
+        lang: language,
+      });
+      const archiveItems = result.data.filter(
+        (item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item
+      );
+      setArchives(archiveItems || []);
+    } catch (error) {
+      logger.apiError('fetch archives', error);
+    } finally {
+      setArchivesLoading(false);
+    }
+  }, [tankoubon?.archives, tankoubon?.tankoubon_id, language]);
+
+  useEffect(() => {
+    fetchTankoubon();
+  }, [fetchTankoubon]);
+
+  useEffect(() => {
+    if (tankoubon) {
+      fetchArchives();
+    }
+  }, [tankoubon, fetchArchives]);
+
+  // Helper function to display translated tag
+  const displayTag = useCallback((tag: string): string => {
+    const key = String(tag || '').trim();
+    if (!key) return '';
+    const idx = key.indexOf(':');
+    return idx > 0 ? key.slice(idx + 1) : key;
+  }, []);
+
+  const handleTagClick = useCallback((tag: string) => {
+    const canonical = String(tag || '').trim();
+    if (!canonical) return;
+    const q = canonical.includes(':') ? canonical : displayTag(canonical);
+    const trimmed = q.trim();
+    if (!trimmed) return;
+    const exactQuery = trimmed.endsWith('$') ? trimmed : `${trimmed}$`;
+    router.push(`/?q=${encodeURIComponent(exactQuery)}`);
+  }, [displayTag, router]);
+
+  const renderTagBadge = useCallback((tag: string, index: number) => {
+    const key = String(tag || '').trim();
+    const idx = key.indexOf(':');
+    const namespace = idx > 0 ? key.slice(0, idx).trim().toLowerCase() : '';
+    const isSource = namespace === 'source';
+    const sourceValue = isSource ? displayTag(key).trim() : '';
+    const hasScheme = sourceValue.startsWith('http://') || sourceValue.startsWith('https://');
+    const sourceUrl = isSource && sourceValue ? (hasScheme ? sourceValue : `https://${sourceValue}`) : '';
+
+    return (
+      <Badge
+        key={`${tag}-${index}`}
+        variant="secondary"
+        className="max-w-full cursor-pointer"
+        title={tag}
+        onClick={() => handleTagClick(tag)}
+      >
+        <span className="flex items-center gap-1 max-w-full">
+          <span className="truncate">{displayTag(tag)}</span>
+          {isSource && sourceValue && (
+            <a
+              href={sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hover:text-primary transition-colors shrink-0"
+              title={sourceUrl}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </span>
+      </Badge>
+    );
+  }, [displayTag, handleTagClick]);
+
+  const handleFavoriteClick = async () => {
+    if (!tankoubon || favoriteLoading) return;
+    setFavoriteLoading(true);
+    try {
+      const success = await FavoriteService.toggleTankoubonFavorite(tankoubon.tankoubon_id, isFavorite);
+      if (success) {
+        setIsFavorite(!isFavorite);
+        setTankoubon({ ...tankoubon, isfavorite: !isFavorite });
+      }
+    } catch (error) {
+      logger.operationFailed('toggle tankoubon favorite', error);
+    } finally {
+      setFavoriteLoading(false);
+    }
+  };
+
+  // Handle edit
+  const handleEdit = async () => {
+    if (!tankoubon) return;
+
+    try {
+      setSaving(true);
+      await TankoubonService.updateTankoubon(tankoubon.tankoubon_id, {
+        name: editName,
+        summary: editSummary,
+        tags: editTags.join(', '),
+        cover: editCover || undefined,
+        metadata_namespace: selectedMetadataPlugin || undefined,
+        archives: metadataArchivePatches,
+      });
+      setEditDialogOpen(false);
+      setMetadataArchivePatches([]);
+      fetchTankoubon();
+    } catch (error) {
+      logger.operationFailed('update tankoubon', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Load metadata plugins when opening the edit dialog
+  useEffect(() => {
+    if (!editDialogOpen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const metas = await PluginService.getMetadataPlugins();
+        if (cancelled) return;
+        setMetadataPlugins(metas);
+        if (!selectedMetadataPlugin && metas.length > 0) {
+          setSelectedMetadataPlugin(metas[0].namespace);
+        }
+      } catch (e) {
+        logger.apiError('load metadata plugins', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editDialogOpen, selectedMetadataPlugin]);
+
+  const submitRpcSelect = useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return;
+    const requestId = rpcSelectRequest.request_id;
+    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, requestId, rpcSelectSelectedIndex);
+    resolvedRpcSelectRequestIdsRef.current.add(requestId);
+    if (!ok) {
+      logger.operationFailed('respond metadata rpc select (tankoubon)', new Error('rpc select response failed'));
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
+      return;
+    }
+    setRpcSelectRequest(null);
+    setRpcSelectTaskId(null);
+    setRpcSelectSelectedIndex(null);
+    setRpcSelectRemainingSeconds(null);
+  }, [rpcSelectRequest, rpcSelectSelectedIndex, rpcSelectTaskId]);
+
+  const abortRpcSelect = useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest) return;
+    const requestId = rpcSelectRequest.request_id;
+    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, requestId);
+    resolvedRpcSelectRequestIdsRef.current.add(requestId);
+    if (!ok) {
+      logger.operationFailed('abort metadata rpc select (tankoubon)', new Error('rpc select abort failed'));
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
+      return;
+    }
+    setRpcSelectRequest(null);
+    setRpcSelectTaskId(null);
+    setRpcSelectSelectedIndex(null);
+    setRpcSelectRemainingSeconds(null);
+  }, [rpcSelectRequest, rpcSelectTaskId]);
+
+  const runMetadataPlugin = useCallback(async () => {
+    if (!tankoubon) return;
+    if (!selectedMetadataPlugin) return;
+
+    resolvedRpcSelectRequestIdsRef.current.clear();
+    setIsMetadataPluginRunning(true);
+    setMetadataPluginProgress(0);
+    setMetadataPluginMessage(t('archive.metadataPluginEnqueued'));
+    setRpcSelectRequest(null);
+    setRpcSelectTaskId(null);
+    setRpcSelectSelectedIndex(null);
+    setRpcSelectRemainingSeconds(null);
+
+    try {
+      const metadataTags = editTags.join(', ');
+      const finalTask = await ArchiveService.runMetadataPluginForTarget(
+        'tankoubon',
+        tankoubon.tankoubon_id,
+        selectedMetadataPlugin,
+        metadataPluginParam,
+        {
+          onUpdate: (task) => {
+            setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0);
+            setMetadataPluginMessage(task.message || '');
+
+            const req = parseRpcSelectRequest(task.message || '');
+            if (req) {
+              if (resolvedRpcSelectRequestIdsRef.current.has(req.request_id)) return;
+              setRpcSelectTaskId(task.id);
+              setRpcSelectRequest((current) => {
+                if (current?.request_id === req.request_id) return current;
+                const defaultIndex = typeof req.default_index === 'number' ? req.default_index : 0;
+                setRpcSelectSelectedIndex(defaultIndex >= 0 && defaultIndex < req.options.length ? defaultIndex : 0);
+                const timeout = typeof req.timeout_seconds === 'number' && req.timeout_seconds > 0 ? Math.floor(req.timeout_seconds) : 90;
+                setRpcSelectRemainingSeconds(timeout);
+                return req;
+              });
+            }
+          },
+        },
+        {
+          writeBack: false,
+          metadata: {
+            title: editName,
+            summary: editSummary,
+            tags: metadataTags,
+          },
+        }
+      );
+
+      if (finalTask.status !== 'completed') {
+        const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+        logger.operationFailed('run metadata plugin (tankoubon)', new Error(err));
+        return;
+      }
+
+      // Preview mode: parse plugin output and fill the edit form (no DB write-back).
+      try {
+        const out = finalTask.result ? JSON.parse(finalTask.result) : null;
+        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true';
+        if (!ok) {
+          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+          logger.operationFailed('run metadata plugin (tankoubon)', new Error(err));
+          return;
+        }
+
+        const data = out?.data || {};
+        const nextTitle = typeof data.title === 'string' ? data.title : '';
+        const nextSummary = typeof data.summary === 'string' ? data.summary : '';
+        const nextTags = typeof data.tags === 'string' ? data.tags : '';
+        const nextCover = typeof data.cover === 'string' ? data.cover : '';
+        const nextArchives = Array.isArray(data.archives) ? data.archives : [];
+
+        if (nextTitle.trim()) setEditName(nextTitle);
+        if (nextSummary.trim()) setEditSummary(nextSummary);
+        if (nextTags.trim()) {
+          setEditTags(
+            nextTags
+              .split(',')
+              .map((tag: string) => tag.trim())
+              .filter((tag: string) => tag)
+          );
+        }
+        if (nextCover.trim()) setEditCover(nextCover.trim());
+
+        setMetadataArchivePatches(
+          nextArchives
+            .map((item: any) => ({
+              archive_id: typeof item?.archive_id === 'string' ? item.archive_id : undefined,
+              volume_no: typeof item?.volume_no === 'number' ? item.volume_no : undefined,
+              title: typeof item?.title === 'string' ? item.title : undefined,
+              summary: typeof item?.summary === 'string' ? item.summary : undefined,
+              tags: typeof item?.tags === 'string' ? item.tags : undefined,
+              updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
+              cover: typeof item?.cover === 'string' ? item.cover : undefined,
+            }))
+            .filter((item: any) => item.archive_id || item.volume_no)
+        );
+      } catch {
+        // ignore parse errors
+      }
+
+      setMetadataPluginMessage(t('archive.metadataPluginCompleted'));
+      setMetadataPluginProgress(100);
+    } catch (e) {
+      logger.operationFailed('run metadata plugin (tankoubon)', e);
+    } finally {
+      setIsMetadataPluginRunning(false);
+      setRpcSelectRequest(null);
+      setRpcSelectTaskId(null);
+      setRpcSelectSelectedIndex(null);
+      setRpcSelectRemainingSeconds(null);
+    }
+  }, [editName, editSummary, editTags, tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
+
+  // Handle delete
+  const handleDelete = async () => {
+    if (!tankoubon) return;
+
+    try {
+      setDeleting(true);
+      await TankoubonService.deleteTankoubon(tankoubon.tankoubon_id);
+      router.push('/');
+    } catch (error) {
+      logger.operationFailed('delete tankoubon', error);
+      setDeleting(false);
+    }
+  };
+
+  // Handle remove archive from tankoubon
+  const handleRemoveArchive = async (arcid: string) => {
+    if (!tankoubon) return;
+
+    try {
+      setRemovingArcids((prev) => new Set(prev).add(arcid));
+      await TankoubonService.removeArchiveFromTankoubon(tankoubon.tankoubon_id, arcid);
+      fetchTankoubon();
+    } catch (error) {
+      logger.operationFailed('remove archive', error);
+    } finally {
+      setRemovingArcids((prev) => {
+        const next = new Set(prev);
+        next.delete(arcid);
+        return next;
+      });
+    }
+  };
+
+  const confirmRemoveArchive = async () => {
+    if (!removeTarget) return;
+    await handleRemoveArchive(removeTarget.arcid);
+    setRemoveDialogOpen(false);
+    setRemoveTarget(null);
+  };
+
+  // Search for archives to add
+  const searchArchives = async () => {
+    try {
+      setSearchLoading(true);
+      const result = await ArchiveService.search({
+        filter: searchQuery,
+        page: 1,
+        pageSize: 50,
+        groupby_tanks: false, // Don't group by tanks when searching for archives to add
+        lang: language,
+      });
+
+      // Filter out archives already in this tankoubon
+      const existingArcids = new Set(tankoubon?.archives || []);
+      const filtered = result.data
+        .filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item)
+        .filter((a) => !existingArcids.has(a.arcid));
+      setAvailableArchives(filtered);
+    } catch (error) {
+      logger.apiError('search archives', error);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  // Handle add archives
+  const handleAddArchives = async () => {
+    if (!tankoubon || selectedArchives.size === 0) return;
+
+    try {
+      setAddingArchives(true);
+      const promises = Array.from(selectedArchives).map((arcid) =>
+        TankoubonService.addArchiveToTankoubon(tankoubon.tankoubon_id, arcid)
+      );
+      await Promise.all(promises);
+      setAddArchiveDialogOpen(false);
+      setSelectedArchives(new Set());
+      setAvailableArchives([]);
+      setSearchQuery('');
+      fetchTankoubon();
+    } catch (error) {
+      logger.operationFailed('add archives', error);
+    } finally {
+      setAddingArchives(false);
+    }
+  };
+
+  // Toggle archive selection
+  const toggleArchiveSelection = (arcid: string) => {
+    const newSelected = new Set(selectedArchives);
+    if (newSelected.has(arcid)) {
+      newSelected.delete(arcid);
+    } else {
+      newSelected.add(arcid);
+    }
+    setSelectedArchives(newSelected);
+  };
+
+  const filteredArchives = useMemo(() => {
+    const q = archiveFilter.trim().toLowerCase();
+    if (!q) return archives;
+    return archives.filter((a) => {
+      const title = String(a.title || '').toLowerCase();
+      const tags = String(a.tags || '').toLowerCase();
+      return title.includes(q) || tags.includes(q);
+    });
+  }, [archives, archiveFilter]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <main className="container mx-auto px-4 py-8">
+          <div className="flex justify-center items-center h-64">
+            <Spinner size="lg" />
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!tankoubon) {
+    return (
+      <div className="min-h-screen bg-background">
+        <main className="container mx-auto px-4 py-8">
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">{t('tankoubon.notFound')}</p>
+            <Button onClick={() => router.push('/')} className="mt-4">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              {t('common.back')}
+            </Button>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  const allTags = tankoubon.tags
+    ? tankoubon.tags.split(',').map((tag) => tag.trim()).filter((tag) => tag)
+    : [];
+
+  const archiveCount = typeof tankoubon.archive_count === 'number' ? tankoubon.archive_count : archives.length;
+  const totalPages = typeof tankoubon.pagecount === 'number' ? tankoubon.pagecount : 0;
+  const totalProgress = typeof tankoubon.progress === 'number' ? tankoubon.progress : 0;
+  const progressPercent =
+    totalPages > 0 && totalProgress > 0
+      ? Math.max(0, Math.min(100, Math.round((totalProgress / totalPages) * 100)))
+      : 0;
+  const coverUrl = typeof tankoubon.cover_asset_id === 'number' && tankoubon.cover_asset_id > 0
+    ? `/api/assets/${tankoubon.cover_asset_id}`
+    : '';
+
+  return (
+    <div className="min-h-dvh bg-background pb-20 lg:pb-0">
+      <main className="container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
+        {/* Header / hero */}
+        <div className="relative mb-8">
+          <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
+            <div className="p-4 md:p-5">
+              {/* Mobile: keep hero clean; actions live in a bottom sheet. */}
+              <div className="sm:hidden absolute right-4 top-4">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 w-9 p-0"
+                  aria-label={t('common.actions')}
+                  onClick={() => setMobileActionsOpen(true)}
+                >
+                  <MoreHorizontal className="w-4 h-4" />
+                </Button>
+              </div>
+
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div className="flex min-w-0 gap-4">
+                  <div className="relative h-44 w-32 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-48 sm:w-36 md:h-56 md:w-40 lg:h-60 lg:w-44">
+                    {coverUrl ? (
+                      <Image
+                        src={coverUrl}
+                        alt={tankoubon.name}
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 640px) 128px, (max-width: 768px) 144px, (max-width: 1024px) 160px, 176px"
+                        unoptimized
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                        {t('archive.noCover')}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge className="bg-primary">
+                      <BookOpen className="w-3 h-3 mr-1" />
+                      {t('tankoubon.collection')}
+                    </Badge>
+                    <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight break-words">
+                      {tankoubon.name}
+                    </h1>
+                  </div>
+
+                  {/* Keep stats directly under title on all screen sizes (same as mobile). */}
+                  <div className="mt-2">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      <span className="tabular-nums">
+                        {t('tankoubon.archiveCount')} {archiveCount}
+                      </span>
+                      <span className="text-muted-foreground/60">•</span>
+                      <span className="tabular-nums">
+                        {t('tankoubon.totalPagesLabel')} {totalPages}
+                      </span>
+                      <span className="text-muted-foreground/60">•</span>
+                      <span className="tabular-nums">
+                        {t('tankoubon.progress')} {progressPercent}%
+                      </span>
+                    </div>
+                    {progressPercent > 0 ? (
+                      <Progress className="mt-2 h-1.5" value={progressPercent} />
+                    ) : null}
+                  </div>
+
+                  {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}
+                  <div className="hidden sm:block">
+                    {tankoubon.summary ? (
+                      <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-2">
+                        {tankoubon.summary}
+                      </p>
+                    ) : null}
+
+                    {allTags.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {allTags.map((tag, index) => renderTagBadge(tag, index))}
+                      </div>
+                    ) : null}
+                  </div>
+                  </div>
+                </div>
+
+                {/* Desktop/tablet actions; mobile actions are in the sheet. */}
+                <div className="hidden sm:flex shrink-0 flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                    title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                    disabled={favoriteLoading}
+                    onClick={handleFavoriteClick}
+                  >
+                    <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-9 p-0"
+                    title={t('common.edit')}
+                    onClick={() => setEditDialogOpen(true)}
+                  >
+                    <Edit className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-9 w-9 p-0 text-destructive"
+                    title={t('common.delete')}
+                    onClick={() => setDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </Button>
+                </div>
+                </div>
+
+              {/* Mobile: summary/tags span full width (avoid an empty left column under the cover). */}
+              <div className="sm:hidden w-full">
+                {tankoubon.summary ? (
+                  <p className="text-sm text-muted-foreground max-w-3xl line-clamp-2">
+                    {tankoubon.summary}
+                  </p>
+                ) : null}
+
+                {allTags.length > 0 ? (
+                  <div className="mt-3 flex flex-wrap gap-2 w-full">
+                    {allTags.map((tag, index) => renderTagBadge(tag, index))}
+                  </div>
+                ) : null}
+              </div>
+
+
+            </div>
+          </div>
+        </div>
+
+        <Sheet open={mobileActionsOpen} onOpenChange={setMobileActionsOpen}>
+          <SheetContent
+            side="bottom"
+            className="px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+1rem)] max-h-[85vh] overflow-y-auto rounded-t-xl sm:hidden"
+          >
+            <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" />
+            <SheetHeader className="mb-3">
+              <SheetTitle>{t('common.actions')}</SheetTitle>
+              <div className="text-sm text-muted-foreground line-clamp-2">{tankoubon.name}</div>
+            </SheetHeader>
+
+            <div className="space-y-2">
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  setAddArchiveDialogOpen(true);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t('tankoubon.addArchive')}
+              </Button>
+
+              <Button
+                variant="outline"
+                className={`w-full justify-start ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                onClick={async () => {
+                  await handleFavoriteClick();
+                  setMobileActionsOpen(false);
+                }}
+                disabled={favoriteLoading}
+              >
+                <Heart className={`w-4 h-4 mr-2 ${isFavorite ? 'fill-current' : ''}`} />
+                {favoriteLoading ? t('common.loading') : isFavorite ? t('common.unfavorite') : t('common.favorite')}
+              </Button>
+
+              <Button
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => {
+                  setEditDialogOpen(true);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                {t('common.edit')}
+              </Button>
+
+              <Button
+                variant="destructive"
+                className="w-full justify-start"
+                onClick={() => {
+                  setDeleteDialogOpen(true);
+                  setMobileActionsOpen(false);
+                }}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                {t('common.delete')}
+              </Button>
+
+              <Button variant="outline" className="w-full justify-start" onClick={() => setMobileActionsOpen(false)}>
+                <X className="w-4 h-4 mr-2" />
+                {t('common.close')}
+              </Button>
+            </div>
+          </SheetContent>
+        </Sheet>
+
+        {/* Archives section */}
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold">{t('tankoubon.archivesTitle')}</h2>
+            <Badge variant="secondary" className="tabular-nums">
+              {archiveFilter.trim() ? `${filteredArchives.length}/${archives.length}` : String(archives.length)}
+            </Badge>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 border-0 shadow-none"
+              onClick={() => handleArchiveViewModeChange(archiveViewMode === 'grid' ? 'list' : 'grid')}
+              title={archiveViewMode === 'grid' ? t('tankoubon.switchToListView') : t('tankoubon.switchToGridView')}
+              aria-label={archiveViewMode === 'grid' ? t('tankoubon.switchToListView') : t('tankoubon.switchToGridView')}
+            >
+              {archiveViewMode === 'grid' ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+              <span className="hidden sm:inline">
+                {archiveViewMode === 'grid' ? t('tankoubon.listView') : t('tankoubon.gridView')}
+              </span>
+            </Button>
+          </div>
+
+          <div className="flex w-full gap-2 sm:w-auto">
+            <div className="relative flex-1 sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={archiveFilter}
+                onChange={(e) => setArchiveFilter(e.target.value)}
+                placeholder={t('tankoubon.filterPlaceholder')}
+                className="pl-9"
+              />
+            </div>
+            <Button onClick={() => setAddArchiveDialogOpen(true)} className="shrink-0">
+              <Plus className="w-4 h-4 mr-2" />
+              {t('tankoubon.addArchive')}
+            </Button>
+          </div>
+        </div>
+
+        {archivesLoading ? (
+          <div className="flex justify-center items-center h-32">
+            <Spinner />
+          </div>
+        ) : archives.length === 0 ? (
+          <div className="text-center py-12 bg-muted/50 rounded-lg">
+            <p className="text-muted-foreground mb-4">{t('tankoubon.noArchives')}</p>
+            <Button onClick={() => setAddArchiveDialogOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              {t('tankoubon.addArchive')}
+            </Button>
+          </div>
+        ) : filteredArchives.length === 0 ? (
+          <div className="text-center py-12 bg-muted/30 rounded-lg border">
+            <p className="text-muted-foreground mb-1">{t('tankoubon.noMatchingArchives')}</p>
+            <Button variant="ghost" onClick={() => setArchiveFilter('')}>
+              {t('common.reset')}
+            </Button>
+          </div>
+        ) : archiveViewMode === 'grid' ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
+              {filteredArchives.map((archive, index) => {
+                const isRemoving = removingArcids.has(archive.arcid);
+                return (
+                  <div key={archive.arcid} className="relative group">
+                    <ArchiveCard archive={archive} index={index} />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="icon"
+                      className="absolute right-2 top-2 h-8 w-8 rounded-full opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus:opacity-100"
+                      title={t('tankoubon.removeArchive')}
+                      disabled={isRemoving}
+                      onClick={() => {
+                        setRemoveTarget(archive);
+                        setRemoveDialogOpen(true);
+                      }}
+                    >
+                      {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-3 h-full flex flex-col">
+            {filteredArchives.map((archive) => {
+              const isRemoving = removingArcids.has(archive.arcid);
+              return (
+                <ArchiveListItem
+                  key={archive.arcid}
+                  archive={archive}
+                  isRemoving={isRemoving}
+                  onRemove={() => {
+                    setRemoveTarget(archive);
+                    setRemoveDialogOpen(true);
+                  }}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        <ConfirmDialog
+          open={removeDialogOpen}
+          onOpenChange={(open) => {
+            setRemoveDialogOpen(open);
+            if (!open) setRemoveTarget(null);
+          }}
+          title={t('tankoubon.removeArchiveConfirmTitle')}
+          description={t('tankoubon.removeArchiveConfirmMessage').replace('{title}', removeTarget?.title ?? '')}
+          onConfirm={confirmRemoveArchive}
+          confirmText={t('common.remove')}
+          cancelText={t('common.cancel')}
+          variant="destructive"
+        />
+
+        {/* Edit Dialog */}
+        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('tankoubon.editTankoubon')}</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="pt-0">
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium">{t('tankoubon.name')}</label>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder={t('tankoubon.namePlaceholder')}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
+                  <Textarea
+                    value={editSummary}
+                    onChange={(e) => setEditSummary(e.target.value)}
+                    placeholder={t('tankoubon.summaryPlaceholder')}
+                    rows={3}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
+                  <div className="mt-2 flex flex-col gap-2">
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="sm:w-[220px]">
+                        <Select value={selectedMetadataPlugin} onValueChange={setSelectedMetadataPlugin}>
+                          <SelectTrigger disabled={saving || isMetadataPluginRunning || metadataPlugins.length === 0}>
+                            <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {metadataPlugins.map((p) => (
+                              <SelectItem key={p.namespace} value={p.namespace}>
+                                {p.name} ({p.namespace})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Input
+                        value={metadataPluginParam}
+                        onChange={(e) => setMetadataPluginParam(e.target.value)}
+                        disabled={saving || isMetadataPluginRunning}
+                        placeholder={t('archive.metadataPluginParamPlaceholder')}
+                      />
+                      <Button
+                        type="button"
+                        onClick={runMetadataPlugin}
+                        disabled={saving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin}
+                      >
+                        <Play className="w-4 h-4 mr-2" />
+                        {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
+                      </Button>
+                    </div>
+                    {(metadataPluginProgress !== null || metadataPluginMessage) && (
+                      <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
+                        <span className="truncate" title={metadataPluginMessage}>
+                          {metadataPluginMessage || ''}
+                        </span>
+                        {metadataPluginProgress !== null && (
+                          <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
+                        )}
+                      </div>
+                    )}
+                    {metadataPlugins.length === 0 && (
+                      <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
+                  <TagInput
+                    value={editTags}
+                    onChange={setEditTags}
+                    placeholder={t('tankoubon.tagsPlaceholder')}
+                    disabled={saving}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">{t('tankoubon.tagsHint')}</p>
+                </div>
+              </div>
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button onClick={handleEdit} disabled={saving || !editName.trim()}>
+                {saving ? <Spinner size="sm" className="mr-2" /> : null}
+                {t('common.save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!rpcSelectRequest} onOpenChange={() => {}}>
+          <DialogContent className="max-w-4xl h-[75vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle>{rpcSelectRequest?.title || '请选择元数据匹配项'}</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="pt-0 flex-1 min-h-0">
+              <div
+                className="space-y-3 h-full flex flex-col"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && rpcSelectSelectedIndex != null && (rpcSelectRemainingSeconds ?? 1) > 0) {
+                    e.preventDefault();
+                    void submitRpcSelect();
+                  }
+                }}
+              >
+                {rpcSelectRequest?.message ? (
+                  <p className="text-sm text-muted-foreground">{rpcSelectRequest.message}</p>
+                ) : null}
+                <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+                  {(rpcSelectRequest?.options || []).map((opt) => (
+                    <Button
+                      key={`${rpcSelectRequest?.request_id}-${opt.index}`}
+                      type="button"
+                      variant={rpcSelectSelectedIndex === opt.index ? 'default' : 'outline'}
+                      className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left whitespace-normal"
+                      onClick={() => setRpcSelectSelectedIndex(opt.index)}
+                    >
+                      <div className="flex w-full items-start gap-3">
+                        {opt.cover ? (
+                          <img
+                            src={opt.cover}
+                            alt={opt.label || `候选 ${opt.index + 1}`}
+                            className="w-20 h-28 shrink-0 object-cover rounded border"
+                            loading="lazy"
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1 text-left">
+                          <div className="font-medium whitespace-normal break-words">{opt.label || `候选 ${opt.index + 1}`}</div>
+                          {opt.description ? (
+                            <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  如果长时间不选择，本次预览任务会超时失败。
+                  {rpcSelectRemainingSeconds != null ? ` 剩余 ${Math.max(0, rpcSelectRemainingSeconds)} 秒。` : ''}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => void abortRpcSelect()}>
+                    放弃
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={rpcSelectSelectedIndex == null || (rpcSelectRemainingSeconds ?? 1) <= 0}
+                    onClick={() => void submitRpcSelect()}
+                  >
+                    选择并提交
+                  </Button>
+                </div>
+              </div>
+            </DialogBody>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('tankoubon.deleteConfirmTitle')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('tankoubon.deleteConfirmMessage')}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDelete}
+                className="bg-destructive text-destructive-foreground"
+                disabled={deleting}
+              >
+                {deleting ? <Spinner size="sm" className="mr-2" /> : null}
+                {t('common.delete')}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Add Archive Dialog */}
+        <Dialog open={addArchiveDialogOpen} onOpenChange={setAddArchiveDialogOpen}>
+          <DialogContent className="max-w-3xl max-h-[80vh]">
+            <DialogHeader>
+              <DialogTitle>{t('tankoubon.addArchive')}</DialogTitle>
+            </DialogHeader>
+            <DialogBody className="pt-0 space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t('tankoubon.searchArchivesPlaceholder')}
+                  onKeyDown={(e) => e.key === 'Enter' && searchArchives()}
+                />
+                <Button onClick={searchArchives} disabled={searchLoading}>
+                  {searchLoading ? <Spinner size="sm" /> : t('common.search')}
+                </Button>
+              </div>
+
+              {availableArchives.length > 0 && (
+                <div className="border rounded-lg p-4">
+                  <p className="text-sm text-muted-foreground mb-3">
+                    {t('tankoubon.selectArchives')} ({selectedArchives.size} {t('common.selected')})
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-h-96 overflow-y-auto">
+                    {availableArchives.map((archive) => (
+                      <div
+                        key={archive.arcid}
+                        className={`p-3 border rounded-lg cursor-pointer transition-colors ${
+                          selectedArchives.has(archive.arcid)
+                            ? 'border-primary bg-primary/10'
+                            : 'hover:border-muted-foreground'
+                        }`}
+                        onClick={() => toggleArchiveSelection(archive.arcid)}
+                      >
+                        <p className="text-sm font-medium line-clamp-2">{archive.title}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {archive.pagecount} {t('archive.pages').replace('{count}', '')}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {availableArchives.length === 0 && searchQuery && !searchLoading && (
+                <p className="text-center text-muted-foreground py-8">{t('tankoubon.noArchivesFound')}</p>
+              )}
+            </DialogBody>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setAddArchiveDialogOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button
+                onClick={handleAddArchives}
+                disabled={addingArchives || selectedArchives.size === 0}
+              >
+                {addingArchives ? <Spinner size="sm" className="mr-2" /> : null}
+                {t('tankoubon.addSelected')} ({selectedArchives.size})
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </main>
+
+      <MobileBottomNav />
+    </div>
+  );
+}
+
+export default function TankoubonDetailPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background pb-20 lg:pb-0">
+        <main className="container mx-auto px-4 py-8">
+          <div className="flex items-center justify-center py-12">
+            <Spinner size="lg" />
+          </div>
+        </main>
+        <MobileBottomNav />
+      </div>
+    }>
+      <TankoubonDetailContent />
+    </Suspense>
+  );
+}

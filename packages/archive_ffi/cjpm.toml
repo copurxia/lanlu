@@ -1,0 +1,14 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "archive_ffi"
+  description = "nothing here"
+  version = "1.0.0"
+  target-dir = ""
+  src-dir = ""
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = "-larchive"
+  package-configuration = {}
+
+[dependencies]

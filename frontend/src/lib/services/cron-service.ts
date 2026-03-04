@@ -1,0 +1,464 @@
+import { api } from '@/lib/api';
+
+/**
+ * 定时任务类型
+ */
+export interface ScheduledTask {
+  id: number;
+  name: string;
+  cronExpression: string;
+  taskType: string;
+  taskParameters: string;
+  enabled: boolean;
+  priority: number;
+  timeoutSeconds: number;
+  lastRunAt: string;
+  lastRunSuccess: boolean;
+  lastRunError: string;
+  nextRunAt: string;
+  runCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 定时任务分页结果
+ */
+export interface ScheduledTaskPageResult {
+  tasks: ScheduledTask[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+/**
+ * CronService 状态
+ */
+export interface CronServiceStatus {
+  running: boolean;
+  totalTasks: number;
+  enabledTasks: number;
+}
+
+/**
+ * Cron 表达式验证结果
+ */
+export interface CronValidationResult {
+  valid: boolean;
+  error: string;
+  nextRuns: string[];
+}
+
+export interface CronTaskTypeOption {
+  value: string;
+}
+
+/**
+ * 创建/更新定时任务的参数
+ */
+export interface ScheduledTaskInput {
+  name: string;
+  cronExpression: string;
+  taskType: string;
+  taskParameters?: string;
+  enabled?: boolean;
+  priority?: number;
+  timeoutSeconds?: number;
+}
+
+/**
+ * Cron Service - 定时任务管理 API
+ */
+export class CronService {
+  private static BASE_URL = '/api/admin/cron';
+  private static taskTypesCache: CronTaskTypeOption[] | null = null;
+
+  static readonly CUSTOM_TASK_TYPE_VALUE = '__custom__';
+
+  /**
+   * 获取 CronService 状态
+   */
+  static async getStatus(): Promise<CronServiceStatus> {
+    try {
+      const response = await api.get(`${this.BASE_URL}/status`);
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        return {
+          running: data.running ?? false,
+          totalTasks: data.totalTasks ?? 0,
+          enabledTasks: data.enabledTasks ?? 0,
+        };
+      }
+      throw new Error(response.error || 'Failed to get cron service status');
+    } catch (error) {
+      console.error('Error getting cron service status:', error);
+      return { running: false, totalTasks: 0, enabledTasks: 0 };
+    }
+  }
+
+  /**
+   * 启动 CronService
+   */
+  static async start(): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/start`);
+      return response.success === true;
+    } catch (error) {
+      console.error('Error starting cron service:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 停止 CronService
+   */
+  static async stop(): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/stop`);
+      return response.success === true;
+    } catch (error) {
+      console.error('Error stopping cron service:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 验证 Cron 表达式
+   */
+  static async validateExpression(expression: string): Promise<CronValidationResult> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/validate`, { expression });
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        return {
+          valid: data.valid ?? false,
+          error: data.error ?? '',
+          nextRuns: data.nextRuns ?? [],
+        };
+      }
+      return { valid: false, error: response.error || 'Validation failed', nextRuns: [] };
+    } catch (error) {
+      console.error('Error validating cron expression:', error);
+      return { valid: false, error: 'Validation request failed', nextRuns: [] };
+    }
+  }
+
+  /**
+   * 获取后端支持的任务类型列表（与 TaskRunner 保持一致）
+   */
+  static async getTaskTypes(): Promise<CronTaskTypeOption[]> {
+    if (this.taskTypesCache) return this.taskTypesCache;
+    try {
+      const response = await api.get(`${this.BASE_URL}/task-types`);
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        const rawTypes = (data?.types ?? data) as any;
+        const values = Array.isArray(rawTypes) ? rawTypes.filter((t) => typeof t === 'string') : [];
+        this.taskTypesCache = values.map((value) => ({ value }));
+        return this.taskTypesCache;
+      }
+    } catch (error) {
+      console.error('Error fetching task types:', error);
+    }
+    // Fallback for older backends or transient failures.
+    this.taskTypesCache = this.TASK_TYPES;
+    return this.taskTypesCache;
+  }
+
+  /**
+   * 获取定时任务列表（分页）
+   */
+  static async getTasks(page: number = 1, pageSize: number = 10): Promise<ScheduledTaskPageResult> {
+    try {
+      const response = await api.get(`${this.BASE_URL}/tasks?page=${page}&pageSize=${pageSize}`);
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        const tasks = Array.isArray(data.tasks)
+          ? data.tasks.map((task: any) => this.normalizeTask(task))
+          : [];
+        return {
+          tasks,
+          total: data.total ?? 0,
+          page: data.page ?? page,
+          pageSize: data.pageSize ?? pageSize,
+          totalPages: data.totalPages ?? 0,
+        };
+      }
+      throw new Error(response.error || 'Failed to fetch scheduled tasks');
+    } catch (error) {
+      console.error('Error fetching scheduled tasks:', error);
+      return { tasks: [], total: 0, page, pageSize, totalPages: 0 };
+    }
+  }
+
+  /**
+   * 获取单个定时任务
+   */
+  static async getTask(id: number): Promise<ScheduledTask | null> {
+    try {
+      const response = await api.get(`${this.BASE_URL}/tasks/${id}`);
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        return this.normalizeTask(data);
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching scheduled task:', error);
+      return null;
+    }
+  }
+
+  /**
+   * 创建定时任务
+   */
+  static async createTask(input: ScheduledTaskInput): Promise<{ success: boolean; task?: ScheduledTask; error?: string }> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/tasks`, input);
+      if (response.success) {
+        let data = response.data;
+        if (typeof data === 'string') {
+          data = JSON.parse(data);
+        }
+        return {
+          success: true,
+          task: data.task ? this.normalizeTask(data.task) : undefined,
+        };
+      }
+      return { success: false, error: response.error || 'Failed to create task' };
+    } catch (error: any) {
+      console.error('Error creating scheduled task:', error);
+      return { success: false, error: error?.message || 'Failed to create task' };
+    }
+  }
+
+  /**
+   * 更新定时任务
+   */
+  static async updateTask(id: number, input: Partial<ScheduledTaskInput>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const response = await api.put(`${this.BASE_URL}/tasks/${id}`, input);
+      return { success: response.success === true, error: response.error };
+    } catch (error: any) {
+      console.error('Error updating scheduled task:', error);
+      return { success: false, error: error?.message || 'Failed to update task' };
+    }
+  }
+
+  /**
+   * 删除定时任务
+   */
+  static async deleteTask(id: number): Promise<boolean> {
+    try {
+      const response = await api.delete(`${this.BASE_URL}/tasks/${id}`);
+      return response.success === true;
+    } catch (error) {
+      console.error('Error deleting scheduled task:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 手动触发定时任务
+   */
+  static async triggerTask(id: number): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/tasks/${id}/trigger`);
+      return response.success === true;
+    } catch (error) {
+      console.error('Error triggering scheduled task:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 启用定时任务
+   */
+  static async enableTask(id: number): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/tasks/${id}/enable`);
+      return response.success === true;
+    } catch (error) {
+      console.error('Error enabling scheduled task:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 禁用定时任务
+   */
+  static async disableTask(id: number): Promise<boolean> {
+    try {
+      const response = await api.post(`${this.BASE_URL}/tasks/${id}/disable`);
+      return response.success === true;
+    } catch (error) {
+      console.error('Error disabling scheduled task:', error);
+      return false;
+    }
+  }
+
+  /**
+   * 标准化任务对象
+   */
+  private static normalizeTask(task: any): ScheduledTask {
+    // 确保 taskParameters 是字符串
+    let taskParams = task.task_parameters ?? task.taskParameters ?? '';
+    if (typeof taskParams === 'object' && taskParams !== null) {
+      taskParams = JSON.stringify(taskParams);
+    }
+
+    return {
+      id: task.id ?? 0,
+      name: task.name ?? '',
+      cronExpression: task.cron_expression ?? task.cronExpression ?? '',
+      taskType: task.task_type ?? task.taskType ?? '',
+      taskParameters: taskParams,
+      enabled: task.enabled ?? false,
+      priority: task.priority ?? 50,
+      timeoutSeconds: task.timeout_seconds ?? task.timeoutSeconds ?? 3600,
+      lastRunAt: task.last_run_at ?? task.lastRunAt ?? '',
+      lastRunSuccess: task.last_run_success ?? task.lastRunSuccess ?? false,
+      lastRunError: task.last_run_error ?? task.lastRunError ?? '',
+      nextRunAt: task.next_run_at ?? task.nextRunAt ?? '',
+      runCount: task.run_count ?? task.runCount ?? 0,
+      createdAt: task.created_at ?? task.createdAt ?? '',
+      updatedAt: task.updated_at ?? task.updatedAt ?? '',
+    };
+  }
+
+  /**
+   * 获取任务类型标签
+   */
+  static getTaskTypeLabel(taskType: string): string {
+    switch (taskType) {
+      case 'download_url':
+        return '下载URL';
+      case 'upload_process':
+        return '上传处理';
+      case 'metadata_plugin':
+        return '元数据插件';
+      case 'download_url_callback':
+        return '下载回调';
+      case 'tag_import':
+        return '标签导入';
+      case 'scan_all_categories':
+        return '扫描所有分类';
+      case 'scan_single_category':
+        return '扫描分类';
+      case 'scan_archive':
+        return '扫描档案';
+      case 'generate_thumbnail':
+        return '生成缩略图';
+      case 'generate_category_cover':
+        return '生成分类封面';
+      case 'check_database':
+        return '数据库检查';
+      case 'scan_plugins':
+        return '插件扫描';
+      case 'deno_task':
+        return 'Deno任务';
+      case 'metadata_plugin_callback':
+        return '元数据回调';
+      case 'clear_cache':
+        return '清理缓存';
+      case 'clear_log':
+        return '清理日志';
+      case 'regenerate_cover':
+        return '重建封面';
+      case 'backfill_metadata':
+        return '回填元数据';
+      default:
+        return taskType;
+    }
+  }
+
+  /**
+   * 获取任务类型颜色
+   */
+  static getTaskTypeColor(taskType: string): string {
+    switch (taskType) {
+      case 'download_url':
+      case 'upload_process':
+        return 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200';
+      case 'metadata_plugin':
+      case 'metadata_plugin_callback':
+        return 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200';
+      case 'tag_import':
+        return 'bg-lime-100 text-lime-800 dark:bg-lime-900 dark:text-lime-200';
+      case 'scan_all_categories':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      case 'scan_single_category':
+        return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200';
+      case 'scan_archive':
+        return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200';
+      case 'check_database':
+        return 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200';
+      case 'scan_plugins':
+        return 'bg-pink-100 text-pink-800 dark:bg-pink-900 dark:text-pink-200';
+      case 'generate_thumbnail':
+        return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
+      case 'generate_category_cover':
+        return 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900 dark:text-fuchsia-200';
+      case 'deno_task':
+        return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
+      case 'clear_cache':
+      case 'clear_log':
+        return 'bg-slate-100 text-slate-800 dark:bg-slate-900 dark:text-slate-200';
+      default:
+        return 'bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-200';
+    }
+  }
+
+  /**
+   * 常用 Cron 表达式预设
+   */
+  static readonly CRON_PRESETS = [
+    { label: '每小时', value: '0 * * * *' },
+    { label: '每6小时', value: '0 */6 * * *' },
+    { label: '每12小时', value: '0 */12 * * *' },
+    { label: '每天凌晨1点', value: '0 1 * * *' },
+    { label: '每天凌晨2点', value: '0 2 * * *' },
+    { label: '每天凌晨3点', value: '0 3 * * *' },
+    { label: '每周一凌晨2点', value: '0 2 * * 1' },
+    { label: '每月1日凌晨2点', value: '0 2 1 * *' },
+  ];
+
+  /**
+   * 可用的任务类型
+   */
+  static readonly TASK_TYPES = [
+    { value: 'download_url' },
+    { value: 'upload_process' },
+    { value: 'metadata_plugin' },
+    { value: 'download_url_callback' },
+    { value: 'tag_import' },
+    { value: 'scan_all_categories' },
+    { value: 'scan_single_category' },
+    { value: 'scan_archive' },
+    { value: 'generate_thumbnail' },
+    { value: 'generate_category_cover' },
+    { value: 'check_database' },
+    { value: 'scan_plugins' },
+    { value: 'deno_task' },
+    { value: 'metadata_plugin_callback' },
+    { value: 'clear_cache' },
+    { value: 'clear_log' },
+    { value: 'regenerate_cover' },
+    { value: 'backfill_metadata' },
+  ];
+}

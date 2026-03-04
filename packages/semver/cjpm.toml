@@ -1,0 +1,15 @@
+[package]
+  cjc-version = "1.0.3"
+  name = "semver"
+  description = "Semantic versioning parser and comparator for Cangjie"
+  version = "0.1.0"
+  target-dir = ""
+  src-dir = "src"
+  output-type = "static"
+  compile-option = ""
+  override-compile-option = ""
+  link-option = ""
+  package-configuration = {}
+
+[dependencies]
+

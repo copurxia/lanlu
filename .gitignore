@@ -1,0 +1,11 @@
+ref
+.cache
+.roo
+.vscode
+.claude
+target
+data
+.env
+.devbrain
+CLAUDE.md
+build-script-cache
