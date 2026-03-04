@@ -235,8 +235,9 @@ public class DownloadUrlCallbackRunner {
         resultW.flush()
         let resultJson = String.fromUtf8(readToEnd(resultOut))
         TaskModel.updateTaskProgress(downloadTaskId, 100, "下载完成")
-        TaskModel.completeTask(downloadTaskId, "download_url completed")
         TaskIO.writeOutput(downloadTaskId, resultJson)
+        // Write JSON result before completion so SSE/detail readers can consistently parse task_id.
+        TaskModel.completeTask(downloadTaskId, resultJson)
         TaskIO.appendLog(downloadTaskId, "download_url task completed: scan_task_id=${scanTask.id}")
 
         // 完成回调任务自身

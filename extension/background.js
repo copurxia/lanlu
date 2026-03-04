@@ -8,6 +8,7 @@ const QUEUE_KEY = "lanlu_download_queue";
 const SETTINGS_KEY = "lanlu_settings";
 const STATUS_CACHE_KEY = "lanlu_tab_status_cache";
 const REMOTE_CHECK_MIN_INTERVAL_MS = 60 * 1000;
+const SSE_RETRY_DELAY_MS = 2000;
 
 const STATUS = {
   NOT_FOUND: "not_found",
@@ -22,6 +23,8 @@ const BADGE = {
   [STATUS.DONE]: { text: "✓", color: "#16a34a" },
   [STATUS.ERROR]: { text: "!", color: "#dc2626" },
 };
+
+let queueMutationChain = Promise.resolve();
 
 // --- Storage helpers ---
 
@@ -125,22 +128,46 @@ async function readQueueEntries() {
   return entries;
 }
 
+function enqueueQueueMutation(work) {
+  const queued = queueMutationChain.catch(() => {}).then(work);
+  queueMutationChain = queued.then(
+    () => undefined,
+    () => undefined
+  );
+  return queued;
+}
+
 async function writeQueueEntry(entryId, patch) {
-  const items = await chromeGet("local", QUEUE_KEY);
-  const raw = items[QUEUE_KEY];
-  const parsed = typeof raw === "string" ? safeJsonParse(raw) : raw;
-  if (!parsed || !parsed.state || !Array.isArray(parsed.state.entries)) return;
+  await enqueueQueueMutation(async () => {
+    const items = await chromeGet("local", QUEUE_KEY);
+    const raw = items[QUEUE_KEY];
+    const parsed = typeof raw === "string" ? safeJsonParse(raw) : raw;
+    if (!parsed || !parsed.state || !Array.isArray(parsed.state.entries)) return;
 
-  const now = Date.now();
-  const entries = parsed.state.entries.map((e) => {
-    if (e.id === entryId) {
-      return { ...e, ...patch, updatedAt: now };
-    }
-    return e;
+    let changed = false;
+    const now = Date.now();
+    const entries = parsed.state.entries.map((e) => {
+      if (e.id === entryId) {
+        changed = true;
+        return { ...e, ...patch, updatedAt: now };
+      }
+      return e;
+    });
+
+    if (!changed) return;
+    parsed.state.entries = entries;
+    await chromeSet("local", { [QUEUE_KEY]: JSON.stringify(parsed) });
   });
+}
 
-  parsed.state.entries = entries;
-  await chromeSet("local", { [QUEUE_KEY]: JSON.stringify(parsed) });
+async function readQueueEntryById(entryId) {
+  const entries = await readQueueEntries();
+  for (const entry of entries) {
+    if (entry && entry.id === entryId) {
+      return entry;
+    }
+  }
+  return null;
 }
 
 async function readStatusCache() {
@@ -192,6 +219,10 @@ function getErrorMessage(error, fallback) {
   if (error instanceof Error) return error.message || fallback;
   if (typeof error === "string") return error || fallback;
   return fallback;
+}
+
+function sleepMs(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isRecord(value) {
@@ -280,6 +311,53 @@ async function searchArchives(auth, params) {
   const data = await requestJson(auth, `/api/search?${searchParams.toString()}`);
   if (!isRecord(data)) return {};
   return { data: Array.isArray(data.data) ? data.data : [] };
+}
+
+function getTaskResultString(task) {
+  if (!isRecord(task)) return "";
+  return typeof task.result === "string" ? task.result : "";
+}
+
+async function readTaskDetail(taskId) {
+  const auth = await getAuth();
+  if (!auth) return null;
+  try {
+    const data = await requestJson(auth, `/api/admin/taskpool/${taskId}`);
+    return isRecord(data) ? data : null;
+  } catch (e) {
+    console.warn(`[SSE] Failed to read task detail: ${taskId}`, e);
+    return null;
+  }
+}
+
+async function resolveScanTaskIdFromTask(task) {
+  const direct = parseScanTaskIdFromDownloadResult(getTaskResultString(task));
+  if (direct) return direct;
+  if (typeof task.id !== "number") return null;
+
+  for (const delayMs of [200, 700]) {
+    await sleepMs(delayMs);
+    const detail = await readTaskDetail(task.id);
+    if (!detail) continue;
+    const parsed = parseScanTaskIdFromDownloadResult(getTaskResultString(detail));
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+async function resolveArchiveIdFromTask(task) {
+  const direct = parseArchiveIdFromScanResult(getTaskResultString(task));
+  if (direct) return direct;
+  if (typeof task.id !== "number") return null;
+
+  for (const delayMs of [200, 700]) {
+    await sleepMs(delayMs);
+    const detail = await readTaskDetail(task.id);
+    if (!detail) continue;
+    const parsed = parseArchiveIdFromScanResult(getTaskResultString(detail));
+    if (parsed) return parsed;
+  }
+  return null;
 }
 
 async function writeStatusCache(url, entry) {
@@ -441,9 +519,73 @@ async function updateBadgeForActiveTab() {
 // --- SSE Task Sync (runs in background service worker) ---
 
 const sseConnections = new Map(); // key: `${entryId}:${kind}:${taskId}` -> EventSource
+const sseRetryTimers = new Map(); // key: `${entryId}:${kind}:${taskId}` -> timeout id
+const autoCloseHandledEntries = new Set();
+
+function isMissingTabErrorMessage(message) {
+  if (typeof message !== "string") return false;
+  return message.includes("No tab with id") || message.includes("Tabs cannot be edited right now");
+}
+
+function closeTabById(tabId) {
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.remove(tabId, () => {
+        const err = chrome.runtime.lastError;
+        if (!err) {
+          resolve();
+          return;
+        }
+        if (isMissingTabErrorMessage(err.message || "")) {
+          resolve();
+          return;
+        }
+        reject(new Error(err.message || "Failed to close tab"));
+      });
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function maybeAutoCloseTabForEntry(entryId) {
+  if (autoCloseHandledEntries.has(entryId)) return;
+
+  const settings = await readSettingsRaw();
+  if (!settings || !settings.autoCloseTabOnComplete) return;
+
+  const entry = await readQueueEntryById(entryId);
+  if (!entry) return;
+  autoCloseHandledEntries.add(entryId);
+
+  if (typeof entry.tabId !== "number") return;
+
+  try {
+    await closeTabById(entry.tabId);
+    console.log(`[AutoClose] Closed tab ${entry.tabId} for entry ${entryId}`);
+  } catch (e) {
+    console.warn(`[AutoClose] Failed to close tab for entry ${entryId}`, e);
+  }
+}
 
 function buildStreamKey(entryId, kind, taskId) {
   return `${entryId}:${kind}:${taskId}`;
+}
+
+function clearSseRetryTimer(key) {
+  const timer = sseRetryTimers.get(key);
+  if (timer == null) return;
+  clearTimeout(timer);
+  sseRetryTimers.delete(key);
+}
+
+function scheduleSseRetry(key) {
+  if (sseRetryTimers.has(key)) return;
+  const timer = setTimeout(() => {
+    sseRetryTimers.delete(key);
+    void syncSseSubscriptions();
+  }, SSE_RETRY_DELAY_MS);
+  sseRetryTimers.set(key, timer);
 }
 
 function closeAllSseConnections() {
@@ -453,11 +595,16 @@ function closeAllSseConnections() {
     } catch {}
   }
   sseConnections.clear();
+  for (const [key, timer] of sseRetryTimers) {
+    clearTimeout(timer);
+    sseRetryTimers.delete(key);
+  }
   console.log("[SSE] Closed all connections");
 }
 
 function createSseConnection(auth, entryId, taskId, kind) {
   const key = buildStreamKey(entryId, kind, taskId);
+  clearSseRetryTimer(key);
 
   // Close existing connection if any
   const existing = sseConnections.get(key);
@@ -465,6 +612,7 @@ function createSseConnection(auth, entryId, taskId, kind) {
     try {
       existing.close();
     } catch {}
+    sseConnections.delete(key);
   }
 
   // Use EventSource with token in URL (EventSource doesn't support custom headers)
@@ -472,25 +620,38 @@ function createSseConnection(auth, entryId, taskId, kind) {
   const source = new EventSource(url);
 
   source.onopen = () => {
+    clearSseRetryTimer(key);
     console.log(`[SSE] Connected: ${key}`);
   };
 
   source.addEventListener("snapshot", (event) => {
-    handleSseEvent(entryId, kind, event);
+    void handleSseEvent(entryId, kind, event).catch((e) => {
+      console.warn(`[SSE] snapshot handler failed: ${key}`, e);
+    });
   });
 
   source.addEventListener("task", (event) => {
-    handleSseEvent(entryId, kind, event);
+    void handleSseEvent(entryId, kind, event).catch((e) => {
+      console.warn(`[SSE] task handler failed: ${key}`, e);
+    });
   });
 
   source.addEventListener("done", (event) => {
-    handleSseEvent(entryId, kind, event);
-    // Close connection after done
-    source.close();
-    sseConnections.delete(key);
-    console.log(`[SSE] Done, closed: ${key}`);
-    // Re-sync to handle scan task if needed
-    syncSseSubscriptions();
+    void (async () => {
+      try {
+        await handleSseEvent(entryId, kind, event);
+      } catch (e) {
+        console.warn(`[SSE] done handler failed: ${key}`, e);
+      } finally {
+        // Close connection after done
+        source.close();
+        sseConnections.delete(key);
+        clearSseRetryTimer(key);
+        console.log(`[SSE] Done, closed: ${key}`);
+        // Re-sync to handle scan task if needed
+        await syncSseSubscriptions();
+      }
+    })();
   });
 
   source.addEventListener("ping", () => {
@@ -501,6 +662,7 @@ function createSseConnection(auth, entryId, taskId, kind) {
     console.warn(`[SSE] Error: ${key}`, err);
     source.close();
     sseConnections.delete(key);
+    scheduleSseRetry(key);
   };
 
   sseConnections.set(key, source);
@@ -529,29 +691,27 @@ async function handleSseEvent(entryId, kind, event) {
   if (kind === "download") {
     const downloadProgress = clampProgress(task.progress);
     const downloadMessage = task.message || "";
-
-    await writeQueueEntry(entryId, {
+    const patch = {
       status,
       downloadProgress,
       downloadMessage,
       error: status === "failed" ? downloadMessage || "任务失败" : undefined,
-    });
+    };
 
-    // Check for scan task on completion
     if (task.status === "completed") {
-      const scanTaskId = parseScanTaskIdFromDownloadResult(task.result);
+      const scanTaskId = await resolveScanTaskIdFromTask(task);
       if (scanTaskId) {
-        await writeQueueEntry(entryId, {
-          scanTaskId,
-          status: "running",
-        });
-        // Will be picked up by syncSseSubscriptions
+        patch.scanTaskId = scanTaskId;
+        patch.status = "running";
+      } else {
+        console.warn(`[SSE] Download completed but no scanTaskId found: ${task.id}`);
       }
     }
+    await writeQueueEntry(entryId, patch);
   } else if (kind === "scan") {
     const scanProgress = clampProgress(task.progress);
     const scanMessage = task.message || "";
-    const archiveId = task.status === "completed" ? parseArchiveIdFromScanResult(task.result) : null;
+    const archiveId = task.status === "completed" ? await resolveArchiveIdFromTask(task) : null;
 
     const patch = {
       scanProgress,
@@ -564,6 +724,10 @@ async function handleSseEvent(entryId, kind, event) {
     }
 
     await writeQueueEntry(entryId, patch);
+
+    if (task.status === "completed") {
+      await maybeAutoCloseTabForEntry(entryId);
+    }
   }
 }
 
@@ -581,9 +745,7 @@ async function syncSseSubscriptions() {
   for (const entry of entries) {
     const needsDownloadStream =
       entry.downloadTaskId &&
-      (entry.status === "queued" ||
-        entry.status === "running" ||
-        (entry.status === "completed" && !entry.scanTaskId && !entry.archiveId));
+      (entry.status === "queued" || entry.status === "running");
 
     if (needsDownloadStream && entry.downloadTaskId) {
       const key = buildStreamKey(entry.id, "download", entry.downloadTaskId);
@@ -610,6 +772,7 @@ async function syncSseSubscriptions() {
     if (!expectedKeys.has(key)) {
       source.close();
       sseConnections.delete(key);
+      clearSseRetryTimer(key);
       console.log(`[SSE] Closed (no longer needed): ${key}`);
     }
   }
@@ -651,6 +814,17 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     const url = typeof changeInfo.url === "string" ? changeInfo.url : typeof tab?.url === "string" ? tab.url : "";
     await updateBadgeForTab(tabId, url);
   }
+});
+
+chrome.runtime.onMessage?.addListener((message, _sender, sendResponse) => {
+  if (!isRecord(message) || message.type !== "lanlu_poll_now") {
+    return false;
+  }
+
+  void syncSseSubscriptions();
+  void updateBadgeForActiveTab();
+  sendResponse?.({ ok: 1 });
+  return false;
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {

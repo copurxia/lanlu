@@ -29,11 +29,9 @@ export default function PopupApp() {
     void useSettingsStore.getState().hydrate()
 
     if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
-      try {
-        chrome.runtime.sendMessage({ type: "lanlu_poll_now" })
-      } catch {
-        // ignore
-      }
+      void Promise.resolve(chrome.runtime.sendMessage({ type: "lanlu_poll_now" })).catch(() => {
+        // ignore: background may be reloading/unavailable
+      })
     }
   }, [])
 
