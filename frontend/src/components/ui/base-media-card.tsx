@@ -7,9 +7,20 @@ import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Eye, Heart } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { TagInput } from '@/components/ui/tag-input'
+import { BookOpen, CheckCircle, Download, Edit, Eye, Heart, RotateCcw, Trash2 } from 'lucide-react'
 import { ArchiveService } from '@/lib/services/archive-service'
+import { TankoubonService } from '@/lib/services/tankoubon-service'
 import { useLanguage } from '@/contexts/LanguageContext'
+import { useAuth } from '@/contexts/AuthContext'
+import { useToast } from '@/hooks/use-toast'
+import { useConfirmContext } from '@/contexts/ConfirmProvider'
+import { appEvents, AppEvents } from '@/lib/utils/events'
+import { logger } from '@/lib/utils/logger'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
 
 export interface BaseMediaCardProps {
@@ -43,6 +54,13 @@ export interface BaseMediaCardProps {
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
 }
 
+function toTagList(raw?: string): string[] {
+  return String(raw || '')
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+}
+
 export function BaseMediaCard({
   id,
   title,
@@ -68,16 +86,57 @@ export function BaseMediaCard({
 }: BaseMediaCardProps) {
   const router = useRouter()
   const { t } = useLanguage()
-  const [isFavorite, setIsFavorite] = React.useState(isfavorite)
-  const [favoriteLoading, setFavoriteLoading] = React.useState(false)
-  const [imageError, setImageError] = React.useState(false)
+  const { isAuthenticated, user } = useAuth()
+  const { error: showError } = useToast()
+  const { confirm } = useConfirmContext()
 
-  const allTags = React.useMemo(() => parseTags(tags), [tags])
+  const [isFavorite, setIsFavorite] = React.useState(isfavorite)
+  const [isNew, setIsNew] = React.useState(isnew)
+  const [favoriteLoading, setFavoriteLoading] = React.useState(false)
+  const [isNewStatusLoading, setIsNewStatusLoading] = React.useState(false)
+  const [deleting, setDeleting] = React.useState(false)
+  const [imageError, setImageError] = React.useState(false)
+  const [displayTitle, setDisplayTitle] = React.useState(title)
+  const [displaySummary, setDisplaySummary] = React.useState(summary || '')
+  const [displayTags, setDisplayTags] = React.useState(tags || '')
+  const [editOpen, setEditOpen] = React.useState(false)
+  const [editSaving, setEditSaving] = React.useState(false)
+  const [editTitle, setEditTitle] = React.useState(title)
+  const [editSummary, setEditSummary] = React.useState(summary || '')
+  const [editTags, setEditTags] = React.useState<string[]>(toTagList(tags))
+  const [menuOpen, setMenuOpen] = React.useState(false)
+  const [menuPosition, setMenuPosition] = React.useState({ x: 0, y: 0 })
+
+  const isAdmin = user?.isAdmin === true
+  const canEdit = isAuthenticated
+  const canDelete = type === 'archive' ? isAdmin : isAuthenticated
+
+  React.useEffect(() => {
+    setDisplayTitle(title)
+  }, [title])
+
+  React.useEffect(() => {
+    setDisplaySummary(summary || '')
+  }, [summary])
+
+  React.useEffect(() => {
+    setDisplayTags(tags || '')
+  }, [tags])
+
+  React.useEffect(() => {
+    setIsFavorite(isfavorite)
+  }, [isfavorite])
+
+  React.useEffect(() => {
+    setIsNew(isnew)
+  }, [isnew])
+
+  const allTags = React.useMemo(() => parseTags(displayTags), [displayTags])
   const displayAllTags = React.useMemo(() => allTags.map(stripNamespace), [allTags])
-  const maxHoverTags = React.useMemo(() => (summary ? 5 : 8), [summary])
+  const maxHoverTags = React.useMemo(() => (displaySummary ? 5 : 8), [displaySummary])
   const hoverTags = React.useMemo(() => {
     return allTags
-      .filter(tag => {
+      .filter((tag) => {
         const stripped = stripNamespace(tag).toLowerCase()
         return !stripped.includes('source') && !tag.toLowerCase().includes('source')
       })
@@ -86,174 +145,440 @@ export function BaseMediaCard({
 
   const hoverTitleParts = React.useMemo(() => [
     displayAllTags.length > 0 ? `${t('archive.tags')}: ${displayAllTags.join(', ')}` : '',
-    summary ? `${t('archive.summary')}: ${summary}` : ''
-  ].filter(Boolean), [displayAllTags, summary, t])
-
-  const handleFavoriteClick = async (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (favoriteLoading || !onFavoriteToggle) return
-    setFavoriteLoading(true)
-    try {
-      const success = await onFavoriteToggle(id, isFavorite)
-      if (success) setIsFavorite(!isFavorite)
-    } catch (error) {
-      console.error('收藏操作失败:', error)
-    } finally {
-      setFavoriteLoading(false)
-    }
-  }
+    displaySummary ? `${t('archive.summary')}: ${displaySummary}` : ''
+  ].filter(Boolean), [displayAllTags, displaySummary, t])
 
   // Avoid promoting hundreds of cards into animation/compositor work during scroll.
   const shouldEntranceAnimate = index < 24
   const animationDelay = shouldEntranceAnimate ? Math.min(index * 50, 500) : 0
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
-  const readerPath = `/reader?id=${thumbnailId}`
+  const readerTargetId = type === 'archive' ? id : thumbnailId
+  const readerPath = readerTargetId ? `/reader?id=${readerTargetId}` : detailPath
   const imageSrc = thumbnailUrl && thumbnailUrl.trim().length > 0
     ? thumbnailUrl
     : ArchiveService.getAssetUrl(thumbnailAssetId)
-
   const hasImage = imageSrc.trim().length > 0
+  const progressPercent = pagecount > 0 ? Math.round((progress / pagecount) * 100) : 0
+
+  const emitRefresh = React.useCallback(() => {
+    appEvents.emit(AppEvents.ARCHIVES_REFRESH)
+  }, [])
+
+  const navigateToReader = React.useCallback(() => {
+    router.push(readerPath)
+  }, [readerPath, router])
+
+  const toggleFavorite = React.useCallback(async () => {
+    if (favoriteLoading || !onFavoriteToggle) return
+    setFavoriteLoading(true)
+    try {
+      const success = await onFavoriteToggle(id, isFavorite)
+      if (success) {
+        setIsFavorite(!isFavorite)
+        emitRefresh()
+      }
+    } catch (error) {
+      logger.operationFailed('toggle favorite', error, { id, type })
+    } finally {
+      setFavoriteLoading(false)
+    }
+  }, [emitRefresh, favoriteLoading, id, isFavorite, onFavoriteToggle, type])
+
+  const handleFavoriteClick = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    await toggleFavorite()
+  }
+
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setMenuPosition({ x: e.clientX, y: e.clientY })
+    setMenuOpen(true)
+  }
+
+  const handleDownload = React.useCallback(() => {
+    if (type !== 'archive') return
+    window.open(ArchiveService.getDownloadUrl(id), '_blank')
+  }, [id, type])
+
+  const handleToggleReadStatus = React.useCallback(async () => {
+    if (type !== 'archive' || isNewStatusLoading) return
+    setIsNewStatusLoading(true)
+    try {
+      if (isNew) {
+        await ArchiveService.clearIsNew(id)
+      } else {
+        await ArchiveService.setIsNew(id)
+      }
+      setIsNew(!isNew)
+      emitRefresh()
+    } catch (error) {
+      logger.operationFailed('toggle archive read status', error, { id })
+      showError(isNew ? t('archive.markAsReadFailed') : t('archive.markAsNewFailed'))
+    } finally {
+      setIsNewStatusLoading(false)
+    }
+  }, [emitRefresh, id, isNew, isNewStatusLoading, showError, t, type])
+
+  const handleOpenEdit = React.useCallback(() => {
+    if (!canEdit) {
+      showError(t('library.loginRequired'))
+      return
+    }
+    setEditTitle(displayTitle)
+    setEditSummary(displaySummary)
+    setEditTags(toTagList(displayTags))
+    setEditOpen(true)
+  }, [canEdit, displaySummary, displayTags, displayTitle, showError, t])
+
+  const handleSaveEdit = React.useCallback(async () => {
+    if (editSaving) return
+    if (!canEdit) {
+      showError(t('library.loginRequired'))
+      return
+    }
+
+    const nextTitle = editTitle.trim()
+    if (type === 'tankoubon' && !nextTitle) {
+      showError(t('tankoubon.nameRequired'))
+      return
+    }
+
+    setEditSaving(true)
+    try {
+      const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean).join(', ')
+      const nextSummary = editSummary.trim()
+
+      if (type === 'archive') {
+        await ArchiveService.updateMetadata(id, {
+          title: nextTitle || displayTitle,
+          summary: nextSummary,
+          tags: nextTags,
+        })
+      } else {
+        await TankoubonService.updateTankoubon(id, {
+          name: nextTitle,
+          summary: nextSummary,
+          tags: nextTags,
+        })
+      }
+
+      if (nextTitle) setDisplayTitle(nextTitle)
+      setDisplaySummary(nextSummary)
+      setDisplayTags(nextTags)
+      setEditOpen(false)
+      emitRefresh()
+    } catch (error) {
+      logger.operationFailed('save card edit', error, { id, type })
+      showError(type === 'archive' ? t('archive.updateFailed') : t('common.error'))
+    } finally {
+      setEditSaving(false)
+    }
+  }, [canEdit, displayTitle, editSaving, editSummary, editTags, editTitle, emitRefresh, id, showError, t, type])
+
+  const handleDelete = React.useCallback(async () => {
+    if (!canDelete) {
+      showError(type === 'archive' ? t('common.accessDenied') : t('library.loginRequired'))
+      return
+    }
+    if (deleting) return
+
+    const confirmed = await confirm({
+      title: type === 'archive' ? t('common.delete') : t('tankoubon.deleteConfirmTitle'),
+      description:
+        type === 'archive'
+          ? `${t('common.delete')} ${t('archive.archiveLabel')}: "${displayTitle}"`
+          : t('tankoubon.deleteConfirmMessage'),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    })
+    if (!confirmed) return
+
+    setDeleting(true)
+    try {
+      if (type === 'archive') {
+        await ArchiveService.deleteArchive(id)
+      } else {
+        await TankoubonService.deleteTankoubon(id)
+      }
+      emitRefresh()
+    } catch (error) {
+      logger.operationFailed('delete from card menu', error, { id, type })
+      showError(t('common.error'))
+    } finally {
+      setDeleting(false)
+    }
+  }, [canDelete, confirm, deleting, displayTitle, emitRefresh, id, showError, t, type])
+
+  const readStatusLabel = isNew ? t('archive.markAsRead') : t('archive.markAsNew')
+  const readStatusText = isNewStatusLoading ? t('common.loading') : readStatusLabel
+  const menuActionDisabled = deleting || editSaving
 
   return (
-    <div
-      className={[
-        "group cursor-pointer motion-reduce:animate-none",
-        shouldEntranceAnimate ? "motion-safe:animate-archive-card-in" : "",
-      ].filter(Boolean).join(" ")}
-      // `content-visibility` acts like browser-level virtualization for large grids.
-      style={{
-        animationDelay: shouldEntranceAnimate ? `${animationDelay}ms` : undefined,
-        ...(disableContentVisibility
-          ? {}
-          : {
-              contentVisibility: 'auto',
-              containIntrinsicSize: '220px 420px',
-            }),
-      }}
-      title={hoverTitleParts.length > 0 ? `${title}\n${hoverTitleParts.join('\n')}` : title}
-      onClick={() => router.push(readerPath)}
-    >
-      <Card className="overflow-hidden transition-shadow hover:shadow-lg">
-        <div className="aspect-[3/4] bg-muted relative">
-          {!imageError && hasImage ? (
-            <Image
-              src={imageSrc}
-              alt={title}
-              fill
-              className="object-cover"
-              priority={priority}
-              sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
-              decoding="async"
-              onError={() => setImageError(true)}
-            />
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-muted-foreground">{t('archive.noCover')}</span>
-            </div>
+    <>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-hidden
+            className="pointer-events-none fixed h-0 w-0 opacity-0"
+            style={{ left: menuPosition.x, top: menuPosition.y }}
+          />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" side="bottom" className="w-52">
+          <DropdownMenuItem disabled={!readerTargetId} onSelect={() => navigateToReader()}>
+            <BookOpen className="mr-2 h-4 w-4" />
+            {t('archive.startReading')}
+          </DropdownMenuItem>
+
+          {type === 'archive' && (
+            <>
+              <DropdownMenuItem onSelect={handleDownload}>
+                <Download className="mr-2 h-4 w-4" />
+                {t('archive.download')}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={menuActionDisabled || isNewStatusLoading}
+                onSelect={() => {
+                  void handleToggleReadStatus()
+                }}
+              >
+                {isNew ? <CheckCircle className="mr-2 h-4 w-4" /> : <RotateCcw className="mr-2 h-4 w-4" />}
+                {readStatusText}
+              </DropdownMenuItem>
+            </>
           )}
 
-          {/* Badges */}
-          {badge && <div className="absolute top-2 left-2 z-30">{badge}</div>}
-          {isnew && (
-            <Badge className="absolute top-2 right-2 z-30 bg-red-500">
-              {t('archive.new')}
-            </Badge>
-          )}
-          {extraBadge && <div className="absolute bottom-2 right-2 z-30">{extraBadge}</div>}
-
-          {/* Floating actions (details/favorite) */}
-          <div
-            className={[
-              // Align with the tag/summary padding (`p-3`) so chips and buttons share the same left edge.
-              "absolute bottom-3 left-3 z-20 items-center gap-2",
-              // Default hidden on all viewports; show on hover/focus for pointer devices.
-              "flex opacity-0 translate-y-1 transition-all",
-              "group-hover:opacity-100 group-hover:translate-y-0",
-              "group-focus-within:opacity-100 group-focus-within:translate-y-0",
-            ].filter(Boolean).join(" ")}
-            onClick={(e) => e.stopPropagation()}
+          <DropdownMenuItem
+            disabled={menuActionDisabled || favoriteLoading || !onFavoriteToggle}
+            onSelect={() => {
+              void toggleFavorite()
+            }}
           >
-            <Button
-              asChild
-              size="icon"
-              variant="secondary"
-              className="h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25"
-              aria-label={detailsLabel || t('archive.details')}
-              title={detailsLabel || t('archive.details')}
-            >
-              {/* Avoid prefetching N distinct URLs like `/archive?id=...` for large grids. */}
-              <Link href={detailPath} prefetch={false}>
-                <Eye className="h-4 w-4" />
-              </Link>
-            </Button>
-            <Button
-              type="button"
-              size="icon"
-              variant="secondary"
-              className={[
-                "h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25",
-                isFavorite ? "text-red-400" : "",
-              ].filter(Boolean).join(" ")}
-              aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-              title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-              disabled={favoriteLoading}
-              onClick={handleFavoriteClick}
-            >
-              <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
-            </Button>
-          </div>
+            <Heart className={`mr-2 h-4 w-4 ${isFavorite ? 'fill-current text-red-500' : ''}`} />
+            {favoriteLoading ? t('common.loading') : isFavorite ? t('common.unfavorite') : t('common.favorite')}
+          </DropdownMenuItem>
 
-          {/* Hover overlay (also acts as a scrim behind floating actions when there are no tags/summary) */}
-          <div
-            className={[
-              "pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent transition-opacity",
-              // Default hidden on all viewports; show on hover/focus behind floating actions / tag chips.
-              "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
-            ].join(" ")}
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem disabled={menuActionDisabled || !canEdit} onSelect={handleOpenEdit}>
+            <Edit className="mr-2 h-4 w-4" />
+            {t('common.edit')}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={menuActionDisabled || !canDelete}
+            className="text-destructive focus:text-destructive"
+            onSelect={() => {
+              void handleDelete()
+            }}
           >
-            {(allTags.length > 0 || summary) && (
-              <div className="w-full p-3 pb-12 space-y-2">
-                {/* Reserve space for the floating action buttons on all viewports (mobile has no hover). */}
-                {allTags.length > 0 && (
-                  <div
-                    className={[
-                      "flex flex-wrap gap-1 overflow-hidden",
-                      summary ? "max-h-[48px]" : "max-h-[72px]",
-                    ].join(" ")}
-                  >
-                    {hoverTags.map((tag) => (
-                      <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
-                        {stripNamespace(tag)}
-                      </span>
-                    ))}
-                    {allTags.length > hoverTags.length && (
-                      <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
-                        +{allTags.length - hoverTags.length}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {summary && (
-                  <div className="text-[11px] leading-snug text-white/90 line-clamp-3">{summary}</div>
-                )}
+            <Trash2 className="mr-2 h-4 w-4" />
+            {deleting ? t('common.loading') : t('common.delete')}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <div
+        className={[
+          "group cursor-pointer motion-reduce:animate-none",
+          shouldEntranceAnimate ? "motion-safe:animate-archive-card-in" : "",
+        ].filter(Boolean).join(" ")}
+        // `content-visibility` acts like browser-level virtualization for large grids.
+        style={{
+          animationDelay: shouldEntranceAnimate ? `${animationDelay}ms` : undefined,
+          ...(disableContentVisibility
+            ? {}
+            : {
+                contentVisibility: 'auto',
+                containIntrinsicSize: '220px 420px',
+              }),
+        }}
+        title={hoverTitleParts.length > 0 ? `${displayTitle}\n${hoverTitleParts.join('\n')}` : displayTitle}
+        onClick={navigateToReader}
+        onContextMenu={handleContextMenu}
+      >
+        <Card className="overflow-hidden transition-shadow hover:shadow-lg">
+          <div className="aspect-[3/4] bg-muted relative">
+            {!imageError && hasImage ? (
+              <Image
+                src={imageSrc}
+                alt={displayTitle}
+                fill
+                className="object-cover"
+                priority={priority}
+                sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
+                decoding="async"
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <span className="text-muted-foreground">{t('archive.noCover')}</span>
               </div>
             )}
+
+            {/* Badges */}
+            {badge && <div className="absolute top-2 left-2 z-30">{badge}</div>}
+            {isNew && (
+              <Badge className="absolute top-2 right-2 z-30 bg-red-500">
+                {t('archive.new')}
+              </Badge>
+            )}
+            {extraBadge && <div className="absolute bottom-2 right-2 z-30">{extraBadge}</div>}
+
+            {/* Floating actions (details/favorite) */}
+            <div
+              className={[
+                // Align with the tag/summary padding (`p-3`) so chips and buttons share the same left edge.
+                "absolute bottom-3 left-3 z-20 items-center gap-2",
+                // Default hidden on all viewports; show on hover/focus for pointer devices.
+                "flex opacity-0 translate-y-1 transition-all",
+                "group-hover:opacity-100 group-hover:translate-y-0",
+                "group-focus-within:opacity-100 group-focus-within:translate-y-0",
+              ].filter(Boolean).join(" ")}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Button
+                asChild
+                size="icon"
+                variant="secondary"
+                className="h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25"
+                aria-label={detailsLabel || t('archive.details')}
+                title={detailsLabel || t('archive.details')}
+              >
+                {/* Avoid prefetching N distinct URLs like `/archive?id=...` for large grids. */}
+                <Link href={detailPath} prefetch={false}>
+                  <Eye className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="secondary"
+                className={[
+                  "h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25",
+                  isFavorite ? "text-red-400" : "",
+                ].filter(Boolean).join(" ")}
+                aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                disabled={favoriteLoading}
+                onClick={handleFavoriteClick}
+              >
+                <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+              </Button>
+            </div>
+
+            {/* Hover overlay (also acts as a scrim behind floating actions when there are no tags/summary) */}
+            <div
+              className={[
+                "pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent transition-opacity",
+                // Default hidden on all viewports; show on hover/focus behind floating actions / tag chips.
+                "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              ].join(" ")}
+            >
+              {(allTags.length > 0 || displaySummary) && (
+                <div className="w-full p-3 pb-12 space-y-2">
+                  {/* Reserve space for the floating action buttons on all viewports (mobile has no hover). */}
+                  {allTags.length > 0 && (
+                    <div
+                      className={[
+                        "flex flex-wrap gap-1 overflow-hidden",
+                        displaySummary ? "max-h-[48px]" : "max-h-[72px]",
+                      ].join(" ")}
+                    >
+                      {hoverTags.map((tag) => (
+                        <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
+                          {stripNamespace(tag)}
+                        </span>
+                      ))}
+                      {allTags.length > hoverTags.length && (
+                        <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
+                          +{allTags.length - hoverTags.length}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {displaySummary && (
+                    <div className="text-[11px] leading-snug text-white/90 line-clamp-3">{displaySummary}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </Card>
+
+        {/* Keep the white "card" background scoped to the cover only; meta text renders outside. */}
+        <div className="pt-3">
+          <div className="h-5 mb-2">
+            <h3 className="font-semibold text-sm line-clamp-1" title={displayTitle}>
+              {displayTitle}
+            </h3>
+          </div>
+          <div className={["text-xs text-muted-foreground", hideMetaOnMobile ? "hidden sm:block" : ""].join(" ")}>
+            {pagesLabel || t('archive.pages').replace('{count}', String(pagecount))}
+            {progress > 0 && pagecount > 0 && ` • ${progressPercent}% ${t('common.read')}`}
           </div>
         </div>
-      </Card>
-
-      {/* Keep the white "card" background scoped to the cover only; meta text renders outside. */}
-      <div className="pt-3">
-        <div className="h-5 mb-2">
-          <h3 className="font-semibold text-sm line-clamp-1" title={title}>
-            {title}
-          </h3>
-        </div>
-        <div className={["text-xs text-muted-foreground", hideMetaOnMobile ? "hidden sm:block" : ""].join(" ")}>
-          {pagesLabel || t('archive.pages').replace('{count}', String(pagecount))}
-          {progress > 0 && ` • ${Math.round((progress / pagecount) * 100)}% ${t('common.read')}`}
-        </div>
       </div>
-    </div>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{type === 'archive' ? t('archive.editMetadata') : t('tankoubon.editTankoubon')}</DialogTitle>
+          </DialogHeader>
+          <DialogBody className="pt-0">
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium">
+                  {type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
+                </label>
+                <Input
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder={type === 'archive' ? t('archive.titleField') : t('tankoubon.namePlaceholder')}
+                  disabled={editSaving}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">
+                  {type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
+                </label>
+                <Textarea
+                  value={editSummary}
+                  onChange={(e) => setEditSummary(e.target.value)}
+                  placeholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
+                  rows={3}
+                  disabled={editSaving}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium">
+                  {type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
+                </label>
+                <TagInput
+                  value={editTags}
+                  onChange={setEditTags}
+                  placeholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
+                  disabled={editSaving}
+                />
+              </div>
+            </div>
+          </DialogBody>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              onClick={() => {
+                void handleSaveEdit()
+              }}
+              disabled={editSaving}
+            >
+              {editSaving ? t('common.saving') : t('common.save')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
