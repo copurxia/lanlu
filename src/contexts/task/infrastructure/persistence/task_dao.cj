@@ -275,7 +275,7 @@ public class TaskDao {
                         stmt.set(3, id)
 
                         stmt.update()
-                        getLogger("task_dao").info("更新任务状态", ("id", id), ("status", status))
+                        getLogger("task_dao").debug("更新任务状态", ("id", id), ("status", status))
                         return true
                     } finally {
                         try {
@@ -433,7 +433,7 @@ public class TaskDao {
                         stmt.set(14, data.id)
 
                         stmt.update()
-                        getLogger("task_dao").info("更新任务", ("id", data.id))
+                        getLogger("task_dao").debug("更新任务", ("id", data.id))
                         return true
                     } finally {
                         try {
@@ -1569,7 +1569,7 @@ public class TaskDao {
                         stmt.set(0, taskId)
                         let result = stmt.update()
                         if (result.rowCount > 0) {
-                            logger.info("激活等待任务", ("id", taskId.toString()))
+                            logger.debug("激活等待任务", ("id", taskId.toString()))
                             return true
                         }
                         return false
@@ -1606,7 +1606,7 @@ public class TaskDao {
                         stmt.set(1, taskId)
                         let result = stmt.update()
                         if (result.rowCount > 0) {
-                            logger.info("等待任务标记失败", ("id", taskId.toString()))
+                            logger.debug("等待任务标记失败", ("id", taskId.toString()))
                             return true
                         }
                         return false

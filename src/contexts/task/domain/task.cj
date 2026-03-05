@@ -392,7 +392,7 @@ public class TaskModel {
 
         let success = TaskDao.updateTaskData(data)
         if (success) {
-            logger.info("完成任务成功", ("id", id))
+            logger.debug("完成任务成功", ("id", id))
         } else {
             logger.error("完成任务失败", ("id", id))
         }

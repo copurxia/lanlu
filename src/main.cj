@@ -101,11 +101,11 @@ main(): Int64 {
     }
 
     // 启动 TaskPool（从tasks表领取pending任务执行）
-    logger.info("Application starting... step 10: starting taskpool service")
+    logger.debug("Application starting... step 10: starting taskpool service")
     let taskpool = TaskPoolService.getInstance()
     let taskpoolStarted = taskpool.start()
     if (taskpoolStarted) {
-        logger.info("TaskPool service started successfully")
+        logger.debug("TaskPool service started successfully")
     } else {
         logger.error("Failed to start TaskPool service")
         return 1

@@ -706,7 +706,7 @@ public class ArchiveDao {
                 
                 let rs = stmt.query()
                 try {
-                    getLogger("archive_dao").debug("SQL查询执行完成")
+                    getLogger("archive_dao").info("SQL查询执行完成")
 
                     while (rs.next()) {
                         let archive = ArchiveData()
