@@ -52,7 +52,19 @@ jobs:
           fi
           xmake --version
 
+      - name: Download stdx
+        env:
+          STDX_URL: ${{ vars.STDX_URL }}
+        run: |
+          set -eux
+          : "${STDX_URL:?Missing repository variable STDX_URL}"
+          wget -O s.zip "$STDX_URL"
+          unzip -q s.zip -d stdx
+
       - name: Build backend
+        env:
+          CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx
+          CANGJIE_STDX: ${{ github.workspace }}/stdx/linux_x86_64_llvm/dynamic/stdx
         run: |
           cjc -v
           cjpm build -V
