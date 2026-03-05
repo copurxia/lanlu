@@ -8,13 +8,12 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import { Textarea } from '@/components/ui/textarea'
-import { TagInput } from '@/components/ui/tag-input'
 import { BookOpen, CheckCircle, Download, Edit, Eye, Heart, RotateCcw, Trash2 } from 'lucide-react'
 import { ArchiveService } from '@/lib/services/archive-service'
 import { TankoubonService } from '@/lib/services/tankoubon-service'
+import { TaskPoolService } from '@/lib/services/taskpool-service'
+import { PluginService } from '@/lib/services/plugin-service'
+import { ArchiveMetadataEditDialog, type RpcSelectRequest } from '@/components/archive/ArchiveMetadataEditDialog'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useAuth } from '@/contexts/AuthContext'
 import { useToast } from '@/hooks/use-toast'
@@ -22,6 +21,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider'
 import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
+import type { Plugin } from '@/lib/services/plugin-service'
 
 export interface BaseMediaCardProps {
   // 基础信息
@@ -59,6 +59,20 @@ function toTagList(raw?: string): string[] {
     .split(',')
     .map((tag) => tag.trim())
     .filter(Boolean)
+}
+
+function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
+  const prefix = '[RPC_SELECT]'
+  if (!message?.startsWith(prefix)) return null
+  try {
+    const parsed = JSON.parse(message.slice(prefix.length)) as RpcSelectRequest
+    if (!parsed?.request_id || !Array.isArray(parsed?.options) || parsed.options.length === 0) {
+      return null
+    }
+    return parsed
+  } catch {
+    return null
+  }
 }
 
 export function BaseMediaCard({
@@ -104,6 +118,26 @@ export function BaseMediaCard({
   const [editTitle, setEditTitle] = React.useState(title)
   const [editSummary, setEditSummary] = React.useState(summary || '')
   const [editTags, setEditTags] = React.useState<string[]>(toTagList(tags))
+  const [metadataPlugins, setMetadataPlugins] = React.useState<Plugin[]>([])
+  const [selectedMetadataPlugin, setSelectedMetadataPlugin] = React.useState<string>('')
+  const [metadataPluginParam, setMetadataPluginParam] = React.useState<string>('')
+  const [isMetadataPluginRunning, setIsMetadataPluginRunning] = React.useState(false)
+  const [metadataPluginProgress, setMetadataPluginProgress] = React.useState<number | null>(null)
+  const [metadataPluginMessage, setMetadataPluginMessage] = React.useState('')
+  const [metadataArchivePatches, setMetadataArchivePatches] = React.useState<Array<{
+    archive_id?: string
+    volume_no?: number
+    title?: string
+    summary?: string
+    tags?: string
+    updated_at?: string
+    cover?: string
+  }>>([])
+  const [rpcSelectTaskId, setRpcSelectTaskId] = React.useState<number | null>(null)
+  const [rpcSelectRequest, setRpcSelectRequest] = React.useState<RpcSelectRequest | null>(null)
+  const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = React.useState<number | null>(null)
+  const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = React.useState<number | null>(null)
+  const resolvedRpcSelectRequestIdsRef = React.useRef<Set<string>>(new Set())
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [menuPosition, setMenuPosition] = React.useState({ x: 0, y: 0 })
 
@@ -130,6 +164,48 @@ export function BaseMediaCard({
   React.useEffect(() => {
     setIsNew(isnew)
   }, [isnew])
+
+  React.useEffect(() => {
+    if (!editOpen || !isAuthenticated) return
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const metas = await PluginService.getMetadataPlugins()
+        if (cancelled) return
+        setMetadataPlugins(metas)
+        if (!selectedMetadataPlugin && metas.length > 0) {
+          setSelectedMetadataPlugin(metas[0].namespace)
+        }
+      } catch (error) {
+        logger.apiError('load metadata plugins (card)', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [editOpen, isAuthenticated, selectedMetadataPlugin, type])
+
+  React.useEffect(() => {
+    if (!rpcSelectRequest || rpcSelectRemainingSeconds == null) return
+    if (rpcSelectRemainingSeconds <= 0) {
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setRpcSelectRemainingSeconds((current) => {
+        if (current == null) return null
+        return Math.max(0, current - 1)
+      })
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [rpcSelectRemainingSeconds, rpcSelectRequest])
 
   const allTags = React.useMemo(() => parseTags(displayTags), [displayTags])
   const displayAllTags = React.useMemo(() => allTags.map(stripNamespace), [allTags])
@@ -228,8 +304,192 @@ export function BaseMediaCard({
     setEditTitle(displayTitle)
     setEditSummary(displaySummary)
     setEditTags(toTagList(displayTags))
+    setMetadataArchivePatches([])
+    setMetadataPluginProgress(null)
+    setMetadataPluginMessage('')
+    resolvedRpcSelectRequestIdsRef.current.clear()
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
     setEditOpen(true)
   }, [canEdit, displaySummary, displayTags, displayTitle, showError, t])
+
+  const submitRpcSelect = React.useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return
+    const requestId = rpcSelectRequest.request_id
+    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, requestId, rpcSelectSelectedIndex)
+    resolvedRpcSelectRequestIdsRef.current.add(requestId)
+    if (!ok) {
+      showError('提交选择失败，可能请求已过期')
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+      return
+    }
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
+  }, [rpcSelectRequest, rpcSelectSelectedIndex, rpcSelectTaskId, showError])
+
+  const abortRpcSelect = React.useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest) return
+    const requestId = rpcSelectRequest.request_id
+    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, requestId)
+    resolvedRpcSelectRequestIdsRef.current.add(requestId)
+    if (!ok) {
+      showError('放弃选择失败，可能请求已过期')
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+      return
+    }
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
+  }, [rpcSelectRequest, rpcSelectTaskId, showError])
+
+  const runMetadataPlugin = React.useCallback(async () => {
+    if (!canEdit) {
+      showError(t('library.loginRequired'))
+      return
+    }
+    if (!selectedMetadataPlugin) {
+      showError(t('archive.metadataPluginSelectRequired'))
+      return
+    }
+
+    setIsMetadataPluginRunning(true)
+    setMetadataPluginProgress(0)
+    setMetadataPluginMessage(t('archive.metadataPluginEnqueued'))
+    resolvedRpcSelectRequestIdsRef.current.clear()
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
+
+    try {
+      const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean).join(', ')
+      const targetType = type === 'archive' ? 'archive' : 'tankoubon'
+      const finalTask = await ArchiveService.runMetadataPluginForTarget(
+        targetType,
+        id,
+        selectedMetadataPlugin,
+        metadataPluginParam,
+        {
+          onUpdate: (task) => {
+            setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0)
+            setMetadataPluginMessage(task.message || '')
+
+            const req = parseRpcSelectRequest(task.message || '')
+            if (req) {
+              if (resolvedRpcSelectRequestIdsRef.current.has(req.request_id)) return
+              setRpcSelectTaskId(task.id)
+              setRpcSelectRequest((current) => {
+                if (current?.request_id === req.request_id) return current
+                const defaultIndex = typeof req.default_index === 'number' ? req.default_index : 0
+                setRpcSelectSelectedIndex(defaultIndex >= 0 && defaultIndex < req.options.length ? defaultIndex : 0)
+                const timeout = typeof req.timeout_seconds === 'number' && req.timeout_seconds > 0 ? Math.floor(req.timeout_seconds) : 90
+                setRpcSelectRemainingSeconds(timeout)
+                return req
+              })
+            }
+          },
+        },
+        {
+          writeBack: false,
+          metadata: {
+            title: editTitle.trim() || displayTitle,
+            summary: editSummary.trim(),
+            tags: metadataTags,
+          },
+        }
+      )
+
+      if (finalTask.status !== 'completed') {
+        const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
+        showError(err)
+        return
+      }
+
+      try {
+        const out = finalTask.result ? JSON.parse(finalTask.result) : null
+        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true'
+        if (!ok) {
+          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
+          showError(err)
+          return
+        }
+
+        const data = out?.data || {}
+        const nextTitle =
+          typeof data.title === 'string'
+            ? data.title
+            : typeof data.name === 'string'
+            ? data.name
+            : ''
+        const nextSummary = typeof data.summary === 'string' ? data.summary : ''
+        const nextTags = typeof data.tags === 'string' ? data.tags : ''
+        const nextArchives = Array.isArray(data.archives) ? data.archives : []
+
+        if (nextTitle.trim()) setEditTitle(nextTitle.trim())
+        if (nextSummary.trim()) setEditSummary(nextSummary.trim())
+        if (nextTags.trim()) {
+          setEditTags(
+            nextTags
+              .split(',')
+              .map((tag: string) => tag.trim())
+              .filter((tag: string) => tag)
+          )
+        }
+        if (type === 'tankoubon') {
+          setMetadataArchivePatches(
+            nextArchives
+              .map((item: any) => ({
+                archive_id: typeof item?.archive_id === 'string' ? item.archive_id : undefined,
+                volume_no: typeof item?.volume_no === 'number' ? item.volume_no : undefined,
+                title: typeof item?.title === 'string' ? item.title : undefined,
+                summary: typeof item?.summary === 'string' ? item.summary : undefined,
+                tags: typeof item?.tags === 'string' ? item.tags : undefined,
+                updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
+                cover: typeof item?.cover === 'string' ? item.cover : undefined,
+              }))
+              .filter((item: any) => item.archive_id || item.volume_no)
+          )
+        }
+      } catch {
+        // Ignore parse errors and keep the task result visible in the status line.
+      }
+
+      setMetadataPluginMessage(t('archive.metadataPluginCompleted'))
+      setMetadataPluginProgress(100)
+    } catch (error: any) {
+      logger.operationFailed('run metadata plugin (card)', error, { id, type })
+      showError(error?.message || t('archive.metadataPluginFailed'))
+    } finally {
+      setIsMetadataPluginRunning(false)
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+    }
+  }, [
+    canEdit,
+    displayTitle,
+    editSummary,
+    editTags,
+    editTitle,
+    id,
+    metadataPluginParam,
+    selectedMetadataPlugin,
+    showError,
+    t,
+    type,
+  ])
 
   const handleSaveEdit = React.useCallback(async () => {
     if (editSaving) return
@@ -254,12 +514,14 @@ export function BaseMediaCard({
           title: nextTitle || displayTitle,
           summary: nextSummary,
           tags: nextTags,
-        })
+        }, undefined, { metadataNamespace: selectedMetadataPlugin || undefined })
       } else {
         await TankoubonService.updateTankoubon(id, {
           name: nextTitle,
           summary: nextSummary,
           tags: nextTags,
+          metadata_namespace: selectedMetadataPlugin || undefined,
+          archives: metadataArchivePatches,
         })
       }
 
@@ -274,7 +536,7 @@ export function BaseMediaCard({
     } finally {
       setEditSaving(false)
     }
-  }, [canEdit, displayTitle, editSaving, editSummary, editTags, editTitle, emitRefresh, id, showError, t, type])
+  }, [canEdit, displayTitle, editSaving, editSummary, editTags, editTitle, emitRefresh, id, metadataArchivePatches, selectedMetadataPlugin, showError, t, type])
 
   const handleDelete = React.useCallback(async () => {
     if (!canDelete) {
@@ -521,64 +783,44 @@ export function BaseMediaCard({
         </div>
       </div>
 
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{type === 'archive' ? t('archive.editMetadata') : t('tankoubon.editTankoubon')}</DialogTitle>
-          </DialogHeader>
-          <DialogBody className="pt-0">
-            <div className="space-y-4">
-              <div>
-                <label className="text-sm font-medium">
-                  {type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
-                </label>
-                <Input
-                  value={editTitle}
-                  onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder={type === 'archive' ? t('archive.titleField') : t('tankoubon.namePlaceholder')}
-                  disabled={editSaving}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">
-                  {type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
-                </label>
-                <Textarea
-                  value={editSummary}
-                  onChange={(e) => setEditSummary(e.target.value)}
-                  placeholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
-                  rows={3}
-                  disabled={editSaving}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">
-                  {type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
-                </label>
-                <TagInput
-                  value={editTags}
-                  onChange={setEditTags}
-                  placeholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
-                  disabled={editSaving}
-                />
-              </div>
-            </div>
-          </DialogBody>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)} disabled={editSaving}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              onClick={() => {
-                void handleSaveEdit()
-              }}
-              disabled={editSaving}
-            >
-              {editSaving ? t('common.saving') : t('common.save')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ArchiveMetadataEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        t={t}
+        dialogTitle={type === 'archive' ? t('archive.editMetadata') : t('tankoubon.editTankoubon')}
+        titleLabel={type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
+        summaryLabel={type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
+        tagsLabel={type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
+        summaryPlaceholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
+        tagsPlaceholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
+        title={editTitle}
+        onTitleChange={setEditTitle}
+        summary={editSummary}
+        onSummaryChange={setEditSummary}
+        tags={editTags}
+        onTagsChange={setEditTags}
+        isSaving={editSaving}
+        saveDisabled={type === 'tankoubon' ? !editTitle.trim() : false}
+        onSave={handleSaveEdit}
+        showMetadataPlugin
+        metadataPlugins={metadataPlugins}
+        selectedMetadataPlugin={selectedMetadataPlugin}
+        onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
+        metadataPluginParam={metadataPluginParam}
+        onMetadataPluginParamChange={setMetadataPluginParam}
+        isMetadataPluginRunning={isMetadataPluginRunning}
+        metadataPluginProgress={metadataPluginProgress}
+        metadataPluginMessage={metadataPluginMessage}
+        onRunMetadataPlugin={runMetadataPlugin}
+        rpcSelect={{
+          request: rpcSelectRequest,
+          selectedIndex: rpcSelectSelectedIndex,
+          remainingSeconds: rpcSelectRemainingSeconds,
+          onSelectIndex: setRpcSelectSelectedIndex,
+          onAbort: abortRpcSelect,
+          onSubmit: submitRpcSelect,
+        }}
+      />
     </>
   )
 }

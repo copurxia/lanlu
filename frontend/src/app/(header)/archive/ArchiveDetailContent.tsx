@@ -12,11 +12,6 @@ import { TagService } from '@/lib/services/tag-service';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { TagInput } from '@/components/ui/tag-input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
@@ -33,23 +28,8 @@ import { ArchiveCollectionsCard } from './components/ArchiveCollectionsCard';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
 import { ArchiveSearchTagBadge } from '@/components/archive/ArchiveSearchTagBadge';
-import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, Play, FolderPlus } from 'lucide-react';
-
-type RpcSelectOption = {
-  index: number;
-  label: string;
-  description?: string;
-  cover?: string;
-};
-
-type RpcSelectRequest = {
-  request_id: string;
-  title: string;
-  message?: string;
-  default_index?: number;
-  timeout_seconds?: number;
-  options: RpcSelectOption[];
-};
+import { ArchiveMetadataEditDialog, type RpcSelectRequest } from '@/components/archive/ArchiveMetadataEditDialog';
+import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, FolderPlus } from 'lucide-react';
 
 function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
   const prefix = '[RPC_SELECT]';
@@ -715,164 +695,37 @@ export function ArchiveDetailContent() {
             </div>
           </div>
 
-          {/* Edit metadata dialog (aligned with Tankoubon page) */}
-          <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>{t('archive.editMetadata')}</DialogTitle>
-              </DialogHeader>
-              <DialogBody className="pt-0">
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium">{t('archive.titleField')}</label>
-                    <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} disabled={isSaving} />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">{t('archive.summary')}</label>
-                    <Textarea
-                      value={editSummary}
-                      onChange={(e) => setEditSummary(e.target.value)}
-                      placeholder={t('archive.summaryPlaceholder')}
-                      rows={3}
-                      disabled={isSaving}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
-                    <div className="mt-2 flex flex-col gap-2">
-                      <div className="flex flex-col sm:flex-row gap-2">
-                        <div className="sm:w-[220px]">
-                          <Select value={selectedMetadataPlugin} onValueChange={setSelectedMetadataPlugin}>
-                            <SelectTrigger disabled={isSaving || isMetadataPluginRunning || metadataPlugins.length === 0}>
-                              <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {metadataPlugins.map((p) => (
-                                <SelectItem key={p.namespace} value={p.namespace}>
-                                  {p.name} ({p.namespace})
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <Input
-                          value={metadataPluginParam}
-                          onChange={(e) => setMetadataPluginParam(e.target.value)}
-                          disabled={isSaving || isMetadataPluginRunning}
-                          placeholder={t('archive.metadataPluginParamPlaceholder')}
-                        />
-                        <Button
-                          type="button"
-                          onClick={runMetadataPlugin}
-                          disabled={isSaving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin}
-                        >
-                          <Play className="w-4 h-4 mr-2" />
-                          {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
-                        </Button>
-                      </div>
-                      {(metadataPluginProgress !== null || metadataPluginMessage) && (
-                        <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
-                          <span className="truncate" title={metadataPluginMessage}>
-                            {metadataPluginMessage || ''}
-                          </span>
-                          {metadataPluginProgress !== null && (
-                            <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
-                          )}
-                        </div>
-                      )}
-                      {metadataPlugins.length === 0 && (
-                        <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
-                      )}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium">{t('archive.tags')}</label>
-                    <TagInput
-                      value={editTags}
-                      onChange={setEditTags}
-                      placeholder={t('archive.tagsPlaceholder')}
-                      disabled={isSaving}
-                    />
-                  </div>
-                </div>
-              </DialogBody>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setEditDialogOpen(false)} disabled={isSaving}>
-                  {t('common.cancel')}
-                </Button>
-                <Button onClick={saveEdit} disabled={isSaving || !editTitle.trim()}>
-                  {t('common.save')}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog open={!!rpcSelectRequest} onOpenChange={() => {}}>
-            <DialogContent className="max-w-4xl h-[75vh] flex flex-col">
-              <DialogHeader>
-                <DialogTitle>{rpcSelectRequest?.title || '请选择元数据匹配项'}</DialogTitle>
-              </DialogHeader>
-              <DialogBody className="pt-0">
-                <div
-                  className="space-y-3 h-full flex flex-col"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && rpcSelectSelectedIndex != null && (rpcSelectRemainingSeconds ?? 1) > 0) {
-                      e.preventDefault();
-                      void submitRpcSelect();
-                    }
-                  }}
-                >
-                  {rpcSelectRequest?.message ? (
-                    <p className="text-sm text-muted-foreground">{rpcSelectRequest.message}</p>
-                  ) : null}
-                  <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
-                    {(rpcSelectRequest?.options || []).map((opt) => (
-                      <Button
-                        key={`${rpcSelectRequest?.request_id}-${opt.index}`}
-                        type="button"
-                        variant={rpcSelectSelectedIndex === opt.index ? 'default' : 'outline'}
-                        className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left whitespace-normal"
-                        onClick={() => setRpcSelectSelectedIndex(opt.index)}
-                      >
-                        <div className="flex w-full items-start gap-3">
-                          {opt.cover ? (
-                            <img
-                              src={opt.cover}
-                              alt={opt.label || `候选 ${opt.index + 1}`}
-                              className="w-20 h-28 shrink-0 object-cover rounded border"
-                              loading="lazy"
-                            />
-                          ) : null}
-                          <div className="min-w-0 flex-1 text-left">
-                            <div className="font-medium whitespace-normal break-words">{opt.label || `候选 ${opt.index + 1}`}</div>
-                            {opt.description ? (
-                              <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
-                            ) : null}
-                          </div>
-                        </div>
-                      </Button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    如果长时间不选择，本次预览任务会超时失败。
-                    {rpcSelectRemainingSeconds != null ? ` 剩余 ${Math.max(0, rpcSelectRemainingSeconds)} 秒。` : ''}
-                  </p>
-                  <div className="flex justify-end gap-2">
-                    <Button type="button" variant="outline" onClick={() => void abortRpcSelect()}>
-                      放弃
-                    </Button>
-                    <Button
-                      type="button"
-                      disabled={rpcSelectSelectedIndex == null || (rpcSelectRemainingSeconds ?? 1) <= 0}
-                      onClick={() => void submitRpcSelect()}
-                    >
-                      选择并提交
-                    </Button>
-                  </div>
-                </div>
-              </DialogBody>
-            </DialogContent>
-          </Dialog>
+          <ArchiveMetadataEditDialog
+            open={editDialogOpen}
+            onOpenChange={setEditDialogOpen}
+            t={t}
+            title={editTitle}
+            onTitleChange={setEditTitle}
+            summary={editSummary}
+            onSummaryChange={setEditSummary}
+            tags={editTags}
+            onTagsChange={setEditTags}
+            isSaving={isSaving}
+            saveDisabled={!editTitle.trim()}
+            onSave={saveEdit}
+            metadataPlugins={metadataPlugins}
+            selectedMetadataPlugin={selectedMetadataPlugin}
+            onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
+            metadataPluginParam={metadataPluginParam}
+            onMetadataPluginParamChange={setMetadataPluginParam}
+            isMetadataPluginRunning={isMetadataPluginRunning}
+            metadataPluginProgress={metadataPluginProgress}
+            metadataPluginMessage={metadataPluginMessage}
+            onRunMetadataPlugin={runMetadataPlugin}
+            rpcSelect={{
+              request: rpcSelectRequest,
+              selectedIndex: rpcSelectSelectedIndex,
+              remainingSeconds: rpcSelectRemainingSeconds,
+              onSelectIndex: setRpcSelectSelectedIndex,
+              onAbort: abortRpcSelect,
+              onSubmit: submitRpcSelect,
+            }}
+          />
 
           <ArchivePreviewCard
             metadata={metadata}
