@@ -605,6 +605,7 @@ function closeAllSseConnections() {
 function createSseConnection(auth, entryId, taskId, kind) {
   const key = buildStreamKey(entryId, kind, taskId);
   clearSseRetryTimer(key);
+  let doneReceived = false;
 
   // Close existing connection if any
   const existing = sseConnections.get(key);
@@ -637,6 +638,7 @@ function createSseConnection(auth, entryId, taskId, kind) {
   });
 
   source.addEventListener("done", (event) => {
+    doneReceived = true;
     void (async () => {
       try {
         await handleSseEvent(entryId, kind, event);
@@ -659,6 +661,13 @@ function createSseConnection(auth, entryId, taskId, kind) {
   });
 
   source.onerror = (err) => {
+    if (doneReceived) {
+      source.close();
+      sseConnections.delete(key);
+      clearSseRetryTimer(key);
+      console.log(`[SSE] Ignored error after done: ${key}`);
+      return;
+    }
     console.warn(`[SSE] Error: ${key}`, err);
     source.close();
     sseConnections.delete(key);
@@ -743,11 +752,14 @@ async function syncSseSubscriptions() {
 
   // Determine which SSE connections we need
   for (const entry of entries) {
+    const statusActive = entry.status === "queued" || entry.status === "running";
+    const hasDownloadTask = typeof entry.downloadTaskId === "number" && entry.downloadTaskId > 0;
+    const hasScanTask = typeof entry.scanTaskId === "number" && entry.scanTaskId > 0;
+    // Once scan task exists, download has already finished; don't keep re-subscribing download SSE.
     const needsDownloadStream =
-      entry.downloadTaskId &&
-      (entry.status === "queued" || entry.status === "running");
+      hasDownloadTask && statusActive && !hasScanTask;
 
-    if (needsDownloadStream && entry.downloadTaskId) {
+    if (needsDownloadStream && hasDownloadTask) {
       const key = buildStreamKey(entry.id, "download", entry.downloadTaskId);
       expectedKeys.add(key);
 
@@ -756,8 +768,8 @@ async function syncSseSubscriptions() {
       }
     }
 
-    const needsScanStream = entry.scanTaskId && (entry.status === "queued" || entry.status === "running");
-    if (needsScanStream && entry.scanTaskId) {
+    const needsScanStream = hasScanTask && statusActive;
+    if (needsScanStream && hasScanTask) {
       const key = buildStreamKey(entry.id, "scan", entry.scanTaskId);
       expectedKeys.add(key);
 
