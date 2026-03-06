@@ -22,8 +22,13 @@ public class TaskPoolService {
     public static func getSupportedTaskTypes(): Array<String> {
         return [
             "upload",
+            "asset_upload",
             "download_url",
             "upload_process",
+            "asset_upload_process",
+            "archive_asset_consume",
+            "tag_asset_consume",
+            "avatar_asset_consume",
             "metadata_plugin",
             "download_url_callback",
             "tag_import",
@@ -335,11 +340,23 @@ public class TaskPoolService {
                 // 这里需要阻塞 worker，直到任务进入终态，确保上传并发受 TaskPool 限制。
                 let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 TaskIO.appendLog(task.id, "upload task is now running, waiting for complete/failed")
-                waitUploadTaskFinalization(task.id)
+                waitUploadTaskFinalization(task.id, "upload")
+            case "asset_upload" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
+                TaskIO.appendLog(task.id, "asset_upload task is now running, waiting for complete/failed")
+                waitUploadTaskFinalization(task.id, "asset_upload")
             case "download_url" =>
                 DownloadUrlTaskRunner.run(task.id, task.parameters, context)
             case "upload_process" =>
                 UploadProcessTaskRunner.run(task.id, task.parameters, context)
+            case "asset_upload_process" =>
+                AssetUploadProcessTaskRunner.run(task.id, task.parameters, context)
+            case "archive_asset_consume" =>
+                ArchiveAssetConsumeTaskRunner.run(task.id, task.parameters, context)
+            case "tag_asset_consume" =>
+                TagAssetConsumeTaskRunner.run(task.id, task.parameters, context)
+            case "avatar_asset_consume" =>
+                AvatarAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "metadata_plugin" =>
                 MetadataPluginTaskRunner.run(task.id, task.parameters, context)
             case "download_url_callback" =>
@@ -387,7 +404,7 @@ public class TaskPoolService {
         return status == "completed" || status == "failed" || status == "stopped"
     }
 
-    private func waitUploadTaskFinalization(taskId: Int64): Unit {
+    private func waitUploadTaskFinalization(taskId: Int64, placeholderTaskType: String): Unit {
         let logger = getLogger("taskpool")
         var ticks: Int64 = 0
 
@@ -400,20 +417,20 @@ public class TaskPoolService {
 
             // async=1 分支会把当前 task 从 upload 改为 upload_process 并置为 pending，
             // 这里视为“upload 阶段结束”，释放当前 worker，让新类型任务重新被领取执行。
-            if (task.status == "pending" && task.taskType != "upload") {
-                TaskIO.appendLog(taskId, "upload task handed off to ${task.taskType}; release upload worker")
+            if (task.status == "pending" && task.taskType != placeholderTaskType) {
+                TaskIO.appendLog(taskId, "${placeholderTaskType} task handed off to ${task.taskType}; release worker")
                 return
             }
 
             if (isTerminalStatus(task.status)) {
-                TaskIO.appendLog(taskId, "upload task reached terminal status: ${task.status}")
+                TaskIO.appendLog(taskId, "${placeholderTaskType} task reached terminal status: ${task.status}")
                 return
             }
 
             ticks += 1
             if (ticks % 30 == 0) {
                 logger.debug(
-                    "upload task still running",
+                    "${placeholderTaskType} task still running",
                     ("task_id", taskId.toString()),
                     ("status", task.status),
                     ("progress", task.progress.toString())

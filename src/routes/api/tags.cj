@@ -64,22 +64,6 @@ public func registerTagRoutes(router: App): Unit {
         TagController.adminUpdate(ctx)
     })
 
-    // 管理员接口：上传标签图标
-    router.put("/api/admin/tags/:id/icon", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(uid) => TagController.adminUploadIcon(ctx, uid)
-            case None => return
-        }
-    })
-
-    // 管理员接口：上传标签背景图
-    router.put("/api/admin/tags/:id/background", { ctx =>
-        match (AuthMiddleware.requireAdmin(ctx)) {
-            case Some(uid) => TagController.adminUploadBackground(ctx, uid)
-            case None => return
-        }
-    })
-
     // 管理员接口：删除标签
     adminTags.delete("/:id", { ctx =>
         TagController.adminDelete(ctx)

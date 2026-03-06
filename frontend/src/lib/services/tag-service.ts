@@ -1,6 +1,7 @@
 'use client';
 
 import { apiClient, uploadClient } from '../api';
+import { ChunkedUploadService } from './chunked-upload-service';
 
 export type TagTranslation = {
   text: string;
@@ -157,27 +158,57 @@ export class TagService {
   }
 
   static async adminUploadIcon(id: number, file: File): Promise<{ iconAssetId: number }> {
-    const body = await file.arrayBuffer();
-    const resp = await apiClient.put(`/api/admin/tags/${id}/icon`, body, {
-      headers: {
-        'Content-Type': file.type || 'application/octet-stream',
-        'X-Filename': file.name || 'tag_icon',
+    const result = await ChunkedUploadService.uploadWithChunks(
+      file,
+      {
+        targetType: 'tag_icon',
+        targetId: String(id),
+        overwrite: true,
+        contentType: file.type || 'application/octet-stream',
       },
-    });
-    const data = resp.data?.data;
-    return { iconAssetId: Number(data?.iconAssetId ?? 0) };
+      {
+        onProgress: () => {},
+        onChunkComplete: () => {},
+        onError: () => {},
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error || 'Tag icon upload failed');
+    }
+
+    let iconAssetId = Number(result.data?.iconAssetId ?? result.data?.assetId ?? 0);
+    if (!iconAssetId) {
+      const latest = await this.getById(id);
+      iconAssetId = Number(latest?.iconAssetId ?? 0);
+    }
+    return { iconAssetId };
   }
 
   static async adminUploadBackground(id: number, file: File): Promise<{ backgroundAssetId: number }> {
-    const body = await file.arrayBuffer();
-    const resp = await apiClient.put(`/api/admin/tags/${id}/background`, body, {
-      headers: {
-        'Content-Type': file.type || 'application/octet-stream',
-        'X-Filename': file.name || 'tag_background',
+    const result = await ChunkedUploadService.uploadWithChunks(
+      file,
+      {
+        targetType: 'tag_background',
+        targetId: String(id),
+        overwrite: true,
+        contentType: file.type || 'application/octet-stream',
       },
-    });
-    const data = resp.data?.data;
-    return { backgroundAssetId: Number(data?.backgroundAssetId ?? 0) };
+      {
+        onProgress: () => {},
+        onChunkComplete: () => {},
+        onError: () => {},
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error || 'Tag background upload failed');
+    }
+
+    let backgroundAssetId = Number(result.data?.backgroundAssetId ?? result.data?.assetId ?? 0);
+    if (!backgroundAssetId) {
+      const latest = await this.getById(id);
+      backgroundAssetId = Number(latest?.backgroundAssetId ?? 0);
+    }
+    return { backgroundAssetId };
   }
 
   /**

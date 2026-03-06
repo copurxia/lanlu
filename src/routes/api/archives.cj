@@ -2,7 +2,6 @@ package lanlu.routes.api
 
 import ignite.*
 import lanlu.contexts.archive.interfaces.http.ArchiveController
-import lanlu.contexts.archive.interfaces.http.ChunkedUploadController
 import lanlu.contexts.archive.interfaces.http.DownloadController
 import lanlu.contexts.archive.interfaces.http.MetadataPluginController
 import lanlu.infrastructure.middleware.*
@@ -77,21 +76,6 @@ public class ArchiveRoutes {
         // 取消收藏
         archives.delete("/:id/favorite", { ctx =>
             ArchiveController.removeFavorite(ctx)
-        })
-
-        // 分片上传 - 初始化上传会话
-        archives.post("/upload/init", { ctx =>
-            ChunkedUploadController.initUpload(ctx)
-        })
-
-        // 分片上传 - 上传分片
-        archives.put("/upload/chunk", { ctx =>
-            ChunkedUploadController.uploadChunk(ctx)
-        })
-
-        // 分片上传 - 取消上传
-        archives.delete("/upload/:taskId", { ctx =>
-            ChunkedUploadController.cancelUpload(ctx)
         })
 
         let protectedApi = router.group("/api")

@@ -2,6 +2,7 @@ package lanlu.routes.api
 
 import ignite.*
 import lanlu.contexts.asset.interfaces.http.AssetController
+import lanlu.contexts.asset.interfaces.http.AssetUploadController
 import lanlu.infrastructure.middleware.*
 
 /**
@@ -14,6 +15,21 @@ public class AssetsRoutes {
 
         assets.get("/:id", { ctx =>
             AssetController.getAsset(ctx)
+        })
+
+        assets.post("/upload/init", { ctx =>
+            match (AuthMiddleware.requireUser(ctx)) {
+                case Some(uid) => AssetUploadController.initUpload(ctx, uid)
+                case None => return
+            }
+        })
+
+        assets.put("/upload/chunk", { ctx =>
+            AssetUploadController.uploadChunk(ctx)
+        })
+
+        assets.delete("/upload/:taskId", { ctx =>
+            AssetUploadController.cancelUpload(ctx)
         })
     }
 }

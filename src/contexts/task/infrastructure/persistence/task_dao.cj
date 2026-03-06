@@ -339,7 +339,7 @@ public class TaskDao {
     }
 
     /**
-     * 定期清理超时的 upload 任务（running 且 timeout_at 已过期）
+     * 定期清理超时的上传占位任务（running 且 timeout_at 已过期）
      */
     public static func failTimedOutUploadTasks(): Int64 {
         let logger = getLogger("task_dao")
@@ -352,7 +352,7 @@ public class TaskDao {
                         SET status = 'failed',
                             message = '上传超时：10分钟内无分片上传',
                             completed_at = CURRENT_TIMESTAMP
-                        WHERE task_type = 'upload'
+                        WHERE task_type IN ('upload', 'asset_upload')
                           AND status = 'running'
                           AND timeout_at IS NOT NULL
                           AND timeout_at <= CURRENT_TIMESTAMP

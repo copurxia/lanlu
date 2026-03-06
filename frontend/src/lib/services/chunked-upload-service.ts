@@ -1,5 +1,6 @@
 import { apiClient } from '../api';
 import { TaskPoolService } from './taskpool-service';
+import type { ApiEnvelope } from '@/types/common';
 
 // 上传元数据接口
 export interface UploadMetadata {
@@ -9,6 +10,9 @@ export interface UploadMetadata {
   categoryId?: string | number;
   fileChecksum?: string;
   overwrite?: boolean;  // 是否覆盖已存在的文件
+  targetType?: 'archive' | 'tag_icon' | 'tag_background' | 'user_avatar';
+  targetId?: string | number;
+  contentType?: string;
 }
 
 // 上传进度回调接口
@@ -27,6 +31,7 @@ export interface UploadResult {
   taskId?: string;
   error?: string;
   fileExists?: boolean;  // 文件是否已存在
+  data?: Record<string, any>;
 }
 
 // 上传状态接口
@@ -71,7 +76,7 @@ export class ChunkedUploadService {
 
     try {
       // 1. 文件验证
-      const validation = this.validateFile(file);
+      const validation = this.validateFile(file, metadata.targetType || 'archive');
       if (!validation.valid) {
         return { success: false, error: validation.error };
       }
@@ -116,7 +121,7 @@ export class ChunkedUploadService {
       );
 
       // 7. 计算总的已上传分片数（包括之前已上传的）
-      let totalCompletedChunks = completedChunks.length + firstUploadResult.successCount;
+      const totalCompletedChunks = completedChunks.length + firstUploadResult.successCount;
       
       // 如果有失败的分片（已包含 chunk 内部重试），直接返回错误
       if (firstUploadResult.failedChunks.length > 0) {
@@ -137,7 +142,7 @@ export class ChunkedUploadService {
         };
       }
 
-      // 9. 等待任务处理完成（由后端自动落盘 + upload_process）
+      // 9. 等待任务处理完成（由后端自动落盘 + asset_upload_process）
       return await this.waitForTaskCompletion(taskId, callbacks);
 
     } catch (error) {
@@ -164,10 +169,14 @@ export class ChunkedUploadService {
   /**
    * 文件验证
    */
-  static validateFile(file: File): ValidationResult {
+  static validateFile(file: File, targetType: UploadMetadata['targetType'] = 'archive'): ValidationResult {
     // 分片上传已实现，这里不再限制总文件大小；仅确保文件非空。
     if (file.size <= 0) {
       return { valid: false, error: '文件不能为空' };
+    }
+
+    if (targetType && targetType !== 'archive') {
+      return { valid: true };
     }
 
     // 检查文件扩展名
@@ -193,38 +202,37 @@ export class ChunkedUploadService {
     totalChunks: number,
     metadata: UploadMetadata
   ): Promise<string | { fileExists: true; error: string } | null> {
+    // 调用服务器初始化上传会话 - 新接口返回 { code, message, data: { taskId } }
     try {
-      // 调用服务器初始化上传会话 - 服务器会返回taskId
-      try {
-        const response = await apiClient.post('/api/archives/upload/init', {
-          filename: fileName,
-          file_checksum: fileHash,
-          filesize: fileSize,
-          chunk_size: this.CHUNK_SIZE,
-          total_chunks: totalChunks,
-          title: metadata.title || '',
-          tags: metadata.tags || '',
-          summary: metadata.summary || '',
-          category_id: metadata.categoryId || '',
-          overwrite: metadata.overwrite ? 'true' : 'false'
-        });
+      const targetType = metadata.targetType || 'archive';
+      const response = await apiClient.post<ApiEnvelope<{ taskId: string }>>('/api/assets/upload/init', {
+        filename: fileName,
+        file_checksum: fileHash,
+        filesize: fileSize,
+        chunk_size: this.CHUNK_SIZE,
+        total_chunks: totalChunks,
+        title: metadata.title || '',
+        tags: metadata.tags || '',
+        summary: metadata.summary || '',
+        category_id: metadata.categoryId || '',
+        overwrite: metadata.overwrite ? 'true' : 'false',
+        target_type: targetType,
+        target_id: metadata.targetId ?? '',
+        content_type: metadata.contentType || ''
+      });
 
-        if (response.data.success !== 1) {
-          // 检查是否是文件已存在的情况
-          if (response.data.fileExists) {
-            return { fileExists: true, error: response.data.error || '文件已存在' };
-          }
-          console.error('Server failed to initialize upload session:', response.data.error);
-          return null;
-        }
+      if (response.data?.code !== 200) {
+        console.error('Server failed to initialize upload session:', response.data?.message);
+        return null;
+      }
 
-        const taskId = response.data.taskId;
-        if (!taskId) {
-          console.error('Server did not return taskId');
-          return null;
-        }
+      const taskId = String(response.data?.data?.taskId ?? '').trim();
+      if (!taskId) {
+        console.error('Server did not return taskId');
+        return null;
+      }
 
-        // 保存上传会话信息到localStorage
+      // 保存上传会话信息到localStorage
       const session = {
         taskId,
         fileName,
@@ -237,13 +245,13 @@ export class ChunkedUploadService {
       };
 
       localStorage.setItem(`upload_${taskId}`, JSON.stringify(session));
-
-        return taskId;
-      } catch (serverError) {
-        console.error('Failed to call server init upload session:', serverError);
-        return null;
+      return taskId;
+    } catch (error: any) {
+      const status = Number(error?.response?.status ?? 0);
+      const message = String(error?.response?.data?.message ?? error?.message ?? '');
+      if (status === 409 && message.includes('文件已存在')) {
+        return { fileExists: true, error: message || '文件已存在' };
       }
-    } catch (error) {
       console.error('Failed to init upload session:', error);
       return null;
     }
@@ -501,20 +509,20 @@ export class ChunkedUploadService {
     params.append('totalChunks', totalChunks.toString());
     params.append('filename', 'chunk.bin');
 
-    const response = await apiClient.put(`/api/archives/upload/chunk?${params.toString()}`, chunkData, {
+    const response = await apiClient.put<ApiEnvelope<Record<string, any>>>(`/api/assets/upload/chunk?${params.toString()}`, chunkData, {
       headers: {
         'Content-Type': 'application/octet-stream',
       },
       timeout: this.UPLOAD_TIMEOUT,
     });
 
-    if (response.data.success !== 1) {
-      throw new Error(response.data.error || `Chunk ${chunkIndex} upload failed`);
+    if (response.data?.code !== 200) {
+      throw new Error(response.data?.message || `Chunk ${chunkIndex} upload failed`);
     }
   }
 
   /**
-   * 等待后端任务完成（upload_process）
+   * 等待后端任务完成（asset_upload_process + consume task）
    */
   private static async waitForTaskCompletion(
     taskId: string,
@@ -538,7 +546,26 @@ export class ChunkedUploadService {
 
       this.cleanupUploadSession(taskId);
       if (task.status === 'completed') {
-        return { success: true, taskId };
+        let resultPayload = this.parseTaskResult(task.result);
+        const consumeTaskId = Number(resultPayload?.consume_task_id || 0);
+        if (consumeTaskId > 0) {
+          const consumeTask = await TaskPoolService.waitForTaskTerminal(consumeTaskId, {
+            timeoutMs,
+            onUpdate: (nextTask) => {
+              if (typeof nextTask.progress === 'number') {
+                lastProgress = Math.max(lastProgress, Math.min(100, Math.max(0, nextTask.progress)));
+                callbacks.onProgress(lastProgress);
+              }
+            },
+          });
+
+          if (consumeTask.status !== 'completed') {
+            return { success: false, error: consumeTask.message || `任务状态为 ${consumeTask.status}` };
+          }
+          const consumePayload = this.parseTaskResult(consumeTask.result);
+          resultPayload = { ...(resultPayload || {}), ...(consumePayload || {}) };
+        }
+        return { success: true, taskId, data: resultPayload || undefined };
       }
       return { success: false, error: task.message || `任务状态为 ${task.status}` };
     } catch (error) {
@@ -604,7 +631,7 @@ export class ChunkedUploadService {
       );
 
       // 计算总的已上传分片数（包括之前已上传的）
-      let totalCompletedChunks = completedChunks.length + uploadResult.successCount;
+      const totalCompletedChunks = completedChunks.length + uploadResult.successCount;
 
       // 如果有失败的分片（已包含 chunk 内部重试），直接返回错误
       if (uploadResult.failedChunks.length > 0) {
@@ -674,9 +701,20 @@ export class ChunkedUploadService {
    */
   private static async cancelUploadTask(taskId: string): Promise<void> {
     try {
-      await apiClient.delete(`/api/archives/upload/${taskId}`);
+      await apiClient.delete(`/api/assets/upload/${taskId}`);
     } catch (error) {
       console.warn(`Failed to cancel upload task ${taskId}:`, error);
+    }
+  }
+
+  private static parseTaskResult(raw: unknown): Record<string, any> | null {
+    if (typeof raw !== 'string' || raw.trim() === '') return null;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+      return parsed as Record<string, any>;
+    } catch {
+      return null;
     }
   }
 

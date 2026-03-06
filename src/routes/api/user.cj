@@ -1,7 +1,6 @@
 package lanlu.routes.api
 
 import ignite.*
-import lanlu.contexts.user.interfaces.http.UserController
 import lanlu.contexts.user.interfaces.http.UserStatsController
 import lanlu.infrastructure.middleware.*
 
@@ -16,14 +15,6 @@ public class UserRoutes {
     public static func configure(router: App) {
         let user = router.group("/api/user")
         user.use(AuthMiddleware.requiredAuthMiddleware())
-
-        // 上传当前用户头像
-        router.put("/api/user/avatar", { ctx =>
-            match (AuthMiddleware.requireUser(ctx)) {
-                case Some(uid) => UserController.uploadAvatar(ctx, uid)
-                case None => ()
-            }
-        })
 
         // 获取用户统计数据
         user.get("/stats", { ctx =>

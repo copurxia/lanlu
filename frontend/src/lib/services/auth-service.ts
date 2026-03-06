@@ -1,5 +1,6 @@
 import { apiClient } from '@/lib/api';
 import type { ApiEnvelope, AuthToken, AuthUser, AuthSession } from '@/types/auth';
+import { ChunkedUploadService } from './chunked-upload-service';
 
 export class AuthService {
   static async login(params: { username: string; password: string; tokenName?: string }) {
@@ -56,13 +57,33 @@ export class AuthService {
   }
 
   static async uploadAvatar(file: File) {
-    const body = await file.arrayBuffer();
-    const res = await apiClient.put<ApiEnvelope<{ avatarAssetId: number }>>('/api/user/avatar', body, {
-      headers: {
-        'Content-Type': file.type || 'application/octet-stream',
-        'X-Filename': file.name || 'avatar',
+    const result = await ChunkedUploadService.uploadWithChunks(
+      file,
+      {
+        targetType: 'user_avatar',
+        overwrite: true,
+        contentType: file.type || 'application/octet-stream',
       },
-    });
-    return res.data;
+      {
+        onProgress: () => {},
+        onChunkComplete: () => {},
+        onError: () => {},
+      }
+    );
+    if (!result.success) {
+      throw new Error(result.error || 'Avatar upload failed');
+    }
+
+    let avatarAssetId = Number(result.data?.avatarAssetId ?? result.data?.assetId ?? 0);
+    if (!avatarAssetId) {
+      const me = await this.me();
+      avatarAssetId = Number(me?.data?.user?.avatarAssetId ?? 0);
+    }
+
+    return {
+      code: 200,
+      message: 'ok',
+      data: { avatarAssetId },
+    } as ApiEnvelope<{ avatarAssetId: number }>;
   }
 }

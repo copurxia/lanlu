@@ -320,10 +320,15 @@ export class ArchiveService {
       onChunkComplete: () => {},
       onError: () => {}
     };
+    const mergedMetadata: UploadMetadata = {
+      ...(metadata || {}),
+      targetType: 'archive',
+      contentType: file.type || (metadata?.contentType ?? '')
+    };
 
     return await ChunkedUploadService.uploadWithChunks(
       file,
-      metadata || {},
+      mergedMetadata,
       callbacks || defaultCallbacks
     );
   }
@@ -343,11 +348,16 @@ export class ArchiveService {
       onChunkComplete: () => {},
       onError: () => {}
     };
+    const mergedMetadata: UploadMetadata = {
+      ...(metadata || {}),
+      targetType: 'archive',
+      contentType: file.type || (metadata?.contentType ?? '')
+    };
 
     return await ChunkedUploadService.resumeUpload(
       taskId,
       file,
-      metadata || {},
+      mergedMetadata,
       callbacks || defaultCallbacks
     );
   }

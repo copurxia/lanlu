@@ -534,7 +534,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
                 )}
 
                 {/* Upload / URL Download Details */}
-                {(['upload', 'upload_process', 'download_url'].includes(task.taskType) && task.parameters) && (
+                {(['upload', 'asset_upload', 'upload_process', 'asset_upload_process', 'download_url'].includes(task.taskType) && task.parameters) && (
                   <div className="text-sm border-t pt-3">
                     <strong>{t('settings.taskManagement.taskDetails')}:</strong>
                     {(() => {

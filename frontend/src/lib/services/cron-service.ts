@@ -348,8 +348,18 @@ export class CronService {
     switch (taskType) {
       case 'download_url':
         return '下载URL';
+      case 'asset_upload':
+        return '资源上传';
       case 'upload_process':
         return '上传处理';
+      case 'asset_upload_process':
+        return '资源上传处理';
+      case 'archive_asset_consume':
+        return '档案资产消费';
+      case 'tag_asset_consume':
+        return '标签资产消费';
+      case 'avatar_asset_consume':
+        return '头像资产消费';
       case 'metadata_plugin':
         return '元数据插件';
       case 'download_url_callback':
@@ -393,8 +403,14 @@ export class CronService {
   static getTaskTypeColor(taskType: string): string {
     switch (taskType) {
       case 'download_url':
+      case 'asset_upload':
       case 'upload_process':
+      case 'asset_upload_process':
         return 'bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200';
+      case 'archive_asset_consume':
+      case 'tag_asset_consume':
+      case 'avatar_asset_consume':
+        return 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200';
       case 'metadata_plugin':
       case 'metadata_plugin_callback':
         return 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200';
@@ -443,7 +459,12 @@ export class CronService {
    */
   static readonly TASK_TYPES = [
     { value: 'download_url' },
+    { value: 'asset_upload' },
     { value: 'upload_process' },
+    { value: 'asset_upload_process' },
+    { value: 'archive_asset_consume' },
+    { value: 'tag_asset_consume' },
+    { value: 'avatar_asset_consume' },
     { value: 'metadata_plugin' },
     { value: 'download_url_callback' },
     { value: 'tag_import' },
