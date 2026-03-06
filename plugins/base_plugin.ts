@@ -60,7 +60,10 @@ export interface HostSelectResult {
 
 export interface MetadataAssetItem {
   key: string;
-  value: string;
+  // `value` can be either:
+  // - plugin cache path (string)
+  // - existing assets.id (number)
+  value: string | number;
 }
 
 export interface MetadataObject {

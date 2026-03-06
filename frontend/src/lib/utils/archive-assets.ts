@@ -31,6 +31,63 @@ export function normalizeArchiveAssets(rawAssets: unknown): ArchiveAssets {
   return normalized;
 }
 
+function normalizeMetadataAssetValue(rawValue: unknown): string {
+  if (rawValue === null || rawValue === undefined) return '';
+  if (typeof rawValue === 'number' && Number.isFinite(rawValue)) {
+    return String(Math.trunc(rawValue));
+  }
+  if (typeof rawValue === 'bigint') {
+    return String(rawValue);
+  }
+  if (typeof rawValue === 'string') {
+    return rawValue.trim();
+  }
+  if (rawValue && typeof rawValue === 'object' && !Array.isArray(rawValue)) {
+    const row = rawValue as Record<string, unknown>;
+    const candidates = [row.value, row.path, row.id, row.asset_id, row.assetId];
+    for (const candidate of candidates) {
+      const normalized = normalizeMetadataAssetValue(candidate);
+      if (normalized) return normalized;
+    }
+  }
+  return '';
+}
+
+/**
+ * Read a metadata-plugin asset value from either:
+ * - array form: [{ key, value }]
+ * - object form: { cover: 123, backdrop: "..." }
+ */
+export function readMetadataAssetValue(rawAssets: unknown, key: string): string {
+  const wanted = String(key || '').trim().toLowerCase();
+  if (!wanted) return '';
+
+  if (Array.isArray(rawAssets)) {
+    for (const item of rawAssets) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const row = item as Record<string, unknown>;
+      const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
+      if (itemKey !== wanted) continue;
+      return normalizeMetadataAssetValue(row.value ?? row.path ?? row.id ?? row.asset_id ?? row.assetId);
+    }
+    return '';
+  }
+
+  if (rawAssets && typeof rawAssets === 'object') {
+    const assets = rawAssets as Record<string, unknown>;
+    const directMatch = assets[wanted];
+    if (directMatch !== undefined) {
+      return normalizeMetadataAssetValue(directMatch);
+    }
+    for (const [assetKey, assetValue] of Object.entries(assets)) {
+      if (assetKey.trim().toLowerCase() !== wanted) continue;
+      return normalizeMetadataAssetValue(assetValue);
+    }
+  }
+
+  return '';
+}
+
 export function getArchiveAssetId(source: ArchiveAssetSource, key: string = 'cover'): number | undefined {
   if (!source) return undefined;
   const assets = normalizeArchiveAssets(source.assets);

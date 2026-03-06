@@ -452,6 +452,312 @@ public class DenoTaskRunner {
         return out.toArray()
     }
 
+    private static func parsePositiveAssetId(rawValue: String): Int64 {
+        let trimmed = rawValue.trimAscii()
+        if (trimmed.size == 0) { return 0 }
+        try {
+            let parsed = Int64.parse(trimmed)
+            return if (parsed > 0) { parsed } else { 0 }
+        } catch (_: Exception) {
+            return 0
+        }
+    }
+
+    private static func readJsonValueAsString(r: JsonReader): String {
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes).trimAscii()
+            case Some(BeginArray) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes).trimAscii()
+            case Some(_) => return r.readValue<String>().trimAscii()
+            case None => return ""
+        }
+    }
+
+    private static func normalizeMetadataOwnerType(rawType: String): String {
+        let t = rawType.trimAscii().toAsciiLower()
+        if (t == "tankoubon" || t == "tank") {
+            return "tankoubon"
+        }
+        return "archive"
+    }
+
+    private static func sanitizeAssetOwnerId(rawOwnerId: String, taskId: Int64): String {
+        var ownerId = rawOwnerId.trimAscii()
+            .replace("\\", "_")
+            .replace("/", "_")
+            .replace(" ", "_")
+        if (ownerId.size == 0) {
+            ownerId = "metadata_${taskId.toString()}"
+        }
+        return ownerId
+    }
+
+    private static func resolvePreviewAssetValue(
+        taskId: Int64,
+        pluginNamespace: String,
+        ownerType: String,
+        ownerId: String,
+        key: String,
+        rawValue: String
+    ): String {
+        let normalizedKey = key.trimAscii().toAsciiLower()
+        let value = rawValue.trimAscii()
+        if (value.size == 0) {
+            return ""
+        }
+
+        let directAssetId = parsePositiveAssetId(value)
+        if (directAssetId > 0) {
+            return directAssetId.toString()
+        }
+
+        if (normalizedKey != "cover" && normalizedKey != "backdrop" && normalizedKey != "clearlogo") {
+            return value
+        }
+
+        let namespace = pluginNamespace.trimAscii()
+        if (namespace.size == 0) {
+            TaskIO.appendLog(taskId, "WARN: preview asset install skipped because plugin namespace is empty (owner=${ownerId}, key=${normalizedKey})")
+            return ""
+        }
+
+        let normalizedOwnerType = normalizeMetadataOwnerType(ownerType)
+        let safeOwnerId = sanitizeAssetOwnerId(ownerId, taskId)
+        let assetKind = if (normalizedOwnerType == "tankoubon") {
+            if (normalizedKey == "cover") {
+                "tankoubon_cover"
+            } else if (normalizedKey == "backdrop") {
+                "tankoubon_backdrop"
+            } else {
+                "tankoubon_clearlogo"
+            }
+        } else {
+            if (normalizedKey == "cover") {
+                "archive_cover"
+            } else if (normalizedKey == "backdrop") {
+                "archive_backdrop"
+            } else {
+                "archive_clearlogo"
+            }
+        }
+        let outputName = if (normalizedKey == "cover") {
+            "${safeOwnerId}.avif"
+        } else {
+            "${safeOwnerId}_${normalizedKey}.avif"
+        }
+
+        let (okInstall, newAssetId, _, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
+            value,
+            namespace,
+            assetKind,
+            outputName
+        )
+        if (okInstall && newAssetId > 0) {
+            return newAssetId.toString()
+        }
+
+        TaskIO.appendLog(taskId, "WARN: preview asset install failed owner=${safeOwnerId} key=${normalizedKey} namespace=${namespace} error=${installErr}")
+        return ""
+    }
+
+    private static func writePreviewAssetEntry(w: JsonWriter, key: String, value: String): Unit {
+        let normalizedKey = key.trimAscii().toAsciiLower()
+        if (normalizedKey.size == 0) {
+            return
+        }
+        w.startObject()
+        w.writeName("key").writeValue(normalizedKey)
+        let parsedId = parsePositiveAssetId(value)
+        if (parsedId > 0) {
+            w.writeName("value").writeValue(parsedId)
+        } else {
+            w.writeName("value").writeValue(value)
+        }
+        w.endObject()
+    }
+
+    private static func writeNormalizedMetadataPreviewAssets(
+        r: JsonReader,
+        w: JsonWriter,
+        taskId: Int64,
+        pluginNamespace: String,
+        ownerType: String,
+        ownerId: String
+    ): Unit {
+        match (r.peek()) {
+            case Some(BeginArray) =>
+                w.startArray()
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    if (r.peek() != Some(BeginObject)) {
+                        let raw = String.fromUtf8(r.readValueBytes())
+                        w.jsonValue(raw)
+                        continue
+                    }
+
+                    var assetKey = ""
+                    var assetValue = ""
+                    var hasValue = false
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let field = r.readName().trimAscii().toAsciiLower()
+                        match (field) {
+                            case "key" =>
+                                assetKey = readJsonValueAsString(r).toAsciiLower()
+                            case "name" =>
+                                if (assetKey.size == 0) { assetKey = readJsonValueAsString(r).toAsciiLower() } else { r.skip() }
+                            case "type" =>
+                                if (assetKey.size == 0) { assetKey = readJsonValueAsString(r).toAsciiLower() } else { r.skip() }
+                            case "value" =>
+                                assetValue = readJsonValueAsString(r)
+                                hasValue = true
+                            case "path" =>
+                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
+                            case "id" =>
+                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
+                            case "asset_id" =>
+                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
+                            case "assetid" =>
+                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+
+                    if (assetKey.trimAscii().size == 0) {
+                        continue
+                    }
+                    let resolved = resolvePreviewAssetValue(taskId, pluginNamespace, ownerType, ownerId, assetKey, assetValue)
+                    writePreviewAssetEntry(w, assetKey, resolved)
+                }
+                r.endArray()
+                w.endArray()
+            case Some(BeginObject) =>
+                // Backward compatibility: object form assets => normalized to array form.
+                w.startArray()
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let assetKey = r.readName().trimAscii().toAsciiLower()
+                    let assetValue = readJsonValueAsString(r)
+                    if (assetKey.size == 0) {
+                        continue
+                    }
+                    let resolved = resolvePreviewAssetValue(taskId, pluginNamespace, ownerType, ownerId, assetKey, assetValue)
+                    writePreviewAssetEntry(w, assetKey, resolved)
+                }
+                r.endObject()
+                w.endArray()
+            case Some(_) =>
+                // Preserve unexpected shape as-is.
+                let raw = String.fromUtf8(r.readValueBytes())
+                w.jsonValue(raw)
+            case None =>
+                w.startArray()
+                w.endArray()
+        }
+    }
+
+    private static func writeNormalizedMetadataPreviewObject(
+        r: JsonReader,
+        w: JsonWriter,
+        taskId: Int64,
+        pluginNamespace: String,
+        ownerType: String,
+        ownerId: String
+    ): Unit {
+        if (r.peek() != Some(BeginObject)) {
+            let raw = String.fromUtf8(r.readValueBytes())
+            w.jsonValue(raw)
+            return
+        }
+
+        r.startObject()
+        w.startObject()
+        var archiveIndex: Int64 = 0
+        while (r.peek() != EndObject) {
+            let key = r.readName()
+            let normalizedKey = key.trimAscii().toAsciiLower()
+            if (normalizedKey == "assets") {
+                w.writeName(key)
+                writeNormalizedMetadataPreviewAssets(r, w, taskId, pluginNamespace, ownerType, ownerId)
+                continue
+            }
+            if (normalizedKey == "archive" && r.peek() == Some(BeginArray)) {
+                w.writeName(key)
+                w.startArray()
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    if (r.peek() == Some(BeginObject)) {
+                        let childOwnerId = sanitizeAssetOwnerId("${ownerId}_archive_${archiveIndex.toString()}", taskId)
+                        writeNormalizedMetadataPreviewObject(r, w, taskId, pluginNamespace, "archive", childOwnerId)
+                    } else {
+                        let raw = String.fromUtf8(r.readValueBytes())
+                        w.jsonValue(raw)
+                    }
+                    archiveIndex += 1
+                }
+                r.endArray()
+                w.endArray()
+                continue
+            }
+
+            let raw = String.fromUtf8(r.readValueBytes())
+            w.writeName(key).jsonValue(raw)
+        }
+        r.endObject()
+        w.endObject()
+    }
+
+    private static func normalizeMetadataPreviewOutputAssets(
+        taskId: Int64,
+        outputJson: String,
+        pluginNamespace: String,
+        targetType: String,
+        targetId: String
+    ): String {
+        let trimmed = outputJson.trimAscii()
+        if (trimmed.size == 0) {
+            return outputJson
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return outputJson
+            }
+
+            let rootOwnerType = normalizeMetadataOwnerType(targetType)
+            let rootOwnerId = sanitizeAssetOwnerId(targetId, taskId)
+
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            r.startObject()
+            w.startObject()
+            while (r.peek() != EndObject) {
+                let key = r.readName()
+                if (key == "data" && r.peek() == Some(BeginObject)) {
+                    w.writeName(key)
+                    writeNormalizedMetadataPreviewObject(r, w, taskId, pluginNamespace, rootOwnerType, rootOwnerId)
+                } else {
+                    let raw = String.fromUtf8(r.readValueBytes())
+                    w.writeName(key).jsonValue(raw)
+                }
+            }
+            r.endObject()
+            w.endObject()
+            w.flush()
+            return String.fromUtf8(readToEnd(out))
+        } catch (e: Exception) {
+            TaskIO.appendLog(taskId, "WARN: normalize metadata preview assets failed: ${e.message}")
+            return outputJson
+        }
+    }
+
     private static func writeMetadataTagsArray(w: JsonWriter, tagsString: String): Unit {
         let tags = splitTagTokens(tagsString)
         w.writeName("tags")
@@ -2356,8 +2662,15 @@ public class DenoTaskRunner {
         )
 
         let result = executeWithStdio(taskId, "deno", denoArgs, inputJson, 0, plugin.namespace, interactiveSelectEnabled)
+        // Normalize metadata preview output:
+        // convert plugin cache paths in assets to concrete assets.id for frontend write-back.
+        let normalizedOutput = if (result.success && interactiveSelectEnabled) {
+            normalizeMetadataPreviewOutputAssets(taskId, result.output, plugin.namespace, effectiveType, effectiveId)
+        } else {
+            result.output
+        }
         // 保留 loginCookiesJson 用于后续处理
-        return DenoExecutionResult(result.success, result.error, result.output, loginCookiesJson, result.exitCode)
+        return DenoExecutionResult(result.success, result.error, normalizedOutput, loginCookiesJson, result.exitCode)
     }
 
     /**

@@ -19,7 +19,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { logger } from '@/lib/utils/logger';
 import { useMounted } from '@/hooks/common-hooks';
-import { getArchiveAssetId } from '@/lib/utils/archive-assets';
+import { getArchiveAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
@@ -502,28 +502,14 @@ export function ArchiveDetailContent() {
         }
 
         const data = out?.data || {};
-        const readAssetValue = (assets: unknown, key: string): string => {
-          if (!Array.isArray(assets)) return '';
-          for (const item of assets) {
-            if (!item || typeof item !== 'object') continue;
-            const row = item as Record<string, unknown>;
-            const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
-            if (itemKey !== key) continue;
-            const value = row.value;
-            if (typeof value === 'string') return value.trim();
-            if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value));
-            return '';
-          }
-          return '';
-        };
         const nextTitle = typeof data.title === 'string' ? data.title : '';
         const nextSummary = typeof data.description === 'string' ? data.description : '';
         const nextTags = Array.isArray(data.tags)
           ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
           : [];
-        const nextCover = readAssetValue(data.assets, 'cover');
-        const nextBackdrop = readAssetValue(data.assets, 'backdrop');
-        const nextClearlogo = readAssetValue(data.assets, 'clearlogo');
+        const nextCover = readMetadataAssetValue(data.assets, 'cover');
+        const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
+        const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
         const applyAssetPreview = (
           rawValue: string,
           setPathValue: (next: string) => void,
@@ -655,15 +641,23 @@ export function ArchiveDetailContent() {
   }
 
   const coverAssetId = getArchiveAssetId(metadata, 'cover');
+  const backdropAssetId = getArchiveAssetId(metadata, 'backdrop');
+  const backdropUrl = backdropAssetId ? `/api/assets/${backdropAssetId}` : '';
 
   return (
-    <div className="min-h-dvh bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
+    <div className="relative min-h-dvh bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
+      {backdropUrl ? (
+        <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
+          <Image src={backdropUrl} alt="" fill className="object-cover opacity-30" unoptimized />
+          <div className="absolute inset-0 bg-gradient-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
+        </div>
+      ) : null}
       {/* Reserve space for the fixed mobile action bar (includes safe-area inset). */}
-      <main className="container mx-auto px-4 pt-6 pb-2 sm:pb-6 max-w-7xl">
+      <main className="relative z-10 container mx-auto px-4 pt-6 pb-2 sm:pb-6 max-w-7xl">
         <div className="space-y-6">
           {/* Header / hero (unified with Tankoubon page) */}
           <div className="relative">
-            <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
+            <div className="relative rounded-2xl border bg-card/70 backdrop-blur dark:bg-card/70">
               <div className="p-4 md:p-5">
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">

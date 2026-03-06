@@ -22,7 +22,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider'
 import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
-import { getCoverAssetId } from '@/lib/utils/archive-assets'
+import { getCoverAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets'
 import type { Plugin } from '@/lib/services/plugin-service'
 
 export interface BaseMediaCardProps {
@@ -579,20 +579,6 @@ export function BaseMediaCard({
         }
 
         const data = out?.data || {}
-        const readAssetValue = (assets: unknown, key: string): string => {
-          if (!Array.isArray(assets)) return ''
-          for (const item of assets) {
-            if (!item || typeof item !== 'object') continue
-            const row = item as Record<string, unknown>
-            const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase()
-            if (itemKey !== key) continue
-            const value = row.value
-            if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value))
-            if (typeof value === 'string') return value.trim()
-            return ''
-          }
-          return ''
-        }
         const nextTitle =
           typeof data.title === 'string'
             ? data.title
@@ -601,9 +587,9 @@ export function BaseMediaCard({
         const nextTags = Array.isArray(data.tags)
           ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
           : []
-        const nextCover = readAssetValue(data.assets, 'cover')
-        const nextBackdrop = readAssetValue(data.assets, 'backdrop')
-        const nextClearlogo = readAssetValue(data.assets, 'clearlogo')
+        const nextCover = readMetadataAssetValue(data.assets, 'cover')
+        const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop')
+        const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo')
         const nextArchives = Array.isArray(data.archive) ? data.archive : []
         const applyAssetPreview = (
           rawValue: string,
@@ -641,9 +627,9 @@ export function BaseMediaCard({
                   ? item.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean).join(', ')
                   : undefined,
                 updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
-                cover: readAssetValue(item?.assets, 'cover') || undefined,
-                backdrop: readAssetValue(item?.assets, 'backdrop') || undefined,
-                clearlogo: readAssetValue(item?.assets, 'clearlogo') || undefined,
+                cover: readMetadataAssetValue(item?.assets, 'cover') || undefined,
+                backdrop: readMetadataAssetValue(item?.assets, 'backdrop') || undefined,
+                clearlogo: readMetadataAssetValue(item?.assets, 'clearlogo') || undefined,
               }))
               .filter((item: any) => item.archive_id || item.volume_no)
           )
@@ -892,7 +878,7 @@ export function BaseMediaCard({
         onClick={navigateToReader}
         onContextMenu={handleContextMenu}
       >
-        <Card className="overflow-hidden transition-shadow hover:shadow-lg">
+        <Card className="overflow-hidden bg-card/70 transition-shadow hover:shadow-lg dark:bg-card/70">
           <div className="aspect-[3/4] bg-muted relative">
             {!imageError && hasImage ? (
               <Image

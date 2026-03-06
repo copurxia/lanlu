@@ -43,7 +43,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
-import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
+import { getArchiveAssetId, getCoverAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
@@ -783,28 +783,14 @@ function TankoubonDetailContent() {
         }
 
         const data = out?.data || {};
-        const readAssetValue = (assets: unknown, key: string): string => {
-          if (!Array.isArray(assets)) return '';
-          for (const item of assets) {
-            if (!item || typeof item !== 'object') continue;
-            const row = item as Record<string, unknown>;
-            const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
-            if (itemKey !== key) continue;
-            const value = row.value;
-            if (typeof value === 'string') return value.trim();
-            if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value));
-            return '';
-          }
-          return '';
-        };
         const nextTitle = typeof data.title === 'string' ? data.title : '';
         const nextSummary = typeof data.description === 'string' ? data.description : '';
         const nextTags = Array.isArray(data.tags)
           ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
           : [];
-        const nextCover = readAssetValue(data.assets, 'cover');
-        const nextBackdrop = readAssetValue(data.assets, 'backdrop');
-        const nextClearlogo = readAssetValue(data.assets, 'clearlogo');
+        const nextCover = readMetadataAssetValue(data.assets, 'cover');
+        const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
+        const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
         const nextArchives = Array.isArray(data.archive) ? data.archive : [];
         const applyAssetPreview = (
           rawValue: string,
@@ -842,9 +828,9 @@ function TankoubonDetailContent() {
                 ? item.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean).join(', ')
                 : undefined,
               updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
-              cover: readAssetValue(item?.assets, 'cover') || undefined,
-              backdrop: readAssetValue(item?.assets, 'backdrop') || undefined,
-              clearlogo: readAssetValue(item?.assets, 'clearlogo') || undefined,
+              cover: readMetadataAssetValue(item?.assets, 'cover') || undefined,
+              backdrop: readMetadataAssetValue(item?.assets, 'backdrop') || undefined,
+              clearlogo: readMetadataAssetValue(item?.assets, 'clearlogo') || undefined,
             }))
             .filter((item: any) => item.archive_id || item.volume_no)
         );
@@ -1028,16 +1014,24 @@ function TankoubonDetailContent() {
       ? Math.max(0, Math.min(100, Math.round((totalProgress / totalPages) * 100)))
       : 0;
   const coverAssetId = getCoverAssetId(tankoubon) ?? 0;
+  const backdropAssetId = getArchiveAssetId(tankoubon, 'backdrop');
   const coverUrl = coverAssetId > 0
     ? `/api/assets/${coverAssetId}`
     : '';
+  const backdropUrl = backdropAssetId ? `/api/assets/${backdropAssetId}` : '';
 
   return (
-    <div className="min-h-dvh bg-background pb-20 lg:pb-0">
-      <main className="container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
+    <div className="relative min-h-dvh bg-background pb-20 lg:pb-0">
+      {backdropUrl ? (
+        <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
+          <Image src={backdropUrl} alt="" fill className="object-cover opacity-30" unoptimized />
+          <div className="absolute inset-0 bg-gradient-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
+        </div>
+      ) : null}
+      <main className="relative z-10 container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
         {/* Header / hero */}
         <div className="relative mb-8">
-          <div className="relative rounded-2xl border bg-card/70 backdrop-blur">
+          <div className="relative rounded-2xl border bg-card/70 backdrop-blur dark:bg-card/70">
             <div className="p-4 md:p-5">
               {/* Mobile: keep hero clean; actions live in a bottom sheet. */}
               <div className="sm:hidden absolute right-4 top-4">
@@ -1286,7 +1280,7 @@ function TankoubonDetailContent() {
             <Spinner />
           </div>
         ) : archives.length === 0 ? (
-          <div className="text-center py-12 bg-muted/50 rounded-lg">
+          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur dark:bg-card/70">
             <p className="text-muted-foreground mb-4">{t('tankoubon.noArchives')}</p>
             <Button onClick={() => setAddArchiveDialogOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
@@ -1294,7 +1288,7 @@ function TankoubonDetailContent() {
             </Button>
           </div>
         ) : filteredArchives.length === 0 ? (
-          <div className="text-center py-12 bg-muted/30 rounded-lg border">
+          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur dark:bg-card/70">
             <p className="text-muted-foreground mb-1">{t('tankoubon.noMatchingArchives')}</p>
             <Button variant="ghost" onClick={() => setArchiveFilter('')}>
               {t('common.reset')}

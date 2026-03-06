@@ -39,7 +39,7 @@ export function ArchivePreviewCard({
   handleImageError,
 }: Props) {
   return (
-    <Card>
+    <Card className="bg-card/70 backdrop-blur dark:bg-card/70">
       {/* When collapsed, default CardHeader padding makes the row feel a bit low; tighten it. */}
       <CardHeader className={cn(showPreview ? 'pb-4' : 'py-4')}>
         <div className="flex items-center justify-between">

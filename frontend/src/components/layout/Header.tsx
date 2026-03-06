@@ -102,7 +102,10 @@ export function Header() {
   ];
 
   return (
-    <header ref={headerRef} className="bg-background border-b border-border sticky top-0 z-50">
+    <header
+      ref={headerRef}
+      className="sticky top-0 z-50 border-b border-border/70 bg-background/70 backdrop-blur-md dark:bg-background/70"
+    >
       {/* Slightly shorter top bar on mobile to match typical 48-56px app headers. */}
       <div className="mx-auto px-4 py-2 sm:py-3">
         <div className="relative flex items-center justify-between">
@@ -163,7 +166,7 @@ export function Header() {
               md:hidden
               absolute inset-0
               flex items-center gap-2 min-w-0
-              bg-background
+              bg-background/70 backdrop-blur-md dark:bg-background/70
               transition-all duration-200 ease-out
               ${mobileSearchOpen ? 'opacity-100 translate-y-0 pointer-events-auto' : 'opacity-0 -translate-y-2 pointer-events-none'}
             `}
