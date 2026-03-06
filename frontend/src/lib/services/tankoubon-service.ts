@@ -2,6 +2,7 @@ import { apiClient } from '@/lib/api';
 import type { Tankoubon, TankoubonCreateRequest, TankoubonUpdateRequest, TankoubonResponse } from '@/types/tankoubon';
 import type { Task } from '@/types/task';
 import { TaskPoolService } from './taskpool-service';
+import { normalizeArchiveAssets } from '@/lib/utils/archive-assets';
 
 type TankoubonUpdateResponse = {
   success?: number | boolean | string;
@@ -16,7 +17,11 @@ export class TankoubonService {
     if (!data) return [];
     const result = (data as any).result;
     if (!result) return [];
-    return Array.isArray(result) ? result : [result];
+    const list = Array.isArray(result) ? result : [result];
+    return list.map((item) => ({
+      ...item,
+      assets: normalizeArchiveAssets((item as any)?.assets),
+    }));
   }
 
   /**

@@ -1,3 +1,10 @@
+export interface ArchiveAssets {
+  cover?: number;
+  backdrop?: number;
+  clearlogo?: number;
+  [key: string]: number | undefined;
+}
+
 export interface Archive {
   arcid: string;
   title: string;
@@ -12,7 +19,7 @@ export interface Archive {
   archivetype: string;
   lastreadtime: number;
   size: number;
-  cover_asset_id?: number;
+  assets?: ArchiveAssets;
 }
 
 export interface SearchResponse {
@@ -63,10 +70,12 @@ export interface ArchiveMetadata {
   lastreadtime: number;
   file_size: number;
   size: number;
-  cover_asset_id?: number;
+  assets?: ArchiveAssets;
   archivetype: string;
   created_at: string;
   updated_at: string;
   relative_path: string;
   cover?: string;
+  backdrop?: string;
+  clearlogo?: string;
 }

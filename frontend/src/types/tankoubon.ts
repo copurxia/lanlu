@@ -4,6 +4,7 @@ export interface Tankoubon {
   summary: string;
   tags: string;
   cover_asset_id?: number;
+  assets?: import('./archive').ArchiveAssets;
   cover?: string;
   archives?: string[];  // Array of arcids (optional for search results)
 
@@ -32,8 +33,11 @@ export interface TankoubonUpdateRequest {
   summary?: string;
   tags?: string;
   cover?: string;
+  backdrop?: string;
+  clearlogo?: string;
   metadata_namespace?: string;
   cover_asset_id?: number;
+  assets?: import('./archive').ArchiveAssets;
   archives?: Array<{
     archive_id?: string;
     volume_no?: number;
@@ -42,6 +46,8 @@ export interface TankoubonUpdateRequest {
     tags?: string;
     updated_at?: string;
     cover?: string;
+    backdrop?: string;
+    clearlogo?: string;
   }>;
 }
 

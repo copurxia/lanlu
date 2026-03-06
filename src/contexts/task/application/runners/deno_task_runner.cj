@@ -18,7 +18,6 @@ import lanlu.contexts.plugin.application.PluginTaskService
 import lanlu.contexts.plugin.application.PluginTaskData
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.task.infrastructure.persistence.*
-import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.infrastructure.archivehandler.*
 import lanlu.infrastructure.kv.*
@@ -82,13 +81,23 @@ class RpcSelectRequest {
     public init() {}
 }
 
+class MetadataAssetEntry {
+    var key: String = ""
+    var value: String = ""
+
+    public init() {}
+
+    public init(key: String, value: String) {
+        this.key = key
+        this.value = value
+    }
+}
+
 class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
     var pluginNamespace: String = ""
     var pluginType: String = ""
     var action: String = "run"
     var groupId: String = ""
-    // Backward compatible: archiveId is still accepted. New fields: targetType/targetId.
-    var archiveId: String = ""
     var targetType: String = ""
     var targetId: String = ""
     var oneshotParam: String = ""
@@ -126,7 +135,6 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
                             case "pluginType" => res.pluginType = r.readValue<String>().trimAscii()
                             case "action" => res.action = r.readValue<String>().trimAscii()
                             case "groupId" => res.groupId = r.readValue<String>().trimAscii()
-                            case "archiveId" => res.archiveId = r.readValue<String>().trimAscii()
                             case "targetType" => res.targetType = r.readValue<String>().trimAscii()
                             case "targetId" => res.targetId = r.readValue<String>().trimAscii()
                             case "oneshotParam" => res.oneshotParam = r.readValue<String>()
@@ -134,8 +142,6 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
                             case "url" => res.url = r.readValue<String>().trimAscii()
                             case "parentTaskId" => res.parentTaskId = r.readValue<String>().trimAscii()
                             case "metadata" => res.metadata = readRawJsonFlexible().trimAscii()
-                            case "metadata_input" => res.metadata = readRawJsonFlexible().trimAscii()
-                            case "metadataInput" => res.metadata = readRawJsonFlexible().trimAscii()
                             case _ => r.skip()
                         }
                     }
@@ -147,17 +153,6 @@ class DenoTaskParametersReq <: JsonDeserializable<DenoTaskParametersReq> {
         if (res.action.size == 0) { res.action = "run" }
         return res
     }
-}
-
-class MetadataInputOverrides {
-    var hasTitle: Bool = false
-    var hasSummary: Bool = false
-    var hasTags: Bool = false
-    var title: String = ""
-    var summary: String = ""
-    var tags: String = ""
-
-    public init() {}
 }
 
 /**
@@ -348,7 +343,6 @@ public class DenoTaskRunner {
         var pluginType = ""
         var action = "run"
         var groupId = ""
-        var archiveId = ""
         var targetType = ""
         var targetId = ""
         var oneshotParam = ""
@@ -368,7 +362,6 @@ public class DenoTaskRunner {
             pluginType = req.pluginType
             action = req.action
             groupId = req.groupId
-            archiveId = req.archiveId
             targetType = req.targetType
             targetId = req.targetId
             oneshotParam = req.oneshotParam
@@ -379,7 +372,6 @@ public class DenoTaskRunner {
         } catch (_: Exception) {}
 
         if (targetType.size == 0) { targetType = "archive" }
-        if (targetId.size == 0) { targetId = archiveId }
         return (pluginNamespace, pluginType, action, groupId, targetType, targetId, oneshotParam, extraParams, url, parentTaskId, metadata)
     }
 
@@ -393,68 +385,187 @@ public class DenoTaskRunner {
         }
     }
 
-    private static func parseMetadataInputOverrides(rawMetadata: String): MetadataInputOverrides {
-        let overrides = MetadataInputOverrides()
-        let trimmed = rawMetadata.trimAscii()
+    private static func splitTagTokens(tagsString: String): Array<String> {
+        let trimmed = tagsString.trimAscii()
         if (trimmed.size == 0) {
-            return overrides
+            return Array<String>()
         }
 
+        let seen = HashSet<String>()
+        let out = ArrayList<String>()
+        let parts = trimmed.split(",")
+        for (part in parts) {
+            let tag = part.trimAscii()
+            if (tag.size == 0 || seen.contains(tag)) {
+                continue
+            }
+            seen.add(tag)
+            out.add(tag)
+        }
+        return out.toArray()
+    }
+
+    private static func parseMetadataAssetsRaw(assetsRaw: String): Array<MetadataAssetEntry> {
+        let normalized = assetsRaw.trimAscii()
+        if (normalized.size == 0 || normalized == "null") {
+            return Array<MetadataAssetEntry>()
+        }
+
+        let seen = HashSet<String>()
+        let out = ArrayList<MetadataAssetEntry>()
         try {
             var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
+            unsafe { buf.write(normalized.rawData()) }
             let r = JsonReader(buf)
-
-            func readStringFlexible(): String {
-                match (r.peek()) {
-                    case Some(BeginObject) =>
-                        let bytes = r.readValueBytes()
-                        return String.fromUtf8(bytes)
-                    case Some(BeginArray) =>
-                        let bytes = r.readValueBytes()
-                        return String.fromUtf8(bytes)
-                    case Some(_) =>
-                        return r.readValue<String>()
-                    case None => return ""
-                }
-            }
-
             if (r.peek() != Some(BeginObject)) {
-                return overrides
+                return Array<MetadataAssetEntry>()
             }
 
             r.startObject()
             while (r.peek() != EndObject) {
-                let k = r.readName()
-                match (k) {
-                    case "title" =>
-                        overrides.hasTitle = true
-                        overrides.title = readStringFlexible()
-                    case "archiveTitle" =>
-                        overrides.hasTitle = true
-                        overrides.title = readStringFlexible()
-                    case "name" =>
-                        overrides.hasTitle = true
-                        overrides.title = readStringFlexible()
-                    case "summary" =>
-                        overrides.hasSummary = true
-                        overrides.summary = readStringFlexible()
-                    case "archiveSummary" =>
-                        overrides.hasSummary = true
-                        overrides.summary = readStringFlexible()
-                    case "tags" =>
-                        overrides.hasTags = true
-                        overrides.tags = readStringFlexible().trimAscii()
-                    case "existingTags" =>
-                        overrides.hasTags = true
-                        overrides.tags = readStringFlexible().trimAscii()
-                    case _ => r.skip()
+                let key = r.readName().trimAscii().toAsciiLower()
+                if (key.size == 0) {
+                    r.skip()
+                    continue
                 }
+
+                var value = ""
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        r.skip()
+                    case Some(BeginArray) =>
+                        r.skip()
+                    case Some(_) =>
+                        value = r.readValue<String>().trimAscii()
+                    case None => ()
+                }
+
+                if (value.size == 0 || seen.contains(key)) {
+                    continue
+                }
+                seen.add(key)
+                out.add(MetadataAssetEntry(key, value))
             }
             r.endObject()
         } catch (_: Exception) {}
 
-        return overrides
+        return out.toArray()
+    }
+
+    private static func writeMetadataTagsArray(w: JsonWriter, tagsString: String): Unit {
+        let tags = splitTagTokens(tagsString)
+        w.writeName("tags")
+        w.startArray()
+        for (tag in tags) {
+            w.writeValue(tag)
+        }
+        w.endArray()
+    }
+
+    private static func writeMetadataAssetsArray(w: JsonWriter, assetsRaw: String): Unit {
+        let assets = parseMetadataAssetsRaw(assetsRaw)
+        w.writeName("assets")
+        w.startArray()
+        for (asset in assets) {
+            if (asset.key.trimAscii().size == 0 || asset.value.trimAscii().size == 0) {
+                continue
+            }
+            w.startObject()
+            w.writeName("key").writeValue(asset.key)
+            w.writeName("value").writeValue(asset.value)
+            w.endObject()
+        }
+        w.endArray()
+    }
+
+    private static func buildArchiveMetadataObjectJson(archiveId: String, includeLocator: Bool, volumeNo: Int32): (Bool, String, String) {
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) {
+            return (false, "", "Archive not found")
+        }
+
+        let tags = TagDao.getArchiveTags(archive.id)
+        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("title").writeValue(archive.title)
+        w.writeName("type").writeValue(0i32)
+        w.writeName("description").writeValue(archive.summary)
+        writeMetadataTagsArray(w, tags)
+        writeMetadataAssetsArray(w, assetsRaw)
+        w.writeName("archive")
+        w.startArray()
+        w.endArray()
+        w.writeName("thumbnail_hash").writeValue(archive.thumbhash)
+        if (includeLocator) {
+            w.writeName("archive_id").writeValue(archive.id)
+            if (volumeNo > 0) {
+                w.writeName("volume_no").writeValue(volumeNo)
+            }
+        }
+        w.endObject()
+        w.flush()
+        return (true, String.fromUtf8(readToEnd(out)), "")
+    }
+
+    private static func buildTankoubonMetadataObjectJson(tankoubonId: String): (Bool, String, String) {
+        match (TankoubonDao.getTankoubonById(tankoubonId)) {
+            case None => return (false, "", "Tankoubon not found")
+            case Some(tankoubon) =>
+                let tags = TankoubonDao.getMergedTagsForTankoubon(tankoubonId)
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("title").writeValue(tankoubon.name)
+                w.writeName("type").writeValue(1i32)
+                w.writeName("description").writeValue(tankoubon.summary)
+                writeMetadataTagsArray(w, tags)
+                writeMetadataAssetsArray(w, tankoubon.assets_raw)
+
+                w.writeName("archive")
+                w.startArray()
+                let archiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+                var volumeNo: Int32 = 1
+                for (idx in 0..archiveIds.size) {
+                    let memberId = archiveIds[idx].trimAscii()
+                    if (memberId.size == 0) {
+                        volumeNo += 1
+                        continue
+                    }
+                    let (okMember, memberJson, _) = buildArchiveMetadataObjectJson(memberId, true, volumeNo)
+                    if (okMember && memberJson.trimAscii().size > 0) {
+                        w.jsonValue(memberJson)
+                    }
+                    volumeNo += 1
+                }
+                w.endArray()
+                w.endObject()
+                w.flush()
+                return (true, String.fromUtf8(readToEnd(out)), "")
+        }
+    }
+
+    private static func normalizeMetadataInputJson(raw: String): String {
+        let trimmed = raw.trimAscii()
+        if (trimmed.size == 0) { return "" }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() == Some(BeginObject)) {
+                return trimmed
+            }
+        } catch (_: Exception) {}
+        return ""
+    }
+
+    private static func buildMetadataInputJsonForTarget(targetType: String, targetId: String): (Bool, String, String) {
+        let effectiveType = targetType.trimAscii().toAsciiLower()
+        if (effectiveType == "tankoubon" || effectiveType == "tank") {
+            return buildTankoubonMetadataObjectJson(targetId)
+        }
+        return buildArchiveMetadataObjectJson(targetId, false, 0)
     }
 
     /**
@@ -722,6 +833,62 @@ public class DenoTaskRunner {
         w.writeName("url").writeValue(url)
 
         // params/loginCookies are stored as JSON inside String; embed as raw JSON values.
+        let paramsTrimmed = params.trimAscii()
+        if (paramsTrimmed.size > 0) {
+            w.writeName("params").jsonValue(paramsTrimmed)
+        } else {
+            w.writeName("params")
+            w.startObject()
+            w.endObject()
+        }
+
+        let cookiesTrimmed = loginCookies.trimAscii()
+        if (cookiesTrimmed.size > 0) {
+            w.writeName("loginCookies").jsonValue(cookiesTrimmed)
+        } else {
+            w.writeName("loginCookies")
+            w.startArray()
+            w.endArray()
+        }
+
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildMetadataStdinJson(
+        action: String,
+        pluginType: String,
+        pluginDir: String,
+        targetType: String,
+        targetId: String,
+        metadataJson: String,
+        oneshotParam: String,
+        params: String,
+        loginCookies: String,
+        url: String
+    ): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+
+        w.startObject()
+        w.writeName("action").writeValue(action)
+        w.writeName("pluginType").writeValue(pluginType)
+        w.writeName("pluginDir").writeValue(pluginDir)
+        w.writeName("targetType").writeValue(targetType)
+        w.writeName("targetId").writeValue(targetId)
+        w.writeName("oneshotParam").writeValue(oneshotParam)
+        w.writeName("url").writeValue(url)
+
+        let normalizedMetadata = normalizeMetadataInputJson(metadataJson)
+        if (normalizedMetadata.size > 0) {
+            w.writeName("metadata").jsonValue(normalizedMetadata)
+        } else {
+            w.writeName("metadata")
+            w.startObject()
+            w.endObject()
+        }
+
         let paramsTrimmed = params.trimAscii()
         if (paramsTrimmed.size > 0) {
             w.writeName("params").jsonValue(paramsTrimmed)
@@ -1357,14 +1524,16 @@ public class DenoTaskRunner {
                 return (false, "{}", "archive not found")
             }
 
-            let tags = TagDao.getArchiveTags(archiveId)
+            let (okMetadata, metadataJson, metadataErr) = buildArchiveMetadataObjectJson(archiveId, false, 0)
+            if (!okMetadata) {
+                let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "failed to build metadata object" }
+                return (false, "{}", err)
+            }
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
             w.writeName("archiveId").writeValue(archiveId)
-            w.writeName("title").writeValue(archive.title)
-            w.writeName("existingTags").writeValue(tags)
-            w.writeName("thumbnailHash").writeValue(archive.thumbhash)
+            w.writeName("metadata").jsonValue(metadataJson)
             w.endObject()
             w.flush()
             return (true, String.fromUtf8(readToEnd(out)), "")
@@ -2150,41 +2319,14 @@ public class DenoTaskRunner {
             return DenoExecutionResult(false, "Missing targetId", "")
         }
 
-        var title = ""
-        var summary = ""
-        var tagsString = ""
-        var thumbhash = ""
-
-        if (effectiveType == "tankoubon" || effectiveType == "tank") {
-            let tankOpt = TankoubonDao.getTankoubonById(effectiveId)
-            match (tankOpt) {
-                case Some(t) =>
-                    title = t.name
-                    summary = t.summary
-                    tagsString = TankoubonDao.getMergedTagsForTankoubon(effectiveId)
-                    let coverAssetId = TankoubonDao.getTankoubonCoverAssetId(effectiveId)
-                    if (coverAssetId > 0) {
-                        let asset = AssetDao.getById(coverAssetId)
-                        thumbhash = asset.thumbhash
-                    }
-                case None => return DenoExecutionResult(false, "Tankoubon not found", "")
+        var metadataInputJson = normalizeMetadataInputJson(metadataJson)
+        if (metadataInputJson.size == 0) {
+            let (okMetadata, builtMetadata, metadataErr) = buildMetadataInputJsonForTarget(effectiveType, effectiveId)
+            if (!okMetadata) {
+                return DenoExecutionResult(false, metadataErr, "")
             }
-        } else {
-            // Default: archive
-            let archive = ArchiveDao.getArchiveById(effectiveId)
-            if (archive.id.size == 0) {
-                return DenoExecutionResult(false, "Archive not found", "")
-            }
-            title = archive.title
-            summary = archive.summary
-            tagsString = TagDao.getArchiveTags(effectiveId)
-            thumbhash = archive.thumbhash
+            metadataInputJson = builtMetadata
         }
-
-        let overrides = parseMetadataInputOverrides(metadataJson)
-        if (overrides.hasTitle) { title = overrides.title }
-        if (overrides.hasSummary) { summary = overrides.summary }
-        if (overrides.hasTags) { tagsString = overrides.tags }
 
         let denoArgs = buildDenoPermissions(plugin, pluginFile)
         // Allow reading the plugin runtime dir so plugins can consume files exported via host RPC
@@ -2200,15 +2342,13 @@ public class DenoTaskRunner {
         let finalParams = mergeParamsJson(mergedParams, contextParams)
 
         // 构建 stdin JSON
-        let inputJson = buildStdinJson(
+        let inputJson = buildMetadataStdinJson(
             "run",
             "Metadata",
             pluginDir,
+            effectiveType,
             effectiveId,
-            title,
-            summary,
-            tagsString,
-            thumbhash,
+            metadataInputJson,
             oneshotParam,
             finalParams,
             loginCookiesJson,

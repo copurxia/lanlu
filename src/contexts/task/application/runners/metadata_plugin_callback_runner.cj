@@ -10,6 +10,7 @@ import stdx.encoding.json.stream.*
 import std.collection.*
 import lanlu.contexts.plugin.application.PluginTaskService
 import lanlu.contexts.archive.infrastructure.persistence.*
+import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
@@ -59,13 +60,19 @@ public class MetadataPluginCallbackRunner {
         var newTags = parsed.tags
         let newSummary = parsed.summary
         let newCover = parsed.cover
+        let newBackdrop = parsed.backdrop
+        let newClearlogo = parsed.clearlogo
         let archivePatches = parsed.archives
         let archivesProvided = parsed.archivesProvided
         let pagePatches = parsed.pages
         // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
         // Map it to archives.updated_at and prevent it from being stored as a normal tag.
-        let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(newTags)
-        newTags = cleanedTags
+        var pluginUpdatedAt = ""
+        if (parsed.tagsProvided) {
+            let (updatedAtCandidate, cleanedTags) = extractUpdatedAtFromTags(newTags)
+            pluginUpdatedAt = updatedAtCandidate
+            newTags = cleanedTags
+        }
 
         let effectiveType = targetType.trimAscii().toAsciiLower()
         TaskModel.updateTaskProgress(taskId, 70, "写回元数据")
@@ -77,23 +84,20 @@ public class MetadataPluginCallbackRunner {
                     failAndMaybeEnqueueFallback(taskId, "Tankoubon not found when updating", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                     return
                 case Some(existing) =>
-                    let updatedName = if (newTitle.size > 0) { newTitle } else { existing.name }
-                    let updatedSummary = if (newSummary.size > 0) { newSummary } else { existing.summary }
+                    let updatedName = if (parsed.titleProvided) { newTitle } else { existing.name }
+                    let updatedSummary = if (parsed.summaryProvided) { newSummary } else { existing.summary }
 
                     let ok = TankoubonDao.updateTankoubon(targetId, updatedName, updatedSummary)
                     if (!ok) {
                         failAndMaybeEnqueueFallback(taskId, "Failed to update tankoubon metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                         return
                     }
-                    if (newTags.size > 0 || parsed.tags.trimAscii().size == 0) {
-                        // If plugin emits tags (non-empty) update; if plugin emits empty, treat as no-op.
-                        if (newTags.size > 0) {
-                            let _ = TankoubonDao.updateTankoubonTags(targetId, newTags)
-                        }
+                    if (parsed.tagsProvided) {
+                        let _ = TankoubonDao.updateTankoubonTags(targetId, newTags)
                     }
 
                     var effectiveTankCover = newCover.trimAscii()
-                    if (effectiveTankCover.size == 0) {
+                    if (effectiveTankCover.size == 0 && !parsed.coverProvided) {
                         for (patch in archivePatches) {
                             let candidate = patch.cover.trimAscii()
                             if (candidate.size > 0) {
@@ -103,27 +107,14 @@ public class MetadataPluginCallbackRunner {
                         }
                     }
 
-                    if (effectiveTankCover.size > 0) {
-                        let oldCoverAssetId = TankoubonDao.getTankoubonCoverAssetId(targetId)
-                        let (okCover, coverAssetId, _, coverErr) = PluginTaskService.installCoverAssetFromPluginPath(
-                            effectiveTankCover,
-                            resolvedNamespace,
-                            "tankoubon_cover",
-                            "${targetId}.avif"
-                        )
-                        if (okCover && coverAssetId > 0) {
-                            let coverUpdated = TankoubonDao.updateTankoubonCover(targetId, coverAssetId)
-                            if (coverUpdated) {
-                                if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
-                                    PluginTaskService.deleteCoverAsset(oldCoverAssetId)
-                                }
-                            } else {
-                                PluginTaskService.deleteCoverAsset(coverAssetId)
-                                TaskIO.appendLog(taskId, "WARN: failed to apply tankoubon cover asset, removed new asset id=${coverAssetId}")
-                            }
-                        } else {
-                            TaskIO.appendLog(taskId, "WARN: failed to install tankoubon cover from plugin result: ${coverErr}")
-                        }
+                    if (parsed.coverProvided || effectiveTankCover.size > 0) {
+                        applyTankoubonAssetFromPluginOutput(taskId, targetId, "cover", effectiveTankCover, resolvedNamespace)
+                    }
+                    if (parsed.backdropProvided) {
+                        applyTankoubonAssetFromPluginOutput(taskId, targetId, "backdrop", newBackdrop, resolvedNamespace)
+                    }
+                    if (parsed.clearlogoProvided) {
+                        applyTankoubonAssetFromPluginOutput(taskId, targetId, "clearlogo", newClearlogo, resolvedNamespace)
                     }
 
                     // Optional: plugin can return per-archive metadata patches for this Tankoubon.
@@ -139,15 +130,15 @@ public class MetadataPluginCallbackRunner {
             }
 
             var changed = false
-            if (newTitle.size > 0) {
+            if (parsed.titleProvided && archiveToUpdate.title != newTitle) {
                 archiveToUpdate.title = newTitle
                 changed = true
             }
-            if (newSummary.size > 0) {
+            if (parsed.summaryProvided && archiveToUpdate.summary != newSummary) {
                 archiveToUpdate.summary = newSummary
                 changed = true
             }
-            if (newTags.size > 0) { changed = true }
+            if (parsed.tagsProvided) { changed = true }
             if (pluginUpdatedAt.size > 0) {
                 archiveToUpdate.updated_at = pluginUpdatedAt
                 changed = true
@@ -160,37 +151,21 @@ public class MetadataPluginCallbackRunner {
                 }
             }
 
-            if (newTags.size > 0) {
+            if (parsed.tagsProvided) {
                 let tagOk = TagDao.updateArchiveTags(targetId, newTags)
                 if (!tagOk) {
                     TaskIO.appendLog(taskId, "WARN: failed to update tags")
                 }
             }
 
-            if (newCover.trimAscii().size > 0) {
-                let oldCoverAssetId = ArchiveDao.getCoverAssetId(targetId)
-                let (okCover, coverAssetId, coverThumbHash, coverErr) = PluginTaskService.installCoverAssetFromPluginPath(
-                    newCover,
-                    resolvedNamespace,
-                    "archive_cover",
-                    "${targetId}.avif"
-                )
-                if (okCover && coverAssetId > 0) {
-                    let coverUpdated = ArchiveDao.updateCoverAssetId(targetId, coverAssetId)
-                    if (coverUpdated) {
-                        if (coverThumbHash.trimAscii().size > 0) {
-                            let _ = ArchiveDao.updateThumbHash(targetId, coverThumbHash)
-                        }
-                        if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
-                            PluginTaskService.deleteCoverAsset(oldCoverAssetId)
-                        }
-                    } else {
-                        PluginTaskService.deleteCoverAsset(coverAssetId)
-                        TaskIO.appendLog(taskId, "WARN: failed to apply archive cover asset, removed new asset id=${coverAssetId}")
-                    }
-                } else {
-                    TaskIO.appendLog(taskId, "WARN: failed to install archive cover from plugin result: ${coverErr}")
-                }
+            if (parsed.coverProvided) {
+                applyArchiveAssetFromPluginOutput(taskId, targetId, "cover", newCover, resolvedNamespace)
+            }
+            if (parsed.backdropProvided) {
+                applyArchiveAssetFromPluginOutput(taskId, targetId, "backdrop", newBackdrop, resolvedNamespace)
+            }
+            if (parsed.clearlogoProvided) {
+                applyArchiveAssetFromPluginOutput(taskId, targetId, "clearlogo", newClearlogo, resolvedNamespace)
             }
         }
 
@@ -312,7 +287,7 @@ public class MetadataPluginCallbackRunner {
 
         // 完成任务
         TaskModel.updateTaskProgress(taskId, 100, "元数据回调完成")
-        let resultJson = buildResultJson(targetId, resolvedNamespace, newTitle, newSummary, newTags, newCover, output, archivePatches.size)
+        let resultJson = buildResultJson(effectiveType, targetId, resolvedNamespace, newTitle, newSummary, newTags, newCover, newBackdrop, newClearlogo, output, archivePatches.size)
         TaskModel.completeTask(taskId, "metadata_plugin_callback completed")
         TaskIO.writeOutput(taskId, resultJson)
     }
@@ -328,6 +303,189 @@ public class MetadataPluginCallbackRunner {
 
         let denoTask = TaskDao.getTaskDataById(denoTaskId)
         return denoTask.pluginNamespace.trimAscii()
+    }
+
+    private static func parsePositiveAssetId(rawValue: String): Int64 {
+        let trimmed = rawValue.trimAscii()
+        if (trimmed.size == 0) { return 0 }
+        try {
+            let parsed = Int64.parse(trimmed)
+            return if (parsed > 0) { parsed } else { 0 }
+        } catch (_: Exception) {
+            return 0
+        }
+    }
+
+    private static func applyArchiveAssetFromPluginOutput(taskId: Int64, archiveId: String, assetKey: String, assetValue: String, pluginNamespace: String): Unit {
+        let key = assetKey.trimAscii().toAsciiLower()
+        if (key != "cover" && key != "backdrop" && key != "clearlogo") {
+            return
+        }
+
+        let value = assetValue.trimAscii()
+        let oldAssetId = ArchiveDao.getArchiveAssetIdByKey(archiveId, key)
+        if (value.size == 0) {
+            let cleared = if (key == "cover") {
+                let ok = ArchiveDao.updateCoverAssetId(archiveId, 0)
+                if (ok) {
+                    let _ = ArchiveDao.updateThumbHash(archiveId, "")
+                }
+                ok
+            } else {
+                ArchiveDao.updateArchiveAssetIdByKey(archiveId, key, 0)
+            }
+            if (cleared && oldAssetId > 0) {
+                PluginTaskService.deleteCoverAsset(oldAssetId)
+            }
+            return
+        }
+
+        let directAssetId = parsePositiveAssetId(value)
+        if (directAssetId > 0) {
+            let updated = if (key == "cover") {
+                let ok = ArchiveDao.updateCoverAssetId(archiveId, directAssetId)
+                if (ok) {
+                    let asset = AssetDao.getById(directAssetId)
+                    let thumbHash = asset.thumbhash.trimAscii()
+                    if (thumbHash.size > 0) {
+                        let _ = ArchiveDao.updateThumbHash(archiveId, thumbHash)
+                    }
+                }
+                ok
+            } else {
+                ArchiveDao.updateArchiveAssetIdByKey(archiveId, key, directAssetId)
+            }
+
+            if (updated) {
+                if (oldAssetId > 0 && oldAssetId != directAssetId) {
+                    PluginTaskService.deleteCoverAsset(oldAssetId)
+                }
+            } else {
+                TaskIO.appendLog(taskId, "WARN: failed to apply archive ${key} asset id=${directAssetId} archive=${archiveId}")
+            }
+            return
+        }
+
+        let assetKind = if (key == "cover") {
+            "archive_cover"
+        } else if (key == "backdrop") {
+            "archive_backdrop"
+        } else {
+            "archive_clearlogo"
+        }
+        let outputName = if (key == "cover") {
+            "${archiveId}.avif"
+        } else {
+            "${archiveId}_${key}.avif"
+        }
+
+        let (okInstall, newAssetId, thumbHash, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
+            value,
+            pluginNamespace,
+            assetKind,
+            outputName
+        )
+        if (!(okInstall && newAssetId > 0)) {
+            TaskIO.appendLog(taskId, "WARN: failed to install archive ${key} from plugin result archive=${archiveId}: ${installErr}")
+            return
+        }
+
+        let updated = if (key == "cover") {
+            let ok = ArchiveDao.updateCoverAssetId(archiveId, newAssetId)
+            if (ok && thumbHash.trimAscii().size > 0) {
+                let _ = ArchiveDao.updateThumbHash(archiveId, thumbHash)
+            }
+            ok
+        } else {
+            ArchiveDao.updateArchiveAssetIdByKey(archiveId, key, newAssetId)
+        }
+
+        if (updated) {
+            if (oldAssetId > 0 && oldAssetId != newAssetId) {
+                PluginTaskService.deleteCoverAsset(oldAssetId)
+            }
+        } else {
+            PluginTaskService.deleteCoverAsset(newAssetId)
+            TaskIO.appendLog(taskId, "WARN: failed to apply archive ${key} asset, removed new asset id=${newAssetId} archive=${archiveId}")
+        }
+    }
+
+    private static func applyTankoubonAssetFromPluginOutput(taskId: Int64, tankoubonId: String, assetKey: String, assetValue: String, pluginNamespace: String): Unit {
+        let key = assetKey.trimAscii().toAsciiLower()
+        if (key != "cover" && key != "backdrop" && key != "clearlogo") {
+            return
+        }
+
+        let value = assetValue.trimAscii()
+        let oldAssetId = TankoubonDao.getTankoubonAssetIdByKey(tankoubonId, key)
+        if (value.size == 0) {
+            let cleared = if (key == "cover") {
+                TankoubonDao.updateTankoubonCover(tankoubonId, 0)
+            } else {
+                TankoubonDao.updateTankoubonAssetIdByKey(tankoubonId, key, 0)
+            }
+            if (cleared && oldAssetId > 0) {
+                PluginTaskService.deleteCoverAsset(oldAssetId)
+            }
+            return
+        }
+
+        let directAssetId = parsePositiveAssetId(value)
+        if (directAssetId > 0) {
+            let updated = if (key == "cover") {
+                TankoubonDao.updateTankoubonCover(tankoubonId, directAssetId)
+            } else {
+                TankoubonDao.updateTankoubonAssetIdByKey(tankoubonId, key, directAssetId)
+            }
+
+            if (updated) {
+                if (oldAssetId > 0 && oldAssetId != directAssetId) {
+                    PluginTaskService.deleteCoverAsset(oldAssetId)
+                }
+            } else {
+                TaskIO.appendLog(taskId, "WARN: failed to apply tankoubon ${key} asset id=${directAssetId} tankoubon=${tankoubonId}")
+            }
+            return
+        }
+
+        let assetKind = if (key == "cover") {
+            "tankoubon_cover"
+        } else if (key == "backdrop") {
+            "tankoubon_backdrop"
+        } else {
+            "tankoubon_clearlogo"
+        }
+        let outputName = if (key == "cover") {
+            "${tankoubonId}.avif"
+        } else {
+            "${tankoubonId}_${key}.avif"
+        }
+
+        let (okInstall, newAssetId, _, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
+            value,
+            pluginNamespace,
+            assetKind,
+            outputName
+        )
+        if (!(okInstall && newAssetId > 0)) {
+            TaskIO.appendLog(taskId, "WARN: failed to install tankoubon ${key} from plugin result tankoubon=${tankoubonId}: ${installErr}")
+            return
+        }
+
+        let updated = if (key == "cover") {
+            TankoubonDao.updateTankoubonCover(tankoubonId, newAssetId)
+        } else {
+            TankoubonDao.updateTankoubonAssetIdByKey(tankoubonId, key, newAssetId)
+        }
+
+        if (updated) {
+            if (oldAssetId > 0 && oldAssetId != newAssetId) {
+                PluginTaskService.deleteCoverAsset(oldAssetId)
+            }
+        } else {
+            PluginTaskService.deleteCoverAsset(newAssetId)
+            TaskIO.appendLog(taskId, "WARN: failed to apply tankoubon ${key} asset, removed new asset id=${newAssetId} tankoubon=${tankoubonId}")
+        }
     }
 
     private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64, pluginNamespace: String, archivesProvided: Bool, notifier: TaskNotifier): (Int64, Int64) {
@@ -347,7 +505,7 @@ public class MetadataPluginCallbackRunner {
 
         var coverPatchedArchiveIds = HashSet<String>()
         for (patch in patches) {
-            if (patch.cover.trimAscii().size == 0) {
+            if (!patch.coverProvided || patch.cover.trimAscii().size == 0) {
                 continue
             }
 
@@ -396,18 +554,19 @@ public class MetadataPluginCallbackRunner {
             }
 
             let (updatedAtFromTags, cleanedPatchTags) = extractUpdatedAtFromTags(patch.tags)
+            let hasPatchUpdatedAt = patch.updatedAtProvided || updatedAtFromTags.size > 0
             let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
 
             var changed = false
-            if (patch.title.trimAscii().size > 0) {
+            if (patch.titleProvided && archive.title != patch.title.trimAscii()) {
                 archive.title = patch.title.trimAscii()
                 changed = true
             }
-            if (patch.summary.trimAscii().size > 0) {
+            if (patch.summaryProvided && archive.summary != patch.summary) {
                 archive.summary = patch.summary
                 changed = true
             }
-            if (effectiveUpdatedAt.size > 0) {
+            if (hasPatchUpdatedAt && archive.updated_at != effectiveUpdatedAt) {
                 archive.updated_at = effectiveUpdatedAt
                 changed = true
             }
@@ -421,37 +580,21 @@ public class MetadataPluginCallbackRunner {
                 }
             }
 
-            if (cleanedPatchTags.trimAscii().size > 0) {
+            if (patch.tagsProvided) {
                 let tagOk = TagDao.updateArchiveTags(targetArchiveId, cleanedPatchTags)
                 if (!tagOk) {
                     TaskIO.appendLog(taskId, "WARN: archive tag update failed id=${targetArchiveId}")
                 }
             }
 
-            if (patch.cover.trimAscii().size > 0) {
-                let oldCoverAssetId = ArchiveDao.getCoverAssetId(targetArchiveId)
-                let (okCover, coverAssetId, coverThumbHash, coverErr) = PluginTaskService.installCoverAssetFromPluginPath(
-                    patch.cover,
-                    pluginNamespace,
-                    "archive_cover",
-                    "${targetArchiveId}.avif"
-                )
-                if (okCover && coverAssetId > 0) {
-                    let coverUpdated = ArchiveDao.updateCoverAssetId(targetArchiveId, coverAssetId)
-                    if (coverUpdated) {
-                        if (coverThumbHash.trimAscii().size > 0) {
-                            let _ = ArchiveDao.updateThumbHash(targetArchiveId, coverThumbHash)
-                        }
-                        if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
-                            PluginTaskService.deleteCoverAsset(oldCoverAssetId)
-                        }
-                    } else {
-                        PluginTaskService.deleteCoverAsset(coverAssetId)
-                        TaskIO.appendLog(taskId, "WARN: archive cover update failed for patch id=${targetArchiveId}")
-                    }
-                } else {
-                    TaskIO.appendLog(taskId, "WARN: archive patch cover install failed id=${targetArchiveId}: ${coverErr}")
-                }
+            if (patch.coverProvided) {
+                applyArchiveAssetFromPluginOutput(taskId, targetArchiveId, "cover", patch.cover, pluginNamespace)
+            }
+            if (patch.backdropProvided) {
+                applyArchiveAssetFromPluginOutput(taskId, targetArchiveId, "backdrop", patch.backdrop, pluginNamespace)
+            }
+            if (patch.clearlogoProvided) {
+                applyArchiveAssetFromPluginOutput(taskId, targetArchiveId, "clearlogo", patch.clearlogo, pluginNamespace)
             }
 
             patched += 1
@@ -633,14 +776,12 @@ public class MetadataPluginCallbackRunner {
                     match (k) {
                         case "targetType" => targetType = r.readValue<String>().trimAscii()
                         case "targetId" => targetId = r.readValue<String>().trimAscii()
-                        case "archiveId" =>
-                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
                         case "denoTaskId" => denoTaskId = readInt64Flexible()
                         case "param" => param = readRawJson().trimAscii()
                         case "metadata" => metadataJson = normalizeMetadataJson(readRawJson())
-                        case "metadata_input" => metadataJson = normalizeMetadataJson(readRawJson())
-                        case "metadataInput" => metadataJson = normalizeMetadataJson(readRawJson())
+                        case "target_type" => targetType = r.readValue<String>().trimAscii()
+                        case "target_id" => targetId = r.readValue<String>().trimAscii()
                         case "fallback_namespaces" =>
                             if (r.peek() == Some(BeginArray)) {
                                 r.startArray()
@@ -721,11 +862,6 @@ public class MetadataPluginCallbackRunner {
             w.startObject()
             w.writeName("target_type").writeValue(targetType)
             w.writeName("target_id").writeValue(targetId)
-            if (targetType == "tankoubon" || targetType == "tank") {
-                w.writeName("tankoubon_id").writeValue(targetId)
-            } else {
-                w.writeName("archive_id").writeValue(targetId)
-            }
             w.writeName("namespace").writeValue(nextNamespace)
             writeParamField(w, param)
             writeMetadataField(w, metadataJson)
@@ -795,10 +931,19 @@ public class MetadataPluginCallbackRunner {
             var successSeen = false
             var success = false
             var err = ""
+            var dataSeen = false
             var title = ""
             var summary = ""
             var tags = ""
             var cover = ""
+            var backdrop = ""
+            var clearlogo = ""
+            var titleProvided = false
+            var summaryProvided = false
+            var tagsProvided = false
+            var coverProvided = false
+            var backdropProvided = false
+            var clearlogoProvided = false
             var archives = ArrayList<ArchiveMetadataPatch>()
             var archivesProvided = false
             var pages = ArrayList<PageMetadataPatch>()
@@ -821,6 +966,26 @@ public class MetadataPluginCallbackRunner {
                 try { return Int32.parse(s) } catch (_: Exception) { return 0 }
             }
 
+            func readTagsArrayAsCsv(): String {
+                if (r.peek() != Some(BeginArray)) {
+                    r.skip()
+                    return ""
+                }
+                let seen = HashSet<String>()
+                let out = ArrayList<String>()
+                r.startArray()
+                while (r.peek() != EndArray) {
+                    let tag = readStringFlexible().trimAscii()
+                    if (tag.size == 0 || seen.contains(tag)) {
+                        continue
+                    }
+                    seen.add(tag)
+                    out.add(tag)
+                }
+                r.endArray()
+                return String.join(out.toArray(), delimiter: ", ")
+            }
+
             func parseArchivePatchObject(): ArchiveMetadataPatch {
                 let patch = ArchiveMetadataPatch()
                 if (r.peek() != Some(BeginObject)) {
@@ -832,21 +997,55 @@ public class MetadataPluginCallbackRunner {
                     let ak = r.readName()
                     match (ak) {
                         case "archive_id" => patch.archiveId = r.readValue<String>().trimAscii()
-                        case "archiveId" => patch.archiveId = r.readValue<String>().trimAscii()
-                        case "target_id" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
-                        case "targetId" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
-                        case "id" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = r.readValue<String>().trimAscii() } else { r.skip() }
                         case "volume_no" => patch.volumeNo = readInt32Flexible()
-                        case "volumeNo" => patch.volumeNo = readInt32Flexible()
-                        case "title" => patch.title = r.readValue<String>()
-                        case "summary" => patch.summary = r.readValue<String>()
-                        case "tags" => patch.tags = readStringFlexible().trimAscii()
-                        case "updated_at" => patch.updatedAt = readStringFlexible().trimAscii()
-                        case "updatedAt" => patch.updatedAt = readStringFlexible().trimAscii()
-                        case "cover" => patch.cover = readStringFlexible().trimAscii()
+                        case "title" =>
+                            patch.title = r.readValue<String>()
+                            patch.titleProvided = true
+                        case "description" =>
+                            patch.summary = r.readValue<String>()
+                            patch.summaryProvided = true
+                        case "tags" =>
+                            patch.tags = readTagsArrayAsCsv()
+                            patch.tagsProvided = true
+                        case "updated_at" =>
+                            patch.updatedAt = readStringFlexible().trimAscii()
+                            patch.updatedAtProvided = true
+                        case "assets" =>
+                            match (r.peek()) {
+                                case Some(BeginArray) =>
+                                    r.startArray()
+                                    while (r.peek() != EndArray) {
+                                        if (r.peek() != Some(BeginObject)) {
+                                            r.skip()
+                                            continue
+                                        }
+                                        var key = ""
+                                        var value = ""
+                                        r.startObject()
+                                        while (r.peek() != EndObject) {
+                                            let assetKey = r.readName()
+                                            match (assetKey) {
+                                                case "key" => key = readStringFlexible().trimAscii().toAsciiLower()
+                                                case "value" => value = readStringFlexible().trimAscii()
+                                                case _ => r.skip()
+                                            }
+                                        }
+                                        r.endObject()
+                                        if (key == "cover") {
+                                            patch.cover = value
+                                            patch.coverProvided = true
+                                        } else if (key == "backdrop") {
+                                            patch.backdrop = value
+                                            patch.backdropProvided = true
+                                        } else if (key == "clearlogo") {
+                                            patch.clearlogo = value
+                                            patch.clearlogoProvided = true
+                                        }
+                                    }
+                                    r.endArray()
+                                case Some(_) => r.skip()
+                                case None => ()
+                            }
                         case _ => r.skip()
                     }
                 }
@@ -873,37 +1072,14 @@ public class MetadataPluginCallbackRunner {
                         case "entryPath" => patch.path = readStringFlexible().trimAscii()
                         case "title" => patch.title = r.readValue<String>()
                         case "description" => patch.description = r.readValue<String>()
-                        case "desc" => patch.description = r.readValue<String>()
                         case "thumb" => patch.thumb = readStringFlexible().trimAscii()
-                        case "thumbnail" => patch.thumb = readStringFlexible().trimAscii()
                         case "sort" =>
                             patch.sort = readInt32Flexible()
                             patch.sortProvided = true
-                        case "sort_index" =>
-                            patch.sort = readInt32Flexible()
-                            patch.sortProvided = true
-                        case "sortIndex" =>
-                            patch.sort = readInt32Flexible()
-                            patch.sortProvided = true
-                        case "order" =>
-                            patch.sort = readInt32Flexible()
-                            patch.sortProvided = true
-                        case "hidden" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
-                        case "hide" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
                         case "hidden_in_files" =>
                             patch.hiddenInFiles = readBoolFlexible()
                             patch.hiddenInFilesProvided = true
                         case "hiddenInFiles" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
-                        case "hide_cover" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
-                        case "hideCover" =>
                             patch.hiddenInFiles = readBoolFlexible()
                             patch.hiddenInFilesProvided = true
                         case _ => r.skip()
@@ -925,44 +1101,70 @@ public class MetadataPluginCallbackRunner {
                     case "data" =>
                         match (r.peek()) {
                             case Some(BeginObject) =>
+                                dataSeen = true
                                 r.startObject()
                                 while (r.peek() != EndObject) {
                                     let dk = r.readName()
                                     match (dk) {
-                                        case "title" => title = r.readValue<String>()
-                                        case "summary" => summary = r.readValue<String>()
-                                        case "tags" => tags = readStringFlexible()
-                                        case "cover" => cover = readStringFlexible().trimAscii()
-                                        case "tankoubon" =>
+                                        case "title" =>
+                                            title = r.readValue<String>()
+                                            titleProvided = true
+                                        case "description" =>
+                                            summary = r.readValue<String>()
+                                            summaryProvided = true
+                                        case "tags" =>
+                                            tags = readTagsArrayAsCsv()
+                                            tagsProvided = true
+                                        case "assets" =>
                                             match (r.peek()) {
-                                                case Some(BeginObject) =>
-                                                    r.startObject()
-                                                    while (r.peek() != EndObject) {
-                                                        let tk = r.readName()
-                                                        match (tk) {
-                                                            case "title" => title = r.readValue<String>()
-                                                            case "summary" => summary = r.readValue<String>()
-                                                            case "tags" => tags = readStringFlexible()
-                                                            case "cover" => cover = readStringFlexible().trimAscii()
-                                                            case _ => r.skip()
+                                                case Some(BeginArray) =>
+                                                    r.startArray()
+                                                    while (r.peek() != EndArray) {
+                                                        if (r.peek() != Some(BeginObject)) {
+                                                            r.skip()
+                                                            continue
+                                                        }
+                                                        var key = ""
+                                                        var value = ""
+                                                        r.startObject()
+                                                        while (r.peek() != EndObject) {
+                                                            let assetKey = r.readName()
+                                                            match (assetKey) {
+                                                                case "key" => key = readStringFlexible().trimAscii().toAsciiLower()
+                                                                case "value" => value = readStringFlexible().trimAscii()
+                                                                case _ => r.skip()
+                                                            }
+                                                        }
+                                                        r.endObject()
+                                                        if (key == "cover") {
+                                                            cover = value
+                                                            coverProvided = true
+                                                        } else if (key == "backdrop") {
+                                                            backdrop = value
+                                                            backdropProvided = true
+                                                        } else if (key == "clearlogo") {
+                                                            clearlogo = value
+                                                            clearlogoProvided = true
                                                         }
                                                     }
-                                                    r.endObject()
+                                                    r.endArray()
                                                 case Some(_) => r.skip()
                                                 case None => ()
                                             }
-                                        case "archives" =>
-                                            archivesProvided = true
+                                        case "archive" =>
                                             match (r.peek()) {
                                                 case Some(BeginArray) =>
+                                                    var parsedAny = false
                                                     r.startArray()
                                                     while (r.peek() != EndArray) {
                                                         let patch = parseArchivePatchObject()
                                                         if (patch.archiveId.trimAscii().size > 0 || patch.volumeNo > 0) {
                                                             archives.add(patch)
+                                                            parsedAny = true
                                                         }
                                                     }
                                                     r.endArray()
+                                                    archivesProvided = parsedAny
                                                 case Some(_) => r.skip()
                                                 case None => ()
                                             }
@@ -996,7 +1198,19 @@ public class MetadataPluginCallbackRunner {
                 let msg = if (err.trimAscii().size > 0) { err.trimAscii() } else { "Plugin returned success=false" }
                 return ParsedMetadataResult(false, msg, "", "", "")
             }
-            return ParsedMetadataResult(true, "", title, summary, tags, cover, archives.toArray(), archivesProvided, pages.toArray())
+            if (!dataSeen) {
+                return ParsedMetadataResult(false, "Plugin output missing metadata data object", "", "", "")
+            }
+            let parsed = ParsedMetadataResult(true, "", title, summary, tags, cover, archives.toArray(), archivesProvided, pages.toArray())
+            parsed.backdrop = backdrop
+            parsed.clearlogo = clearlogo
+            parsed.titleProvided = titleProvided
+            parsed.summaryProvided = summaryProvided
+            parsed.tagsProvided = tagsProvided
+            parsed.coverProvided = coverProvided
+            parsed.backdropProvided = backdropProvided
+            parsed.clearlogoProvided = clearlogoProvided
+            return parsed
         } catch (e: Exception) {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
         }
@@ -1006,17 +1220,57 @@ public class MetadataPluginCallbackRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func buildResultJson(archiveId: String, namespace: String, title: String, summary: String, tags: String, cover: String, output: String, archivesCount: Int64): String {
+    private static func buildResultJson(targetType: String, targetId: String, namespace: String, title: String, summary: String, tags: String, cover: String, backdrop: String, clearlogo: String, output: String, archivesCount: Int64): String {
+        let effectiveType = targetType.trimAscii().toAsciiLower()
+        let metadataType = if (effectiveType == "tankoubon" || effectiveType == "tank") { 1i32 } else { 0i32 }
+        let tagsArray = tags.trimAscii().split(",")
+
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
         w.writeName("success").writeValue(1)
-        w.writeName("archive_id").writeValue(archiveId)
+        w.writeName("target_type").writeValue(effectiveType)
+        w.writeName("target_id").writeValue(targetId)
         w.writeName("namespace").writeValue(namespace)
+        w.writeName("metadata")
+        w.startObject()
         w.writeName("title").writeValue(title)
-        w.writeName("summary").writeValue(summary)
-        w.writeName("tags").writeValue(tags)
-        w.writeName("cover").writeValue(cover)
+        w.writeName("type").writeValue(metadataType)
+        w.writeName("description").writeValue(summary)
+        w.writeName("tags")
+        w.startArray()
+        for (tag in tagsArray) {
+            let value = tag.trimAscii()
+            if (value.size > 0) {
+                w.writeValue(value)
+            }
+        }
+        w.endArray()
+        w.writeName("assets")
+        w.startArray()
+        if (cover.trimAscii().size > 0) {
+            w.startObject()
+            w.writeName("key").writeValue("cover")
+            w.writeName("value").writeValue(cover.trimAscii())
+            w.endObject()
+        }
+        if (backdrop.trimAscii().size > 0) {
+            w.startObject()
+            w.writeName("key").writeValue("backdrop")
+            w.writeName("value").writeValue(backdrop.trimAscii())
+            w.endObject()
+        }
+        if (clearlogo.trimAscii().size > 0) {
+            w.startObject()
+            w.writeName("key").writeValue("clearlogo")
+            w.writeName("value").writeValue(clearlogo.trimAscii())
+            w.endObject()
+        }
+        w.endArray()
+        w.writeName("archive")
+        w.startArray()
+        w.endArray()
+        w.endObject()
         w.writeName("archives_count").writeValue(archivesCount)
         w.writeName("plugin_output").writeValue(output)
         w.endObject()

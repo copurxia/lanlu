@@ -1742,7 +1742,22 @@ public class ArchiveDao {
         match (connOpt) {
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT cover_asset_id FROM archives WHERE arcid = ?")
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(
+                            NULLIF(cover_asset_id, 0),
+                            CASE
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'cover') = 'number'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'cover')::BIGINT
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'cover') = 'string'
+                                     AND (COALESCE(assets, '{}'::jsonb)->>'cover') ~ '^[0-9]+$'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'cover')::BIGINT
+                                ELSE 0
+                            END,
+                            0
+                        )
+                        FROM archives
+                        WHERE arcid = ?
+                    """)
                     try {
                         stmt.set(0, archiveId)
                         let rs = stmt.query()
@@ -1770,20 +1785,189 @@ public class ArchiveDao {
     }
 
     /**
-     * 更新归档封面资源 ID（assets.id）
+     * 获取归档指定 assets key 的资源 ID（支持 cover/backdrop/clearlogo）。
      */
-    public static func updateCoverAssetId(archiveId: String, assetId: Int64): Bool {
+    public static func getArchiveAssetIdByKey(archiveId: String, assetKey: String): Int64 {
+        let key = assetKey.trimAscii()
+        if (key == "cover") {
+            return getCoverAssetId(archiveId)
+        }
+        if (key != "backdrop" && key != "clearlogo") {
+            return 0
+        }
+
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE archives SET cover_asset_id = ? WHERE arcid = ?")
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(
+                            CASE
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'${key}') = 'number'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'${key}')::BIGINT
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'${key}') = 'string'
+                                     AND (COALESCE(assets, '{}'::jsonb)->>'${key}') ~ '^[0-9]+$'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'${key}')::BIGINT
+                                ELSE 0
+                            END,
+                            0
+                        )
+                        FROM archives
+                        WHERE arcid = ?
+                    """)
                     try {
-                        if (assetId > 0) {
-                            stmt.set(0, assetId)
-                        } else {
-                            stmt.setNull(0)
+                        stmt.set(0, archiveId)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<Int64>(0) ?? 0
+                            }
+                            return 0
+                        } finally {
+                            rs.close()
                         }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("获取归档 assets key 资源ID失败", ("arcid", archiveId), ("key", key), ("error", e.message))
+                    return 0
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return 0
+        }
+    }
+
+    /**
+     * 获取归档 assets JSON（原样透传，默认 {}）
+     */
+    public static func getArchiveAssetsRaw(archiveId: String): String {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("SELECT COALESCE(CAST(assets AS TEXT), '{}') FROM archives WHERE arcid = ?")
+                    try {
+                        stmt.set(0, archiveId)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                let raw = (rs.getOrNull<String>(0) ?? "").trimAscii()
+                                return if (raw.size > 0) { raw } else { "{}" }
+                            }
+                            return "{}"
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return "{}"
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return "{}"
+        }
+    }
+
+    /**
+     * 批量获取归档 assets JSON（key=arcid, value=JSON文本）
+     */
+    public static func getBatchArchiveAssetsRaw(archiveIds: Array<String>): HashMap<String, String> {
+        let result = HashMap<String, String>()
+        if (archiveIds.size == 0) { return result }
+
+        let deduped = ArrayList<String>()
+        let seen = HashMap<String, Bool>()
+        for (archiveId in archiveIds) {
+            let id = archiveId.trimAscii()
+            if (id.size == 0) { continue }
+            match (seen.get(id)) {
+                case Some(_) => ()
+                case None =>
+                    seen[id] = true
+                    deduped.add(id)
+            }
+        }
+        if (deduped.size == 0) { return result }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    var inClause = ""
+                    for (i in 0..deduped.size) {
+                        if (i > 0) { inClause += "," }
+                        inClause += "?"
+                    }
+
+                    let sql = "SELECT arcid, COALESCE(CAST(assets AS TEXT), '{}') FROM archives WHERE arcid IN (${inClause})"
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        for (i in 0..deduped.size) {
+                            stmt.set(i, deduped[i])
+                        }
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let arcid = (rs.getOrNull<String>(0) ?? "").trimAscii()
+                                let raw = (rs.getOrNull<String>(1) ?? "").trimAscii()
+                                if (arcid.size == 0) { continue }
+                                result[arcid] = if (raw.size > 0) { raw } else { "{}" }
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return result
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => ()
+        }
+
+        return result
+    }
+
+    /**
+     * 原样更新归档 assets JSON，并同步 cover_asset_id。
+     */
+    public static func updateArchiveAssetsRaw(archiveId: String, assetsRaw: String): Bool {
+        let normalized = assetsRaw.trimAscii()
+        let payload = if (normalized.size > 0) { normalized } else { "{}" }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        WITH payload AS (
+                            SELECT COALESCE(CAST(? AS JSONB), '{}'::jsonb) AS j
+                        )
+                        UPDATE archives AS a
+                        SET assets = payload.j,
+                            cover_asset_id = CASE
+                                WHEN jsonb_typeof(payload.j->'cover') = 'number'
+                                     AND (payload.j->>'cover')::BIGINT > 0
+                                    THEN (payload.j->>'cover')::BIGINT
+                                WHEN jsonb_typeof(payload.j->'cover') = 'string'
+                                     AND (payload.j->>'cover') ~ '^[0-9]+$'
+                                     AND (payload.j->>'cover')::BIGINT > 0
+                                    THEN (payload.j->>'cover')::BIGINT
+                                ELSE NULL
+                            END
+                        FROM payload
+                        WHERE a.arcid = ?
+                    """)
+                    try {
+                        stmt.set(0, payload)
                         stmt.set(1, archiveId)
                         stmt.update()
                         return true
@@ -1791,7 +1975,95 @@ public class ArchiveDao {
                         stmt.close()
                     }
                 } catch (e: Exception) {
+                    getLogger("archive_dao").error("更新归档 assets JSON 失败", ("arcid", archiveId), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return false
+        }
+    }
+
+    /**
+     * 更新归档封面资源 ID（assets.id）
+     */
+    public static func updateCoverAssetId(archiveId: String, assetId: Int64): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE archives
+                        SET cover_asset_id = ?,
+                            assets = CASE
+                                WHEN ? > 0 THEN COALESCE(assets, '{}'::jsonb) || jsonb_build_object('cover', CAST(? AS BIGINT))
+                                ELSE COALESCE(assets, '{}'::jsonb) - 'cover'
+                            END
+                        WHERE arcid = ?
+                    """)
+                    try {
+                        if (assetId > 0) {
+                            stmt.set(0, assetId)
+                        } else {
+                            stmt.setNull(0)
+                        }
+                        stmt.set(1, assetId)
+                        stmt.set(2, assetId)
+                        stmt.set(3, archiveId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
                     getLogger("archive_dao").error("更新封面资源ID失败", ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return false
+        }
+    }
+
+    /**
+     * 更新归档指定 assets key 的资源 ID（仅支持 cover/backdrop/clearlogo）。
+     */
+    public static func updateArchiveAssetIdByKey(archiveId: String, assetKey: String, assetId: Int64): Bool {
+        let key = assetKey.trimAscii()
+        if (key == "cover") {
+            return updateCoverAssetId(archiveId, assetId)
+        }
+        if (key != "backdrop" && key != "clearlogo") {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE archives
+                        SET assets = CASE
+                            WHEN ? > 0 THEN COALESCE(assets, '{}'::jsonb) || jsonb_build_object('${key}', CAST(? AS BIGINT))
+                            ELSE COALESCE(assets, '{}'::jsonb) - '${key}'
+                        END
+                        WHERE arcid = ?
+                    """)
+                    try {
+                        stmt.set(0, assetId)
+                        stmt.set(1, assetId)
+                        stmt.set(2, archiveId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("更新归档 assets key 失败", ("arcid", archiveId), ("key", key), ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}

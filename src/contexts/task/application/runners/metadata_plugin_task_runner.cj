@@ -94,8 +94,6 @@ public class MetadataPluginTaskRunner {
         w.writeName("groupId").writeValue(groupId)
         w.writeName("targetType").writeValue(effectiveType)
         w.writeName("targetId").writeValue(targetId)
-        // Backward-compatible field for older runners/plugins.
-        w.writeName("archiveId").writeValue(targetId)
         match (oneshotOpt) {
             case Some(v) => w.writeName("oneshotParam").writeValue(v)
             case None => ()
@@ -164,10 +162,8 @@ public class MetadataPluginTaskRunner {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
-        w.writeName("targetType").writeValue(targetType)
-        w.writeName("targetId").writeValue(targetId)
-        // Backward-compatible field.
-        w.writeName("archiveId").writeValue(targetId)
+        w.writeName("target_type").writeValue(targetType)
+        w.writeName("target_id").writeValue(targetId)
         w.writeName("namespace").writeValue(namespace)
         if (param.trimAscii().size > 0) {
             writeParamField(w, param)
@@ -228,21 +224,9 @@ public class MetadataPluginTaskRunner {
                         case "targetType" => targetType = r.readValue<String>().trimAscii()
                         case "target_id" => targetId = r.readValue<String>().trimAscii()
                         case "targetId" => targetId = r.readValue<String>().trimAscii()
-                        case "tankoubon_id" =>
-                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); targetType = "tankoubon" } else { r.skip() }
-                        case "archive_id" =>
-                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
-                        case "id" =>
-                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
-                        case "arcid" =>
-                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
-                        case "archiveId" =>
-                            if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
                         case "param" => param = readRawJson()
                         case "metadata" => metadataJson = normalizeMetadataJson(readRawJson())
-                        case "metadata_input" => metadataJson = normalizeMetadataJson(readRawJson())
-                        case "metadataInput" => metadataJson = normalizeMetadataJson(readRawJson())
                         case "fallback_namespaces" =>
                             if (r.peek() == Some(BeginArray)) {
                                 r.startArray()
@@ -323,11 +307,6 @@ public class MetadataPluginTaskRunner {
             w.startObject()
             w.writeName("target_type").writeValue(targetType)
             w.writeName("target_id").writeValue(targetId)
-            if (targetType == "tankoubon" || targetType == "tank") {
-                w.writeName("tankoubon_id").writeValue(targetId)
-            } else {
-                w.writeName("archive_id").writeValue(targetId)
-            }
             w.writeName("namespace").writeValue(nextNamespace)
             writeParamField(w, param)
             writeMetadataField(w, metadataJson)

@@ -79,12 +79,12 @@ public class MetadataPluginController {
 
     /**
      * POST /api/metadata_plugin
-     * 请求体: { "archive_id": "xxxx", "namespace": "ehplugin", "param": "...", "write_back": 0|1, "mode": "query|write" }
+     * 请求体: { "target_type": "archive|tankoubon", "target_id": "xxxx", "namespace": "ehplugin", "param": "...", "metadata": {...}, "write_back": 0|1 }
      * param 可选：若为 JSON 对象字符串，会作为 --params 覆盖/补充插件配置；否则作为 --oneshot 传入
      *
      * 语义分支：
-     * - write_back=0 / mode=query（默认）：只运行 Metadata 插件，返回 deno_task 的 job id；不写回 archives/tags
-     * - write_back=1 / mode=write：走 metadata_plugin + callback 流程，自动写回 archives/tags
+     * - write_back=0（默认）：只运行 Metadata 插件，返回 deno_task 的 job id；不写回 archives/tags
+     * - write_back=1：走 metadata_plugin + callback 流程，自动写回 archives/tags
      */
     public static func runMetadataPlugin(ctx: Ctx): Unit {
         let logger = getLogger("metadata_plugin_controller")
@@ -113,30 +113,11 @@ public class MetadataPluginController {
                                 case "targetType" => targetType = r.readValue<String>().trimAscii()
                                 case "target_id" => targetId = r.readValue<String>().trimAscii()
                                 case "targetId" => targetId = r.readValue<String>().trimAscii()
-                                case "tankoubon_id" =>
-                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); targetType = "tankoubon" } else { r.skip() }
-                                case "archive_id" =>
-                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
-                                case "id" =>
-                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
-                                case "arcid" =>
-                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii() } else { r.skip() }
-                                case "archiveId" =>
-                                    if (targetId.size == 0) { targetId = r.readValue<String>().trimAscii(); if (targetType.size == 0) { targetType = "archive" } } else { r.skip() }
                                 case "namespace" => namespace = r.readValue<String>().trimAscii()
                                 case "param" => param = readRawJson(r).trimAscii()
                                 case "metadata" => metadataJson = normalizeMetadataJson(readRawJson(r))
-                                case "metadata_input" => metadataJson = normalizeMetadataJson(readRawJson(r))
-                                case "metadataInput" => metadataJson = normalizeMetadataJson(readRawJson(r))
                                 case "write_back" => writeBack = readBoolFlexible(r)
                                 case "writeBack" => writeBack = readBoolFlexible(r)
-                                case "mode" =>
-                                    let mode = r.readValue<String>().trimAscii().toAsciiLower()
-                                    if (mode == "write" || mode == "persist" || mode == "save" || mode == "apply") {
-                                        writeBack = true
-                                    } else if (mode == "query" || mode == "preview" || mode == "dry_run" || mode == "dryrun") {
-                                        writeBack = false
-                                    }
                                 case _ => r.skip()
                             }
                         }
@@ -152,27 +133,14 @@ public class MetadataPluginController {
                 targetType = ctx.query("target_type") ?? (ctx.query("targetType") ?? "")
             }
             if (targetId.size == 0) {
-                // Backward compatible keys (avoid deep coalescing chains for parser compatibility).
                 let q1 = ctx.query("target_id") ?? ""
                 let q2 = ctx.query("targetId") ?? ""
-                let q3 = ctx.query("tankoubon_id") ?? ""
-                let q4 = ctx.query("archive_id") ?? ""
-                let q5 = ctx.query("archiveId") ?? ""
-                let q6 = ctx.query("id") ?? ""
                 if (q1.size > 0) { targetId = q1 }
                 else if (q2.size > 0) { targetId = q2 }
-                else if (q3.size > 0) { targetId = q3 }
-                else if (q4.size > 0) { targetId = q4 }
-                else if (q5.size > 0) { targetId = q5 }
-                else { targetId = q6 }
+                else { targetId = "" }
             }
             if (targetType.size == 0) {
-                // Infer type from which id param was provided.
-                if ((ctx.query("tankoubon_id") ?? "").trimAscii().size > 0) {
-                    targetType = "tankoubon"
-                } else {
-                    targetType = "archive"
-                }
+                targetType = "archive"
             }
             if (namespace.size == 0) {
                 namespace = ctx.query("namespace") ?? ""
@@ -181,22 +149,13 @@ public class MetadataPluginController {
                 param = ctx.query("param") ?? ""
             }
             if (metadataJson.size == 0) {
-                let qMeta = ctx.query("metadata") ?? (ctx.query("metadata_input") ?? "")
+                let qMeta = ctx.query("metadata") ?? ""
                 metadataJson = normalizeMetadataJson(qMeta)
             }
             let writeBackQuery = ctx.query("write_back") ?? (ctx.query("writeBack") ?? "")
             if (writeBackQuery.trimAscii().size > 0) {
                 let v = writeBackQuery.trimAscii().toAsciiLower()
                 writeBack = v == "true" || v == "1" || v == "yes" || v == "y"
-            }
-            let modeQuery = ctx.query("mode") ?? ""
-            if (modeQuery.trimAscii().size > 0) {
-                let mode = modeQuery.trimAscii().toAsciiLower()
-                if (mode == "write" || mode == "persist" || mode == "save" || mode == "apply") {
-                    writeBack = true
-                } else if (mode == "query" || mode == "preview" || mode == "dry_run" || mode == "dryrun") {
-                    writeBack = false
-                }
             }
 
             if (targetId.size == 0 || namespace.size == 0) {
@@ -279,7 +238,6 @@ public class MetadataPluginController {
             w.writeName("action").writeValue("run")
             w.writeName("targetType").writeValue(effectiveType)
             w.writeName("targetId").writeValue(targetId)
-            w.writeName("archiveId").writeValue(targetId)
             match (oneshotOpt) {
                 case Some(v) => w.writeName("oneshotParam").writeValue(v)
                 case None => ()

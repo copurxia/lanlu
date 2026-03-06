@@ -11,6 +11,14 @@ public class ParsedMetadataResult {
     public var summary: String = ""
     public var tags: String = ""
     public var cover: String = ""
+    public var backdrop: String = ""
+    public var clearlogo: String = ""
+    public var titleProvided: Bool = false
+    public var summaryProvided: Bool = false
+    public var tagsProvided: Bool = false
+    public var coverProvided: Bool = false
+    public var backdropProvided: Bool = false
+    public var clearlogoProvided: Bool = false
     public var archives: Array<ArchiveMetadataPatch> = Array<ArchiveMetadataPatch>()
     public var archivesProvided: Bool = false
     public var pages: Array<PageMetadataPatch> = Array<PageMetadataPatch>()
@@ -22,6 +30,14 @@ public class ParsedMetadataResult {
         this.summary = summary
         this.tags = tags
         this.cover = ""
+        this.backdrop = ""
+        this.clearlogo = ""
+        this.titleProvided = false
+        this.summaryProvided = false
+        this.tagsProvided = false
+        this.coverProvided = false
+        this.backdropProvided = false
+        this.clearlogoProvided = false
         this.archives = Array<ArchiveMetadataPatch>()
         this.archivesProvided = false
         this.pages = Array<PageMetadataPatch>()
@@ -34,6 +50,14 @@ public class ParsedMetadataResult {
         this.summary = summary
         this.tags = tags
         this.cover = cover
+        this.backdrop = ""
+        this.clearlogo = ""
+        this.titleProvided = false
+        this.summaryProvided = false
+        this.tagsProvided = false
+        this.coverProvided = false
+        this.backdropProvided = false
+        this.clearlogoProvided = false
         this.archives = archives
         this.archivesProvided = false
         this.pages = Array<PageMetadataPatch>()
@@ -46,6 +70,14 @@ public class ParsedMetadataResult {
         this.summary = summary
         this.tags = tags
         this.cover = cover
+        this.backdrop = ""
+        this.clearlogo = ""
+        this.titleProvided = false
+        this.summaryProvided = false
+        this.tagsProvided = false
+        this.coverProvided = false
+        this.backdropProvided = false
+        this.clearlogoProvided = false
         this.archives = archives
         this.archivesProvided = archivesProvided
         this.pages = Array<PageMetadataPatch>()
@@ -58,6 +90,14 @@ public class ParsedMetadataResult {
         this.summary = summary
         this.tags = tags
         this.cover = cover
+        this.backdrop = ""
+        this.clearlogo = ""
+        this.titleProvided = false
+        this.summaryProvided = false
+        this.tagsProvided = false
+        this.coverProvided = false
+        this.backdropProvided = false
+        this.clearlogoProvided = false
         this.archives = archives
         this.archivesProvided = archivesProvided
         this.pages = pages
@@ -75,6 +115,15 @@ public class ArchiveMetadataPatch {
     public var tags: String = ""
     public var updatedAt: String = ""
     public var cover: String = ""
+    public var backdrop: String = ""
+    public var clearlogo: String = ""
+    public var titleProvided: Bool = false
+    public var summaryProvided: Bool = false
+    public var tagsProvided: Bool = false
+    public var updatedAtProvided: Bool = false
+    public var coverProvided: Bool = false
+    public var backdropProvided: Bool = false
+    public var clearlogoProvided: Bool = false
 
     public init() {}
 }

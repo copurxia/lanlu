@@ -48,6 +48,13 @@ type Props = {
   onTitleChange: (next: string) => void;
   summary: string;
   onSummaryChange: (next: string) => void;
+  assetCoverId?: string;
+  onAssetCoverIdChange?: (next: string) => void;
+  assetBackdropId?: string;
+  onAssetBackdropIdChange?: (next: string) => void;
+  assetClearlogoId?: string;
+  onAssetClearlogoIdChange?: (next: string) => void;
+  showAssetFields?: boolean;
   tags: string[];
   onTagsChange: (next: string[]) => void;
   isSaving: boolean;
@@ -80,6 +87,13 @@ export function ArchiveMetadataEditDialog({
   onTitleChange,
   summary,
   onSummaryChange,
+  assetCoverId = '',
+  onAssetCoverIdChange,
+  assetBackdropId = '',
+  onAssetBackdropIdChange,
+  assetClearlogoId = '',
+  onAssetClearlogoIdChange,
+  showAssetFields = true,
   tags,
   onTagsChange,
   isSaving,
@@ -120,6 +134,31 @@ export function ArchiveMetadataEditDialog({
                   disabled={isSaving}
                 />
               </div>
+              {showAssetFields ? (
+                <div>
+                  <label className="text-sm font-medium">{t('archive.assets')}</label>
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <Input
+                      value={assetCoverId}
+                      onChange={(e) => onAssetCoverIdChange?.(e.target.value)}
+                      disabled={isSaving}
+                      placeholder={t('archive.assetsCoverPlaceholder')}
+                    />
+                    <Input
+                      value={assetBackdropId}
+                      onChange={(e) => onAssetBackdropIdChange?.(e.target.value)}
+                      disabled={isSaving}
+                      placeholder={t('archive.assetsBackdropPlaceholder')}
+                    />
+                    <Input
+                      value={assetClearlogoId}
+                      onChange={(e) => onAssetClearlogoIdChange?.(e.target.value)}
+                      disabled={isSaving}
+                      placeholder={t('archive.assetsClearlogoPlaceholder')}
+                    />
+                  </div>
+                </div>
+              ) : null}
               {showMetadataPlugin ? (
                 <div>
                   <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>

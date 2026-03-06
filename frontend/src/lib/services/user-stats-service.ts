@@ -1,6 +1,7 @@
 // 用户统计服务 - 统计数据来自 /api/user/stats，趋势来自 /api/user/trend，最近活动由 /api/search 计算
 import { apiClient } from '../api';
 import { Archive } from '@/types/archive';
+import { normalizeArchivePayload } from '@/lib/utils/archive-assets';
 
 export interface UserStats {
   favoriteCount: number;
@@ -21,7 +22,10 @@ export interface RecentActivity {
 
 function normalizeSearchArchives(payload: any): Archive[] {
   const list = payload?.data;
-  return Array.isArray(list) ? (list as Archive[]) : [];
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item)
+    .map((item) => normalizeArchivePayload(item));
 }
 
 export class UserStatsService {

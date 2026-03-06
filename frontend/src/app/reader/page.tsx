@@ -66,6 +66,7 @@ import { TankoubonService } from '@/lib/services/tankoubon-service';
 import type { Tankoubon } from '@/types/tankoubon';
 import { toast } from 'sonner';
 import { getStoredPath } from '@/lib/utils/navigation';
+import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 
 function ReaderContent() {
   type ReaderPageInfo = PageInfo & {
@@ -726,7 +727,7 @@ function ReaderContent() {
               return {
                 id: nextId,
                 title: nextTitle,
-                coverAssetId: meta.cover_asset_id,
+                coverAssetId: getArchiveAssetId(meta, 'cover'),
                 source: 'tankoubon',
               };
             } catch (metaErr) {
@@ -762,7 +763,7 @@ function ReaderContent() {
       return {
         id: randomCandidate.arcid,
         title: randomTitle,
-        coverAssetId: randomCandidate.cover_asset_id,
+        coverAssetId: getArchiveAssetId(randomCandidate, 'cover'),
         source: 'random',
       };
     },
@@ -869,7 +870,7 @@ function ReaderContent() {
           setResolvedNextArchive(sourceArchiveId, {
             id: nextId,
             title: nextTitle,
-            coverAssetId: meta.cover_asset_id,
+            coverAssetId: getArchiveAssetId(meta, 'cover'),
             source: 'tankoubon',
           });
         } catch (metaErr) {
@@ -2016,7 +2017,7 @@ function ReaderContent() {
             enabled={isCollectionEndPage && readingMode !== 'webtoon'}
             finishedId={activeArchiveId}
             finishedTitle={displayArchiveTitle}
-            finishedCoverAssetId={archive.archiveMetadata?.cover_asset_id}
+            finishedCoverAssetId={getArchiveAssetId(archive.archiveMetadata, 'cover')}
             nextId={nextArchive?.id ?? null}
             nextTitle={nextArchive?.title ?? null}
             nextCoverAssetId={nextArchive?.coverAssetId}
@@ -2046,7 +2047,7 @@ function ReaderContent() {
 	          pages={streamPages}
 	          finishedId={activeArchiveId}
 	          finishedTitle={displayArchiveTitle}
-	          finishedCoverAssetId={archive.archiveMetadata?.cover_asset_id}
+	          finishedCoverAssetId={getArchiveAssetId(archive.archiveMetadata, 'cover')}
 	          nextId={nextArchive?.id ?? null}
 	          nextTitle={nextArchive?.title ?? null}
 	          nextCoverAssetId={nextArchive?.coverAssetId}

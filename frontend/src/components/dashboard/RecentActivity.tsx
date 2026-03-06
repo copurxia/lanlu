@@ -7,6 +7,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { Archive } from '@/types/archive';
 import Link from 'next/link';
 import Image from 'next/image';
+import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 
 interface RecentActivitySectionProps {
   title: string;
@@ -52,36 +53,39 @@ function RecentActivitySection({ title, icon, archives, loading = false, emptyMe
       <CardContent>
         {archives.length > 0 ? (
           <div className="space-y-3">
-            {archives.map((archive) => (
-              <Link
-                key={archive.arcid}
-                href={`/archive?id=${archive.arcid}`}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors"
-              >
-                <div className="relative w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-muted">
-                  {archive.cover_asset_id ? (
-                    <Image
-                      src={`/api/assets/${archive.cover_asset_id}`}
-                      alt={archive.title}
-                      fill
-                      className="object-cover"
-                      sizes="48px"
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
-                      {t('archive.noCover')}
-                    </div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium leading-tight break-words">{archive.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {archive.pagecount} 页
-                    {archive.progress > 0 && ` · 已读 ${archive.progress} 页`}
-                  </p>
-                </div>
-              </Link>
-            ))}
+            {archives.map((archive) => {
+              const coverAssetId = getArchiveAssetId(archive, 'cover');
+              return (
+                <Link
+                  key={archive.arcid}
+                  href={`/archive?id=${archive.arcid}`}
+                  className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors"
+                >
+                  <div className="relative w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-muted">
+                    {coverAssetId ? (
+                      <Image
+                        src={`/api/assets/${coverAssetId}`}
+                        alt={archive.title}
+                        fill
+                        className="object-cover"
+                        sizes="48px"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-[10px] text-muted-foreground">
+                        {t('archive.noCover')}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium leading-tight break-words">{archive.title}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {archive.pagecount} 页
+                      {archive.progress > 0 && ` · 已读 ${archive.progress} 页`}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         ) : (
           <div className="py-8 text-center text-muted-foreground text-sm">

@@ -215,11 +215,6 @@ public class BackfillMetadataTaskRunner {
             w.startObject()
             w.writeName("target_type").writeValue(targetType)
             w.writeName("target_id").writeValue(targetId)
-            if (targetType == "tankoubon" || targetType == "tank") {
-                w.writeName("tankoubon_id").writeValue(targetId)
-            } else {
-                w.writeName("archive_id").writeValue(targetId)
-            }
             w.writeName("namespace").writeValue(namespace)
             if (fallbackNamespaces.size > 0) {
                 w.writeName("fallback_namespaces")

@@ -24,6 +24,11 @@ import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 
 public class ArchiveController {
+    private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
+        let raw = assetsRaw.trimAscii()
+        let normalized = if (raw.size > 0) { raw } else { "{}" }
+        w.writeName("assets").jsonValue(normalized)
+    }
 
     /**
      * 获取档案的基础路径（从分类获取）
@@ -132,6 +137,7 @@ public class ArchiveController {
         } else {
             tagsString
         }
+        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
 
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -148,7 +154,7 @@ public class ArchiveController {
         w.writeName("lastreadtime").writeValue(lastreadtime)
         w.writeName("file_size").writeValue(archive.file_size)
         w.writeName("size").writeValue(archive.file_size)
-        w.writeName("cover_asset_id").writeValue(archive.cover_asset_id)
+        writeArchiveAssetsJson(w, assetsRaw)
         w.writeName("archivetype").writeValue(archive.archive_type)
         w.writeName("created_at").writeValue(archive.created_at)
         w.writeName("updated_at").writeValue(archive.updated_at)
@@ -216,6 +222,9 @@ public class ArchiveController {
         let tagsParam = ctx.query("tags")
         let summaryParam = ctx.query("summary")
         let coverParam = ctx.query("cover")
+        let backdropParam = ctx.query("backdrop")
+        let clearlogoParam = ctx.query("clearlogo")
+        let assetsParam = ctx.query("assets")
         var pluginNamespace = (ctx.query("metadata_namespace") ?? "").trimAscii()
         if (pluginNamespace.size == 0) {
             pluginNamespace = (ctx.query("plugin_namespace") ?? "").trimAscii()
@@ -296,6 +305,18 @@ public class ArchiveController {
                     }
                 case None => () // 不更新标签
             }
+
+            match (assetsParam) {
+                case Some(rawAssets) =>
+                    let assetsUpdated = ArchiveDao.updateArchiveAssetsRaw(id, rawAssets)
+                    if (!assetsUpdated) {
+                        let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive assets\",\"success\":0}"
+                        ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                        ResponseView.json(ctx, errorResponse)
+                        return
+                    }
+                case None => ()
+            }
             
             match (coverParam) {
                 case Some(coverPath) =>
@@ -323,6 +344,56 @@ public class ArchiveController {
                             }
                         } else {
                             getLogger("archive_controller").warn("Failed to install archive cover from plugin path", ("arcid", id), ("error", coverErr))
+                        }
+                    }
+                case None => ()
+            }
+
+            match (backdropParam) {
+                case Some(backdropPath) =>
+                    let backdropTrimmed = backdropPath.trimAscii()
+                    if (backdropTrimmed.size == 0) {
+                        let _ = ArchiveDao.updateArchiveAssetIdByKey(id, "backdrop", 0)
+                    } else {
+                        let (okBackdrop, backdropAssetId, _, backdropErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                            backdropTrimmed,
+                            pluginNamespace,
+                            "archive_backdrop",
+                            "${id}_backdrop.avif"
+                        )
+                        if (okBackdrop && backdropAssetId > 0) {
+                            let backdropUpdated = ArchiveDao.updateArchiveAssetIdByKey(id, "backdrop", backdropAssetId)
+                            if (!backdropUpdated) {
+                                PluginCoverUtils.deleteAsset(backdropAssetId)
+                                getLogger("archive_controller").warn("Failed to update archive backdrop asset id", ("arcid", id))
+                            }
+                        } else {
+                            getLogger("archive_controller").warn("Failed to install archive backdrop from plugin path", ("arcid", id), ("error", backdropErr))
+                        }
+                    }
+                case None => ()
+            }
+
+            match (clearlogoParam) {
+                case Some(clearlogoPath) =>
+                    let clearlogoTrimmed = clearlogoPath.trimAscii()
+                    if (clearlogoTrimmed.size == 0) {
+                        let _ = ArchiveDao.updateArchiveAssetIdByKey(id, "clearlogo", 0)
+                    } else {
+                        let (okClearlogo, clearlogoAssetId, _, clearlogoErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                            clearlogoTrimmed,
+                            pluginNamespace,
+                            "archive_clearlogo",
+                            "${id}_clearlogo.avif"
+                        )
+                        if (okClearlogo && clearlogoAssetId > 0) {
+                            let clearlogoUpdated = ArchiveDao.updateArchiveAssetIdByKey(id, "clearlogo", clearlogoAssetId)
+                            if (!clearlogoUpdated) {
+                                PluginCoverUtils.deleteAsset(clearlogoAssetId)
+                                getLogger("archive_controller").warn("Failed to update archive clearlogo asset id", ("arcid", id))
+                            }
+                        } else {
+                            getLogger("archive_controller").warn("Failed to install archive clearlogo from plugin path", ("arcid", id), ("error", clearlogoErr))
                         }
                     }
                 case None => ()
@@ -1545,6 +1616,13 @@ public class ArchiveController {
 
                 // 获取收藏的档案详情
                 let (archives, totalCount) = UserFavoriteDao.getUserFavoriteArchives(userId, start, count)
+                let archiveIds = ArrayList<String>()
+                for (archive in archives) {
+                    if (archive.id.size > 0) {
+                        archiveIds.add(archive.id)
+                    }
+                }
+                let assetsMap = ArchiveDao.getBatchArchiveAssetsRaw(archiveIds.toArray())
 
                 let out = ByteBuffer()
                 let w = JsonWriter(out)
@@ -1568,7 +1646,11 @@ public class ArchiveController {
                     w.writeName("pagecount").writeValue(archive.pagecount)
                     w.writeName("progress").writeValue(archive.progress)
                     w.writeName("file_size").writeValue(archive.file_size)
-                    w.writeName("cover_asset_id").writeValue(archive.cover_asset_id)
+                    let assetsRaw = match (assetsMap.get(archive.id)) {
+                        case Some(raw) => raw
+                        case None => "{}"
+                    }
+                    writeArchiveAssetsJson(w, assetsRaw)
                     w.writeName("created_at").writeValue(archive.created_at)
                     w.writeName("updated_at").writeValue(archive.updated_at)
                     w.writeName("last_read_time").writeValue(archive.last_read_time)
@@ -1609,6 +1691,13 @@ public class ArchiveController {
 
                 // 获取已读的档案详情
                 let (archives, totalCount) = UserArchiveStatusDao.getUserReadArchives(userId, start, count)
+                let archiveIds = ArrayList<String>()
+                for (archive in archives) {
+                    if (archive.id.size > 0) {
+                        archiveIds.add(archive.id)
+                    }
+                }
+                let assetsMap = ArchiveDao.getBatchArchiveAssetsRaw(archiveIds.toArray())
 
                 let out = ByteBuffer()
                 let w = JsonWriter(out)
@@ -1632,7 +1721,11 @@ public class ArchiveController {
                     w.writeName("pagecount").writeValue(archive.pagecount)
                     w.writeName("progress").writeValue(archive.progress)
                     w.writeName("file_size").writeValue(archive.file_size)
-                    w.writeName("cover_asset_id").writeValue(archive.cover_asset_id)
+                    let assetsRaw = match (assetsMap.get(archive.id)) {
+                        case Some(raw) => raw
+                        case None => "{}"
+                    }
+                    writeArchiveAssetsJson(w, assetsRaw)
                     w.writeName("created_at").writeValue(archive.created_at)
                     w.writeName("updated_at").writeValue(archive.updated_at)
                     w.writeName("last_read_time").writeValue(archive.last_read_time)

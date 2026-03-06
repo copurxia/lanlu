@@ -6,6 +6,7 @@ import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadRes
 import { TaskPoolService } from './taskpool-service';
 import { isSuccessResponse } from '@/lib/utils/api-utils';
 import type { Task } from '@/types/task';
+import { normalizeArchiveAssets, normalizeArchivePayload } from '@/lib/utils/archive-assets';
 
 // 下载相关接口定义
 export interface DownloadMetadata {
@@ -36,10 +37,21 @@ export interface MetadataPluginRunCallbacks {
   onUpdate?: (task: Task) => void;
 }
 
+export interface MetadataPluginAssetInput {
+  key: string;
+  value: string | number;
+}
+
 export interface MetadataPluginInputMetadata {
   title?: string;
-  summary?: string;
-  tags?: string;
+  type?: number;
+  description?: string;
+  tags?: string[];
+  assets?: MetadataPluginAssetInput[];
+  archive?: MetadataPluginInputMetadata[];
+  archive_id?: string;
+  volume_no?: number;
+  [key: string]: unknown;
 }
 
 export interface MetadataPluginRunOptions {
@@ -62,6 +74,27 @@ export interface PageInfo {
 }
 
 export class ArchiveService {
+  private static isArchiveItem(item: unknown): item is Archive {
+    return Boolean(item) && typeof item === 'object' && 'arcid' in (item as Record<string, unknown>);
+  }
+
+  private static normalizeArchiveItem(item: Archive): Archive {
+    return normalizeArchivePayload(item);
+  }
+
+  private static normalizeMixedItems(items: unknown[]): Array<Archive | Tankoubon> {
+    return items.map((item) => {
+      if (this.isArchiveItem(item)) {
+        return this.normalizeArchiveItem(item);
+      }
+      const tank = item as Tankoubon & { assets?: unknown };
+      return {
+        ...tank,
+        assets: normalizeArchiveAssets(tank.assets),
+      };
+    });
+  }
+
   private static extractPathFromPageUrl(url: string): string {
     const raw = String(url || '').trim();
     if (!raw) return '';
@@ -91,7 +124,11 @@ export class ArchiveService {
     normalizedParams.pageSize = Math.max(1, Math.trunc(params.pageSize ?? 20));
 
     const response = await apiClient.get('/api/search', { params: normalizedParams, signal: options?.signal });
-    return response.data;
+    const data = Array.isArray(response.data?.data) ? this.normalizeMixedItems(response.data.data) : [];
+    return {
+      ...response.data,
+      data,
+    };
   }
 
   static async getRandom(params: RandomParams = {}): Promise<Array<Archive | Tankoubon>> {
@@ -106,7 +143,8 @@ export class ArchiveService {
         lang: params.lang
       }
     });
-    return response.data.data || [];
+    const data = Array.isArray(response.data?.data) ? this.normalizeMixedItems(response.data.data) : [];
+    return data;
   }
 
   static async getMetadata(id: string, lang?: string): Promise<ArchiveMetadata> {
@@ -115,7 +153,7 @@ export class ArchiveService {
       params.lang = lang;
     }
     const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
-    return response.data;
+    return normalizeArchivePayload(response.data);
   }
 
   static async updateMetadata(
@@ -142,6 +180,24 @@ export class ArchiveService {
     }
     if (metadata.cover !== undefined) {
       params.append('cover', metadata.cover);
+    }
+    if (metadata.backdrop !== undefined) {
+      params.append('backdrop', metadata.backdrop);
+    }
+    if (metadata.clearlogo !== undefined) {
+      params.append('clearlogo', metadata.clearlogo);
+    }
+    if (metadata.assets !== undefined) {
+      const normalizedAssets: Record<string, number> = {};
+      for (const [key, value] of Object.entries(metadata.assets || {})) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) continue;
+        const id = Math.trunc(n);
+        if (id > 0) {
+          normalizedAssets[key] = id;
+        }
+      }
+      params.append('assets', JSON.stringify(normalizedAssets));
     }
     if (options?.metadataNamespace) {
       params.append('metadata_namespace', options.metadataNamespace);
@@ -430,8 +486,6 @@ export class ArchiveService {
     const payload: Record<string, unknown> = {
       target_type: targetType,
       target_id: targetId,
-      // Backward-compatible field; backend ignores it when target_* is present.
-      archive_id: targetId,
       namespace,
       param: param || '',
       // Default is preview/query (no persistence). Explicitly pass the flag so behavior is stable.

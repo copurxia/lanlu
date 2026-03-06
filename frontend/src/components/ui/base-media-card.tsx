@@ -373,7 +373,7 @@ export function BaseMediaCard({
     setRpcSelectRemainingSeconds(null)
 
     try {
-      const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean).join(', ')
+      const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean)
       const targetType = type === 'archive' ? 'archive' : 'tankoubon'
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         targetType,
@@ -404,8 +404,11 @@ export function BaseMediaCard({
           writeBack: false,
           metadata: {
             title: editTitle.trim() || displayTitle,
-            summary: editSummary.trim(),
+            type: targetType === 'tankoubon' ? 1 : 0,
+            description: editSummary.trim(),
             tags: metadataTags,
+            assets: [],
+            archive: [],
           },
         }
       )
@@ -426,26 +429,33 @@ export function BaseMediaCard({
         }
 
         const data = out?.data || {}
+        const readAssetValue = (assets: unknown, key: string): string => {
+          if (!Array.isArray(assets)) return ''
+          for (const item of assets) {
+            if (!item || typeof item !== 'object') continue
+            const row = item as Record<string, unknown>
+            const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase()
+            if (itemKey !== key) continue
+            const value = row.value
+            if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value))
+            if (typeof value === 'string') return value.trim()
+            return ''
+          }
+          return ''
+        }
         const nextTitle =
           typeof data.title === 'string'
             ? data.title
-            : typeof data.name === 'string'
-            ? data.name
             : ''
-        const nextSummary = typeof data.summary === 'string' ? data.summary : ''
-        const nextTags = typeof data.tags === 'string' ? data.tags : ''
-        const nextArchives = Array.isArray(data.archives) ? data.archives : []
+        const nextSummary = typeof data.description === 'string' ? data.description : ''
+        const nextTags = Array.isArray(data.tags)
+          ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
+          : []
+        const nextArchives = Array.isArray(data.archive) ? data.archive : []
 
         if (nextTitle.trim()) setEditTitle(nextTitle.trim())
-        if (nextSummary.trim()) setEditSummary(nextSummary.trim())
-        if (nextTags.trim()) {
-          setEditTags(
-            nextTags
-              .split(',')
-              .map((tag: string) => tag.trim())
-              .filter((tag: string) => tag)
-          )
-        }
+        setEditSummary(nextSummary)
+        setEditTags(nextTags)
         if (type === 'tankoubon') {
           setMetadataArchivePatches(
             nextArchives
@@ -453,10 +463,12 @@ export function BaseMediaCard({
                 archive_id: typeof item?.archive_id === 'string' ? item.archive_id : undefined,
                 volume_no: typeof item?.volume_no === 'number' ? item.volume_no : undefined,
                 title: typeof item?.title === 'string' ? item.title : undefined,
-                summary: typeof item?.summary === 'string' ? item.summary : undefined,
-                tags: typeof item?.tags === 'string' ? item.tags : undefined,
+                summary: typeof item?.description === 'string' ? item.description : undefined,
+                tags: Array.isArray(item?.tags)
+                  ? item.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean).join(', ')
+                  : undefined,
                 updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
-                cover: typeof item?.cover === 'string' ? item.cover : undefined,
+                cover: readAssetValue(item?.assets, 'cover') || undefined,
               }))
               .filter((item: any) => item.archive_id || item.volume_no)
           )

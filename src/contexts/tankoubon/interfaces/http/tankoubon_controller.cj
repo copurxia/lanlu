@@ -114,11 +114,17 @@ public class TankoubonController {
         var hasSummary = false
         var hasTags = false
         var hasCoverAssetId = false
+        var hasAssets = false
         var hasCover = false
+        var hasBackdrop = false
+        var hasClearlogo = false
         var name = ""
         var summary = ""
         var tags = ""
+        var assetsRaw = "{}"
         var cover = ""
+        var backdrop = ""
+        var clearlogo = ""
         var metadataNamespace = ""
         var coverAssetId: Int64 = -1i64
         var archivePatches = ArrayList<ArchiveMetadataPatch>()
@@ -176,6 +182,25 @@ public class TankoubonController {
                         case "updated_at" => patch.updatedAt = readStringFlexible().trimAscii()
                         case "updatedAt" => patch.updatedAt = readStringFlexible().trimAscii()
                         case "cover" => patch.cover = readStringFlexible().trimAscii()
+                        case "backdrop" => patch.backdrop = readStringFlexible().trimAscii()
+                        case "clearlogo" => patch.clearlogo = readStringFlexible().trimAscii()
+                        case "assets" =>
+                            match (r.peek()) {
+                                case Some(BeginObject) =>
+                                    r.startObject()
+                                    while (r.peek() != EndObject) {
+                                        let assetKey = r.readName()
+                                        match (assetKey) {
+                                            case "cover" => patch.cover = readStringFlexible().trimAscii()
+                                            case "backdrop" => patch.backdrop = readStringFlexible().trimAscii()
+                                            case "clearlogo" => patch.clearlogo = readStringFlexible().trimAscii()
+                                            case _ => r.skip()
+                                        }
+                                    }
+                                    r.endObject()
+                                case Some(_) => r.skip()
+                                case None => ()
+                            }
                         case _ => r.skip()
                     }
                 }
@@ -203,9 +228,20 @@ public class TankoubonController {
                         case "coverAssetId" =>
                             hasCoverAssetId = true
                             coverAssetId = readInt64Flexible()
+                        case "assets" =>
+                            hasAssets = true
+                            let bytes = r.readValueBytes()
+                            let raw = String.fromUtf8(bytes).trimAscii()
+                            assetsRaw = if (raw.size > 0 && raw != "null") { raw } else { "{}" }
                         case "cover" =>
                             hasCover = true
                             cover = readStringFlexible().trimAscii()
+                        case "backdrop" =>
+                            hasBackdrop = true
+                            backdrop = readStringFlexible().trimAscii()
+                        case "clearlogo" =>
+                            hasClearlogo = true
+                            clearlogo = readStringFlexible().trimAscii()
                         case "metadata_namespace" =>
                             metadataNamespace = readStringFlexible().trimAscii()
                         case "metadataNamespace" =>
@@ -258,6 +294,10 @@ public class TankoubonController {
             success = TankoubonModel.updateTankoubonTags(id, tags)
         }
 
+        if (success && hasAssets) {
+            success = TankoubonDao.updateTankoubonAssetsRaw(id, assetsRaw)
+        }
+
         // cover_asset_id: only update when provided and non-negative
         if (success && hasCoverAssetId && coverAssetId >= 0) {
             let _ = TankoubonModel.updateTankoubonCover(id, coverAssetId)
@@ -280,6 +320,46 @@ public class TankoubonController {
                     }
                 } else {
                     PluginCoverUtils.deleteAsset(newCoverAssetId)
+                }
+            }
+        }
+
+        if (success && hasBackdrop) {
+            let backdropTrimmed = backdrop.trimAscii()
+            if (backdropTrimmed.size == 0) {
+                let _ = TankoubonDao.updateTankoubonAssetIdByKey(id, "backdrop", 0)
+            } else {
+                let (okBackdrop, backdropAssetId, _, _) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                    backdropTrimmed,
+                    metadataNamespace,
+                    "tankoubon_backdrop",
+                    "${id}_backdrop.avif"
+                )
+                if (okBackdrop && backdropAssetId > 0) {
+                    let backdropUpdated = TankoubonDao.updateTankoubonAssetIdByKey(id, "backdrop", backdropAssetId)
+                    if (!backdropUpdated) {
+                        PluginCoverUtils.deleteAsset(backdropAssetId)
+                    }
+                }
+            }
+        }
+
+        if (success && hasClearlogo) {
+            let clearlogoTrimmed = clearlogo.trimAscii()
+            if (clearlogoTrimmed.size == 0) {
+                let _ = TankoubonDao.updateTankoubonAssetIdByKey(id, "clearlogo", 0)
+            } else {
+                let (okClearlogo, clearlogoAssetId, _, _) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                    clearlogoTrimmed,
+                    metadataNamespace,
+                    "tankoubon_clearlogo",
+                    "${id}_clearlogo.avif"
+                )
+                if (okClearlogo && clearlogoAssetId > 0) {
+                    let clearlogoUpdated = TankoubonDao.updateTankoubonAssetIdByKey(id, "clearlogo", clearlogoAssetId)
+                    if (!clearlogoUpdated) {
+                        PluginCoverUtils.deleteAsset(clearlogoAssetId)
+                    }
                 }
             }
         }
@@ -348,7 +428,6 @@ public class TankoubonController {
         pw.startObject()
         pw.writeName("targetType").writeValue("tankoubon")
         pw.writeName("targetId").writeValue(tankoubonId)
-        pw.writeName("archiveId").writeValue(tankoubonId)
         pw.writeName("namespace").writeValue(pluginNamespace.trimAscii())
         pw.writeName("denoTaskId").writeValue(denoTaskId)
         pw.endObject()
@@ -374,23 +453,76 @@ public class TankoubonController {
     }
 
     private static func buildMetadataFallbackOutput(patches: Array<ArchiveMetadataPatch>): String {
+        func splitTagsToArray(tagsRaw: String): Array<String> {
+            let trimmed = tagsRaw.trimAscii()
+            if (trimmed.size == 0) {
+                return Array<String>()
+            }
+
+            let seen = HashSet<String>()
+            let out = ArrayList<String>()
+            let parts = trimmed.split(",")
+            for (part in parts) {
+                let tag = part.trimAscii()
+                if (tag.size == 0 || seen.contains(tag)) {
+                    continue
+                }
+                seen.add(tag)
+                out.add(tag)
+            }
+            return out.toArray()
+        }
+
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
         w.writeName("success").writeValue(true)
         w.writeName("data")
         w.startObject()
-        w.writeName("archives")
+        w.writeName("type").writeValue(1)
+        // This fallback payload is for member archive patches only.
+        // Do not emit empty top-level fields, otherwise callback parser
+        // treats them as provided and clears Tankoubon title/description/tags/assets.
+        w.writeName("archive")
         w.startArray()
         for (patch in patches) {
             w.startObject()
             if (patch.archiveId.trimAscii().size > 0) { w.writeName("archive_id").writeValue(patch.archiveId.trimAscii()) }
             if (patch.volumeNo > 0) { w.writeName("volume_no").writeValue(patch.volumeNo) }
             if (patch.title.trimAscii().size > 0) { w.writeName("title").writeValue(patch.title.trimAscii()) }
-            if (patch.summary.trimAscii().size > 0) { w.writeName("summary").writeValue(patch.summary) }
-            if (patch.tags.trimAscii().size > 0) { w.writeName("tags").writeValue(patch.tags.trimAscii()) }
+            w.writeName("type").writeValue(0)
+            w.writeName("description").writeValue(patch.summary)
+            w.writeName("tags")
+            w.startArray()
+            for (tag in splitTagsToArray(patch.tags)) {
+                w.writeValue(tag)
+            }
+            w.endArray()
             if (patch.updatedAt.trimAscii().size > 0) { w.writeName("updated_at").writeValue(patch.updatedAt.trimAscii()) }
-            if (patch.cover.trimAscii().size > 0) { w.writeName("cover").writeValue(patch.cover.trimAscii()) }
+            w.writeName("assets")
+            w.startArray()
+            if (patch.cover.trimAscii().size > 0) {
+                w.startObject()
+                w.writeName("key").writeValue("cover")
+                w.writeName("value").writeValue(patch.cover.trimAscii())
+                w.endObject()
+            }
+            if (patch.backdrop.trimAscii().size > 0) {
+                w.startObject()
+                w.writeName("key").writeValue("backdrop")
+                w.writeName("value").writeValue(patch.backdrop.trimAscii())
+                w.endObject()
+            }
+            if (patch.clearlogo.trimAscii().size > 0) {
+                w.startObject()
+                w.writeName("key").writeValue("clearlogo")
+                w.writeName("value").writeValue(patch.clearlogo.trimAscii())
+                w.endObject()
+            }
+            w.endArray()
+            w.writeName("archive")
+            w.startArray()
+            w.endArray()
             w.endObject()
         }
         w.endArray()

@@ -18,6 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { logger } from '@/lib/utils/logger';
 import { useMounted } from '@/hooks/common-hooks';
+import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
@@ -175,6 +176,11 @@ export function ArchiveDetailContent() {
   const [editSummary, setEditSummary] = useState('');
   const [editTags, setEditTags] = useState<string[]>([]);
   const [editCover, setEditCover] = useState('');
+  const [editBackdrop, setEditBackdrop] = useState('');
+  const [editClearlogo, setEditClearlogo] = useState('');
+  const [editAssetCoverId, setEditAssetCoverId] = useState('');
+  const [editAssetBackdropId, setEditAssetBackdropId] = useState('');
+  const [editAssetClearlogoId, setEditAssetClearlogoId] = useState('');
 
   const [metadataPlugins, setMetadataPlugins] = useState<Plugin[]>([]);
   const [selectedMetadataPlugin, setSelectedMetadataPlugin] = useState<string>('');
@@ -237,6 +243,11 @@ export function ArchiveDetailContent() {
     setEditSummary(metadata.summary || '');
     setEditTags(tags.map(toCanonicalTag));
     setEditCover('');
+    setEditBackdrop('');
+    setEditClearlogo('');
+    setEditAssetCoverId(String(getArchiveAssetId(metadata, 'cover') || ''));
+    setEditAssetBackdropId(String(getArchiveAssetId(metadata, 'backdrop') || ''));
+    setEditAssetClearlogoId(String(getArchiveAssetId(metadata, 'clearlogo') || ''));
   }, [metadata, tags, toCanonicalTag]);
 
   const openEditDialog = useCallback(() => {
@@ -249,9 +260,28 @@ export function ArchiveDetailContent() {
     setIsSaving(true);
     try {
       const canonicalTags = editTags.map((t) => toCanonicalTag(t));
+      const parseAssetId = (raw: string): number | undefined => {
+        const value = Number(String(raw || '').trim());
+        if (!Number.isFinite(value)) return undefined;
+        const id = Math.trunc(value);
+        return id > 0 ? id : undefined;
+      };
+      const assets = {
+        cover: parseAssetId(editAssetCoverId),
+        backdrop: parseAssetId(editAssetBackdropId),
+        clearlogo: parseAssetId(editAssetClearlogoId),
+      };
       await ArchiveService.updateMetadata(
         metadata.arcid,
-        { title: editTitle, summary: editSummary, tags: canonicalTags.join(', '), cover: editCover || undefined },
+        {
+          title: editTitle,
+          summary: editSummary,
+          tags: canonicalTags.join(', '),
+          cover: editCover || undefined,
+          backdrop: editBackdrop || undefined,
+          clearlogo: editClearlogo || undefined,
+          assets,
+        },
         language,
         { metadataNamespace: selectedMetadataPlugin || undefined }
       );
@@ -263,7 +293,7 @@ export function ArchiveDetailContent() {
     } finally {
       setIsSaving(false);
     }
-  }, [editCover, editSummary, editTags, editTitle, language, metadata, refetch, selectedMetadataPlugin, showError, t, toCanonicalTag]);
+  }, [editAssetBackdropId, editAssetClearlogoId, editAssetCoverId, editBackdrop, editClearlogo, editCover, editSummary, editTags, editTitle, language, metadata, refetch, selectedMetadataPlugin, showError, t, toCanonicalTag]);
 
   const submitRpcSelect = useCallback(async () => {
     if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return;
@@ -321,7 +351,19 @@ export function ArchiveDetailContent() {
     setRpcSelectRemainingSeconds(null);
 
     try {
-      const metadataTags = editTags.map((tag) => toCanonicalTag(tag)).join(', ');
+      const metadataTags = editTags.map((tag) => toCanonicalTag(tag)).filter(Boolean);
+      const toAssetValue = (pathValue: string, assetId: string): string => {
+        const path = pathValue.trim();
+        if (path) return path;
+        const id = assetId.trim();
+        if (/^\d+$/.test(id)) return id;
+        return '';
+      };
+      const rootAssets = [
+        { key: 'cover', value: toAssetValue(editCover, editAssetCoverId) },
+        { key: 'backdrop', value: toAssetValue(editBackdrop, editAssetBackdropId) },
+        { key: 'clearlogo', value: toAssetValue(editClearlogo, editAssetClearlogoId) },
+      ].filter((item) => item.value);
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         'archive',
         metadata.arcid,
@@ -352,8 +394,11 @@ export function ArchiveDetailContent() {
           writeBack: false,
           metadata: {
             title: editTitle,
-            summary: editSummary,
+            type: 0,
+            description: editSummary,
             tags: metadataTags,
+            assets: rootAssets,
+            archive: [],
           },
         }
       );
@@ -375,23 +420,52 @@ export function ArchiveDetailContent() {
         }
 
         const data = out?.data || {};
+        const readAssetValue = (assets: unknown, key: string): string => {
+          if (!Array.isArray(assets)) return '';
+          for (const item of assets) {
+            if (!item || typeof item !== 'object') continue;
+            const row = item as Record<string, unknown>;
+            const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
+            if (itemKey !== key) continue;
+            const value = row.value;
+            if (typeof value === 'string') return value.trim();
+            if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value));
+            return '';
+          }
+          return '';
+        };
         const nextTitle = typeof data.title === 'string' ? data.title : '';
-        const nextSummary = typeof data.summary === 'string' ? data.summary : '';
-        const nextTags = typeof data.tags === 'string' ? data.tags : '';
-        const nextCover = typeof data.cover === 'string' ? data.cover : '';
+        const nextSummary = typeof data.description === 'string' ? data.description : '';
+        const nextTags = Array.isArray(data.tags)
+          ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
+          : [];
+        const nextCover = readAssetValue(data.assets, 'cover');
+        const nextBackdrop = readAssetValue(data.assets, 'backdrop');
+        const nextClearlogo = readAssetValue(data.assets, 'clearlogo');
+        const applyAssetPreview = (
+          rawValue: string,
+          setPathValue: (next: string) => void,
+          setAssetIdValue: (next: string) => void
+        ) => {
+          const trimmed = rawValue.trim();
+          if (!trimmed) return;
+          if (/^\d+$/.test(trimmed)) {
+            const id = Number.parseInt(trimmed, 10);
+            if (Number.isFinite(id) && id > 0) {
+              setAssetIdValue(String(id));
+              setPathValue('');
+              return;
+            }
+          }
+          setPathValue(trimmed);
+        };
 
         if (nextTitle.trim()) setEditTitle(nextTitle.trim());
-        if (nextSummary.trim()) setEditSummary(nextSummary.trim());
-        if (nextTags.trim()) {
-          setEditTags(
-            nextTags
-              .split(',')
-              .map((tag: string) => tag.trim())
-              .filter((tag: string) => tag)
-              .map((tag: string) => toCanonicalTag(tag))
-          );
-        }
-        if (nextCover.trim()) setEditCover(nextCover.trim());
+        setEditSummary(nextSummary);
+        setEditTags(nextTags.map((tag: string) => toCanonicalTag(tag)));
+        applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId);
+        applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId);
+        applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId);
         setEditDialogOpen(true);
       } catch {
         // If output isn't JSON, still mark as completed and let user view logs/result.
@@ -408,7 +482,7 @@ export function ArchiveDetailContent() {
       setRpcSelectSelectedIndex(null);
       setRpcSelectRemainingSeconds(null);
     }
-  }, [editSummary, editTags, editTitle, isAuthenticated, metadata, metadataPluginParam, selectedMetadataPlugin, showError, t, toCanonicalTag]);
+  }, [editAssetBackdropId, editAssetClearlogoId, editAssetCoverId, editBackdrop, editClearlogo, editCover, editSummary, editTags, editTitle, isAuthenticated, metadata, metadataPluginParam, selectedMetadataPlugin, showError, t, toCanonicalTag]);
 
   const [isNewStatusLoading, setIsNewStatusLoading] = useState(false);
   const handleMarkAsRead = useCallback(async () => {
@@ -498,6 +572,8 @@ export function ArchiveDetailContent() {
     );
   }
 
+  const coverAssetId = getArchiveAssetId(metadata, 'cover');
+
   return (
     <div className="min-h-dvh bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
       {/* Reserve space for the fixed mobile action bar (includes safe-area inset). */}
@@ -510,9 +586,9 @@ export function ArchiveDetailContent() {
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">
                     <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
-                      {metadata.cover_asset_id ? (
+                      {coverAssetId ? (
                         <Image
-                          src={`/api/assets/${metadata.cover_asset_id}`}
+                          src={`/api/assets/${coverAssetId}`}
                           alt={metadata.title || ''}
                           fill
                           className="object-cover"
@@ -703,6 +779,12 @@ export function ArchiveDetailContent() {
             onTitleChange={setEditTitle}
             summary={editSummary}
             onSummaryChange={setEditSummary}
+            assetCoverId={editAssetCoverId}
+            onAssetCoverIdChange={setEditAssetCoverId}
+            assetBackdropId={editAssetBackdropId}
+            onAssetBackdropIdChange={setEditAssetBackdropId}
+            assetClearlogoId={editAssetClearlogoId}
+            onAssetClearlogoIdChange={setEditAssetClearlogoId}
             tags={editTags}
             onTagsChange={setEditTags}
             isSaving={isSaving}

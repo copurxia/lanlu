@@ -1,6 +1,7 @@
 import { Archive } from '@/types/archive';
 import { BaseMediaCard } from '@/components/ui/base-media-card';
 import { FavoriteService } from '@/lib/services/favorite-service';
+import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 
 interface ArchiveCardProps {
   archive: Archive;
@@ -15,6 +16,8 @@ export function ArchiveCard({
   priority = false,
   disableContentVisibility = false,
 }: ArchiveCardProps) {
+  const coverAssetId = getArchiveAssetId(archive, 'cover');
+
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
     return await FavoriteService.toggleFavorite(id, isFavorite);
   };
@@ -24,7 +27,7 @@ export function ArchiveCard({
       id={archive.arcid}
       title={archive.title}
       thumbnailId={archive.arcid}
-      thumbnailAssetId={archive.cover_asset_id}
+      thumbnailAssetId={coverAssetId}
       tags={archive.tags}
       summary={archive.summary}
       pagecount={archive.pagecount}

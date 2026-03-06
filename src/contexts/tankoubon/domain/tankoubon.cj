@@ -14,6 +14,7 @@ public class Tankoubon {
     public var tags: String
     public var archives: Array<String>
     public var cover_asset_id: Int64 = 0
+    public var assets_raw: String = "{}"
 
     // 聚合字段（用于搜索结果显示）
     public var pagecount: Int32 = 0
@@ -35,12 +36,15 @@ public class Tankoubon {
      * 转换为JSON字符串
      */
     public func writeJson(w: JsonWriter): Unit {
+        let rawAssets = assets_raw.trimAscii()
+        let normalizedAssets = if (rawAssets.size > 0) { rawAssets } else { "{}" }
         w.startObject()
         w.writeName("tankoubon_id").writeValue(id)
         w.writeName("name").writeValue(name)
         w.writeName("summary").writeValue(summary)
         w.writeName("tags").writeValue(tags)
         w.writeName("cover_asset_id").writeValue(cover_asset_id)
+        w.writeName("assets").jsonValue(normalizedAssets)
         w.writeName("archives")
         w.startArray()
         for (archive in archives) {
@@ -68,6 +72,8 @@ public class Tankoubon {
      * 转换为带聚合数据的JSON字符串（用于搜索结果）
      */
     public func toAggregatedJson(): String {
+        let rawAssets = assets_raw.trimAscii()
+        let normalizedAssets = if (rawAssets.size > 0) { rawAssets } else { "{}" }
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -76,6 +82,7 @@ public class Tankoubon {
         w.writeName("summary").writeValue(summary)
         w.writeName("tags").writeValue(tags)
         w.writeName("cover_asset_id").writeValue(cover_asset_id)
+        w.writeName("assets").jsonValue(normalizedAssets)
         w.writeName("pagecount").writeValue(pagecount)
         w.writeName("progress").writeValue(progress)
         w.writeName("lastreadtime").writeValue(last_read_time)
@@ -102,6 +109,7 @@ public class TankoubonModel {
         for (data in daoData) {
             let t = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
             t.cover_asset_id = data.cover_asset_id
+            t.assets_raw = data.assets_raw
             tankoubons.add(t)
         }
 
@@ -117,6 +125,7 @@ public class TankoubonModel {
         for (data in daoData) {
             let t = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
             t.cover_asset_id = data.cover_asset_id
+            t.assets_raw = data.assets_raw
             applyAggregatedMetadata(t, userId)
             tankoubons.add(t)
         }
@@ -177,6 +186,7 @@ public class TankoubonModel {
     private static func buildTankoubonFromData(data: TankoubonData): Tankoubon {
         let tankoubon = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
         tankoubon.cover_asset_id = data.cover_asset_id
+        tankoubon.assets_raw = data.assets_raw
         let (archiveCount, totalPages) = TankoubonDao.getTankoubonArchiveStats(data.tankoubon_id)
         tankoubon.archive_count = archiveCount
         tankoubon.pagecount = totalPages
@@ -192,6 +202,7 @@ public class TankoubonModel {
                 if (agg.cover_asset_id > 0) {
                     tankoubon.cover_asset_id = agg.cover_asset_id
                 }
+                tankoubon.assets_raw = agg.assets_raw
                 tankoubon.pagecount = agg.pagecount
                 tankoubon.archive_count = agg.archive_count
                 tankoubon.progress = agg.progress
@@ -210,6 +221,7 @@ public class TankoubonModel {
             case Some(aggData) =>
                 let tankoubon = Tankoubon(aggData.tankoubon_id, aggData.name, aggData.summary, aggData.tags, [])
                 tankoubon.cover_asset_id = aggData.cover_asset_id
+                tankoubon.assets_raw = aggData.assets_raw
                 tankoubon.pagecount = aggData.pagecount
                 tankoubon.progress = aggData.progress
                 tankoubon.last_read_time = aggData.last_read_time

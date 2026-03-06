@@ -41,6 +41,7 @@ import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
+import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
@@ -90,6 +91,7 @@ type ArchiveListItemProps = {
 function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps) {
   const router = useRouter();
   const { t } = useLanguage();
+  const coverAssetId = getArchiveAssetId(archive, 'cover');
   const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const parsedTags = useMemo(() => parseTags(archive.tags).map(stripNamespace).slice(0, 8), [archive.tags]);
@@ -171,9 +173,9 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
 
       <div className="flex gap-3 sm:gap-4">
         <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
-          {archive.cover_asset_id ? (
+          {coverAssetId ? (
             <Image
-              src={`/api/assets/${archive.cover_asset_id}`}
+              src={`/api/assets/${coverAssetId}`}
               alt={archive.title}
               fill
               className="object-cover"
@@ -239,6 +241,11 @@ function TankoubonDetailContent() {
   const [editSummary, setEditSummary] = useState('');
   const [editTags, setEditTags] = useState<string[]>([]);
   const [editCover, setEditCover] = useState('');
+  const [editBackdrop, setEditBackdrop] = useState('');
+  const [editClearlogo, setEditClearlogo] = useState('');
+  const [editAssetCoverId, setEditAssetCoverId] = useState('');
+  const [editAssetBackdropId, setEditAssetBackdropId] = useState('');
+  const [editAssetClearlogoId, setEditAssetClearlogoId] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Metadata plugin state (preview mode: fill edit form without DB write-back)
@@ -282,6 +289,8 @@ function TankoubonDetailContent() {
     tags?: string;
     updated_at?: string;
     cover?: string;
+    backdrop?: string;
+    clearlogo?: string;
   }>>([]);
 
   // Delete dialog state
@@ -369,6 +378,11 @@ function TankoubonDetailContent() {
           .filter((tag) => tag)
       );
       setEditCover('');
+      setEditBackdrop('');
+      setEditClearlogo('');
+      setEditAssetCoverId(String(data.assets?.cover || ''));
+      setEditAssetBackdropId(String(data.assets?.backdrop || ''));
+      setEditAssetClearlogoId(String(data.assets?.clearlogo || ''));
     } catch (error) {
       logger.apiError('fetch tankoubon', error);
     } finally {
@@ -491,11 +505,24 @@ function TankoubonDetailContent() {
 
     try {
       setSaving(true);
+      const parseAssetId = (raw: string): number | undefined => {
+        const value = Number(String(raw || '').trim());
+        if (!Number.isFinite(value)) return undefined;
+        const id = Math.trunc(value);
+        return id > 0 ? id : undefined;
+      };
       await TankoubonService.updateTankoubon(tankoubon.tankoubon_id, {
         name: editName,
         summary: editSummary,
         tags: editTags.join(', '),
         cover: editCover || undefined,
+        backdrop: editBackdrop || undefined,
+        clearlogo: editClearlogo || undefined,
+        assets: {
+          cover: parseAssetId(editAssetCoverId),
+          backdrop: parseAssetId(editAssetBackdropId),
+          clearlogo: parseAssetId(editAssetClearlogoId),
+        },
         metadata_namespace: selectedMetadataPlugin || undefined,
         archives: metadataArchivePatches,
       });
@@ -582,7 +609,40 @@ function TankoubonDetailContent() {
     setRpcSelectRemainingSeconds(null);
 
     try {
-      const metadataTags = editTags.join(', ');
+      const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean);
+      const toAssetValue = (pathValue: string, assetId: string): string => {
+        const path = pathValue.trim();
+        if (path) return path;
+        const id = assetId.trim();
+        if (/^\d+$/.test(id)) return id;
+        return '';
+      };
+      const rootAssets = [
+        { key: 'cover', value: toAssetValue(editCover, editAssetCoverId) },
+        { key: 'backdrop', value: toAssetValue(editBackdrop, editAssetBackdropId) },
+        { key: 'clearlogo', value: toAssetValue(editClearlogo, editAssetClearlogoId) },
+      ].filter((item) => item.value);
+      const archiveMembers = metadataArchivePatches.map((item) => {
+        const memberAssets = [
+          { key: 'cover', value: String(item.cover || '').trim() },
+          { key: 'backdrop', value: String(item.backdrop || '').trim() },
+          { key: 'clearlogo', value: String(item.clearlogo || '').trim() },
+        ].filter((asset) => asset.value);
+        return {
+          title: item.title || '',
+          type: 0,
+          description: item.summary || '',
+          tags: String(item.tags || '')
+            .split(',')
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+          assets: memberAssets,
+          archive: [],
+          archive_id: item.archive_id,
+          volume_no: item.volume_no,
+          updated_at: item.updated_at,
+        };
+      });
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         'tankoubon',
         tankoubon.tankoubon_id,
@@ -612,8 +672,11 @@ function TankoubonDetailContent() {
           writeBack: false,
           metadata: {
             title: editName,
-            summary: editSummary,
+            type: 1,
+            description: editSummary,
             tags: metadataTags,
+            assets: rootAssets,
+            archive: archiveMembers,
           },
         }
       );
@@ -635,23 +698,53 @@ function TankoubonDetailContent() {
         }
 
         const data = out?.data || {};
+        const readAssetValue = (assets: unknown, key: string): string => {
+          if (!Array.isArray(assets)) return '';
+          for (const item of assets) {
+            if (!item || typeof item !== 'object') continue;
+            const row = item as Record<string, unknown>;
+            const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
+            if (itemKey !== key) continue;
+            const value = row.value;
+            if (typeof value === 'string') return value.trim();
+            if (typeof value === 'number' && Number.isFinite(value)) return String(Math.trunc(value));
+            return '';
+          }
+          return '';
+        };
         const nextTitle = typeof data.title === 'string' ? data.title : '';
-        const nextSummary = typeof data.summary === 'string' ? data.summary : '';
-        const nextTags = typeof data.tags === 'string' ? data.tags : '';
-        const nextCover = typeof data.cover === 'string' ? data.cover : '';
-        const nextArchives = Array.isArray(data.archives) ? data.archives : [];
+        const nextSummary = typeof data.description === 'string' ? data.description : '';
+        const nextTags = Array.isArray(data.tags)
+          ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
+          : [];
+        const nextCover = readAssetValue(data.assets, 'cover');
+        const nextBackdrop = readAssetValue(data.assets, 'backdrop');
+        const nextClearlogo = readAssetValue(data.assets, 'clearlogo');
+        const nextArchives = Array.isArray(data.archive) ? data.archive : [];
+        const applyAssetPreview = (
+          rawValue: string,
+          setPathValue: (next: string) => void,
+          setAssetIdValue: (next: string) => void
+        ) => {
+          const trimmed = rawValue.trim();
+          if (!trimmed) return;
+          if (/^\d+$/.test(trimmed)) {
+            const id = Number.parseInt(trimmed, 10);
+            if (Number.isFinite(id) && id > 0) {
+              setAssetIdValue(String(id));
+              setPathValue('');
+              return;
+            }
+          }
+          setPathValue(trimmed);
+        };
 
         if (nextTitle.trim()) setEditName(nextTitle);
-        if (nextSummary.trim()) setEditSummary(nextSummary);
-        if (nextTags.trim()) {
-          setEditTags(
-            nextTags
-              .split(',')
-              .map((tag: string) => tag.trim())
-              .filter((tag: string) => tag)
-          );
-        }
-        if (nextCover.trim()) setEditCover(nextCover.trim());
+        setEditSummary(nextSummary);
+        setEditTags(nextTags);
+        applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId);
+        applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId);
+        applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId);
 
         setMetadataArchivePatches(
           nextArchives
@@ -659,10 +752,14 @@ function TankoubonDetailContent() {
               archive_id: typeof item?.archive_id === 'string' ? item.archive_id : undefined,
               volume_no: typeof item?.volume_no === 'number' ? item.volume_no : undefined,
               title: typeof item?.title === 'string' ? item.title : undefined,
-              summary: typeof item?.summary === 'string' ? item.summary : undefined,
-              tags: typeof item?.tags === 'string' ? item.tags : undefined,
+              summary: typeof item?.description === 'string' ? item.description : undefined,
+              tags: Array.isArray(item?.tags)
+                ? item.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean).join(', ')
+                : undefined,
               updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
-              cover: typeof item?.cover === 'string' ? item.cover : undefined,
+              cover: readAssetValue(item?.assets, 'cover') || undefined,
+              backdrop: readAssetValue(item?.assets, 'backdrop') || undefined,
+              clearlogo: readAssetValue(item?.assets, 'clearlogo') || undefined,
             }))
             .filter((item: any) => item.archive_id || item.volume_no)
         );
@@ -681,7 +778,22 @@ function TankoubonDetailContent() {
       setRpcSelectSelectedIndex(null);
       setRpcSelectRemainingSeconds(null);
     }
-  }, [editName, editSummary, editTags, tankoubon, selectedMetadataPlugin, metadataPluginParam, t]);
+  }, [
+    editName,
+    editSummary,
+    editTags,
+    editCover,
+    editBackdrop,
+    editClearlogo,
+    editAssetCoverId,
+    editAssetBackdropId,
+    editAssetClearlogoId,
+    metadataArchivePatches,
+    tankoubon,
+    selectedMetadataPlugin,
+    metadataPluginParam,
+    t,
+  ]);
 
   // Handle delete
   const handleDelete = async () => {
@@ -830,8 +942,11 @@ function TankoubonDetailContent() {
     totalPages > 0 && totalProgress > 0
       ? Math.max(0, Math.min(100, Math.round((totalProgress / totalPages) * 100)))
       : 0;
-  const coverUrl = typeof tankoubon.cover_asset_id === 'number' && tankoubon.cover_asset_id > 0
-    ? `/api/assets/${tankoubon.cover_asset_id}`
+  const coverAssetId = typeof tankoubon.assets?.cover === 'number' && Number.isFinite(tankoubon.assets.cover) && tankoubon.assets.cover > 0
+    ? Math.trunc(tankoubon.assets.cover)
+    : 0;
+  const coverUrl = coverAssetId > 0
+    ? `/api/assets/${coverAssetId}`
     : '';
 
   return (
@@ -1186,6 +1301,29 @@ function TankoubonDetailContent() {
                     placeholder={t('tankoubon.summaryPlaceholder')}
                     rows={3}
                   />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t('archive.assets')}</label>
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                    <Input
+                      value={editAssetCoverId}
+                      onChange={(e) => setEditAssetCoverId(e.target.value)}
+                      disabled={saving}
+                      placeholder={t('archive.assetsCoverPlaceholder')}
+                    />
+                    <Input
+                      value={editAssetBackdropId}
+                      onChange={(e) => setEditAssetBackdropId(e.target.value)}
+                      disabled={saving}
+                      placeholder={t('archive.assetsBackdropPlaceholder')}
+                    />
+                    <Input
+                      value={editAssetClearlogoId}
+                      onChange={(e) => setEditAssetClearlogoId(e.target.value)}
+                      disabled={saving}
+                      placeholder={t('archive.assetsClearlogoPlaceholder')}
+                    />
+                  </div>
                 </div>
                 <div>
                   <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>

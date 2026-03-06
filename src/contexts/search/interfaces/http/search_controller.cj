@@ -18,6 +18,11 @@ import stdx.encoding.json.stream.*
  * 搜索控制器
  */
 public class SearchController {
+    private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
+        let raw = assetsRaw.trimAscii()
+        let normalized = if (raw.size > 0) { raw } else { "{}" }
+        w.writeName("assets").jsonValue(normalized)
+    }
 
     /**
      * 从逗号分隔的 tags 字符串中提取并去重标签（namespace:name），用于批量翻译。
@@ -159,6 +164,7 @@ public class SearchController {
                         w.writeName("name").writeValue(agg.name)
                         w.writeName("summary").writeValue(agg.summary)
                         w.writeName("cover_asset_id").writeValue(agg.cover_asset_id)
+                        writeArchiveAssetsJson(w, agg.assets_raw)
                         w.writeName("tags").writeValue(translatedTags)
                         w.writeName("archives")
                         w.startArray()
@@ -264,6 +270,14 @@ public class SearchController {
             }
         }
 
+        let archiveIdsForAssets = ArrayList<String>()
+        for (archive in archives) {
+            if (archive.id.size > 0) {
+                archiveIdsForAssets.add(archive.id)
+            }
+        }
+        let archiveAssetsMap = ArchiveDao.getBatchArchiveAssetsRaw(archiveIdsForAssets.toArray())
+
         // 批量获取当前页 Tankoubon 聚合数据 / 收藏信息。
         let tankoubonDataCache = TankoubonDao.getBatchAggregatedMetadata(tankoubonIdsList.toArray(), userId)
         let tankFavoriteMap = UserTankoubonFavoriteDao.getBatchFavoriteStatus(userId, tankoubonIdsList.toArray())
@@ -345,6 +359,7 @@ public class SearchController {
                         w.writeName("name").writeValue(tankoubon.name)
                         w.writeName("summary").writeValue(tankoubon.summary)
                         w.writeName("cover_asset_id").writeValue(tankoubon.cover_asset_id)
+                        writeArchiveAssetsJson(w, tankoubon.assets_raw)
                         w.writeName("tags").writeValue(translatedTankTags)
                         w.writeName("archives")
                         w.startArray()
@@ -422,7 +437,11 @@ public class SearchController {
                     w.writeName("pagecount").writeValue(archive.pagecount)
                     w.writeName("progress").writeValue(progress)
                     w.writeName("size").writeValue(archive.size())
-                    w.writeName("cover_asset_id").writeValue(archive.cover_asset_id)
+                    let assetsRaw = match (archiveAssetsMap.get(archive.id)) {
+                        case Some(raw) => raw
+                        case None => "{}"
+                    }
+                    writeArchiveAssetsJson(w, assetsRaw)
                     w.writeName("summary").writeValue(archive.summary)
                     w.writeName("tags").writeValue(translatedArchiveTags)
                     w.writeName("title").writeValue(archive.title)
@@ -548,6 +567,14 @@ public class SearchController {
             }
         }
 
+        let randomArchiveIdsForAssets = ArrayList<String>()
+        for (archive in archives) {
+            if (archive.id.size > 0) {
+                randomArchiveIdsForAssets.add(archive.id)
+            }
+        }
+        let randomArchiveAssetsMap = ArchiveDao.getBatchArchiveAssetsRaw(randomArchiveIdsForAssets.toArray())
+
         // 批量获取当前页 Tankoubon 聚合数据 / 收藏信息。
         let tankoubonDataCache = TankoubonDao.getBatchAggregatedMetadata(tankoubonIdsList.toArray(), userId)
         let tankFavoriteMap = UserTankoubonFavoriteDao.getBatchFavoriteStatus(userId, tankoubonIdsList.toArray())
@@ -629,6 +656,7 @@ public class SearchController {
                         w.writeName("name").writeValue(tankoubon.name)
                         w.writeName("summary").writeValue(tankoubon.summary)
                         w.writeName("cover_asset_id").writeValue(tankoubon.cover_asset_id)
+                        writeArchiveAssetsJson(w, tankoubon.assets_raw)
                         w.writeName("tags").writeValue(translatedTankTags)
                         w.writeName("archives")
                         w.startArray()
@@ -706,7 +734,11 @@ public class SearchController {
                     w.writeName("pagecount").writeValue(archive.pagecount)
                     w.writeName("progress").writeValue(progress)
                     w.writeName("size").writeValue(archive.size())
-                    w.writeName("cover_asset_id").writeValue(archive.cover_asset_id)
+                    let assetsRaw = match (randomArchiveAssetsMap.get(archive.id)) {
+                        case Some(raw) => raw
+                        case None => "{}"
+                    }
+                    writeArchiveAssetsJson(w, assetsRaw)
                     w.writeName("summary").writeValue(archive.summary)
                     w.writeName("tags").writeValue(translatedRandomTags)
                     w.writeName("title").writeValue(archive.title)

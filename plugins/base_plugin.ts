@@ -57,16 +57,32 @@ export interface HostSelectOption {
 export interface HostSelectResult {
   index: number;
 }
+
+export interface MetadataAssetItem {
+  key: string;
+  value: string;
+}
+
+export interface MetadataObject {
+  title: string;
+  type: number;
+  description: string;
+  tags: string[];
+  assets: MetadataAssetItem[];
+  archive: MetadataObject[];
+  archive_id?: string;
+  volume_no?: number;
+  [key: string]: unknown;
+}
+
 export interface PluginInput {
   action: 'plugin_info' | 'run';
   pluginType: string;
   pluginDir?: string;  // 插件工作目录，由系统传入
-  archiveId?: string;
-  archiveTitle?: string;
-  archiveSummary?: string;
-  existingTags?: string;
-  thumbnailHash?: string;
+  targetType?: string;
+  targetId?: string;
   oneshotParam?: string;
+  metadata?: MetadataObject;
   params?: Record<string, any>;
   loginCookies?: Array<{ name: string; value: string; domain?: string; path?: string }>;
   url?: string;
@@ -266,6 +282,63 @@ export abstract class BasePlugin {
     this.outputResult({ success: false, error: message });
   }
 
+  protected readMetadataObject(input: PluginInput): MetadataObject {
+    return this.normalizeMetadataObject(input?.metadata);
+  }
+
+  protected cloneMetadataObject(metadata: MetadataObject): MetadataObject {
+    return this.normalizeMetadataObject(metadata);
+  }
+
+  protected metadataTagsFromCsv(raw: string): string[] {
+    if (!raw) return [];
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const token of raw.split(',')) {
+      const tag = String(token || '').trim();
+      if (!tag || seen.has(tag)) continue;
+      seen.add(tag);
+      out.push(tag);
+    }
+    return out;
+  }
+
+  protected metadataTagsToCsv(tags: string[]): string {
+    return this.normalizeMetadataTags(tags).join(', ');
+  }
+
+  protected metadataGetAssetValue(
+    assets: MetadataAssetItem[] | undefined,
+    key: string,
+  ): string {
+    const wanted = String(key || '').trim().toLowerCase();
+    if (!wanted || !Array.isArray(assets)) return '';
+    for (const item of assets) {
+      const itemKey = String(item?.key || '').trim().toLowerCase();
+      if (itemKey !== wanted) continue;
+      const value = String(item?.value || '').trim();
+      if (value) return value;
+    }
+    return '';
+  }
+
+  protected metadataSetAssetValue(
+    assets: MetadataAssetItem[] | undefined,
+    key: string,
+    value: unknown,
+  ): MetadataAssetItem[] {
+    const normalized = this.normalizeMetadataAssets(assets);
+    const wanted = String(key || '').trim().toLowerCase();
+    if (!wanted) return normalized;
+
+    const valueStr = this.normalizeAssetValue(value);
+    const next = normalized.filter((item) => String(item.key || '').trim().toLowerCase() !== wanted);
+    if (valueStr) {
+      next.push({ key: wanted, value: valueStr });
+    }
+    return next;
+  }
+
   /**
    * 获取参数（从 input 中提取并进行类型转换）
    */
@@ -330,6 +403,119 @@ export abstract class BasePlugin {
     } catch {
       return '"<unserializable>"';
     }
+  }
+
+  private normalizeMetadataObject(raw: unknown): MetadataObject {
+    const source = (raw && typeof raw === 'object' && !Array.isArray(raw))
+      ? (raw as Record<string, unknown>)
+      : {};
+
+    const result: MetadataObject = {
+      title: this.readStringField(source.title),
+      type: this.readIntField(source.type, 0),
+      description: this.readStringField(source.description),
+      tags: this.normalizeMetadataTags(source.tags),
+      assets: this.normalizeMetadataAssets(source.assets),
+      archive: [],
+    };
+
+    const rawArchive = Array.isArray(source.archive) ? source.archive : [];
+    result.archive = rawArchive.map((item) => this.normalizeMetadataObject(item));
+
+    const archiveId = this.readStringField((source as Record<string, unknown>).archive_id);
+    if (archiveId) {
+      result.archive_id = archiveId;
+    }
+    const volumeNo = this.readIntField((source as Record<string, unknown>).volume_no, 0);
+    if (volumeNo > 0) {
+      result.volume_no = volumeNo;
+    }
+
+    for (const [key, value] of Object.entries(source)) {
+      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'archive_id' || key === 'volume_no') {
+        continue;
+      }
+      result[key] = value;
+    }
+
+    return result;
+  }
+
+  private normalizeMetadataTags(raw: unknown): string[] {
+    if (Array.isArray(raw)) {
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const item of raw) {
+        const tag = String(item || '').trim();
+        if (!tag || seen.has(tag)) continue;
+        seen.add(tag);
+        out.push(tag);
+      }
+      return out;
+    }
+    if (typeof raw === 'string') {
+      return this.metadataTagsFromCsv(raw);
+    }
+    return [];
+  }
+
+  private normalizeMetadataAssets(raw: unknown): MetadataAssetItem[] {
+    const out: MetadataAssetItem[] = [];
+    const pushItem = (keyRaw: unknown, valueRaw: unknown) => {
+      const key = String(keyRaw || '').trim().toLowerCase();
+      const value = this.normalizeAssetValue(valueRaw);
+      if (!key || !value) return;
+      out.push({ key, value });
+    };
+
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+        const row = item as Record<string, unknown>;
+        pushItem(row.key ?? row.name ?? row.type, row.value ?? row.path ?? row.id ?? row.asset_id ?? row.assetId);
+      }
+    } else if (raw && typeof raw === 'object') {
+      for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        pushItem(key, value);
+      }
+    }
+
+    const deduped: MetadataAssetItem[] = [];
+    const seen = new Set<string>();
+    for (const item of out) {
+      const key = item.key.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push({ key, value: item.value });
+    }
+    return deduped;
+  }
+
+  private normalizeAssetValue(raw: unknown): string {
+    if (raw === null || raw === undefined) return '';
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return String(Math.trunc(raw));
+    }
+    if (typeof raw === 'bigint') {
+      return String(raw);
+    }
+    return String(raw).trim();
+  }
+
+  private readStringField(raw: unknown): string {
+    if (typeof raw === 'string') return raw;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return String(raw);
+    if (typeof raw === 'bigint') return String(raw);
+    return '';
+  }
+
+  private readIntField(raw: unknown, fallback: number): number {
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return Math.trunc(raw);
+    }
+    const parsed = Number.parseInt(String(raw ?? '').trim(), 10);
+    if (Number.isNaN(parsed)) return fallback;
+    return parsed;
   }
 }
 

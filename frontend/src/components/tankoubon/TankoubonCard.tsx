@@ -18,6 +18,9 @@ export function TankoubonCard({
 }: TankoubonCardProps) {
   const { t } = useLanguage();
   const firstArchiveId = tankoubon.archives?.[0];
+  const coverAssetId = typeof tankoubon.assets?.cover === 'number' && Number.isFinite(tankoubon.assets.cover) && tankoubon.assets.cover > 0
+    ? Math.trunc(tankoubon.assets.cover)
+    : 0;
 
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
     return await FavoriteService.toggleTankoubonFavorite(id, isFavorite);
@@ -28,7 +31,7 @@ export function TankoubonCard({
       id={tankoubon.tankoubon_id}
       title={tankoubon.name}
       thumbnailId={firstArchiveId || ''}
-      thumbnailAssetId={tankoubon.cover_asset_id}
+      thumbnailAssetId={coverAssetId}
       tags={tankoubon.tags}
       summary={tankoubon.summary}
       pagecount={tankoubon.pagecount || 0}

@@ -17,6 +17,7 @@ public class TankoubonData {
     public var name: String = ""
     public var summary: String = ""
     public var cover_asset_id: Int64 = 0
+    public var assets_raw: String = "{}"
     public var auto_created: Bool = false
     public var source_category_id: Int64 = 0
     public var source_relative_path: String = ""
@@ -33,6 +34,7 @@ public class TankoubonAggregatedData {
     public var name: String = ""
     public var summary: String = ""
     public var cover_asset_id: Int64 = 0
+    public var assets_raw: String = "{}"
     public var tags: String = ""  // 合并的标签：tankoubon tags + 所有 archive tags
     public var pagecount: Int32 = 0  // 所有归档的页数总和
     public var progress: Int32 = 0  // 所有归档的平均进度
@@ -79,7 +81,7 @@ public class TankoubonDao {
                 var tankoubons: ArrayList<TankoubonData> = ArrayList<TankoubonData>()
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons ORDER BY id")
+                        "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(CAST(assets AS TEXT), '{}'), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons ORDER BY id")
                     try {
                         let rs = stmt.query()
                         try {
@@ -90,11 +92,13 @@ public class TankoubonDao {
                                 tankoubon.name = rs.getOrNull<String>(2) ?? ""
                                 tankoubon.summary = rs.getOrNull<String>(3) ?? ""
                                 tankoubon.cover_asset_id = rs.getOrNull<Int64>(4) ?? 0
-                                tankoubon.auto_created = rs.getOrNull<Bool>(5) ?? false
-                                tankoubon.source_category_id = rs.getOrNull<Int64>(6) ?? 0
-                                tankoubon.source_relative_path = rs.getOrNull<String>(7) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(8) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(9) ?? ""
+                                tankoubon.assets_raw = (rs.getOrNull<String>(5) ?? "").trimAscii()
+                                if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
+                                tankoubon.auto_created = rs.getOrNull<Bool>(6) ?? false
+                                tankoubon.source_category_id = rs.getOrNull<Int64>(7) ?? 0
+                                tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
+                                tankoubon.created_at = rs.getOrNull<String>(9) ?? ""
+                                tankoubon.updated_at = rs.getOrNull<String>(10) ?? ""
                                 tankoubon.archives = getArchivesInTankoubon(tankoubon.tankoubon_id)
                                 tankoubons.add(tankoubon)
                             }
@@ -127,7 +131,7 @@ public class TankoubonDao {
                 
                 try {
                     let stmt = conn.prepareStatement(
-                        "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons WHERE tankoubon_id = ?")
+                        "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(CAST(assets AS TEXT), '{}'), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons WHERE tankoubon_id = ?")
                     try {
                         stmt.set(0, tankoubonId)
                         let rs = stmt.query()
@@ -139,11 +143,13 @@ public class TankoubonDao {
                                 tankoubon.name = rs.getOrNull<String>(2) ?? ""
                                 tankoubon.summary = rs.getOrNull<String>(3) ?? ""
                                 tankoubon.cover_asset_id = rs.getOrNull<Int64>(4) ?? 0
-                                tankoubon.auto_created = rs.getOrNull<Bool>(5) ?? false
-                                tankoubon.source_category_id = rs.getOrNull<Int64>(6) ?? 0
-                                tankoubon.source_relative_path = rs.getOrNull<String>(7) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(8) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(9) ?? ""
+                                tankoubon.assets_raw = (rs.getOrNull<String>(5) ?? "").trimAscii()
+                                if (tankoubon.assets_raw.size == 0) { tankoubon.assets_raw = "{}" }
+                                tankoubon.auto_created = rs.getOrNull<Bool>(6) ?? false
+                                tankoubon.source_category_id = rs.getOrNull<Int64>(7) ?? 0
+                                tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
+                                tankoubon.created_at = rs.getOrNull<String>(9) ?? ""
+                                tankoubon.updated_at = rs.getOrNull<String>(10) ?? ""
                                 tankoubon.archives = getArchivesInTankoubon(tankoubonId)
                                 return Some(tankoubon)
                             }
@@ -537,14 +543,119 @@ public class TankoubonDao {
         match (connOpt) {
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "UPDATE tankoubons SET cover_asset_id = ?, updated_at = CURRENT_TIMESTAMP WHERE tankoubon_id = ?")
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tankoubons
+                        SET cover_asset_id = ?,
+                            assets = CASE
+                                WHEN ? > 0 THEN COALESCE(assets, '{}'::jsonb) || jsonb_build_object('cover', CAST(? AS BIGINT))
+                                ELSE COALESCE(assets, '{}'::jsonb) - 'cover'
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE tankoubon_id = ?
+                    """)
                     try {
-                        stmt.set(0, coverAssetId)
-                        stmt.set(1, tankoubonId)
+                        if (coverAssetId > 0) {
+                            stmt.set(0, coverAssetId)
+                        } else {
+                            stmt.setNull(0)
+                        }
+                        stmt.set(1, coverAssetId)
+                        stmt.set(2, coverAssetId)
+                        stmt.set(3, tankoubonId)
                         stmt.update()
                         return true
                     } finally { stmt.close() }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
+     * 原样更新 Tankoubon assets JSON，并同步 cover_asset_id。
+     */
+    public static func updateTankoubonAssetsRaw(tankoubonId: String, assetsRaw: String): Bool {
+        let normalized = assetsRaw.trimAscii()
+        let payload = if (normalized.size > 0) { normalized } else { "{}" }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        WITH payload AS (
+                            SELECT COALESCE(CAST(? AS JSONB), '{}'::jsonb) AS j
+                        )
+                        UPDATE tankoubons AS t
+                        SET assets = payload.j,
+                            cover_asset_id = CASE
+                                WHEN jsonb_typeof(payload.j->'cover') = 'number'
+                                     AND (payload.j->>'cover')::BIGINT > 0
+                                    THEN (payload.j->>'cover')::BIGINT
+                                WHEN jsonb_typeof(payload.j->'cover') = 'string'
+                                     AND (payload.j->>'cover') ~ '^[0-9]+$'
+                                     AND (payload.j->>'cover')::BIGINT > 0
+                                    THEN (payload.j->>'cover')::BIGINT
+                                ELSE NULL
+                            END,
+                            updated_at = CURRENT_TIMESTAMP
+                        FROM payload
+                        WHERE t.tankoubon_id = ?
+                    """)
+                    try {
+                        stmt.set(0, payload)
+                        stmt.set(1, tankoubonId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
+     * 更新 Tankoubon 指定 assets key 的资源 ID（仅支持 cover/backdrop/clearlogo）。
+     */
+    public static func updateTankoubonAssetIdByKey(tankoubonId: String, assetKey: String, assetId: Int64): Bool {
+        let key = assetKey.trimAscii()
+        if (key == "cover") {
+            return updateTankoubonCover(tankoubonId, assetId)
+        }
+        if (key != "backdrop" && key != "clearlogo") {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tankoubons
+                        SET assets = CASE
+                            WHEN ? > 0 THEN COALESCE(assets, '{}'::jsonb) || jsonb_build_object('${key}', CAST(? AS BIGINT))
+                            ELSE COALESCE(assets, '{}'::jsonb) - '${key}'
+                        END,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE tankoubon_id = ?
+                    """)
+                    try {
+                        stmt.set(0, assetId)
+                        stmt.set(1, assetId)
+                        stmt.set(2, tankoubonId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
                 } catch (_: Exception) {
                     return false
                 } finally {
@@ -647,7 +758,22 @@ public class TankoubonDao {
             case None => return 0
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement("SELECT COALESCE(cover_asset_id, 0) FROM tankoubons WHERE tankoubon_id = ?")
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(
+                            NULLIF(cover_asset_id, 0),
+                            CASE
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'cover') = 'number'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'cover')::BIGINT
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'cover') = 'string'
+                                     AND (COALESCE(assets, '{}'::jsonb)->>'cover') ~ '^[0-9]+$'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'cover')::BIGINT
+                                ELSE 0
+                            END,
+                            0
+                        )
+                        FROM tankoubons
+                        WHERE tankoubon_id = ?
+                    """)
                     try {
                         stmt.set(0, tankoubonId)
                         let rs = stmt.query()
@@ -658,6 +784,53 @@ public class TankoubonDao {
                         } finally { rs.close() }
                     } finally { stmt.close() }
                     return 0
+                } catch (_: Exception) {
+                    return 0
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+    }
+
+    public static func getTankoubonAssetIdByKey(tankoubonId: String, assetKey: String): Int64 {
+        let key = assetKey.trimAscii()
+        if (key == "cover") {
+            return getTankoubonCoverAssetId(tankoubonId)
+        }
+        if (key != "backdrop" && key != "clearlogo") {
+            return 0
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return 0
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(
+                            CASE
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'${key}') = 'number'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'${key}')::BIGINT
+                                WHEN jsonb_typeof(COALESCE(assets, '{}'::jsonb)->'${key}') = 'string'
+                                     AND (COALESCE(assets, '{}'::jsonb)->>'${key}') ~ '^[0-9]+$'
+                                    THEN (COALESCE(assets, '{}'::jsonb)->>'${key}')::BIGINT
+                                ELSE 0
+                            END,
+                            0
+                        )
+                        FROM tankoubons
+                        WHERE tankoubon_id = ?
+                    """)
+                    try {
+                        stmt.set(0, tankoubonId)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<Int64>(0) ?? 0
+                            }
+                            return 0
+                        } finally { rs.close() }
+                    } finally { stmt.close() }
                 } catch (_: Exception) {
                     return 0
                 } finally {
@@ -824,6 +997,7 @@ public class TankoubonDao {
                             t.name,
                             t.summary,
                             COALESCE(t.cover_asset_id, 0) as cover_asset_id,
+                            COALESCE(CAST(t.assets AS TEXT), '{}') as assets_raw,
                             COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
                             COUNT(a.id)::INT as archive_count,
                             COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
@@ -834,7 +1008,7 @@ public class TankoubonDao {
                         JOIN archives a ON a.id = ta.archive_id
                         LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
                         WHERE t.tankoubon_id = ?
-                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary, t.cover_asset_id
+                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary, t.cover_asset_id, t.assets
                     """)
                     try {
                         stmt.set(0, userId)
@@ -849,11 +1023,13 @@ public class TankoubonDao {
                                 data.name = rs.getOrNull<String>(1) ?? ""
                                 data.summary = rs.getOrNull<String>(2) ?? ""
                                 data.cover_asset_id = rs.getOrNull<Int64>(3) ?? 0
-                                data.pagecount = rs.getOrNull<Int32>(4) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(5) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(6) ?? ""
-                                data.progress = rs.getOrNull<Int32>(7) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(8) ?? true
+                                data.assets_raw = (rs.getOrNull<String>(4) ?? "").trimAscii()
+                                if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
+                                data.pagecount = rs.getOrNull<Int32>(5) ?? 0
+                                data.archive_count = rs.getOrNull<Int32>(6) ?? 0
+                                data.last_read_time = rs.getOrNull<String>(7) ?? ""
+                                data.progress = rs.getOrNull<Int32>(8) ?? 0
+                                data.isnew = rs.getOrNull<Bool>(9) ?? true
                                 dataOpt = Some(data)
                             }
                         } finally {
@@ -1202,6 +1378,7 @@ public class TankoubonDao {
                             t.name,
                             t.summary,
                             COALESCE(t.cover_asset_id, 0) as cover_asset_id,
+                            COALESCE(CAST(t.assets AS TEXT), '{}') as assets_raw,
                             COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
                             COUNT(a.id)::INT as archive_count,
                             COALESCE(MAX(uas.updated_at)::TEXT, '') as last_read_time,
@@ -1212,7 +1389,7 @@ public class TankoubonDao {
                         JOIN archives a ON a.id = ta.archive_id
                         LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
                         WHERE t.tankoubon_id IN (${placeholders})
-                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary, t.cover_asset_id
+                        GROUP BY t.id, t.tankoubon_id, t.name, t.summary, t.cover_asset_id, t.assets
                     """)
                     try {
                         stmt.set(0, userId)
@@ -1231,11 +1408,13 @@ public class TankoubonDao {
                                 data.name = rs.getOrNull<String>(1) ?? ""
                                 data.summary = rs.getOrNull<String>(2) ?? ""
                                 data.cover_asset_id = rs.getOrNull<Int64>(3) ?? 0
-                                data.pagecount = rs.getOrNull<Int32>(4) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(5) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(6) ?? ""
-                                data.progress = rs.getOrNull<Int32>(7) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(8) ?? true
+                                data.assets_raw = (rs.getOrNull<String>(4) ?? "").trimAscii()
+                                if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
+                                data.pagecount = rs.getOrNull<Int32>(5) ?? 0
+                                data.archive_count = rs.getOrNull<Int32>(6) ?? 0
+                                data.last_read_time = rs.getOrNull<String>(7) ?? ""
+                                data.progress = rs.getOrNull<Int32>(8) ?? 0
+                                data.isnew = rs.getOrNull<Bool>(9) ?? true
                                 tempData[data.tankoubon_id] = data
                             }
                         } finally {
