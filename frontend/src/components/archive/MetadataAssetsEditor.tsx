@@ -104,13 +104,13 @@ export function MetadataAssetsEditor({
           </div>
         </div>
 
-        <div className="absolute left-28 sm:left-32 right-4 bottom-8 z-10 h-20 sm:h-24 px-3 flex items-center justify-center">
+        <div className="absolute left-28 sm:left-32 right-4 bottom-6 z-10 h-24 sm:h-28 px-3 flex items-center justify-center">
           {clearlogoPreviewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={clearlogoPreviewUrl}
               alt={t('archive.assetClearlogoLabel')}
-              className="max-h-14 sm:max-h-16 max-w-full object-contain"
+              className="max-h-16 sm:max-h-20 max-w-full object-contain"
             />
           ) : (
             <span className="max-w-full truncate text-sm sm:text-base font-semibold text-white/90 drop-shadow-sm">{clearlogoPlaceholder}</span>
