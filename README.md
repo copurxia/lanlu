@@ -116,7 +116,8 @@ lanlu/
 ### 环境要求
 
 - 仓颉 SDK (LTS 版本)
-- Node.js 18+
+- Node.js 20+
+- pnpm 10+（或使用 Corepack）
 - PostgreSQL 12+
 - Docker (可选)
 
@@ -134,8 +135,9 @@ cjpm build -V
 
 ```bash
 cd frontend
-npm install
-npm run build
+corepack enable
+pnpm install --frozen-lockfile
+pnpm run build
 ```
 
 ### 运行
@@ -195,13 +197,13 @@ grep -nE "已创建默认管理员账户|用户名:|密码:" ./data/logs/system.
 | 端点 | 方法 | 说明 |
 |------|------|------|
 | `/api/info` | GET | 服务器信息 |
-| `/api/archives` | GET | 归档列表 |
-| `/api/archives/:id` | GET | 归档详情 |
+| `/api/search` | GET | 搜索/分页获取归档列表 |
+| `/api/search/random` | GET | 随机归档 |
+| `/api/archives/:id/metadata` | GET | 归档详情/元数据 |
 | `/api/archives/:id/files` | GET | 归档文件列表 |
-| `/api/search` | GET | 搜索归档 |
 | `/api/tags` | GET | 标签列表 |
 | `/api/tankoubons` | GET | 合集列表 |
-| `/api/plugins` | GET | 插件列表 |
+| `/api/admin/plugins` | GET | 插件列表（管理员） |
 
 ### 搜索语法（`/api/search?filter=...`）
 
