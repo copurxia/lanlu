@@ -142,7 +142,7 @@ const DialogContent: React.FC<{
       {showOverlay ? (
         <div
           className={cn(
-            "fixed inset-0 bg-black/50 transition-opacity duration-200 ease-out motion-reduce:transition-none",
+            "fixed inset-0 bg-white/55 dark:bg-black/55 backdrop-blur transition-opacity duration-200 ease-out motion-reduce:transition-none",
             active ? "opacity-100" : "opacity-0 pointer-events-none",
             overlayClassName
           )}
