@@ -2,6 +2,11 @@
 
 兰鹿 - 基于仓颉语言的漫画归档管理系统
 
+| 类型 | CNB | Gitea | GitHub |
+| :--: | :--: | :--: | :--: |
+| 服务 | [![CNB Build](https://cnb.cool/copurx/lanlu/-/badge/git/latest/ci/status/push?branch=main)](https://cnb.cool/copurx/lanlu/-/ci) | [![Gitea Build](https://git.copur.xyz/copur/lanlu/actions/workflows/build.yaml/badge.svg?branch=main)](https://git.copur.xyz/copur/lanlu/actions/workflows/build.yaml) | [![GitHub Build](https://github.com/copurxia/lanlu/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/copurxia/lanlu/actions/workflows/build.yml) |
+| 扩展 | [![CNB Build](https://cnb.cool/copurx/lanlu/-/badge/git/latest/ci/status/push?branch=main)](https://cnb.cool/copurx/lanlu/-/ci) | [![Gitea Extension](https://git.copur.xyz/copur/lanlu/actions/workflows/extension.yaml/badge.svg?branch=main)](https://git.copur.xyz/copur/lanlu/actions/workflows/extension.yaml) | [![GitHub Extension](https://github.com/copurxia/lanlu/actions/workflows/extension.yml/badge.svg?branch=main)](https://github.com/copurxia/lanlu/actions/workflows/extension.yml) |
+
 ## 简介
 
 兰鹿是一个全栈 Web 应用，用于管理和阅读数字漫画归档。项目使用仓颉语言重新实现了 [LANraragi](https://github.com/Difegue/LANraragi) 的核心功能，并配备了现代化的前端界面。
