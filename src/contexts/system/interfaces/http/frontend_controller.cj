@@ -83,32 +83,19 @@ public class FrontendController {
         let fileSize = fileInfo.size
         let lastModified = fileInfo.lastModificationTime
 
-        let file = File(Path(filePath), Read)
-        let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
-        let bytesRead = file.read(buffer)
-        file.close()
+        let bytes = File.readFrom(Path(filePath))
+        let contentType = getContentType(filePath)
 
-        if (bytesRead > 0) {
-            let contentType = getContentType(filePath)
+        let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
 
-            let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
-
-            if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
-                ctx.status(304)
-                return
-            }
-
-            // _next/static/ 下的资源使用长期缓存（带哈希，永不变化）
-            if (filePath.contains("/_next/static/")) {
-                CacheUtils.setStaticCacheHeaders(ctx, etag)
-            } else {
-                CacheUtils.setDynamicCacheHeaders(ctx, etag)
-            }
-            ctx.setHeader("Content-Type", contentType)
-            ctx.send(buffer.slice(0, bytesRead))
-        } else {
-            FrontendController.serve404(ctx)
+        if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
+            sendNotModifiedByPolicy(ctx, filePath, etag)
+            return
         }
+
+        applyCacheHeadersByPolicy(ctx, filePath, etag)
+        ctx.setHeader("Content-Type", contentType)
+        ctx.send(bytes)
     }
 
     /**
@@ -120,21 +107,18 @@ public class FrontendController {
             // 尝试使用自定义404页面
             let custom404Path = "${baseDir}/404/index.html"
             if (exists(custom404Path)) {
-                let file = File(Path(custom404Path), Read)
-                let buffer = Array<Byte>(1024 * 1024, {_ => 0}) // 1MB buffer
-                let bytesRead = file.read(buffer)
-                file.close()
-
-                if (bytesRead > 0) {
-                    ctx.setHeader("Content-Type", "text/html; charset=utf-8")
-                    ctx.status(404).send(buffer.slice(0, bytesRead))
-                    return
-                }
+                let bytes = File.readFrom(Path(custom404Path))
+                CacheUtils.setNoCacheHeaders(ctx)
+                ctx.setHeader("Content-Type", "text/html; charset=utf-8")
+                ctx.status(404).send(bytes)
+                return
             }
 
             // 如果自定义404不存在，返回默认错误信息
+            CacheUtils.setNoCacheHeaders(ctx)
             ctx.status(404).sendString("404 - Page not found")
         } catch (ex: Exception) {
+            CacheUtils.setNoCacheHeaders(ctx)
             ctx.status(500).sendString("Error serving 404 page: ${ex.message}")
         }
     }
@@ -177,6 +161,52 @@ public class FrontendController {
         } else {
             return defaultType
         }
+    }
+
+    /**
+     * 判断是否为可长期 immutable 缓存资源。
+     * 仅对带内容哈希的 chunks 启用，避免把可变的 build 清单缓存过久。
+     */
+    private static func isImmutableFrontendAsset(filePath: String): Bool {
+        return filePath.contains("/_next/static/chunks/")
+    }
+
+    /**
+     * 判断是否应每次访问都重验证。
+     * 典型场景：HTML/TXT 页面与 Next build 清单。
+     */
+    private static func shouldRevalidateEveryRequest(filePath: String): Bool {
+        if (filePath.endsWith(".html") || filePath.endsWith(".txt")) {
+            return true
+        }
+        if (filePath.contains("/_next/static/build/")) {
+            return true
+        }
+        return false
+    }
+
+    private static func applyCacheHeadersByPolicy(ctx: Ctx, filePath: String, etag: String): Unit {
+        if (isImmutableFrontendAsset(filePath)) {
+            CacheUtils.setStaticCacheHeaders(ctx, etag)
+            return
+        }
+        if (shouldRevalidateEveryRequest(filePath)) {
+            CacheUtils.setRevalidateCacheHeaders(ctx, etag)
+            return
+        }
+        CacheUtils.setDynamicCacheHeaders(ctx, etag)
+    }
+
+    private static func sendNotModifiedByPolicy(ctx: Ctx, filePath: String, etag: String): Unit {
+        if (isImmutableFrontendAsset(filePath)) {
+            CacheUtils.sendNotModified(ctx, etag)
+            return
+        }
+        if (shouldRevalidateEveryRequest(filePath)) {
+            CacheUtils.sendNotModifiedRevalidate(ctx, etag)
+            return
+        }
+        CacheUtils.sendNotModifiedDynamic(ctx, etag)
     }
 
     /**
@@ -257,16 +287,11 @@ public class FrontendController {
         let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
 
         if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
-            ctx.status(304)
+            sendNotModifiedByPolicy(ctx, filePath, etag)
             return
         }
 
-        // _next/static/ 下的资源使用长期缓存（带哈希，永不变化）
-        if (filePath.contains("/_next/static/")) {
-            CacheUtils.setStaticCacheHeaders(ctx, etag)
-        } else {
-            CacheUtils.setDynamicCacheHeaders(ctx, etag)
-        }
+        applyCacheHeadersByPolicy(ctx, filePath, etag)
         ctx.setHeader("Content-Type", contentType)
         ctx.status(200)
     }
@@ -281,6 +306,7 @@ public class FrontendController {
             // 尝试使用自定义404页面
             let custom404Path = "${baseDir}/404/index.html"
             if (exists(custom404Path)) {
+                CacheUtils.setNoCacheHeaders(ctx)
                 ctx.setHeader("Content-Type", "text/html; charset=utf-8")
                 ctx.status(404)
                 // HEAD 请求不返回内容，只返回状态码和头部
@@ -288,10 +314,12 @@ public class FrontendController {
             }
 
             // 如果自定义404不存在，返回默认错误头部
+            CacheUtils.setNoCacheHeaders(ctx)
             ctx.setHeader("Content-Type", "text/plain; charset=utf-8")
             ctx.status(404)
             // HEAD 请求不返回内容
         } catch (ex: Exception) {
+            CacheUtils.setNoCacheHeaders(ctx)
             ctx.setHeader("Content-Type", "text/plain; charset=utf-8")
             ctx.status(500)
             // HEAD 请求不返回内容

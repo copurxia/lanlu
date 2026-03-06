@@ -69,10 +69,20 @@ public class CacheUtils {
     }
 
     /**
+     * 设置每次访问都需重验证的缓存头（用于 HTML、构建清单等）
+     */
+    public static func setRevalidateCacheHeaders(ctx: Ctx, etag: String): Unit {
+        ctx.setHeader("Cache-Control", "public, no-cache, must-revalidate")
+        ctx.setHeader("ETag", etag)
+    }
+
+    /**
      * 设置不缓存头（用于占位符等临时资源）
      */
     public static func setNoCacheHeaders(ctx: Ctx): Unit {
         ctx.setHeader("Cache-Control", "no-cache, no-store, must-revalidate")
+        ctx.setHeader("Pragma", "no-cache")
+        ctx.setHeader("Expires", "0")
     }
 
     /**
@@ -90,6 +100,15 @@ public class CacheUtils {
     public static func sendNotModifiedDynamic(ctx: Ctx, etag: String): Unit {
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "public, max-age=86400")
+        ctx.status(HttpStatusCode.STATUS_NOT_MODIFIED)
+    }
+
+    /**
+     * 发送 304 Not Modified 响应（用于每次重验证资源）
+     */
+    public static func sendNotModifiedRevalidate(ctx: Ctx, etag: String): Unit {
+        ctx.setHeader("ETag", etag)
+        ctx.setHeader("Cache-Control", "public, no-cache, must-revalidate")
         ctx.status(HttpStatusCode.STATUS_NOT_MODIFIED)
     }
 }
