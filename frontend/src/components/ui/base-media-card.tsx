@@ -11,6 +11,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { BookOpen, CheckCircle, Download, Edit, Eye, Heart, RotateCcw, Trash2 } from 'lucide-react'
 import { ArchiveService } from '@/lib/services/archive-service'
 import { TankoubonService } from '@/lib/services/tankoubon-service'
+import { ChunkedUploadService } from '@/lib/services/chunked-upload-service'
 import { TaskPoolService } from '@/lib/services/taskpool-service'
 import { PluginService } from '@/lib/services/plugin-service'
 import { ArchiveMetadataEditDialog, type RpcSelectRequest } from '@/components/archive/ArchiveMetadataEditDialog'
@@ -21,6 +22,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider'
 import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
+import { getCoverAssetId } from '@/lib/utils/archive-assets'
 import type { Plugin } from '@/lib/services/plugin-service'
 
 export interface BaseMediaCardProps {
@@ -118,6 +120,15 @@ export function BaseMediaCard({
   const [editTitle, setEditTitle] = React.useState(title)
   const [editSummary, setEditSummary] = React.useState(summary || '')
   const [editTags, setEditTags] = React.useState<string[]>(toTagList(tags))
+  const [editCover, setEditCover] = React.useState('')
+  const [editBackdrop, setEditBackdrop] = React.useState('')
+  const [editClearlogo, setEditClearlogo] = React.useState('')
+  const [editAssetCoverId, setEditAssetCoverId] = React.useState('')
+  const [editAssetBackdropId, setEditAssetBackdropId] = React.useState('')
+  const [editAssetClearlogoId, setEditAssetClearlogoId] = React.useState('')
+  const [coverUploading, setCoverUploading] = React.useState(false)
+  const [backdropUploading, setBackdropUploading] = React.useState(false)
+  const [clearlogoUploading, setClearlogoUploading] = React.useState(false)
   const [metadataPlugins, setMetadataPlugins] = React.useState<Plugin[]>([])
   const [selectedMetadataPlugin, setSelectedMetadataPlugin] = React.useState<string>('')
   const [metadataPluginParam, setMetadataPluginParam] = React.useState<string>('')
@@ -132,6 +143,8 @@ export function BaseMediaCard({
     tags?: string
     updated_at?: string
     cover?: string
+    backdrop?: string
+    clearlogo?: string
   }>>([])
   const [rpcSelectTaskId, setRpcSelectTaskId] = React.useState<number | null>(null)
   const [rpcSelectRequest, setRpcSelectRequest] = React.useState<RpcSelectRequest | null>(null)
@@ -206,6 +219,46 @@ export function BaseMediaCard({
 
     return () => window.clearTimeout(timer)
   }, [rpcSelectRemainingSeconds, rpcSelectRequest])
+
+  React.useEffect(() => {
+    if (!editOpen || !canEdit) return
+
+    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
+      ? String(Math.trunc(thumbnailAssetId))
+      : ''
+    setEditCover('')
+    setEditBackdrop('')
+    setEditClearlogo('')
+    setEditAssetCoverId(fallbackCoverId)
+    setEditAssetBackdropId('')
+    setEditAssetClearlogoId('')
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (type === 'archive') {
+          const meta = await ArchiveService.getMetadata(id)
+          if (cancelled) return
+          setEditAssetCoverId(String(getCoverAssetId(meta) || ''))
+          setEditAssetBackdropId(String(meta.assets?.backdrop || ''))
+          setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''))
+          return
+        }
+
+        const tank = await TankoubonService.getTankoubonById(id)
+        if (cancelled) return
+        setEditAssetCoverId(String(getCoverAssetId(tank) || ''))
+        setEditAssetBackdropId(String(tank.assets?.backdrop || ''))
+        setEditAssetClearlogoId(String(tank.assets?.clearlogo || ''))
+      } catch (_error) {
+        // Keep fallback values when detail request fails.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [canEdit, editOpen, id, thumbnailAssetId, type])
 
   const allTags = React.useMemo(() => parseTags(displayTags), [displayTags])
   const displayAllTags = React.useMemo(() => allTags.map(stripNamespace), [allTags])
@@ -301,9 +354,18 @@ export function BaseMediaCard({
       showError(t('library.loginRequired'))
       return
     }
+    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
+      ? String(Math.trunc(thumbnailAssetId))
+      : ''
     setEditTitle(displayTitle)
     setEditSummary(displaySummary)
     setEditTags(toTagList(displayTags))
+    setEditCover('')
+    setEditBackdrop('')
+    setEditClearlogo('')
+    setEditAssetCoverId(fallbackCoverId)
+    setEditAssetBackdropId('')
+    setEditAssetClearlogoId('')
     setMetadataArchivePatches([])
     setMetadataPluginProgress(null)
     setMetadataPluginMessage('')
@@ -313,7 +375,7 @@ export function BaseMediaCard({
     setRpcSelectSelectedIndex(null)
     setRpcSelectRemainingSeconds(null)
     setEditOpen(true)
-  }, [canEdit, displaySummary, displayTags, displayTitle, showError, t])
+  }, [canEdit, displaySummary, displayTags, displayTitle, showError, t, thumbnailAssetId])
 
   const submitRpcSelect = React.useCallback(async () => {
     if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return
@@ -353,6 +415,82 @@ export function BaseMediaCard({
     setRpcSelectRemainingSeconds(null)
   }, [rpcSelectRequest, rpcSelectTaskId, showError])
 
+  const uploadMetadataAsset = React.useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
+    if (!canEdit || editSaving || isMetadataPluginRunning) return
+
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.style.display = 'none'
+
+    const setUploading = (next: boolean) => {
+      if (slot === 'cover') {
+        setCoverUploading(next)
+        return
+      }
+      if (slot === 'backdrop') {
+        setBackdropUploading(next)
+        return
+      }
+      setClearlogoUploading(next)
+    }
+
+    input.onchange = async (event) => {
+      const e = event as unknown as React.ChangeEvent<HTMLInputElement>
+      const file = e.target.files?.[0]
+      if (!file) {
+        document.body.removeChild(input)
+        return
+      }
+
+      setUploading(true)
+      try {
+        const result = await ChunkedUploadService.uploadWithChunks(
+          file,
+          {
+            targetType: 'metadata_asset',
+            overwrite: true,
+            contentType: file.type || 'application/octet-stream',
+          },
+          {
+            onProgress: () => {},
+            onChunkComplete: () => {},
+            onError: () => {},
+          }
+        )
+        if (!result.success) {
+          throw new Error(result.error || t('archive.assetUploadFailed'))
+        }
+
+        const assetId = Number(result.data?.assetId ?? 0)
+        if (!Number.isFinite(assetId) || assetId <= 0) {
+          throw new Error(t('archive.assetUploadFailed'))
+        }
+        const normalizedAssetId = String(Math.trunc(assetId))
+
+        if (slot === 'cover') {
+          setEditAssetCoverId(normalizedAssetId)
+          setEditCover('')
+        } else if (slot === 'backdrop') {
+          setEditAssetBackdropId(normalizedAssetId)
+          setEditBackdrop('')
+        } else {
+          setEditAssetClearlogoId(normalizedAssetId)
+          setEditClearlogo('')
+        }
+      } catch (error: any) {
+        logger.operationFailed('upload metadata asset from card', error, { id, slot, type })
+        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'))
+      } finally {
+        setUploading(false)
+        document.body.removeChild(input)
+      }
+    }
+
+    document.body.appendChild(input)
+    input.click()
+  }, [canEdit, editSaving, id, isMetadataPluginRunning, showError, t, type])
+
   const runMetadataPlugin = React.useCallback(async () => {
     if (!canEdit) {
       showError(t('library.loginRequired'))
@@ -375,6 +513,18 @@ export function BaseMediaCard({
     try {
       const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean)
       const targetType = type === 'archive' ? 'archive' : 'tankoubon'
+      const toAssetValue = (pathValue: string, assetId: string): string => {
+        const path = pathValue.trim()
+        if (path) return path
+        const idStr = assetId.trim()
+        if (/^\d+$/.test(idStr)) return idStr
+        return ''
+      }
+      const rootAssets = [
+        { key: 'cover', value: toAssetValue(editCover, editAssetCoverId) },
+        { key: 'backdrop', value: toAssetValue(editBackdrop, editAssetBackdropId) },
+        { key: 'clearlogo', value: toAssetValue(editClearlogo, editAssetClearlogoId) },
+      ].filter((item) => item.value)
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         targetType,
         id,
@@ -407,7 +557,7 @@ export function BaseMediaCard({
             type: targetType === 'tankoubon' ? 1 : 0,
             description: editSummary.trim(),
             tags: metadataTags,
-            assets: [],
+            assets: rootAssets,
             archive: [],
           },
         }
@@ -451,11 +601,34 @@ export function BaseMediaCard({
         const nextTags = Array.isArray(data.tags)
           ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
           : []
+        const nextCover = readAssetValue(data.assets, 'cover')
+        const nextBackdrop = readAssetValue(data.assets, 'backdrop')
+        const nextClearlogo = readAssetValue(data.assets, 'clearlogo')
         const nextArchives = Array.isArray(data.archive) ? data.archive : []
+        const applyAssetPreview = (
+          rawValue: string,
+          setPathValue: (next: string) => void,
+          setAssetIdValue: (next: string) => void
+        ) => {
+          const trimmed = rawValue.trim()
+          if (!trimmed) return
+          if (/^\d+$/.test(trimmed)) {
+            const parsedId = Number.parseInt(trimmed, 10)
+            if (Number.isFinite(parsedId) && parsedId > 0) {
+              setAssetIdValue(String(parsedId))
+              setPathValue('')
+              return
+            }
+          }
+          setPathValue(trimmed)
+        }
 
         if (nextTitle.trim()) setEditTitle(nextTitle.trim())
         setEditSummary(nextSummary)
         setEditTags(nextTags)
+        applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId)
+        applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId)
+        applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId)
         if (type === 'tankoubon') {
           setMetadataArchivePatches(
             nextArchives
@@ -469,6 +642,8 @@ export function BaseMediaCard({
                   : undefined,
                 updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
                 cover: readAssetValue(item?.assets, 'cover') || undefined,
+                backdrop: readAssetValue(item?.assets, 'backdrop') || undefined,
+                clearlogo: readAssetValue(item?.assets, 'clearlogo') || undefined,
               }))
               .filter((item: any) => item.archive_id || item.volume_no)
           )
@@ -492,6 +667,12 @@ export function BaseMediaCard({
   }, [
     canEdit,
     displayTitle,
+    editAssetBackdropId,
+    editAssetClearlogoId,
+    editAssetCoverId,
+    editBackdrop,
+    editClearlogo,
+    editCover,
     editSummary,
     editTags,
     editTitle,
@@ -520,18 +701,37 @@ export function BaseMediaCard({
     try {
       const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean).join(', ')
       const nextSummary = editSummary.trim()
+      const parseAssetId = (raw: string): number | undefined => {
+        const value = Number(raw.trim())
+        if (!Number.isFinite(value)) return undefined
+        const parsedId = Math.trunc(value)
+        return parsedId > 0 ? parsedId : undefined
+      }
+      const assets = {
+        cover: parseAssetId(editAssetCoverId),
+        backdrop: parseAssetId(editAssetBackdropId),
+        clearlogo: parseAssetId(editAssetClearlogoId),
+      }
 
       if (type === 'archive') {
         await ArchiveService.updateMetadata(id, {
           title: nextTitle || displayTitle,
           summary: nextSummary,
           tags: nextTags,
+          cover: editCover || undefined,
+          backdrop: editBackdrop || undefined,
+          clearlogo: editClearlogo || undefined,
+          assets,
         }, undefined, { metadataNamespace: selectedMetadataPlugin || undefined })
       } else {
         await TankoubonService.updateTankoubon(id, {
           name: nextTitle,
           summary: nextSummary,
           tags: nextTags,
+          cover: editCover || undefined,
+          backdrop: editBackdrop || undefined,
+          clearlogo: editClearlogo || undefined,
+          assets,
           metadata_namespace: selectedMetadataPlugin || undefined,
           archives: metadataArchivePatches,
         })
@@ -548,7 +748,27 @@ export function BaseMediaCard({
     } finally {
       setEditSaving(false)
     }
-  }, [canEdit, displayTitle, editSaving, editSummary, editTags, editTitle, emitRefresh, id, metadataArchivePatches, selectedMetadataPlugin, showError, t, type])
+  }, [
+    canEdit,
+    displayTitle,
+    editAssetBackdropId,
+    editAssetClearlogoId,
+    editAssetCoverId,
+    editBackdrop,
+    editClearlogo,
+    editCover,
+    editSaving,
+    editSummary,
+    editTags,
+    editTitle,
+    emitRefresh,
+    id,
+    metadataArchivePatches,
+    selectedMetadataPlugin,
+    showError,
+    t,
+    type,
+  ])
 
   const handleDelete = React.useCallback(async () => {
     if (!canDelete) {
@@ -799,7 +1019,6 @@ export function BaseMediaCard({
         open={editOpen}
         onOpenChange={setEditOpen}
         t={t}
-        dialogTitle={type === 'archive' ? t('archive.editMetadata') : t('tankoubon.editTankoubon')}
         titleLabel={type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
         summaryLabel={type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
         tagsLabel={type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
@@ -809,6 +1028,21 @@ export function BaseMediaCard({
         onTitleChange={setEditTitle}
         summary={editSummary}
         onSummaryChange={setEditSummary}
+        assetCoverId={editAssetCoverId}
+        onAssetCoverIdChange={setEditAssetCoverId}
+        assetBackdropId={editAssetBackdropId}
+        onAssetBackdropIdChange={setEditAssetBackdropId}
+        assetClearlogoId={editAssetClearlogoId}
+        onAssetClearlogoIdChange={setEditAssetClearlogoId}
+        assetCoverValue={editCover}
+        assetBackdropValue={editBackdrop}
+        assetClearlogoValue={editClearlogo}
+        onUploadAssetCover={() => uploadMetadataAsset('cover')}
+        onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
+        onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
+        uploadingAssetCover={coverUploading}
+        uploadingAssetBackdrop={backdropUploading}
+        uploadingAssetClearlogo={clearlogoUploading}
         tags={editTags}
         onTagsChange={setEditTags}
         isSaving={editSaving}

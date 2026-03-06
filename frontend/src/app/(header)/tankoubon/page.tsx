@@ -35,14 +35,17 @@ import {
 } from '@/components/ui/alert-dialog';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
-import { getArchiveAssetId } from '@/lib/utils/archive-assets';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, Play, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
+import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
+import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
+import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
 import type { Tankoubon } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import Image from 'next/image';
@@ -223,6 +226,7 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
 
 function TankoubonDetailContent() {
   const { t, language } = useLanguage();
+  const { success, error: showError } = useToast();
   const searchParams = useSearchParams();
   const router = useRouter();
   const tankoubonId = searchParams?.get('id') ?? null;
@@ -246,6 +250,9 @@ function TankoubonDetailContent() {
   const [editAssetCoverId, setEditAssetCoverId] = useState('');
   const [editAssetBackdropId, setEditAssetBackdropId] = useState('');
   const [editAssetClearlogoId, setEditAssetClearlogoId] = useState('');
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [backdropUploading, setBackdropUploading] = useState(false);
+  const [clearlogoUploading, setClearlogoUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Metadata plugin state (preview mode: fill edit form without DB write-back)
@@ -380,7 +387,7 @@ function TankoubonDetailContent() {
       setEditCover('');
       setEditBackdrop('');
       setEditClearlogo('');
-      setEditAssetCoverId(String(data.assets?.cover || ''));
+      setEditAssetCoverId(String(getCoverAssetId(data) || ''));
       setEditAssetBackdropId(String(data.assets?.backdrop || ''));
       setEditAssetClearlogoId(String(data.assets?.clearlogo || ''));
     } catch (error) {
@@ -535,6 +542,84 @@ function TankoubonDetailContent() {
       setSaving(false);
     }
   };
+
+  const uploadMetadataAsset = useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
+    if (saving || isMetadataPluginRunning) return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+
+    const setUploading = (next: boolean) => {
+      if (slot === 'cover') {
+        setCoverUploading(next);
+        return;
+      }
+      if (slot === 'backdrop') {
+        setBackdropUploading(next);
+        return;
+      }
+      setClearlogoUploading(next);
+    };
+
+    input.onchange = async (event) => {
+      const e = event as unknown as React.ChangeEvent<HTMLInputElement>;
+      const file = e.target.files?.[0];
+      if (!file) {
+        document.body.removeChild(input);
+        return;
+      }
+
+      setUploading(true);
+      try {
+        const result = await ChunkedUploadService.uploadWithChunks(
+          file,
+          {
+            targetType: 'metadata_asset',
+            overwrite: true,
+            contentType: file.type || 'application/octet-stream',
+          },
+          {
+            onProgress: () => {},
+            onChunkComplete: () => {},
+            onError: () => {},
+          }
+        );
+        if (!result.success) {
+          throw new Error(result.error || t('archive.assetUploadFailed'));
+        }
+
+        const assetId = Number(result.data?.assetId ?? 0);
+        if (!Number.isFinite(assetId) || assetId <= 0) {
+          throw new Error(t('archive.assetUploadFailed'));
+        }
+        const normalizedAssetId = String(Math.trunc(assetId));
+
+        if (slot === 'cover') {
+          setEditAssetCoverId(normalizedAssetId);
+          setEditCover('');
+        } else if (slot === 'backdrop') {
+          setEditAssetBackdropId(normalizedAssetId);
+          setEditBackdrop('');
+        } else {
+          setEditAssetClearlogoId(normalizedAssetId);
+          setEditClearlogo('');
+        }
+
+        success(t('archive.assetUploadSuccess'));
+      } catch (error: any) {
+        logger.operationFailed('upload tankoubon metadata asset', error, { slot });
+        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'));
+      } finally {
+        setUploading(false);
+        document.body.removeChild(input);
+      }
+    };
+
+    document.body.appendChild(input);
+    input.click();
+  }, [isMetadataPluginRunning, saving, showError, success, t]);
 
   // Load metadata plugins when opening the edit dialog
   useEffect(() => {
@@ -942,9 +1027,7 @@ function TankoubonDetailContent() {
     totalPages > 0 && totalProgress > 0
       ? Math.max(0, Math.min(100, Math.round((totalProgress / totalPages) * 100)))
       : 0;
-  const coverAssetId = typeof tankoubon.assets?.cover === 'number' && Number.isFinite(tankoubon.assets.cover) && tankoubon.assets.cover > 0
-    ? Math.trunc(tankoubon.assets.cover)
-    : 0;
+  const coverAssetId = getCoverAssetId(tankoubon) ?? 0;
   const coverUrl = coverAssetId > 0
     ? `/api/assets/${coverAssetId}`
     : '';
@@ -1277,192 +1360,58 @@ function TankoubonDetailContent() {
           variant="destructive"
         />
 
-        {/* Edit Dialog */}
-        <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>{t('tankoubon.editTankoubon')}</DialogTitle>
-            </DialogHeader>
-            <DialogBody className="pt-0">
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.name')}</label>
-                  <Input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    placeholder={t('tankoubon.namePlaceholder')}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.summary')}</label>
-                  <Textarea
-                    value={editSummary}
-                    onChange={(e) => setEditSummary(e.target.value)}
-                    placeholder={t('tankoubon.summaryPlaceholder')}
-                    rows={3}
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">{t('archive.assets')}</label>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <Input
-                      value={editAssetCoverId}
-                      onChange={(e) => setEditAssetCoverId(e.target.value)}
-                      disabled={saving}
-                      placeholder={t('archive.assetsCoverPlaceholder')}
-                    />
-                    <Input
-                      value={editAssetBackdropId}
-                      onChange={(e) => setEditAssetBackdropId(e.target.value)}
-                      disabled={saving}
-                      placeholder={t('archive.assetsBackdropPlaceholder')}
-                    />
-                    <Input
-                      value={editAssetClearlogoId}
-                      onChange={(e) => setEditAssetClearlogoId(e.target.value)}
-                      disabled={saving}
-                      placeholder={t('archive.assetsClearlogoPlaceholder')}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>
-                  <div className="mt-2 flex flex-col gap-2">
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <div className="sm:w-[220px]">
-                        <Select value={selectedMetadataPlugin} onValueChange={setSelectedMetadataPlugin}>
-                          <SelectTrigger disabled={saving || isMetadataPluginRunning || metadataPlugins.length === 0}>
-                            <SelectValue placeholder={t('archive.metadataPluginSelectPlaceholder')} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {metadataPlugins.map((p) => (
-                              <SelectItem key={p.namespace} value={p.namespace}>
-                                {p.name} ({p.namespace})
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Input
-                        value={metadataPluginParam}
-                        onChange={(e) => setMetadataPluginParam(e.target.value)}
-                        disabled={saving || isMetadataPluginRunning}
-                        placeholder={t('archive.metadataPluginParamPlaceholder')}
-                      />
-                      <Button
-                        type="button"
-                        onClick={runMetadataPlugin}
-                        disabled={saving || isMetadataPluginRunning || metadataPlugins.length === 0 || !selectedMetadataPlugin}
-                      >
-                        <Play className="w-4 h-4 mr-2" />
-                        {isMetadataPluginRunning ? t('archive.metadataPluginRunning') : t('archive.metadataPluginRun')}
-                      </Button>
-                    </div>
-                    {(metadataPluginProgress !== null || metadataPluginMessage) && (
-                      <div className="text-xs text-muted-foreground flex items-center justify-between gap-2">
-                        <span className="truncate" title={metadataPluginMessage}>
-                          {metadataPluginMessage || ''}
-                        </span>
-                        {metadataPluginProgress !== null && (
-                          <span className="tabular-nums">{Math.max(0, Math.min(100, metadataPluginProgress))}%</span>
-                        )}
-                      </div>
-                    )}
-                    {metadataPlugins.length === 0 && (
-                      <div className="text-xs text-muted-foreground">{t('archive.metadataPluginNoPlugins')}</div>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="text-sm font-medium">{t('tankoubon.tags')}</label>
-                  <TagInput
-                    value={editTags}
-                    onChange={setEditTags}
-                    placeholder={t('tankoubon.tagsPlaceholder')}
-                    disabled={saving}
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">{t('tankoubon.tagsHint')}</p>
-                </div>
-              </div>
-            </DialogBody>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setEditDialogOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button onClick={handleEdit} disabled={saving || !editName.trim()}>
-                {saving ? <Spinner size="sm" className="mr-2" /> : null}
-                {t('common.save')}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Dialog open={!!rpcSelectRequest} onOpenChange={() => {}}>
-          <DialogContent className="max-w-4xl h-[75vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle>{rpcSelectRequest?.title || '请选择元数据匹配项'}</DialogTitle>
-            </DialogHeader>
-            <DialogBody className="pt-0 flex-1 min-h-0">
-              <div
-                className="space-y-3 h-full flex flex-col"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && rpcSelectSelectedIndex != null && (rpcSelectRemainingSeconds ?? 1) > 0) {
-                    e.preventDefault();
-                    void submitRpcSelect();
-                  }
-                }}
-              >
-                {rpcSelectRequest?.message ? (
-                  <p className="text-sm text-muted-foreground">{rpcSelectRequest.message}</p>
-                ) : null}
-                <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
-                  {(rpcSelectRequest?.options || []).map((opt) => (
-                    <Button
-                      key={`${rpcSelectRequest?.request_id}-${opt.index}`}
-                      type="button"
-                      variant={rpcSelectSelectedIndex === opt.index ? 'default' : 'outline'}
-                      className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left whitespace-normal"
-                      onClick={() => setRpcSelectSelectedIndex(opt.index)}
-                    >
-                      <div className="flex w-full items-start gap-3">
-                        {opt.cover ? (
-                          <img
-                            src={opt.cover}
-                            alt={opt.label || `候选 ${opt.index + 1}`}
-                            className="w-20 h-28 shrink-0 object-cover rounded border"
-                            loading="lazy"
-                          />
-                        ) : null}
-                        <div className="min-w-0 flex-1 text-left">
-                          <div className="font-medium whitespace-normal break-words">{opt.label || `候选 ${opt.index + 1}`}</div>
-                          {opt.description ? (
-                            <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </Button>
-                  ))}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  如果长时间不选择，本次预览任务会超时失败。
-                  {rpcSelectRemainingSeconds != null ? ` 剩余 ${Math.max(0, rpcSelectRemainingSeconds)} 秒。` : ''}
-                </p>
-                <div className="flex justify-end gap-2">
-                  <Button type="button" variant="outline" onClick={() => void abortRpcSelect()}>
-                    放弃
-                  </Button>
-                  <Button
-                    type="button"
-                    disabled={rpcSelectSelectedIndex == null || (rpcSelectRemainingSeconds ?? 1) <= 0}
-                    onClick={() => void submitRpcSelect()}
-                  >
-                    选择并提交
-                  </Button>
-                </div>
-              </div>
-            </DialogBody>
-          </DialogContent>
-        </Dialog>
+        <ArchiveMetadataEditDialog
+          open={editDialogOpen}
+          onOpenChange={setEditDialogOpen}
+          t={t}
+          titleLabel={t('tankoubon.name')}
+          summaryLabel={t('tankoubon.summary')}
+          tagsLabel={t('tankoubon.tags')}
+          summaryPlaceholder={t('tankoubon.summaryPlaceholder')}
+          tagsPlaceholder={t('tankoubon.tagsPlaceholder')}
+          title={editName}
+          onTitleChange={setEditName}
+          summary={editSummary}
+          onSummaryChange={setEditSummary}
+          assetCoverId={editAssetCoverId}
+          onAssetCoverIdChange={setEditAssetCoverId}
+          assetBackdropId={editAssetBackdropId}
+          onAssetBackdropIdChange={setEditAssetBackdropId}
+          assetClearlogoId={editAssetClearlogoId}
+          onAssetClearlogoIdChange={setEditAssetClearlogoId}
+          assetCoverValue={editCover}
+          assetBackdropValue={editBackdrop}
+          assetClearlogoValue={editClearlogo}
+          onUploadAssetCover={() => uploadMetadataAsset('cover')}
+          onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
+          onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
+          uploadingAssetCover={coverUploading}
+          uploadingAssetBackdrop={backdropUploading}
+          uploadingAssetClearlogo={clearlogoUploading}
+          tags={editTags}
+          onTagsChange={setEditTags}
+          isSaving={saving}
+          saveDisabled={!editName.trim()}
+          onSave={handleEdit}
+          showMetadataPlugin
+          metadataPlugins={metadataPlugins}
+          selectedMetadataPlugin={selectedMetadataPlugin}
+          onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
+          metadataPluginParam={metadataPluginParam}
+          onMetadataPluginParamChange={setMetadataPluginParam}
+          isMetadataPluginRunning={isMetadataPluginRunning}
+          metadataPluginProgress={metadataPluginProgress}
+          metadataPluginMessage={metadataPluginMessage}
+          onRunMetadataPlugin={runMetadataPlugin}
+          rpcSelect={{
+            request: rpcSelectRequest,
+            selectedIndex: rpcSelectSelectedIndex,
+            remainingSeconds: rpcSelectRemainingSeconds,
+            onSelectIndex: setRpcSelectSelectedIndex,
+            onAbort: abortRpcSelect,
+            onSubmit: submitRpcSelect,
+          }}
+        />
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

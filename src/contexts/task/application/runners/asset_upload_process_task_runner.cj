@@ -219,7 +219,7 @@ public class AssetUploadProcessTaskRunner {
     }
 
     private static func isSupportedTargetType(targetType: String): Bool {
-        return targetType == "archive" || targetType == "tag_icon" || targetType == "tag_background" || targetType == "user_avatar"
+        return targetType == "archive" || targetType == "tag_icon" || targetType == "tag_background" || targetType == "user_avatar" || targetType == "metadata_asset"
     }
 
     private static func resolveConsumeTaskType(targetType: String): String {
@@ -228,6 +228,7 @@ public class AssetUploadProcessTaskRunner {
             case "tag_icon" => return "tag_asset_consume"
             case "tag_background" => return "tag_asset_consume"
             case "user_avatar" => return "avatar_asset_consume"
+            case "metadata_asset" => return "metadata_asset_consume"
             case _ => return ""
         }
     }
@@ -238,6 +239,7 @@ public class AssetUploadProcessTaskRunner {
             case "tag_icon" => return "消费标签图标上传资产"
             case "tag_background" => return "消费标签背景上传资产"
             case "user_avatar" => return "消费头像上传资产"
+            case "metadata_asset" => return "消费元数据上传资产"
             case _ => return "消费上传资产"
         }
     }

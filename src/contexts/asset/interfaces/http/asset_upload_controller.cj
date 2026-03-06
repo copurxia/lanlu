@@ -543,7 +543,7 @@ public class AssetUploadController {
     }
 
     private static func isSupportedTargetType(targetType: String): Bool {
-        return targetType == "archive" || targetType == "tag_icon" || targetType == "tag_background" || targetType == "user_avatar"
+        return targetType == "archive" || targetType == "tag_icon" || targetType == "tag_background" || targetType == "user_avatar" || targetType == "metadata_asset"
     }
 
     private static func validateInitTarget(
@@ -610,6 +610,10 @@ public class AssetUploadController {
             return true
         }
 
+        if (targetType == "metadata_asset") {
+            return true
+        }
+
         return false
     }
 
@@ -619,6 +623,7 @@ public class AssetUploadController {
             case "tag_icon" => return "上传标签图标资源"
             case "tag_background" => return "上传标签背景资源"
             case "user_avatar" => return "上传头像资源"
+            case "metadata_asset" => return "上传元数据资源"
             case _ => return "上传资源"
         }
     }

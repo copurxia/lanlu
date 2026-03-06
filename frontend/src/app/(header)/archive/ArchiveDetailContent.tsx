@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
@@ -181,6 +182,9 @@ export function ArchiveDetailContent() {
   const [editAssetCoverId, setEditAssetCoverId] = useState('');
   const [editAssetBackdropId, setEditAssetBackdropId] = useState('');
   const [editAssetClearlogoId, setEditAssetClearlogoId] = useState('');
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [backdropUploading, setBackdropUploading] = useState(false);
+  const [clearlogoUploading, setClearlogoUploading] = useState(false);
 
   const [metadataPlugins, setMetadataPlugins] = useState<Plugin[]>([]);
   const [selectedMetadataPlugin, setSelectedMetadataPlugin] = useState<string>('');
@@ -254,6 +258,84 @@ export function ArchiveDetailContent() {
     if (!isAuthenticated) return;
     setEditDialogOpen(true);
   }, [isAuthenticated]);
+
+  const uploadMetadataAsset = useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
+    if (!isAuthenticated || isSaving || isMetadataPluginRunning) return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.style.display = 'none';
+
+    const setUploading = (next: boolean) => {
+      if (slot === 'cover') {
+        setCoverUploading(next);
+        return;
+      }
+      if (slot === 'backdrop') {
+        setBackdropUploading(next);
+        return;
+      }
+      setClearlogoUploading(next);
+    };
+
+    input.onchange = async (event) => {
+      const e = event as unknown as React.ChangeEvent<HTMLInputElement>;
+      const file = e.target.files?.[0];
+      if (!file) {
+        document.body.removeChild(input);
+        return;
+      }
+
+      setUploading(true);
+      try {
+        const result = await ChunkedUploadService.uploadWithChunks(
+          file,
+          {
+            targetType: 'metadata_asset',
+            overwrite: true,
+            contentType: file.type || 'application/octet-stream',
+          },
+          {
+            onProgress: () => {},
+            onChunkComplete: () => {},
+            onError: () => {},
+          }
+        );
+        if (!result.success) {
+          throw new Error(result.error || t('archive.assetUploadFailed'));
+        }
+
+        const assetId = Number(result.data?.assetId ?? 0);
+        if (!Number.isFinite(assetId) || assetId <= 0) {
+          throw new Error(t('archive.assetUploadFailed'));
+        }
+        const normalizedAssetId = String(Math.trunc(assetId));
+
+        if (slot === 'cover') {
+          setEditAssetCoverId(normalizedAssetId);
+          setEditCover('');
+        } else if (slot === 'backdrop') {
+          setEditAssetBackdropId(normalizedAssetId);
+          setEditBackdrop('');
+        } else {
+          setEditAssetClearlogoId(normalizedAssetId);
+          setEditClearlogo('');
+        }
+
+        success(t('archive.assetUploadSuccess'));
+      } catch (error: any) {
+        logger.operationFailed('upload archive metadata asset', error, { slot });
+        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'));
+      } finally {
+        setUploading(false);
+        document.body.removeChild(input);
+      }
+    };
+
+    document.body.appendChild(input);
+    input.click();
+  }, [isAuthenticated, isMetadataPluginRunning, isSaving, showError, success, t]);
 
   const saveEdit = useCallback(async () => {
     if (!metadata) return;
@@ -785,6 +867,15 @@ export function ArchiveDetailContent() {
             onAssetBackdropIdChange={setEditAssetBackdropId}
             assetClearlogoId={editAssetClearlogoId}
             onAssetClearlogoIdChange={setEditAssetClearlogoId}
+            assetCoverValue={editCover}
+            assetBackdropValue={editBackdrop}
+            assetClearlogoValue={editClearlogo}
+            onUploadAssetCover={() => uploadMetadataAsset('cover')}
+            onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
+            onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
+            uploadingAssetCover={coverUploading}
+            uploadingAssetBackdrop={backdropUploading}
+            uploadingAssetClearlogo={clearlogoUploading}
             tags={editTags}
             onTagsChange={setEditTags}
             isSaving={isSaving}

@@ -4,6 +4,12 @@ type ArchiveAssetSource = {
   assets?: unknown;
 } | null | undefined;
 
+type CoverAssetSource = {
+  assets?: unknown;
+  cover_asset_id?: unknown;
+  coverAssetId?: unknown;
+} | null | undefined;
+
 function toPositiveAssetId(value: unknown): number | undefined {
   if (value === null || value === undefined) return undefined;
   const n = typeof value === 'number' ? value : Number(value);
@@ -29,6 +35,13 @@ export function getArchiveAssetId(source: ArchiveAssetSource, key: string = 'cov
   if (!source) return undefined;
   const assets = normalizeArchiveAssets(source.assets);
   return assets[key];
+}
+
+export function getCoverAssetId(source: CoverAssetSource): number | undefined {
+  if (!source) return undefined;
+  const fromAssets = getArchiveAssetId(source, 'cover');
+  if (fromAssets !== undefined) return fromAssets;
+  return toPositiveAssetId(source.cover_asset_id ?? source.coverAssetId);
 }
 
 export function normalizeArchivePayload<T extends { assets?: unknown }>(

@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { MetadataAssetsEditor } from '@/components/archive/MetadataAssetsEditor';
 import type { Plugin } from '@/lib/services/plugin-service';
 
 export type RpcSelectOption = {
@@ -38,7 +39,6 @@ type Props = {
   open: boolean;
   onOpenChange: (next: boolean) => void;
   t: (key: string) => string;
-  dialogTitle?: string;
   titleLabel?: string;
   summaryLabel?: string;
   tagsLabel?: string;
@@ -54,6 +54,15 @@ type Props = {
   onAssetBackdropIdChange?: (next: string) => void;
   assetClearlogoId?: string;
   onAssetClearlogoIdChange?: (next: string) => void;
+  assetCoverValue?: string;
+  assetBackdropValue?: string;
+  assetClearlogoValue?: string;
+  onUploadAssetCover?: () => void | Promise<void>;
+  onUploadAssetBackdrop?: () => void | Promise<void>;
+  onUploadAssetClearlogo?: () => void | Promise<void>;
+  uploadingAssetCover?: boolean;
+  uploadingAssetBackdrop?: boolean;
+  uploadingAssetClearlogo?: boolean;
   showAssetFields?: boolean;
   tags: string[];
   onTagsChange: (next: string[]) => void;
@@ -77,7 +86,6 @@ export function ArchiveMetadataEditDialog({
   open,
   onOpenChange,
   t,
-  dialogTitle,
   titleLabel,
   summaryLabel,
   tagsLabel,
@@ -93,6 +101,15 @@ export function ArchiveMetadataEditDialog({
   onAssetBackdropIdChange,
   assetClearlogoId = '',
   onAssetClearlogoIdChange,
+  assetCoverValue = '',
+  assetBackdropValue = '',
+  assetClearlogoValue = '',
+  onUploadAssetCover,
+  onUploadAssetBackdrop,
+  onUploadAssetClearlogo,
+  uploadingAssetCover = false,
+  uploadingAssetBackdrop = false,
+  uploadingAssetClearlogo = false,
   showAssetFields = true,
   tags,
   onTagsChange,
@@ -115,11 +132,36 @@ export function ArchiveMetadataEditDialog({
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{dialogTitle || t('archive.editMetadata')}</DialogTitle>
-          </DialogHeader>
-          <DialogBody className="pt-0">
+          <DialogBody>
             <div className="space-y-4">
+              {showAssetFields ? (
+                <MetadataAssetsEditor
+                  t={t}
+                  title={title}
+                  disabled={isSaving || isMetadataPluginRunning}
+                  coverAssetId={assetCoverId}
+                  onCoverAssetIdChange={onAssetCoverIdChange}
+                  backdropAssetId={assetBackdropId}
+                  onBackdropAssetIdChange={onAssetBackdropIdChange}
+                  clearlogoAssetId={assetClearlogoId}
+                  onClearlogoAssetIdChange={onAssetClearlogoIdChange}
+                  coverValue={assetCoverValue}
+                  backdropValue={assetBackdropValue}
+                  clearlogoValue={assetClearlogoValue}
+                  onUploadCover={() => {
+                    void onUploadAssetCover?.();
+                  }}
+                  onUploadBackdrop={() => {
+                    void onUploadAssetBackdrop?.();
+                  }}
+                  onUploadClearlogo={() => {
+                    void onUploadAssetClearlogo?.();
+                  }}
+                  uploadingCover={uploadingAssetCover}
+                  uploadingBackdrop={uploadingAssetBackdrop}
+                  uploadingClearlogo={uploadingAssetClearlogo}
+                />
+              ) : null}
               <div>
                 <label className="text-sm font-medium">{titleLabel || t('archive.titleField')}</label>
                 <Input value={title} onChange={(e) => onTitleChange(e.target.value)} disabled={isSaving} />
@@ -134,31 +176,6 @@ export function ArchiveMetadataEditDialog({
                   disabled={isSaving}
                 />
               </div>
-              {showAssetFields ? (
-                <div>
-                  <label className="text-sm font-medium">{t('archive.assets')}</label>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                    <Input
-                      value={assetCoverId}
-                      onChange={(e) => onAssetCoverIdChange?.(e.target.value)}
-                      disabled={isSaving}
-                      placeholder={t('archive.assetsCoverPlaceholder')}
-                    />
-                    <Input
-                      value={assetBackdropId}
-                      onChange={(e) => onAssetBackdropIdChange?.(e.target.value)}
-                      disabled={isSaving}
-                      placeholder={t('archive.assetsBackdropPlaceholder')}
-                    />
-                    <Input
-                      value={assetClearlogoId}
-                      onChange={(e) => onAssetClearlogoIdChange?.(e.target.value)}
-                      disabled={isSaving}
-                      placeholder={t('archive.assetsClearlogoPlaceholder')}
-                    />
-                  </div>
-                </div>
-              ) : null}
               {showMetadataPlugin ? (
                 <div>
                   <label className="text-sm font-medium">{t('tankoubon.metadataPluginLabel')}</label>

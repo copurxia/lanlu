@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { BookOpen } from 'lucide-react';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { getCoverAssetId } from '@/lib/utils/archive-assets';
 
 interface TankoubonCardProps {
   tankoubon: Tankoubon;
@@ -18,9 +19,7 @@ export function TankoubonCard({
 }: TankoubonCardProps) {
   const { t } = useLanguage();
   const firstArchiveId = tankoubon.archives?.[0];
-  const coverAssetId = typeof tankoubon.assets?.cover === 'number' && Number.isFinite(tankoubon.assets.cover) && tankoubon.assets.cover > 0
-    ? Math.trunc(tankoubon.assets.cover)
-    : 0;
+  const coverAssetId = getCoverAssetId(tankoubon) ?? 0;
 
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
     return await FavoriteService.toggleTankoubonFavorite(id, isFavorite);
