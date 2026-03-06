@@ -88,6 +88,18 @@ export function readMetadataAssetValue(rawAssets: unknown, key: string): string 
   return '';
 }
 
+function toAssetUrl(rawValue: unknown): string {
+  const normalized = normalizeMetadataAssetValue(rawValue);
+  if (!normalized) return '';
+  if (/^\d+$/.test(normalized)) {
+    return `/api/assets/${normalized}`;
+  }
+  if (normalized.startsWith('/') || /^https?:\/\//i.test(normalized)) {
+    return normalized;
+  }
+  return '';
+}
+
 export function getArchiveAssetId(source: ArchiveAssetSource, key: string = 'cover'): number | undefined {
   if (!source) return undefined;
   const assets = normalizeArchiveAssets(source.assets);
@@ -99,6 +111,20 @@ export function getCoverAssetId(source: CoverAssetSource): number | undefined {
   const fromAssets = getArchiveAssetId(source, 'cover');
   if (fromAssets !== undefined) return fromAssets;
   return toPositiveAssetId(source.cover_asset_id ?? source.coverAssetId);
+}
+
+export function resolveArchiveAssetUrl(
+  source: ArchiveAssetSource,
+  key: string,
+  fallbackValue?: unknown
+): string {
+  const id = getArchiveAssetId(source, key);
+  if (id !== undefined) return `/api/assets/${id}`;
+
+  const fromAssets = readMetadataAssetValue(source?.assets, key);
+  if (fromAssets) return toAssetUrl(fromAssets);
+
+  return toAssetUrl(fallbackValue);
 }
 
 export function normalizeArchivePayload<T extends { assets?: unknown }>(

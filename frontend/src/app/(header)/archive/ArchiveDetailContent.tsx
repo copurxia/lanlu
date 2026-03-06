@@ -746,99 +746,102 @@ export function ArchiveDetailContent() {
                   </div>
 
                   {/* Desktop/tablet actions; mobile uses the bottom action bar */}
-                  <div className="hidden sm:flex shrink-0 flex-wrap items-center gap-2">
-                    <AddToTankoubonDialog
-                      archiveId={metadata.arcid}
-                      trigger={
+                  <div className="hidden sm:flex shrink-0 flex-col items-end gap-3">
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <AddToTankoubonDialog
+                        archiveId={metadata.arcid}
+                        trigger={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-9 w-9 p-0"
+                            title={t('tankoubon.addToCollection')}
+                          >
+                            <FolderPlus className="w-4 h-4" />
+                          </Button>
+                        }
+                      />
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                        title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                        disabled={!isAuthenticated || favoriteLoading}
+                        onClick={handleFavoriteClick}
+                      >
+                        <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                      </Button>
+
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-9 w-9 p-0"
+                        title={t('archive.download')}
+                        onClick={() => {
+                          const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
+                          window.open(downloadUrl, '_blank');
+                        }}
+                      >
+                        <Download className="w-4 h-4" />
+                      </Button>
+
+                      {metadata.isnew ? (
                         <Button
                           size="sm"
                           variant="outline"
                           className="h-9 w-9 p-0"
-                          title={t('tankoubon.addToCollection')}
+                          title={t('archive.markAsRead')}
+                          disabled={!isAuthenticated || isNewStatusLoading}
+                          onClick={handleMarkAsRead}
                         >
-                          <FolderPlus className="w-4 h-4" />
+                          <CheckCircle className="w-4 h-4" />
                         </Button>
-                      }
-                    />
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-9 w-9 p-0"
+                          title={t('archive.markAsNew')}
+                          disabled={!isAuthenticated || isNewStatusLoading}
+                          onClick={handleMarkAsNew}
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </Button>
+                      )}
 
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                      title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                      disabled={!isAuthenticated || favoriteLoading}
-                      onClick={handleFavoriteClick}
-                    >
-                      <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-                    </Button>
-
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-9 w-9 p-0"
-                      title={t('archive.download')}
-                      onClick={() => {
-                        const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
-                        window.open(downloadUrl, '_blank');
-                      }}
-                    >
-                      <Download className="w-4 h-4" />
-                    </Button>
-
-                    {metadata.isnew ? (
                       <Button
-                        size="sm"
                         variant="outline"
+                        size="sm"
                         className="h-9 w-9 p-0"
-                        title={t('archive.markAsRead')}
-                        disabled={!isAuthenticated || isNewStatusLoading}
-                        onClick={handleMarkAsRead}
+                        title={t('common.edit')}
+                        disabled={!isAuthenticated}
+                        onClick={openEditDialog}
                       >
-                        <CheckCircle className="w-4 h-4" />
+                        <Edit className="w-4 h-4" />
                       </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-9 w-9 p-0"
-                        title={t('archive.markAsNew')}
-                        disabled={!isAuthenticated || isNewStatusLoading}
-                        onClick={handleMarkAsNew}
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </Button>
-                    )}
 
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-9 w-9 p-0"
-                      title={t('common.edit')}
-                      disabled={!isAuthenticated}
-                      onClick={openEditDialog}
-                    >
-                      <Edit className="w-4 h-4" />
-                    </Button>
+                      {isAdmin ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-9 w-9 p-0 text-destructive"
+                          title={t('common.delete')}
+                          disabled={deleteLoading}
+                          onClick={handleDeleteArchive}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      ) : null}
 
-                    {isAdmin ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 p-0 text-destructive"
-                        title={t('common.delete')}
-                        disabled={deleteLoading}
-                        onClick={handleDeleteArchive}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    ) : null}
+                      <Link href={`/reader?id=${metadata.arcid}`}>
+                        <Button size="sm" variant="default" className="h-9">
+                          <BookOpen className="w-4 h-4 mr-2" />
+                          {t('archive.startReading')}
+                        </Button>
+                      </Link>
+                    </div>
 
-                    <Link href={`/reader?id=${metadata.arcid}`} className="ml-auto">
-                      <Button size="sm" variant="default" className="h-9">
-                        <BookOpen className="w-4 h-4 mr-2" />
-                        {t('archive.startReading')}
-                      </Button>
-                    </Link>
                   </div>
                 </div>
 

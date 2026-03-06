@@ -6,6 +6,8 @@ export interface Tankoubon {
   cover_asset_id?: number;
   assets?: import('./archive').ArchiveAssets;
   cover?: string;
+  backdrop?: string;
+  clearlogo?: string;
   archives?: string[];  // Array of arcids (optional for search results)
 
   // Aggregated metadata for display (only in search results)

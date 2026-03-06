@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { Suspense, useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { SearchBar, type SearchBarHandle } from '@/components/search/SearchBar';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { TankoubonService } from '@/lib/services/tankoubon-service';
+import { resolveArchiveAssetUrl } from '@/lib/utils/archive-assets';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
@@ -11,7 +13,7 @@ import { SettingsNav } from '@/components/settings/SettingsNav';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAppBack } from '@/hooks/use-app-back';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -19,8 +21,77 @@ import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { Logo } from '@/components/brand/Logo';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 
+function HeaderPageClearlogo({
+  pathname,
+  language,
+}: {
+  pathname: string | null | undefined;
+  language: string;
+}) {
+  const searchParams = useSearchParams();
+  const [pageClearlogoUrl, setPageClearlogoUrl] = useState('');
+  const [pageClearlogoAlt, setPageClearlogoAlt] = useState('');
+  const detailId = String(searchParams?.get('id') || '').trim();
+
+  useEffect(() => {
+    const onArchiveDetail = Boolean(pathname?.startsWith('/archive'));
+    const onTankoubonDetail = Boolean(pathname?.startsWith('/tankoubon'));
+    if (!detailId || (!onArchiveDetail && !onTankoubonDetail)) {
+      setPageClearlogoUrl('');
+      setPageClearlogoAlt('');
+      return;
+    }
+
+    let cancelled = false;
+    setPageClearlogoUrl('');
+    setPageClearlogoAlt('');
+
+    const loadClearlogo = async () => {
+      try {
+        if (onArchiveDetail) {
+          const metadata = await ArchiveService.getMetadata(detailId, language);
+          if (cancelled) return;
+          setPageClearlogoUrl(resolveArchiveAssetUrl(metadata, 'clearlogo', metadata.clearlogo));
+          setPageClearlogoAlt((metadata.title || '').trim());
+          return;
+        }
+
+        const tank = await TankoubonService.getTankoubonById(detailId);
+        if (cancelled) return;
+        setPageClearlogoUrl(resolveArchiveAssetUrl(tank, 'clearlogo', tank.clearlogo));
+        setPageClearlogoAlt((tank.name || '').trim());
+      } catch {
+        if (cancelled) return;
+        setPageClearlogoUrl('');
+        setPageClearlogoAlt('');
+      }
+    };
+
+    void loadClearlogo();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detailId, language, pathname]);
+
+  if (!pageClearlogoUrl) return null;
+
+  return (
+    <span className="flex h-5 max-w-[110px] shrink-0 items-center sm:h-6 sm:max-w-[150px] md:h-7 md:max-w-none">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={pageClearlogoUrl}
+        alt={pageClearlogoAlt || 'clearlogo'}
+        className="h-full w-auto max-w-full object-contain"
+        loading="lazy"
+        decoding="async"
+      />
+    </span>
+  );
+}
+
 export function Header() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const { serverName, serverInfo } = useServerInfo();
   const headerRef = useRef<HTMLElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -158,6 +229,9 @@ export function Header() {
                 · {serverInfo.motd}
               </span>
             )}
+            <Suspense fallback={null}>
+              <HeaderPageClearlogo pathname={pathname} language={language} />
+            </Suspense>
           </div>
 
           {/* 移动端：搜索模式（点击图标后独占顶栏） */}

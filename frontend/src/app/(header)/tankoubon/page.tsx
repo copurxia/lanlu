@@ -1114,35 +1114,38 @@ function TankoubonDetailContent() {
                 </div>
 
                 {/* Desktop/tablet actions; mobile actions are in the sheet. */}
-                <div className="hidden sm:flex shrink-0 flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                    title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                    disabled={favoriteLoading}
-                    onClick={handleFavoriteClick}
-                  >
-                    <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 w-9 p-0"
-                    title={t('common.edit')}
-                    onClick={() => setEditDialogOpen(true)}
-                  >
-                    <Edit className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 w-9 p-0 text-destructive"
-                    title={t('common.delete')}
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                <div className="hidden sm:flex shrink-0 flex-col items-end gap-3">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                      title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                      disabled={favoriteLoading}
+                      onClick={handleFavoriteClick}
+                    >
+                      <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      title={t('common.edit')}
+                      onClick={() => setEditDialogOpen(true)}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0 text-destructive"
+                      title={t('common.delete')}
+                      onClick={() => setDeleteDialogOpen(true)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+
                 </div>
                 </div>
 

@@ -9,12 +9,22 @@ import type React from 'react';
 
 const SIDEBAR_HORIZONTAL_PADDING_PX = 24;
 const SIDEBAR_GRID_GAP_PX = 8;
-const SIDEBAR_GRID_OVERSCAN_ROWS = 3;
-const SIDEBAR_IMAGE_HEIGHT_RATIO = 4 / 3; // `aspect-[3/4]`
-const SIDEBAR_THUMB_IMAGE_CLASS = 'absolute inset-0 h-full w-full object-contain object-center transition-opacity duration-200';
+const SIDEBAR_GRID_OVERSCAN_PX = 480;
+const SIDEBAR_THUMB_DEFAULT_ASPECT_RATIO = 3 / 4;
+const SIDEBAR_THUMB_CAPTION_HEIGHT_PX = 34;
+const SIDEBAR_THUMB_IMAGE_CLASS = 'block h-auto w-full transition-opacity duration-200';
 const SIDEBAR_CONTENT_PADDING_CLASS = 'px-3 pb-2 pt-2';
 const FILE_TREE_ROW_LEFT_PADDING_PX = 6;
 const FILE_TREE_DEPTH_INDENT_PX = 14;
+
+type ThumbnailLayoutItem = {
+  page: PageInfo;
+  index: number;
+  top: number;
+  left: number;
+  mediaHeight: number;
+  cardHeight: number;
+};
 
 type FileTreeFileNode = {
   kind: 'file';
@@ -56,11 +66,17 @@ function getPagePathSegments(path: string): string[] {
     .filter(Boolean);
 }
 
-function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string): string {
+function getPageCustomTitle(page: PageInfo): string {
   const metaTitle = page.metadata?.title?.trim();
   if (metaTitle) return metaTitle;
   const pageTitle = page.title?.trim();
   if (pageTitle) return pageTitle;
+  return '';
+}
+
+function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string): string {
+  const customTitle = getPageCustomTitle(page);
+  if (customTitle) return customTitle;
   return t('reader.pageAlt').replace('{page}', String(pageIndex + 1));
 }
 
@@ -107,8 +123,38 @@ export function ReaderSidebar({
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [activeTab, setActiveTab] = useState<SidebarTab>('thumbnails');
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
+  const [thumbAspectRatios, setThumbAspectRatios] = useState<Record<string, number>>({});
   const fileTreeScrollRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
+
+  const getThumbLayoutKey = useCallback((page: PageInfo, index: number) => {
+    const path = String(page.path || '').trim();
+    if (path) return path;
+    const url = String(page.url || '').trim();
+    if (url) return url;
+    return `page-${index}`;
+  }, []);
+
+  const handleThumbImageLoad = useCallback((page: PageInfo, index: number, image: HTMLImageElement) => {
+    const naturalWidth = image.naturalWidth || image.width;
+    const naturalHeight = image.naturalHeight || image.height;
+    if (!naturalWidth || !naturalHeight) return;
+
+    const nextRatio = naturalWidth / naturalHeight;
+    if (!Number.isFinite(nextRatio) || nextRatio <= 0) return;
+
+    const key = getThumbLayoutKey(page, index);
+    setThumbAspectRatios((prev) => {
+      const prevRatio = prev[key];
+      if (prevRatio && Math.abs(prevRatio - nextRatio) < 0.01) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [key]: nextRatio,
+      };
+    });
+  }, [getThumbLayoutKey]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -168,61 +214,56 @@ export function ReaderSidebar({
     return Math.max(0, width);
   }, [sidebarColumns, sidebarContentWidth]);
 
-  const thumbHeight = thumbWidth > 0 ? Math.round(thumbWidth * SIDEBAR_IMAGE_HEIGHT_RATIO) : 0;
-  const rowHeight = thumbHeight + SIDEBAR_GRID_GAP_PX;
-  const totalRows = sidebarColumns > 0 ? Math.ceil(sidebarDisplayPages.length / sidebarColumns) : 0;
-  const totalHeight = totalRows > 0 ? totalRows * rowHeight - SIDEBAR_GRID_GAP_PX : 0;
-  const canVirtualizeGrid = !isEpub && thumbWidth > 0 && rowHeight > 0 && sidebarViewportHeight > 0;
-
-  const startRow = canVirtualizeGrid
-    ? Math.max(0, Math.floor(sidebarScrollTop / rowHeight) - SIDEBAR_GRID_OVERSCAN_ROWS)
-    : 0;
-  const endRow = canVirtualizeGrid
-    ? Math.min(
-        totalRows - 1,
-        Math.ceil((sidebarScrollTop + sidebarViewportHeight) / rowHeight) + SIDEBAR_GRID_OVERSCAN_ROWS
-      )
-    : totalRows - 1;
-
-  const visibleStartIndex = Math.max(0, startRow * sidebarColumns);
-  const visibleEndIndex = Math.max(
-    -1,
-    Math.min(sidebarDisplayPages.length - 1, ((endRow + 1) * sidebarColumns) - 1)
-  );
-
-  const visibleThumbs = useMemo(() => {
-    if (!canVirtualizeGrid || visibleEndIndex < visibleStartIndex) return [] as Array<{
-      page: PageInfo;
-      index: number;
-      top: number;
-      left: number;
-    }>;
-
-    const items: Array<{ page: PageInfo; index: number; top: number; left: number }> = [];
-    for (let i = visibleStartIndex; i <= visibleEndIndex; i += 1) {
-      const page = sidebarDisplayPages[i];
-      if (!page) continue;
-
-      const row = Math.floor(i / sidebarColumns);
-      const column = i % sidebarColumns;
-      items.push({
-        page,
-        index: i,
-        top: row * rowHeight,
-        left: column * (thumbWidth + SIDEBAR_GRID_GAP_PX),
-      });
+  const thumbGridLayout = useMemo(() => {
+    if (sidebarColumns <= 0 || thumbWidth <= 0) {
+      return { items: [] as ThumbnailLayoutItem[], totalHeight: 0 };
     }
 
-    return items;
-  }, [
-    canVirtualizeGrid,
-    rowHeight,
-    sidebarColumns,
-    sidebarDisplayPages,
-    thumbWidth,
-    visibleEndIndex,
-    visibleStartIndex,
-  ]);
+    const columnHeights = Array.from({ length: sidebarColumns }, () => 0);
+    const items: ThumbnailLayoutItem[] = [];
+
+    sidebarDisplayPages.forEach((page, index) => {
+      const key = getThumbLayoutKey(page, index);
+      const aspectRatio = thumbAspectRatios[key] || SIDEBAR_THUMB_DEFAULT_ASPECT_RATIO;
+      const mediaHeight = Math.max(64, Math.round(thumbWidth / Math.max(aspectRatio, 0.05)));
+      const cardHeight = mediaHeight + SIDEBAR_THUMB_CAPTION_HEIGHT_PX;
+
+      let column = 0;
+      for (let i = 1; i < columnHeights.length; i += 1) {
+        if (columnHeights[i] < columnHeights[column]) {
+          column = i;
+        }
+      }
+
+      const top = columnHeights[column];
+      const left = column * (thumbWidth + SIDEBAR_GRID_GAP_PX);
+      columnHeights[column] += cardHeight + SIDEBAR_GRID_GAP_PX;
+
+      items.push({
+        page,
+        index,
+        top,
+        left,
+        mediaHeight,
+        cardHeight,
+      });
+    });
+
+    const totalHeight = Math.max(0, ...columnHeights) - (items.length > 0 ? SIDEBAR_GRID_GAP_PX : 0);
+    return { items, totalHeight };
+  }, [getThumbLayoutKey, sidebarColumns, sidebarDisplayPages, thumbAspectRatios, thumbWidth]);
+
+  const canVirtualizeGrid = !isEpub && thumbWidth > 0 && sidebarViewportHeight > 0;
+
+  const visibleThumbs = useMemo(() => {
+    if (!thumbGridLayout.items.length) return [] as ThumbnailLayoutItem[];
+    if (!canVirtualizeGrid) return thumbGridLayout.items;
+
+    const minTop = Math.max(0, sidebarScrollTop - SIDEBAR_GRID_OVERSCAN_PX);
+    const maxBottom = sidebarScrollTop + sidebarViewportHeight + SIDEBAR_GRID_OVERSCAN_PX;
+
+    return thumbGridLayout.items.filter((item) => item.top + item.cardHeight >= minTop && item.top <= maxBottom);
+  }, [canVirtualizeGrid, sidebarScrollTop, sidebarViewportHeight, thumbGridLayout]);
 
   const fileTree = useMemo(() => {
     const defaultPageLabel = (pageIndex: number) =>
@@ -474,9 +515,10 @@ export function ReaderSidebar({
       let itemHeight = 0;
 
       if (activeTab === 'thumbnails' && !isEpub && canVirtualizeGrid) {
-        const rowIndex = Math.floor(currentPage / sidebarColumns);
-        itemTop = rowIndex * rowHeight;
-        itemHeight = thumbHeight || rowHeight || 1;
+        const layoutItem = thumbGridLayout.items[currentPage];
+        if (!layoutItem) return;
+        itemTop = layoutItem.top;
+        itemHeight = layoutItem.cardHeight || 1;
       } else {
         const itemEl = container.querySelector(`[data-sidebar-item-index="${currentPage}"]`) as HTMLElement | null;
         if (!itemEl) return;
@@ -485,7 +527,7 @@ export function ReaderSidebar({
       }
 
       const itemBottom = itemTop + itemHeight;
-      const keepVisiblePadding = isEpub ? 96 : Math.max(64, rowHeight);
+      const keepVisiblePadding = isEpub ? 96 : Math.max(64, Math.round(itemHeight * 0.35));
       const outsideViewport =
         itemTop < viewTop + keepVisiblePadding ||
         itemBottom > viewBottom - keepVisiblePadding;
@@ -509,11 +551,9 @@ export function ReaderSidebar({
     isEpub,
     activeTab,
     open,
-    rowHeight,
-    sidebarColumns,
     sidebarDisplayPages.length,
     sidebarScrollRef,
-    thumbHeight,
+    thumbGridLayout,
   ]);
 
   if (!open) return null;
@@ -567,6 +607,79 @@ export function ReaderSidebar({
           ) : null}
         </span>
         <span className="shrink-0 opacity-80">{pageIcon}</span>
+      </button>
+    );
+  };
+
+  const renderThumbnailItem = (item: ThumbnailLayoutItem) => {
+    const { page, index, top, left, mediaHeight, cardHeight } = item;
+    const isCurrentPage = currentPage === index;
+    const metadataThumb = getPageDisplayThumb(page);
+    const showVideoPreview = page.type === 'video' && !metadataThumb;
+    const thumbSrc = metadataThumb || page.url;
+    const displayTitle = getPageDisplayTitle(page, index, t);
+    const hasCustomTitle = getPageCustomTitle(page).length > 0;
+    const captionText = hasCustomTitle ? displayTitle : String(index + 1);
+
+    return (
+      <button
+        key={index}
+        data-sidebar-item-index={index}
+        onClick={() => onSelectPage(index)}
+        className={`group absolute overflow-hidden rounded-lg bg-muted shadow-sm hover:ring-2 hover:ring-primary transition-all duration-200 ${
+          isCurrentPage ? 'ring-2 ring-primary' : ''
+        }`}
+        style={{
+          top,
+          left,
+          width: `${thumbWidth}px`,
+          height: `${cardHeight}px`,
+        }}
+      >
+        {isCurrentPage ? <div className="pointer-events-none absolute inset-0 z-10 bg-primary/10" /> : null}
+
+        <div className="pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur-sm">
+          <span>{index + 1}</span>
+          {page.type === 'video' ? <Film className="h-3 w-3" /> : null}
+          {page.type === 'html' ? <FileText className="h-3 w-3" /> : null}
+        </div>
+
+        <div className="w-full overflow-hidden bg-muted/70" style={{ height: `${mediaHeight}px` }}>
+          {showVideoPreview ? (
+            <video
+              src={page.url}
+              className="block h-full w-full object-cover"
+              muted
+              loop
+              playsInline
+              onMouseEnter={(e) => {
+                const video = e.target as HTMLVideoElement;
+                video.play().catch(() => {});
+              }}
+              onMouseLeave={(e) => {
+                const video = e.target as HTMLVideoElement;
+                video.pause();
+                video.currentTime = 0;
+              }}
+            />
+          ) : (
+            <MemoizedImage
+              src={thumbSrc}
+              alt={displayTitle || t('archive.previewPage').replace('{current}', String(index + 1)).replace('{total}', String(pagesLength))}
+              className={SIDEBAR_THUMB_IMAGE_CLASS}
+              decoding="async"
+              loading="lazy"
+              draggable={false}
+              onLoad={(e) => handleThumbImageLoad(page, index, e.currentTarget)}
+            />
+          )}
+        </div>
+
+        <div className="flex min-h-[34px] items-center justify-center border-t border-black/5 bg-background/84 px-2 py-1 text-center backdrop-blur-sm">
+          <span className={`block max-w-full text-[11px] leading-snug tracking-tight ${hasCustomTitle ? 'line-clamp-2 font-normal text-foreground/80' : 'truncate text-[10px] text-muted-foreground/80'}`}>
+            {captionText}
+          </span>
+        </div>
       </button>
     );
   };
@@ -664,7 +777,7 @@ export function ReaderSidebar({
                     {index + 1}
                   </span>
                   <span className="flex-1 truncate text-sm group-hover:text-primary transition-colors">
-                    {page.title || `${t('archive.chapter')} ${index + 1}`}
+                    {getPageCustomTitle(page) || `${t('archive.chapter')} ${index + 1}`}
                   </span>
                   <Book className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
                 </button>
@@ -675,144 +788,9 @@ export function ReaderSidebar({
           </div>
         ) : (
           <>
-            {canVirtualizeGrid ? (
-              <div className="relative" style={{ height: `${totalHeight}px` }}>
-                {visibleThumbs.map(({ page, index, top, left }) => {
-                  const isCurrentPage = currentPage === index;
-                  const metadataThumb = getPageDisplayThumb(page);
-                  const showVideoPreview = page.type === 'video' && !metadataThumb;
-                  const thumbSrc = metadataThumb || page.url;
-                  const thumbAlt = getPageDisplayTitle(page, index, t);
-                  return (
-                    <button
-                      key={index}
-                      data-sidebar-item-index={index}
-                      onClick={() => onSelectPage(index)}
-                      className={`group absolute bg-muted rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all duration-200 ${
-                        isCurrentPage ? 'ring-2 ring-primary' : ''
-                      }`}
-                      style={{
-                        top,
-                        left,
-                        width: `${thumbWidth}px`,
-                        height: `${thumbHeight}px`,
-                      }}
-                    >
-                      {isCurrentPage && (
-                        <div className="absolute inset-0 bg-primary/10 z-10 flex items-center justify-center">
-                          <div className="bg-primary text-primary-foreground text-xs px-2 py-1 rounded-full font-medium">
-                            {index + 1}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="relative w-full h-full">
-                        {showVideoPreview ? (
-                          <video
-                            src={page.url}
-                            className="w-full h-full object-cover"
-                            muted
-                            loop
-                            playsInline
-                            onMouseEnter={(e) => {
-                              const video = e.target as HTMLVideoElement;
-                              video.play().catch(() => {});
-                            }}
-                            onMouseLeave={(e) => {
-                              const video = e.target as HTMLVideoElement;
-                              video.pause();
-                              video.currentTime = 0;
-                            }}
-                          />
-                        ) : (
-                          <MemoizedImage
-                            src={thumbSrc}
-                            alt={thumbAlt || t('archive.previewPage')
-                              .replace('{current}', String(index + 1))
-                              .replace('{total}', String(pagesLength))}
-                            className={SIDEBAR_THUMB_IMAGE_CLASS}
-                            decoding="async"
-                            loading="lazy"
-                            draggable={false}
-                          />
-                        )}
-                      </div>
-
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs py-1 px-1 text-center truncate">
-                        {index + 1}
-                        {page.type === 'video' ? ' 🎬' : ''}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {sidebarDisplayPages.map((page, index) => {
-                  const isCurrentPage = currentPage === index;
-                  const metadataThumb = getPageDisplayThumb(page);
-                  const showVideoPreview = page.type === 'video' && !metadataThumb;
-                  const thumbSrc = metadataThumb || page.url;
-                  const thumbAlt = getPageDisplayTitle(page, index, t);
-
-                  return (
-                    <button
-                      key={index}
-                      data-sidebar-item-index={index}
-                      onClick={() => onSelectPage(index)}
-                      className={`group relative aspect-[3/4] bg-muted rounded-lg overflow-hidden hover:ring-2 hover:ring-primary transition-all duration-200 ${
-                        isCurrentPage ? 'ring-2 ring-primary' : ''
-                      }`}
-                    >
-                      {isCurrentPage && (
-                        <div className="absolute inset-0 bg-primary/10 z-10 flex items-center justify-center">
-                          <div className="bg-primary text-primary-foreground text-xs px-2 py-1 rounded-full font-medium">
-                            {index + 1}
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="relative w-full h-full">
-                        {showVideoPreview ? (
-                          <video
-                            src={page.url}
-                            className="w-full h-full object-cover"
-                            muted
-                            loop
-                            playsInline
-                            onMouseEnter={(e) => {
-                              const video = e.target as HTMLVideoElement;
-                              video.play().catch(() => {});
-                            }}
-                            onMouseLeave={(e) => {
-                              const video = e.target as HTMLVideoElement;
-                              video.pause();
-                              video.currentTime = 0;
-                            }}
-                          />
-                        ) : (
-                          <MemoizedImage
-                            src={thumbSrc}
-                            alt={thumbAlt || t('archive.previewPage')
-                              .replace('{current}', String(index + 1))
-                              .replace('{total}', String(pagesLength))}
-                            className={SIDEBAR_THUMB_IMAGE_CLASS}
-                            decoding="async"
-                            loading="lazy"
-                            draggable={false}
-                          />
-                        )}
-                      </div>
-
-                      <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs py-1 px-1 text-center truncate">
-                        {index + 1}
-                        {page.type === 'video' ? ' 🎬' : ''}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div className="relative" style={{ height: `${thumbGridLayout.totalHeight}px` }}>
+              {visibleThumbs.map(renderThumbnailItem)}
+            </div>
           </>
         )}
 
