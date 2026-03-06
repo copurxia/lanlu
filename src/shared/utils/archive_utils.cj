@@ -1,5 +1,6 @@
 package lanlu.shared.utils
 
+import avif_ffi.*
 import std.fs.*
 import std.process.*
 import std.convert.*
@@ -342,9 +343,9 @@ public class ArchiveUtils {
 
     /**
      * 转换图片或视频为AVIF格式缩略图
-     * Thumbnail conversion strategy: libvips > FFmpeg
-     * - libvips is preferred: it supports many input formats via loaders and can write AVIF
-     *   when the system has an AVIF-capable saver (typically via libheif).
+     * Thumbnail conversion strategy: libvips + libavif > FFmpeg
+     * - libvips is preferred for decode/resize/crop across many input formats.
+     * - libavif is used for the final AVIF encode so alpha is preserved for PNG inputs.
      * - If libvips fails, we fall back directly to FFmpeg for maximum compatibility.
      * 统一处理策略：宽度缩放到500px，高度裁剪到1000px（自适应，从顶部裁剪）
      */
@@ -366,12 +367,12 @@ public class ArchiveUtils {
             match (VipsConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
                 case Some(res) =>
                     if (res.success) { return res }
-                    logger.warn("libvips convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips+libavif convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
             // 1) FFmpeg fallback.
-            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
+            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter, 500i64)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
@@ -399,11 +400,11 @@ public class ArchiveUtils {
                     if (res.success) {
                         return (res, hash)
                     }
-                    logger.warn("libvips convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips+libavif convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
-            let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter)
+            let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter, 500i64)
             if (exitCode == 0) {
                 return (ProcessResultData(true, outputPath, ""), hash)
             }
@@ -431,12 +432,12 @@ public class ArchiveUtils {
             match (VipsConvertUtils.tryConvertAvatarToAvif(inputPath, outputPath, 256i64)) {
                 case Some(res) =>
                     if (res.success) { return res }
-                    logger.warn("libvips avatar convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips+libavif avatar convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
             // 1) FFmpeg fallback.
-            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
+            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter, 256i64)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
@@ -461,11 +462,11 @@ public class ArchiveUtils {
                     if (res.success) {
                         return (res, hash)
                     }
-                    logger.warn("libvips avatar convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips+libavif avatar convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
-            let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter)
+            let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter, 256i64)
             if (exitCode == 0) {
                 return (ProcessResultData(true, outputPath, ""), hash)
             }
@@ -493,12 +494,12 @@ public class ArchiveUtils {
             match (VipsConvertUtils.tryConvertTagBackgroundToAvif(inputPath, outputPath, 1200i64, 400i64)) {
                 case Some(res) =>
                     if (res.success) { return res }
-                    logger.warn("libvips tag background convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips+libavif tag background convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
             // 1) FFmpeg fallback.
-            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter)
+            let (exitCode, stderrStr) = runFfmpegToAvif(inputPath, outputPath, vfFilter, 1200i64)
             if (exitCode == 0) {
                 return ProcessResultData(true, outputPath, "")
             }
@@ -523,11 +524,11 @@ public class ArchiveUtils {
                     if (res.success) {
                         return (res, hash)
                     }
-                    logger.warn("libvips tag background convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    logger.warn("libvips+libavif tag background convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
                 case None => ()
             }
 
-            let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter)
+            let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter, 1200i64)
             if (exitCode == 0) {
                 return (ProcessResultData(true, outputPath, ""), hash)
             }
@@ -538,84 +539,31 @@ public class ArchiveUtils {
     }
 
     /**
-     * Run FFmpeg to convert a single image/video frame to AVIF.
+     * Run FFmpeg to process a single image/video frame into RGBA, then encode with libavif.
      */
-    private static func runFfmpegToAvif(inputPath: String, outputPath: String, vfFilter: String): (Int64, String) {
-        // Encoding AVIF can be extremely expensive with default encoder settings.
-        // We try a "fast thumbnail" profile first (lower CPU, good-enough quality),
-        // then fall back to the previous generic invocation for maximum compatibility.
-        //
-        // Notes:
-        // - `libaom-av1` is widely available and supports `-cpu-used` / `-row-mt`.
-        // - `-crf`+`-b:v 0` is the recommended quality control for AV1.
-        // - `fast_bilinear` is cheaper for scaling and is fine for thumbnails.
-        let fastArgs = [
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",                    // 覆盖输出文件
-            "-threads", "1",
-            "-i", inputPath,         // 输入文件
-            "-sws_flags", "fast_bilinear",
-            "-vf", vfFilter,
-            "-frames:v", "1",        // 只输出一帧
-            "-pix_fmt", "yuv420p",
-            "-c:v", "libaom-av1",
-            "-still-picture", "1",
-            "-row-mt", "1",
-            "-cpu-used", "6",
-            "-crf", "35",
-            "-b:v", "0",
-            "-map_metadata", "-1",   // 过滤元数据
-            outputPath
-        ]
-
-        let processFast = launch(
-            "ffmpeg",
-            fastArgs,
-            stdOut: ProcessRedirect.Pipe,
-            stdErr: ProcessRedirect.Pipe
-        )
-        let (fastExitCode, _, fastStderr) = processFast.waitOutput()
-        let fastStderrStr = try { String.fromUtf8(fastStderr) } catch (_: Exception) { "" }
-        if (fastExitCode == 0) {
-            return (0, fastStderrStr)
+    private static func runFfmpegToAvif(inputPath: String, outputPath: String, vfFilter: String, targetWidth: Int64): (Int64, String) {
+        let (exitCode, stderrStr, rgbaPixels, height) = runFfmpegToProcessedRgba(inputPath, vfFilter, targetWidth)
+        if (exitCode != 0) {
+            return (exitCode, stderrStr)
         }
 
-        // Fallback: previous behavior.
-        let process = launch(
-            "ffmpeg",
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",                    // 覆盖输出文件
-            "-threads", "1",
-            "-i", inputPath,         // 输入文件
-            "-sws_flags", "fast_bilinear",
-            "-vf", vfFilter,
-            "-frames:v", "1",        // 只输出一帧
-            "-q:v", "2",             // 质量设置
-            "-map_metadata", "-1",   // 过滤元数据
-            outputPath,
-            stdOut: ProcessRedirect.Pipe,
-            stdErr: ProcessRedirect.Pipe
-        )
-        let (exitCode, _, stderr) = process.waitOutput()
-        let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
-
-        // Preserve the fast attempt stderr as context for debugging.
-        let combined = if (fastStderrStr.size > 0) { "fast profile failed:\n${fastStderrStr}\n---\n${stderrStr}" } else { stderrStr }
-        return (exitCode, combined)
+        if (!AvifEncoder.encodeRGBAFile(UInt32(targetWidth), UInt32(height), rgbaPixels, outputPath)) {
+            let err = if (stderrStr.size > 0) { "${stderrStr}\n---\nlibavif encode failed" } else { "libavif encode failed" }
+            return (1, err)
+        }
+        return (0, stderrStr)
     }
 
     /**
-     * Run FFmpeg to convert to AVIF and simultaneously emit the final RGBA pixels to stdout
-     * so we can compute thumbhash without re-decoding the output file.
+     * Run FFmpeg to scale/crop one frame and emit the final RGBA pixels.
+     * Width is fixed by the caller's filter policy, so height can be derived from the buffer size.
      */
-    private static func runFfmpegToAvifWithThumbHash(inputPath: String, outputPath: String, vfFilter: String): (Int64, String, String) {
-        // Use filter_complex to split the same processed frame into:
-        // - AVIF encoder output file
-        // - raw RGBA bytes on stdout (pipe:1)
-        let filterComplex = "[0:v]${vfFilter},format=rgba,split=2[vavif][vraw]"
+    private static func runFfmpegToProcessedRgba(inputPath: String, vfFilter: String, targetWidth: Int64): (Int64, String, Array<UInt8>, Int64) {
+        if (targetWidth <= 0) {
+            return (1, "invalid ffmpeg target width: ${targetWidth}", Array<UInt8>(), 0)
+        }
 
+        let vfFilterWithAlpha = "${vfFilter},format=rgba"
         let args = [
             "-hide_banner",
             "-loglevel", "error",
@@ -623,21 +571,7 @@ public class ArchiveUtils {
             "-threads", "1",
             "-i", inputPath,
             "-sws_flags", "fast_bilinear",
-            "-filter_complex", filterComplex,
-            // AVIF output
-            "-map", "[vavif]",
-            "-frames:v", "1",
-            "-pix_fmt", "yuv420p",
-            "-c:v", "libaom-av1",
-            "-still-picture", "1",
-            "-row-mt", "1",
-            "-cpu-used", "6",
-            "-crf", "35",
-            "-b:v", "0",
-            "-map_metadata", "-1",
-            outputPath,
-            // Raw RGBA output for hashing
-            "-map", "[vraw]",
+            "-vf", vfFilterWithAlpha,
             "-frames:v", "1",
             "-f", "rawvideo",
             "-pix_fmt", "rgba",
@@ -653,12 +587,40 @@ public class ArchiveUtils {
         let (exitCode, stdout, stderr) = process.waitOutput()
         let stderrStr = try { String.fromUtf8(stderr) } catch (_: Exception) { "" }
         if (exitCode != 0) {
+            return (exitCode, stderrStr, Array<UInt8>(), 0)
+        }
+
+        let rowBytes = targetWidth * 4
+        let totalBytes = Int64(stdout.size)
+        if (rowBytes <= 0 || totalBytes <= 0 || (totalBytes % rowBytes) != 0) {
+            return (1, "ffmpeg rgba buffer size mismatch: ${totalBytes} bytes for width ${targetWidth}", Array<UInt8>(), 0)
+        }
+
+        let height = totalBytes / rowBytes
+        if (height <= 0) {
+            return (1, "ffmpeg produced invalid height: ${height}", Array<UInt8>(), 0)
+        }
+
+        return (0, stderrStr, stdout, height)
+    }
+
+    /**
+     * Run FFmpeg to emit the final RGBA pixels, then encode with libavif and compute thumbhash
+     * from the same post-filter pixels without re-decoding the output file.
+     */
+    private static func runFfmpegToAvifWithThumbHash(inputPath: String, outputPath: String, vfFilter: String, targetWidth: Int64): (Int64, String, String) {
+        let (exitCode, stderrStr, rgbaPixels, height) = runFfmpegToProcessedRgba(inputPath, vfFilter, targetWidth)
+        if (exitCode != 0) {
             return (exitCode, stderrStr, "")
         }
 
-        // stdout is raw RGBA bytes for the processed frame.
+        if (!AvifEncoder.encodeRGBAFile(UInt32(targetWidth), UInt32(height), rgbaPixels, outputPath)) {
+            let err = if (stderrStr.size > 0) { "${stderrStr}\n---\nlibavif encode failed" } else { "libavif encode failed" }
+            return (1, err, "")
+        }
+
         let hash = try {
-            ThumbHashUtils.calculateThumbHashFromRgbaPixels(stdout)
+            ThumbHashUtils.calculateThumbHashFromRgbaPixels(rgbaPixels)
         } catch (_: Exception) { "" }
         return (0, stderrStr, hash)
     }

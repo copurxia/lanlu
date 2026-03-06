@@ -34,6 +34,9 @@ foreign func vips_resize(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, scale: 
 // Crop/extract.
 foreign func vips_extract_area(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32, ...): Int32
 
+// Extract a single band from a multi-band image.
+foreign func vips_extract_band(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, band: Int32, ...): Int32
+
 // Render text via Pango.
 // Signature: int vips_text(VipsImage **out, const char *text, ...)
 foreign func vips_text(out: CPointer<VipsImagePtr>, text: CString, ...): Int32
@@ -114,6 +117,10 @@ public class VipsApi {
 
     public static func extractArea(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, left: Int32, top: Int32, width: Int32, height: Int32): Int32 {
         return unsafe { vips_extract_area(_in, out, left, top, width, height, CPointer<Unit>()) }
+    }
+
+    public static func extractBand(_in: VipsImagePtr, out: CPointer<VipsImagePtr>, band: Int32): Int32 {
+        return unsafe { vips_extract_band(_in, out, band, CPointer<Unit>()) }
     }
 
     // Wrap values (best-effort, matches libvips enum order).
