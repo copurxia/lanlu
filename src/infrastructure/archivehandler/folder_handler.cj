@@ -100,7 +100,36 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     public func listEntries(archivePath: String): Array<String> {
-        return DirectoryScanner.listDirectory(archivePath)
+        return listEntriesRecursive(archivePath, "")
+    }
+
+    /**
+     * 递归列出目录中的所有文件，支持下钻子目录（如 extrafanart）
+     */
+    private func listEntriesRecursive(basePath: String, relativePrefix: String): Array<String> {
+        let entries = DirectoryScanner.listDirectory(basePath)
+        let result = ArrayList<String>()
+
+        for (entry in entries) {
+            let fullPath = DirectoryScanner.joinPath(basePath, entry)
+            let relativePath = if (relativePrefix.size > 0) {
+                "${relativePrefix}/${entry}"
+            } else {
+                entry
+            }
+
+            if (DirectoryScanner.isDirectory(fullPath)) {
+                // 递归扫描子目录
+                let subEntries = listEntriesRecursive(fullPath, relativePath)
+                for (subEntry in subEntries) {
+                    result.add(subEntry)
+                }
+            } else if (DirectoryScanner.fileExists(fullPath)) {
+                result.add(relativePath)
+            }
+        }
+
+        return result.toArray()
     }
 
     public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>) {
@@ -169,83 +198,74 @@ public class FolderHandler <: ArchiveHandler {
     public func getFirstCoverEntry(archivePath: String): (String, String) {
         let entries = listEntries(archivePath)
 
-        // 优先当前目录中的图片文件
-        let imageEntries = ArrayList<String>()
+        // 优先当前目录中的图片文件（不包含路径分隔符）
+        let topLevelImageEntries = ArrayList<String>()
+        let subDirImageEntries = ArrayList<String>()
+        
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(archivePath, entry)
-            if (DirectoryScanner.isDirectory(fullPath)) {
+            if (!DirectoryScanner.fileExists(fullPath)) {
                 continue
             }
-            if (DirectoryScanner.fileExists(fullPath) && isImageFile(entry)) {
-                imageEntries.add(entry)
+            if (isImageFile(entry)) {
+                if (entry.contains("/")) {
+                    subDirImageEntries.add(entry)
+                } else {
+                    topLevelImageEntries.add(entry)
+                }
             }
         }
-        if (!imageEntries.isEmpty()) {
-            NaturalSort.sortStrings(imageEntries)
-            let firstEntry = imageEntries[0]
+        
+        // 优先顶层图片
+        if (!topLevelImageEntries.isEmpty()) {
+            NaturalSort.sortStrings(topLevelImageEntries)
+            let firstEntry = topLevelImageEntries[0]
+            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
+            return (firstEntry, fullPath)
+        }
+        
+        // 其次子目录中的图片
+        if (!subDirImageEntries.isEmpty()) {
+            NaturalSort.sortStrings(subDirImageEntries)
+            let firstEntry = subDirImageEntries[0]
             let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
             return (firstEntry, fullPath)
         }
 
-        // 如果当前目录没有图片，查找子目录中的图片
+        // 图片不存在时，回退到视频文件
+        let topLevelVideoEntries = ArrayList<String>()
+        let subDirVideoEntries = ArrayList<String>()
+        
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(archivePath, entry)
-            if (DirectoryScanner.isDirectory(fullPath)) {
-                let subEntries = DirectoryScanner.listDirectory(fullPath)
-                let subImageEntries = ArrayList<String>()
-                for (subEntry in subEntries) {
-                    let subFullPath = DirectoryScanner.joinPath(fullPath, subEntry)
-                    if (DirectoryScanner.fileExists(subFullPath) && isImageFile(subEntry)) {
-                        subImageEntries.add(subEntry)
-                    }
-                }
-                if (!subImageEntries.isEmpty()) {
-                    NaturalSort.sortStrings(subImageEntries)
-                    let firstSubEntry = subImageEntries[0]
-                    let subFullPath = DirectoryScanner.joinPath(fullPath, firstSubEntry)
-                    return (firstSubEntry, subFullPath)
-                }
-            }
-        }
-
-        // 图片不存在时，回退到当前目录中的视频文件
-        let videoEntries = ArrayList<String>()
-        for (entry in entries) {
-            let fullPath = DirectoryScanner.joinPath(archivePath, entry)
-            if (DirectoryScanner.isDirectory(fullPath)) {
+            if (!DirectoryScanner.fileExists(fullPath)) {
                 continue
             }
-            if (DirectoryScanner.fileExists(fullPath) && isVideoFile(entry)) {
-                videoEntries.add(entry)
+            if (isVideoFile(entry)) {
+                if (entry.contains("/")) {
+                    subDirVideoEntries.add(entry)
+                } else {
+                    topLevelVideoEntries.add(entry)
+                }
             }
         }
-        if (!videoEntries.isEmpty()) {
-            NaturalSort.sortStrings(videoEntries)
-            let firstEntry = videoEntries[0]
+        
+        // 优先顶层视频
+        if (!topLevelVideoEntries.isEmpty()) {
+            NaturalSort.sortStrings(topLevelVideoEntries)
+            let firstEntry = topLevelVideoEntries[0]
             let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
             return (firstEntry, fullPath)
         }
-
-        // 最后查找子目录中的视频文件
-        for (entry in entries) {
-            let fullPath = DirectoryScanner.joinPath(archivePath, entry)
-            if (DirectoryScanner.isDirectory(fullPath)) {
-                let subEntries = DirectoryScanner.listDirectory(fullPath)
-                let subVideoEntries = ArrayList<String>()
-                for (subEntry in subEntries) {
-                    let subFullPath = DirectoryScanner.joinPath(fullPath, subEntry)
-                    if (DirectoryScanner.fileExists(subFullPath) && isVideoFile(subEntry)) {
-                        subVideoEntries.add(subEntry)
-                    }
-                }
-                if (!subVideoEntries.isEmpty()) {
-                    NaturalSort.sortStrings(subVideoEntries)
-                    let firstSubEntry = subVideoEntries[0]
-                    let subFullPath = DirectoryScanner.joinPath(fullPath, firstSubEntry)
-                    return (firstSubEntry, subFullPath)
-                }
-            }
+        
+        // 最后子目录中的视频
+        if (!subDirVideoEntries.isEmpty()) {
+            NaturalSort.sortStrings(subDirVideoEntries)
+            let firstEntry = subDirVideoEntries[0]
+            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
+            return (firstEntry, fullPath)
         }
+        
         return ("", "")
     }
 
@@ -268,9 +288,14 @@ public class FolderHandler <: ArchiveHandler {
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(filePath, entry)
 
-            // 如果存在子目录，则不允许嵌套
+            // 如果存在子目录，检查是否为特例（如 extrafanart）
             if (DirectoryScanner.isDirectory(fullPath)) {
-                return false
+                let lowerEntry = entry.toAsciiLower()
+                if (lowerEntry != "extrafanart") {
+                    return false
+                }
+                // extrafanart 是特例，跳过继续检查其他条目
+                continue
             }
 
             // 检查文件是否是允许的媒体格式
