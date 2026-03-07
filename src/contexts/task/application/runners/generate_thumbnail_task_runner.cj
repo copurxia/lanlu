@@ -103,31 +103,31 @@ public class GenerateThumbnailTaskRunner {
 
         // Stream cover extraction into a temp file to avoid loading huge entries into memory.
         // This prevents long stalls on large archives (e.g. 40MB+ PNG cover pages).
-        TaskIO.appendLog(taskId, "Extracting cover image using streaming reader (type: ${archiveType})...")
+        TaskIO.appendLog(taskId, "Extracting cover media using streaming reader (type: ${archiveType})...")
 
-        let (coverEntryName, _) = handler.getFirstImage(actualArchivePath)
+        let (coverEntryName, _) = handler.getFirstCoverEntry(actualArchivePath)
         if (coverEntryName.size == 0) {
-            let errorMsg = "No image found in ${archiveType} archive"
+            let errorMsg = "No cover media found in ${archiveType} archive"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
             return ProcessResultData(false, "", errorMsg)
         }
-        TaskIO.appendLog(taskId, "Cover entry selected: ${coverEntryName}")
+        TaskIO.appendLog(taskId, "Cover media entry selected: ${coverEntryName}")
 
         var inferredExt = inferExtensionFromName(coverEntryName)
         if (inferredExt.size == 0) {
             inferredExt = "tmp"
         }
 
-        let tempImagePath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${inferredExt}")
+        let tempCoverPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.${inferredExt}")
         TaskIO.appendLog(taskId, "Inferred cover extension: ${inferredExt}")
-        TaskIO.appendLog(taskId, "Streaming cover entry to: ${tempImagePath}")
+        TaskIO.appendLog(taskId, "Streaming cover entry to: ${tempCoverPath}")
 
         let (readerExitCode, readerOpt, readerErr) = handler.getEntryReader(actualArchivePath, coverEntryName)
         if (readerExitCode == 0) {
             match (readerOpt) {
                 case Some(reader) =>
                     try {
-                        let outFile = File(Path(tempImagePath), Write)
+                        let outFile = File(Path(tempCoverPath), Write)
                         let bufSize: Int64 = 1024 * 1024
                         var buf = Array<Byte>(bufSize, repeat: 0)
                         var total: Int64 = 0
@@ -141,10 +141,10 @@ public class GenerateThumbnailTaskRunner {
                         }
                         outFile.close()
                         reader.close()
-                        TaskIO.appendLog(taskId, "Cover image extracted via streaming, size: ${total} bytes")
+                        TaskIO.appendLog(taskId, "Cover media extracted via streaming, size: ${total} bytes")
                     } catch (e: Exception) {
                         try { reader.close() } catch (_: Exception) {}
-                        let errorMsg = "Failed to write cover image to temp file (streaming): ${e.message}"
+                        let errorMsg = "Failed to write cover media to temp file (streaming): ${e.message}"
                         TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                         return ProcessResultData(false, "", errorMsg)
                     }
@@ -159,12 +159,12 @@ public class GenerateThumbnailTaskRunner {
                         return ProcessResultData(false, "", errorMsg)
                     }
                     try {
-                        let tempFile = File(Path(tempImagePath), Write)
+                        let tempFile = File(Path(tempCoverPath), Write)
                         tempFile.write(imageData)
                         tempFile.close()
-                        TaskIO.appendLog(taskId, "Cover image extracted (fallback), size: ${imageData.size} bytes")
+                        TaskIO.appendLog(taskId, "Cover media extracted (fallback), size: ${imageData.size} bytes")
                     } catch (e: Exception) {
-                        let errorMsg = "Failed to write cover image to temp file (fallback): ${e.message}"
+                        let errorMsg = "Failed to write cover media to temp file (fallback): ${e.message}"
                         TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                         return ProcessResultData(false, "", errorMsg)
                     }
@@ -180,27 +180,27 @@ public class GenerateThumbnailTaskRunner {
                 return ProcessResultData(false, "", errorMsg)
             }
             try {
-                let tempFile = File(Path(tempImagePath), Write)
+                let tempFile = File(Path(tempCoverPath), Write)
                 tempFile.write(imageData)
                 tempFile.close()
-                TaskIO.appendLog(taskId, "Cover image extracted (fallback), size: ${imageData.size} bytes")
+                TaskIO.appendLog(taskId, "Cover media extracted (fallback), size: ${imageData.size} bytes")
             } catch (e: Exception) {
-                let errorMsg = "Failed to write cover image to temp file (fallback): ${e.message}"
+                let errorMsg = "Failed to write cover media to temp file (fallback): ${e.message}"
                 TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
                 return ProcessResultData(false, "", errorMsg)
             }
         }
 
-        // 先转换图片为 AVIF 格式（临时路径）
-        TaskIO.appendLog(taskId, "Converting image to AVIF format (libvips > FFmpeg)...")
+        // 先转换封面媒体为 AVIF 格式（临时路径）
+        TaskIO.appendLog(taskId, "Converting cover media to AVIF format (libvips > FFmpeg)...")
         let tempAvifPath = FileUtils.joinPath(taskTempDir, "${archiveId}_temp.avif")
-        let (convertResult, thumbHashFromConvert) = ArchiveUtils.convertImageToAvifWithThumbHash(tempImagePath, tempAvifPath, taskTempDir)
+        let (convertResult, thumbHashFromConvert) = ArchiveUtils.convertImageToAvifWithThumbHash(tempCoverPath, tempAvifPath, taskTempDir)
 
         // 清理输入临时文件（无论转换成功或失败）
         try {
-            if (fileExists(tempImagePath)) {
-                remove(Path(tempImagePath))
-                TaskIO.appendLog(taskId, "Deleted temp file: ${tempImagePath}")
+            if (fileExists(tempCoverPath)) {
+                remove(Path(tempCoverPath))
+                TaskIO.appendLog(taskId, "Deleted temp file: ${tempCoverPath}")
             }
         } catch (e: Exception) {
             let warnMsg = "Failed to cleanup temp files for task: ${taskId}, error: ${e.message}"

@@ -141,16 +141,16 @@ public interface ArchiveHandler {
     func getMediaCount(archivePath: String): Int32
 
     /**
-     * 获取第一张图片信息（用于缩略图生成）
+     * 获取首个可生成封面的媒体条目（图片优先，其次视频）
      * @param archivePath 档案路径
      * @return (entryName, fullPath) - fullPath仅对folder类型有效
      */
-    func getFirstImage(archivePath: String): (String, String)
+    func getFirstCoverEntry(archivePath: String): (String, String)
 
     /**
-     * 获取封面图片数据
+     * 获取封面源媒体数据
      * @param archivePath 档案路径
-     * @return (exitCode, imageData, errorData) - 0表示成功
+     * @return (exitCode, mediaData, errorData) - 0表示成功
      */
     func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>)
 

@@ -166,10 +166,10 @@ public class FolderHandler <: ArchiveHandler {
         return count
     }
 
-    public func getFirstImage(archivePath: String): (String, String) {
+    public func getFirstCoverEntry(archivePath: String): (String, String) {
         let entries = listEntries(archivePath)
 
-        // 筛选当前目录的图片文件并排序
+        // 优先当前目录中的图片文件
         let imageEntries = ArrayList<String>()
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(archivePath, entry)
@@ -187,7 +187,7 @@ public class FolderHandler <: ArchiveHandler {
             return (firstEntry, fullPath)
         }
 
-        // 如果当前目录没有图片，查找子目录
+        // 如果当前目录没有图片，查找子目录中的图片
         for (entry in entries) {
             let fullPath = DirectoryScanner.joinPath(archivePath, entry)
             if (DirectoryScanner.isDirectory(fullPath)) {
@@ -202,6 +202,45 @@ public class FolderHandler <: ArchiveHandler {
                 if (!subImageEntries.isEmpty()) {
                     NaturalSort.sortStrings(subImageEntries)
                     let firstSubEntry = subImageEntries[0]
+                    let subFullPath = DirectoryScanner.joinPath(fullPath, firstSubEntry)
+                    return (firstSubEntry, subFullPath)
+                }
+            }
+        }
+
+        // 图片不存在时，回退到当前目录中的视频文件
+        let videoEntries = ArrayList<String>()
+        for (entry in entries) {
+            let fullPath = DirectoryScanner.joinPath(archivePath, entry)
+            if (DirectoryScanner.isDirectory(fullPath)) {
+                continue
+            }
+            if (DirectoryScanner.fileExists(fullPath) && isVideoFile(entry)) {
+                videoEntries.add(entry)
+            }
+        }
+        if (!videoEntries.isEmpty()) {
+            NaturalSort.sortStrings(videoEntries)
+            let firstEntry = videoEntries[0]
+            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
+            return (firstEntry, fullPath)
+        }
+
+        // 最后查找子目录中的视频文件
+        for (entry in entries) {
+            let fullPath = DirectoryScanner.joinPath(archivePath, entry)
+            if (DirectoryScanner.isDirectory(fullPath)) {
+                let subEntries = DirectoryScanner.listDirectory(fullPath)
+                let subVideoEntries = ArrayList<String>()
+                for (subEntry in subEntries) {
+                    let subFullPath = DirectoryScanner.joinPath(fullPath, subEntry)
+                    if (DirectoryScanner.fileExists(subFullPath) && isVideoFile(subEntry)) {
+                        subVideoEntries.add(subEntry)
+                    }
+                }
+                if (!subVideoEntries.isEmpty()) {
+                    NaturalSort.sortStrings(subVideoEntries)
+                    let firstSubEntry = subVideoEntries[0]
                     let subFullPath = DirectoryScanner.joinPath(fullPath, firstSubEntry)
                     return (firstSubEntry, subFullPath)
                 }
@@ -254,9 +293,9 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
-        let (entryName, fullPath) = getFirstImage(archivePath)
+        let (entryName, fullPath) = getFirstCoverEntry(archivePath)
         if (entryName.isEmpty() || fullPath.isEmpty()) {
-            return (1i64, Array<UInt8>(), "No image found".toArray())
+            return (1i64, Array<UInt8>(), "No cover media found".toArray())
         }
         try {
             let data = File.readFrom(Path(fullPath))

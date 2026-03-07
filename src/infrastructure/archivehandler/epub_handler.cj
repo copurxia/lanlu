@@ -112,7 +112,7 @@ public class EpubHandler <: ArchiveHandler {
         return Int32(entries.size)
     }
 
-    public func getFirstImage(archivePath: String): (String, String) {
+    public func getFirstCoverEntry(archivePath: String): (String, String) {
         try {
             let epub = Epub.open(archivePath)
             let resources = epub.getResourceList()

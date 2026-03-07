@@ -263,15 +263,18 @@ public class Archive {
     }
 
     /**
-     * Find the first image entry in an archive using a single streaming scan.
+     * Find the first coverable entry in an archive using a single streaming scan.
+     *
+     * Images are preferred to preserve existing behavior. If no image exists,
+     * the first video entry is returned instead.
      *
      * This avoids building a full entry list + natural sorting, which can be very slow
      * on large archives. The ordering matches lanlu.utils.NaturalSort semantics
      * (numbers are compared by value, case-insensitive text).
      *
-     * @return best-matching image entry name, or "" if none found / open fails.
+     * @return best-matching cover entry name, or "" if none found / open fails.
      */
-    public static func findFirstImageEntry(archivePath: String): String {
+    public static func findFirstCoverEntry(archivePath: String): String {
         ensureLocaleInitialized()
         let a = unsafe { archive_read_new() }
         if (a.isNull()) {
@@ -293,7 +296,8 @@ public class Archive {
         }
 
         let entry = unsafe { archive_entry_new2(a) }
-        var localBest = ""
+        var bestImage = ""
+        var bestVideo = ""
 
         while (true) {
             let r = unsafe { archive_read_next_header2(a, entry) }
@@ -308,13 +312,21 @@ public class Archive {
             if (name.size == 0) {
                 continue
             }
-            if (!isImageEntryName(name)) {
+            if (isImageEntryName(name)) {
+                if (bestImage.size == 0) {
+                    bestImage = name
+                } else if (naturalCompare(name, bestImage) == Ordering.LT) {
+                    bestImage = name
+                }
                 continue
             }
-            if (localBest.size == 0) {
-                localBest = name
-            } else if (naturalCompare(name, localBest) == Ordering.LT) {
-                localBest = name
+            if (!isVideoEntryName(name)) {
+                continue
+            }
+            if (bestVideo.size == 0) {
+                bestVideo = name
+            } else if (naturalCompare(name, bestVideo) == Ordering.LT) {
+                bestVideo = name
             }
         }
 
@@ -324,7 +336,10 @@ public class Archive {
             archive_read_free(a)
         }
 
-        return localBest
+        if (bestImage.size > 0) {
+            return bestImage
+        }
+        return bestVideo
     }
 
     /**

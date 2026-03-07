@@ -1684,17 +1684,39 @@ public class DenoTaskRunner {
             if (qv < 2i64) { qv = 2i64 }
             if (qv > 31i64) { qv = 31i64 }
             let vf = "scale=${scale}:${scale}:force_original_aspect_ratio=decrease"
-            let args = [
-                "-hide_banner",
-                "-loglevel", "error",
-                "-y",
-                "-i", inputPath,
-                "-frames:v", "1",
-                "-vf", vf,
-                "-q:v", qv.toString(),
-                "-map_metadata", "-1",
-                outputPath
-            ]
+            let lowerInputPath = inputPath.toAsciiLower()
+            let isVideoInput = lowerInputPath.endsWith(".mp4") ||
+                               lowerInputPath.endsWith(".webm") ||
+                               lowerInputPath.endsWith(".mkv") ||
+                               lowerInputPath.endsWith(".avi") ||
+                               lowerInputPath.endsWith(".mov") ||
+                               lowerInputPath.endsWith(".m4v")
+            let args = if (isVideoInput) {
+                [
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-y",
+                    "-ss", "1",
+                    "-i", inputPath,
+                    "-frames:v", "1",
+                    "-vf", vf,
+                    "-q:v", qv.toString(),
+                    "-map_metadata", "-1",
+                    outputPath
+                ]
+            } else {
+                [
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-y",
+                    "-i", inputPath,
+                    "-frames:v", "1",
+                    "-vf", vf,
+                    "-q:v", qv.toString(),
+                    "-map_metadata", "-1",
+                    outputPath
+                ]
+            }
             try {
                 let proc = launch("ffmpeg", args, stdOut: ProcessRedirect.Pipe, stdErr: ProcessRedirect.Pipe)
                 let (exitCode, _, stderr) = proc.waitOutput()
@@ -2206,9 +2228,9 @@ public class DenoTaskRunner {
                 case None => return (false, "{}", "archive not found or path unresolved")
                 case Some((archiveType, actualPath)) =>
                     let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
-                    let (entryName, _) = handler.getFirstImage(actualPath)
+                    let (entryName, _) = handler.getFirstCoverEntry(actualPath)
                     if (entryName.trimAscii().size == 0) {
-                        return (false, "{}", "no image found in archive")
+                        return (false, "{}", "no cover media found in archive")
                     }
 
                     // Infer ext from entryName.

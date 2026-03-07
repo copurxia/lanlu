@@ -363,12 +363,14 @@ public class ArchiveUtils {
             // The comma in min() must be escaped for FFmpeg filter parsing.
             let vfFilter = "scale=500:-1,crop=500:min(ih\\,1000):0:0"
 
-            // 0) libvips (preferred): decode+resize+crop+write directly.
-            match (VipsConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
-                case Some(res) =>
-                    if (res.success) { return res }
-                    logger.warn("libvips+libavif convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
-                case None => ()
+            // 0) libvips (preferred for still images only): decode+resize+crop+write directly.
+            if (!isLikelyVideoPath(inputPath)) {
+                match (VipsConvertUtils.tryConvertToAvifThumbnail(inputPath, outputPath, 500i64, 1000i64)) {
+                    case Some(res) =>
+                        if (res.success) { return res }
+                        logger.warn("libvips+libavif convert->avif failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    case None => ()
+                }
             }
 
             // 1) FFmpeg fallback.
@@ -395,13 +397,15 @@ public class ArchiveUtils {
 
             let vfFilter = "scale=500:-1,crop=500:min(ih\\,1000):0:0"
 
-            match (VipsConvertUtils.tryConvertToAvifThumbnailWithThumbHash(inputPath, outputPath, 500i64, 1000i64)) {
-                case Some((res, hash)) =>
-                    if (res.success) {
-                        return (res, hash)
-                    }
-                    logger.warn("libvips+libavif convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
-                case None => ()
+            if (!isLikelyVideoPath(inputPath)) {
+                match (VipsConvertUtils.tryConvertToAvifThumbnailWithThumbHash(inputPath, outputPath, 500i64, 1000i64)) {
+                    case Some((res, hash)) =>
+                        if (res.success) {
+                            return (res, hash)
+                        }
+                        logger.warn("libvips+libavif convert->avif+hash failed; falling back to ffmpeg", ("inputPath", inputPath), ("error", res.error))
+                    case None => ()
+                }
             }
 
             let (exitCode, stderrStr, hash) = runFfmpegToAvifWithThumbHash(inputPath, outputPath, vfFilter, 500i64)
@@ -564,19 +568,36 @@ public class ArchiveUtils {
         }
 
         let vfFilterWithAlpha = "${vfFilter},format=rgba"
-        let args = [
-            "-hide_banner",
-            "-loglevel", "error",
-            "-y",
-            "-threads", "1",
-            "-i", inputPath,
-            "-sws_flags", "fast_bilinear",
-            "-vf", vfFilterWithAlpha,
-            "-frames:v", "1",
-            "-f", "rawvideo",
-            "-pix_fmt", "rgba",
-            "pipe:1"
-        ]
+        let args = if (isLikelyVideoPath(inputPath)) {
+            [
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",
+                "-threads", "1",
+                "-ss", "1",
+                "-i", inputPath,
+                "-sws_flags", "fast_bilinear",
+                "-vf", vfFilterWithAlpha,
+                "-frames:v", "1",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgba",
+                "pipe:1"
+            ]
+        } else {
+            [
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",
+                "-threads", "1",
+                "-i", inputPath,
+                "-sws_flags", "fast_bilinear",
+                "-vf", vfFilterWithAlpha,
+                "-frames:v", "1",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgba",
+                "pipe:1"
+            ]
+        }
 
         let process = launch(
             "ffmpeg",
@@ -626,6 +647,19 @@ public class ArchiveUtils {
     }
 
     // ==================== 私有工具方法 ====================
+
+    private static func isLikelyVideoPath(inputPath: String): Bool {
+        if (inputPath.size == 0) {
+            return false
+        }
+        let lower = inputPath.toAsciiLower()
+        return lower.endsWith(".mp4") ||
+               lower.endsWith(".webm") ||
+               lower.endsWith(".mkv") ||
+               lower.endsWith(".avi") ||
+               lower.endsWith(".mov") ||
+               lower.endsWith(".m4v")
+    }
 
     /**
      * 获取当前时间戳（毫秒）

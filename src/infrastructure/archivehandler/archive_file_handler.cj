@@ -84,10 +84,10 @@ public class ArchiveFileHandler <: ArchiveHandler {
         return Archive.countMediaEntries(archivePath)
     }
 
-    public func getFirstImage(archivePath: String): (String, String) {
+    public func getFirstCoverEntry(archivePath: String): (String, String) {
         // Fast-path: avoid listing/sorting all entries for large archives.
-        // This scans headers once and selects the best candidate using natural order.
-        let best = Archive.findFirstImageEntry(archivePath)
+        // This scans headers once and selects the best cover candidate using natural order.
+        let best = Archive.findFirstCoverEntry(archivePath)
         if (best.size == 0) {
             return ("", "")
         }
@@ -123,9 +123,9 @@ public class ArchiveFileHandler <: ArchiveHandler {
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {
-        let (entryName, _) = getFirstImage(archivePath)
+        let (entryName, _) = getFirstCoverEntry(archivePath)
         if (entryName.isEmpty()) {
-            return (1i64, Array<UInt8>(), "No image found".toArray())
+            return (1i64, Array<UInt8>(), "No cover media found".toArray())
         }
         return extractEntryToStream(archivePath, entryName)
     }
