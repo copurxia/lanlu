@@ -274,6 +274,83 @@ public class ArchiveDao {
     }
 
     /**
+     * 批量根据 arcid 获取归档数据
+     */
+    public static func getBatchArchivesById(archiveIds: Array<String>): HashMap<String, ArchiveData> {
+        let result = HashMap<String, ArchiveData>()
+        if (archiveIds.size == 0) { return result }
+
+        let deduped = ArrayList<String>()
+        let seen = HashMap<String, Bool>()
+        for (archiveId in archiveIds) {
+            let id = archiveId.trimAscii()
+            if (id.size == 0) { continue }
+            match (seen.get(id)) {
+                case Some(_) => ()
+                case None =>
+                    seen[id] = true
+                    deduped.add(id)
+            }
+        }
+        if (deduped.size == 0) { return result }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    var inClause = ""
+                    for (i in 0..deduped.size) {
+                        if (i > 0) { inClause += "," }
+                        inClause += "?"
+                    }
+
+                    let stmt = conn.prepareStatement(
+                        "SELECT arcid, id, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type, category_id FROM archives WHERE arcid IN (${inClause})")
+                    try {
+                        for (i in 0..deduped.size) {
+                            stmt.set(i, deduped[i])
+                        }
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let archive = ArchiveData()
+                                archive.id = rs.getOrNull<String>(0) ?? ""
+                                archive.internalId = rs.getOrNull<Int64>(1) ?? 0
+                                archive.title = rs.getOrNull<String>(2) ?? ""
+                                archive.filename = rs.getOrNull<String>(3) ?? ""
+                                archive.summary = rs.getOrNull<String>(4) ?? ""
+                                archive.thumbhash = rs.getOrNull<String>(5) ?? ""
+                                archive.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
+                                archive.created_at = rs.getOrNull<String>(7) ?? ""
+                                archive.updated_at = rs.getOrNull<String>(8) ?? ""
+                                archive.relative_path = rs.getOrNull<String>(9) ?? ""
+                                archive.file_size = rs.getOrNull<Int64>(10) ?? 0
+                                archive.pagecount = rs.getOrNull<Int32>(11) ?? 0
+                                archive.archive_type = rs.getOrNull<String>(12) ?? "archive"
+                                archive.category_id = rs.getOrNull<Int64>(13) ?? 0
+                                if (archive.id.trimAscii().size > 0) {
+                                    result[archive.id] = archive
+                                }
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("批量查询归档失败", ("error", e.message))
+                    return result
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => getLogger("archive_dao").error("无法连接到数据库")
+        }
+
+        return result
+    }
+
+    /**
      * 根据 arcid 获取 archives 表的内部 ID（INTEGER）
      */
     public static func getArchiveInternalId(arcid: String): Int64 {

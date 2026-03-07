@@ -784,14 +784,13 @@ public class DenoTaskRunner {
         w.endArray()
     }
 
-    private static func buildArchiveMetadataObjectJson(archiveId: String, includeLocator: Bool, volumeNo: Int32): (Bool, String, String) {
-        let archive = ArchiveDao.getArchiveById(archiveId)
-        if (archive.id.size == 0) {
-            return (false, "", "Archive not found")
-        }
-
-        let tags = TagDao.getArchiveTags(archive.id)
-        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
+    private static func buildArchiveMetadataObjectJsonFromParts(
+        archive: ArchiveData,
+        tags: String,
+        assetsRaw: String,
+        includeLocator: Bool,
+        volumeNo: Int32
+    ): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -812,7 +811,18 @@ public class DenoTaskRunner {
         }
         w.endObject()
         w.flush()
-        return (true, String.fromUtf8(readToEnd(out)), "")
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildArchiveMetadataObjectJson(archiveId: String, includeLocator: Bool, volumeNo: Int32): (Bool, String, String) {
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) {
+            return (false, "", "Archive not found")
+        }
+
+        let tags = TagDao.getArchiveTags(archive.id)
+        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
+        return (true, buildArchiveMetadataObjectJsonFromParts(archive, tags, assetsRaw, includeLocator, volumeNo), "")
     }
 
     private static func buildTankoubonMetadataObjectJson(tankoubonId: String): (Bool, String, String) {
@@ -820,6 +830,10 @@ public class DenoTaskRunner {
             case None => return (false, "", "Tankoubon not found")
             case Some(tankoubon) =>
                 let tags = TankoubonDao.getMergedTagsForTankoubon(tankoubonId)
+                let archiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
+                let archiveMap = ArchiveDao.getBatchArchivesById(archiveIds)
+                let archiveTagsMap = TagDao.getBatchArchiveTags(archiveIds)
+                let archiveAssetsMap = ArchiveDao.getBatchArchiveAssetsRaw(archiveIds)
                 let out = ByteBuffer()
                 let w = JsonWriter(out)
                 w.startObject()
@@ -831,7 +845,6 @@ public class DenoTaskRunner {
 
                 w.writeName("archive")
                 w.startArray()
-                let archiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
                 var volumeNo: Int32 = 1
                 for (idx in 0..archiveIds.size) {
                     let memberId = archiveIds[idx].trimAscii()
@@ -839,9 +852,21 @@ public class DenoTaskRunner {
                         volumeNo += 1
                         continue
                     }
-                    let (okMember, memberJson, _) = buildArchiveMetadataObjectJson(memberId, true, volumeNo)
-                    if (okMember && memberJson.trimAscii().size > 0) {
-                        w.jsonValue(memberJson)
+                    match (archiveMap.get(memberId)) {
+                        case Some(archive) =>
+                            let memberTags = match (archiveTagsMap.get(memberId)) {
+                                case Some(value) => value
+                                case None => ""
+                            }
+                            let memberAssetsRaw = match (archiveAssetsMap.get(memberId)) {
+                                case Some(value) => value
+                                case None => "{}"
+                            }
+                            let memberJson = buildArchiveMetadataObjectJsonFromParts(archive, memberTags, memberAssetsRaw, true, volumeNo)
+                            if (memberJson.trimAscii().size > 0) {
+                                w.jsonValue(memberJson)
+                            }
+                        case None => ()
                     }
                     volumeNo += 1
                 }
@@ -877,6 +902,58 @@ public class DenoTaskRunner {
     /**
      * 准备插件脚本
      */
+    private static func sha1HexForPath(path: Path): String {
+        if (!exists(path)) { return "" }
+        var sha1 = SHA1()
+        try {
+            let f = File(path, Read)
+            try {
+                let bufSize: Int64 = 1024 * 1024
+                var buf = Array<Byte>(bufSize, repeat: 0)
+                while (true) {
+                    let n = f.read(buf)
+                    if (n <= 0) { break }
+                    sha1.write(buf[0..n])
+                }
+                return toHexString(sha1.finish())
+            } finally {
+                try { f.close() } catch (_: Exception) {}
+            }
+        } catch (_: Exception) {
+            return ""
+        }
+    }
+
+    private static func copyFileIfChanged(sourcePath: Path, targetPath: Path): Bool {
+        if (!exists(sourcePath)) {
+            return false
+        }
+
+        var shouldCopy = !exists(targetPath)
+        if (!shouldCopy) {
+            try {
+                let sourceInfo = FileInfo(sourcePath)
+                let targetInfo = FileInfo(targetPath)
+                if (sourceInfo.size != targetInfo.size || sourceInfo.lastModificationTime != targetInfo.lastModificationTime) {
+                    shouldCopy = true
+                }
+            } catch (_: Exception) {
+                shouldCopy = true
+            }
+        }
+
+        if (!shouldCopy) {
+            let sourceHash = sha1HexForPath(sourcePath)
+            let targetHash = sha1HexForPath(targetPath)
+            shouldCopy = sourceHash.size == 0 || targetHash.size == 0 || sourceHash != targetHash
+        }
+
+        if (shouldCopy) {
+            copy(sourcePath, to: targetPath, overwrite: true)
+        }
+        return true
+    }
+
     private static func ensurePluginScriptReady(plugin: PluginTaskData, scriptName: String): Bool {
         try {
             let pluginsRoot = Path(PluginTaskService.getPluginRuntimeRoot())
@@ -889,8 +966,10 @@ public class DenoTaskRunner {
                 getLogger("deno_task").error("缺少基础插件文件", ("path", basePluginSource.toString()))
                 return false
             }
-            // Always refresh base_plugin.ts so runtime cache doesn't get stale across upgrades.
-            copy(basePluginSource, to: basePluginTarget, overwrite: true)
+            if (!copyFileIfChanged(basePluginSource, basePluginTarget)) {
+                getLogger("deno_task").error("复制基础插件文件失败", ("path", basePluginSource.toString()))
+                return false
+            }
 
             // 创建插件运行时目录（按命名空间）
             let pluginDir = Path("${pluginsRoot.toString()}/${plugin.namespace}")
@@ -905,7 +984,10 @@ public class DenoTaskRunner {
                 return false
             }
 
-            copy(sourcePath, to: targetFile, overwrite: true)
+            if (!copyFileIfChanged(sourcePath, targetFile)) {
+                getLogger("deno_task").error("复制插件文件失败", ("path", sourcePath.toString()))
+                return false
+            }
             return true
         } catch (e: Exception) {
             getLogger("deno_task").error("准备插件文件失败", ("error", e.message))
@@ -1576,15 +1658,18 @@ public class DenoTaskRunner {
             var sha1 = SHA1()
             try {
                 let f = File(p, Read)
-                let bufSize: Int64 = 1024 * 1024
-                var buf = Array<Byte>(bufSize, repeat: 0)
-                while (true) {
-                    let n = f.read(buf)
-                    if (n <= 0) { break }
-                    sha1.write(buf[0..n])
+                try {
+                    let bufSize: Int64 = 1024 * 1024
+                    var buf = Array<Byte>(bufSize, repeat: 0)
+                    while (true) {
+                        let n = f.read(buf)
+                        if (n <= 0) { break }
+                        sha1.write(buf[0..n])
+                    }
+                    return toHexString(sha1.finish())
+                } finally {
+                    try { f.close() } catch (_: Exception) {}
                 }
-                f.close()
-                return toHexString(sha1.finish())
             } catch (_: Exception) {
                 return ""
             }

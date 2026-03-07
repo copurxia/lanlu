@@ -289,6 +289,67 @@ public class TagDao {
     }
 
     /**
+     * 批量获取档案标签（key=arcid, value=逗号分隔 tags）
+     */
+    public static func getBatchArchiveTags(archiveIds: Array<String>): HashMap<String, String> {
+        let result = HashMap<String, String>()
+        if (archiveIds.size == 0) { return result }
+
+        let deduped = ArrayList<String>()
+        let seen = HashMap<String, Bool>()
+        for (archiveId in archiveIds) {
+            let id = archiveId.trimAscii()
+            if (id.size == 0) { continue }
+            match (seen.get(id)) {
+                case Some(_) => ()
+                case None =>
+                    seen[id] = true
+                    deduped.add(id)
+            }
+        }
+        if (deduped.size == 0) { return result }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return result
+            case Some(conn) =>
+                try {
+                    var placeholders = ""
+                    for (i in 0..deduped.size) {
+                        if (i > 0) { placeholders += "," }
+                        placeholders += "?"
+                    }
+
+                    let stmt = conn.prepareStatement("SELECT arcid, COALESCE(tags, '') FROM archives_with_tags WHERE arcid IN (${placeholders})")
+                    try {
+                        for (i in 0..deduped.size) {
+                            stmt.set(i, deduped[i])
+                        }
+                        let rs = stmt.query()
+                        try {
+                            while (rs.next()) {
+                                let arcid = (rs.getOrNull<String>(0) ?? "").trimAscii()
+                                if (arcid.size == 0) { continue }
+                                result[arcid] = rs.getOrNull<String>(1) ?? ""
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("tag_dao").error("批量获取 archive tags 失败", ("error", e.message))
+                    return result
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+
+        return result
+    }
+
+    /**
      * 获取所有标签（支持分页和搜索）
      */
     public static func list(namespace: ?String, query: ?String, limit: Int64, offset: Int64): ArrayList<TagData> {
