@@ -157,11 +157,13 @@ export function useReaderSourceSession({
     }
 
     void fetchPages();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // pageParam intentionally excluded from deps - it should only affect initial page selection,
+  // not trigger re-fetching on every page turn (which causes full page refresh)
   }, [
     appliedVirtualFromUrlForIdRef,
     appendedArchiveIdsRef,
     handledUrlPositionRef,
-    pageParam,
     pendingUrlPageIndexRef,
     pendingUrlPageRawRef,
     pendingWebtoonScrollToEdgeRef,
