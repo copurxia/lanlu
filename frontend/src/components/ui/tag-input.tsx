@@ -15,6 +15,7 @@ interface TagInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>
   placeholder?: string
   className?: string
   enableAutocomplete?: boolean
+  allowEmpty?: boolean
 }
 
 export function TagInput({
@@ -23,6 +24,7 @@ export function TagInput({
   placeholder = "输入标签后按回车添加",
   className,
   enableAutocomplete = true,
+  allowEmpty = false,
   ...props
 }: TagInputProps) {
   const { language } = useLanguage()
@@ -74,7 +76,8 @@ export function TagInput({
 
   const addTag = (tag: string) => {
     const newTag = tag.trim()
-    if (newTag && !value.includes(newTag)) {
+    const canAddEmpty = allowEmpty && newTag === '' && !value.includes('')
+    if ((newTag && !value.includes(newTag)) || canAddEmpty) {
       onChange([...value, newTag])
     }
     setInputValue("")
@@ -106,7 +109,8 @@ export function TagInput({
     setTimeout(() => {
       autocomplete.setShowSuggestions(false)
       const newTag = inputValue.trim()
-      if (newTag && !value.includes(newTag)) {
+      const canAddEmpty = allowEmpty && newTag === '' && !value.includes('')
+      if ((newTag && !value.includes(newTag)) || canAddEmpty) {
         onChange([...value, newTag])
         setInputValue("")
       }
