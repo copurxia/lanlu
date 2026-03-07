@@ -142,6 +142,11 @@ public class ScanSingleCategoryTaskRunner {
             for (entry in entries) {
                 let fullPath = DirectoryScanner.joinPath(dirPath, entry)
                 if (DirectoryScanner.isDirectory(fullPath)) {
+                    // extrafanart 是特例，跳过检查
+                    let lowerEntry = entry.toAsciiLower()
+                    if (lowerEntry == "extrafanart") {
+                        continue
+                    }
                     leafOk = false
                     break
                 }

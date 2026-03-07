@@ -3,6 +3,7 @@ package lanlu.infrastructure.archivehandler
 import std.fs.*
 import std.collection.*
 import lanlu.contexts.archive.domain.ArchiveTypes
+import lanlu.shared.utils.ArchiveUtils
 import lanlu.shared.utils.DirectoryScanner
 import lanlu.shared.utils.NaturalSort
 import lanlu.shared.utils.FileUtils
@@ -272,6 +273,12 @@ public class FolderHandler <: ArchiveHandler {
     public func canHandle(filePath: String): Bool {
         // 首先检查是否是目录
         if (!DirectoryScanner.isDirectory(filePath)) {
+            return false
+        }
+
+        // extrafanart 目录不作为独立档案处理
+        let dirName = ArchiveUtils.getFullFileName(filePath)
+        if (dirName.toAsciiLower() == "extrafanart") {
             return false
         }
 
