@@ -13,6 +13,7 @@ import { TagService } from '@/lib/services/tag-service';
 import { logger } from '@/lib/utils/logger';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
 import { WordCloud } from '@/components/charts/WordCloud';
+import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 
 type CloudItem = { tag: string; display: string; count: number };
 
@@ -49,60 +50,21 @@ export default function ServerInfoSettingsPage() {
     };
   }, [isAdmin, isAuthenticated, language]);
 
-  if (!isAuthenticated) {
-    return (
-      <div className="space-y-6">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <BarChart3 className="w-5 h-5" />
-            {t('settings.stats')}
-          </h2>
-          <p className="text-sm text-muted-foreground">{t('auth.loginToManageTokens')}</p>
-        </div>
-        <Card>
-          <CardContent className="pt-6" />
-        </Card>
-      </div>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <div className="space-y-6">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <BarChart3 className="w-5 h-5" />
-            {t('settings.stats')}
-          </h2>
-          <p className="text-sm text-muted-foreground">{t('common.accessDenied')}</p>
-        </div>
-        <Card>
-          <CardContent className="pt-6" />
-        </Card>
-      </div>
-    );
-  }
+  const actions = (
+    <Button variant="outline" onClick={refresh}>
+      {t('common.refresh')}
+    </Button>
+  );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <BarChart3 className="w-5 h-5" />
-            {t('settings.stats')}
-          </h2>
-          <p className="text-sm text-muted-foreground">{t('settings.statsDescription')}</p>
-        </div>
-        <Button
-          variant="outline"
-          onClick={() => {
-            refresh();
-          }}
-        >
-          {t('common.refresh')}
-        </Button>
-      </div>
-
+    <SettingsPageWrapper
+      title={t('settings.stats')}
+      description={t('settings.statsDescription')}
+      icon={<BarChart3 className="w-5 h-5" />}
+      requireAuth
+      requireAdmin
+      actions={actions}
+    >
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">{t('settings.statsSystem')}</CardTitle>
@@ -172,6 +134,6 @@ export default function ServerInfoSettingsPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </SettingsPageWrapper>
   );
 }

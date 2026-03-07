@@ -4,7 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { Clock, RefreshCw, Plus, Play, Square } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -12,6 +12,7 @@ import { CronService, CronServiceStatus } from '@/lib/services/cron-service';
 import { ScheduledTaskList } from '@/components/cron/ScheduledTaskList';
 import { ScheduledTaskDialog } from '@/components/cron/ScheduledTaskDialog';
 import { StartupTaskSettings } from '@/components/cron/StartupTaskSettings';
+import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 import { useToast } from '@/hooks/use-toast';
 
 export default function SettingsCronPage() {
@@ -79,79 +80,47 @@ export default function SettingsCronPage() {
     handleRefresh();
   };
 
-  if (!isAuthenticated) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('settings.cron')}</CardTitle>
-            <CardDescription>{t('auth.loginToManageTokens')}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!isAdmin) {
-    return (
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t('settings.cron')}</CardTitle>
-            <CardDescription>{t('common.accessDenied')}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
-  }
+  const actions = (
+    <div className="flex items-center gap-2">
+      <Button
+        variant="outline"
+        size="icon"
+        onClick={handleRefresh}
+        className="sm:hidden"
+        aria-label={t('common.refresh')}
+        title={t('common.refresh')}
+      >
+        <RefreshCw className="w-4 h-4" />
+      </Button>
+      <Button
+        size="icon"
+        onClick={handleCreateTask}
+        className="sm:hidden"
+        aria-label={t('settings.cronManagement.createTask')}
+        title={t('settings.cronManagement.createTask')}
+      >
+        <Plus className="w-4 h-4" />
+      </Button>
+      <Button variant="outline" onClick={handleRefresh} className="hidden sm:inline-flex">
+        <RefreshCw className="w-4 h-4 mr-2" />
+        {t('common.refresh')}
+      </Button>
+      <Button onClick={handleCreateTask} className="hidden sm:inline-flex">
+        <Plus className="w-4 h-4 mr-2" />
+        {t('settings.cronManagement.createTask')}
+      </Button>
+    </div>
+  );
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="space-y-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <h2 className="text-xl font-semibold flex items-center gap-2">
-              <Clock className="w-5 h-5" />
-              {t('settings.cronManagement.title')}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Mobile: icon buttons */}
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={handleRefresh}
-              className="sm:hidden"
-              aria-label={t('common.refresh')}
-              title={t('common.refresh')}
-            >
-              <RefreshCw className="w-4 h-4" />
-            </Button>
-            <Button
-              size="icon"
-              onClick={handleCreateTask}
-              className="sm:hidden"
-              aria-label={t('settings.cronManagement.createTask')}
-              title={t('settings.cronManagement.createTask')}
-            >
-              <Plus className="w-4 h-4" />
-            </Button>
-
-            {/* Desktop: text buttons */}
-            <Button variant="outline" onClick={handleRefresh} className="hidden sm:inline-flex">
-              <RefreshCw className="w-4 h-4 mr-2" />
-              {t('common.refresh')}
-            </Button>
-            <Button onClick={handleCreateTask} className="hidden sm:inline-flex">
-              <Plus className="w-4 h-4 mr-2" />
-              {t('settings.cronManagement.createTask')}
-            </Button>
-          </div>
-        </div>
-        <p className="text-sm text-muted-foreground">{t('settings.cronManagement.description')}</p>
-      </div>
-
+    <SettingsPageWrapper
+      title={t('settings.cronManagement.title')}
+      description={t('settings.cronManagement.description')}
+      icon={<Clock className="w-5 h-5" />}
+      requireAuth
+      requireAdmin
+      actions={actions}
+    >
       {/* Service Status Card */}
       <Card>
         <CardHeader className="pb-4">
@@ -228,6 +197,6 @@ export default function SettingsCronPage() {
         onClose={handleDialogClose}
         onSaved={handleTaskSaved}
       />
-    </div>
+    </SettingsPageWrapper>
   );
 }

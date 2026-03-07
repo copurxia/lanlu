@@ -9,7 +9,7 @@ import { resolveArchiveAssetUrl } from '@/lib/utils/archive-assets';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
-import { SettingsNav } from '@/components/settings/SettingsNav';
+import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
@@ -188,7 +188,7 @@ export function Header() {
               ${mobileSearchOpen ? 'opacity-0 pointer-events-none md:opacity-100 md:pointer-events-auto' : 'opacity-100'}
             `}
           >
-            {isSettingsPage && (
+            {(isSettingsPage || pathname === '/') && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -276,8 +276,23 @@ export function Header() {
           </div>
 
           {/* 搜索栏 - 桌面端显示 */}
-          <div className="hidden md:flex flex-1 max-w-md mx-8">
-            <SearchBar />
+          <div className="hidden md:flex flex-1 max-w-xl mx-8 items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <SearchBar />
+            </div>
+            {pathname === '/' && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-10 w-10 flex-shrink-0"
+                onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
+                aria-label={t('common.filter')}
+                title={t('common.filter')}
+              >
+                <Filter className="h-5 w-5" />
+              </Button>
+            )}
           </div>
 
           {/* 导航菜单 - 桌面端显示 */}
@@ -321,20 +336,6 @@ export function Header() {
                 );
               })}
             </div>
-            {/* md~lg: no sidebar, so expose filter entry point in the top bar */}
-            {pathname === '/' && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="lg:hidden"
-                onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
-                aria-label={t('common.filter')}
-                title={t('common.filter')}
-              >
-                <Filter className="h-4 w-4" />
-              </Button>
-            )}
             <UserMenu />
             <LanguageButton />
             <ThemeToggle />
@@ -362,18 +363,6 @@ export function Header() {
             >
               <Search className="h-5 w-5" />
             </Button>
-            {pathname === '/' && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
-                aria-label={t('common.filter')}
-                title={t('common.filter')}
-              >
-                <Filter className="h-5 w-5" />
-              </Button>
-            )}
             <UserMenu />
             <ThemeButton />
             <LanguageButton />
@@ -381,39 +370,52 @@ export function Header() {
         </div>
       </div>
 
-      {/* 移动端：侧边栏菜单仅出现在 settings */}
-      {isSettingsPage && (
+      {/* 移动端：侧边栏菜单 */}
+      {(isSettingsPage || pathname === '/') && (
         <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
           {mobileMenuOpen && (
-            <SheetContent side="left" className="w-[280px]">
-              <SheetHeader>
+            <SheetContent side="left" className="w-[280px] p-0 flex flex-col">
+              <div className="px-4 pt-4">
                 <SheetTitle className="flex items-center gap-2">
-                  <Settings className="w-5 h-5" />
-                  {t('settings.title')}
+                  {isSettingsPage ? (
+                    <>
+                      <Settings className="w-5 h-5" />
+                      {t('settings.title')}
+                    </>
+                  ) : (
+                    <>
+                      <Home className="w-5 h-5" />
+                      {t('navigation.home')}
+                    </>
+                  )}
                 </SheetTitle>
-              </SheetHeader>
-              <div className="mt-4 flex flex-col gap-4">
-                <SettingsNav onNavigate={() => setMobileMenuOpen(false)} />
+              </div>
+              <AppSidebarNav
+                mode={isSettingsPage ? 'settings' : 'home'}
+                fetchCategories={!isSettingsPage}
+                onNavigate={() => setMobileMenuOpen(false)}
+                className="flex-1"
+              />
 
-                {!token && (
+              {!token && (
+                <div className="px-4 pb-4">
                   <Button
                     variant="ghost"
                     onClick={() => {
                       router.push('/login');
                       setMobileMenuOpen(false);
                     }}
-                    className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors justify-start text-muted-foreground hover:text-foreground hover:bg-muted"
+                    className="flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors justify-start text-muted-foreground hover:text-foreground hover:bg-muted w-full"
                   >
                     <LogIn className="h-4 w-4" />
                     <span>{t('auth.login')}</span>
                   </Button>
-                )}
-
-                {/* 底部工具栏 */}
-                <div className="flex items-center gap-2 pt-3 border-t border-border">
-                  <ThemeButton />
-                  <LanguageButton />
                 </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-3 border-t border-border px-4 pb-4">
+                <ThemeButton />
+                <LanguageButton />
               </div>
             </SheetContent>
           )}

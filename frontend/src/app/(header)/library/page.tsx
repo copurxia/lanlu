@@ -4,7 +4,8 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertTriangle, BookOpen, Heart, RefreshCw, Search, History } from 'lucide-react';
 
-import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
+import { LibrarySidebarNav } from '@/components/library/LibrarySidebarNav';
+import { PageSidebarLayout } from '@/components/layout/PageSidebarLayout';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,7 +34,7 @@ function getItemTitle(item: FavoriteItem): string {
 
 function timeToMs(v: unknown): number {
   if (!v) return 0;
-  if (typeof v === 'number') return v * 1000; // backend uses seconds in most places
+  if (typeof v === 'number') return v * 1000;
   if (typeof v === 'string') {
     const d = new Date(v);
     const ms = d.getTime();
@@ -52,18 +53,13 @@ function LibraryPageContent() {
   const initialTab: ActiveTab = tabFromUrl === 'history' ? 'history' : 'favorites';
 
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
-
-  // Favorites state (archives + tankoubons mixed together; no extra level of tabs).
   const [favoritesLoading, setFavoritesLoading] = useState(true);
   const [favoriteItems, setFavoriteItems] = useState<FavoriteItem[]>([]);
   const [favoritesError, setFavoritesError] = useState<string | null>(null);
-
-  // Reading history state.
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyArchives, setHistoryArchives] = useState<Archive[]>([]);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [historyLoadedLanguage, setHistoryLoadedLanguage] = useState<string | null>(null);
-
   const [query, setQuery] = useState('');
   const [refreshing, setRefreshing] = useState(false);
 
@@ -96,13 +92,9 @@ function LibraryPageContent() {
         ]);
 
         const archives: FavoriteItem[] =
-          archivesRes.status === 'fulfilled'
-            ? ((archivesRes.value.data as Archive[]) ?? [])
-            : [];
+          archivesRes.status === 'fulfilled' ? ((archivesRes.value.data as Archive[]) ?? []) : [];
         const tankoubons: FavoriteItem[] =
-          tankRes.status === 'fulfilled'
-            ? (tankRes.value.data ?? [])
-            : [];
+          tankRes.status === 'fulfilled' ? (tankRes.value.data ?? []) : [];
 
         if (archivesRes.status === 'rejected' || tankRes.status === 'rejected') {
           setFavoritesError(t('favorites.loadError'));
@@ -159,27 +151,25 @@ function LibraryPageContent() {
     [language, t, token]
   );
 
-  // Load favorites on mount.
   useEffect(() => {
     loadFavorites();
   }, [loadFavorites]);
 
-  // Lazy-load history when user switches to it (or when language changes).
   useEffect(() => {
     if (activeTab === 'history' && historyLoadedLanguage !== language && !historyLoading) {
       loadReadingHistory();
     }
   }, [activeTab, historyLoading, historyLoadedLanguage, language, loadReadingHistory]);
 
-  // Keep URL in sync for shareable links and redirects from legacy routes.
   useEffect(() => {
     const current = (searchParams?.get('tab') ?? '').toLowerCase();
-    if ((activeTab === 'favorites' && current !== 'favorites') || (activeTab === 'history' && current !== 'history')) {
+    if (
+      (activeTab === 'favorites' && current !== 'favorites') ||
+      (activeTab === 'history' && current !== 'history')
+    ) {
       router.replace(`/library?tab=${activeTab}`);
     }
-    // We intentionally omit `searchParams` to avoid infinite loops.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, router]);
+  }, [activeTab, router, searchParams]);
 
   const activeError = activeTab === 'favorites' ? favoritesError : historyError;
   const normalizedQuery = query.trim().toLowerCase();
@@ -216,23 +206,35 @@ function LibraryPageContent() {
     }
   }, [activeTab, favoritesLoading, historyLoading, loadFavorites, loadReadingHistory, refreshing, token]);
 
+  const historyCountLabel = historyLoadedLanguage === language ? String(historyArchives.length) : '...';
+
   return (
-    <div className="min-h-screen bg-background pb-20 lg:pb-0">
-      <div className="container mx-auto px-4 py-6 md:py-10">
+    <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as ActiveTab)}>
+      <PageSidebarLayout
+        sidebar={
+          <LibrarySidebarNav
+            favoriteCount={favoriteItems.length}
+            historyCountLabel={historyCountLabel}
+          />
+        }
+        contentClassName="pb-6"
+      >
         {!token ? (
-          <Card className="mx-auto max-w-xl overflow-hidden">
-            <CardHeader className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Heart className="h-5 w-5" />
-                <CardTitle className="text-xl">{t('library.title')}</CardTitle>
-              </div>
-              <p className="text-sm text-muted-foreground">{t('library.loginRequired')}</p>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between gap-4">
-              <Button onClick={() => router.push('/login')}>{t('auth.login')}</Button>
-              <div className="text-xs text-muted-foreground">{t('favorites.noFavoritesHint')}</div>
-            </CardContent>
-          </Card>
+          <div className="mx-auto max-w-xl pt-6 lg:pt-12">
+            <Card className="overflow-hidden">
+              <CardHeader className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <Heart className="h-5 w-5" />
+                  <CardTitle className="text-xl">{t('library.title')}</CardTitle>
+                </div>
+                <p className="text-sm text-muted-foreground">{t('library.loginRequired')}</p>
+              </CardHeader>
+              <CardContent className="flex items-center justify-between gap-4">
+                <Button onClick={() => router.push('/login')}>{t('auth.login')}</Button>
+                <div className="text-xs text-muted-foreground">{t('favorites.noFavoritesHint')}</div>
+              </CardContent>
+            </Card>
+          </div>
         ) : (
           <div className="space-y-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -289,143 +291,98 @@ function LibraryPageContent() {
               </Alert>
             )}
 
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ActiveTab)}>
-              <div className="grid gap-6 md:grid-cols-[220px_1fr]">
-                {/* Desktop: vertical tabs */}
-                <aside className="hidden md:block md:sticky md:top-20 h-fit">
-                  <Card>
-                    <CardContent className="p-2">
-                      <TabsList className="flex h-auto w-full flex-col items-stretch gap-1 bg-transparent p-0">
-                        <TabsTrigger
-                          value="favorites"
-                          className="w-full justify-start rounded-md px-3 py-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
-                        >
-                          <div className="flex w-full items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <Heart className="h-4 w-4" />
-                              <span>{t('library.tabs.favorites')}</span>
-                            </div>
-                            <Badge variant="secondary">{favoriteItems.length}</Badge>
-                          </div>
-                        </TabsTrigger>
-                        <TabsTrigger
-                          value="history"
-                          className="w-full justify-start rounded-md px-3 py-2 data-[state=active]:bg-muted data-[state=active]:shadow-none"
-                        >
-                          <div className="flex w-full items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <History className="h-4 w-4" />
-                              <span>{t('library.tabs.history')}</span>
-                            </div>
-                            <Badge variant="secondary">
-                              {historyLoadedLanguage === language ? String(historyArchives.length) : '...'}
-                            </Badge>
-                          </div>
-                        </TabsTrigger>
-                      </TabsList>
-                    </CardContent>
-                  </Card>
-                </aside>
+            <div className="lg:hidden">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="favorites" className="gap-2">
+                  <Heart className="h-4 w-4" />
+                  {t('library.tabs.favorites')}
+                </TabsTrigger>
+                <TabsTrigger value="history" className="gap-2">
+                  <History className="h-4 w-4" />
+                  {t('library.tabs.history')}
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
-                <div>
-                  {/* Mobile: horizontal tabs */}
-                  <div className="md:hidden">
-                    <TabsList className="grid w-full grid-cols-2 mb-4">
-                      <TabsTrigger value="favorites" className="gap-2">
-                        <Heart className="h-4 w-4" />
-                        {t('library.tabs.favorites')}
-                      </TabsTrigger>
-                      <TabsTrigger value="history" className="gap-2">
-                        <History className="h-4 w-4" />
-                        {t('library.tabs.history')}
-                      </TabsTrigger>
-                    </TabsList>
-                  </div>
-
-                  <TabsContent value="favorites">
-                    {favoritesLoading ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
-                        {Array.from({ length: 10 }).map((_, i) => (
-                          <div key={i} className="space-y-2">
-                            <Skeleton className="aspect-[3/4] w-full" />
-                            <Skeleton className="h-4 w-full" />
-                            <Skeleton className="h-4 w-2/3" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : filteredFavoritesGrouped.length === 0 ? (
-                      <Card className="border-dashed">
-                        <CardContent className="text-center py-12">
-                          <Heart className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
-                          <p className="text-lg text-muted-foreground">
-                            {normalizedQuery ? t('archive.noMatchingArchives') : t('favorites.noFavorites')}
-                          </p>
-                          {!normalizedQuery && (
-                            <p className="text-sm text-muted-foreground mt-2">{t('favorites.noFavoritesHint')}</p>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <div className="space-y-8">
-                        {filteredFavoritesGrouped.map((group) => (
-                          <div key={group.label} className="space-y-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
-                              <Badge variant="secondary">{group.archives.length}</Badge>
-                            </div>
-                            <ArchiveGrid archives={group.archives as any} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
-
-                  <TabsContent value="history">
-                    {historyLoading ? (
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
-                        {Array.from({ length: 10 }).map((_, i) => (
-                          <div key={i} className="space-y-2">
-                            <Skeleton className="aspect-[3/4] w-full" />
-                            <Skeleton className="h-4 w-full" />
-                            <Skeleton className="h-4 w-2/3" />
-                          </div>
-                        ))}
-                      </div>
-                    ) : filteredHistoryGrouped.length === 0 ? (
-                      <Card className="border-dashed">
-                        <CardContent className="text-center py-12">
-                          <BookOpen className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
-                          <p className="text-lg text-muted-foreground">
-                            {normalizedQuery ? t('archive.noMatchingArchives') : t('readingHistory.noHistory')}
-                          </p>
-                          {!normalizedQuery && (
-                            <p className="text-sm text-muted-foreground mt-2">{t('readingHistory.noHistoryHint')}</p>
-                          )}
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <div className="space-y-8">
-                        {filteredHistoryGrouped.map((group) => (
-                          <div key={group.label} className="space-y-3">
-                            <div className="flex items-center justify-between gap-3">
-                              <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
-                              <Badge variant="secondary">{group.archives.length}</Badge>
-                            </div>
-                            <ArchiveGrid archives={group.archives as any} />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </TabsContent>
+            <TabsContent value="favorites" className="mt-0">
+              {favoritesLoading ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="aspect-[3/4] w-full" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  ))}
                 </div>
-              </div>
-            </Tabs>
+              ) : filteredFavoritesGrouped.length === 0 ? (
+                <Card className="border-dashed">
+                  <CardContent className="text-center py-12">
+                    <Heart className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-lg text-muted-foreground">
+                      {normalizedQuery ? t('archive.noMatchingArchives') : t('favorites.noFavorites')}
+                    </p>
+                    {!normalizedQuery && (
+                      <p className="text-sm text-muted-foreground mt-2">{t('favorites.noFavoritesHint')}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-8">
+                  {filteredFavoritesGrouped.map((group) => (
+                    <div key={group.label} className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
+                        <Badge variant="secondary">{group.archives.length}</Badge>
+                      </div>
+                      <ArchiveGrid archives={group.archives as any} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="history" className="mt-0">
+              {historyLoading ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
+                  {Array.from({ length: 10 }).map((_, i) => (
+                    <div key={i} className="space-y-2">
+                      <Skeleton className="aspect-[3/4] w-full" />
+                      <Skeleton className="h-4 w-full" />
+                      <Skeleton className="h-4 w-2/3" />
+                    </div>
+                  ))}
+                </div>
+              ) : filteredHistoryGrouped.length === 0 ? (
+                <Card className="border-dashed">
+                  <CardContent className="text-center py-12">
+                    <BookOpen className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+                    <p className="text-lg text-muted-foreground">
+                      {normalizedQuery ? t('archive.noMatchingArchives') : t('readingHistory.noHistory')}
+                    </p>
+                    {!normalizedQuery && (
+                      <p className="text-sm text-muted-foreground mt-2">{t('readingHistory.noHistoryHint')}</p>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-8">
+                  {filteredHistoryGrouped.map((group) => (
+                    <div key={group.label} className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
+                        <Badge variant="secondary">{group.archives.length}</Badge>
+                      </div>
+                      <ArchiveGrid archives={group.archives as any} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
           </div>
         )}
-      </div>
-
-      <MobileBottomNav />
-    </div>
+      </PageSidebarLayout>
+    </Tabs>
   );
 }
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { logger } from '@/lib/utils/logger';
 import { LayoutGrid, Heart, BookOpen, FileText, Database } from 'lucide-react';
@@ -11,6 +11,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { UserStatsService, UserStats, ReadingTrendItem } from '@/lib/services/user-stats-service';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { RecentActivity } from '@/components/dashboard/RecentActivity';
+import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 import { Archive } from '@/types/archive';
 
 const ReadingTrendChart = dynamic(
@@ -75,55 +76,48 @@ export default function SettingsPage() {
   }, [loadDashboardData]);
 
   return (
-    <div className="space-y-6">
-      {/* 页面标题 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <LayoutGrid className="w-5 h-5" />
-            {t('dashboard.title')}
-          </CardTitle>
-          <CardDescription>{t('dashboard.description')}</CardDescription>
-        </CardHeader>
-      </Card>
+    <SettingsPageWrapper
+      title={t('settings.overview')}
+      description={t('settings.overviewDescription')}
+      icon={<LayoutGrid className="w-5 h-5" />}
+      requireAuth={false}
+    >
+      <div className="space-y-6">
+        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
+          <StatsCard
+            title={t('dashboard.favorites')}
+            value={stats?.favoriteCount ?? 0}
+            icon={<Heart className="w-5 h-5" />}
+            loading={loading}
+          />
+          <StatsCard
+            title={t('dashboard.readArchives')}
+            value={stats?.readCount ?? 0}
+            icon={<BookOpen className="w-5 h-5" />}
+            loading={loading}
+          />
+          <StatsCard
+            title={t('dashboard.totalPagesRead')}
+            value={stats?.totalPagesRead ?? 0}
+            icon={<FileText className="w-5 h-5" />}
+            loading={loading}
+          />
+          <StatsCard
+            title={t('dashboard.totalArchives')}
+            value={stats?.totalArchives ?? 0}
+            icon={<Database className="w-5 h-5" />}
+            loading={loading}
+          />
+        </div>
 
-      {/* 统计卡片区域 */}
-      <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-        <StatsCard
-          title={t('dashboard.favorites')}
-          value={stats?.favoriteCount ?? 0}
-          icon={<Heart className="w-5 h-5" />}
-          loading={loading}
-        />
-        <StatsCard
-          title={t('dashboard.readArchives')}
-          value={stats?.readCount ?? 0}
-          icon={<BookOpen className="w-5 h-5" />}
-          loading={loading}
-        />
-        <StatsCard
-          title={t('dashboard.totalPagesRead')}
-          value={stats?.totalPagesRead ?? 0}
-          icon={<FileText className="w-5 h-5" />}
-          loading={loading}
-        />
-        <StatsCard
-          title={t('dashboard.totalArchives')}
-          value={stats?.totalArchives ?? 0}
-          icon={<Database className="w-5 h-5" />}
+        <ReadingTrendChart data={trend} loading={loading} />
+
+        <RecentActivity
+          recentRead={recentRead}
+          recentFavorites={recentFavorites}
           loading={loading}
         />
       </div>
-
-      {/* 阅读趋势图表 */}
-      <ReadingTrendChart data={trend} loading={loading} />
-
-      {/* 最近活动区域 */}
-      <RecentActivity
-        recentRead={recentRead}
-        recentFavorites={recentFavorites}
-        loading={loading}
-      />
-    </div>
+    </SettingsPageWrapper>
   );
 }

@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
+import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
@@ -508,23 +509,14 @@ function HomePageContent() {
       {/* Use the real header height (CSS var) so the document never exceeds the viewport. */}
       <div className="flex h-full min-h-0">
         {/* 侧栏 - 桌面端显示 */}
-        <div className="hidden lg:block flex-shrink-0 border-r border-border w-80 min-h-0">
-          <SearchSidebar
-            onSearch={handleSearch}
-            loading={loading}
-            filters={{
-              sortBy,
-              sortOrder,
-              dateFrom,
-              dateTo,
-              newonly,
-              untaggedonly,
-              favoriteonly,
-              groupByTanks,
-              categoryId,
-            }}
+        <aside className="hidden lg:block flex-shrink-0 border-r border-border w-72 min-h-0 pt-4">
+          <AppSidebarNav
+            mode="home"
+            categories={categories}
+            categoriesLoading={categoriesLoading}
+            activeCategoryId={categoryId}
           />
-        </div>
+        </aside>
 
         {/* 主内容区 - 独立滚动 */}
         {/* Reserve just enough space for the fixed mobile bottom nav (plus iOS safe-area). */}
