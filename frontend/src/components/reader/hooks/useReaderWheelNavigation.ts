@@ -4,9 +4,27 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { toast } from 'sonner';
 import type { PageInfo } from '@/lib/services/archive-service';
-import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
+import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset, stepHtmlSpread } from '@/components/reader/utils/html-spread';
 
 const COUNTDOWN_DURATION = 3;
+const EDGE_THRESHOLD_PX = 8;
+const SPREAD_WHEEL_TRIGGER = 36;
+const SPREAD_WHEEL_LOCK_MS = 380;
+
+function isScrollable(el: HTMLElement | null): el is HTMLElement {
+  if (!el) return false;
+  return el.scrollHeight > el.clientHeight + 1 || el.scrollWidth > el.clientWidth + 1;
+}
+
+function resolveActiveHtmlContainer(targetEl: HTMLElement | null): HTMLElement | null {
+  const inner = targetEl?.closest?.('.html-content-container') as HTMLElement | null;
+  const outer = targetEl?.closest?.('.reader-html-page-container') as HTMLElement | null;
+
+  if (outer?.classList.contains('reader-html-spread-container')) return outer;
+  if (isScrollable(inner)) return inner;
+  if (isScrollable(outer)) return outer;
+  return inner || outer;
+}
 
 export function useReaderWheelNavigation({
   pages,
@@ -39,6 +57,8 @@ export function useReaderWheelNavigation({
   const countdownSecondsRef = useRef(COUNTDOWN_DURATION);
   const countdownTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const countdownToastId = useRef<string | number | null>(null);
+  const spreadWheelAccumRef = useRef(0);
+  const spreadWheelLockUntilRef = useRef(0);
 
   const scrollLongPageContainer = useCallback((target: 'top' | 'bottom') => {
     const startedAt = performance.now();
@@ -56,8 +76,6 @@ export function useReaderWheelNavigation({
         return;
       }
 
-      // For long images, scrollHeight often grows after the image finishes decoding.
-      // Keep nudging to bottom until scrollHeight stabilizes (or timeout).
       const { scrollHeight, clientHeight } = el;
       el.scrollTop = scrollHeight;
 
@@ -82,6 +100,7 @@ export function useReaderWheelNavigation({
       toast.dismiss(countdownToastId.current);
       countdownToastId.current = null;
     }
+    spreadWheelAccumRef.current = 0;
     setShowAutoNextCountdown(false);
     countdownSecondsRef.current = COUNTDOWN_DURATION;
   }, []);
@@ -103,7 +122,6 @@ export function useReaderWheelNavigation({
       if (e.target instanceof HTMLInputElement) return;
 
       const targetEl = e.target as HTMLElement | null;
-      // Ignore wheel events coming from overlay UI (e.g. settings sheet) so scrolling there doesn't flip pages.
       if (targetEl?.closest?.('[data-reader-overlay="true"]')) return;
 
       if (autoHideEnabled && showToolbar) {
@@ -133,8 +151,6 @@ export function useReaderWheelNavigation({
         return;
       }
 
-      // Long image page uses an internal scroll container. Like HTML pages, when the user keeps scrolling
-      // near the top/bottom edges, start a countdown to flip pages.
       const longPageContainer = targetEl?.closest?.('.long-page-scroll-container') as HTMLElement | null;
       if (longPageContainer) {
         const scrollTop = longPageContainer.scrollTop;
@@ -166,23 +182,26 @@ export function useReaderWheelNavigation({
           });
 
           countdownTimeoutRef.current = setInterval(() => {
-                countdownSecondsRef.current -= 1;
-              if (countdownSecondsRef.current <= 0) {
-                clearCountdown();
-                onPrevPage();
-                scrollLongPageContainer('bottom');
-                return;
-              }
+            countdownSecondsRef.current -= 1;
+            if (countdownSecondsRef.current <= 0) {
+              clearCountdown();
+              onPrevPage();
+              scrollLongPageContainer('bottom');
+              return;
+            }
 
-              if (countdownToastId.current !== null) {
-                toast.loading(`即将跳转到上一页（${countdownSecondsRef.current}秒后）`, {
+            if (countdownToastId.current !== null) {
+              toast.loading(`即将跳转到上一页（${countdownSecondsRef.current}秒后）`, {
                 id: countdownToastId.current,
                 duration: countdownSecondsRef.current * 1000,
                 action: { label: '取消', onClick: () => clearCountdown() },
               });
             }
           }, 1000);
-        } else if (isNearBottom && deltaY > 0) {
+          return;
+        }
+
+        if (isNearBottom && deltaY > 0) {
           e.preventDefault();
           setShowAutoNextCountdown(true);
           countdownSecondsRef.current = COUNTDOWN_DURATION;
@@ -211,21 +230,19 @@ export function useReaderWheelNavigation({
           }, 1000);
         }
 
-        // Not at edges: allow normal scrolling inside the container (no wheel-flip).
         return;
       }
 
       const isHtmlPage = pages[currentPage]?.type === 'html';
 
       if (isHtmlPage) {
-        const htmlContainer =
-          (targetEl?.closest?.('.reader-html-page-container') as HTMLElement | null) ||
-          (targetEl?.closest?.('.html-content-container') as HTMLElement | null);
+        const htmlContainer = resolveActiveHtmlContainer(targetEl);
 
         if (htmlContainer) {
           const startCountdown = (direction: 'prev' | 'next', onDone: () => void) => {
             setShowAutoNextCountdown(true);
             countdownSecondsRef.current = COUNTDOWN_DURATION;
+            spreadWheelAccumRef.current = 0;
 
             const label = direction === 'next' ? '下一页' : '上一页';
             countdownToastId.current = toast.loading(`即将跳转到${label}（${COUNTDOWN_DURATION}秒后）`, {
@@ -256,11 +273,10 @@ export function useReaderWheelNavigation({
 
           if (isHorizontalSpread) {
             const metrics = getHtmlSpreadMetrics(htmlContainer);
-            const isAtStart = metrics.currentSlot <= 0 || metrics.scrollLeft <= 5;
-            const isNearStart = metrics.currentSlot <= 0 || metrics.scrollLeft <= 150;
-            const isNearEnd =
-              metrics.currentSlot >= metrics.maxSlot || metrics.scrollLeft >= metrics.maxScrollLeft - 150;
-            const isAtEnd = metrics.currentSlot >= metrics.maxSlot || metrics.scrollLeft >= metrics.maxScrollLeft - 5;
+            const isAtStart = metrics.scrollLeft <= EDGE_THRESHOLD_PX;
+            const isAtEnd = metrics.scrollLeft >= metrics.maxScrollLeft - EDGE_THRESHOLD_PX;
+            const now = performance.now();
+            const direction = primaryDelta < 0 ? 'prev' : primaryDelta > 0 ? 'next' : null;
 
             if (showAutoNextCountdown) {
               e.preventDefault();
@@ -270,10 +286,28 @@ export function useReaderWheelNavigation({
               return;
             }
 
-            if (primaryDelta < 0) {
-              e.preventDefault();
-              if (isNearStart) {
-                startCountdown('prev', () => {
+            if (!direction) return;
+
+            e.preventDefault();
+
+            if (now < spreadWheelLockUntilRef.current) {
+              return;
+            }
+
+            const prevAccum = spreadWheelAccumRef.current;
+            spreadWheelAccumRef.current = prevAccum !== 0 && Math.sign(prevAccum) !== Math.sign(primaryDelta)
+              ? primaryDelta
+              : prevAccum + primaryDelta;
+
+            if (Math.abs(spreadWheelAccumRef.current) < SPREAD_WHEEL_TRIGGER) {
+              return;
+            }
+
+            spreadWheelAccumRef.current = 0;
+
+            if ((direction === 'prev' && isAtStart) || (direction === 'next' && isAtEnd)) {
+              startCountdown(direction, () => {
+                if (direction === 'prev') {
                   onPrevPage();
                   setTimeout(() => {
                     const el = document.querySelector('.reader-html-spread-container') as HTMLElement | null;
@@ -286,46 +320,28 @@ export function useReaderWheelNavigation({
                       );
                     }
                   }, 100);
-                });
-                return;
-              }
-
-              const targetSlot = Math.max(0, metrics.currentSlot - 1);
-              const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
-              htmlContainer.scrollTo({ left: target, behavior: 'auto' });
-              return;
-            }
-
-            if (primaryDelta > 0) {
-              e.preventDefault();
-              if (isNearEnd) {
-                startCountdown('next', () => {
+                } else {
                   onNextPage();
                   setTimeout(() => {
                     const el = document.querySelector('.reader-html-spread-container') as HTMLElement | null;
                     if (el) el.scrollLeft = 0;
                   }, 100);
-                });
-                return;
-              }
-
-              const targetSlot = Math.min(metrics.maxSlot, metrics.currentSlot + 1);
-              const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
-              htmlContainer.scrollTo({ left: target, behavior: 'auto' });
+                }
+              });
               return;
             }
 
+            if (stepHtmlSpread(htmlContainer, direction)) {
+              spreadWheelLockUntilRef.current = now + SPREAD_WHEEL_LOCK_MS;
+            }
             return;
           }
 
           const scrollTop = htmlContainer.scrollTop;
           const scrollHeight = htmlContainer.scrollHeight;
           const clientHeight = htmlContainer.clientHeight;
-          const isAtTop = scrollTop <= 5;
-          const isNearTop = scrollTop <= 150;
-          const isNearBottom = scrollTop >= scrollHeight - clientHeight - 150;
-          const isAtBottom = scrollTop >= scrollHeight - clientHeight - 5;
-
+          const isAtTop = scrollTop <= EDGE_THRESHOLD_PX;
+          const isAtBottom = scrollTop >= scrollHeight - clientHeight - EDGE_THRESHOLD_PX;
           const deltaY = e.deltaY;
 
           if (showAutoNextCountdown) {
@@ -336,21 +352,21 @@ export function useReaderWheelNavigation({
             return;
           }
 
-          if (isNearTop && deltaY < 0) {
+          if (isAtTop && deltaY < 0) {
             e.preventDefault();
             startCountdown('prev', () => {
               onPrevPage();
               setTimeout(() => {
-                const el = document.querySelector('.reader-html-page-container') as HTMLElement | null;
+                const el = document.querySelector('.reader-html-page-container, .html-content-container') as HTMLElement | null;
                 if (el) el.scrollTop = el.scrollHeight;
               }, 100);
             });
-          } else if (isNearBottom && deltaY > 0) {
+          } else if (isAtBottom && deltaY > 0) {
             e.preventDefault();
             startCountdown('next', () => {
               onNextPage();
               setTimeout(() => {
-                const el = document.querySelector('.reader-html-page-container') as HTMLElement | null;
+                const el = document.querySelector('.reader-html-page-container, .html-content-container') as HTMLElement | null;
                 if (el) el.scrollTop = 0;
               }, 100);
             });

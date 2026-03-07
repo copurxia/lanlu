@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'react';
 import type React from 'react';
-import { ArchiveService, PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService } from '@/lib/services/archive-service';
 import type { Archive } from '@/types/archive';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -28,7 +28,7 @@ import { useReaderSidebar } from '@/components/reader/hooks/useReaderSidebar';
 import { useReaderToolbarAutoHide } from '@/components/reader/hooks/useReaderToolbarAutoHide';
 import { useReaderWebtoonVirtualization } from '@/components/reader/hooks/useReaderWebtoonVirtualization';
 import { useReaderWheelNavigation } from '@/components/reader/hooks/useReaderWheelNavigation';
-import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
+import { stepHtmlSpread } from '@/components/reader/utils/html-spread';
 import { logger } from '@/lib/utils/logger';
 import {
   useReadingMode,
@@ -67,34 +67,12 @@ import type { Tankoubon } from '@/types/tankoubon';
 import { toast } from 'sonner';
 import { getStoredPath } from '@/lib/utils/navigation';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
+import type { ReaderPageItem, ReaderSegment } from '@/features/reader/domain/models/reader-item';
+import { isHtmlReaderItem, isVirtualEndReaderItem } from '@/features/reader/domain/rules/reader-item-capabilities';
+import { mapPageDtosToReaderPageItems } from '@/features/reader/domain/mappers/page-dto-mapper';
+import { buildReaderStream } from '@/features/reader/application/use-cases/build-reader-stream';
 
 function ReaderContent() {
-  type ReaderPageInfo = PageInfo & {
-    archiveId: string;
-  };
-
-  type ReaderSegment = {
-    archiveId: string;
-    start: number;
-    count: number;
-    title: string;
-    coverAssetId?: number;
-  };
-
-  type ReaderStreamPageInfo = ReaderPageInfo & {
-    streamSegmentIndex: number;
-    streamLocalPage: number;
-    streamRealPage: number;
-  };
-
-  type ReaderVirtualEndPage = {
-    type: 'virtual-end';
-    archiveId: string;
-    streamSegmentIndex: number;
-  };
-
-  type ReaderStreamItem = ReaderStreamPageInfo | ReaderVirtualEndPage;
-
   type EndPageNextArchive = {
     id: string;
     title: string;
@@ -109,7 +87,7 @@ function ReaderContent() {
   const { t, language } = useLanguage();
   
   const [sourceArchiveId, setSourceArchiveId] = useState<string | null>(queryArchiveId);
-  const [pages, setPages] = useState<ReaderPageInfo[]>([]);
+  const [pages, setPages] = useState<ReaderPageItem[]>([]);
   const [segments, setSegments] = useState<ReaderSegment[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -325,86 +303,22 @@ function ReaderContent() {
     setNextArchiveByArchiveId({});
   }, [language, sourceArchiveId]);
 
-  const effectiveSegments = useMemo<ReaderSegment[]>(() => {
-    if (segments.length > 0) return segments;
-    if (!sourceArchiveId) return [];
-    return [
-      {
-        archiveId: sourceArchiveId,
-        start: 0,
-        count: pages.length,
-        title: sourceArchiveId,
-      },
-    ];
-  }, [pages.length, segments, sourceArchiveId]);
-
   const hasInterChapterVirtualPages = seamlessWebtoonEnabled;
-  const streamPages = useMemo<ReaderStreamItem[]>(() => {
-    if (pages.length <= 0) return [];
-
-    if (effectiveSegments.length <= 0) {
-      const fallbackPages: ReaderStreamPageInfo[] = pages.map((page, index) => ({
-        ...page,
-        streamSegmentIndex: 0,
-        streamLocalPage: index,
-        streamRealPage: index,
-      }));
-      return [
-        ...fallbackPages,
-        { type: 'virtual-end', archiveId: sourceArchiveId ?? '', streamSegmentIndex: 0 },
-      ];
-    }
-
-    const items: ReaderStreamItem[] = [];
-    effectiveSegments.forEach((segment, segmentIndex) => {
-      const end = segment.start + segment.count;
-      for (let realIndex = segment.start; realIndex < end; realIndex += 1) {
-        const page = pages[realIndex];
-        if (!page) continue;
-        items.push({
-          ...page,
-          streamSegmentIndex: segmentIndex,
-          streamLocalPage: realIndex - segment.start,
-          streamRealPage: realIndex,
-        });
-      }
-
-      const isTailSegment = segmentIndex === effectiveSegments.length - 1;
-      if (hasInterChapterVirtualPages || isTailSegment) {
-        items.push({
-          type: 'virtual-end',
-          archiveId: segment.archiveId,
-          streamSegmentIndex: segmentIndex,
-        });
-      }
-    });
-    return items;
-  }, [effectiveSegments, hasInterChapterVirtualPages, pages, sourceArchiveId]);
-
-  const streamIndexByRealPage = useMemo(() => {
-    const map = new Map<number, number>();
-    streamPages.forEach((item, index) => {
-      if (item.type === 'virtual-end') return;
-      map.set(item.streamRealPage, index);
-    });
-    return map;
-  }, [streamPages]);
-
-  const streamVirtualIndexBySegment = useMemo(() => {
-    const map = new Map<number, number>();
-    streamPages.forEach((item, index) => {
-      if (item.type !== 'virtual-end') return;
-      map.set(item.streamSegmentIndex, index);
-    });
-    return map;
-  }, [streamPages]);
-
-  const virtualPageIndex = useMemo(() => {
-    for (let i = streamPages.length - 1; i >= 0; i -= 1) {
-      if (streamPages[i]?.type === 'virtual-end') return i;
-    }
-    return -1;
-  }, [streamPages]);
+  const readerStream = useMemo(
+    () =>
+      buildReaderStream({
+        sourceArchiveId,
+        pages,
+        segments,
+        includeInterChapterVirtualPages: hasInterChapterVirtualPages,
+      }),
+    [hasInterChapterVirtualPages, pages, segments, sourceArchiveId]
+  );
+  const effectiveSegments = readerStream.effectiveSegments;
+  const streamPages = readerStream.items;
+  const streamIndexByRealPage = readerStream.streamIndexByRealPage;
+  const streamVirtualIndexBySegment = readerStream.streamVirtualIndexBySegment;
+  const virtualPageIndex = readerStream.virtualPageIndex;
 
   const currentStreamItem = streamPages[currentPage] ?? null;
   const activeSegment = useMemo(() => {
@@ -475,8 +389,8 @@ function ReaderContent() {
   const endPageIsRandomNext = nextArchive?.source === 'random';
 
   const currentPageType = currentStreamItem?.type ?? null;
-  const isCurrentHtmlPage = currentPageType === 'html';
-  const isCollectionEndPage = currentPageType === 'virtual-end';
+  const isCurrentHtmlPage = isHtmlReaderItem(currentStreamItem);
+  const isCollectionEndPage = isVirtualEndReaderItem(currentStreamItem);
   const isTailCollectionEndPage = isCollectionEndPage && currentPage === virtualPageIndex;
   const activeSegmentLastRealPage =
     activeSegment && activeSegment.count > 0 ? activeSegment.start + activeSegment.count - 1 : -1;
@@ -595,7 +509,7 @@ function ReaderContent() {
 
       try {
         const data = await ArchiveService.getFiles(sourceArchiveId);
-        const initialPages = data.pages.map((page) => ({ ...page, archiveId: sourceArchiveId }));
+        const initialPages = mapPageDtosToReaderPageItems(data.pages, sourceArchiveId);
         appendedArchiveIdsRef.current = new Set([sourceArchiveId]);
         setSegments([
           {
@@ -954,7 +868,7 @@ function ReaderContent() {
       if (!data.pages || data.pages.length === 0) return false;
 
       const start = pagesLengthRef.current;
-      const appendedPages = data.pages.map((page) => ({ ...page, archiveId: target.id }));
+      const appendedPages = mapPageDtosToReaderPageItems(data.pages, target.id);
       setPages((prev) => [...prev, ...appendedPages]);
       setSegments((prev) => [
         ...prev,
@@ -1232,7 +1146,7 @@ function ReaderContent() {
     pagesLength: seamlessEnabled && activeSegment ? activeSegment.count : pages.length,
     doublePageMode,
     splitCoverMode,
-    isCurrentHtmlPage: isCurrentOrTailHtmlPage,
+    currentItemType: isCurrentOrTailHtmlPage ? 'html' : currentPageType,
   });
 
   // Apply URL `page` -> state. This runs for all modes (including webtoon and the synthetic "end" page).
@@ -1575,22 +1489,7 @@ function ReaderContent() {
       const container = htmlContainerRefs.current[currentPage];
       if (!container) return false;
 
-      const metrics = getHtmlSpreadMetrics(container);
-      if (metrics.maxScrollLeft <= 1) return false;
-
-      if (direction === 'next') {
-        if (metrics.currentSlot >= metrics.maxSlot) return false;
-        const targetSlot = Math.min(metrics.maxSlot, metrics.currentSlot + 1);
-        const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
-        container.scrollTo({ left: target, behavior: 'auto' });
-        return true;
-      }
-
-      if (metrics.currentSlot <= 0) return false;
-      const targetSlot = Math.max(0, metrics.currentSlot - 1);
-      const target = getHtmlSpreadSlotOffset(metrics.maxScrollLeft, metrics.step, targetSlot);
-      container.scrollTo({ left: target, behavior: 'auto' });
-      return true;
+      return stepHtmlSpread(container, direction);
     },
     [currentPage, htmlContainerRefs, isHtmlSpreadView]
   );

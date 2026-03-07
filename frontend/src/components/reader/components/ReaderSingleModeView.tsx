@@ -441,7 +441,7 @@ export function ReaderSingleModeView({
                   >
                     <HtmlRenderer
                       html={htmlContents[currentPage] || ''}
-                      scrollable={!isHtmlSpreadView}
+                      scrollable={false}
                       className={isHtmlSpreadView ? 'reader-html-spread-content' : 'max-w-4xl mx-auto p-4'}
                       style={
                         isHtmlSpreadView
@@ -604,7 +604,7 @@ export function ReaderSingleModeView({
                       }}
                       className="w-full h-full overflow-auto bg-white"
                     >
-                      <HtmlRenderer html={htmlContents[currentPage + 1] || ''} className="max-w-4xl mx-auto p-4" />
+                      <HtmlRenderer html={htmlContents[currentPage + 1] || ''} scrollable={false} className="max-w-4xl mx-auto p-4" />
                     </div>
 	                  ) : (
 	                    <MemoizedImage

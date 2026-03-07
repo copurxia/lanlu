@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { logger } from '@/lib/utils/logger';
+import type { ReaderItemType } from '@/features/reader/domain/models/reader-item';
+import { computeProgressPage } from '@/features/reader/application/use-cases/compute-progress-page';
 
 export function useReaderProgressTracking({
   id,
@@ -10,14 +12,14 @@ export function useReaderProgressTracking({
   pagesLength,
   doublePageMode,
   splitCoverMode,
-  isCurrentHtmlPage,
+  currentItemType,
 }: {
   id: string | null;
   currentPage: number;
   pagesLength: number;
   doublePageMode: boolean;
   splitCoverMode: boolean;
-  isCurrentHtmlPage: boolean;
+  currentItemType?: ReaderItemType | null;
 }) {
   const imageLoadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentPageRef = useRef<number>(0);
@@ -27,23 +29,20 @@ export function useReaderProgressTracking({
       if (!id) return;
 
       try {
-        let actualPage = page;
-        if (doublePageMode && splitCoverMode && !isCurrentHtmlPage) {
-          if (page === 0) {
-            actualPage = 0;
-          } else if (page === 1) {
-            actualPage = 2;
-          } else {
-            actualPage = page + 1;
-          }
-        }
+        const actualPage = computeProgressPage({
+          currentPage: page,
+          pagesLength,
+          doublePageMode,
+          splitCoverMode,
+          currentItemType,
+        });
 
         await ArchiveService.updateProgress(id, actualPage + 1);
       } catch (err) {
         logger.operationFailed('update reading progress', err);
       }
     },
-    [id, doublePageMode, splitCoverMode, isCurrentHtmlPage]
+    [id, pagesLength, doublePageMode, splitCoverMode, currentItemType]
   );
 
   useEffect(() => {
@@ -57,10 +56,7 @@ export function useReaderProgressTracking({
       }
 
       imageLoadTimeoutRef.current = setTimeout(() => {
-        // `currentPage` may temporarily point to a synthetic page (e.g. collection "end" page).
-        // Clamp to a valid page index so we never send an out-of-range progress to the API.
-        const clampedPage = Math.max(0, Math.min(currentPage, pagesLength - 1));
-        updateReadingProgress(clampedPage);
+        updateReadingProgress(currentPage);
       }, 500);
 
       return () => {
@@ -74,8 +70,7 @@ export function useReaderProgressTracking({
   useEffect(() => {
     return () => {
       if (pagesLength > 0 && currentPageRef.current >= 0) {
-        const clampedPage = Math.max(0, Math.min(currentPageRef.current, pagesLength - 1));
-        updateReadingProgress(clampedPage);
+        updateReadingProgress(currentPageRef.current);
       }
     };
   }, [pagesLength, updateReadingProgress]);
