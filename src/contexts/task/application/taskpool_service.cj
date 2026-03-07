@@ -52,24 +52,17 @@ public class TaskPoolService {
 
     private var isRunning: Bool = false
     private let runningMutex: Mutex = Mutex()
-    private var tickStarted: Bool = false
-    private var timeoutCleanupStarted: Bool = false
 
     // 并发 worker 上限
     private var maxWorkers: Int32 = 2
     // 使用原子操作管理 worker 计数，减少锁竞争
     private let currentWorkers: AtomicInt32 = AtomicInt32(0)
     private let workerSeq: AtomicInt32 = AtomicInt32(0)
-    // Safety tick interval (seconds). Use atomic so it can be reloaded at runtime.
-    private let tickIntervalSeconds: AtomicInt32 = AtomicInt32(600)
     // upload task 空闲超时时间：10分钟内无分片上报则失败
     private static let UPLOAD_IDLE_TIMEOUT_SECONDS: Int32 = 600
-    // timeout_at 清理频率（秒）
-    private static let TIMEOUT_CLEANUP_SECONDS: Int64 = 30
 
     private init() {
         loadMaxWorkersConfig()
-        loadTickIntervalConfig()
     }
 
     private func loadMaxWorkersConfig(): Unit {
@@ -83,19 +76,6 @@ public class TaskPoolService {
         if (maxWorkers < 1) {
             maxWorkers = 1
         }
-    }
-
-    private func loadTickIntervalConfig(): Unit {
-        // Default to 5 minutes. Keep a reasonable floor to avoid excessive DB polling.
-        let secondsInt = SystemSettingsService.getInt("TASKPOOL_TICK_SECONDS")
-        var seconds = if (secondsInt > 0) { secondsInt } else { 600i32 }
-        if (seconds < 30i32) {
-            seconds = 30i32
-        }
-        if (seconds > 86400i32) {
-            seconds = 86400i32
-        }
-        tickIntervalSeconds.store(seconds)
     }
 
     public static func getInstance(): TaskPoolService {
@@ -119,25 +99,16 @@ public class TaskPoolService {
             return true
         }
         isRunning = true
-        // Start a low-frequency safety tick so the pool can recover from missed notifies.
-        // This is intentionally infrequent (5 minutes) to avoid extra DB load.
-        if (!tickStarted) {
-            tickStarted = true
-            spawn { tickLoop() }
-        }
-        if (!timeoutCleanupStarted) {
-            timeoutCleanupStarted = true
-            spawn { timeoutCleanupLoop() }
-        }
         runningMutex.unlock()
 
         let logger = getLogger("taskpool")
         logger.debug("TaskPool starting", ("max_workers", maxWorkers.toString()))
 
-        // 注意：孤儿任务清理现在由 ShinobuService 在创建启动任务之前处理
+        // 注意：孤儿任务清理现在由 CronService 在创建启动任务之前处理
         // 这里不需要重复清理，避免时序问题
 
         // 启动时仅尝试领取已有 pending（不做轮询）
+        // 后续的调度由事件驱动：任务入队时 notify，Worker 完成时 dispatch
         dispatch()
         return true
     }
@@ -150,55 +121,25 @@ public class TaskPoolService {
     }
 
     /**
-     * Safety tick: periodically call dispatch() even if no notify is triggered.
-     * This helps recover if workers are stuck in a state where dispatch() is never reached.
-     */
-    private func tickLoop(): Unit {
-        let logger = getLogger("taskpool")
-        while (true) {
-            // Sleep first so start() can do an immediate dispatch().
-            let seconds = tickIntervalSeconds.load()
-            sleep(Duration.second * Int64(seconds))
-            if (!isServiceRunning()) {
-                return
-            }
-            try {
-                logger.debug("TaskPool tick dispatch")
-                dispatch()
-            } catch (e: Exception) {
-                // Best-effort: never let the tick thread die.
-                logger.warn("TaskPool tick failed", ("error", e.message))
-            }
-        }
-    }
-
-    /**
-     * timeout_at 定时清理：专门处理 upload 任务超时回收
-     */
-    private func timeoutCleanupLoop(): Unit {
-        let logger = getLogger("taskpool")
-        while (true) {
-            sleep(Duration.second * TIMEOUT_CLEANUP_SECONDS)
-            if (!isServiceRunning()) {
-                return
-            }
-
-            try {
-                let timeoutCleaned = TaskDao.failTimedOutUploadTasks()
-                if (timeoutCleaned > 0) {
-                    logger.warn("TaskPool timeout cleanup executed", ("count", timeoutCleaned.toString()))
-                }
-            } catch (e: Exception) {
-                logger.warn("TaskPool timeout cleanup failed", ("error", e.message))
-            }
-        }
-    }
-
-    /**
      * 有新任务入队时调用：尽可能填满并发 worker
      */
     public func notifyTaskAvailable(): Unit {
         dispatch()
+    }
+
+    /**
+     * Safety tick: 由 CronService 周期性调用，检查是否有遗漏的 pending 任务
+     * 这是事件驱动的兜底机制，防止 notify 失效时任务卡住
+     */
+    public func safetyTick(): Unit {
+        dispatch()
+    }
+
+    /**
+     * 清理超时的上传任务：由 CronService 周期性调用
+     */
+    public static func cleanupTimedOutUploads(): Int64 {
+        return TaskDao.failTimedOutUploadTasks()
     }
 
     /**
@@ -208,16 +149,11 @@ public class TaskPoolService {
     public func reloadMaxWorkersConfig(): Unit {
         let logger = getLogger("taskpool")
         let oldMaxWorkers = maxWorkers
-        let oldTickSeconds = tickIntervalSeconds.load()
         loadMaxWorkersConfig()
-        loadTickIntervalConfig()
-        let newTickSeconds = tickIntervalSeconds.load()
         logger.debug(
             "TaskPool config reloaded",
             ("old_max_workers", oldMaxWorkers.toString()),
-            ("new_max_workers", maxWorkers.toString()),
-            ("old_tick_seconds", oldTickSeconds.toString()),
-            ("new_tick_seconds", newTickSeconds.toString())
+            ("new_max_workers", maxWorkers.toString())
         )
     }
 

@@ -16,6 +16,10 @@ import lanlu.shared.utils.*
  * CronService: 定时任务调度服务
  * 负责管理和执行基于cron表达式的定时任务
  * 单实例运行，每秒检查到期任务
+ * 
+ * 同时负责周期性维护任务：
+ * - TaskPool safety tick（每分钟检查遗漏的 pending 任务）
+ * - 超时上传任务清理（每分钟）
  */
 public class CronService {
     private static var instance: Option<CronService> = Option<CronService>.None
@@ -35,6 +39,10 @@ public class CronService {
     private let cacheRefreshIntervalMs: Int64 = 300000
     // 最近任务执行时间（用于动态调整等待间隔）
     private var nearestTaskRunAt: String = ""
+
+    // 周期性维护任务间隔（毫秒）
+    private let maintenanceIntervalMs: Int64 = 60000  // 1分钟
+    private var lastMaintenanceTime: Int64 = 0
 
     private init() {}
 
@@ -123,6 +131,7 @@ public class CronService {
 
     /**
      * 调度循环：使用动态间隔检查到期任务，减少数据库查询
+     * 同时执行周期性维护任务
      */
     private func runScheduleLoop(): Unit {
         let logger = getLogger("cron_service")
@@ -133,13 +142,8 @@ public class CronService {
 
         while (isServiceRunning()) {
             try {
-                // 计算动态等待间隔
-                let waitTime = calculateNextWaitTime()
-                
-                if (waitTime > 0) {
-                    // 等待直到下一个任务到期或达到最小检查间隔
-                    sleep(Duration.millisecond * waitTime)
-                }
+                // 先执行维护任务，避免在长等待窗口内延后执行
+                runMaintenanceTasks()
 
                 // 检查缓存是否需要刷新
                 if (shouldRefreshCache()) {
@@ -148,12 +152,58 @@ public class CronService {
 
                 // 检查并触发到期的任务
                 checkAndTriggerDueTasksFromCache()
+
+                // 下一轮等待时间不能超过维护间隔，确保维护任务最多延后 1 分钟
+                let waitTime = calculateLoopWaitTime()
+                if (waitTime > 0) {
+                    sleep(Duration.millisecond * waitTime)
+                }
             } catch (e: Exception) {
                 logger.error("Error in schedule loop", ("error", e.message))
             }
         }
 
         logger.debug("Schedule loop stopped")
+    }
+
+    /**
+     * 执行周期性维护任务
+     */
+    private func runMaintenanceTasks(): Unit {
+        let now = DateTime.now().toUnixTimeStamp().toMilliseconds()
+
+        if (now - lastMaintenanceTime < maintenanceIntervalMs) {
+            return
+        }
+
+        lastMaintenanceTime = now
+        let logger = getLogger("cron_service")
+
+        try {
+            TaskPoolService.getInstance().safetyTick()
+        } catch (e: Exception) {
+            logger.warn("TaskPool safety tick failed", ("error", e.message))
+        }
+
+        try {
+            let timeoutCleaned = TaskPoolService.cleanupTimedOutUploads()
+            if (timeoutCleaned > 0) {
+                logger.warn("Cleaned up timed out upload tasks", ("count", timeoutCleaned.toString()))
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to cleanup timed out upload tasks", ("error", e.message))
+        }
+    }
+
+    /**
+     * 计算调度循环等待时间：不超过维护任务间隔
+     */
+    private func calculateLoopWaitTime(): Int64 {
+        let nextCronWait = calculateNextWaitTime()
+        if (nextCronWait <= maintenanceIntervalMs) {
+            return nextCronWait
+        }
+        return maintenanceIntervalMs
     }
 
     /**
@@ -244,9 +294,10 @@ public class CronService {
                     // 否则根据实际时间差计算，但不超过maxWait
                     if (waitMillis <= 30000) {
                         return minWait
+                    } else if (waitMillis >= maxWait) {
+                        return maxWait
                     } else {
-                        // 返回较小值，确保及时检查但不超过最大间隔
-                        return min(minWait, maxWait, Array<Int64>())
+                        return waitMillis
                     }
                 case None =>
                     // 时间解析失败，返回默认间隔
