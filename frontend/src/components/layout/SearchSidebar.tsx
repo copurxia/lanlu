@@ -128,7 +128,7 @@ export function SearchSidebar({ onSearch, loading = false, filters, noPadding = 
   };
 
   return (
-    <div className={cn("space-y-4", noPadding ? "" : "px-4 pb-4 sm:p-4")}>
+    <div className={cn("space-y-4 pt-4", noPadding ? "" : "px-4 pb-4 sm:p-4")}>
       <div className="space-y-2">
         <DateRangePicker
           value={{ from: dateFrom, to: dateTo }}
@@ -178,7 +178,7 @@ export function SearchSidebar({ onSearch, loading = false, filters, noPadding = 
         </div>
       </div>
 
-      <div className="space-y-2 border-t pt-3">
+      <div className="space-y-2 border-y py-3">
         <div className="flex items-center justify-between">
           <label htmlFor="newonly" className="text-sm">
             {t('search.newOnly')}
