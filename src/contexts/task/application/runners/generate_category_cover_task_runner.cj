@@ -98,11 +98,21 @@ public class GenerateCategoryCoverTaskRunner {
 
     private static func pickPalette(r: CategoryCoverRng): ((Int32, Int32, Int32), (Int32, Int32, Int32)) {
         let palettes = [
-            ((14i32, 165i32, 233i32), (167i32, 139i32, 250i32)), // sky -> violet
-            ((34i32, 197i32, 94i32), (6i32, 182i32, 212i32)),    // green -> cyan
-            ((249i32, 115i32, 22i32), (239i32, 68i32, 68i32)),   // orange -> red
-            ((59i32, 130i32, 246i32), (16i32, 185i32, 129i32)),  // blue -> emerald
-            ((139i32, 92i32, 246i32), (236i32, 72i32, 153i32))   // violet -> pink
+            ((14i32, 165i32, 233i32), (167i32, 139i32, 250i32)), // sky -> violet (清爽)
+            ((34i32, 197i32, 94i32), (6i32, 182i32, 212i32)),    // green -> cyan (清新)
+            ((249i32, 115i32, 22i32), (239i32, 68i32, 68i32)),   // orange -> red (温暖)
+            ((59i32, 130i32, 246i32), (16i32, 185i32, 129i32)),  // blue -> emerald (自然)
+            ((139i32, 92i32, 246i32), (236i32, 72i32, 153i32)),  // violet -> pink (优雅)
+            ((99i32, 102i32, 241i32), (168i32, 85i32, 247i32)), // indigo -> purple (深邃)
+            ((20i32, 184i32, 166i32), (45i32, 212i32, 191i32)), // teal -> emerald (清雅)
+            ((236i32, 72i32, 153i32), (244i32, 114i32, 182i32)), // pink -> rose (柔和)
+            ((34i32, 211i32, 238i32), (103i32, 232i32, 249i32)), // light blue -> cyan (明亮)
+            ((132i32, 204i32, 22i32), (190i32, 242i32, 100i32)), // lime -> green (活力)
+            ((79i32, 70i32, 229i32), (147i32, 51i32, 234i32)),   // deep purple -> purple (神秘)
+            ((6i32, 182i32, 212i32), (59i32, 130i32, 246i32)),   // cyan -> blue (清爽)
+            ((168i32, 85i32, 247i32), (236i32, 72i32, 153i32)),  // purple -> pink (梦幻)
+            ((16i32, 185i32, 129i32), (34i32, 197i32, 94i32)),   // emerald -> green (自然)
+            ((244i32, 114i32, 182i32), (251i32, 146i32, 60i32))  // rose -> warm orange (温暖)
         ]
         let p = Int64(r.nextU64() % UInt64(palettes.size))
         return palettes[p]
@@ -623,6 +633,18 @@ public class GenerateCategoryCoverTaskRunner {
                     picked.add(id)
             }
         }
+
+        // If we didn't get enough distinct IDs, cycle through the picked ones to fill to count.
+        var cycleCount: Int64 = 0
+        while (picked.size < Int64(count)) {
+            let cycleIdx = cycleCount % Int64(picked.size)
+            let id = picked[cycleIdx]
+            if (id > 0) {
+                picked.add(id)
+            }
+            cycleCount += 1
+        }
+
         return picked.toArray()
     }
 
@@ -731,7 +753,31 @@ public class GenerateCategoryCoverTaskRunner {
             var idx: Int64 = 0
             let total = Int64(categories.size)
 
-            for (cat in categories) {
+            // Shuffle categories to distribute colors when generating covers in batch
+            var shuffledCats = ArrayList<CategoryData>()
+            let ts = DateTime.now().toUnixTimeStamp().toSeconds()
+            let rng = CategoryCoverRng(UInt64(ts))
+            let indices = ArrayList<Int64>()
+            for (i in 0..Int64(categories.size)) {
+                indices.add(i)
+            }
+
+            // Fisher-Yates shuffle
+            let n = Int64(categories.size)
+            for (i in 0..n) {
+                let ii = n - 1 - i
+                if (ii <= 0) { break }
+                let j = Int64(rng.nextU64() % UInt64(ii + 1))
+                let temp = indices[ii]
+                indices[ii] = indices[j]
+                indices[j] = temp
+            }
+
+            for (i in 0..Int64(indices.size)) {
+                shuffledCats.add(categories[indices[i]])
+            }
+
+            for (cat in shuffledCats) {
                 idx += 1
                 let progress = 10i32 + Int32((idx * 80) / total)  // 10..90
                 TaskModel.updateTaskProgress(taskId, progress, "Updating cover: ${cat.name}")
