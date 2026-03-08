@@ -65,9 +65,11 @@ export function ArchiveDetailContent() {
   });
 
   const [showPreview, setShowPreview] = useState(false);
-  const pageSize = 10;
-  const { previewLoading, previewError, archivePages, displayPages, loadingImages, loadMorePages, handleImageLoadEnd, handleImageError } =
-    useArchivePreview({ id, showPreview, pageSize, t });
+  const { previewLoading, previewError, archivePages, displayPages } =
+    useArchivePreview({ id, showPreview, t });
+
+  // displayPages 和 archivePages 现在是相同的，使用 displayPages 作为统一的页面数据
+  const pages = displayPages;
 
   const { tankoubons, tankoubonPreviewArchives, loading: tankoubonsLoading } = useArchiveTankoubons({
     archiveId: id,
@@ -904,12 +906,7 @@ export function ArchiveDetailContent() {
             setShowPreview={setShowPreview}
             previewLoading={previewLoading}
             previewError={previewError}
-            archivePages={archivePages}
-            displayPages={displayPages}
-            loadingImages={loadingImages}
-            loadMorePages={loadMorePages}
-            handleImageLoadEnd={handleImageLoadEnd}
-            handleImageError={handleImageError}
+            pages={pages}
           />
 
           {tankoubonsLoading || tankoubons.length > 0 ? (

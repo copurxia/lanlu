@@ -205,7 +205,14 @@ export function ReaderSidebar({
     };
   }, [activeTab, isEpub, open, sidebarScrollRef, updateSidebarViewport]);
 
-  const sidebarColumns = useMemo(() => (sidebarContentWidth >= 768 ? 3 : 2), [sidebarContentWidth]);
+  const sidebarColumns = useMemo(() => {
+    if (sidebarContentWidth < 400) return 2;
+    if (sidebarContentWidth < 600) return 3;
+    if (sidebarContentWidth < 900) return 4;
+    if (sidebarContentWidth < 1200) return 5;
+    if (sidebarContentWidth < 1600) return 6;
+    return 7;
+  }, [sidebarContentWidth]);
 
   const thumbWidth = useMemo(() => {
     if (sidebarColumns <= 0) return 0;
