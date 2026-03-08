@@ -34,7 +34,7 @@ export function useReaderArchiveMetadata({
         const metadata = await ArchiveService.getMetadata(id, language);
         if (cancelled) return;
         setArchiveMetadata(metadata);
-        setIsFavorited(metadata.isfavorite);
+        setIsFavorited(Boolean(metadata.isfavorite));
         if (metadata.title && metadata.title.trim()) {
           setArchiveTitle(metadata.title);
         }
@@ -50,14 +50,11 @@ export function useReaderArchiveMetadata({
     };
   }, [id, language]);
 
-  const archiveTags = archiveMetadata?.tags ?? '';
   const metadataTags = useMemo(() => {
-    if (!archiveTags) return [];
-    return archiveTags
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean);
-  }, [archiveTags]);
+    return Array.isArray(archiveMetadata?.tags)
+      ? archiveMetadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean)
+      : [];
+  }, [archiveMetadata?.tags]);
 
   const toggleFavorite = useCallback(
     async (e?: React.MouseEvent) => {

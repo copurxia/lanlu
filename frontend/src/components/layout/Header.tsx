@@ -56,10 +56,10 @@ function HeaderPageClearlogo({
           return;
         }
 
-        const tank = await TankoubonService.getTankoubonById(detailId);
+        const tank = await TankoubonService.getMetadata(detailId);
         if (cancelled) return;
         setPageClearlogoUrl(resolveArchiveAssetUrl(tank, 'clearlogo', tank.clearlogo));
-        setPageClearlogoAlt((tank.name || '').trim());
+        setPageClearlogoAlt((tank.name || tank.title || '').trim());
       } catch {
         if (cancelled) return;
         setPageClearlogoUrl('');

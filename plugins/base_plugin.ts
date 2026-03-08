@@ -66,6 +66,16 @@ export interface MetadataAssetItem {
   value: string | number;
 }
 
+export interface PageMetadataPatch {
+  page?: number;
+  path?: string;
+  title?: string;
+  description?: string;
+  thumb?: string | number;
+  sort?: number;
+  hidden_in_files?: boolean;
+}
+
 export interface MetadataObject {
   title: string;
   type: number;
@@ -73,6 +83,7 @@ export interface MetadataObject {
   tags: string[];
   assets: MetadataAssetItem[];
   archive: MetadataObject[];
+  pages?: PageMetadataPatch[];
   archive_id?: string;
   volume_no?: number;
   [key: string]: unknown;
@@ -424,6 +435,10 @@ export abstract class BasePlugin {
 
     const rawArchive = Array.isArray(source.archive) ? source.archive : [];
     result.archive = rawArchive.map((item) => this.normalizeMetadataObject(item));
+    const rawPages = Array.isArray(source.pages) ? source.pages : [];
+    if (rawPages.length > 0) {
+      result.pages = rawPages.map((item) => this.normalizePageMetadataPatch(item));
+    }
 
     const archiveId = this.readStringField((source as Record<string, unknown>).archive_id);
     if (archiveId) {
@@ -435,7 +450,7 @@ export abstract class BasePlugin {
     }
 
     for (const [key, value] of Object.entries(source)) {
-      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'archive_id' || key === 'volume_no') {
+      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'pages' || key === 'archive_id' || key === 'volume_no') {
         continue;
       }
       result[key] = value;
@@ -492,6 +507,35 @@ export abstract class BasePlugin {
       deduped.push({ key, value: item.value });
     }
     return deduped;
+  }
+
+  private normalizePageMetadataPatch(raw: unknown): PageMetadataPatch {
+    const source = (raw && typeof raw === 'object' && !Array.isArray(raw))
+      ? (raw as Record<string, unknown>)
+      : {};
+
+    const patch: PageMetadataPatch = {};
+    const page = this.readIntField(source.page ?? source.page_number ?? source.pageNumber, 0);
+    if (page > 0) patch.page = page;
+    const path = this.readStringField(source.path ?? source.entry ?? source.entry_path ?? source.entryPath);
+    if (path) patch.path = path;
+    const title = this.readStringField(source.title);
+    if (title) patch.title = title;
+    const description = this.readStringField(source.description ?? source.summary);
+    if (description) patch.description = description;
+    const nestedMetadata = (source.metadata && typeof source.metadata === 'object' && !Array.isArray(source.metadata))
+      ? (source.metadata as Record<string, unknown>)
+      : {};
+    const thumb = this.normalizeAssetValue(source.thumb ?? nestedMetadata.thumb);
+    if (thumb) patch.thumb = thumb;
+    const sort = this.readIntField(source.sort, 0);
+    if (sort !== 0) patch.sort = sort;
+    if (typeof source.hidden_in_files === 'boolean') {
+      patch.hidden_in_files = source.hidden_in_files;
+    } else if (typeof source.hiddenInFiles === 'boolean') {
+      patch.hidden_in_files = source.hiddenInFiles;
+    }
+    return patch;
   }
 
   private normalizeAssetValue(raw: unknown): string {

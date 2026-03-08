@@ -1,33 +1,64 @@
+import type { Archive, ArchiveAssets, MetadataObject, MetadataPagePatch } from './archive';
+
 export interface Tankoubon {
   tankoubon_id: string;
   name: string;
   summary: string;
   tags: string;
   cover_asset_id?: number;
-  assets?: import('./archive').ArchiveAssets;
+  assets?: ArchiveAssets;
   cover?: string;
   backdrop?: string;
   clearlogo?: string;
-  archives?: string[];  // Array of arcids (optional for search results)
-
-  // Aggregated metadata for display (only in search results)
+  archives?: string[];
   pagecount?: number;
   progress?: number;
   lastreadtime?: string;
   isnew?: boolean;
   archive_count?: number;
   isfavorite?: boolean;
-  favoritetime?: string;  // 收藏时间（可选）
+  favoritetime?: string;
 }
 
 export interface TankoubonDetail extends Tankoubon {
-  archiveDetails: Archive[];  // Full archive objects
+  archiveDetails: Archive[];
 }
 
 export interface TankoubonCreateRequest {
   name: string;
   summary?: string;
   tags?: string;
+}
+
+export interface TankoubonMemberMetadataPatch extends MetadataObject {
+  archive_id?: string;
+  volume_no?: number;
+  summary?: string;
+  updated_at?: string;
+  cover?: string;
+  backdrop?: string;
+  clearlogo?: string;
+  pages?: MetadataPagePatch[];
+}
+
+export interface TankoubonMetadata extends MetadataObject {
+  tankoubon_id: string;
+  name: string;
+  title?: string;
+  description?: string;
+  summary: string;
+  tags: string[];
+  archive: TankoubonMemberMetadataPatch[];
+  archives: string[];
+  archive_count?: number;
+  pagecount?: number;
+  progress?: number;
+  lastreadtime?: string;
+  isnew?: boolean;
+  isfavorite?: boolean;
+  cover?: string;
+  backdrop?: string;
+  clearlogo?: string;
 }
 
 export interface TankoubonUpdateRequest {
@@ -39,7 +70,7 @@ export interface TankoubonUpdateRequest {
   clearlogo?: string;
   metadata_namespace?: string;
   cover_asset_id?: number;
-  assets?: import('./archive').ArchiveAssets;
+  assets?: ArchiveAssets;
   archives?: Array<{
     archive_id?: string;
     volume_no?: number;
@@ -58,6 +89,3 @@ export interface TankoubonResponse {
   result: Tankoubon | Tankoubon[];
   total: number;
 }
-
-// Import Archive type from existing types
-import type { Archive } from './archive';

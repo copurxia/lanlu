@@ -23,6 +23,8 @@ import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
 import { getCoverAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets'
+import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata'
+import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon'
 import type { Plugin } from '@/lib/services/plugin-service'
 
 export interface BaseMediaCardProps {
@@ -135,17 +137,7 @@ export function BaseMediaCard({
   const [isMetadataPluginRunning, setIsMetadataPluginRunning] = React.useState(false)
   const [metadataPluginProgress, setMetadataPluginProgress] = React.useState<number | null>(null)
   const [metadataPluginMessage, setMetadataPluginMessage] = React.useState('')
-  const [metadataArchivePatches, setMetadataArchivePatches] = React.useState<Array<{
-    archive_id?: string
-    volume_no?: number
-    title?: string
-    summary?: string
-    tags?: string
-    updated_at?: string
-    cover?: string
-    backdrop?: string
-    clearlogo?: string
-  }>>([])
+  const [metadataArchivePatches, setMetadataArchivePatches] = React.useState<TankoubonMemberMetadataPatch[]>([])
   const [rpcSelectTaskId, setRpcSelectTaskId] = React.useState<number | null>(null)
   const [rpcSelectRequest, setRpcSelectRequest] = React.useState<RpcSelectRequest | null>(null)
   const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = React.useState<number | null>(null)
@@ -513,18 +505,18 @@ export function BaseMediaCard({
     try {
       const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean)
       const targetType = type === 'archive' ? 'archive' : 'tankoubon'
-      const toAssetValue = (pathValue: string, assetId: string): string => {
-        const path = pathValue.trim()
-        if (path) return path
-        const idStr = assetId.trim()
-        if (/^\d+$/.test(idStr)) return idStr
-        return ''
-      }
-      const rootAssets = [
-        { key: 'cover', value: toAssetValue(editCover, editAssetCoverId) },
-        { key: 'backdrop', value: toAssetValue(editBackdrop, editAssetBackdropId) },
-        { key: 'clearlogo', value: toAssetValue(editClearlogo, editAssetClearlogoId) },
-      ].filter((item) => item.value)
+      const rootAssets = buildMetadataAssetInputs(
+        {
+          cover: editCover || undefined,
+          backdrop: editBackdrop || undefined,
+          clearlogo: editClearlogo || undefined,
+        },
+        {
+          cover: /^\d+$/.test(editAssetCoverId.trim()) ? Number.parseInt(editAssetCoverId.trim(), 10) : undefined,
+          backdrop: /^\d+$/.test(editAssetBackdropId.trim()) ? Number.parseInt(editAssetBackdropId.trim(), 10) : undefined,
+          clearlogo: /^\d+$/.test(editAssetClearlogoId.trim()) ? Number.parseInt(editAssetClearlogoId.trim(), 10) : undefined,
+        },
+      ) || []
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         targetType,
         id,
@@ -558,7 +550,30 @@ export function BaseMediaCard({
             description: editSummary.trim(),
             tags: metadataTags,
             assets: rootAssets,
-            archive: [],
+            archive: type === 'tankoubon'
+              ? metadataArchivePatches.map((item) => ({
+                  title: item.title || '',
+                  type: 0,
+                  description: item.summary || item.description || '',
+                  tags: Array.isArray(item.tags)
+                    ? item.tags
+                    : String(item.tags || '')
+                        .split(',')
+                        .map((tag) => tag.trim())
+                        .filter(Boolean),
+                  assets: buildMetadataAssetInputs(
+                    {
+                      cover: item.cover || undefined,
+                      backdrop: item.backdrop || undefined,
+                      clearlogo: item.clearlogo || undefined,
+                    },
+                  ),
+                  archive_id: item.archive_id,
+                  volume_no: item.volume_no,
+                  updated_at: item.updated_at,
+                  pages: item.pages,
+                }))
+              : [],
           },
         }
       )
@@ -618,20 +633,8 @@ export function BaseMediaCard({
         if (type === 'tankoubon') {
           setMetadataArchivePatches(
             nextArchives
-              .map((item: any) => ({
-                archive_id: typeof item?.archive_id === 'string' ? item.archive_id : undefined,
-                volume_no: typeof item?.volume_no === 'number' ? item.volume_no : undefined,
-                title: typeof item?.title === 'string' ? item.title : undefined,
-                summary: typeof item?.description === 'string' ? item.description : undefined,
-                tags: Array.isArray(item?.tags)
-                  ? item.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean).join(', ')
-                  : undefined,
-                updated_at: typeof item?.updated_at === 'string' ? item.updated_at : undefined,
-                cover: readMetadataAssetValue(item?.assets, 'cover') || undefined,
-                backdrop: readMetadataAssetValue(item?.assets, 'backdrop') || undefined,
-                clearlogo: readMetadataAssetValue(item?.assets, 'clearlogo') || undefined,
-              }))
-              .filter((item: any) => item.archive_id || item.volume_no)
+              .map((item: unknown) => normalizeTankoubonMemberMetadataPatch(item))
+              .filter((item: TankoubonMemberMetadataPatch) => item.archive_id || item.volume_no)
           )
         }
       } catch {
@@ -685,7 +688,7 @@ export function BaseMediaCard({
 
     setEditSaving(true)
     try {
-      const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean).join(', ')
+      const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean)
       const nextSummary = editSummary.trim()
       const parseAssetId = (raw: string): number | undefined => {
         const value = Number(raw.trim())
@@ -693,7 +696,7 @@ export function BaseMediaCard({
         const parsedId = Math.trunc(value)
         return parsedId > 0 ? parsedId : undefined
       }
-      const assets = {
+      const assetIds = {
         cover: parseAssetId(editAssetCoverId),
         backdrop: parseAssetId(editAssetBackdropId),
         clearlogo: parseAssetId(editAssetClearlogoId),
@@ -702,30 +705,62 @@ export function BaseMediaCard({
       if (type === 'archive') {
         await ArchiveService.updateMetadata(id, {
           title: nextTitle || displayTitle,
-          summary: nextSummary,
+          type: 0,
+          description: nextSummary,
           tags: nextTags,
-          cover: editCover || undefined,
-          backdrop: editBackdrop || undefined,
-          clearlogo: editClearlogo || undefined,
-          assets,
-        }, undefined, { metadataNamespace: selectedMetadataPlugin || undefined })
-      } else {
-        await TankoubonService.updateTankoubon(id, {
-          name: nextTitle,
-          summary: nextSummary,
-          tags: nextTags,
-          cover: editCover || undefined,
-          backdrop: editBackdrop || undefined,
-          clearlogo: editClearlogo || undefined,
-          assets,
+          assets: buildMetadataAssetInputs(
+            {
+              cover: editCover || undefined,
+              backdrop: editBackdrop || undefined,
+              clearlogo: editClearlogo || undefined,
+            },
+            assetIds,
+          ),
           metadata_namespace: selectedMetadataPlugin || undefined,
-          archives: metadataArchivePatches,
+        })
+      } else {
+        await TankoubonService.updateMetadata(id, {
+          title: nextTitle,
+          type: 1,
+          description: nextSummary,
+          tags: nextTags,
+          assets: buildMetadataAssetInputs(
+            {
+              cover: editCover || undefined,
+              backdrop: editBackdrop || undefined,
+              clearlogo: editClearlogo || undefined,
+            },
+            assetIds,
+          ),
+          metadata_namespace: selectedMetadataPlugin || undefined,
+          archive: metadataArchivePatches.map((item) => ({
+            title: item.title || '',
+            type: 0,
+            description: item.summary || item.description || '',
+            tags: Array.isArray(item.tags)
+              ? item.tags
+              : String(item.tags || '')
+                  .split(',')
+                  .map((tag) => tag.trim())
+                  .filter(Boolean),
+            assets: buildMetadataAssetInputs(
+              {
+                cover: item.cover || undefined,
+                backdrop: item.backdrop || undefined,
+                clearlogo: item.clearlogo || undefined,
+              },
+            ),
+            archive_id: item.archive_id,
+            volume_no: item.volume_no,
+            updated_at: item.updated_at,
+            pages: item.pages,
+          })),
         })
       }
 
       if (nextTitle) setDisplayTitle(nextTitle)
       setDisplaySummary(nextSummary)
-      setDisplayTags(nextTags)
+      setDisplayTags(nextTags.join(', '))
       setEditOpen(false)
       emitRefresh()
     } catch (error) {

@@ -16,6 +16,7 @@ import stdx.encoding.json.stream.*
 import stdx.log.*
 import lanlu.contexts.plugin.application.PluginTaskService
 import lanlu.contexts.plugin.application.PluginTaskData
+import lanlu.contexts.plugin.application.MetadataPatchService
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
@@ -815,66 +816,11 @@ public class DenoTaskRunner {
     }
 
     private static func buildArchiveMetadataObjectJson(archiveId: String, includeLocator: Bool, volumeNo: Int32): (Bool, String, String) {
-        let archive = ArchiveDao.getArchiveById(archiveId)
-        if (archive.id.size == 0) {
-            return (false, "", "Archive not found")
-        }
-
-        let tags = TagDao.getArchiveTags(archive.id)
-        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
-        return (true, buildArchiveMetadataObjectJsonFromParts(archive, tags, assetsRaw, includeLocator, volumeNo), "")
+        return MetadataPatchService.buildArchiveMetadataObjectJson(archiveId, includeLocator, volumeNo, includePages: false)
     }
 
     private static func buildTankoubonMetadataObjectJson(tankoubonId: String): (Bool, String, String) {
-        match (TankoubonDao.getTankoubonById(tankoubonId)) {
-            case None => return (false, "", "Tankoubon not found")
-            case Some(tankoubon) =>
-                let tags = TankoubonDao.getMergedTagsForTankoubon(tankoubonId)
-                let archiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
-                let archiveMap = ArchiveDao.getBatchArchivesById(archiveIds)
-                let archiveTagsMap = TagDao.getBatchArchiveTags(archiveIds)
-                let archiveAssetsMap = ArchiveDao.getBatchArchiveAssetsRaw(archiveIds)
-                let out = ByteBuffer()
-                let w = JsonWriter(out)
-                w.startObject()
-                w.writeName("title").writeValue(tankoubon.name)
-                w.writeName("type").writeValue(1i32)
-                w.writeName("description").writeValue(tankoubon.summary)
-                writeMetadataTagsArray(w, tags)
-                writeMetadataAssetsArray(w, tankoubon.assets_raw)
-
-                w.writeName("archive")
-                w.startArray()
-                var volumeNo: Int32 = 1
-                for (idx in 0..archiveIds.size) {
-                    let memberId = archiveIds[idx].trimAscii()
-                    if (memberId.size == 0) {
-                        volumeNo += 1
-                        continue
-                    }
-                    match (archiveMap.get(memberId)) {
-                        case Some(archive) =>
-                            let memberTags = match (archiveTagsMap.get(memberId)) {
-                                case Some(value) => value
-                                case None => ""
-                            }
-                            let memberAssetsRaw = match (archiveAssetsMap.get(memberId)) {
-                                case Some(value) => value
-                                case None => "{}"
-                            }
-                            let memberJson = buildArchiveMetadataObjectJsonFromParts(archive, memberTags, memberAssetsRaw, true, volumeNo)
-                            if (memberJson.trimAscii().size > 0) {
-                                w.jsonValue(memberJson)
-                            }
-                        case None => ()
-                    }
-                    volumeNo += 1
-                }
-                w.endArray()
-                w.endObject()
-                w.flush()
-                return (true, String.fromUtf8(readToEnd(out)), "")
-        }
+        return MetadataPatchService.buildTankoubonMetadataObjectJson(tankoubonId, includePages: false)
     }
 
     private static func normalizeMetadataInputJson(raw: String): String {
@@ -1910,7 +1856,97 @@ public class DenoTaskRunner {
 
         if (m == "archive.getMetadata") {
             var archiveId = ""
+            var includePages = false
 
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                            case "includePages" =>
+                                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                                includePages = v == "true" || v == "1"
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (archiveId.size == 0) {
+                return (false, "{}", "missing archiveId")
+            }
+
+            let archive = ArchiveDao.getArchiveById(archiveId)
+            if (archive.id.size == 0) {
+                return (false, "{}", "archive not found")
+            }
+
+            let (okMetadata, metadataJson, metadataErr) = MetadataPatchService.buildArchiveMetadataObjectJson(archiveId, false, 0, includePages: includePages)
+            if (!okMetadata) {
+                let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "failed to build metadata object" }
+                return (false, "{}", err)
+            }
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archiveId").writeValue(archiveId)
+            w.writeName("metadata").jsonValue(metadataJson)
+            w.endObject()
+            w.flush()
+            return (true, String.fromUtf8(readToEnd(out)), "")
+        }
+
+        if (m == "tankoubon.getMetadata") {
+            var tankoubonId = ""
+            var includePages = false
+
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(effectiveParams.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "tankoubonId" => tankoubonId = r.readValue<String>().trimAscii()
+                            case "includePages" =>
+                                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                                includePages = v == "true" || v == "1"
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+
+            if (tankoubonId.size == 0) {
+                return (false, "{}", "missing tankoubonId")
+            }
+
+            let (okMetadata, metadataJson, metadataErr) = MetadataPatchService.buildTankoubonMetadataObjectJson(tankoubonId, includePages: includePages)
+            if (!okMetadata) {
+                let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "failed to build metadata object" }
+                return (false, "{}", err)
+            }
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("tankoubonId").writeValue(tankoubonId)
+            w.writeName("metadata").jsonValue(metadataJson)
+            w.endObject()
+            w.flush()
+            return (true, String.fromUtf8(readToEnd(out)), "")
+        }
+
+        if (m == "archive.listPages") {
+            var archiveId = ""
             try {
                 var buf = ByteBuffer()
                 unsafe { buf.write(effectiveParams.rawData()) }
@@ -1928,28 +1964,69 @@ public class DenoTaskRunner {
                 }
             } catch (_: Exception) {}
 
-            if (archiveId.size == 0) {
-                return (false, "{}", "missing archiveId")
-            }
+            let resolved = resolveArchiveActualPath(archiveId)
+            match (resolved) {
+                case None => return (false, "{}", "archive not found or path unresolved")
+                case Some((archiveType, actualPath)) =>
+                    let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+                    let entries = handler.listEntriesWithTitle(actualPath)
+                    let pageMetadata = ArchiveDao.getPageMetadata(archiveId)
+                    var metadataByPath = HashMap<String, PageMetadataData>()
+                    var metadataByPage = HashMap<Int32, PageMetadataData>()
+                    for (meta in pageMetadata) {
+                        let pathKey = meta.entry_path.trimAscii()
+                        if (pathKey.size > 0 && !metadataByPath.contains(pathKey)) {
+                            metadataByPath[pathKey] = meta
+                        }
+                        if (meta.page_number > 0 && !metadataByPage.contains(meta.page_number)) {
+                            metadataByPage[meta.page_number] = meta
+                        }
+                    }
 
-            let archive = ArchiveDao.getArchiveById(archiveId)
-            if (archive.id.size == 0) {
-                return (false, "{}", "archive not found")
-            }
+                    let out = ByteBuffer()
+                    let w = JsonWriter(out)
+                    w.startObject()
+                    w.writeName("archiveId").writeValue(archiveId)
+                    w.writeName("count").writeValue(Int64(entries.size))
+                    w.writeName("pages")
+                    w.startArray()
+                    for (i in 0..entries.size) {
+                        let pageNumber = Int32(i + 1)
+                        let entry = entries[i]
+                        let pathKey = entry[0].trimAscii()
+                        var metadataOpt: Option<PageMetadataData> = Option<PageMetadataData>.None
+                        match (metadataByPath.get(pathKey)) {
+                            case Some(meta) => metadataOpt = Some(meta)
+                            case None =>
+                                match (metadataByPage.get(pageNumber)) {
+                                    case Some(meta) => metadataOpt = Some(meta)
+                                    case None => ()
+                                }
+                        }
 
-            let (okMetadata, metadataJson, metadataErr) = buildArchiveMetadataObjectJson(archiveId, false, 0)
-            if (!okMetadata) {
-                let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "failed to build metadata object" }
-                return (false, "{}", err)
+                        w.startObject()
+                        w.writeName("page").writeValue(pageNumber)
+                        w.writeName("path").writeValue(entry[0])
+                        w.writeName("title").writeValue(entry[1])
+                        match (metadataOpt) {
+                            case Some(meta) =>
+                                w.writeName("metadata")
+                                w.startObject()
+                                w.writeName("title").writeValue(meta.title)
+                                w.writeName("description").writeValue(meta.description)
+                                w.writeName("thumb_asset_id").writeValue(meta.thumb_asset_id)
+                                w.writeName("sort").writeValue(meta.sort_index)
+                                w.writeName("hidden_in_files").writeValue(meta.hidden_in_files)
+                                w.endObject()
+                            case None => ()
+                        }
+                        w.endObject()
+                    }
+                    w.endArray()
+                    w.endObject()
+                    w.flush()
+                    return (true, String.fromUtf8(readToEnd(out)), "")
             }
-            let out = ByteBuffer()
-            let w = JsonWriter(out)
-            w.startObject()
-            w.writeName("archiveId").writeValue(archiveId)
-            w.writeName("metadata").jsonValue(metadataJson)
-            w.endObject()
-            w.flush()
-            return (true, String.fromUtf8(readToEnd(out)), "")
         }
 
         if (m == "tankoubon.listArchives") {

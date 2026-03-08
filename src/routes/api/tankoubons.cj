@@ -21,6 +21,11 @@ public func registerTankoubonRoutes(router: App) {
         TankoubonController.getTankoubonById(ctx)
     })
 
+    // 获取单行本统一 metadata
+    tankoubon.get("/:id/metadata", { ctx =>
+        TankoubonController.getMetadata(ctx)
+    })
+
     // 创建新单行本
     tankoubon.put("", { ctx => 
         TankoubonController.createTankoubon(ctx)
@@ -29,6 +34,11 @@ public func registerTankoubonRoutes(router: App) {
     // 更新单行本
     tankoubon.put("/:id", { ctx => 
         TankoubonController.updateTankoubon(ctx)
+    })
+
+    // 更新单行本统一 metadata
+    tankoubon.put("/:id/metadata", { ctx =>
+        TankoubonController.updateMetadata(ctx)
     })
     
     // 删除单行本

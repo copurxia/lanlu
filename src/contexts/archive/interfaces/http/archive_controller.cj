@@ -5,6 +5,7 @@ import ignite.*
 import lanlu.contexts.archive.domain.*
 import lanlu.contexts.tankoubon.domain.*
 import lanlu.contexts.plugin.domain.*
+import lanlu.contexts.plugin.application.*
 import lanlu.contexts.system.application.*
 import lanlu.shared.utils.*
 import lanlu.shared.views.*
@@ -317,7 +318,8 @@ public class ArchiveController {
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
-        let lang = ctx.query("lang") ?? ""
+        let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
+        let includePages = includePagesRaw == "1" || includePagesRaw == "true"
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -327,7 +329,6 @@ public class ArchiveController {
             return
         }
 
-        // 获取档案元数据（包含标签）
         let archive = ArchiveDao.getArchiveMetadataById(id)
         if (archive.id.size == 0) {
             let errorResponse = "{\"error\":\"Archive not found\",\"success\":0}"
@@ -336,63 +337,39 @@ public class ArchiveController {
             return
         }
 
-        // 获取归档的内部数据库ID用于查询用户状态
-        let archiveIdInt = getArchiveInternalId(id)
-
-        // 查询用户级别的 isNew 状态、收藏状态和阅读进度
-        var isNew = true  // 默认为新
-        var isFavorite = false  // 默认未收藏
-        var userProgress: Int32 = 0  // 用户特定阅读进度，默认为0
-        var lastreadtime: Int64 = 0  // 最后阅读时间，默认为0
+        var progress: Int32 = 0i32
+        var isNew = false
+        var isFavorite = false
+        var lastReadTime: Int64 = 0i64
         match (AuthMiddleware.optionalUser(ctx)) {
             case Some(userId) =>
+                let archiveIdInt = ArchiveDao.getArchiveInternalId(id)
                 if (archiveIdInt > 0) {
+                    progress = UserArchiveStatusDao.getProgress(userId, archiveIdInt)
                     isNew = UserArchiveStatusDao.isNew(userId, archiveIdInt)
                     isFavorite = UserFavoriteDao.isFavorite(userId, archiveIdInt)
-                    userProgress = UserArchiveStatusDao.getProgress(userId, archiveIdInt)
-                    // 获取最后阅读时间
-                    lastreadtime = UserArchiveStatusDao.getLastReadTime(userId, archiveIdInt)
+                    lastReadTime = UserArchiveStatusDao.getLastReadTime(userId, archiveIdInt)
                 }
-            case None =>
-                // 未登录用户，默认为新且未收藏，进度为0
-                isNew = true
-                isFavorite = false
-                userProgress = 0
-                lastreadtime = 0
+            case None => ()
         }
 
-        // JSON response via JsonWriter (avoid manual escaping).
-        let tagsString = TagDao.getArchiveTags(archive.id)
-        let translatedTags = if (lang.size > 0) {
-            TagDao.translateTagsString(tagsString, lang)
-        } else {
-            tagsString
+        let (okMetadata, metadataJson, metadataErr) = MetadataPatchService.buildArchiveMetadataObjectJson(
+            id,
+            true,
+            0,
+            includePages: includePages,
+            progress: progress,
+            isNew: isNew,
+            isFavorite: isFavorite,
+            lastReadTime: lastReadTime
+        )
+        if (!okMetadata) {
+            let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Failed to build archive metadata" }
+            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            ResponseView.json(ctx, "{\"error\":\"${err}\",\"success\":0}")
+            return
         }
-        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
-
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("arcid").writeValue(archive.id)
-        w.writeName("title").writeValue(archive.title)
-        w.writeName("filename").writeValue(archive.filename)
-        w.writeName("summary").writeValue(archive.summary)
-        w.writeName("tags").writeValue(translatedTags)
-        w.writeName("isnew").writeValue(isNew)
-        w.writeName("isfavorite").writeValue(isFavorite)
-        w.writeName("pagecount").writeValue(archive.pagecount)
-        w.writeName("progress").writeValue(userProgress)
-        w.writeName("lastreadtime").writeValue(lastreadtime)
-        w.writeName("file_size").writeValue(archive.file_size)
-        w.writeName("size").writeValue(archive.file_size)
-        writeArchiveAssetsJson(w, assetsRaw)
-        w.writeName("archivetype").writeValue(archive.archive_type)
-        w.writeName("created_at").writeValue(archive.created_at)
-        w.writeName("updated_at").writeValue(archive.updated_at)
-        w.writeName("relative_path").writeValue(archive.relative_path)
-        w.endObject()
-        w.flush()
-        ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+        ResponseView.json(ctx, metadataJson)
     }
 
     // GET /api/archives/{id}/tankoubons
@@ -473,6 +450,31 @@ public class ArchiveController {
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
             ResponseView.json(ctx, errorResponse)
             return
+        }
+
+        if (requestBody.size > 0) {
+            let parsed = MetadataPatchService.parseMetadataObject(requestBody)
+            if (parsed.success && (
+                parsed.titleProvided ||
+                parsed.summaryProvided ||
+                parsed.tagsProvided ||
+                parsed.coverProvided ||
+                parsed.backdropProvided ||
+                parsed.clearlogoProvided ||
+                parsed.pages.size > 0
+            )) {
+                let pluginNamespaceFromBody = MetadataPatchService.extractMetadataNamespace(requestBody)
+                let topPatch = MetadataPatchService.buildArchivePatchFromParsed(parsed)
+                let ok = MetadataPatchService.applyArchiveMetadataPatch(0, id, topPatch, pluginNamespaceFromBody)
+                if (!ok) {
+                    let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive metadata\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ResponseView.json(ctx, errorResponse)
+                    return
+                }
+                ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"success\":1}")
+                return
+            }
         }
         
         // 获取现有档案数据

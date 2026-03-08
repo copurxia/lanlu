@@ -25,27 +25,27 @@ export function ArchiveBasicInfoCard({ metadata, t }: Props) {
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileName')}</span>
             <span
               className="flex-1 text-right whitespace-normal break-all"
-              title={metadata.relative_path + '/' + metadata.filename}
+              title={[metadata.relative_path, metadata.filename].filter(Boolean).join('/')}
             >
-              {metadata.relative_path}/{metadata.filename}
+              {[metadata.relative_path, metadata.filename].filter(Boolean).join('/') || t('archive.unknown')}
             </span>
           </div>
 
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.pageCount')}</span>
-            <span className="flex-1 text-right whitespace-normal break-words">{metadata.pagecount}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{metadata.pagecount ?? 0}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.progress')}</span>
             <span className="flex-1 text-right whitespace-normal break-words">
-              {metadata.progress}/{metadata.pagecount}
+              {metadata.progress ?? 0}/{metadata.pagecount ?? 0}
             </span>
           </div>
 
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.lastRead')}</span>
             <span className="flex-1 text-right whitespace-normal break-words">
-              {metadata.lastreadtime ? new Date(metadata.lastreadtime * 1000).toLocaleDateString() : t('archive.neverRead')}
+              {metadata.last_read_time ? new Date(metadata.last_read_time).toLocaleDateString() : metadata.lastreadtime ? new Date(metadata.lastreadtime * 1000).toLocaleDateString() : t('archive.neverRead')}
             </span>
           </div>
           <div className="flex items-start justify-between gap-3">
@@ -57,20 +57,20 @@ export function ArchiveBasicInfoCard({ metadata, t }: Props) {
 
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileSize')}</span>
-            <span className="flex-1 text-right whitespace-normal break-words">{formatFileSize(metadata.file_size)}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{formatFileSize(metadata.file_size || 0)}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileType')}</span>
-            <span className="flex-1 text-right whitespace-normal break-words">{metadata.archivetype.toUpperCase()}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{metadata.archivetype ? metadata.archivetype.toUpperCase() : t('archive.unknown')}</span>
           </div>
 
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.createdAt')}</span>
-            <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.created_at, t('archive.unknown'))}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.created_at || '', t('archive.unknown'))}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.updatedAt')}</span>
-            <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.updated_at, t('archive.unknown'))}</span>
+            <span className="flex-1 text-right whitespace-normal break-words">{formatDate(metadata.updated_at || '', t('archive.unknown'))}</span>
           </div>
         </div>
       </CardContent>

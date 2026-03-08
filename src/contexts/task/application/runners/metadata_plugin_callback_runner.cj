@@ -9,6 +9,7 @@ import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import std.collection.*
 import lanlu.contexts.plugin.application.PluginTaskService
+import lanlu.contexts.plugin.application.MetadataPatchService
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.contexts.task.infrastructure.persistence.*
@@ -51,7 +52,7 @@ public class MetadataPluginCallbackRunner {
 
         // 解析元数据输出
         TaskModel.updateTaskProgress(taskId, 50, "解析元数据")
-        let parsed = parseMetadataOutput(output)
+        let parsed = MetadataPatchService.parsePluginOutput(output)
         if (!parsed.success) {
             failAndMaybeEnqueueFallback(taskId, parsed.error, targetType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
             return
@@ -65,7 +66,6 @@ public class MetadataPluginCallbackRunner {
         let newClearlogo = parsed.clearlogo
         let archivePatches = parsed.archives
         let archivesProvided = parsed.archivesProvided
-        let pagePatches = parsed.pages
         // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
         // Map it to archives.updated_at and prevent it from being stored as a normal tag.
         var pluginUpdatedAt = ""
@@ -109,13 +109,13 @@ public class MetadataPluginCallbackRunner {
                     }
 
                     if (parsed.coverProvided || effectiveTankCover.size > 0) {
-                        applyTankoubonAssetFromPluginOutput(taskId, targetId, "cover", effectiveTankCover, resolvedNamespace)
+                        MetadataPatchService.applyTankoubonAssetFromOutput(taskId, targetId, "cover", effectiveTankCover, resolvedNamespace)
                     }
                     if (parsed.backdropProvided) {
-                        applyTankoubonAssetFromPluginOutput(taskId, targetId, "backdrop", newBackdrop, resolvedNamespace)
+                        MetadataPatchService.applyTankoubonAssetFromOutput(taskId, targetId, "backdrop", newBackdrop, resolvedNamespace)
                     }
                     if (parsed.clearlogoProvided) {
-                        applyTankoubonAssetFromPluginOutput(taskId, targetId, "clearlogo", newClearlogo, resolvedNamespace)
+                        MetadataPatchService.applyTankoubonAssetFromOutput(taskId, targetId, "clearlogo", newClearlogo, resolvedNamespace)
                     }
 
                     // Optional: plugin can return per-archive metadata patches for this Tankoubon.
@@ -124,166 +124,24 @@ public class MetadataPluginCallbackRunner {
             }
         } else {
             // Default: archive write-back.
-            var archiveToUpdate = ArchiveDao.getArchiveById(targetId)
+            let archiveToUpdate = ArchiveDao.getArchiveById(targetId)
             if (archiveToUpdate.id.size == 0) {
                 failAndMaybeEnqueueFallback(taskId, "Archive not found when updating", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                 return
             }
 
-            var changed = false
-            if (parsed.titleProvided && archiveToUpdate.title != newTitle) {
-                archiveToUpdate.title = newTitle
-                changed = true
-            }
-            if (parsed.summaryProvided && archiveToUpdate.summary != newSummary) {
-                archiveToUpdate.summary = newSummary
-                changed = true
-            }
-            if (parsed.tagsProvided) { changed = true }
-            if (pluginUpdatedAt.size > 0) {
-                archiveToUpdate.updated_at = pluginUpdatedAt
-                changed = true
-            }
-            if (changed) {
-                let ok = ArchiveDao.update(archiveToUpdate)
-                if (!ok) {
-                    failAndMaybeEnqueueFallback(taskId, "Failed to update archive metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
-                    return
-                }
-            }
-
+            let topPatch = MetadataPatchService.buildArchivePatchFromParsed(parsed)
             if (parsed.tagsProvided) {
-                let tagOk = TagDao.updateArchiveTags(targetId, newTags)
-                if (!tagOk) {
-                    TaskIO.appendLog(taskId, "WARN: failed to update tags")
-                }
+                topPatch.tags = newTags
             }
-
-            if (parsed.coverProvided) {
-                applyArchiveAssetFromPluginOutput(taskId, targetId, "cover", newCover, resolvedNamespace)
+            if (pluginUpdatedAt.size > 0) {
+                topPatch.updatedAt = pluginUpdatedAt
+                topPatch.updatedAtProvided = true
             }
-            if (parsed.backdropProvided) {
-                applyArchiveAssetFromPluginOutput(taskId, targetId, "backdrop", newBackdrop, resolvedNamespace)
-            }
-            if (parsed.clearlogoProvided) {
-                applyArchiveAssetFromPluginOutput(taskId, targetId, "clearlogo", newClearlogo, resolvedNamespace)
-            }
-        }
-
-        // 处理页面元数据（如果插件返回了 pages）
-        if (pagePatches.size > 0 && targetType.trimAscii().toAsciiLower() != "tankoubon" && targetType.trimAscii().toAsciiLower() != "tank") {
-            let archiveInternalId = ArchiveDao.getArchiveInternalId(targetId)
-            if (archiveInternalId > 0) {
-                var savedPages: Int64 = 0
-                for (patch in pagePatches) {
-                    let entryPath = patch.path.trimAscii()
-                    if (patch.page <= 0 && entryPath.size == 0) {
-                        continue
-                    }
-
-                    var existingMeta = if (entryPath.size > 0) {
-                        ArchivePageMetadataDao.getByArchiveAndPath(archiveInternalId, entryPath)
-                    } else {
-                        Option<PageMetadataData>.None
-                    }
-                    var hasExistingMeta = false
-                    match (existingMeta) {
-                        case Some(_) => hasExistingMeta = true
-                        case None => ()
-                    }
-                    if (!hasExistingMeta && patch.page > 0) {
-                        existingMeta = ArchivePageMetadataDao.getByArchiveAndPage(archiveInternalId, patch.page)
-                    }
-
-                    let pageNumber = if (patch.page > 0) {
-                        patch.page
-                    } else {
-                        match (existingMeta) {
-                            case Some(existing) => existing.page_number
-                            case None => 0i32
-                        }
-                    }
-                    let normalizedEntryPath = if (entryPath.size > 0) {
-                        entryPath
-                    } else {
-                        match (existingMeta) {
-                            case Some(existing) => existing.entry_path
-                            case None => ""
-                        }
-                    }
-
-                    var titleToSave = patch.title
-                    var descriptionToSave = patch.description
-                    var thumbAssetId: Int64 = 0
-                    var thumbHash = ""
-                    var sortIndex: Int32 = 0
-                    var hiddenInFiles = false
-
-                    match (existingMeta) {
-                        case Some(existing) =>
-                            if (titleToSave.trimAscii().size == 0) {
-                                titleToSave = existing.title
-                            }
-                            if (descriptionToSave.trimAscii().size == 0) {
-                                descriptionToSave = existing.description
-                            }
-                            thumbAssetId = existing.thumb_asset_id
-                            thumbHash = existing.thumbhash
-                            sortIndex = existing.sort_index
-                            hiddenInFiles = existing.hidden_in_files
-                        case None => ()
-                    }
-
-                    if (patch.sortProvided) {
-                        sortIndex = patch.sort
-                    }
-                    if (patch.hiddenInFilesProvided) {
-                        hiddenInFiles = patch.hiddenInFiles
-                    }
-
-                    let patchThumb = patch.thumb.trimAscii()
-                    if (patchThumb.size > 0) {
-                        let pageToken = if (pageNumber > 0) {
-                            pageNumber.toString()
-                        } else {
-                            DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
-                        }
-                        let oldThumbAssetId = thumbAssetId
-                        let (okThumb, newThumbAssetId, newThumbHash, thumbErr) = PluginTaskService.installCoverAssetFromPluginPath(
-                            patchThumb,
-                            resolvedNamespace,
-                            "page_thumb",
-                            "${targetId}_${pageToken}.avif"
-                        )
-                        if (okThumb && newThumbAssetId > 0) {
-                            thumbAssetId = newThumbAssetId
-                            thumbHash = newThumbHash
-                            if (oldThumbAssetId > 0 && oldThumbAssetId != newThumbAssetId) {
-                                PluginTaskService.deleteCoverAsset(oldThumbAssetId)
-                            }
-                        } else {
-                            TaskIO.appendLog(taskId, "WARN: failed to install page thumb from plugin result (archive=${targetId}, page=${pageNumber.toString()}, path=${entryPath}): ${thumbErr}")
-                        }
-                    }
-
-                    let ok = ArchivePageMetadataDao.insertOrUpdate(
-                        archiveInternalId,
-                        pageNumber,
-                        normalizedEntryPath,
-                        titleToSave,
-                        descriptionToSave,
-                        thumbAssetId: thumbAssetId,
-                        thumbHash: thumbHash,
-                        extraData: "{}",
-                        sortIndex: sortIndex,
-                        hiddenInFiles: hiddenInFiles
-                    )
-                    if (ok) {
-                        savedPages += 1
-                    }
-                }
-                TaskIO.appendLog(taskId, "Saved ${savedPages} page metadata entries from plugin")
-                syncArchiveVisiblePageCount(taskId, targetId)
+            let ok = MetadataPatchService.applyArchiveMetadataPatch(taskId, targetId, topPatch, resolvedNamespace)
+            if (!ok) {
+                failAndMaybeEnqueueFallback(taskId, "Failed to update archive metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
+                return
             }
         }
 
@@ -629,55 +487,18 @@ public class MetadataPluginCallbackRunner {
                 continue
             }
 
-            var archive = ArchiveDao.getArchiveById(targetArchiveId)
+            let archive = ArchiveDao.getArchiveById(targetArchiveId)
             if (archive.id.size == 0) {
                 skipped += 1
                 TaskIO.appendLog(taskId, "skip archive patch: archive not found id=${targetArchiveId}")
                 continue
             }
 
-            let (updatedAtFromTags, cleanedPatchTags) = extractUpdatedAtFromTags(patch.tags)
-            let hasPatchUpdatedAt = patch.updatedAtProvided || updatedAtFromTags.size > 0
-            let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
-
-            var changed = false
-            if (patch.titleProvided && archive.title != patch.title.trimAscii()) {
-                archive.title = patch.title.trimAscii()
-                changed = true
-            }
-            if (patch.summaryProvided && archive.summary != patch.summary) {
-                archive.summary = patch.summary
-                changed = true
-            }
-            if (hasPatchUpdatedAt && archive.updated_at != effectiveUpdatedAt) {
-                archive.updated_at = effectiveUpdatedAt
-                changed = true
-            }
-
-            if (changed) {
-                let ok = ArchiveDao.update(archive)
-                if (!ok) {
-                    skipped += 1
-                    TaskIO.appendLog(taskId, "skip archive patch: archive update failed id=${targetArchiveId}")
-                    continue
-                }
-            }
-
-            if (patch.tagsProvided) {
-                let tagOk = TagDao.updateArchiveTags(targetArchiveId, cleanedPatchTags)
-                if (!tagOk) {
-                    TaskIO.appendLog(taskId, "WARN: archive tag update failed id=${targetArchiveId}")
-                }
-            }
-
-            if (patch.coverProvided) {
-                applyArchiveAssetFromPluginOutput(taskId, targetArchiveId, "cover", patch.cover, pluginNamespace)
-            }
-            if (patch.backdropProvided) {
-                applyArchiveAssetFromPluginOutput(taskId, targetArchiveId, "backdrop", patch.backdrop, pluginNamespace)
-            }
-            if (patch.clearlogoProvided) {
-                applyArchiveAssetFromPluginOutput(taskId, targetArchiveId, "clearlogo", patch.clearlogo, pluginNamespace)
+            let ok = MetadataPatchService.applyArchiveMetadataPatch(taskId, targetArchiveId, patch, pluginNamespace)
+            if (!ok) {
+                skipped += 1
+                TaskIO.appendLog(taskId, "skip archive patch: archive update failed id=${targetArchiveId}")
+                continue
             }
 
             patched += 1

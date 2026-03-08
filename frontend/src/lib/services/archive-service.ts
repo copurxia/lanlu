@@ -1,5 +1,5 @@
 import { apiClient } from '../api';
-import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata } from '@/types/archive';
+import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata, MetadataAssetInput, MetadataObject } from '@/types/archive';
 import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
@@ -7,6 +7,7 @@ import { TaskPoolService } from './taskpool-service';
 import { isSuccessResponse } from '@/lib/utils/api-utils';
 import type { Task } from '@/types/task';
 import { normalizeArchiveAssets, normalizeArchivePayload } from '@/lib/utils/archive-assets';
+import { normalizeArchiveMetadata } from '@/lib/utils/metadata';
 
 // 下载相关接口定义
 export interface DownloadMetadata {
@@ -37,21 +38,12 @@ export interface MetadataPluginRunCallbacks {
   onUpdate?: (task: Task) => void;
 }
 
-export interface MetadataPluginAssetInput {
-  key: string;
-  value: string | number;
-}
+export type MetadataPluginAssetInput = MetadataAssetInput;
 
-export interface MetadataPluginInputMetadata {
-  title?: string;
-  type?: number;
-  description?: string;
-  tags?: string[];
+export interface MetadataPluginInputMetadata extends MetadataObject {
   assets?: MetadataPluginAssetInput[];
   archive?: MetadataPluginInputMetadata[];
-  archive_id?: string;
-  volume_no?: number;
-  [key: string]: unknown;
+  pages?: MetadataPagePatchInput[];
 }
 
 export interface MetadataPluginRunOptions {
@@ -156,67 +148,30 @@ export class ArchiveService {
     return data;
   }
 
-  static async getMetadata(id: string, lang?: string): Promise<ArchiveMetadata> {
+  static async getMetadata(id: string, lang?: string, options?: { includePages?: boolean }): Promise<ArchiveMetadata> {
     const params: Record<string, string> = {};
     if (lang) {
       params.lang = lang;
     }
+    if (options?.includePages) {
+      params.include_pages = '1';
+    }
     const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
-    return normalizeArchivePayload(response.data);
+    return normalizeArchiveMetadata(response.data);
   }
 
   static async updateMetadata(
     id: string,
-    metadata: Partial<ArchiveMetadata>,
-    lang?: string,
-    options?: { metadataNamespace?: string; pages?: MetadataPagePatchInput[] }
+    metadata: MetadataObject,
+    lang?: string
   ): Promise<void> {
     const params = new URLSearchParams();
-
-    // 添加语言参数
     if (lang) {
       params.append('lang', lang);
     }
-
-    if (metadata.title !== undefined) {
-      params.append('title', metadata.title);
-    }
-    if (metadata.summary !== undefined) {
-      params.append('summary', metadata.summary);
-    }
-    if (metadata.tags !== undefined) {
-      params.append('tags', metadata.tags);
-    }
-    if (metadata.cover !== undefined) {
-      params.append('cover', metadata.cover);
-    }
-    if (metadata.backdrop !== undefined) {
-      params.append('backdrop', metadata.backdrop);
-    }
-    if (metadata.clearlogo !== undefined) {
-      params.append('clearlogo', metadata.clearlogo);
-    }
-    if (metadata.assets !== undefined) {
-      const normalizedAssets: Record<string, number> = {};
-      for (const [key, value] of Object.entries(metadata.assets || {})) {
-        const n = Number(value);
-        if (!Number.isFinite(n)) continue;
-        const id = Math.trunc(n);
-        if (id > 0) {
-          normalizedAssets[key] = id;
-        }
-      }
-      params.append('assets', JSON.stringify(normalizedAssets));
-    }
-    if (options?.metadataNamespace) {
-      params.append('metadata_namespace', options.metadataNamespace);
-    }
-
-    const body = Array.isArray(options?.pages) && options.pages.length > 0
-      ? { pages: options.pages }
-      : undefined;
-
-    await apiClient.put(`/api/archives/${id}/metadata?${params.toString()}`, body);
+    const query = params.toString();
+    const url = query ? `/api/archives/${id}/metadata?${query}` : `/api/archives/${id}/metadata`;
+    await apiClient.put(url, metadata);
   }
 
   static async getFiles(id: string): Promise<{ pages: PageInfo[]; progress: number }> {

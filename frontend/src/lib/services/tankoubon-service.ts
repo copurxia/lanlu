@@ -1,8 +1,10 @@
 import { apiClient } from '@/lib/api';
-import type { Tankoubon, TankoubonCreateRequest, TankoubonUpdateRequest, TankoubonResponse } from '@/types/tankoubon';
+import type { Tankoubon, TankoubonCreateRequest, TankoubonMetadata, TankoubonResponse, TankoubonUpdateRequest } from '@/types/tankoubon';
+import type { MetadataObject } from '@/types/archive';
 import type { Task } from '@/types/task';
 import { TaskPoolService } from './taskpool-service';
 import { normalizeArchiveAssets } from '@/lib/utils/archive-assets';
+import { normalizeTankoubonMetadata } from '@/lib/utils/metadata';
 
 type TankoubonUpdateResponse = {
   success?: number | boolean | string;
@@ -45,6 +47,20 @@ export class TankoubonService {
       ...tankoubon,
       archive_count: response.data.total
     };
+  }
+
+
+  static async getMetadata(id: string, options?: { includePages?: boolean }): Promise<TankoubonMetadata> {
+    const params: Record<string, string> = {};
+    if (options?.includePages) {
+      params.include_pages = '1';
+    }
+    const response = await apiClient.get<TankoubonMetadata>(`${this.baseUrl}/${id}/metadata`, { params });
+    return normalizeTankoubonMetadata(response.data);
+  }
+
+  static async updateMetadata(id: string, metadata: MetadataObject): Promise<void> {
+    await apiClient.put(`${this.baseUrl}/${id}/metadata`, metadata);
   }
 
   /**

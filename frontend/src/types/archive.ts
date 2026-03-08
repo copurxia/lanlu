@@ -5,6 +5,37 @@ export interface ArchiveAssets {
   [key: string]: number | undefined;
 }
 
+export interface MetadataAssetInput {
+  key: string;
+  value: string | number;
+}
+
+export type MetadataAssets = ArchiveAssets | MetadataAssetInput[];
+
+export interface MetadataPagePatch {
+  page?: number;
+  path?: string;
+  title?: string;
+  description?: string;
+  thumb?: string;
+  sort?: number;
+  hidden_in_files?: boolean;
+}
+
+export interface MetadataObject {
+  title?: string;
+  type?: number;
+  description?: string;
+  tags?: string[];
+  assets?: MetadataAssets;
+  archive?: MetadataObject[];
+  pages?: MetadataPagePatch[];
+  archive_id?: string;
+  volume_no?: number;
+  metadata_namespace?: string;
+  [key: string]: unknown;
+}
+
 export interface Archive {
   arcid: string;
   title: string;
@@ -13,9 +44,9 @@ export interface Archive {
   tags: string;
   pagecount: number;
   progress: number;
-  isnew: boolean;  // 改为布尔值类型
-  isfavorite?: boolean;  // 用户收藏状态（可选，仅在需要时提供）
-  favoritetime?: string;  // 收藏时间（可选）
+  isnew: boolean;
+  isfavorite?: boolean;
+  favoritetime?: string;
   archivetype: string;
   lastreadtime: number;
   size: number;
@@ -57,25 +88,27 @@ export interface RandomParams {
   lang?: string;
 }
 
-export interface ArchiveMetadata {
+export interface ArchiveMetadata extends MetadataObject {
+  archive_id: string;
   arcid: string;
-  title: string;
-  filename: string;
   summary: string;
-  tags: string;
-  isnew: boolean;  // 改为布尔值类型
-  isfavorite: boolean;  // 用户收藏状态
-  pagecount: number;
-  progress: number;
-  lastreadtime: number;
-  file_size: number;
-  size: number;
+  tags: string[];
   assets?: ArchiveAssets;
-  archivetype: string;
-  created_at: string;
-  updated_at: string;
-  relative_path: string;
   cover?: string;
   backdrop?: string;
   clearlogo?: string;
+  filename?: string;
+  isnew?: boolean;
+  isfavorite?: boolean;
+  pagecount?: number;
+  progress?: number;
+  last_read_time?: string;
+  lastreadtime?: number;
+  file_size?: number;
+  size?: number;
+  archivetype?: string;
+  created_at?: string;
+  updated_at?: string;
+  relative_path?: string;
+  thumbnail_hash?: string;
 }

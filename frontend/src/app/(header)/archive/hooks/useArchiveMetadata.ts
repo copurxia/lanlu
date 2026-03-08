@@ -23,7 +23,7 @@ export function useArchiveMetadata({ id, language, t }: UseArchiveMetadataParams
     try {
       const data = await ArchiveService.getMetadata(id, language);
       setMetadata(data);
-      setIsFavorite(data.isfavorite || false);
+      setIsFavorite(Boolean(data.isfavorite));
 
       return data;
     } catch (err) {

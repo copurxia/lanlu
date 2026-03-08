@@ -179,7 +179,7 @@ export function ReaderSettingsSheet({
                 </Button>
               </div>
               <div className="text-xs leading-relaxed text-muted-foreground whitespace-pre-wrap line-clamp-4">
-                {archiveMetadata.summary ? archiveMetadata.summary : t('archive.noSummary')}
+                {archiveMetadata.description ? archiveMetadata.description : t('archive.noSummary')}
               </div>
               <div className="space-y-2">
                 <span className="text-sm font-medium">{t('archive.tags')}</span>

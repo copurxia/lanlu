@@ -23,6 +23,8 @@ public class ParsedMetadataResult {
     public var archivesProvided: Bool = false
     public var pages: Array<PageMetadataPatch> = Array<PageMetadataPatch>()
 
+    public init() {}
+
     public init(success: Bool, error: String, title: String, summary: String, tags: String) {
         this.success = success
         this.error = error
@@ -124,6 +126,7 @@ public class ArchiveMetadataPatch {
     public var coverProvided: Bool = false
     public var backdropProvided: Bool = false
     public var clearlogoProvided: Bool = false
+    public var pages: Array<PageMetadataPatch> = Array<PageMetadataPatch>()
 
     public init() {}
 }

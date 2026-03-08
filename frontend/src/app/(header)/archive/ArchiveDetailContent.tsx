@@ -20,6 +20,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { logger } from '@/lib/utils/logger';
 import { useMounted } from '@/hooks/common-hooks';
 import { getArchiveAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets';
+import { buildMetadataAssetInputs, normalizeMetadataPages } from '@/lib/utils/metadata';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
@@ -45,40 +46,6 @@ function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
   } catch {
     return null;
   }
-}
-
-function normalizePreviewPages(rawPages: unknown[]): MetadataPagePatchInput[] {
-  const normalized: MetadataPagePatchInput[] = [];
-  const seen = new Set<string>();
-
-  for (const rawPage of rawPages) {
-    if (!rawPage || typeof rawPage !== 'object') continue;
-    const page = rawPage as Record<string, unknown>;
-    const path = [page.path, page.entry_path, page.entryPath, page.entry]
-      .map((value) => String(value ?? '').trim())
-      .find(Boolean) || '';
-    if (!path || seen.has(path)) continue;
-
-    const metadata = page.metadata && typeof page.metadata === 'object'
-      ? (page.metadata as Record<string, unknown>)
-      : null;
-    const thumb = [page.thumb, metadata?.thumb]
-      .map((value) => String(value ?? '').trim())
-      .find(Boolean) || '';
-    const rawSort = Number(page.sort ?? 0);
-
-    normalized.push({
-      path,
-      title: String(page.title ?? '').trim() || undefined,
-      description: String(page.description ?? '').trim() || undefined,
-      thumb: thumb || undefined,
-      sort: Number.isFinite(rawSort) && rawSort > 0 ? Math.trunc(rawSort) : undefined,
-      hidden_in_files: page.hidden_in_files === true || page.hiddenInFiles === true || undefined,
-    });
-    seen.add(path);
-  }
-
-  return normalized;
 }
 
 export function ArchiveDetailContent() {
@@ -111,12 +78,9 @@ export function ArchiveDetailContent() {
   });
 
   const tags = useMemo(() => {
-    const raw = metadata?.tags ?? '';
-    if (!raw) return [];
-    return raw
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter((tag) => tag);
+    return Array.isArray(metadata?.tags)
+      ? metadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean)
+      : [];
   }, [metadata?.tags]);
 
   const progressPercent = useMemo(() => {
@@ -281,7 +245,7 @@ export function ArchiveDetailContent() {
   useEffect(() => {
     if (!metadata) return;
     setEditTitle(metadata.title || '');
-    setEditSummary(metadata.summary || '');
+    setEditSummary(metadata.description || metadata.summary || '');
     setEditTags(tags.map(toCanonicalTag));
     setEditCover('');
     setEditBackdrop('');
@@ -386,7 +350,7 @@ export function ArchiveDetailContent() {
         const id = Math.trunc(value);
         return id > 0 ? id : undefined;
       };
-      const assets = {
+      const assetIds = {
         cover: parseAssetId(editAssetCoverId),
         backdrop: parseAssetId(editAssetBackdropId),
         clearlogo: parseAssetId(editAssetClearlogoId),
@@ -395,18 +359,21 @@ export function ArchiveDetailContent() {
         metadata.arcid,
         {
           title: editTitle,
-          summary: editSummary,
-          tags: canonicalTags.join(', '),
-          cover: editCover || undefined,
-          backdrop: editBackdrop || undefined,
-          clearlogo: editClearlogo || undefined,
-          assets,
+          type: 0,
+          description: editSummary,
+          tags: canonicalTags,
+          assets: buildMetadataAssetInputs(
+            {
+              cover: editCover || undefined,
+              backdrop: editBackdrop || undefined,
+              clearlogo: editClearlogo || undefined,
+            },
+            assetIds,
+          ),
+          pages: metadataPluginPreviewPages.length > 0 ? metadataPluginPreviewPages : undefined,
+          metadata_namespace: selectedMetadataPlugin || undefined,
         },
         language,
-        {
-          metadataNamespace: selectedMetadataPlugin || undefined,
-          pages: metadataPluginPreviewPages.length > 0 ? metadataPluginPreviewPages : undefined,
-        }
       );
       setEditDialogOpen(false);
       await refetch();
@@ -476,18 +443,18 @@ export function ArchiveDetailContent() {
 
     try {
       const metadataTags = editTags.map((tag) => toCanonicalTag(tag)).filter(Boolean);
-      const toAssetValue = (pathValue: string, assetId: string): string => {
-        const path = pathValue.trim();
-        if (path) return path;
-        const id = assetId.trim();
-        if (/^\d+$/.test(id)) return id;
-        return '';
-      };
-      const rootAssets = [
-        { key: 'cover', value: toAssetValue(editCover, editAssetCoverId) },
-        { key: 'backdrop', value: toAssetValue(editBackdrop, editAssetBackdropId) },
-        { key: 'clearlogo', value: toAssetValue(editClearlogo, editAssetClearlogoId) },
-      ].filter((item) => item.value);
+      const rootAssets = buildMetadataAssetInputs(
+        {
+          cover: editCover || undefined,
+          backdrop: editBackdrop || undefined,
+          clearlogo: editClearlogo || undefined,
+        },
+        {
+          cover: /^\d+$/.test(editAssetCoverId.trim()) ? Number.parseInt(editAssetCoverId.trim(), 10) : undefined,
+          backdrop: /^\d+$/.test(editAssetBackdropId.trim()) ? Number.parseInt(editAssetBackdropId.trim(), 10) : undefined,
+          clearlogo: /^\d+$/.test(editAssetClearlogoId.trim()) ? Number.parseInt(editAssetClearlogoId.trim(), 10) : undefined,
+        },
+      ) || [];
       const finalTask = await ArchiveService.runMetadataPluginForTarget(
         'archive',
         metadata.arcid,
@@ -552,7 +519,7 @@ export function ArchiveDetailContent() {
         const nextCover = readMetadataAssetValue(data.assets, 'cover');
         const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
         const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
-        const nextPages = Array.isArray(data.pages) ? normalizePreviewPages(data.pages) : [];
+        const nextPages = normalizeMetadataPages(data.pages);
         const applyAssetPreview = (
           rawValue: string,
           setPathValue: (next: string) => void,
@@ -755,9 +722,9 @@ export function ArchiveDetailContent() {
 
                       {/* On mobile, summary/tags span full width below (to avoid an empty left column under the cover). */}
                       <div className="hidden sm:block">
-                        {metadata.summary ? (
+                        {(metadata.description || metadata.summary) ? (
                           <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                            {metadata.summary}
+                            {metadata.description || metadata.summary}
                           </p>
                         ) : (
                           <p className="mt-2 text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
@@ -774,9 +741,9 @@ export function ArchiveDetailContent() {
 
                   {/* Mobile: show summary/tags full width (not constrained to the title column). */}
                   <div className="sm:hidden w-full">
-                    {metadata.summary ? (
+                    {(metadata.description || metadata.summary) ? (
                       <p className="text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                        {metadata.summary}
+                        {metadata.description || metadata.summary}
                       </p>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
