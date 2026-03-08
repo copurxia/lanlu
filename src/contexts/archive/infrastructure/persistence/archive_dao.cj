@@ -615,6 +615,9 @@ public class ArchiveDao {
                 if (category.size > 0) {
                     whereConditions.add("archives_with_tags.category_id = ?")
                     filterParams.add(category)
+                } else {
+                    // 当没有指定分类时，只搜索启用的分类
+                    whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archives_with_tags.category_id AND c.enabled = true)")
                 }
 
                 // tankoubon_id 过滤 - 只返回某个合集中的归档
@@ -986,6 +989,9 @@ public class ArchiveDao {
                     if (category.size > 0) {
                         whereConditions.add("archives_with_tags.category_id = ?")
                         filterParams.add(category)
+                    } else {
+                        // 当没有指定分类时，只搜索启用的分类
+                        whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archives_with_tags.category_id AND c.enabled = true)")
                     }
 
                     if (tankoubonId.size > 0) {
