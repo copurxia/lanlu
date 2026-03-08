@@ -16,6 +16,7 @@ import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.plugin.domain.*
 import lanlu.shared.utils.*
+import lanlu.infrastructure.archivehandler.*
 
 /**
  * metadata_plugin_callback 回调任务执行器
@@ -282,6 +283,7 @@ public class MetadataPluginCallbackRunner {
                     }
                 }
                 TaskIO.appendLog(taskId, "Saved ${savedPages} page metadata entries from plugin")
+                syncArchiveVisiblePageCount(taskId, targetId)
             }
         }
 
@@ -303,6 +305,87 @@ public class MetadataPluginCallbackRunner {
 
         let denoTask = TaskDao.getTaskDataById(denoTaskId)
         return denoTask.pluginNamespace.trimAscii()
+    }
+
+    private static func syncArchiveVisiblePageCount(taskId: Int64, archiveId: String): Unit {
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) {
+            TaskIO.appendLog(taskId, "WARN: failed to sync archive pagecount, archive not found: ${archiveId}")
+            return
+        }
+
+        if (archive.category_id <= 0) {
+            TaskIO.appendLog(taskId, "WARN: failed to sync archive pagecount, category missing: ${archiveId}")
+            return
+        }
+
+        let basePath = match (CategoryDao.getCategoryByInternalId(archive.category_id)) {
+            case Some(cat) => cat.scanPath
+            case None => ""
+        }
+        if (basePath.trimAscii().size == 0) {
+            TaskIO.appendLog(taskId, "WARN: failed to sync archive pagecount, category scan path missing: ${archiveId}")
+            return
+        }
+
+        let fullArchivePath = if (archive.relative_path.size > 0) {
+            "${basePath}/${archive.relative_path}/${archive.filename}"
+        } else {
+            "${basePath}/${archive.filename}"
+        }
+        let actualPath = FileUtils.resolvePath(fullArchivePath)
+        if (actualPath.trimAscii().size == 0) {
+            TaskIO.appendLog(taskId, "WARN: failed to sync archive pagecount, archive path missing: ${fullArchivePath}")
+            return
+        }
+
+        let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
+        let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
+        let pageMetadata = ArchiveDao.getPageMetadata(archiveId)
+
+        var metadataByPath = HashMap<String, PageMetadataData>()
+        var metadataByPage = HashMap<Int32, PageMetadataData>()
+        for (meta in pageMetadata) {
+            let pathKey = meta.entry_path.trimAscii()
+            if (pathKey.size > 0 && !metadataByPath.contains(pathKey)) {
+                metadataByPath[pathKey] = meta
+            }
+            if (meta.page_number > 0 && !metadataByPage.contains(meta.page_number)) {
+                metadataByPage[meta.page_number] = meta
+            }
+        }
+
+        var visiblePageCount: Int32 = 0
+        for (i in 0..entriesWithTitle.size) {
+            let entry = entriesWithTitle[i]
+            let pageNumber = Int32(i + 1)
+            let pathKey = entry[0].trimAscii()
+
+            var hidden = false
+            var metadataFound = false
+            match (metadataByPath.get(pathKey)) {
+                case Some(meta) =>
+                    hidden = meta.hidden_in_files
+                    metadataFound = true
+                case None => ()
+            }
+            if (!metadataFound) {
+                match (metadataByPage.get(pageNumber)) {
+                    case Some(meta) => hidden = meta.hidden_in_files
+                    case None => ()
+                }
+            }
+
+            if (!hidden) {
+                visiblePageCount += 1
+            }
+        }
+
+        if (ArchiveDao.updatePageCount(archiveId, visiblePageCount)) {
+            TaskIO.appendLog(taskId, "Synced archive visible pagecount: ${visiblePageCount} (archive=${archiveId})")
+        } else {
+            TaskIO.appendLog(taskId, "WARN: failed to update archive pagecount: ${archiveId}")
+        }
     }
 
     private static func parsePositiveAssetId(rawValue: String): Int64 {
