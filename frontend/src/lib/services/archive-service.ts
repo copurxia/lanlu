@@ -59,6 +59,15 @@ export interface MetadataPluginRunOptions {
   metadata?: MetadataPluginInputMetadata;
 }
 
+export interface MetadataPagePatchInput {
+  path?: string;
+  title?: string;
+  description?: string;
+  thumb?: string;
+  sort?: number;
+  hidden_in_files?: boolean;
+}
+
 // 页面信息接口（支持图片、视频和HTML）
 export interface PageInfo {
   path: string;
@@ -160,7 +169,7 @@ export class ArchiveService {
     id: string,
     metadata: Partial<ArchiveMetadata>,
     lang?: string,
-    options?: { metadataNamespace?: string }
+    options?: { metadataNamespace?: string; pages?: MetadataPagePatchInput[] }
   ): Promise<void> {
     const params = new URLSearchParams();
 
@@ -203,7 +212,11 @@ export class ArchiveService {
       params.append('metadata_namespace', options.metadataNamespace);
     }
 
-    await apiClient.put(`/api/archives/${id}/metadata?${params.toString()}`);
+    const body = Array.isArray(options?.pages) && options.pages.length > 0
+      ? { pages: options.pages }
+      : undefined;
+
+    await apiClient.put(`/api/archives/${id}/metadata?${params.toString()}`, body);
   }
 
   static async getFiles(id: string): Promise<{ pages: PageInfo[]; progress: number }> {

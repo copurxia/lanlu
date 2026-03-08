@@ -8,9 +8,10 @@ type UseArchivePreviewParams = {
   id: string | null;
   showPreview: boolean;
   t: (key: string) => string;
+  refreshToken?: number;
 };
 
-export function useArchivePreview({ id, showPreview, t }: UseArchivePreviewParams) {
+export function useArchivePreview({ id, showPreview, t, refreshToken = 0 }: UseArchivePreviewParams) {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [archivePages, setArchivePages] = useState<PageInfo[]>([]);
@@ -40,7 +41,7 @@ export function useArchivePreview({ id, showPreview, t }: UseArchivePreviewParam
     return () => {
       cancelled = true;
     };
-  }, [id, showPreview, t]);
+  }, [id, showPreview, t, refreshToken]);
 
   useEffect(() => {
     if (!showPreview) {

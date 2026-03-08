@@ -4,7 +4,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArchiveService } from '@/lib/services/archive-service';
+import { ArchiveService, type MetadataPagePatchInput } from '@/lib/services/archive-service';
 import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
@@ -47,6 +47,40 @@ function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
   }
 }
 
+function normalizePreviewPages(rawPages: unknown[]): MetadataPagePatchInput[] {
+  const normalized: MetadataPagePatchInput[] = [];
+  const seen = new Set<string>();
+
+  for (const rawPage of rawPages) {
+    if (!rawPage || typeof rawPage !== 'object') continue;
+    const page = rawPage as Record<string, unknown>;
+    const path = [page.path, page.entry_path, page.entryPath, page.entry]
+      .map((value) => String(value ?? '').trim())
+      .find(Boolean) || '';
+    if (!path || seen.has(path)) continue;
+
+    const metadata = page.metadata && typeof page.metadata === 'object'
+      ? (page.metadata as Record<string, unknown>)
+      : null;
+    const thumb = [page.thumb, metadata?.thumb]
+      .map((value) => String(value ?? '').trim())
+      .find(Boolean) || '';
+    const rawSort = Number(page.sort ?? 0);
+
+    normalized.push({
+      path,
+      title: String(page.title ?? '').trim() || undefined,
+      description: String(page.description ?? '').trim() || undefined,
+      thumb: thumb || undefined,
+      sort: Number.isFinite(rawSort) && rawSort > 0 ? Math.trunc(rawSort) : undefined,
+      hidden_in_files: page.hidden_in_files === true || page.hiddenInFiles === true || undefined,
+    });
+    seen.add(path);
+  }
+
+  return normalized;
+}
+
 export function ArchiveDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -65,10 +99,11 @@ export function ArchiveDetailContent() {
   });
 
   const [showPreview, setShowPreview] = useState(false);
-  const { previewLoading, previewError, archivePages, displayPages } =
-    useArchivePreview({ id, showPreview, t });
+  const [metadataPluginPreviewPages, setMetadataPluginPreviewPages] = useState<MetadataPagePatchInput[]>([]);
+  const [previewRefreshToken, setPreviewRefreshToken] = useState(0);
+  const { previewLoading, previewError, displayPages } =
+    useArchivePreview({ id, showPreview, t, refreshToken: previewRefreshToken });
 
-  // displayPages 和 archivePages 现在是相同的，使用 displayPages 作为统一的页面数据
   const pages = displayPages;
 
   const { tankoubons, tankoubonPreviewArchives, loading: tankoubonsLoading } = useArchiveTankoubons({
@@ -254,6 +289,7 @@ export function ArchiveDetailContent() {
     setEditAssetCoverId(String(getArchiveAssetId(metadata, 'cover') || ''));
     setEditAssetBackdropId(String(getArchiveAssetId(metadata, 'backdrop') || ''));
     setEditAssetClearlogoId(String(getArchiveAssetId(metadata, 'clearlogo') || ''));
+    setMetadataPluginPreviewPages([]);
   }, [metadata, tags, toCanonicalTag]);
 
   const openEditDialog = useCallback(() => {
@@ -367,17 +403,21 @@ export function ArchiveDetailContent() {
           assets,
         },
         language,
-        { metadataNamespace: selectedMetadataPlugin || undefined }
+        {
+          metadataNamespace: selectedMetadataPlugin || undefined,
+          pages: metadataPluginPreviewPages.length > 0 ? metadataPluginPreviewPages : undefined,
+        }
       );
       setEditDialogOpen(false);
       await refetch();
+      setPreviewRefreshToken((current) => current + 1);
     } catch (err) {
       logger.operationFailed('update metadata', err);
       showError(t('archive.updateFailed'));
     } finally {
       setIsSaving(false);
     }
-  }, [editAssetBackdropId, editAssetClearlogoId, editAssetCoverId, editBackdrop, editClearlogo, editCover, editSummary, editTags, editTitle, language, metadata, refetch, selectedMetadataPlugin, showError, t, toCanonicalTag]);
+  }, [editAssetBackdropId, editAssetClearlogoId, editAssetCoverId, editBackdrop, editClearlogo, editCover, editSummary, editTags, editTitle, language, metadata, metadataPluginPreviewPages, refetch, selectedMetadataPlugin, showError, t, toCanonicalTag]);
 
   const submitRpcSelect = useCallback(async () => {
     if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return;
@@ -512,6 +552,7 @@ export function ArchiveDetailContent() {
         const nextCover = readMetadataAssetValue(data.assets, 'cover');
         const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
         const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
+        const nextPages = Array.isArray(data.pages) ? normalizePreviewPages(data.pages) : [];
         const applyAssetPreview = (
           rawValue: string,
           setPathValue: (next: string) => void,
@@ -536,6 +577,7 @@ export function ArchiveDetailContent() {
         applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId);
         applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId);
         applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId);
+        setMetadataPluginPreviewPages(nextPages);
         setEditDialogOpen(true);
       } catch {
         // If output isn't JSON, still mark as completed and let user view logs/result.

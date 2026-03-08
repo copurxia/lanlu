@@ -23,6 +23,19 @@ import std.database.sql.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 
+public class ArchivePagePatchInput {
+    public var path: String = ""
+    public var title: String = ""
+    public var description: String = ""
+    public var thumb: String = ""
+    public var sort: Int32 = 0
+    public var sortProvided: Bool = false
+    public var hiddenInFiles: Bool = false
+    public var hiddenInFilesProvided: Bool = false
+
+    public init() {}
+}
+
 public class ArchiveController {
     private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
         let raw = assetsRaw.trimAscii()
@@ -81,6 +94,224 @@ public class ArchiveController {
             }
         }
         return stem.trimAscii()
+    }
+
+    private static func parsePagePatchesFromUpdateRequestBody(requestBody: String): Array<ArchivePagePatchInput> {
+        let body = requestBody.trimAscii()
+        if (body.size == 0) {
+            return Array<ArchivePagePatchInput>()
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(body.rawData()) }
+            let r = JsonReader(buf)
+
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
+            }
+
+            func readStringFlexible(): String {
+                match (r.peek()) {
+                    case Some(BeginObject) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(BeginArray) =>
+                        let bytes = r.readValueBytes()
+                        return String.fromUtf8(bytes)
+                    case Some(_) => return r.readValue<String>()
+                    case None => return ""
+                }
+            }
+
+            func readInt32Flexible(): Int32 {
+                let s = readStringFlexible().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return 0 }
+            }
+
+            func parsePagePatchObject(): ArchivePagePatchInput {
+                let patch = ArchivePagePatchInput()
+                if (r.peek() != Some(BeginObject)) {
+                    return patch
+                }
+
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let pk = r.readName()
+                    match (pk) {
+                        case "path" => patch.path = readStringFlexible().trimAscii()
+                        case "entry" => patch.path = readStringFlexible().trimAscii()
+                        case "entry_path" => patch.path = readStringFlexible().trimAscii()
+                        case "entryPath" => patch.path = readStringFlexible().trimAscii()
+                        case "title" => patch.title = readStringFlexible()
+                        case "description" => patch.description = readStringFlexible()
+                        case "thumb" => patch.thumb = readStringFlexible().trimAscii()
+                        case "sort" =>
+                            patch.sort = readInt32Flexible()
+                            patch.sortProvided = true
+                        case "hidden_in_files" =>
+                            patch.hiddenInFiles = readBoolFlexible()
+                            patch.hiddenInFilesProvided = true
+                        case "hiddenInFiles" =>
+                            patch.hiddenInFiles = readBoolFlexible()
+                            patch.hiddenInFilesProvided = true
+                        case "metadata" =>
+                            if (r.peek() == Some(BeginObject)) {
+                                r.startObject()
+                                while (r.peek() != EndObject) {
+                                    let mk = r.readName()
+                                    match (mk) {
+                                        case "thumb" =>
+                                            let nestedThumb = readStringFlexible().trimAscii()
+                                            if (patch.thumb.trimAscii().size == 0 && nestedThumb.size > 0) {
+                                                patch.thumb = nestedThumb
+                                            }
+                                        case _ => r.skip()
+                                    }
+                                }
+                                r.endObject()
+                            } else {
+                                r.skip()
+                            }
+                        case _ => r.skip()
+                    }
+                }
+                r.endObject()
+                return patch
+            }
+
+            if (r.peek() != Some(BeginObject)) {
+                return Array<ArchivePagePatchInput>()
+            }
+
+            var pages = ArrayList<ArchivePagePatchInput>()
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let key = r.readName()
+                match (key) {
+                    case "pages" =>
+                        if (r.peek() == Some(BeginArray)) {
+                            r.startArray()
+                            while (r.peek() != EndArray) {
+                                let patch = parsePagePatchObject()
+                                if (patch.path.trimAscii().size > 0) {
+                                    pages.add(patch)
+                                }
+                            }
+                            r.endArray()
+                        } else {
+                            r.skip()
+                        }
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+            return pages.toArray()
+        } catch (e: Exception) {
+            getLogger("archive_controller").warn("Failed to parse update metadata pages", ("error", e.message))
+            return Array<ArchivePagePatchInput>()
+        }
+    }
+
+    private static func persistPagePatchesForArchive(arcid: String, pluginNamespace: String, pagePatches: Array<ArchivePagePatchInput>): Bool {
+        if (pagePatches.size == 0) {
+            return true
+        }
+
+        let archiveInternalId = ArchiveModel.getArchiveIdByArcid(arcid)
+        if (archiveInternalId <= 0) {
+            return false
+        }
+
+        var saveIndex: Int64 = 0
+        for (patch in pagePatches) {
+            let entryPath = patch.path.trimAscii()
+            if (entryPath.size == 0) {
+                continue
+            }
+            saveIndex += 1
+
+            let existingMeta = ArchivePageMetadataDao.getByArchiveAndPath(archiveInternalId, entryPath)
+            var titleToSave = patch.title
+            var descriptionToSave = patch.description
+            var thumbAssetId: Int64 = 0
+            var thumbHash = ""
+            var sortIndex: Int32 = 0
+            var hiddenInFiles = false
+
+            match (existingMeta) {
+                case Some(existing) =>
+                    if (titleToSave.trimAscii().size == 0) {
+                        titleToSave = existing.title
+                    }
+                    if (descriptionToSave.trimAscii().size == 0) {
+                        descriptionToSave = existing.description
+                    }
+                    thumbAssetId = existing.thumb_asset_id
+                    thumbHash = existing.thumbhash
+                    sortIndex = existing.sort_index
+                    hiddenInFiles = existing.hidden_in_files
+                case None => ()
+            }
+
+            if (patch.sortProvided) {
+                sortIndex = patch.sort
+            }
+            if (patch.hiddenInFilesProvided) {
+                hiddenInFiles = patch.hiddenInFiles
+            }
+
+            let patchThumb = patch.thumb.trimAscii()
+            if (patchThumb.size > 0) {
+                var directAssetId: Int64 = 0
+                try { directAssetId = Int64.parse(patchThumb) } catch (_: Exception) { directAssetId = 0 }
+                if (directAssetId > 0) {
+                    thumbAssetId = directAssetId
+                    thumbHash = ""
+                } else if (pluginNamespace.trimAscii().size > 0) {
+                    let oldThumbAssetId = thumbAssetId
+                    let (okThumb, newThumbAssetId, newThumbHash, thumbErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
+                        patchThumb,
+                        pluginNamespace,
+                        "page_thumb",
+                        "${arcid}_${saveIndex.toString()}.avif"
+                    )
+                    if (okThumb && newThumbAssetId > 0) {
+                        thumbAssetId = newThumbAssetId
+                        thumbHash = newThumbHash
+                        if (oldThumbAssetId > 0 && oldThumbAssetId != newThumbAssetId) {
+                            PluginCoverUtils.deleteAsset(oldThumbAssetId)
+                        }
+                    } else {
+                        getLogger("archive_controller").warn(
+                            "Failed to install page thumb while updating archive metadata",
+                            ("arcid", arcid),
+                            ("path", entryPath),
+                            ("error", thumbErr)
+                        )
+                    }
+                }
+            }
+
+            let ok = ArchivePageMetadataDao.insertOrUpdate(
+                archiveInternalId,
+                0i32,
+                entryPath,
+                titleToSave,
+                descriptionToSave,
+                thumbAssetId: thumbAssetId,
+                thumbHash: thumbHash,
+                extraData: "{}",
+                sortIndex: sortIndex,
+                hiddenInFiles: hiddenInFiles
+            )
+            if (!ok) {
+                return false
+            }
+        }
+
+        return true
     }
     
     // GET /api/archives/{id}/metadata
@@ -208,6 +439,8 @@ public class ArchiveController {
     public static func updateMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
         let lang = ctx.query("lang") ?? ""
+        let requestBody = ctx.bodyString().trimAscii()
+        let pagePatches = parsePagePatchesFromUpdateRequestBody(requestBody)
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -397,6 +630,16 @@ public class ArchiveController {
                         }
                     }
                 case None => ()
+            }
+
+            if (pagePatches.size > 0) {
+                let pagePatchesUpdated = persistPagePatchesForArchive(id, pluginNamespace, pagePatches)
+                if (!pagePatchesUpdated) {
+                    let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update page metadata\",\"success\":0}"
+                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                    ResponseView.json(ctx, errorResponse)
+                    return
+                }
             }
 
             let result = "{\"operation\":\"update_metadata\",\"success\":1}"
