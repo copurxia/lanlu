@@ -32,8 +32,11 @@ export interface MetadataObject {
   pages?: MetadataPagePatch[];
   archive_id?: string;
   volume_no?: number;
-  metadata_namespace?: string;
   [key: string]: unknown;
+}
+
+export interface MetadataUpdatePayload extends MetadataObject {
+  metadata_namespace?: string;
 }
 
 export interface Archive {

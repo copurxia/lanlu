@@ -1,16 +1,9 @@
 import { apiClient } from '@/lib/api';
-import type { Tankoubon, TankoubonCreateRequest, TankoubonMetadata, TankoubonResponse, TankoubonUpdateRequest } from '@/types/tankoubon';
-import type { MetadataObject } from '@/types/archive';
-import type { Task } from '@/types/task';
-import { TaskPoolService } from './taskpool-service';
+import type { Tankoubon, TankoubonCreateRequest, TankoubonMetadata, TankoubonResponse } from '@/types/tankoubon';
+import type { MetadataUpdatePayload } from '@/types/archive';
 import { normalizeArchiveAssets } from '@/lib/utils/archive-assets';
 import { normalizeTankoubonMetadata } from '@/lib/utils/metadata';
 
-type TankoubonUpdateResponse = {
-  success?: number | boolean | string;
-  archives_task_id?: number | string;
-  archives_task_error?: string;
-};
 
 export class TankoubonService {
   private static baseUrl = '/api/tankoubons';
@@ -34,21 +27,6 @@ export class TankoubonService {
     return this.normalizeResult(response.data);
   }
 
-  /**
-   * Get tankoubon by ID
-   */
-  static async getTankoubonById(id: string): Promise<Tankoubon & { total?: number }> {
-    const response = await apiClient.get<TankoubonResponse & { total?: number }>(`${this.baseUrl}/${id}`);
-    const items = this.normalizeResult(response.data);
-    if (items.length === 0) throw new Error('Failed to fetch tankoubon');
-    const tankoubon = items[0];
-    // Attach the total (archive count) from the API response
-    return {
-      ...tankoubon,
-      archive_count: response.data.total
-    };
-  }
-
 
   static async getMetadata(id: string, options?: { includePages?: boolean }): Promise<TankoubonMetadata> {
     const params: Record<string, string> = {};
@@ -59,7 +37,7 @@ export class TankoubonService {
     return normalizeTankoubonMetadata(response.data);
   }
 
-  static async updateMetadata(id: string, metadata: MetadataObject): Promise<void> {
+  static async updateMetadata(id: string, metadata: MetadataUpdatePayload): Promise<void> {
     await apiClient.put(`${this.baseUrl}/${id}/metadata`, metadata);
   }
 
@@ -74,35 +52,6 @@ export class TankoubonService {
     return response.data;
   }
 
-  /**
-   * Update tankoubon metadata
-   */
-  static async updateTankoubon(id: string, data: TankoubonUpdateRequest): Promise<void> {
-    const response = await apiClient.put<TankoubonUpdateResponse>(`${this.baseUrl}/${id}`, data);
-    const payload = response.data;
-
-    const rawTaskId = payload?.archives_task_id;
-    const taskId =
-      typeof rawTaskId === 'number'
-        ? rawTaskId
-        : typeof rawTaskId === 'string' && rawTaskId.trim() !== ''
-        ? Number(rawTaskId)
-        : 0;
-
-    if (!taskId || !Number.isFinite(taskId) || taskId <= 0) {
-      return;
-    }
-
-    const finalTask = await this.waitForTaskCompletion(taskId);
-    if (finalTask.status === 'failed' || finalTask.status === 'stopped') {
-      const err =
-        payload?.archives_task_error ||
-        finalTask.result ||
-        finalTask.message ||
-        'Archive metadata task failed';
-      throw new Error(err);
-    }
-  }
 
   /**
    * Delete tankoubon
@@ -136,11 +85,11 @@ export class TankoubonService {
   /**
    * 批量获取多个 tankoubon 的详细信息（包含 archives）
    */
-  static async getTankoubonsWithArchives(ids: string[]): Promise<Tankoubon[]> {
-    const promises = ids.map(id => this.getTankoubonById(id));
+  static async getTankoubonsWithArchives(ids: string[]): Promise<TankoubonMetadata[]> {
+    const promises = ids.map((id) => this.getMetadata(id));
     const results = await Promise.allSettled(promises);
     return results
-      .filter((result): result is PromiseFulfilledResult<Tankoubon> =>
+      .filter((result): result is PromiseFulfilledResult<TankoubonMetadata> =>
         result.status === 'fulfilled'
       )
       .map(result => result.value);
@@ -175,13 +124,5 @@ export class TankoubonService {
     };
   }
 
-  private static async waitForTaskCompletion(
-    jobId: number,
-    options?: { timeoutMs?: number }
-  ): Promise<Task> {
-    return await TaskPoolService.waitForTaskTerminal(jobId, {
-      timeoutMs: options?.timeoutMs ?? 10 * 60 * 1000,
-    });
-  }
 
 }

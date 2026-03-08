@@ -48,6 +48,7 @@ export interface TankoubonMetadata extends MetadataObject {
   description?: string;
   summary: string;
   tags: string[];
+  assets?: ArchiveAssets;
   archive: TankoubonMemberMetadataPatch[];
   archives: string[];
   archive_count?: number;
@@ -61,28 +62,6 @@ export interface TankoubonMetadata extends MetadataObject {
   clearlogo?: string;
 }
 
-export interface TankoubonUpdateRequest {
-  name?: string;
-  summary?: string;
-  tags?: string;
-  cover?: string;
-  backdrop?: string;
-  clearlogo?: string;
-  metadata_namespace?: string;
-  cover_asset_id?: number;
-  assets?: ArchiveAssets;
-  archives?: Array<{
-    archive_id?: string;
-    volume_no?: number;
-    title?: string;
-    summary?: string;
-    tags?: string;
-    updated_at?: string;
-    cover?: string;
-    backdrop?: string;
-    clearlogo?: string;
-  }>;
-}
 
 export interface TankoubonResponse {
   filtered: number;

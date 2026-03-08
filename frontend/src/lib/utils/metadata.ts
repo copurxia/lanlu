@@ -126,7 +126,6 @@ export function normalizeMetadataObject(raw: unknown): MetadataObject {
       const volumeNo = readNumber(row.volume_no || row.volumeNo);
       return typeof volumeNo === 'number' && Number.isFinite(volumeNo) ? Math.trunc(volumeNo) : undefined;
     })(),
-    metadata_namespace: readString(row.metadata_namespace || row.metadataNamespace || row.namespace) || undefined,
   };
 }
 
@@ -201,6 +200,7 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
     name: readString(row.name || metadata.title),
     summary: description,
     tags: metadata.tags || [],
+    assets: normalizeMetadataAssetMap(row.assets),
     archive,
     archives,
     archive_count: typeof archiveCount === 'number' && Number.isFinite(archiveCount) ? Math.trunc(archiveCount) : archive.length,

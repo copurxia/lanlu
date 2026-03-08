@@ -24,19 +24,6 @@ import std.database.sql.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 
-public class ArchivePagePatchInput {
-    public var path: String = ""
-    public var title: String = ""
-    public var description: String = ""
-    public var thumb: String = ""
-    public var sort: Int32 = 0
-    public var sortProvided: Bool = false
-    public var hiddenInFiles: Bool = false
-    public var hiddenInFilesProvided: Bool = false
-
-    public init() {}
-}
-
 public class ArchiveController {
     private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
         let raw = assetsRaw.trimAscii()
@@ -97,224 +84,6 @@ public class ArchiveController {
         return stem.trimAscii()
     }
 
-    private static func parsePagePatchesFromUpdateRequestBody(requestBody: String): Array<ArchivePagePatchInput> {
-        let body = requestBody.trimAscii()
-        if (body.size == 0) {
-            return Array<ArchivePagePatchInput>()
-        }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(body.rawData()) }
-            let r = JsonReader(buf)
-
-            func readBoolFlexible(): Bool {
-                let v = r.readValue<String>().trimAscii().toAsciiLower()
-                return v == "true" || v == "1"
-            }
-
-            func readStringFlexible(): String {
-                match (r.peek()) {
-                    case Some(BeginObject) =>
-                        let bytes = r.readValueBytes()
-                        return String.fromUtf8(bytes)
-                    case Some(BeginArray) =>
-                        let bytes = r.readValueBytes()
-                        return String.fromUtf8(bytes)
-                    case Some(_) => return r.readValue<String>()
-                    case None => return ""
-                }
-            }
-
-            func readInt32Flexible(): Int32 {
-                let s = readStringFlexible().trimAscii()
-                try { return Int32.parse(s) } catch (_: Exception) { return 0 }
-            }
-
-            func parsePagePatchObject(): ArchivePagePatchInput {
-                let patch = ArchivePagePatchInput()
-                if (r.peek() != Some(BeginObject)) {
-                    return patch
-                }
-
-                r.startObject()
-                while (r.peek() != EndObject) {
-                    let pk = r.readName()
-                    match (pk) {
-                        case "path" => patch.path = readStringFlexible().trimAscii()
-                        case "entry" => patch.path = readStringFlexible().trimAscii()
-                        case "entry_path" => patch.path = readStringFlexible().trimAscii()
-                        case "entryPath" => patch.path = readStringFlexible().trimAscii()
-                        case "title" => patch.title = readStringFlexible()
-                        case "description" => patch.description = readStringFlexible()
-                        case "thumb" => patch.thumb = readStringFlexible().trimAscii()
-                        case "sort" =>
-                            patch.sort = readInt32Flexible()
-                            patch.sortProvided = true
-                        case "hidden_in_files" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
-                        case "hiddenInFiles" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
-                        case "metadata" =>
-                            if (r.peek() == Some(BeginObject)) {
-                                r.startObject()
-                                while (r.peek() != EndObject) {
-                                    let mk = r.readName()
-                                    match (mk) {
-                                        case "thumb" =>
-                                            let nestedThumb = readStringFlexible().trimAscii()
-                                            if (patch.thumb.trimAscii().size == 0 && nestedThumb.size > 0) {
-                                                patch.thumb = nestedThumb
-                                            }
-                                        case _ => r.skip()
-                                    }
-                                }
-                                r.endObject()
-                            } else {
-                                r.skip()
-                            }
-                        case _ => r.skip()
-                    }
-                }
-                r.endObject()
-                return patch
-            }
-
-            if (r.peek() != Some(BeginObject)) {
-                return Array<ArchivePagePatchInput>()
-            }
-
-            var pages = ArrayList<ArchivePagePatchInput>()
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let key = r.readName()
-                match (key) {
-                    case "pages" =>
-                        if (r.peek() == Some(BeginArray)) {
-                            r.startArray()
-                            while (r.peek() != EndArray) {
-                                let patch = parsePagePatchObject()
-                                if (patch.path.trimAscii().size > 0) {
-                                    pages.add(patch)
-                                }
-                            }
-                            r.endArray()
-                        } else {
-                            r.skip()
-                        }
-                    case _ => r.skip()
-                }
-            }
-            r.endObject()
-            return pages.toArray()
-        } catch (e: Exception) {
-            getLogger("archive_controller").warn("Failed to parse update metadata pages", ("error", e.message))
-            return Array<ArchivePagePatchInput>()
-        }
-    }
-
-    private static func persistPagePatchesForArchive(arcid: String, pluginNamespace: String, pagePatches: Array<ArchivePagePatchInput>): Bool {
-        if (pagePatches.size == 0) {
-            return true
-        }
-
-        let archiveInternalId = ArchiveModel.getArchiveIdByArcid(arcid)
-        if (archiveInternalId <= 0) {
-            return false
-        }
-
-        var saveIndex: Int64 = 0
-        for (patch in pagePatches) {
-            let entryPath = patch.path.trimAscii()
-            if (entryPath.size == 0) {
-                continue
-            }
-            saveIndex += 1
-
-            let existingMeta = ArchivePageMetadataDao.getByArchiveAndPath(archiveInternalId, entryPath)
-            var titleToSave = patch.title
-            var descriptionToSave = patch.description
-            var thumbAssetId: Int64 = 0
-            var thumbHash = ""
-            var sortIndex: Int32 = 0
-            var hiddenInFiles = false
-
-            match (existingMeta) {
-                case Some(existing) =>
-                    if (titleToSave.trimAscii().size == 0) {
-                        titleToSave = existing.title
-                    }
-                    if (descriptionToSave.trimAscii().size == 0) {
-                        descriptionToSave = existing.description
-                    }
-                    thumbAssetId = existing.thumb_asset_id
-                    thumbHash = existing.thumbhash
-                    sortIndex = existing.sort_index
-                    hiddenInFiles = existing.hidden_in_files
-                case None => ()
-            }
-
-            if (patch.sortProvided) {
-                sortIndex = patch.sort
-            }
-            if (patch.hiddenInFilesProvided) {
-                hiddenInFiles = patch.hiddenInFiles
-            }
-
-            let patchThumb = patch.thumb.trimAscii()
-            if (patchThumb.size > 0) {
-                var directAssetId: Int64 = 0
-                try { directAssetId = Int64.parse(patchThumb) } catch (_: Exception) { directAssetId = 0 }
-                if (directAssetId > 0) {
-                    thumbAssetId = directAssetId
-                    thumbHash = ""
-                } else if (pluginNamespace.trimAscii().size > 0) {
-                    let oldThumbAssetId = thumbAssetId
-                    let (okThumb, newThumbAssetId, newThumbHash, thumbErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
-                        patchThumb,
-                        pluginNamespace,
-                        "page_thumb",
-                        "${arcid}_${saveIndex.toString()}.avif"
-                    )
-                    if (okThumb && newThumbAssetId > 0) {
-                        thumbAssetId = newThumbAssetId
-                        thumbHash = newThumbHash
-                        if (oldThumbAssetId > 0 && oldThumbAssetId != newThumbAssetId) {
-                            PluginCoverUtils.deleteAsset(oldThumbAssetId)
-                        }
-                    } else {
-                        getLogger("archive_controller").warn(
-                            "Failed to install page thumb while updating archive metadata",
-                            ("arcid", arcid),
-                            ("path", entryPath),
-                            ("error", thumbErr)
-                        )
-                    }
-                }
-            }
-
-            let ok = ArchivePageMetadataDao.insertOrUpdate(
-                archiveInternalId,
-                0i32,
-                entryPath,
-                titleToSave,
-                descriptionToSave,
-                thumbAssetId: thumbAssetId,
-                thumbHash: thumbHash,
-                extraData: "{}",
-                sortIndex: sortIndex,
-                hiddenInFiles: hiddenInFiles
-            )
-            if (!ok) {
-                return false
-            }
-        }
-
-        return true
-    }
-    
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
@@ -415,35 +184,21 @@ public class ArchiveController {
     // PUT /api/archives/{id}/metadata
     public static func updateMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
-        let lang = ctx.query("lang") ?? ""
         let requestBody = ctx.bodyString().trimAscii()
-        let pagePatches = parsePagePatchesFromUpdateRequestBody(requestBody)
 
-        // 检查ID是否为空
         if (id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"No archive ID specified.\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
             ResponseView.json(ctx, errorResponse)
             return
         }
+        if (requestBody.size == 0) {
+            let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Request body is required\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+            ResponseView.json(ctx, errorResponse)
+            return
+        }
 
-        // 获取查询参数
-        let titleParam = ctx.query("title")
-        let tagsParam = ctx.query("tags")
-        let summaryParam = ctx.query("summary")
-        let coverParam = ctx.query("cover")
-        let backdropParam = ctx.query("backdrop")
-        let clearlogoParam = ctx.query("clearlogo")
-        let assetsParam = ctx.query("assets")
-        var pluginNamespace = (ctx.query("metadata_namespace") ?? "").trimAscii()
-        if (pluginNamespace.size == 0) {
-            pluginNamespace = (ctx.query("plugin_namespace") ?? "").trimAscii()
-        }
-        if (pluginNamespace.size == 0) {
-            pluginNamespace = (ctx.query("namespace") ?? "").trimAscii()
-        }
-        
-        // 检查归档是否存在
         let archive = ArchiveModel.getArchiveById(id)
         if (archive.id.size == 0) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Archive not found\",\"success\":0}"
@@ -452,205 +207,25 @@ public class ArchiveController {
             return
         }
 
-        if (requestBody.size > 0) {
-            let parsed = MetadataPatchService.parseMetadataObject(requestBody)
-            if (parsed.success && (
-                parsed.titleProvided ||
-                parsed.summaryProvided ||
-                parsed.tagsProvided ||
-                parsed.coverProvided ||
-                parsed.backdropProvided ||
-                parsed.clearlogoProvided ||
-                parsed.pages.size > 0
-            )) {
-                let pluginNamespaceFromBody = MetadataPatchService.extractMetadataNamespace(requestBody)
-                let topPatch = MetadataPatchService.buildArchivePatchFromParsed(parsed)
-                let ok = MetadataPatchService.applyArchiveMetadataPatch(0, id, topPatch, pluginNamespaceFromBody)
-                if (!ok) {
-                    let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive metadata\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ResponseView.json(ctx, errorResponse)
-                    return
-                }
-                ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"success\":1}")
-                return
-            }
-        }
-        
-        // 获取现有档案数据
-        var existingArchive = ArchiveDao.getArchiveById(id)
-        if (existingArchive.id.size == 0) {
-            let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Archive not found in database\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+        let parsed = MetadataPatchService.parseMetadataObject(requestBody)
+        if (!parsed.success) {
+            let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"${parsed.error}\",\"success\":0}"
+            ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
             ResponseView.json(ctx, errorResponse)
             return
         }
-        
-        // 更新字段（只有提供了参数才更新）
-        match (titleParam) {
-            case Some(title) => existingArchive.title = title
-            case None => () // 保持原值
-        }
-        
-        match (summaryParam) {
-            case Some(summary) => existingArchive.summary = summary
-            case None => () // 保持原值
-        }
 
-        // Default: do NOT bump updated_at when only metadata changes.
-        // In this project, archives.updated_at is treated as the "release time" unless a plugin explicitly sets it.
-        var nextUpdatedAt = existingArchive.updated_at
-
-        // If tags contain `updated_at:*`, prefer it as archive updated_at and strip it from tag storage.
-        var cleanedTagsOpt: Option<String> = None
-        match (tagsParam) {
-            case Some(tags) =>
-                let originalTags = if (lang.size > 0) {
-                    TagDao.reverseTranslateTagsString(tags, lang)
-                } else {
-                    tags
-                }
-                let (pluginUpdatedAt, cleanedTags) = extractUpdatedAtFromTags(originalTags)
-                if (pluginUpdatedAt.size > 0) {
-                    nextUpdatedAt = pluginUpdatedAt
-                }
-                cleanedTagsOpt = Some(cleanedTags)
-            case None => ()
-        }
-
-        existingArchive.updated_at = nextUpdatedAt
-        
-        // 执行数据库更新
-        let updateSuccess = ArchiveDao.update(existingArchive)
-        
-        if (updateSuccess) {
-            // 如果有标签参数，更新标签
-            match (cleanedTagsOpt) {
-                case Some(originalTags) =>
-                    // 使用TagDao更新标签（updated_at:* 已剥离，不会作为普通标签写入）
-                    let tagUpdateSuccess = TagDao.updateArchiveTags(id, originalTags)
-                    if (!tagUpdateSuccess) {
-                        // 记录错误日志到日志文件，而不是控制台
-                        getLogger("archive_controller").error("Failed to update tags for archive ${id}")
-                        // 返回错误响应给前端
-                        let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update tags\",\"success\":0}"
-                        ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ResponseView.json(ctx, errorResponse)
-                        return
-                    }
-                case None => () // 不更新标签
-            }
-
-            match (assetsParam) {
-                case Some(rawAssets) =>
-                    let assetsUpdated = ArchiveDao.updateArchiveAssetsRaw(id, rawAssets)
-                    if (!assetsUpdated) {
-                        let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive assets\",\"success\":0}"
-                        ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                        ResponseView.json(ctx, errorResponse)
-                        return
-                    }
-                case None => ()
-            }
-            
-            match (coverParam) {
-                case Some(coverPath) =>
-                    let coverTrimmed = coverPath.trimAscii()
-                    if (coverTrimmed.size > 0) {
-                        let oldCoverAssetId = ArchiveDao.getCoverAssetId(id)
-                        let (okCover, coverAssetId, coverThumbHash, coverErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
-                            coverTrimmed,
-                            pluginNamespace,
-                            "archive_cover",
-                            "${id}.avif"
-                        )
-                        if (okCover && coverAssetId > 0) {
-                            let coverUpdated = ArchiveDao.updateCoverAssetId(id, coverAssetId)
-                            if (coverUpdated) {
-                                if (coverThumbHash.trimAscii().size > 0) {
-                                    let _ = ArchiveDao.updateThumbHash(id, coverThumbHash)
-                                }
-                                if (oldCoverAssetId > 0 && oldCoverAssetId != coverAssetId) {
-                                    PluginCoverUtils.deleteAsset(oldCoverAssetId)
-                                }
-                            } else {
-                                PluginCoverUtils.deleteAsset(coverAssetId)
-                                getLogger("archive_controller").warn("Failed to update archive cover asset id", ("arcid", id))
-                            }
-                        } else {
-                            getLogger("archive_controller").warn("Failed to install archive cover from plugin path", ("arcid", id), ("error", coverErr))
-                        }
-                    }
-                case None => ()
-            }
-
-            match (backdropParam) {
-                case Some(backdropPath) =>
-                    let backdropTrimmed = backdropPath.trimAscii()
-                    if (backdropTrimmed.size == 0) {
-                        let _ = ArchiveDao.updateArchiveAssetIdByKey(id, "backdrop", 0)
-                    } else {
-                        let (okBackdrop, backdropAssetId, _, backdropErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
-                            backdropTrimmed,
-                            pluginNamespace,
-                            "archive_backdrop",
-                            "${id}_backdrop.avif"
-                        )
-                        if (okBackdrop && backdropAssetId > 0) {
-                            let backdropUpdated = ArchiveDao.updateArchiveAssetIdByKey(id, "backdrop", backdropAssetId)
-                            if (!backdropUpdated) {
-                                PluginCoverUtils.deleteAsset(backdropAssetId)
-                                getLogger("archive_controller").warn("Failed to update archive backdrop asset id", ("arcid", id))
-                            }
-                        } else {
-                            getLogger("archive_controller").warn("Failed to install archive backdrop from plugin path", ("arcid", id), ("error", backdropErr))
-                        }
-                    }
-                case None => ()
-            }
-
-            match (clearlogoParam) {
-                case Some(clearlogoPath) =>
-                    let clearlogoTrimmed = clearlogoPath.trimAscii()
-                    if (clearlogoTrimmed.size == 0) {
-                        let _ = ArchiveDao.updateArchiveAssetIdByKey(id, "clearlogo", 0)
-                    } else {
-                        let (okClearlogo, clearlogoAssetId, _, clearlogoErr) = PluginCoverUtils.installCoverAssetFromPluginPath(
-                            clearlogoTrimmed,
-                            pluginNamespace,
-                            "archive_clearlogo",
-                            "${id}_clearlogo.avif"
-                        )
-                        if (okClearlogo && clearlogoAssetId > 0) {
-                            let clearlogoUpdated = ArchiveDao.updateArchiveAssetIdByKey(id, "clearlogo", clearlogoAssetId)
-                            if (!clearlogoUpdated) {
-                                PluginCoverUtils.deleteAsset(clearlogoAssetId)
-                                getLogger("archive_controller").warn("Failed to update archive clearlogo asset id", ("arcid", id))
-                            }
-                        } else {
-                            getLogger("archive_controller").warn("Failed to install archive clearlogo from plugin path", ("arcid", id), ("error", clearlogoErr))
-                        }
-                    }
-                case None => ()
-            }
-
-            if (pagePatches.size > 0) {
-                let pagePatchesUpdated = persistPagePatchesForArchive(id, pluginNamespace, pagePatches)
-                if (!pagePatchesUpdated) {
-                    let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update page metadata\",\"success\":0}"
-                    ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                    ResponseView.json(ctx, errorResponse)
-                    return
-                }
-            }
-
-            let result = "{\"operation\":\"update_metadata\",\"success\":1}"
-            ResponseView.json(ctx, result)
-        } else {
+        let pluginNamespace = MetadataPatchService.extractMetadataNamespace(requestBody)
+        let topPatch = MetadataPatchService.buildArchivePatchFromParsed(parsed)
+        let ok = MetadataPatchService.applyArchiveMetadataPatch(0, id, topPatch, pluginNamespace)
+        if (!ok) {
             let errorResponse = "{\"operation\":\"update_metadata\",\"error\":\"Failed to update archive metadata\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
             ResponseView.json(ctx, errorResponse)
+            return
         }
+
+        ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"success\":1}")
     }
     
     // GET /api/archives/{id}/files

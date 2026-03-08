@@ -150,10 +150,6 @@ public class MetadataPatchService {
                 let key = r.readName().trimAscii()
                 match (key) {
                     case "metadata_namespace" => return readJsonScalarAsString(r).trimAscii()
-                    case "metadataNamespace" => return readJsonScalarAsString(r).trimAscii()
-                    case "plugin_namespace" => return readJsonScalarAsString(r).trimAscii()
-                    case "pluginNamespace" => return readJsonScalarAsString(r).trimAscii()
-                    case "namespace" => return readJsonScalarAsString(r).trimAscii()
                     case _ => r.skip()
                 }
             }

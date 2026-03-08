@@ -1,5 +1,5 @@
 import { apiClient } from '../api';
-import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata, MetadataAssetInput, MetadataObject } from '@/types/archive';
+import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload } from '@/types/archive';
 import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
@@ -162,7 +162,7 @@ export class ArchiveService {
 
   static async updateMetadata(
     id: string,
-    metadata: MetadataObject,
+    metadata: MetadataUpdatePayload,
     lang?: string
   ): Promise<void> {
     const params = new URLSearchParams();

@@ -237,7 +237,7 @@ export function BaseMediaCard({
           return
         }
 
-        const tank = await TankoubonService.getTankoubonById(id)
+        const tank = await TankoubonService.getMetadata(id)
         if (cancelled) return
         setEditAssetCoverId(String(getCoverAssetId(tank) || ''))
         setEditAssetBackdropId(String(tank.assets?.backdrop || ''))
