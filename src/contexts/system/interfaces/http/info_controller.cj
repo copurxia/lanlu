@@ -8,6 +8,7 @@ import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.contexts.system.infrastructure.persistence.DatabaseMetaDao
 import lanlu.contexts.system.application.*
 import lanlu.shared.views.*
+import cjpminfo.*
 
 /**
  * Info API 控制器
@@ -24,7 +25,10 @@ public class InfoController {
 
             // 获取全局总阅读页数
             let totalPagesRead = UserStatsDao.getGlobalTotalPagesRead()
-
+            let version:String = @ModuleVer("1.0.0")
+            let cjcVersion: String = @ModuleCjv("1.0.0")
+            let gitCommitIdShort: String = @GitCommitIdShort("unknown")
+            let gitBranch: String = @GitBranch("unknown")
             // 从系统设置获取服务器名称和欢迎消息
             let serverName = SystemSettingsService.getString("SERVER_NAME")
             let serverMotd = SystemSettingsService.getString("SERVER_MOTD")
@@ -40,8 +44,8 @@ public class InfoController {
             w.writeName("name").writeValue(serverName)
             w.writeName("total_archives").writeValue(totalArchives)
             w.writeName("total_pages_read").writeValue(totalPagesRead)
-            w.writeName("version").writeValue("0.9.50")
-            w.writeName("version_desc").writeValue("Lanlu - Initial Release")
+            w.writeName("version").writeValue(version)
+            w.writeName("version_desc").writeValue("${version}-${gitBranch}.${gitCommitIdShort}(${cjcVersion})")
             w.writeName("version_name").writeValue("Cangjie")
             w.writeName("db_extensions")
             w.startArray()
