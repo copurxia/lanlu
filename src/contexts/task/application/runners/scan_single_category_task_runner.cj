@@ -133,44 +133,14 @@ public class ScanSingleCategoryTaskRunner {
             TankoubonAutocreateService.ensureAndSync(ctx.categoryId, relDir, dirPath)
         } catch (_: Exception) {}
 
-        // Optimization: leaf media folders are treated as a single "folder archive".
-        // Avoid scanning each contained media file (which would be skipped anyway) and
-        // avoid redundant DirectoryScanner.listDirectory() calls inside FolderHandler.canHandle().
-        if (dirPath != ctx.basePath && entries.size > 0) {
-            var leafOk = true
-            var hasMedia = false
-            for (entry in entries) {
-                let fullPath = DirectoryScanner.joinPath(dirPath, entry)
-                if (DirectoryScanner.isDirectory(fullPath)) {
-                    // extrafanart 是特例，跳过检查
-                    let lowerEntry = entry.toAsciiLower()
-                    if (lowerEntry == "extrafanart") {
-                        continue
-                    }
-                    leafOk = false
-                    break
-                }
-                if (!DirectoryScanner.fileExists(fullPath)) {
-                    leafOk = false
-                    break
-                }
-                if (FolderHandler.isAllowedMediaFileName(entry)) {
-                    hasMedia = true
-                } else if (FolderHandler.isAllowedAuxFileName(entry)) {
-                    // Allow aux files (e.g. meta.json) in leaf media folders.
-                } else {
-                    leafOk = false
-                    break
-                }
+        // Optimization: if FolderHandler recognizes the current directory as a folder archive,
+        // enqueue it directly and stop descending. Special directories stay centralized there.
+        if (dirPath != ctx.basePath && FolderHandler.canHandleDirectoryEntries(dirPath, entries)) {
+            total = Int64(entries.size)
+            if (enqueueScanArchiveTask(dirPath, ctx)) {
+                created = 1
             }
-
-            if (leafOk && hasMedia) {
-                total = Int64(entries.size)
-                if (enqueueScanArchiveTask(dirPath, ctx)) {
-                    created = 1
-                }
-                return (total, created)
-            }
+            return (total, created)
         }
 
         for (entry in entries) {
@@ -179,6 +149,13 @@ public class ScanSingleCategoryTaskRunner {
                 total++
 
                 if (DirectoryScanner.isDirectory(fullPath)) {
+                    // Blu-ray structure directories are implementation details of the parent archive.
+                    // Stop descending here so scanner policy stays centralized and does not create
+                    // more and more special cases for deep internal folders.
+                    if (FolderHandler.isAllowedStructureDirectoryName(entry)) {
+                        continue
+                    }
+
                     // Directory handling is done by recursion; folder archives are detected in the callee.
                     let (subTotal, subCreated) = scanDirectoryRecursive(fullPath, ctx)
                     total += subTotal

@@ -45,6 +45,13 @@ public class FileEntryReader <: EntryReader {
  * 文件夹类型处理器
  */
 public class FolderHandler <: ArchiveHandler {
+    private static let AUX_SUBDIRECTORY_NAMES: Array<String> = [
+        "extrafanart"
+    ]
+
+    private static let STRUCTURE_SUBDIRECTORY_NAMES: Array<String> = [
+        "bdmv", "certificate"
+    ]
 
     public func getType(): String {
         return ArchiveTypes.FOLDER
@@ -57,7 +64,8 @@ public class FolderHandler <: ArchiveHandler {
 
     // 允许的视频文件扩展名（与 archive_file_handler 保持一致）
     private static let ALLOWED_VIDEO_EXTENSIONS: Array<String> = [
-        "mp4", "webm", "mkv", "avi", "mov", "m4v", "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V"
+        "mp4", "webm", "mkv", "avi", "mov", "m4v", "m2ts", "mts", "ts",
+        "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V", "M2TS", "MTS", "TS"
     ]
 
     /**
@@ -97,7 +105,79 @@ public class FolderHandler <: ArchiveHandler {
         return lower.endsWith(".json") ||
                lower.endsWith(".opf") ||
                lower.endsWith(".nfo") ||
-               lower.endsWith(".xml")
+               lower.endsWith(".xml") ||
+               lower.endsWith(".svg")
+    }
+
+    public static func isAllowedAuxDirectoryName(entryName: String): Bool {
+        let lower = entryName.toAsciiLower()
+        for (name in AUX_SUBDIRECTORY_NAMES) {
+            if (lower == name) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public static func isAllowedStructureDirectoryName(entryName: String): Bool {
+        let lower = entryName.toAsciiLower()
+        for (name in STRUCTURE_SUBDIRECTORY_NAMES) {
+            if (lower == name) {
+                return true
+            }
+        }
+        return false
+    }
+
+    public static func isAllowedChildDirectoryName(entryName: String): Bool {
+        return isAllowedAuxDirectoryName(entryName) ||
+               isAllowedStructureDirectoryName(entryName)
+    }
+
+    public static func canHandleDirectoryEntries(filePath: String, entries: Array<String>): Bool {
+        if (!DirectoryScanner.isDirectory(filePath)) {
+            return false
+        }
+
+        let dirName = ArchiveUtils.getFullFileName(filePath)
+        if (isAllowedChildDirectoryName(dirName)) {
+            return false
+        }
+
+        if (entries.size == 0) {
+            return false
+        }
+
+        var hasMedia = false
+        var hasPrimaryStructureDir = false
+        for (entry in entries) {
+            let fullPath = DirectoryScanner.joinPath(filePath, entry)
+
+            if (DirectoryScanner.isDirectory(fullPath)) {
+                if (FolderHandler.isAllowedStructureDirectoryName(entry)) {
+                    hasPrimaryStructureDir = true
+                    continue
+                }
+                if (FolderHandler.isAllowedAuxDirectoryName(entry)) {
+                    continue
+                }
+                return false
+            }
+
+            if (!DirectoryScanner.fileExists(fullPath)) {
+                return false
+            }
+
+            if (FolderHandler.isAllowedMediaFileName(entry)) {
+                hasMedia = true
+            } else if (FolderHandler.isAllowedAuxFileName(entry)) {
+                // ignore
+            } else {
+                return false
+            }
+        }
+
+        return hasMedia || hasPrimaryStructureDir
     }
 
     public func listEntries(archivePath: String): Array<String> {
@@ -271,57 +351,11 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     public func canHandle(filePath: String): Bool {
-        // 首先检查是否是目录
         if (!DirectoryScanner.isDirectory(filePath)) {
             return false
         }
-
-        // extrafanart 目录不作为独立档案处理
-        let dirName = ArchiveUtils.getFullFileName(filePath)
-        if (dirName.toAsciiLower() == "extrafanart") {
-            return false
-        }
-
-        // 列出目录中的所有条目
         let entries = DirectoryScanner.listDirectory(filePath)
-
-        // 如果目录为空，不处理
-        if (entries.size == 0) {
-            return false
-        }
-
-        // 检查每个条目
-        var hasMedia = false
-        for (entry in entries) {
-            let fullPath = DirectoryScanner.joinPath(filePath, entry)
-
-            // 如果存在子目录，检查是否为特例（如 extrafanart）
-            if (DirectoryScanner.isDirectory(fullPath)) {
-                let lowerEntry = entry.toAsciiLower()
-                if (lowerEntry != "extrafanart") {
-                    return false
-                }
-                // extrafanart 是特例，跳过继续检查其他条目
-                continue
-            }
-
-            // 检查文件是否是允许的媒体格式
-            if (!DirectoryScanner.fileExists(fullPath)) {
-                return false
-            }
-
-            // Allow aux files like meta.json; require at least one media file overall.
-            if (FolderHandler.isAllowedMediaFileName(entry)) {
-                hasMedia = true
-            } else if (FolderHandler.isAllowedAuxFileName(entry)) {
-                // ignore
-            } else {
-                return false
-            }
-        }
-
-        // 所有检查通过：必须至少有一个媒体文件，不能只有 json
-        return hasMedia
+        return FolderHandler.canHandleDirectoryEntries(filePath, entries)
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {

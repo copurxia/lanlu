@@ -106,7 +106,8 @@ public class ArchiveFileHandler <: ArchiveHandler {
 
     // 允许的视频文件扩展名（与 folder_handler 保持一致）
     private static let ALLOWED_VIDEO_EXTENSIONS: Array<String> = [
-        "mp4", "webm", "mkv", "avi", "mov", "m4v", "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V"
+        "mp4", "webm", "mkv", "avi", "mov", "m4v", "m2ts", "mts", "ts",
+        "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V", "M2TS", "MTS", "TS"
     ]
 
     public func canHandle(filePath: String): Bool {

@@ -25,29 +25,10 @@ public class TankoubonAutocreateService {
         return row.id <= 0
     }
 
-    public static func isLeafMediaFolder(dirPath: String): Bool {
+    public static func isFolderArchiveDirectory(dirPath: String): Bool {
         if (!DirectoryScanner.directoryExists(dirPath)) { return false }
         let entries = DirectoryScanner.listDirectory(dirPath)
-        if (entries.size == 0) { return false }
-
-        var hasMedia = false
-        for (entry in entries) {
-            let full = DirectoryScanner.joinPath(dirPath, entry)
-            if (DirectoryScanner.isDirectory(full)) {
-                return false
-            }
-            if (!DirectoryScanner.fileExists(full)) {
-                return false
-            }
-            if (FolderHandler.isAllowedMediaFileName(entry)) {
-                hasMedia = true
-            } else if (FolderHandler.isAllowedAuxFileName(entry)) {
-                // allow
-            } else {
-                return false
-            }
-        }
-        return hasMedia
+        return FolderHandler.canHandleDirectoryEntries(dirPath, entries)
     }
 
     private static func isAllowedCollectionAuxFileName(entryName: String): Bool {
@@ -71,7 +52,7 @@ public class TankoubonAutocreateService {
         for (entry in entries) {
             let full = DirectoryScanner.joinPath(dirPath, entry)
             if (DirectoryScanner.isDirectory(full)) {
-                if (isLeafMediaFolder(full)) {
+                if (isFolderArchiveDirectory(full)) {
                     candidates.add(entry)
                 } else {
                     hasOtherDirectory = true

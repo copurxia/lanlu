@@ -73,7 +73,8 @@ public class ArchiveUtils {
 
     // 支持的视频格式（与处理器保持一致）
     public static let SUPPORTED_VIDEO_EXTENSIONS: Array<String> = [
-        "mp4", "webm", "mkv", "avi", "mov", "m4v", "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V"
+        "mp4", "webm", "mkv", "avi", "mov", "m4v", "m2ts", "mts", "ts",
+        "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V", "M2TS", "MTS", "TS"
     ]
 
     // ==================== 从 ShinobuService 迁移的工具方法 ====================
