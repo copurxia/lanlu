@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
+import { useLocalStorage } from '@/hooks/common-hooks';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
@@ -53,6 +54,10 @@ type MutableFileTreeFolderNode = {
 };
 
 type SidebarTab = 'thumbnails' | 'list' | 'tree';
+
+function isSidebarTab(value: unknown): value is SidebarTab {
+  return value === 'thumbnails' || value === 'list' || value === 'tree';
+}
 
 function getPageArchiveId(page: PageInfo): string {
   const archiveId = (page as { archiveId?: string }).archiveId;
@@ -121,11 +126,22 @@ export function ReaderSidebar({
   const [sidebarViewportHeight, setSidebarViewportHeight] = useState(0);
   const [sidebarContentWidth, setSidebarContentWidth] = useState(0);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [activeTab, setActiveTab] = useState<SidebarTab>('thumbnails');
+  const [storedActiveTab, setStoredActiveTab] = useLocalStorage<SidebarTab>('reader-sidebar-tab', 'thumbnails');
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
   const [thumbAspectRatios, setThumbAspectRatios] = useState<Record<string, number>>({});
   const fileTreeScrollRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
+  const activeTab = isSidebarTab(storedActiveTab) ? storedActiveTab : 'thumbnails';
+
+  const setActiveTab = useCallback((nextTab: SidebarTab) => {
+    setStoredActiveTab(nextTab);
+  }, [setStoredActiveTab]);
+
+  useEffect(() => {
+    if (storedActiveTab !== activeTab) {
+      setStoredActiveTab(activeTab);
+    }
+  }, [activeTab, setStoredActiveTab, storedActiveTab]);
 
   const getThumbLayoutKey = useCallback((page: PageInfo, index: number) => {
     const path = String(page.path || '').trim();
