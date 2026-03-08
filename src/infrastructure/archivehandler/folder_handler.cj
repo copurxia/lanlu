@@ -101,8 +101,15 @@ public class FolderHandler <: ArchiveHandler {
      */
     public static func isAllowedAuxFileName(entryName: String): Bool {
         let lower = entryName.toAsciiLower()
-        // Keep it narrow: allow common sidecar metadata files.
+        // Keep it narrow: allow common sidecar metadata/subtitle files.
         return lower.endsWith(".json") ||
+               lower.endsWith(".ass") ||
+               lower.endsWith(".ssa") ||
+               lower.endsWith(".srt") ||
+               lower.endsWith(".vtt") ||
+               lower.endsWith(".sub") ||
+               lower.endsWith(".idx") ||
+               lower.endsWith(".sup") ||
                lower.endsWith(".opf") ||
                lower.endsWith(".nfo") ||
                lower.endsWith(".xml") ||
