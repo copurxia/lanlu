@@ -3,6 +3,8 @@ ref
 .roo
 .vscode
 .claude
+.codex
+.specify
 target
 data
 .env
