@@ -24,6 +24,7 @@ import lanlu.infrastructure.archivehandler.*
 import lanlu.infrastructure.kv.*
 import lanlu.contexts.archive.domain.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.shared.utils.*
 
 /**
@@ -1970,7 +1971,7 @@ public class DenoTaskRunner {
                 case Some((archiveType, actualPath)) =>
                     let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
                     let entries = handler.listEntriesWithTitle(actualPath)
-                    let pageMetadata = ArchiveDao.getPageMetadata(archiveId)
+                    let pageMetadata = MetadataDao.listPageMetadata(archiveId)
                     var metadataByPath = HashMap<String, PageMetadataData>()
                     var metadataByPage = HashMap<Int32, PageMetadataData>()
                     for (meta in pageMetadata) {

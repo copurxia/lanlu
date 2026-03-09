@@ -12,14 +12,53 @@ export interface MetadataAssetInput {
 
 export type MetadataAssets = ArchiveAssets | MetadataAssetInput[];
 
+export interface MetadataLocator {
+  entity_type?: string;
+  entity_id?: string;
+  parent_entity_type?: string;
+  parent_entity_id?: string;
+  archive_id?: string;
+  tankoubon_id?: string;
+  page?: number;
+  page_number?: number;
+  path?: string;
+  entry_path?: string;
+  entry?: string;
+  volume_no?: number;
+  order_index?: number;
+  [key: string]: unknown;
+}
+
 export interface MetadataPagePatch {
   page?: number;
+  page_number?: number;
   path?: string;
+  entry_path?: string;
   title?: string;
   description?: string;
   thumb?: string;
   sort?: number;
+  order_index?: number;
   hidden_in_files?: boolean;
+  locator?: MetadataLocator;
+}
+
+export interface MetadataChild {
+  entity_type?: string;
+  entity_id?: string;
+  archive_id?: string;
+  volume_no?: number;
+  order_index?: number;
+  title?: string;
+  description?: string;
+  summary?: string;
+  tags?: string[];
+  assets?: MetadataAssets;
+  pages?: MetadataPagePatch[];
+  locator?: MetadataLocator;
+  children?: MetadataChild[];
+  archive?: MetadataChild[];
+  [key: string]: unknown;
 }
 
 export interface MetadataObject {
@@ -28,10 +67,15 @@ export interface MetadataObject {
   description?: string;
   tags?: string[];
   assets?: MetadataAssets;
-  archive?: MetadataObject[];
+  children?: MetadataChild[];
+  archive?: MetadataChild[];
   pages?: MetadataPagePatch[];
+  locator?: MetadataLocator;
+  entity_type?: string;
+  entity_id?: string;
   archive_id?: string;
   volume_no?: number;
+  order_index?: number;
   [key: string]: unknown;
 }
 

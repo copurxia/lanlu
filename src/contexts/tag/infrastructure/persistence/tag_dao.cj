@@ -1212,6 +1212,64 @@ public class TagDao {
         return result
     }
 
+    /**
+     * 根据翻译文本查找标签（使用已有连接，避免嵌套连接泄漏）
+     * 用于在持有连接的情况下调用，避免连接池耗尽
+     */
+    public static func findTagsByTranslationWithConn(conn: Connection, searchTerm: String): ArrayList<String> {
+        var result: ArrayList<String> = ArrayList<String>()
+
+        if (searchTerm.size == 0) {
+            return result
+        }
+
+        translationSearchCacheMutex.lock()
+        match (translationSearchCache.get(searchTerm)) {
+            case Some(cached) =>
+                translationSearchCacheMutex.unlock()
+                return cached
+            case None => ()
+        }
+        translationSearchCacheMutex.unlock()
+
+        try {
+            let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ? LIMIT 200"
+            let stmt = conn.prepareStatement(sql)
+            try {
+                let pattern = "%" + searchTerm + "%"
+                stmt.set(0, pattern)
+                let rs = stmt.query()
+                try {
+                    while (rs.next()) {
+                        let namespace = rs.getOrNull<String>(0) ?? ""
+                        let name = rs.getOrNull<String>(1) ?? ""
+                        let fullName = if (namespace.size > 0) {
+                            "${namespace}:${name}"
+                        } else {
+                            name
+                        }
+                        result.add(fullName)
+                    }
+                } finally {
+                    rs.close()
+                }
+            } finally {
+                stmt.close()
+            }
+        } catch (e: Exception) {
+            getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", searchTerm))
+        }
+
+        translationSearchCacheMutex.lock()
+        if (translationSearchCache.size >= translationSearchCacheMaxSize) {
+            translationSearchCache = HashMap<String, ArrayList<String>>()
+        }
+        translationSearchCache[searchTerm] = result
+        translationSearchCacheMutex.unlock()
+
+        return result
+    }
+
     // ============ JSON 序列化/反序列化辅助方法 ============
 
     /**

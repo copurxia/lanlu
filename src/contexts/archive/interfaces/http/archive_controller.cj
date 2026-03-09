@@ -6,12 +6,11 @@ import lanlu.contexts.archive.domain.*
 import lanlu.contexts.tankoubon.domain.*
 import lanlu.contexts.plugin.domain.*
 import lanlu.contexts.plugin.application.*
-import lanlu.contexts.system.application.*
 import lanlu.shared.utils.*
 import lanlu.shared.views.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
-import lanlu.contexts.asset.infrastructure.persistence.*
+import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.config.*
@@ -98,13 +97,6 @@ public class ArchiveController {
             return
         }
 
-        let archive = ArchiveDao.getArchiveMetadataById(id)
-        if (archive.id.size == 0) {
-            let errorResponse = "{\"error\":\"Archive not found\",\"success\":0}"
-            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
-            ResponseView.json(ctx, errorResponse)
-            return
-        }
 
         var progress: Int32 = 0i32
         var isNew = false
@@ -134,7 +126,11 @@ public class ArchiveController {
         )
         if (!okMetadata) {
             let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Failed to build archive metadata" }
-            ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            if (err == "Archive not found") {
+                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            } else {
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+            }
             ResponseView.json(ctx, "{\"error\":\"${err}\",\"success\":0}")
             return
         }
@@ -277,7 +273,7 @@ public class ArchiveController {
         let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
 
         // handler 已经进行了适当的过滤：EPUB返回HTML文件，其他返回媒体文件
-        let pageMetadata = ArchiveDao.getPageMetadata(id)
+        let pageMetadata = MetadataDao.listPageMetadata(id)
         var metadataByPath = HashMap<String, PageMetadataData>()
         var metadataByPage = HashMap<Int32, PageMetadataData>()
         var sidecarThumbByBase = HashMap<String, Int64>()
@@ -500,8 +496,21 @@ public class ArchiveController {
                 // Keep all necessary data before deleting the archive row.
                 // IMPORTANT: Must get archivePath BEFORE deleting from database,
                 // because getArchiveBasePath() queries the archives table.
+                let rootAssetIds = HashSet<Int64>()
+                match (MetadataDao.getMetadataObject("archive", id)) {
+                    case Some(metadata) =>
+                        for (asset in metadata.assets) {
+                            if (asset.asset_id > 0) {
+                                rootAssetIds.add(asset.asset_id)
+                            }
+                        }
+                    case None => ()
+                }
                 let coverAssetId = ArchiveDao.getCoverAssetId(id)
-                let pageThumbAssetIds = ArchiveDao.getPageThumbAssetIds(id)
+                if (coverAssetId > 0) {
+                    rootAssetIds.add(coverAssetId)
+                }
+                let pageThumbAssetIds = MetadataDao.getPageThumbAssetIds(id)
                 let archivePath = getArchiveBasePath(archive.id)
 
                 // 4. 删除档案记录
@@ -509,31 +518,18 @@ public class ArchiveController {
 
                 // 5. 删除相关文件（缩略图和原始档案）
                 if (deleteSuccess) {
-                    // 删除页面元数据及其缩略图资源
-                    let _ = ArchiveDao.deletePageMetadata(id)
-                    // 删除封面资源文件（assets）
-                    try {
-                        if (coverAssetId > 0) {
-                            let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
-                            let assetPath = FileUtils.joinPath(assetRoot, "${coverAssetId}.avif")
-                            try { remove(Path(assetPath)) } catch (_: Exception) {}
-                            let _ = AssetDao.deleteById(coverAssetId)
-                            getLogger("archive_controller").info("Deleted cover asset", ("asset_id", coverAssetId.toString()), ("arcid", id))
+                    let _ = MetadataDao.deletePageMetadata(id)
+                    let _ = MetadataDao.deleteEntity("archive", id)
+                    for (assetId in pageThumbAssetIds) {
+                        if (assetId > 0) {
+                            rootAssetIds.add(assetId)
                         }
-                    } catch (_: Exception) {}
-
-                    // 删除页面级缩略图资源文件（assets）
-                    try {
-                        let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
-                        for (assetId in pageThumbAssetIds) {
-                            if (assetId <= 0 || assetId == coverAssetId) {
-                                continue
-                            }
-                            let assetPath = FileUtils.joinPath(assetRoot, "${assetId}.avif")
-                            try { remove(Path(assetPath)) } catch (_: Exception) {}
-                            let _ = AssetDao.deleteById(assetId)
+                    }
+                    for (assetId in rootAssetIds) {
+                        if (assetId > 0) {
+                            PluginTaskService.deleteCoverAsset(assetId)
                         }
-                    } catch (_: Exception) {}
+                    }
 
                     // 删除原始档案文件
                     try {

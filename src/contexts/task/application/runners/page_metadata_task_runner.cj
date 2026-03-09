@@ -7,6 +7,7 @@ import stdx.encoding.json.stream.*
 import std.fs.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.asset.infrastructure.persistence.*
+import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.archivehandler.*
@@ -64,6 +65,19 @@ public class PageMetadataTaskRunner {
         let pageCount = pageEntries.size
         var processedCount: Int64 = 0
         var thumbGeneratedCount: Int64 = 0
+        let existingMetadata = MetadataDao.listPageMetadata(archiveId)
+        let metadataByPath = HashMap<String, PageMetadataData>()
+        let metadataByPage = HashMap<Int32, PageMetadataData>()
+        for (meta in existingMetadata) {
+            let pathKey = meta.entry_path.trimAscii()
+            if (pathKey.size > 0 && !metadataByPath.contains(pathKey)) {
+                metadataByPath[pathKey] = meta
+            }
+            if (meta.page_number > 0 && !metadataByPage.contains(meta.page_number)) {
+                metadataByPage[meta.page_number] = meta
+            }
+        }
+        let items = ArrayList<PageMetadataData>()
 
         for (i in 0..pageEntries.size) {
             let pageNumber = Int32(i + 1)
@@ -82,14 +96,10 @@ public class PageMetadataTaskRunner {
             }
 
             var hasThumb = false
-            var existingMeta = ArchivePageMetadataDao.getByArchiveAndPath(archiveInternalId, entryName)
-            var hasExistingMeta = false
-            match (existingMeta) {
-                case Some(_) => hasExistingMeta = true
+            var existingMeta: Option<PageMetadataData> = Option<PageMetadataData>.None
+            match (metadataByPath.get(entryName.trimAscii())) {
+                case Some(meta) => existingMeta = Some(meta)
                 case None => ()
-            }
-            if (!hasExistingMeta) {
-                existingMeta = ArchivePageMetadataDao.getByArchiveAndPage(archiveInternalId, pageNumber)
             }
             match (existingMeta) {
                 case Some(existing) =>
@@ -99,12 +109,29 @@ public class PageMetadataTaskRunner {
                     pageData.description = existing.description
                     pageData.sort_index = existing.sort_index
                     pageData.hidden_in_files = existing.hidden_in_files
+                    pageData.extra_data = existing.extra_data
                     if (existing.thumb_asset_id > 0 && existing.thumbhash.size > 0) {
                         pageData.thumb_asset_id = existing.thumb_asset_id
                         pageData.thumbhash = existing.thumbhash
                         hasThumb = true
                     }
-                case None => ()
+                case None =>
+                    match (metadataByPage.get(pageNumber)) {
+                        case Some(existing) =>
+                            if (existing.title.trimAscii().size > 0) {
+                                pageData.title = existing.title
+                            }
+                            pageData.description = existing.description
+                            pageData.sort_index = existing.sort_index
+                            pageData.hidden_in_files = existing.hidden_in_files
+                            pageData.extra_data = existing.extra_data
+                            if (existing.thumb_asset_id > 0 && existing.thumbhash.size > 0) {
+                                pageData.thumb_asset_id = existing.thumb_asset_id
+                                pageData.thumbhash = existing.thumbhash
+                                hasThumb = true
+                            }
+                        case None => ()
+                    }
             }
 
             if (!hasThumb) {
@@ -126,26 +153,18 @@ public class PageMetadataTaskRunner {
                 }
             }
 
-            let saveOk = ArchivePageMetadataDao.insertOrUpdate(
-                pageData.archive_id,
-                pageData.page_number,
-                pageData.entry_path,
-                pageData.title,
-                pageData.description,
-                thumbAssetId: pageData.thumb_asset_id,
-                thumbHash: pageData.thumbhash,
-                extraData: pageData.extra_data,
-                sortIndex: pageData.sort_index,
-                hiddenInFiles: pageData.hidden_in_files
-            )
-
-            if (saveOk) {
-                processedCount += 1
-            }
+            items.add(pageData)
+            processedCount += 1
 
             if (i % 10 == 0) {
                 context.notifyTaskAvailable()
             }
+        }
+
+        let saveOk = MetadataDao.upsertPageMetadataBatch(archiveId, items.toArray(), sourceNamespace: "page_metadata")
+        if (!saveOk) {
+            fail(taskId, "Failed to save page metadata to unified metadata store")
+            return
         }
 
         TaskModel.updateTaskProgress(taskId, 100, "页面元数据处理完成")

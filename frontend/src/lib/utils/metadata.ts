@@ -2,6 +2,7 @@ import type {
   ArchiveAssets,
   ArchiveMetadata,
   MetadataAssetInput,
+  MetadataLocator,
   MetadataObject,
   MetadataPagePatch,
 } from '@/types/archive';
@@ -71,6 +72,84 @@ function normalizeMetadataAssetMap(rawAssets: unknown): ArchiveAssets | undefine
   return normalized;
 }
 
+function normalizeMetadataLocator(rawLocator: unknown, fallback?: Record<string, unknown>): MetadataLocator | undefined {
+  const locatorRow = asRecord(rawLocator);
+  const entityType = readString(locatorRow.entity_type || locatorRow.entityType || fallback?.entity_type || fallback?.entityType);
+  const entityId = readString(
+    locatorRow.entity_id ||
+      locatorRow.entityId ||
+      fallback?.entity_id ||
+      fallback?.entityId ||
+      fallback?.archive_id ||
+      fallback?.archiveId ||
+      fallback?.arcid ||
+      fallback?.tankoubon_id ||
+      fallback?.tankoubonId
+  );
+  const parentEntityType = readString(
+    locatorRow.parent_entity_type || locatorRow.parentEntityType || fallback?.parent_entity_type || fallback?.parentEntityType
+  );
+  const parentEntityId = readString(
+    locatorRow.parent_entity_id ||
+      locatorRow.parentEntityId ||
+      fallback?.parent_entity_id ||
+      fallback?.parentEntityId ||
+      fallback?.archive_id ||
+      fallback?.archiveId ||
+      fallback?.arcid
+  );
+  const archiveId = readString(locatorRow.archive_id || locatorRow.archiveId || fallback?.archive_id || fallback?.archiveId || fallback?.arcid);
+  const tankoubonId = readString(locatorRow.tankoubon_id || locatorRow.tankoubonId || fallback?.tankoubon_id || fallback?.tankoubonId);
+  const page = readNumber(
+    locatorRow.page ??
+      locatorRow.page_number ??
+      locatorRow.pageNumber ??
+      fallback?.page ??
+      fallback?.page_number ??
+      fallback?.pageNumber
+  );
+  const path = readString(
+    locatorRow.path ||
+      locatorRow.entry_path ||
+      locatorRow.entryPath ||
+      locatorRow.entry ||
+      fallback?.path ||
+      fallback?.entry_path ||
+      fallback?.entryPath ||
+      fallback?.entry
+  );
+  const volumeNo = readNumber(locatorRow.volume_no || locatorRow.volumeNo || fallback?.volume_no || fallback?.volumeNo);
+  const orderIndex = readNumber(
+    locatorRow.order_index || locatorRow.orderIndex || fallback?.order_index || fallback?.orderIndex || fallback?.sort
+  );
+
+  const locator: MetadataLocator = {};
+  if (entityType) locator.entity_type = entityType;
+  if (entityId) locator.entity_id = entityId;
+  if (parentEntityType) locator.parent_entity_type = parentEntityType;
+  if (parentEntityId) locator.parent_entity_id = parentEntityId;
+  if (archiveId) locator.archive_id = archiveId;
+  if (tankoubonId) locator.tankoubon_id = tankoubonId;
+  if (typeof page === 'number' && Number.isFinite(page)) {
+    locator.page = Math.trunc(page);
+    locator.page_number = Math.trunc(page);
+  }
+  if (path) {
+    locator.path = path;
+    locator.entry_path = path;
+    locator.entry = path;
+  }
+  if (typeof volumeNo === 'number' && Number.isFinite(volumeNo)) locator.volume_no = Math.trunc(volumeNo);
+  if (typeof orderIndex === 'number' && Number.isFinite(orderIndex)) locator.order_index = Math.trunc(orderIndex);
+
+  return Object.keys(locator).length > 0 ? locator : undefined;
+}
+
+function normalizeMetadataChildren(rawChildren: unknown): MetadataObject[] {
+  if (!Array.isArray(rawChildren)) return [];
+  return rawChildren.map((item) => normalizeMetadataObject(item));
+}
+
 export function normalizeMetadataTags(rawTags: unknown): string[] {
   if (Array.isArray(rawTags)) {
     return rawTags.map((tag) => String(tag || '').trim()).filter(Boolean);
@@ -87,7 +166,7 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
   for (const item of rawPages) {
     const row = asRecord(item);
     const page = readNumber(row.page ?? row.page_number ?? row.pageNumber);
-    const sort = readNumber(row.sort);
+    const sort = readNumber(row.sort ?? row.order_index ?? row.orderIndex);
     const hiddenInFiles = row.hidden_in_files === true || row.hiddenInFiles === true;
     const path = readString(row.path || row.entry_path || row.entryPath || row.entry);
     const title = readString(row.title);
@@ -96,14 +175,21 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
 
     if (!path && !(typeof page === 'number' && page > 0)) continue;
 
+    const normalizedPage = typeof page === 'number' && page > 0 ? Math.trunc(page) : undefined;
+    const normalizedSort = typeof sort === 'number' && Number.isFinite(sort) ? Math.trunc(sort) : undefined;
+
     normalized.push({
-      page: typeof page === 'number' && page > 0 ? Math.trunc(page) : undefined,
+      page: normalizedPage,
+      page_number: normalizedPage,
       path: path || undefined,
+      entry_path: path || undefined,
       title: title || undefined,
       description: description || undefined,
       thumb: thumb || undefined,
-      sort: typeof sort === 'number' && Number.isFinite(sort) ? Math.trunc(sort) : undefined,
+      sort: normalizedSort,
+      order_index: normalizedSort,
       hidden_in_files: hiddenInFiles || undefined,
+      locator: normalizeMetadataLocator(row.locator, row),
     });
   }
 
@@ -112,6 +198,11 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
 
 export function normalizeMetadataObject(raw: unknown): MetadataObject {
   const row = asRecord(raw);
+  const rawChildren = Array.isArray(row.children) ? row.children : Array.isArray(row.archive) ? row.archive : [];
+  const children = normalizeMetadataChildren(rawChildren);
+  const orderIndex = readNumber(row.order_index || row.orderIndex || row.sort);
+  const volumeNo = readNumber(row.volume_no || row.volumeNo);
+
   return {
     ...row,
     title: readString(row.title || row.name) || undefined,
@@ -119,25 +210,30 @@ export function normalizeMetadataObject(raw: unknown): MetadataObject {
     description: readString(row.description || row.summary) || undefined,
     tags: normalizeMetadataTags(row.tags),
     assets: normalizeMetadataAssetMap(row.assets),
-    archive: Array.isArray(row.archive) ? row.archive.map((item) => normalizeMetadataObject(item)) : [],
+    children,
+    archive: children,
     pages: normalizeMetadataPages(row.pages),
-    archive_id: readString(row.archive_id || row.archiveId || row.arcid) || undefined,
-    volume_no: (() => {
-      const volumeNo = readNumber(row.volume_no || row.volumeNo);
-      return typeof volumeNo === 'number' && Number.isFinite(volumeNo) ? Math.trunc(volumeNo) : undefined;
-    })(),
+    locator: normalizeMetadataLocator(row.locator, row),
+    entity_type: readString(row.entity_type || row.entityType) || undefined,
+    entity_id: readString(row.entity_id || row.entityId) || undefined,
+    archive_id: readString(row.archive_id || row.archiveId || row.arcid || row.entity_id || row.entityId) || undefined,
+    volume_no: typeof volumeNo === 'number' && Number.isFinite(volumeNo) ? Math.trunc(volumeNo) : undefined,
+    order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
   };
 }
 
 export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
-  const archiveId = readString(metadata.archive_id || row.archive_id || row.archiveId || row.arcid);
+  const archiveId = readString(metadata.archive_id || row.archive_id || row.archiveId || row.arcid || metadata.entity_id);
   const description = readString(metadata.description || row.description || row.summary);
   const pagecount = readNumber(row.pagecount);
   const progress = readNumber(row.progress);
   const fileSize = readNumber(row.file_size ?? row.size);
   const lastReadTime = readNumber(row.lastreadtime);
+
+  const normalizedAssets = normalizeMetadataAssetMap(metadata.assets ?? row.assets);
+  const rawAssets = metadata.assets ?? row.assets;
 
   return {
     ...metadata,
@@ -145,10 +241,10 @@ export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
     arcid: archiveId,
     summary: description,
     tags: metadata.tags || [],
-    assets: normalizeMetadataAssetMap(row.assets),
-    cover: readMetadataAssetValue(row.assets, 'cover') || readString(row.cover) || undefined,
-    backdrop: readMetadataAssetValue(row.assets, 'backdrop') || readString(row.backdrop) || undefined,
-    clearlogo: readMetadataAssetValue(row.assets, 'clearlogo') || readString(row.clearlogo) || undefined,
+    assets: normalizedAssets,
+    cover: readMetadataAssetValue(rawAssets, 'cover') || readString(row.cover) || undefined,
+    backdrop: readMetadataAssetValue(rawAssets, 'backdrop') || readString(row.backdrop) || undefined,
+    clearlogo: readMetadataAssetValue(rawAssets, 'clearlogo') || readString(row.clearlogo) || undefined,
     filename: readString(row.filename) || undefined,
     relative_path: readString(row.relative_path) || undefined,
     pagecount: typeof pagecount === 'number' && Number.isFinite(pagecount) ? Math.trunc(pagecount) : metadata.pages?.length || 0,
@@ -170,9 +266,11 @@ export function normalizeTankoubonMemberMetadataPatch(raw: unknown): TankoubonMe
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
   const description = readString(metadata.description || row.description || row.summary);
+  const archiveId = readString(metadata.archive_id || row.archive_id || row.archiveId || row.arcid || metadata.entity_id);
 
   return {
     ...metadata,
+    archive_id: archiveId || undefined,
     summary: description || undefined,
     updated_at: readString(row.updated_at || row.updatedAt) || undefined,
     cover: readMetadataAssetValue(row.assets, 'cover') || readString(row.cover) || undefined,
@@ -186,32 +284,39 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
   const description = readString(metadata.description || row.description || row.summary);
-  const archive = Array.isArray(row.archive) ? row.archive.map((item) => normalizeTankoubonMemberMetadataPatch(item)) : [];
-  const archives = archive
-    .map((item) => readString(item.archive_id))
+  const childrenSource = Array.isArray(row.children) ? row.children : Array.isArray(row.archive) ? row.archive : [];
+  const children = childrenSource.map((item) => normalizeTankoubonMemberMetadataPatch(item));
+  const archives = children
+    .map((item) => readString(item.archive_id || item.entity_id))
     .filter(Boolean);
   const archiveCount = readNumber(row.archive_count ?? row.archiveCount);
   const pagecount = readNumber(row.pagecount);
   const progress = readNumber(row.progress);
 
+  const normalizedAssets = normalizeMetadataAssetMap(metadata.assets ?? row.assets);
+  const rawAssets = metadata.assets ?? row.assets;
+
   return {
     ...metadata,
-    tankoubon_id: readString(row.tankoubon_id || row.id),
+    tankoubon_id: readString(row.tankoubon_id || row.id || metadata.entity_id),
     name: readString(row.name || metadata.title),
+    title: readString(metadata.title || row.name) || undefined,
+    description: description || undefined,
     summary: description,
     tags: metadata.tags || [],
-    assets: normalizeMetadataAssetMap(row.assets),
-    archive,
+    assets: normalizedAssets,
+    children,
+    archive: children,
     archives,
-    archive_count: typeof archiveCount === 'number' && Number.isFinite(archiveCount) ? Math.trunc(archiveCount) : archive.length,
+    archive_count: typeof archiveCount === 'number' && Number.isFinite(archiveCount) ? Math.trunc(archiveCount) : children.length,
     pagecount: typeof pagecount === 'number' && Number.isFinite(pagecount) ? Math.trunc(pagecount) : undefined,
     progress: typeof progress === 'number' && Number.isFinite(progress) ? Math.trunc(progress) : undefined,
     lastreadtime: readString(row.lastreadtime || row.last_read_time) || undefined,
     isnew: row.isnew === true,
     isfavorite: row.isfavorite === true,
-    cover: readMetadataAssetValue(row.assets, 'cover') || readString(row.cover) || undefined,
-    backdrop: readMetadataAssetValue(row.assets, 'backdrop') || readString(row.backdrop) || undefined,
-    clearlogo: readMetadataAssetValue(row.assets, 'clearlogo') || readString(row.clearlogo) || undefined,
+    cover: readMetadataAssetValue(rawAssets, 'cover') || readString(row.cover) || undefined,
+    backdrop: readMetadataAssetValue(rawAssets, 'backdrop') || readString(row.backdrop) || undefined,
+    clearlogo: readMetadataAssetValue(rawAssets, 'clearlogo') || readString(row.clearlogo) || undefined,
   };
 }
 

@@ -76,6 +76,13 @@ export interface PageMetadataPatch {
   hidden_in_files?: boolean;
 }
 
+export interface MetadataLocator {
+  entity_type?: string;
+  entity_id?: string;
+  volume_no?: number;
+  order_index?: number;
+}
+
 export interface MetadataObject {
   title: string;
   type: number;
@@ -83,9 +90,13 @@ export interface MetadataObject {
   tags: string[];
   assets: MetadataAssetItem[];
   archive: MetadataObject[];
+  children?: MetadataObject[];
   pages?: PageMetadataPatch[];
   archive_id?: string;
+  entity_id?: string;
   volume_no?: number;
+  order_index?: number;
+  locator?: MetadataLocator;
   [key: string]: unknown;
 }
 
@@ -431,26 +442,44 @@ export abstract class BasePlugin {
       tags: this.normalizeMetadataTags(source.tags),
       assets: this.normalizeMetadataAssets(source.assets),
       archive: [],
+      children: [],
     };
 
-    const rawArchive = Array.isArray(source.archive) ? source.archive : [];
+    const rawArchive = Array.isArray(source.children) ? source.children : Array.isArray(source.archive) ? source.archive : [];
     result.archive = rawArchive.map((item) => this.normalizeMetadataObject(item));
+    result.children = result.archive;
     const rawPages = Array.isArray(source.pages) ? source.pages : [];
     if (rawPages.length > 0) {
       result.pages = rawPages.map((item) => this.normalizePageMetadataPatch(item));
     }
 
-    const archiveId = this.readStringField((source as Record<string, unknown>).archive_id);
+    const archiveId = this.readStringField((source as Record<string, unknown>).archive_id ?? (source as Record<string, unknown>).entity_id);
     if (archiveId) {
       result.archive_id = archiveId;
+      result.entity_id = archiveId;
     }
     const volumeNo = this.readIntField((source as Record<string, unknown>).volume_no, 0);
     if (volumeNo > 0) {
       result.volume_no = volumeNo;
     }
+    const orderIndex = this.readIntField((source as Record<string, unknown>).order_index, 0);
+    if (orderIndex > 0) {
+      result.order_index = orderIndex;
+    }
+    const locatorSource = source.locator && typeof source.locator === 'object' && !Array.isArray(source.locator)
+      ? (source.locator as Record<string, unknown>)
+      : undefined;
+    if (locatorSource) {
+      result.locator = {
+        entity_type: this.readStringField(locatorSource.entity_type),
+        entity_id: this.readStringField(locatorSource.entity_id),
+        volume_no: this.readIntField(locatorSource.volume_no, 0) || undefined,
+        order_index: this.readIntField(locatorSource.order_index, 0) || undefined,
+      };
+    }
 
     for (const [key, value] of Object.entries(source)) {
-      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'pages' || key === 'archive_id' || key === 'volume_no') {
+      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'children' || key === 'pages' || key === 'archive_id' || key === 'entity_id' || key === 'volume_no' || key === 'order_index' || key === 'locator') {
         continue;
       }
       result[key] = value;

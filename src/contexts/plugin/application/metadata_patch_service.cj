@@ -10,6 +10,7 @@ import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.asset.infrastructure.persistence.*
+import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.archivehandler.*
@@ -105,6 +106,174 @@ public class MetadataPatchService {
         } catch (_: Exception) {}
 
         return out.toArray()
+    }
+
+
+    private static func buildMetadataAssets(coverAssetId: Int64, assetsRaw: String): Array<MetadataAssetData> {
+        let out = ArrayList<MetadataAssetData>()
+        let seen = HashSet<String>()
+        if (coverAssetId > 0) {
+            seen.add("cover")
+            out.add(MetadataAssetData("cover", coverAssetId))
+        }
+        for (asset in parseMetadataAssetsRaw(assetsRaw)) {
+            let slot = asset.key.trimAscii().toAsciiLower()
+            if (slot != "cover" && slot != "backdrop" && slot != "clearlogo" && slot != "thumb") {
+                continue
+            }
+            let assetId = parsePositiveAssetId(asset.value)
+            if (slot.size == 0 || assetId <= 0 || seen.contains(slot)) {
+                continue
+            }
+            seen.add(slot)
+            out.add(MetadataAssetData(slot, assetId))
+        }
+        return out.toArray()
+    }
+
+    private static func findMetadataAssetId(assets: Array<MetadataAssetData>, slot: String): Int64 {
+        let normalizedSlot = slot.trimAscii().toAsciiLower()
+        for (asset in assets) {
+            if (asset.slot.trimAscii().toAsciiLower() == normalizedSlot && asset.asset_id > 0) {
+                return asset.asset_id
+            }
+        }
+        return 0
+    }
+
+    private static func writeMetadataTagsArrayFromList(w: JsonWriter, tags: Array<String>): Unit {
+        w.writeName("tags")
+        w.startArray()
+        for (tag in tags) {
+            let value = tag.trimAscii()
+            if (value.size > 0) {
+                w.writeValue(value)
+            }
+        }
+        w.endArray()
+    }
+
+    private static func writeMetadataAssetsArrayFromList(w: JsonWriter, assets: Array<MetadataAssetData>): Unit {
+        w.writeName("assets")
+        w.startArray()
+        for (asset in assets) {
+            let slot = asset.slot.trimAscii().toAsciiLower()
+            if (slot.size == 0 || asset.asset_id <= 0) {
+                continue
+            }
+            w.startObject()
+            w.writeName("key").writeValue(slot)
+            w.writeName("value").writeValue(asset.asset_id)
+            w.endObject()
+        }
+        w.endArray()
+    }
+
+    private static func getAssetThumbhash(assetId: Int64): String {
+        if (assetId <= 0) {
+            return ""
+        }
+        let asset = AssetDao.getById(assetId)
+        return asset.thumbhash.trimAscii()
+    }
+
+    private static func resolveArchiveThumbnailHash(archive: ArchiveData, assets: Array<MetadataAssetData>): String {
+        let coverAssetId = findMetadataAssetId(assets, "cover")
+        if (coverAssetId > 0) {
+            let thumbhash = getAssetThumbhash(coverAssetId)
+            if (thumbhash.size > 0) {
+                return thumbhash
+            }
+        }
+        return archive.thumbhash.trimAscii()
+    }
+
+    private static func writeLocatorObject(w: JsonWriter, entityType: String, entityId: String, volumeNo!: Int32 = 0, orderIndex!: Int32 = 0): Unit {
+        w.writeName("locator")
+        w.startObject()
+        w.writeName("entity_type").writeValue(entityType)
+        w.writeName("entity_id").writeValue(entityId)
+        if (volumeNo > 0) {
+            w.writeName("volume_no").writeValue(volumeNo)
+        }
+        if (orderIndex > 0) {
+            w.writeName("order_index").writeValue(orderIndex)
+        }
+        w.endObject()
+    }
+
+    private static func writeTankoubonChildObject(w: JsonWriter, child: MetadataChildData): Unit {
+        w.startObject()
+        w.writeName("entity_type").writeValue(child.entity_type)
+        w.writeName("entity_id").writeValue(child.entity_id)
+        if (child.volume_no > 0) {
+            w.writeName("volume_no").writeValue(child.volume_no)
+        }
+        if (child.order_index > 0) {
+            w.writeName("order_index").writeValue(child.order_index)
+        }
+        writeLocatorObject(w, child.entity_type, child.entity_id, volumeNo: child.volume_no, orderIndex: child.order_index)
+        w.endObject()
+    }
+
+    private static func ensureArchiveMetadataObject(archiveId: String, archive!: ArchiveData = ArchiveData()): Option<MetadataObjectData> {
+        let normalizedId = archiveId.trimAscii()
+        if (normalizedId.size == 0) {
+            return None
+        }
+        match (MetadataDao.getMetadataObject("archive", normalizedId)) {
+            case Some(existing) => return Some(existing)
+            case None => ()
+        }
+
+        let sourceArchive = if (archive.id.size > 0) { archive } else { ArchiveDao.getArchiveById(normalizedId) }
+        if (sourceArchive.id.size == 0) {
+            return None
+        }
+
+        let fallback = MetadataObjectData()
+        fallback.entity_type = "archive"
+        fallback.entity_id = sourceArchive.id
+        fallback.title = sourceArchive.title
+        fallback.description = sourceArchive.summary
+        fallback.extra_data = "{}"
+        fallback.source_namespace = ""
+        fallback.created_at = sourceArchive.created_at
+        fallback.updated_at = sourceArchive.updated_at
+        fallback.tags = splitTagTokens(TagDao.getArchiveTags(sourceArchive.id))
+        fallback.assets = buildMetadataAssets(sourceArchive.cover_asset_id, ArchiveDao.getArchiveAssetsRaw(sourceArchive.id))
+        return Some(fallback)
+    }
+
+    private static func ensureTankoubonMetadataObject(tankoubonId: String, preloaded!: TankoubonData = TankoubonData()): Option<MetadataObjectData> {
+        let normalizedId = tankoubonId.trimAscii()
+        if (normalizedId.size == 0) {
+            return None
+        }
+        match (MetadataDao.getMetadataObject("tankoubon", normalizedId)) {
+            case Some(existing) => return Some(existing)
+            case None => ()
+        }
+
+        let tankoubon = if (preloaded.tankoubon_id.size > 0) { preloaded } else {
+            match (TankoubonDao.getTankoubonById(normalizedId)) {
+                case Some(data) => data
+                case None => return None
+            }
+        }
+
+        let fallback = MetadataObjectData()
+        fallback.entity_type = "tankoubon"
+        fallback.entity_id = normalizedId
+        fallback.title = tankoubon.name
+        fallback.description = tankoubon.summary
+        fallback.extra_data = "{}"
+        fallback.source_namespace = ""
+        fallback.created_at = tankoubon.created_at
+        fallback.updated_at = tankoubon.updated_at
+        fallback.tags = splitTagTokens(TankoubonDao.getOwnTagsForTankoubon(normalizedId))
+        fallback.assets = buildMetadataAssets(tankoubon.cover_asset_id, tankoubon.assets_raw)
+        return Some(fallback)
     }
 
     private static func readJsonScalarAsString(r: JsonReader): String {
@@ -360,6 +529,10 @@ public class MetadataPatchService {
                     match (ak) {
                         case "archive_id" => patch.archiveId = readStringFlexible().trimAscii()
                         case "archiveId" => patch.archiveId = readStringFlexible().trimAscii()
+                        case "entity_id" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
+                        case "entityId" =>
+                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
                         case "target_id" =>
                             if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
                         case "targetId" =>
@@ -418,6 +591,9 @@ public class MetadataPatchService {
                         case "archive" =>
                             // Archive members are the recursive boundary for now; ignore deeper nesting.
                             r.skip()
+                        case "children" =>
+                            // Child members are the recursive boundary for now; ignore deeper nesting.
+                            r.skip()
                         case _ => r.skip()
                     }
                 }
@@ -470,6 +646,23 @@ public class MetadataPatchService {
                             parsed.clearlogoProvided = true
                         }
                     case "archive" =>
+                        parsed.archivesProvided = true
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                let archives = ArrayList<ArchiveMetadataPatch>()
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    let patch = parseArchivePatchObject()
+                                    if (patch.archiveId.trimAscii().size > 0 || patch.volumeNo > 0 || patch.pages.size > 0) {
+                                        archives.add(patch)
+                                    }
+                                }
+                                r.endArray()
+                                parsed.archives = archives.toArray()
+                            case Some(_) => r.skip()
+                            case None => ()
+                        }
+                    case "children" =>
                         parsed.archivesProvided = true
                         match (r.peek()) {
                             case Some(BeginArray) =>
@@ -570,33 +763,6 @@ public class MetadataPatchService {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
         }
     }
-
-    private static func writeMetadataTagsArray(w: JsonWriter, tagsString: String): Unit {
-        let tags = splitTagTokens(tagsString)
-        w.writeName("tags")
-        w.startArray()
-        for (tag in tags) {
-            w.writeValue(tag)
-        }
-        w.endArray()
-    }
-
-    private static func writeMetadataAssetsArray(w: JsonWriter, assetsRaw: String): Unit {
-        let assets = parseMetadataAssetsRaw(assetsRaw)
-        w.writeName("assets")
-        w.startArray()
-        for (asset in assets) {
-            if (asset.key.trimAscii().size == 0 || asset.value.trimAscii().size == 0) {
-                continue
-            }
-            w.startObject()
-            w.writeName("key").writeValue(asset.key)
-            w.writeName("value").writeValue(asset.value)
-            w.endObject()
-        }
-        w.endArray()
-    }
-
     private static func writePageMetadataArray(w: JsonWriter, pageMetadata: Array<PageMetadataData>): Unit {
         w.writeName("pages")
         w.startArray()
@@ -631,10 +797,10 @@ public class MetadataPatchService {
 
     private static func buildArchiveMetadataObjectJsonFromParts(
         archive: ArchiveData,
-        tags: String,
-        assetsRaw: String,
+        metadata: MetadataObjectData,
         includeLocator: Bool,
         volumeNo: Int32,
+        orderIndex: Int32,
         includePages: Bool,
         progress!: Int32 = 0i32,
         isNew!: Bool = false,
@@ -643,13 +809,22 @@ public class MetadataPatchService {
     ): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
+        let description = metadata.description
+        let updatedAt = if (metadata.updated_at.trimAscii().size > 0) { metadata.updated_at } else { archive.updated_at }
+        let thumbnailHash = resolveArchiveThumbnailHash(archive, metadata.assets)
         w.startObject()
-        w.writeName("title").writeValue(archive.title)
+        w.writeName("title").writeValue(metadata.title)
         w.writeName("type").writeValue(0i32)
-        w.writeName("description").writeValue(archive.summary)
-        w.writeName("summary").writeValue(archive.summary)
-        writeMetadataTagsArray(w, tags)
-        writeMetadataAssetsArray(w, assetsRaw)
+        w.writeName("description").writeValue(description)
+        w.writeName("summary").writeValue(description)
+        writeMetadataTagsArrayFromList(w, metadata.tags)
+        writeMetadataAssetsArrayFromList(w, metadata.assets)
+        w.writeName("children")
+        w.startArray()
+        w.endArray()
+        w.writeName("archive")
+        w.startArray()
+        w.endArray()
         w.writeName("arcid").writeValue(archive.id)
         w.writeName("filename").writeValue(archive.filename)
         w.writeName("relative_path").writeValue(archive.relative_path)
@@ -662,19 +837,20 @@ public class MetadataPatchService {
         w.writeName("lastreadtime").writeValue(lastReadTime)
         w.writeName("archivetype").writeValue(archive.archive_type)
         w.writeName("created_at").writeValue(archive.created_at)
-        w.writeName("updated_at").writeValue(archive.updated_at)
-        w.writeName("archive")
-        w.startArray()
-        w.endArray()
+        w.writeName("updated_at").writeValue(updatedAt)
         if (includePages) {
-            writePageMetadataArray(w, ArchiveDao.getPageMetadata(archive.id))
+            writePageMetadataArray(w, MetadataDao.listPageMetadata(archive.id))
         }
-        w.writeName("thumbnail_hash").writeValue(archive.thumbhash)
+        w.writeName("thumbnail_hash").writeValue(thumbnailHash)
         if (includeLocator) {
             w.writeName("archive_id").writeValue(archive.id)
             if (volumeNo > 0) {
                 w.writeName("volume_no").writeValue(volumeNo)
             }
+            if (orderIndex > 0) {
+                w.writeName("order_index").writeValue(orderIndex)
+            }
+            writeLocatorObject(w, "archive", archive.id, volumeNo: volumeNo, orderIndex: orderIndex)
         }
         w.endObject()
         w.flush()
@@ -695,71 +871,115 @@ public class MetadataPatchService {
         if (archive.id.size == 0) {
             return (false, "", "Archive not found")
         }
-
-        let tags = TagDao.getArchiveTags(archive.id)
-        let assetsRaw = ArchiveDao.getArchiveAssetsRaw(archive.id)
-        return (true, buildArchiveMetadataObjectJsonFromParts(
-            archive,
-            tags,
-            assetsRaw,
-            includeLocator,
-            volumeNo,
-            includePages,
-            progress: progress,
-            isNew: isNew,
-            isFavorite: isFavorite,
-            lastReadTime: lastReadTime
-        ), "")
+        match (ensureArchiveMetadataObject(archiveId, archive: archive)) {
+            case None => return (false, "", "Archive metadata not found")
+            case Some(metadata) =>
+                return (true, buildArchiveMetadataObjectJsonFromParts(
+                    archive,
+                    metadata,
+                    includeLocator,
+                    volumeNo,
+                    0,
+                    includePages,
+                    progress: progress,
+                    isNew: isNew,
+                    isFavorite: isFavorite,
+                    lastReadTime: lastReadTime
+                ), "")
+        }
     }
 
-    public static func buildTankoubonMetadataObjectJson(tankoubonId: String, includePages!: Bool = false): (Bool, String, String) {
+    public static func buildTankoubonMetadataObjectJson(
+        tankoubonId: String,
+        includePages!: Bool = false,
+        includeArchiveDetails!: Bool = true,
+        archiveCount!: Int32 = -1,
+        pageCount!: Int32 = -1,
+        progress!: Int32 = 0i32,
+        isNew!: Bool = false,
+        isFavorite!: Bool = false,
+        lastReadTime!: String = ""
+    ): (Bool, String, String) {
         match (TankoubonDao.getTankoubonById(tankoubonId)) {
             case None => return (false, "", "Tankoubon not found")
             case Some(tankoubon) =>
-                let tags = TankoubonDao.getMergedTagsForTankoubon(tankoubonId)
-                let archiveIds = TankoubonDao.getArchivesInTankoubon(tankoubonId)
-                let archiveMap = ArchiveDao.getBatchArchivesById(archiveIds)
-                let archiveTagsMap = TagDao.getBatchArchiveTags(archiveIds)
-                let archiveAssetsMap = ArchiveDao.getBatchArchiveAssetsRaw(archiveIds)
-                let out = ByteBuffer()
-                let w = JsonWriter(out)
-                w.startObject()
-                w.writeName("title").writeValue(tankoubon.name)
-                w.writeName("type").writeValue(1i32)
-                w.writeName("description").writeValue(tankoubon.summary)
-                writeMetadataTagsArray(w, tags)
-                writeMetadataAssetsArray(w, tankoubon.assets_raw)
-                w.writeName("archive")
-                w.startArray()
-                var volumeNo: Int32 = 1
-                for (idx in 0..archiveIds.size) {
-                    let memberId = archiveIds[idx].trimAscii()
-                    if (memberId.size == 0) {
-                        volumeNo += 1
-                        continue
-                    }
-                    match (archiveMap.get(memberId)) {
-                        case Some(archive) =>
-                            let memberTags = match (archiveTagsMap.get(memberId)) {
-                                case Some(value) => value
-                                case None => ""
+                match (ensureTankoubonMetadataObject(tankoubonId, preloaded: tankoubon)) {
+                    case None => return (false, "", "Tankoubon metadata not found")
+                    case Some(metadata) =>
+                        let (statsArchiveCount, statsPageCount) = TankoubonDao.getTankoubonArchiveStats(tankoubonId)
+                        let effectiveArchiveCount = if (archiveCount >= 0) { archiveCount } else { statsArchiveCount }
+                        let effectivePageCount = if (pageCount >= 0) { pageCount } else { statsPageCount }
+                        let children = MetadataDao.getTankoubonChildren(tankoubonId)
+                        let out = ByteBuffer()
+                        let w = JsonWriter(out)
+                        w.startObject()
+                        w.writeName("title").writeValue(metadata.title)
+                        w.writeName("name").writeValue(metadata.title)
+                        w.writeName("type").writeValue(1i32)
+                        w.writeName("description").writeValue(metadata.description)
+                        w.writeName("summary").writeValue(metadata.description)
+                        writeMetadataTagsArrayFromList(w, metadata.tags)
+                        writeMetadataAssetsArrayFromList(w, metadata.assets)
+                        w.writeName("tankoubon_id").writeValue(tankoubonId)
+                        w.writeName("archives")
+                        w.startArray()
+                        for (child in children) {
+                            w.writeValue(child.entity_id)
+                        }
+                        w.endArray()
+                        w.writeName("children")
+                        w.startArray()
+                        for (child in children) {
+                            writeTankoubonChildObject(w, child)
+                        }
+                        w.endArray()
+                        w.writeName("archive")
+                        w.startArray()
+                        if (!includeArchiveDetails) {
+                            for (child in children) {
+                                writeTankoubonChildObject(w, child)
                             }
-                            let memberAssetsRaw = match (archiveAssetsMap.get(memberId)) {
-                                case Some(value) => value
-                                case None => "{}"
+                        } else {
+                            for (child in children) {
+                                let memberId = child.entity_id.trimAscii()
+                                if (memberId.size == 0) {
+                                    continue
+                                }
+                                let archive = ArchiveDao.getArchiveById(memberId)
+                                if (archive.id.size == 0) {
+                                    continue
+                                }
+                                match (ensureArchiveMetadataObject(memberId, archive: archive)) {
+                                    case Some(childMetadata) =>
+                                        let memberJson = buildArchiveMetadataObjectJsonFromParts(
+                                            archive,
+                                            childMetadata,
+                                            true,
+                                            child.volume_no,
+                                            child.order_index,
+                                            includePages
+                                        )
+                                        if (memberJson.trimAscii().size > 0) {
+                                            w.jsonValue(memberJson)
+                                        }
+                                    case None => ()
+                                }
                             }
-                            let memberJson = buildArchiveMetadataObjectJsonFromParts(archive, memberTags, memberAssetsRaw, true, volumeNo, includePages)
-                            if (memberJson.trimAscii().size > 0) {
-                                w.jsonValue(memberJson)
-                            }
-                        case None => ()
-                    }
-                    volumeNo += 1
+                        }
+                        w.endArray()
+                        w.writeName("archive_count").writeValue(effectiveArchiveCount)
+                        w.writeName("pagecount").writeValue(effectivePageCount)
+                        w.writeName("progress").writeValue(progress)
+                        w.writeName("lastreadtime").writeValue(lastReadTime)
+                        w.writeName("isnew").writeValue(isNew)
+                        w.writeName("isfavorite").writeValue(isFavorite)
+                        w.writeName("created_at").writeValue(tankoubon.created_at)
+                        w.writeName("updated_at").writeValue(if (metadata.updated_at.trimAscii().size > 0) { metadata.updated_at } else { tankoubon.updated_at })
+                        writeLocatorObject(w, "tankoubon", tankoubonId)
+                        w.endObject()
+                        w.flush()
+                        return (true, String.fromUtf8(readToEnd(out)), "")
                 }
-                w.endArray()
-                w.endObject()
-                w.flush()
-                return (true, String.fromUtf8(readToEnd(out)), "")
         }
     }
 
@@ -797,19 +1017,11 @@ public class MetadataPatchService {
         if (key != "cover" && key != "backdrop" && key != "clearlogo") {
             return
         }
-
+        let _ = ensureArchiveMetadataObject(archiveId)
         let value = assetValue.trimAscii()
-        let oldAssetId = ArchiveDao.getArchiveAssetIdByKey(archiveId, key)
+        let oldAssetId = MetadataDao.getMetadataAssetId("archive", archiveId, key)
         if (value.size == 0) {
-            let cleared = if (key == "cover") {
-                let ok = ArchiveDao.updateCoverAssetId(archiveId, 0)
-                if (ok) {
-                    let _ = ArchiveDao.updateThumbHash(archiveId, "")
-                }
-                ok
-            } else {
-                ArchiveDao.updateArchiveAssetIdByKey(archiveId, key, 0)
-            }
+            let cleared = MetadataDao.setMetadataAssetId("archive", archiveId, key, 0)
             if (cleared && oldAssetId > 0) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
@@ -818,20 +1030,7 @@ public class MetadataPatchService {
 
         let directAssetId = parsePositiveAssetId(value)
         if (directAssetId > 0) {
-            let updated = if (key == "cover") {
-                let ok = ArchiveDao.updateCoverAssetId(archiveId, directAssetId)
-                if (ok) {
-                    let asset = AssetDao.getById(directAssetId)
-                    let thumbHash = asset.thumbhash.trimAscii()
-                    if (thumbHash.size > 0) {
-                        let _ = ArchiveDao.updateThumbHash(archiveId, thumbHash)
-                    }
-                }
-                ok
-            } else {
-                ArchiveDao.updateArchiveAssetIdByKey(archiveId, key, directAssetId)
-            }
-
+            let updated = MetadataDao.setMetadataAssetId("archive", archiveId, key, directAssetId)
             if (updated) {
                 if (oldAssetId > 0 && oldAssetId != directAssetId) {
                     PluginTaskService.deleteCoverAsset(oldAssetId)
@@ -860,7 +1059,7 @@ public class MetadataPatchService {
             "${archiveId}_${key}.avif"
         }
 
-        let (okInstall, newAssetId, thumbHash, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
+        let (okInstall, newAssetId, _, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
             value,
             pluginNamespace,
             assetKind,
@@ -871,16 +1070,7 @@ public class MetadataPatchService {
             return
         }
 
-        let updated = if (key == "cover") {
-            let ok = ArchiveDao.updateCoverAssetId(archiveId, newAssetId)
-            if (ok && thumbHash.trimAscii().size > 0) {
-                let _ = ArchiveDao.updateThumbHash(archiveId, thumbHash)
-            }
-            ok
-        } else {
-            ArchiveDao.updateArchiveAssetIdByKey(archiveId, key, newAssetId)
-        }
-
+        let updated = MetadataDao.setMetadataAssetId("archive", archiveId, key, newAssetId)
         if (updated) {
             if (oldAssetId > 0 && oldAssetId != newAssetId) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
@@ -896,15 +1086,11 @@ public class MetadataPatchService {
         if (key != "cover" && key != "backdrop" && key != "clearlogo") {
             return
         }
-
+        let _ = ensureTankoubonMetadataObject(tankoubonId)
         let value = assetValue.trimAscii()
-        let oldAssetId = TankoubonDao.getTankoubonAssetIdByKey(tankoubonId, key)
+        let oldAssetId = MetadataDao.getMetadataAssetId("tankoubon", tankoubonId, key)
         if (value.size == 0) {
-            let cleared = if (key == "cover") {
-                TankoubonDao.updateTankoubonCover(tankoubonId, 0)
-            } else {
-                TankoubonDao.updateTankoubonAssetIdByKey(tankoubonId, key, 0)
-            }
+            let cleared = MetadataDao.setMetadataAssetId("tankoubon", tankoubonId, key, 0)
             if (cleared && oldAssetId > 0) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
@@ -913,12 +1099,7 @@ public class MetadataPatchService {
 
         let directAssetId = parsePositiveAssetId(value)
         if (directAssetId > 0) {
-            let updated = if (key == "cover") {
-                TankoubonDao.updateTankoubonCover(tankoubonId, directAssetId)
-            } else {
-                TankoubonDao.updateTankoubonAssetIdByKey(tankoubonId, key, directAssetId)
-            }
-
+            let updated = MetadataDao.setMetadataAssetId("tankoubon", tankoubonId, key, directAssetId)
             if (updated) {
                 if (oldAssetId > 0 && oldAssetId != directAssetId) {
                     PluginTaskService.deleteCoverAsset(oldAssetId)
@@ -958,12 +1139,7 @@ public class MetadataPatchService {
             return
         }
 
-        let updated = if (key == "cover") {
-            TankoubonDao.updateTankoubonCover(tankoubonId, newAssetId)
-        } else {
-            TankoubonDao.updateTankoubonAssetIdByKey(tankoubonId, key, newAssetId)
-        }
-
+        let updated = MetadataDao.setMetadataAssetId("tankoubon", tankoubonId, key, newAssetId)
         if (updated) {
             if (oldAssetId > 0 && oldAssetId != newAssetId) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
@@ -1008,7 +1184,7 @@ public class MetadataPatchService {
 
         let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
         let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
-        let pageMetadata = ArchiveDao.getPageMetadata(archiveId)
+        let pageMetadata = MetadataDao.listPageMetadata(archiveId)
 
         var metadataByPath = HashMap<String, PageMetadataData>()
         var metadataByPage = HashMap<Int32, PageMetadataData>()
@@ -1060,13 +1236,13 @@ public class MetadataPatchService {
             return true
         }
 
-        let archiveInternalId = ArchiveDao.getArchiveInternalId(archiveId)
-        if (archiveInternalId <= 0) {
-            logWarn(taskId, "skip page patches: archive internal id missing archive=${archiveId}")
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) {
+            logWarn(taskId, "skip page patches: archive not found archive=${archiveId}")
             return false
         }
 
-        let existingPageMetadata = ArchivePageMetadataDao.getByArchiveId(archiveInternalId)
+        let existingPageMetadata = MetadataDao.listPageMetadata(archiveId)
         var metadataByPath = HashMap<String, PageMetadataData>()
         var metadataByPage = HashMap<Int32, PageMetadataData>()
         for (meta in existingPageMetadata) {
@@ -1108,7 +1284,7 @@ public class MetadataPatchService {
             }
 
             let item = PageMetadataData()
-            item.archive_id = archiveInternalId
+            item.archive_id = archive.internalId
             item.page_number = if (patch.page > 0) {
                 patch.page
             } else {
@@ -1164,8 +1340,7 @@ public class MetadataPatchService {
                 let directAssetId = parsePositiveAssetId(patchThumb)
                 if (directAssetId > 0) {
                     item.thumb_asset_id = directAssetId
-                    let asset = AssetDao.getById(directAssetId)
-                    item.thumbhash = asset.thumbhash.trimAscii()
+                    item.thumbhash = getAssetThumbhash(directAssetId)
                 } else if (pluginNamespace.trimAscii().size > 0) {
                     let oldThumbAssetId = item.thumb_asset_id
                     let pageToken = if (item.page_number > 0) {
@@ -1211,7 +1386,7 @@ public class MetadataPatchService {
             return true
         }
 
-        let ok = ArchivePageMetadataDao.insertOrUpdateBatch(items.toArray())
+        let ok = MetadataDao.upsertPageMetadataBatch(archiveId, items.toArray(), sourceNamespace: pluginNamespace)
         if (!ok) {
             for (assetId in cleanupNewAssetIds) {
                 if (assetId > 0) {
@@ -1235,10 +1410,17 @@ public class MetadataPatchService {
     }
 
     public static func applyArchiveMetadataPatch(taskId: Int64, archiveId: String, patch: ArchiveMetadataPatch, pluginNamespace: String): Bool {
-        var archive = ArchiveDao.getArchiveById(archiveId)
+        let archive = ArchiveDao.getArchiveById(archiveId)
         if (archive.id.size == 0) {
             logWarn(taskId, "archive not found when applying metadata patch: ${archiveId}")
             return false
+        }
+
+        let existingMetadata = match (ensureArchiveMetadataObject(archiveId)) {
+            case Some(data) => data
+            case None =>
+                logWarn(taskId, "archive metadata row missing: ${archiveId}")
+                return false
         }
 
         let (updatedAtFromTags, cleanedPatchTags) = if (patch.tagsProvided) {
@@ -1248,34 +1430,32 @@ public class MetadataPatchService {
         }
         let hasPatchUpdatedAt = patch.updatedAtProvided || updatedAtFromTags.trimAscii().size > 0
         let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
-
-        var changed = false
-        if (patch.titleProvided) {
-            let titleValue = patch.title.trimAscii()
-            if (archive.title != titleValue) {
-                archive.title = titleValue
-                changed = true
-            }
-        }
-        if (patch.summaryProvided && archive.summary != patch.summary) {
-            archive.summary = patch.summary
-            changed = true
-        }
-        if (hasPatchUpdatedAt && archive.updated_at != effectiveUpdatedAt) {
-            archive.updated_at = effectiveUpdatedAt
-            changed = true
+        let nextTitle = if (patch.titleProvided) { patch.title.trimAscii() } else { existingMetadata.title }
+        let nextDescription = if (patch.summaryProvided) { patch.summary } else { existingMetadata.description }
+        let nextUpdatedAt = if (hasPatchUpdatedAt) {
+            effectiveUpdatedAt
+        } else if (existingMetadata.updated_at.trimAscii().size > 0) {
+            existingMetadata.updated_at
+        } else {
+            archive.updated_at
         }
 
-        if (changed) {
-            let ok = ArchiveDao.update(archive)
-            if (!ok) {
-                logWarn(taskId, "archive update failed while applying metadata patch: ${archiveId}")
-                return false
-            }
+        let rootOk = MetadataDao.upsertRootMetadataObject(
+            "archive",
+            archiveId,
+            nextTitle,
+            nextDescription,
+            sourceNamespace: pluginNamespace,
+            createdAt: archive.created_at,
+            updatedAt: nextUpdatedAt
+        )
+        if (!rootOk) {
+            logWarn(taskId, "archive metadata update failed while applying metadata patch: ${archiveId}")
+            return false
         }
 
         if (patch.tagsProvided) {
-            let tagOk = TagDao.updateArchiveTags(archiveId, cleanedPatchTags)
+            let tagOk = MetadataDao.replaceMetadataTags("archive", archiveId, splitTagTokens(cleanedPatchTags))
             if (!tagOk) {
                 logWarn(taskId, "archive tag update failed: ${archiveId}")
             }
@@ -1290,9 +1470,73 @@ public class MetadataPatchService {
         if (patch.clearlogoProvided) {
             applyArchiveAssetFromOutput(taskId, archiveId, "clearlogo", patch.clearlogo, pluginNamespace)
         }
-
         if (patch.pages.size > 0) {
             return applyPagePatchesForArchive(taskId, archiveId, patch.pages, pluginNamespace)
+        }
+        return true
+    }
+
+    public static func applyTankoubonMetadataPatch(taskId: Int64, tankoubonId: String, patch: ArchiveMetadataPatch, pluginNamespace: String): Bool {
+        let tankoubon = match (TankoubonDao.getTankoubonById(tankoubonId)) {
+            case Some(data) => data
+            case None =>
+                logWarn(taskId, "tankoubon not found when applying metadata patch: ${tankoubonId}")
+                return false
+        }
+
+        let existingMetadata = match (ensureTankoubonMetadataObject(tankoubonId)) {
+            case Some(data) => data
+            case None =>
+                logWarn(taskId, "tankoubon metadata row missing: ${tankoubonId}")
+                return false
+        }
+
+        let (updatedAtFromTags, cleanedPatchTags) = if (patch.tagsProvided) {
+            extractUpdatedAtFromTags(patch.tags)
+        } else {
+            ("", patch.tags)
+        }
+        let hasPatchUpdatedAt = patch.updatedAtProvided || updatedAtFromTags.trimAscii().size > 0
+        let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
+        let nextTitle = if (patch.titleProvided) { patch.title.trimAscii() } else { existingMetadata.title }
+        let nextDescription = if (patch.summaryProvided) { patch.summary } else { existingMetadata.description }
+        let nextUpdatedAt = if (hasPatchUpdatedAt) {
+            effectiveUpdatedAt
+        } else if (existingMetadata.updated_at.trimAscii().size > 0) {
+            existingMetadata.updated_at
+        } else {
+            tankoubon.updated_at
+        }
+
+        let rootOk = MetadataDao.upsertRootMetadataObject(
+            "tankoubon",
+            tankoubonId,
+            nextTitle,
+            nextDescription,
+            sourceNamespace: pluginNamespace,
+            createdAt: tankoubon.created_at,
+            updatedAt: nextUpdatedAt
+        )
+        if (!rootOk) {
+            logWarn(taskId, "tankoubon metadata update failed while applying metadata patch: ${tankoubonId}")
+            return false
+        }
+
+        if (patch.tagsProvided) {
+            let tagOk = MetadataDao.replaceMetadataTags("tankoubon", tankoubonId, splitTagTokens(cleanedPatchTags))
+            if (!tagOk) {
+                logWarn(taskId, "tankoubon tag update failed: ${tankoubonId}")
+            }
+        }
+
+        if (patch.coverProvided) {
+            applyTankoubonAssetFromOutput(taskId, tankoubonId, "cover", patch.cover, pluginNamespace)
+        }
+        if (patch.backdropProvided) {
+            applyTankoubonAssetFromOutput(taskId, tankoubonId, "backdrop", patch.backdrop, pluginNamespace)
+        }
+        if (patch.clearlogoProvided) {
+            applyTankoubonAssetFromOutput(taskId, tankoubonId, "clearlogo", patch.clearlogo, pluginNamespace)
         }
         return true
     }

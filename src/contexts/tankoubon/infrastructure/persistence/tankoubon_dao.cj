@@ -70,6 +70,35 @@ public class TankoubonDao {
         return namespace == "source"
     }
 
+    private static func getArchivesInTankoubonWithConnection(conn: Connection, tankoubonId: String): Array<String> {
+        var arcids: ArrayList<String> = ArrayList<String>()
+        let stmt = conn.prepareStatement("""
+            SELECT a.arcid
+            FROM tankoubon_archives ta
+            JOIN tankoubons t ON t.id = ta.tankoubon_id
+            JOIN archives a ON a.id = ta.archive_id
+            WHERE t.tankoubon_id = ?
+            ORDER BY ta.sort_order, ta.id
+        """)
+        try {
+            stmt.set(0, tankoubonId)
+            let rs = stmt.query()
+            try {
+                while (rs.next()) {
+                    let arcid = rs.getOrNull<String>(0) ?? ""
+                    if (arcid != "") {
+                        arcids.add(arcid)
+                    }
+                }
+            } finally {
+                rs.close()
+            }
+        } finally {
+            stmt.close()
+        }
+        return arcids.toArray()
+    }
+
     /**
      * 获取所有Tankoubons
      */
@@ -77,7 +106,6 @@ public class TankoubonDao {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
-                
                 var tankoubons: ArrayList<TankoubonData> = ArrayList<TankoubonData>()
                 try {
                     let stmt = conn.prepareStatement(
@@ -99,7 +127,6 @@ public class TankoubonDao {
                                 tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
                                 tankoubon.created_at = rs.getOrNull<String>(9) ?? ""
                                 tankoubon.updated_at = rs.getOrNull<String>(10) ?? ""
-                                tankoubon.archives = getArchivesInTankoubon(tankoubon.tankoubon_id)
                                 tankoubons.add(tankoubon)
                             }
                         } finally {
@@ -107,6 +134,9 @@ public class TankoubonDao {
                         }
                     } finally {
                         stmt.close()
+                    }
+                    for (tankoubon in tankoubons) {
+                        tankoubon.archives = getArchivesInTankoubonWithConnection(conn, tankoubon.tankoubon_id)
                     }
                     return tankoubons.toArray()
                 } catch (e: Exception) {
@@ -128,8 +158,8 @@ public class TankoubonDao {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
-                
                 try {
+                    var resultOpt: Option<TankoubonData> = None
                     let stmt = conn.prepareStatement(
                         "SELECT id, tankoubon_id, name, summary, COALESCE(cover_asset_id, 0), COALESCE(CAST(assets AS TEXT), '{}'), COALESCE(auto_created, false), COALESCE(source_category_id, 0), COALESCE(source_relative_path, ''), created_at, updated_at FROM tankoubons WHERE tankoubon_id = ?")
                     try {
@@ -150,15 +180,19 @@ public class TankoubonDao {
                                 tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
                                 tankoubon.created_at = rs.getOrNull<String>(9) ?? ""
                                 tankoubon.updated_at = rs.getOrNull<String>(10) ?? ""
-                                tankoubon.archives = getArchivesInTankoubon(tankoubonId)
-                                return Some(tankoubon)
+                                resultOpt = Some(tankoubon)
                             }
-                            return None
                         } finally {
                             rs.close()
                         }
                     } finally {
                         stmt.close()
+                    }
+                    match (resultOpt) {
+                        case Some(tankoubon) =>
+                            tankoubon.archives = getArchivesInTankoubonWithConnection(conn, tankoubonId)
+                            return Some(tankoubon)
+                        case None => return None
                     }
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("查询Tankoubon失败", ("tankoubonId", tankoubonId), ("error", e.message))
@@ -752,6 +786,21 @@ public class TankoubonDao {
         }
     }
 
+    public static func getOwnTagsForTankoubon(tankoubonId: String): String {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return ""
+            case Some(conn) =>
+                try {
+                    return getTankoubonTagsForTankoubon(conn, tankoubonId)
+                } catch (_: Exception) {
+                    return ""
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+    }
+
     public static func getTankoubonCoverAssetId(tankoubonId: String): Int64 {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
@@ -846,34 +895,8 @@ public class TankoubonDao {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
-                
-                var arcids: ArrayList<String> = ArrayList<String>()
                 try {
-                    let stmt = conn.prepareStatement("""
-                        SELECT a.arcid
-                        FROM tankoubon_archives ta
-                        JOIN tankoubons t ON t.id = ta.tankoubon_id
-                        JOIN archives a ON a.id = ta.archive_id
-                        WHERE t.tankoubon_id = ?
-                        ORDER BY ta.sort_order, ta.id
-                    """)
-                    try {
-                        stmt.set(0, tankoubonId)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let arcid = rs.getOrNull<String>(0) ?? ""
-                                if (arcid != "") {
-                                    arcids.add(arcid)
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return arcids.toArray()
+                    return getArchivesInTankoubonWithConnection(conn, tankoubonId)
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("获取Tankoubon中的归档失败",
                         ("tankoubonId", tankoubonId), ("error", e.message))

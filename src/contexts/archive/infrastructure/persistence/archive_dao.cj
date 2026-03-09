@@ -132,7 +132,7 @@ public class ArchiveDao {
      * 带翻译扩展的精确标签匹配条件：
      * `tag$` 将匹配 tag 本身以及通过翻译检索到的原始标签（namespace:name）。
      */
-    private static func buildExactTagMatchConditionWithTranslations(tagToken: String, params: ArrayList<String>, tableAlias: String): String {
+    private static func buildExactTagMatchConditionWithTranslations(conn: Connection, tagToken: String, params: ArrayList<String>, tableAlias: String): String {
         var candidates: ArrayList<String> = ArrayList<String>()
         var seen: HashMap<String, Bool> = HashMap<String, Bool>()
 
@@ -143,7 +143,7 @@ public class ArchiveDao {
         }
 
         // 翻译命中标签（去重）
-        let translatedTags = TagDao.findTagsByTranslation(tagToken)
+        let translatedTags = TagDao.findTagsByTranslationWithConn(conn, tagToken)
         for (t in translatedTags) {
             match (seen.get(t)) {
                 case Some(_) => ()
@@ -489,7 +489,7 @@ public class ArchiveDao {
 
                         // `$`：标签完全匹配（硬性过滤条件，不参与 OR 相关度）
                         if (isExactTag) {
-                            whereConditions.add(buildExactTagMatchConditionWithTranslations(termValue, filterParams, "archives_with_tags"))
+                            whereConditions.add(buildExactTagMatchConditionWithTranslations(conn, termValue, filterParams, "archives_with_tags"))
                             continue
                         }
 
@@ -501,7 +501,7 @@ public class ArchiveDao {
                         var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archives_with_tags")
 
                         // 查询翻译匹配的标签，添加 OR 条件
-                        let translatedTags = TagDao.findTagsByTranslation(termValue)
+                        let translatedTags = TagDao.findTagsByTranslationWithConn(conn, termValue)
                         for (tagName in translatedTags) {
                             fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archives_with_tags")
                         }
@@ -531,7 +531,7 @@ public class ArchiveDao {
 
                         // `"xxx$"` 且不包含空格时，按标签完全匹配处理
                         if (isExactTag && !phraseValue.contains(" ")) {
-                            whereConditions.add(buildExactTagMatchConditionWithTranslations(phraseValue, filterParams, "archives_with_tags"))
+                            whereConditions.add(buildExactTagMatchConditionWithTranslations(conn, phraseValue, filterParams, "archives_with_tags"))
                             continue
                         }
 
@@ -542,7 +542,7 @@ public class ArchiveDao {
                         var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archives_with_tags")
 
                         // 查询翻译匹配的标签
-                        let translatedTags = TagDao.findTagsByTranslation(phraseValue)
+                        let translatedTags = TagDao.findTagsByTranslationWithConn(conn, phraseValue)
                         for (tagName in translatedTags) {
                             fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archives_with_tags")
                         }
@@ -562,7 +562,7 @@ public class ArchiveDao {
 
                         // `-xxx$`：排除包含该精确标签的归档
                         if (isExactTag) {
-                            whereConditions.add("NOT " + buildExactTagMatchConditionWithTranslations(excludeValue, filterParams, "archives_with_tags"))
+                            whereConditions.add("NOT " + buildExactTagMatchConditionWithTranslations(conn, excludeValue, filterParams, "archives_with_tags"))
                             continue
                         }
 
@@ -573,7 +573,7 @@ public class ArchiveDao {
                         var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archives_with_tags")
 
                         // 查询翻译匹配的标签
-                        let translatedTags = TagDao.findTagsByTranslation(excludeValue)
+                        let translatedTags = TagDao.findTagsByTranslationWithConn(conn, excludeValue)
                         for (tagName in translatedTags) {
                             fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archives_with_tags")
                         }
@@ -884,7 +884,7 @@ public class ArchiveDao {
 
                             // `$`：标签完全匹配（硬性过滤条件，不参与 OR 相关度）
                             if (isExactTag) {
-                                whereConditions.add(buildExactTagMatchConditionWithTranslations(termValue, filterParams, "archives_with_tags"))
+                                whereConditions.add(buildExactTagMatchConditionWithTranslations(conn, termValue, filterParams, "archives_with_tags"))
                                 continue
                             }
 
@@ -894,7 +894,7 @@ public class ArchiveDao {
                             filterParams.add(pattern)
                             var fieldCondition = "(archives_with_tags.title LIKE ? ESCAPE '\\' OR archives_with_tags.filename LIKE ? ESCAPE '\\' OR archives_with_tags.summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archives_with_tags")
 
-                            let translatedTags = TagDao.findTagsByTranslation(termValue)
+                            let translatedTags = TagDao.findTagsByTranslationWithConn(conn, termValue)
                             for (tagName in translatedTags) {
                                 fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archives_with_tags")
                             }
@@ -920,7 +920,7 @@ public class ArchiveDao {
 
                             // `"xxx$"` 且不包含空格时，按标签完全匹配处理
                             if (isExactTag && !phraseValue.contains(" ")) {
-                                whereConditions.add(buildExactTagMatchConditionWithTranslations(phraseValue, filterParams, "archives_with_tags"))
+                                whereConditions.add(buildExactTagMatchConditionWithTranslations(conn, phraseValue, filterParams, "archives_with_tags"))
                                 continue
                             }
 
@@ -930,7 +930,7 @@ public class ArchiveDao {
                             filterParams.add(pattern)
                             var fieldCondition = "(archives_with_tags.title LIKE ? ESCAPE '\\' OR archives_with_tags.filename LIKE ? ESCAPE '\\' OR archives_with_tags.summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archives_with_tags")
 
-                            let translatedTags = TagDao.findTagsByTranslation(phraseValue)
+                            let translatedTags = TagDao.findTagsByTranslationWithConn(conn, phraseValue)
                             for (tagName in translatedTags) {
                                 fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archives_with_tags")
                             }
@@ -948,7 +948,7 @@ public class ArchiveDao {
 
                             // `-xxx$`：排除包含该精确标签的归档
                             if (isExactTag) {
-                                whereConditions.add("NOT " + buildExactTagMatchConditionWithTranslations(excludeValue, filterParams, "archives_with_tags"))
+                                whereConditions.add("NOT " + buildExactTagMatchConditionWithTranslations(conn, excludeValue, filterParams, "archives_with_tags"))
                                 continue
                             }
 
@@ -958,7 +958,7 @@ public class ArchiveDao {
                             filterParams.add(pattern)
                             var fieldCondition = "(archives_with_tags.title LIKE ? ESCAPE '\\' OR archives_with_tags.filename LIKE ? ESCAPE '\\' OR archives_with_tags.summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archives_with_tags")
 
-                            let translatedTags = TagDao.findTagsByTranslation(excludeValue)
+                            let translatedTags = TagDao.findTagsByTranslationWithConn(conn, excludeValue)
                             for (tagName in translatedTags) {
                                 fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archives_with_tags")
                             }

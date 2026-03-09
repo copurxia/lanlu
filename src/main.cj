@@ -62,6 +62,7 @@ main(): Int64 {
     MigrationRegistry.register(V008_ArchivesCategoryPathFilenameIndex())
     MigrationRegistry.register(V009_ArchivePageMetadata())
     MigrationRegistry.register(V010_ArchiveTankoubonAssetsJson())
+    MigrationRegistry.register(V011_UnifiedMetadataStore())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {

@@ -1,4 +1,4 @@
-import type { Archive, ArchiveAssets, MetadataObject, MetadataPagePatch } from './archive';
+import type { Archive, ArchiveAssets, MetadataLocator, MetadataObject, MetadataPagePatch } from './archive';
 
 export interface Tankoubon {
   tankoubon_id: string;
@@ -31,14 +31,18 @@ export interface TankoubonCreateRequest {
 }
 
 export interface TankoubonMemberMetadataPatch extends MetadataObject {
+  entity_type?: string;
+  entity_id?: string;
   archive_id?: string;
   volume_no?: number;
+  order_index?: number;
   summary?: string;
   updated_at?: string;
   cover?: string;
   backdrop?: string;
   clearlogo?: string;
   pages?: MetadataPagePatch[];
+  locator?: MetadataLocator;
 }
 
 export interface TankoubonMetadata extends MetadataObject {
@@ -49,6 +53,7 @@ export interface TankoubonMetadata extends MetadataObject {
   summary: string;
   tags: string[];
   assets?: ArchiveAssets;
+  children: TankoubonMemberMetadataPatch[];
   archive: TankoubonMemberMetadataPatch[];
   archives: string[];
   archive_count?: number;
@@ -61,7 +66,6 @@ export interface TankoubonMetadata extends MetadataObject {
   backdrop?: string;
   clearlogo?: string;
 }
-
 
 export interface TankoubonResponse {
   filtered: number;

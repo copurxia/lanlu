@@ -82,16 +82,22 @@ public class MetadataPluginCallbackRunner {
                     failAndMaybeEnqueueFallback(taskId, "Tankoubon not found when updating", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
                     return
                 case Some(existing) =>
-                    let updatedName = if (parsed.titleProvided) { newTitle } else { existing.name }
-                    let updatedSummary = if (parsed.summaryProvided) { newSummary } else { existing.summary }
-
-                    let ok = TankoubonDao.updateTankoubon(targetId, updatedName, updatedSummary)
-                    if (!ok) {
-                        failAndMaybeEnqueueFallback(taskId, "Failed to update tankoubon metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
-                        return
-                    }
+                    var topPatch = MetadataPatchService.buildArchivePatchFromParsed(parsed)
                     if (parsed.tagsProvided) {
-                        let _ = TankoubonDao.updateTankoubonTags(targetId, newTags)
+                        topPatch.tags = newTags
+                        topPatch.tagsProvided = true
+                    }
+                    if (pluginUpdatedAt.size > 0) {
+                        topPatch.updatedAt = pluginUpdatedAt
+                        topPatch.updatedAtProvided = true
+                    }
+                    if (parsed.backdropProvided) {
+                        topPatch.backdrop = newBackdrop
+                        topPatch.backdropProvided = true
+                    }
+                    if (parsed.clearlogoProvided) {
+                        topPatch.clearlogo = newClearlogo
+                        topPatch.clearlogoProvided = true
                     }
 
                     var effectiveTankCover = newCover.trimAscii()
@@ -104,15 +110,15 @@ public class MetadataPluginCallbackRunner {
                             }
                         }
                     }
+                    if (effectiveTankCover.size > 0 && !topPatch.coverProvided) {
+                        topPatch.cover = effectiveTankCover
+                        topPatch.coverProvided = true
+                    }
 
-                    if (parsed.coverProvided || effectiveTankCover.size > 0) {
-                        MetadataPatchService.applyTankoubonAssetFromOutput(taskId, targetId, "cover", effectiveTankCover, resolvedNamespace)
-                    }
-                    if (parsed.backdropProvided) {
-                        MetadataPatchService.applyTankoubonAssetFromOutput(taskId, targetId, "backdrop", newBackdrop, resolvedNamespace)
-                    }
-                    if (parsed.clearlogoProvided) {
-                        MetadataPatchService.applyTankoubonAssetFromOutput(taskId, targetId, "clearlogo", newClearlogo, resolvedNamespace)
+                    let ok = MetadataPatchService.applyTankoubonMetadataPatch(taskId, targetId, topPatch, resolvedNamespace)
+                    if (!ok) {
+                        failAndMaybeEnqueueFallback(taskId, "Failed to update tankoubon metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
+                        return
                     }
 
                     // Optional: plugin can return per-archive metadata patches for this Tankoubon.

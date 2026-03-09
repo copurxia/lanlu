@@ -2,9 +2,9 @@ package lanlu.contexts.tankoubon.interfaces.http
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 
 import ignite.*
-import std.convert.*
 import lanlu.contexts.tankoubon.domain.*
 import lanlu.contexts.plugin.application.*
+import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.infrastructure.middleware.*
 import std.collection.*
@@ -70,7 +70,26 @@ public class TankoubonController {
 
         let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
         let includePages = includePagesRaw == "1" || includePagesRaw == "true"
-        let (okMetadata, metadataJson, metadataErr) = MetadataPatchService.buildTankoubonMetadataObjectJson(id, includePages: includePages)
+        let tank = match (AuthMiddleware.optionalUser(ctx)) {
+            case Some(userId) => TankoubonModel.getTankoubonByIdWithUser(id, userId)
+            case None => TankoubonModel.getTankoubonById(id)
+        }
+        if (tank.id.trimAscii().size == 0) {
+            ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+            ctx.json("{\"error\":\"Tankoubon not found\",\"operation\":\"get_tankoubon_metadata\",\"success\":0}")
+            return
+        }
+        let (okMetadata, metadataJson, metadataErr) = MetadataPatchService.buildTankoubonMetadataObjectJson(
+            id,
+            includePages: includePages,
+            includeArchiveDetails: false,
+            archiveCount: tank.archive_count,
+            pageCount: tank.pagecount,
+            progress: tank.progress,
+            isNew: tank.isnew,
+            isFavorite: tank.isfavorite,
+            lastReadTime: tank.last_read_time
+        )
         if (!okMetadata) {
             let errorText = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Tankoubon not found" }
             ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
@@ -108,20 +127,9 @@ public class TankoubonController {
                 return
             case Some(existing) =>
                 let namespace = MetadataPatchService.extractMetadataNamespace(requestBody)
-                let coverAssetId = MetadataPatchService.extractCoverAssetId(requestBody)
-                let updatedName = if (parsed.titleProvided) { parsed.title } else { existing.name }
-                let updatedSummary = if (parsed.summaryProvided) { parsed.summary } else { existing.summary }
-
-                var success = TankoubonDao.updateTankoubon(id, updatedName, updatedSummary)
-                if (success && parsed.tagsProvided) {
-                    success = TankoubonDao.updateTankoubonTags(id, parsed.tags)
-                }
-                if (success && coverAssetId >= 0) {
-                    let _ = TankoubonDao.updateTankoubonCover(id, coverAssetId)
-                }
-
-                var effectiveCover = parsed.cover.trimAscii()
-                if (effectiveCover.size == 0 && !parsed.coverProvided) {
+                var topPatch = MetadataPatchService.buildArchivePatchFromParsed(parsed)
+                var effectiveCover = topPatch.cover.trimAscii()
+                if (effectiveCover.size == 0 && !topPatch.coverProvided) {
                     for (patch in parsed.archives) {
                         let candidate = patch.cover.trimAscii()
                         if (candidate.size > 0) {
@@ -130,15 +138,12 @@ public class TankoubonController {
                         }
                     }
                 }
-                if (success && (parsed.coverProvided || effectiveCover.size > 0)) {
-                    MetadataPatchService.applyTankoubonAssetFromOutput(0, id, "cover", effectiveCover, namespace)
+                if (effectiveCover.size > 0 && !topPatch.coverProvided) {
+                    topPatch.cover = effectiveCover
+                    topPatch.coverProvided = true
                 }
-                if (success && parsed.backdropProvided) {
-                    MetadataPatchService.applyTankoubonAssetFromOutput(0, id, "backdrop", parsed.backdrop, namespace)
-                }
-                if (success && parsed.clearlogoProvided) {
-                    MetadataPatchService.applyTankoubonAssetFromOutput(0, id, "clearlogo", parsed.clearlogo, namespace)
-                }
+
+                var success = MetadataPatchService.applyTankoubonMetadataPatch(0, id, topPatch, namespace)
 
                 let memberArchiveIds = TankoubonDao.getArchivesInTankoubon(id)
                 let memberSet = HashSet<String>()
@@ -195,9 +200,25 @@ public class TankoubonController {
      */
     public static func deleteTankoubon(ctx: Ctx) {
         let id = ctx.paramsOpt("id") ?? ""
-        
+        let assetIds = HashSet<Int64>()
+        match (MetadataDao.getMetadataObject("tankoubon", id)) {
+            case Some(metadata) =>
+                for (asset in metadata.assets) {
+                    if (asset.asset_id > 0) {
+                        assetIds.add(asset.asset_id)
+                    }
+                }
+            case None => ()
+        }
+
         let success = TankoubonModel.deleteTankoubon(id)
         if (success) {
+            let _ = MetadataDao.deleteEntity("tankoubon", id)
+            for (assetId in assetIds) {
+                if (assetId > 0) {
+                    PluginTaskService.deleteCoverAsset(assetId)
+                }
+            }
             let successResponse = "{\"error\":\"\",\"operation\":\"delete_tankoubon\",\"success\":1,\"successMessage\":null}"
             ctx.json(successResponse)
         } else {

@@ -133,13 +133,15 @@ public class UserTokenDao {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
-                
                 try {
                     let stmt = conn.prepareStatement("UPDATE user_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?")
-                    stmt.set(0, tokenId)
-                    stmt.update()
-                    stmt.close()
-                    return true
+                    try {
+                        stmt.set(0, tokenId)
+                        stmt.update()
+                        return true
+                    } finally {
+                        stmt.close()
+                    }
                 } catch (_: Exception) {
                     return false
                 } finally {
