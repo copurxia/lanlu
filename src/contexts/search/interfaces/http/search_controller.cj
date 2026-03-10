@@ -161,12 +161,11 @@ public class SearchController {
                         w.startObject()
                         w.writeName("type").writeValue("tankoubon")
                         w.writeName("tankoubon_id").writeValue(agg.tankoubon_id)
-                        w.writeName("name").writeValue(agg.name)
-                        w.writeName("summary").writeValue(agg.summary)
-                        w.writeName("cover_asset_id").writeValue(agg.cover_asset_id)
+                        w.writeName("title").writeValue(agg.name)
+                        w.writeName("description").writeValue(agg.summary)
                         writeArchiveAssetsJson(w, agg.assets_raw)
                         w.writeName("tags").writeValue(translatedTags)
-                        w.writeName("archives")
+                        w.writeName("children")
                         w.startArray()
                         match (tankArchivesCache.get(tid)) {
                             case Some(archives) =>
@@ -356,12 +355,11 @@ public class SearchController {
                         w.startObject()
                         w.writeName("type").writeValue("tankoubon")
                         w.writeName("tankoubon_id").writeValue(tankoubon.tankoubon_id)
-                        w.writeName("name").writeValue(tankoubon.name)
-                        w.writeName("summary").writeValue(tankoubon.summary)
-                        w.writeName("cover_asset_id").writeValue(tankoubon.cover_asset_id)
+                        w.writeName("title").writeValue(tankoubon.name)
+                        w.writeName("description").writeValue(tankoubon.summary)
                         writeArchiveAssetsJson(w, tankoubon.assets_raw)
                         w.writeName("tags").writeValue(translatedTankTags)
-                        w.writeName("archives")
+                        w.writeName("children")
                         w.startArray()
                         match (tankoubonArchivesCache.get(itemId)) {
                             case Some(tankoubonArchives) =>
@@ -442,7 +440,7 @@ public class SearchController {
                         case None => "{}"
                     }
                     writeArchiveAssetsJson(w, assetsRaw)
-                    w.writeName("summary").writeValue(archive.summary)
+                    w.writeName("description").writeValue(archive.summary)
                     w.writeName("tags").writeValue(translatedArchiveTags)
                     w.writeName("title").writeValue(archive.title)
                     w.endObject()
@@ -653,12 +651,11 @@ public class SearchController {
                         w.startObject()
                         w.writeName("type").writeValue("tankoubon")
                         w.writeName("tankoubon_id").writeValue(tankoubon.tankoubon_id)
-                        w.writeName("name").writeValue(tankoubon.name)
-                        w.writeName("summary").writeValue(tankoubon.summary)
-                        w.writeName("cover_asset_id").writeValue(tankoubon.cover_asset_id)
+                        w.writeName("title").writeValue(tankoubon.name)
+                        w.writeName("description").writeValue(tankoubon.summary)
                         writeArchiveAssetsJson(w, tankoubon.assets_raw)
                         w.writeName("tags").writeValue(translatedTankTags)
-                        w.writeName("archives")
+                        w.writeName("children")
                         w.startArray()
                         match (tankoubonArchivesCache.get(itemId)) {
                             case Some(tankoubonArchives) =>
@@ -739,7 +736,7 @@ public class SearchController {
                         case None => "{}"
                     }
                     writeArchiveAssetsJson(w, assetsRaw)
-                    w.writeName("summary").writeValue(archive.summary)
+                    w.writeName("description").writeValue(archive.summary)
                     w.writeName("tags").writeValue(translatedRandomTags)
                     w.writeName("title").writeValue(archive.title)
                     w.endObject()

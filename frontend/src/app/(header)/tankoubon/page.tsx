@@ -201,9 +201,9 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
               : ''}
           </div>
 
-          {archive.summary && (
-            <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={archive.summary}>
-              {archive.summary}
+          {archive.description && (
+            <p className="mt-2 text-sm text-muted-foreground line-clamp-2" title={archive.description}>
+              {archive.description}
             </p>
           )}
 
@@ -338,25 +338,17 @@ function TankoubonDetailContent() {
     try {
       setLoading(true);
       const data = await TankoubonService.getMetadata(tankoubonId);
-      const normalizedName = data.name || data.title || '';
-      const normalizedSummary = data.summary || data.description || '';
+      const normalizedName = data.title || '';
+      const normalizedSummary = data.description || '';
       const normalizedTags = Array.isArray(data.tags) ? data.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : [];
-      const memberMetadata = Array.isArray(data.children) && data.children.length > 0
-        ? data.children
-        : (Array.isArray(data.archive) ? data.archive : []);
+      const memberMetadata = Array.isArray(data.children) ? data.children : [];
       const nextData: TankoubonMetadata = {
         ...data,
         tankoubon_id: data.tankoubon_id || tankoubonId,
-        name: normalizedName,
-        title: data.title || normalizedName,
-        summary: normalizedSummary,
-        description: data.description || normalizedSummary,
+        title: normalizedName,
+        description: normalizedSummary,
         tags: normalizedTags,
         children: memberMetadata,
-        archive: memberMetadata,
-        archives: Array.isArray(data.archives) && data.archives.length > 0
-          ? data.archives
-          : memberMetadata.map((item) => String(item.archive_id || item.entity_id || '').trim()).filter(Boolean),
         archive_count: typeof data.archive_count === 'number' ? data.archive_count : memberMetadata.length,
       };
 
@@ -508,7 +500,7 @@ function TankoubonDetailContent() {
       const childrenPayload = metadataArchivePatches.map((item) => ({
         title: item.title || '',
         type: 0,
-        description: item.summary || item.description || '',
+        description: item.description || '',
         tags: Array.isArray(item.tags)
           ? item.tags
           : String(item.tags || '')
@@ -522,7 +514,6 @@ function TankoubonDetailContent() {
             clearlogo: item.clearlogo || undefined,
           },
         ),
-        archive_id: item.archive_id,
         entity_id: item.entity_id,
         entity_type: item.entity_type || 'archive',
         volume_no: item.volume_no,
@@ -546,7 +537,6 @@ function TankoubonDetailContent() {
         ),
         metadata_namespace: selectedMetadataPlugin || undefined,
         children: childrenPayload,
-        archive: childrenPayload,
       });
       setEditDialogOpen(false);
       setMetadataArchivePatches([]);
@@ -725,7 +715,7 @@ function TankoubonDetailContent() {
       const archiveMembers = metadataArchivePatches.map((item) => ({
         title: item.title || '',
         type: 0,
-        description: item.summary || item.description || '',
+        description: item.description || '',
         tags: Array.isArray(item.tags)
           ? item.tags
           : String(item.tags || '')
@@ -740,8 +730,6 @@ function TankoubonDetailContent() {
           },
         ),
         children: [],
-        archive: [],
-        archive_id: item.archive_id,
         entity_id: item.entity_id,
         entity_type: item.entity_type || 'archive',
         volume_no: item.volume_no,
@@ -784,7 +772,6 @@ function TankoubonDetailContent() {
             tags: metadataTags,
             assets: rootAssets,
             children: archiveMembers,
-            archive: archiveMembers,
           },
         }
       );
@@ -814,7 +801,7 @@ function TankoubonDetailContent() {
         const nextCover = readMetadataAssetValue(data.assets, 'cover');
         const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
         const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
-        const nextArchives = Array.isArray(data.children) ? data.children : (Array.isArray(data.archive) ? data.archive : []);
+        const nextArchives = Array.isArray(data.children) ? data.children : [];
         const applyAssetPreview = (
           rawValue: string,
           setPathValue: (next: string) => void,
@@ -843,7 +830,7 @@ function TankoubonDetailContent() {
         setMetadataArchivePatches(
           nextArchives
             .map((item: unknown) => normalizeTankoubonMemberMetadataPatch(item))
-            .filter((item: TankoubonMemberMetadataPatch) => item.archive_id || item.volume_no)
+            .filter((item: TankoubonMemberMetadataPatch) => item.entity_id || item.volume_no)
         );
       } catch {
         // ignore parse errors
@@ -930,7 +917,11 @@ function TankoubonDetailContent() {
       });
 
       // Filter out archives already in this tankoubon
-      const existingArcids = new Set(tankoubon?.archives || []);
+      const existingArcids = new Set(
+        (tankoubon?.children || [])
+          .map((item) => String(item.entity_id || '').trim())
+          .filter(Boolean)
+      );
       const filtered = result.data
         .filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item)
         .filter((a) => !existingArcids.has(a.arcid));
@@ -1061,7 +1052,7 @@ function TankoubonDetailContent() {
                     {coverUrl ? (
                       <Image
                         src={coverUrl}
-                        alt={tankoubon.name || ''}
+                        alt={tankoubon.title || ''}
                         fill
                         className="object-cover"
                         sizes="(max-width: 640px) 128px, (max-width: 768px) 144px, (max-width: 1024px) 160px, 176px"
@@ -1081,7 +1072,7 @@ function TankoubonDetailContent() {
                       {t('tankoubon.collection')}
                     </Badge>
                     <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight break-words">
-                      {tankoubon.name}
+                      {tankoubon.title}
                     </h1>
                   </div>
 
@@ -1107,9 +1098,9 @@ function TankoubonDetailContent() {
 
                   {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}
                   <div className="hidden sm:block">
-                    {tankoubon.summary ? (
+                    {tankoubon.description ? (
                       <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-2">
-                        {tankoubon.summary}
+                        {tankoubon.description}
                       </p>
                     ) : null}
 
@@ -1160,9 +1151,9 @@ function TankoubonDetailContent() {
 
               {/* Mobile: summary/tags span full width (avoid an empty left column under the cover). */}
               <div className="sm:hidden w-full">
-                {tankoubon.summary ? (
+                {tankoubon.description ? (
                   <p className="text-sm text-muted-foreground max-w-3xl line-clamp-2">
-                    {tankoubon.summary}
+                    {tankoubon.description}
                   </p>
                 ) : null}
 
@@ -1186,7 +1177,7 @@ function TankoubonDetailContent() {
             <div className="mx-auto mb-3 h-1.5 w-12 rounded-full bg-muted" />
             <SheetHeader className="mb-3">
               <SheetTitle>{t('common.actions')}</SheetTitle>
-              <div className="text-sm text-muted-foreground line-clamp-2">{tankoubon.name}</div>
+              <div className="text-sm text-muted-foreground line-clamp-2">{tankoubon.title}</div>
             </SheetHeader>
 
             <div className="space-y-2">

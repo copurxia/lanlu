@@ -29,7 +29,7 @@ type ActiveTab = 'favorites' | 'history';
 type FavoriteItem = Archive | Tankoubon;
 
 function getItemTitle(item: FavoriteItem): string {
-  return 'arcid' in item ? item.title : item.name;
+  return 'arcid' in item ? item.title : item.title;
 }
 
 function timeToMs(v: unknown): number {

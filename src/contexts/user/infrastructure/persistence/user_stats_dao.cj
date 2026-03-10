@@ -263,7 +263,7 @@ public class UserStatsDao {
                                awt.created_at, awt.updated_at, awt.relative_path, awt.file_size,
                                awt.pagecount, uas.updated_at as last_read_time,
                                COALESCE(uas.progress, 0) as progress, awt.tags
-                        FROM archives_with_tags awt
+                        FROM archive_metadata_search awt
                         INNER JOIN archives a ON awt.arcid = a.arcid
                         INNER JOIN user_archive_status uas ON a.id = uas.archive_id
                         WHERE uas.user_id = ? AND uas.is_new = false
@@ -315,7 +315,7 @@ public class UserStatsDao {
                                awt.pagecount,
                                COALESCE(uas.updated_at, '1970-01-01 00:00:00') as last_read_time,
                                COALESCE(uas.progress, 0) as progress, awt.tags
-                        FROM archives_with_tags awt
+                        FROM archive_metadata_search awt
                         INNER JOIN archives a ON awt.arcid = a.arcid
                         INNER JOIN user_favorites uf ON a.id = uf.archive_id
                         LEFT JOIN user_archive_status uas ON a.id = uas.archive_id AND uas.user_id = uf.user_id

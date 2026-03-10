@@ -46,7 +46,7 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
       const windowSize = Math.max(1, maxPreviewArchivesPerTankoubon);
       const results = await Promise.allSettled(
         tanks.map(async (tank) => {
-          const arcids = (tank.archives || []).filter((id) => id);
+          const arcids = (tank.children || []).filter((id) => id);
           const idx = archiveId ? arcids.indexOf(archiveId) : -1;
           const start = idx >= 0 ? Math.max(0, idx - Math.floor(windowSize / 2)) : 0;
 

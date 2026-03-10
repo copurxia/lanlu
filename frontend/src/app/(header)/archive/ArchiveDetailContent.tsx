@@ -245,7 +245,7 @@ export function ArchiveDetailContent() {
   useEffect(() => {
     if (!metadata) return;
     setEditTitle(metadata.title || '');
-    setEditSummary(metadata.description || metadata.summary || '');
+    setEditSummary(metadata.description || '');
     setEditTags(tags.map(toCanonicalTag));
     setEditCover('');
     setEditBackdrop('');
@@ -722,9 +722,9 @@ export function ArchiveDetailContent() {
 
                       {/* On mobile, summary/tags span full width below (to avoid an empty left column under the cover). */}
                       <div className="hidden sm:block">
-                        {(metadata.description || metadata.summary) ? (
+                        {metadata.description ? (
                           <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                            {metadata.description || metadata.summary}
+                            {metadata.description}
                           </p>
                         ) : (
                           <p className="mt-2 text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
@@ -741,9 +741,9 @@ export function ArchiveDetailContent() {
 
                   {/* Mobile: show summary/tags full width (not constrained to the title column). */}
                   <div className="sm:hidden w-full">
-                    {(metadata.description || metadata.summary) ? (
+                    {metadata.description ? (
                       <p className="text-sm text-muted-foreground max-w-3xl line-clamp-3">
-                        {metadata.description || metadata.summary}
+                        {metadata.description}
                       </p>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>

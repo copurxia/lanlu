@@ -2,15 +2,11 @@ import type { Archive, ArchiveAssets, MetadataLocator, MetadataObject, MetadataP
 
 export interface Tankoubon {
   tankoubon_id: string;
-  name: string;
-  summary: string;
+  title: string;
+  description: string;
   tags: string;
-  cover_asset_id?: number;
   assets?: ArchiveAssets;
-  cover?: string;
-  backdrop?: string;
-  clearlogo?: string;
-  archives?: string[];
+  children?: string[];
   pagecount?: number;
   progress?: number;
   lastreadtime?: string;
@@ -33,10 +29,8 @@ export interface TankoubonCreateRequest {
 export interface TankoubonMemberMetadataPatch extends MetadataObject {
   entity_type?: string;
   entity_id?: string;
-  archive_id?: string;
   volume_no?: number;
   order_index?: number;
-  summary?: string;
   updated_at?: string;
   cover?: string;
   backdrop?: string;
@@ -47,15 +41,11 @@ export interface TankoubonMemberMetadataPatch extends MetadataObject {
 
 export interface TankoubonMetadata extends MetadataObject {
   tankoubon_id: string;
-  name: string;
-  title?: string;
-  description?: string;
-  summary: string;
+  title: string;
+  description: string;
   tags: string[];
   assets?: ArchiveAssets;
   children: TankoubonMemberMetadataPatch[];
-  archive: TankoubonMemberMetadataPatch[];
-  archives: string[];
   archive_count?: number;
   pagecount?: number;
   progress?: number;

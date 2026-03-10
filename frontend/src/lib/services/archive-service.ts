@@ -42,7 +42,7 @@ export type MetadataPluginAssetInput = MetadataAssetInput;
 
 export interface MetadataPluginInputMetadata extends MetadataObject {
   assets?: MetadataPluginAssetInput[];
-  archive?: MetadataPluginInputMetadata[];
+  children?: MetadataPluginInputMetadata[];
   pages?: MetadataPagePatchInput[];
 }
 
@@ -52,11 +52,12 @@ export interface MetadataPluginRunOptions {
 }
 
 export interface MetadataPagePatchInput {
-  path?: string;
+  page_number?: number;
+  entry_path?: string;
   title?: string;
   description?: string;
   thumb?: string;
-  sort?: number;
+  order_index?: number;
   hidden_in_files?: boolean;
 }
 
@@ -80,7 +81,11 @@ export class ArchiveService {
   }
 
   private static normalizeArchiveItem(item: Archive): Archive {
-    return normalizeArchivePayload(item);
+    const normalized = normalizeArchivePayload(item);
+    return {
+      ...normalized,
+      description: String((normalized as any).description || '').trim(),
+    };
   }
 
   private static normalizeMixedItems(items: unknown[]): Array<Archive | Tankoubon> {
@@ -88,9 +93,14 @@ export class ArchiveService {
       if (this.isArchiveItem(item)) {
         return this.normalizeArchiveItem(item);
       }
-      const tank = item as Tankoubon & { assets?: unknown };
+      const tank = item as Tankoubon & { assets?: unknown; children?: unknown };
       return {
         ...tank,
+        title: String((tank as any).title || '').trim(),
+        description: String((tank as any).description || '').trim(),
+        children: Array.isArray(tank.children)
+          ? tank.children.map((value) => String(value || '').trim()).filter(Boolean)
+          : [],
         assets: normalizeArchiveAssets(tank.assets),
       };
     });

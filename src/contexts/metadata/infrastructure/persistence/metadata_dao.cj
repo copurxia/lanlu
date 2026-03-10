@@ -6,7 +6,6 @@ import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
-import lanlu.contexts.archive.infrastructure.persistence.PageMetadataData
 
 public class MetadataAssetData {
     public var slot: String = ""

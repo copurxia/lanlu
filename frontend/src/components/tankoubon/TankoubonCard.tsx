@@ -18,7 +18,7 @@ export function TankoubonCard({
   disableContentVisibility = false,
 }: TankoubonCardProps) {
   const { t } = useLanguage();
-  const firstArchiveId = tankoubon.archives?.[0];
+  const firstArchiveId = tankoubon.children?.[0];
   const coverAssetId = getCoverAssetId(tankoubon) ?? 0;
 
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
@@ -28,11 +28,11 @@ export function TankoubonCard({
   return (
     <BaseMediaCard
       id={tankoubon.tankoubon_id}
-      title={tankoubon.name}
+      title={tankoubon.title}
       thumbnailId={firstArchiveId || ''}
       thumbnailAssetId={coverAssetId}
       tags={tankoubon.tags}
-      summary={tankoubon.summary}
+      summary={tankoubon.description}
       pagecount={tankoubon.pagecount || 0}
       progress={tankoubon.progress}
       isnew={tankoubon.isnew}

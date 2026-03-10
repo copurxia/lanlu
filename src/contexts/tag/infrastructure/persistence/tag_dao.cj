@@ -172,28 +172,66 @@ public class TagDao {
             case None => false
             case Some(conn) =>
                 try {
-                    // 首先获取档案的内部ID
-                    let getArchiveIdStmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
-                    var archiveInternalId: Int64 = 0
+                    // Ensure archive root metadata exists and resolve metadata id.
+                    var metadataId: Int64 = 0
+                    let getMetadataStmt = conn.prepareStatement("""
+                        SELECT id
+                        FROM metadata_objects
+                        WHERE entity_type = 'archive' AND entity_id = ?
+                        LIMIT 1
+                    """)
                     try {
-                        getArchiveIdStmt.set(0, archiveId)
-                        let archiveIdResult = getArchiveIdStmt.query()
+                        getMetadataStmt.set(0, archiveId)
+                        let rs = getMetadataStmt.query()
                         try {
-                            if (!archiveIdResult.next()) {
-                                return false
+                            if (rs.next()) {
+                                metadataId = rs.getOrNull<Int64>(0) ?? 0
                             }
-                            archiveInternalId = archiveIdResult.getOrNull<Int64>(0) ?? 0
                         } finally {
-                            archiveIdResult.close()
+                            rs.close()
                         }
                     } finally {
-                        getArchiveIdStmt.close()
+                        getMetadataStmt.close()
                     }
 
-                    // 删除现有的标签关联
-                    let deleteStmt = conn.prepareStatement("DELETE FROM archive_tags WHERE archive_id = ?")
+                    if (metadataId <= 0) {
+                        let createMetadataStmt = conn.prepareStatement("""
+                            INSERT INTO metadata_objects (
+                                entity_type, entity_id, title, description, created_at, updated_at
+                            )
+                            SELECT
+                                'archive',
+                                a.arcid,
+                                COALESCE(a.title, ''),
+                                COALESCE(a.summary, ''),
+                                a.created_at,
+                                a.updated_at
+                            FROM archives a
+                            WHERE a.arcid = ?
+                            RETURNING id
+                        """)
+                        try {
+                            createMetadataStmt.set(0, archiveId)
+                            let rs = createMetadataStmt.query()
+                            try {
+                                if (rs.next()) {
+                                    metadataId = rs.getOrNull<Int64>(0) ?? 0
+                                }
+                            } finally {
+                                rs.close()
+                            }
+                        } finally {
+                            createMetadataStmt.close()
+                        }
+                    }
+                    if (metadataId <= 0) {
+                        return false
+                    }
+
+                    // Delete existing tags for this archive metadata object.
+                    let deleteStmt = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id = ?")
                     try {
-                        deleteStmt.set(0, archiveInternalId)
+                        deleteStmt.set(0, metadataId)
                         deleteStmt.update()
                     } finally {
                         deleteStmt.close()
@@ -210,13 +248,17 @@ public class TagDao {
                     // 为每个标签创建或获取标签ID，并建立关联
                     for (tag in tags) {
                         let (namespace, name) = parseTagName(tag)
-                        let tagId = getOrCreateTagInternal(conn, namespace, name)
+                        let _ = getOrCreateTagInternal(conn, namespace, name)
+                        let normalizedTag = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                        if (normalizedTag.trimAscii().size == 0) {
+                            continue
+                        }
 
-                        // 建立档案和标签的关联
-                        let insertRelationStmt = conn.prepareStatement("INSERT INTO archive_tags (archive_id, tag_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
+                        // Write unified relation into metadata_tags.
+                        let insertRelationStmt = conn.prepareStatement("INSERT INTO metadata_tags (metadata_id, tag) VALUES (?, ?) ON CONFLICT DO NOTHING")
                         try {
-                            insertRelationStmt.set(0, archiveInternalId)
-                            insertRelationStmt.set(1, tagId)
+                            insertRelationStmt.set(0, metadataId)
+                            insertRelationStmt.set(1, normalizedTag)
                             insertRelationStmt.update()
                         } finally {
                             insertRelationStmt.close()
@@ -262,9 +304,14 @@ public class TagDao {
         match (connOpt) {
             case None => ""
             case Some(conn) =>
-                
                 try {
-                    let stmt = conn.prepareStatement("SELECT tags FROM archives_with_tags WHERE arcid = ?")
+                    let stmt = conn.prepareStatement("""
+                        SELECT COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
+                        FROM metadata_objects mo
+                        LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                        WHERE mo.entity_type = 'archive'
+                          AND mo.entity_id = ?
+                    """)
                     try {
                         stmt.set(0, archiveId)
                         let result = stmt.query()
@@ -320,7 +367,14 @@ public class TagDao {
                         placeholders += "?"
                     }
 
-                    let stmt = conn.prepareStatement("SELECT arcid, COALESCE(tags, '') FROM archives_with_tags WHERE arcid IN (${placeholders})")
+                    let stmt = conn.prepareStatement("""
+                        SELECT mo.entity_id, COALESCE(string_agg(mt.tag, ',' ORDER BY mt.tag), '')
+                        FROM metadata_objects mo
+                        LEFT JOIN metadata_tags mt ON mt.metadata_id = mo.id
+                        WHERE mo.entity_type = 'archive'
+                          AND mo.entity_id IN (${placeholders})
+                        GROUP BY mo.entity_id
+                    """)
                     try {
                         for (i in 0..deduped.size) {
                             stmt.set(i, deduped[i])
@@ -1382,7 +1436,8 @@ public class TagDao {
                                    ELSE 5
                                END as match_priority
                         FROM tags t
-                        INNER JOIN archive_tags at ON at.tag_id = t.id
+                        INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END
+                        INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'
                         WHERE t.name ILIKE ?
                            OR (t.namespace != '' AND t.namespace || ':' || t.name ILIKE ?)
                            OR t.translations->?->>'text' ILIKE ?
@@ -1481,9 +1536,10 @@ public class TagDao {
                     let sql = """
                         SELECT t.namespace, t.name,
                                COALESCE(t.translations->?->>'text', '') as translated_text,
-                               COUNT(at.archive_id)::BIGINT as usage_count
+                               COUNT(DISTINCT mo.entity_id)::BIGINT as usage_count
                         FROM tags t
-                        INNER JOIN archive_tags at ON at.tag_id = t.id
+                        INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END
+                        INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'
                         WHERE COALESCE(LOWER(t.namespace), '') != 'source'
                         GROUP BY t.id, t.namespace, t.name, translated_text
                         ORDER BY usage_count DESC, t.name
@@ -1580,7 +1636,7 @@ public class TagDao {
 
     /**
      * 合并标签（按 id）：将 sourceId 的关联关系迁移到 targetId，并可选删除 sourceId。
-     * - archive_tags/tankoubon_tags：先插入目标关系(去重)，再删除源关系
+     * - metadata_tags：将 source tag string 迁移到 target tag string
      * - tags.translations：将 source 的 translations 合并到 target（target 同 key 优先）
      * - links/icon/background：仅在 target 为空时回填 source 的值
      */
@@ -1616,41 +1672,54 @@ public class TagDao {
                         mergeStmt.update()
                     } finally { mergeStmt.close() }
 
-                    // archive_tags: insert then delete.
-                    let insArchive = conn.prepareStatement("""
-                        INSERT INTO archive_tags (archive_id, tag_id)
-                        SELECT archive_id, ? FROM archive_tags WHERE tag_id = ?
-                        ON CONFLICT DO NOTHING
+                    // Resolve source/target canonical tag strings.
+                    var sourceTag = ""
+                    var targetTag = ""
+                    let tagInfoStmt = conn.prepareStatement("""
+                        SELECT
+                            id,
+                            CASE
+                                WHEN COALESCE(namespace, '') != '' THEN namespace || ':' || name
+                                ELSE name
+                            END AS tag_str
+                        FROM tags
+                        WHERE id = ? OR id = ?
                     """)
                     try {
-                        insArchive.set(0, targetId)
-                        insArchive.set(1, sourceId)
-                        insArchive.update()
-                    } finally { insArchive.close() }
+                        tagInfoStmt.set(0, sourceId)
+                        tagInfoStmt.set(1, targetId)
+                        let rs = tagInfoStmt.query()
+                        try {
+                            while (rs.next()) {
+                                let id = rs.getOrNull<Int64>(0) ?? 0
+                                let tagStr = rs.getOrNull<String>(1) ?? ""
+                                if (id == sourceId) {
+                                    sourceTag = tagStr
+                                } else if (id == targetId) {
+                                    targetTag = tagStr
+                                }
+                            }
+                        } finally { rs.close() }
+                    } finally { tagInfoStmt.close() }
 
-                    let delArchive = conn.prepareStatement("DELETE FROM archive_tags WHERE tag_id = ?")
-                    try {
-                        delArchive.set(0, sourceId)
-                        delArchive.update()
-                    } finally { delArchive.close() }
+                    if (sourceTag.trimAscii().size > 0 && targetTag.trimAscii().size > 0) {
+                        let insMetadata = conn.prepareStatement("""
+                            INSERT INTO metadata_tags (metadata_id, tag)
+                            SELECT metadata_id, ? FROM metadata_tags WHERE tag = ?
+                            ON CONFLICT DO NOTHING
+                        """)
+                        try {
+                            insMetadata.set(0, targetTag)
+                            insMetadata.set(1, sourceTag)
+                            insMetadata.update()
+                        } finally { insMetadata.close() }
 
-                    // tankoubon_tags: insert then delete.
-                    let insTank = conn.prepareStatement("""
-                        INSERT INTO tankoubon_tags (tankoubon_id, tag_id)
-                        SELECT tankoubon_id, ? FROM tankoubon_tags WHERE tag_id = ?
-                        ON CONFLICT DO NOTHING
-                    """)
-                    try {
-                        insTank.set(0, targetId)
-                        insTank.set(1, sourceId)
-                        insTank.update()
-                    } finally { insTank.close() }
-
-                    let delTank = conn.prepareStatement("DELETE FROM tankoubon_tags WHERE tag_id = ?")
-                    try {
-                        delTank.set(0, sourceId)
-                        delTank.update()
-                    } finally { delTank.close() }
+                        let delMetadata = conn.prepareStatement("DELETE FROM metadata_tags WHERE tag = ?")
+                        try {
+                            delMetadata.set(0, sourceTag)
+                            delMetadata.update()
+                        } finally { delMetadata.close() }
+                    }
 
                     if (deleteSource) {
                         let delTag = conn.prepareStatement("DELETE FROM tags WHERE id = ?")

@@ -29,7 +29,7 @@ export function ArchiveCard({
       thumbnailId={archive.arcid}
       thumbnailAssetId={coverAssetId}
       tags={archive.tags}
-      summary={archive.summary}
+      summary={archive.description}
       pagecount={archive.pagecount}
       progress={archive.progress}
       isnew={archive.isnew}

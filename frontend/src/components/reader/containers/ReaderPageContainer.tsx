@@ -507,13 +507,13 @@ function ReaderContent() {
           const chosen = [...tanks].sort((a, b) => {
             const fav = Number(Boolean(b.isfavorite)) - Number(Boolean(a.isfavorite));
             if (fav !== 0) return fav;
-            const aCount = a.archives?.length ?? 0;
-            const bCount = b.archives?.length ?? 0;
+            const aCount = a.children?.length ?? 0;
+            const bCount = b.children?.length ?? 0;
             return bCount - aCount;
           })[0];
 
-          const idx = chosen.archives?.indexOf(archiveId) ?? -1;
-          const nextId = idx >= 0 ? chosen.archives?.[idx + 1] : undefined;
+          const idx = chosen.children?.indexOf(archiveId) ?? -1;
+          const nextId = idx >= 0 ? chosen.children?.[idx + 1] : undefined;
           if (nextId && !isExcluded(nextId)) {
             try {
               const meta = await ArchiveService.getMetadata(nextId, language);
@@ -641,17 +641,17 @@ function ReaderContent() {
         const chosen = [...tanks].sort((a, b) => {
           const fav = Number(Boolean(b.isfavorite)) - Number(Boolean(a.isfavorite));
           if (fav !== 0) return fav;
-          const aCount = a.archives?.length ?? 0;
-          const bCount = b.archives?.length ?? 0;
+          const aCount = a.children?.length ?? 0;
+          const bCount = b.children?.length ?? 0;
           return bCount - aCount;
         })[0];
 
         setTankoubonContext(chosen);
 
-        const idx = chosen.archives?.indexOf(sourceArchiveId) ?? -1;
-        const prevId = idx > 0 ? chosen.archives?.[idx - 1] : undefined;
+        const idx = chosen.children?.indexOf(sourceArchiveId) ?? -1;
+        const prevId = idx > 0 ? chosen.children?.[idx - 1] : undefined;
         setPrevArchiveId(prevId ?? null);
-        const nextId = idx >= 0 ? chosen.archives?.[idx + 1] : undefined;
+        const nextId = idx >= 0 ? chosen.children?.[idx + 1] : undefined;
         if (!nextId) {
           setResolvedNextArchive(sourceArchiveId, null);
           return;

@@ -602,28 +602,14 @@ public class DenoTaskRunner {
 
                     var assetKey = ""
                     var assetValue = ""
-                    var hasValue = false
                     r.startObject()
                     while (r.peek() != EndObject) {
                         let field = r.readName().trimAscii().toAsciiLower()
                         match (field) {
                             case "key" =>
                                 assetKey = readJsonValueAsString(r).toAsciiLower()
-                            case "name" =>
-                                if (assetKey.size == 0) { assetKey = readJsonValueAsString(r).toAsciiLower() } else { r.skip() }
-                            case "type" =>
-                                if (assetKey.size == 0) { assetKey = readJsonValueAsString(r).toAsciiLower() } else { r.skip() }
                             case "value" =>
                                 assetValue = readJsonValueAsString(r)
-                                hasValue = true
-                            case "path" =>
-                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
-                            case "id" =>
-                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
-                            case "asset_id" =>
-                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
-                            case "assetid" =>
-                                if (!hasValue) { assetValue = readJsonValueAsString(r) } else { r.skip() }
                             case _ => r.skip()
                         }
                     }
@@ -638,24 +624,14 @@ public class DenoTaskRunner {
                 r.endArray()
                 w.endArray()
             case Some(BeginObject) =>
-                // Backward compatibility: object form assets => normalized to array form.
+                // Canonical metadata only accepts array-form assets.
+                r.skip()
                 w.startArray()
-                r.startObject()
-                while (r.peek() != EndObject) {
-                    let assetKey = r.readName().trimAscii().toAsciiLower()
-                    let assetValue = readJsonValueAsString(r)
-                    if (assetKey.size == 0) {
-                        continue
-                    }
-                    let resolved = resolvePreviewAssetValue(taskId, pluginNamespace, ownerType, ownerId, assetKey, assetValue)
-                    writePreviewAssetEntry(w, assetKey, resolved)
-                }
-                r.endObject()
                 w.endArray()
             case Some(_) =>
-                // Preserve unexpected shape as-is.
-                let raw = String.fromUtf8(r.readValueBytes())
-                w.jsonValue(raw)
+                r.skip()
+                w.startArray()
+                w.endArray()
             case None =>
                 w.startArray()
                 w.endArray()
@@ -678,7 +654,7 @@ public class DenoTaskRunner {
 
         r.startObject()
         w.startObject()
-        var archiveIndex: Int64 = 0
+        var childIndex: Int64 = 0
         while (r.peek() != EndObject) {
             let key = r.readName()
             let normalizedKey = key.trimAscii().toAsciiLower()
@@ -687,19 +663,24 @@ public class DenoTaskRunner {
                 writeNormalizedMetadataPreviewAssets(r, w, taskId, pluginNamespace, ownerType, ownerId)
                 continue
             }
-            if (normalizedKey == "archive" && r.peek() == Some(BeginArray)) {
+            if (normalizedKey == "archive" || normalizedKey == "archives") {
+                // Legacy aliases are intentionally ignored in canonical mode.
+                r.skip()
+                continue
+            }
+            if (normalizedKey == "children" && r.peek() == Some(BeginArray)) {
                 w.writeName(key)
                 w.startArray()
                 r.startArray()
                 while (r.peek() != EndArray) {
                     if (r.peek() == Some(BeginObject)) {
-                        let childOwnerId = sanitizeAssetOwnerId("${ownerId}_archive_${archiveIndex.toString()}", taskId)
+                        let childOwnerId = sanitizeAssetOwnerId("${ownerId}_child_${childIndex.toString()}", taskId)
                         writeNormalizedMetadataPreviewObject(r, w, taskId, pluginNamespace, "archive", childOwnerId)
                     } else {
                         let raw = String.fromUtf8(r.readValueBytes())
                         w.jsonValue(raw)
                     }
-                    archiveIndex += 1
+                    childIndex += 1
                 }
                 r.endArray()
                 w.endArray()
@@ -801,15 +782,19 @@ public class DenoTaskRunner {
         w.writeName("description").writeValue(archive.summary)
         writeMetadataTagsArray(w, tags)
         writeMetadataAssetsArray(w, assetsRaw)
-        w.writeName("archive")
+        w.writeName("children")
         w.startArray()
         w.endArray()
         w.writeName("thumbnail_hash").writeValue(archive.thumbhash)
         if (includeLocator) {
-            w.writeName("archive_id").writeValue(archive.id)
+            w.writeName("locator")
+            w.startObject()
+            w.writeName("entity_type").writeValue("archive")
+            w.writeName("entity_id").writeValue(archive.id)
             if (volumeNo > 0) {
                 w.writeName("volume_no").writeValue(volumeNo)
             }
+            w.endObject()
         }
         w.endObject()
         w.flush()

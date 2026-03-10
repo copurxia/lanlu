@@ -60,7 +60,7 @@ export function AddToTankoubonDialog({
   const filteredTankoubons = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return tankoubons;
-    return tankoubons.filter((tankoubon) => String(tankoubon.name || '').toLowerCase().includes(q));
+    return tankoubons.filter((tankoubon) => String(tankoubon.title || '').toLowerCase().includes(q));
   }, [query, tankoubons]);
 
   function handleOpenChange(newOpen: boolean) {
@@ -155,7 +155,7 @@ export function AddToTankoubonDialog({
     if (!mounted) return;
 
     // Get tankoubon name for confirmation message
-    const tankoubonName = tankoubons.find(t => t.tankoubon_id === tankoubonId)?.name || '';
+    const tankoubonName = tankoubons.find(t => t.tankoubon_id === tankoubonId)?.title || '';
     const confirmed = await confirm({
       title: '确认移除',
       description: `确定要从合集"${tankoubonName}"中移除当前档案吗？`,
@@ -283,8 +283,8 @@ export function AddToTankoubonDialog({
               ) : (
                 <div className="max-h-[42vh] overflow-y-auto divide-y">
                   {filteredTankoubons.map((tankoubon) => {
-                    const isInTankoubon = tankoubon.archives?.includes(archiveId);
-                    const count = tankoubon.archive_count || tankoubon.archives?.length || 0;
+                    const isInTankoubon = tankoubon.children?.includes(archiveId);
+                    const count = tankoubon.archive_count || tankoubon.children?.length || 0;
 
                     return (
                       <div
@@ -292,7 +292,7 @@ export function AddToTankoubonDialog({
                         className="flex items-center justify-between gap-3 px-4 py-3"
                       >
                         <div className="min-w-0 flex-1">
-                          <p className="font-medium truncate">{tankoubon.name}</p>
+                          <p className="font-medium truncate">{tankoubon.title}</p>
                           <p className="text-xs text-muted-foreground">
                             {count} {t('tankoubon.archives')}
                           </p>

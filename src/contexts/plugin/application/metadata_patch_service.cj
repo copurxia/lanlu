@@ -8,22 +8,11 @@ import stdx.encoding.json.stream.*
 import lanlu.contexts.plugin.domain.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
-import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.archivehandler.*
-
-class MetadataAssetEntry {
-    public var key: String = ""
-    public var value: String = ""
-
-    public init(key: String, value: String) {
-        this.key = key
-        this.value = value
-    }
-}
 
 public class MetadataPatchService {
     private static let logger = getLogger("metadata_patch_service")
@@ -60,73 +49,6 @@ public class MetadataPatchService {
             }
             seen.add(tag)
             out.add(tag)
-        }
-        return out.toArray()
-    }
-
-    private static func parseMetadataAssetsRaw(assetsRaw: String): Array<MetadataAssetEntry> {
-        let normalized = assetsRaw.trimAscii()
-        if (normalized.size == 0 || normalized == "null") {
-            return Array<MetadataAssetEntry>()
-        }
-
-        let seen = HashSet<String>()
-        let out = ArrayList<MetadataAssetEntry>()
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(normalized.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) {
-                return Array<MetadataAssetEntry>()
-            }
-
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let key = r.readName().trimAscii().toAsciiLower()
-                if (key.size == 0) {
-                    r.skip()
-                    continue
-                }
-
-                var value = ""
-                match (r.peek()) {
-                    case Some(BeginObject) => r.skip()
-                    case Some(BeginArray) => r.skip()
-                    case Some(_) => value = r.readValue<String>().trimAscii()
-                    case None => ()
-                }
-
-                if (value.size == 0 || seen.contains(key)) {
-                    continue
-                }
-                seen.add(key)
-                out.add(MetadataAssetEntry(key, value))
-            }
-            r.endObject()
-        } catch (_: Exception) {}
-
-        return out.toArray()
-    }
-
-
-    private static func buildMetadataAssets(coverAssetId: Int64, assetsRaw: String): Array<MetadataAssetData> {
-        let out = ArrayList<MetadataAssetData>()
-        let seen = HashSet<String>()
-        if (coverAssetId > 0) {
-            seen.add("cover")
-            out.add(MetadataAssetData("cover", coverAssetId))
-        }
-        for (asset in parseMetadataAssetsRaw(assetsRaw)) {
-            let slot = asset.key.trimAscii().toAsciiLower()
-            if (slot != "cover" && slot != "backdrop" && slot != "clearlogo" && slot != "thumb") {
-                continue
-            }
-            let assetId = parsePositiveAssetId(asset.value)
-            if (slot.size == 0 || assetId <= 0 || seen.contains(slot)) {
-                continue
-            }
-            seen.add(slot)
-            out.add(MetadataAssetData(slot, assetId))
         }
         return out.toArray()
     }
@@ -231,18 +153,16 @@ public class MetadataPatchService {
             return None
         }
 
-        let fallback = MetadataObjectData()
-        fallback.entity_type = "archive"
-        fallback.entity_id = sourceArchive.id
-        fallback.title = sourceArchive.title
-        fallback.description = sourceArchive.summary
-        fallback.extra_data = "{}"
-        fallback.source_namespace = ""
-        fallback.created_at = sourceArchive.created_at
-        fallback.updated_at = sourceArchive.updated_at
-        fallback.tags = splitTagTokens(TagDao.getArchiveTags(sourceArchive.id))
-        fallback.assets = buildMetadataAssets(sourceArchive.cover_asset_id, ArchiveDao.getArchiveAssetsRaw(sourceArchive.id))
-        return Some(fallback)
+        let _ = MetadataDao.upsertRootMetadataObject(
+            "archive",
+            sourceArchive.id,
+            "",
+            "",
+            sourceNamespace: "system:bootstrap",
+            createdAt: sourceArchive.created_at,
+            updatedAt: sourceArchive.updated_at
+        )
+        return MetadataDao.getMetadataObject("archive", sourceArchive.id)
     }
 
     private static func ensureTankoubonMetadataObject(tankoubonId: String, preloaded!: TankoubonData = TankoubonData()): Option<MetadataObjectData> {
@@ -262,18 +182,16 @@ public class MetadataPatchService {
             }
         }
 
-        let fallback = MetadataObjectData()
-        fallback.entity_type = "tankoubon"
-        fallback.entity_id = normalizedId
-        fallback.title = tankoubon.name
-        fallback.description = tankoubon.summary
-        fallback.extra_data = "{}"
-        fallback.source_namespace = ""
-        fallback.created_at = tankoubon.created_at
-        fallback.updated_at = tankoubon.updated_at
-        fallback.tags = splitTagTokens(TankoubonDao.getOwnTagsForTankoubon(normalizedId))
-        fallback.assets = buildMetadataAssets(tankoubon.cover_asset_id, tankoubon.assets_raw)
-        return Some(fallback)
+        let _ = MetadataDao.upsertRootMetadataObject(
+            "tankoubon",
+            normalizedId,
+            "",
+            "",
+            sourceNamespace: "system:bootstrap",
+            createdAt: tankoubon.created_at,
+            updatedAt: tankoubon.updated_at
+        )
+        return MetadataDao.getMetadataObject("tankoubon", normalizedId)
     }
 
     private static func readJsonScalarAsString(r: JsonReader): String {
@@ -287,12 +205,6 @@ public class MetadataPatchService {
             case Some(_) => return r.readValue<String>()
             case None => return ""
         }
-    }
-
-    private static func readJsonInt64Flexible(r: JsonReader, defaultValue: Int64): Int64 {
-        let s = readJsonScalarAsString(r).trimAscii()
-        if (s.size == 0) { return defaultValue }
-        try { return Int64.parse(s) } catch (_: Exception) { return defaultValue }
     }
 
     private static func isSyntheticEntryPath(entryPath: String): Bool {
@@ -326,35 +238,6 @@ public class MetadataPatchService {
         } catch (_: Exception) {}
 
         return ""
-    }
-
-    public static func extractCoverAssetId(raw: String): Int64 {
-        let trimmed = raw.trimAscii()
-        if (trimmed.size == 0) {
-            return -1i64
-        }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) {
-                return -1i64
-            }
-
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let key = r.readName().trimAscii()
-                match (key) {
-                    case "cover_asset_id" => return readJsonInt64Flexible(r, -1i64)
-                    case "coverAssetId" => return readJsonInt64Flexible(r, -1i64)
-                    case _ => r.skip()
-                }
-            }
-            r.endObject()
-        } catch (_: Exception) {}
-
-        return -1i64
     }
 
     public static func parseMetadataObject(raw: String): ParsedMetadataResult {
@@ -415,44 +298,17 @@ public class MetadataPatchService {
                 while (r.peek() != EndObject) {
                     let pk = r.readName()
                     match (pk) {
-                        case "page" => patch.page = readInt32Flexible()
                         case "page_number" => patch.page = readInt32Flexible()
-                        case "pageNumber" => patch.page = readInt32Flexible()
-                        case "path" => patch.path = readStringFlexible().trimAscii()
-                        case "entry" => patch.path = readStringFlexible().trimAscii()
                         case "entry_path" => patch.path = readStringFlexible().trimAscii()
-                        case "entryPath" => patch.path = readStringFlexible().trimAscii()
                         case "title" => patch.title = readStringFlexible()
                         case "description" => patch.description = readStringFlexible()
-                        case "summary" => patch.description = readStringFlexible()
                         case "thumb" => patch.thumb = readStringFlexible().trimAscii()
-                        case "sort" =>
+                        case "order_index" =>
                             patch.sort = readInt32Flexible()
                             patch.sortProvided = true
                         case "hidden_in_files" =>
                             patch.hiddenInFiles = readBoolFlexible()
                             patch.hiddenInFilesProvided = true
-                        case "hiddenInFiles" =>
-                            patch.hiddenInFiles = readBoolFlexible()
-                            patch.hiddenInFilesProvided = true
-                        case "metadata" =>
-                            if (r.peek() == Some(BeginObject)) {
-                                r.startObject()
-                                while (r.peek() != EndObject) {
-                                    let mk = r.readName()
-                                    match (mk) {
-                                        case "thumb" =>
-                                            let nestedThumb = readStringFlexible().trimAscii()
-                                            if (patch.thumb.trimAscii().size == 0 && nestedThumb.size > 0) {
-                                                patch.thumb = nestedThumb
-                                            }
-                                        case _ => r.skip()
-                                    }
-                                }
-                                r.endObject()
-                            } else {
-                                r.skip()
-                            }
                         case _ => r.skip()
                     }
                 }
@@ -527,30 +383,19 @@ public class MetadataPatchService {
                 while (r.peek() != EndObject) {
                     let ak = r.readName()
                     match (ak) {
-                        case "archive_id" => patch.archiveId = readStringFlexible().trimAscii()
-                        case "archiveId" => patch.archiveId = readStringFlexible().trimAscii()
+                        case "entity_type" =>
+                            // Child patch currently supports archive targets only.
+                            let et = readStringFlexible().trimAscii().toAsciiLower()
+                            if (et.size > 0 && et != "archive") {
+                                patch.archiveId = ""
+                            }
                         case "entity_id" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
-                        case "entityId" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
-                        case "target_id" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
-                        case "targetId" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
-                        case "id" =>
-                            if (patch.archiveId.size == 0) { patch.archiveId = readStringFlexible().trimAscii() } else { r.skip() }
+                            patch.archiveId = readStringFlexible().trimAscii()
                         case "volume_no" => patch.volumeNo = readInt32Flexible()
-                        case "volumeNo" => patch.volumeNo = readInt32Flexible()
                         case "title" =>
                             patch.title = readStringFlexible()
                             patch.titleProvided = true
-                        case "name" =>
-                            patch.title = readStringFlexible()
-                            patch.titleProvided = true
                         case "description" =>
-                            patch.summary = readStringFlexible()
-                            patch.summaryProvided = true
-                        case "summary" =>
                             patch.summary = readStringFlexible()
                             patch.summaryProvided = true
                         case "tags" =>
@@ -559,18 +404,6 @@ public class MetadataPatchService {
                         case "updated_at" =>
                             patch.updatedAt = readStringFlexible().trimAscii()
                             patch.updatedAtProvided = true
-                        case "updatedAt" =>
-                            patch.updatedAt = readStringFlexible().trimAscii()
-                            patch.updatedAtProvided = true
-                        case "cover" =>
-                            patch.cover = readStringFlexible().trimAscii()
-                            patch.coverProvided = true
-                        case "backdrop" =>
-                            patch.backdrop = readStringFlexible().trimAscii()
-                            patch.backdropProvided = true
-                        case "clearlogo" =>
-                            patch.clearlogo = readStringFlexible().trimAscii()
-                            patch.clearlogoProvided = true
                         case "assets" => patch = parseAssetFieldsToPatch(patch)
                         case "pages" =>
                             match (r.peek()) {
@@ -588,9 +421,6 @@ public class MetadataPatchService {
                                 case Some(_) => r.skip()
                                 case None => ()
                             }
-                        case "archive" =>
-                            // Archive members are the recursive boundary for now; ignore deeper nesting.
-                            r.skip()
                         case "children" =>
                             // Child members are the recursive boundary for now; ignore deeper nesting.
                             r.skip()
@@ -610,27 +440,12 @@ public class MetadataPatchService {
                     case "title" =>
                         parsed.title = readStringFlexible()
                         parsed.titleProvided = true
-                    case "name" =>
-                        parsed.title = readStringFlexible()
-                        parsed.titleProvided = true
                     case "description" =>
-                        parsed.summary = readStringFlexible()
-                        parsed.summaryProvided = true
-                    case "summary" =>
                         parsed.summary = readStringFlexible()
                         parsed.summaryProvided = true
                     case "tags" =>
                         parsed.tags = readTagsFlexible()
                         parsed.tagsProvided = true
-                    case "cover" =>
-                        parsed.cover = readStringFlexible().trimAscii()
-                        parsed.coverProvided = true
-                    case "backdrop" =>
-                        parsed.backdrop = readStringFlexible().trimAscii()
-                        parsed.backdropProvided = true
-                    case "clearlogo" =>
-                        parsed.clearlogo = readStringFlexible().trimAscii()
-                        parsed.clearlogoProvided = true
                     case "assets" =>
                         let topPatch = parseAssetFieldsToPatch(ArchiveMetadataPatch())
                         if (topPatch.coverProvided) {
@@ -644,23 +459,6 @@ public class MetadataPatchService {
                         if (topPatch.clearlogoProvided) {
                             parsed.clearlogo = topPatch.clearlogo
                             parsed.clearlogoProvided = true
-                        }
-                    case "archive" =>
-                        parsed.archivesProvided = true
-                        match (r.peek()) {
-                            case Some(BeginArray) =>
-                                let archives = ArrayList<ArchiveMetadataPatch>()
-                                r.startArray()
-                                while (r.peek() != EndArray) {
-                                    let patch = parseArchivePatchObject()
-                                    if (patch.archiveId.trimAscii().size > 0 || patch.volumeNo > 0 || patch.pages.size > 0) {
-                                        archives.add(patch)
-                                    }
-                                }
-                                r.endArray()
-                                parsed.archives = archives.toArray()
-                            case Some(_) => r.skip()
-                            case None => ()
                         }
                     case "children" =>
                         parsed.archivesProvided = true
@@ -763,17 +561,17 @@ public class MetadataPatchService {
             return ParsedMetadataResult(false, "Failed to parse plugin output: ${e.message}", "", "", "")
         }
     }
-    private static func writePageMetadataArray(w: JsonWriter, pageMetadata: Array<PageMetadataData>): Unit {
+    private static func writePageMetadataArray(w: JsonWriter, archiveId: String, pageMetadata: Array<PageMetadataData>): Unit {
         w.writeName("pages")
         w.startArray()
         for (meta in pageMetadata) {
             w.startObject()
             if (meta.page_number > 0) {
-                w.writeName("page").writeValue(meta.page_number)
+                w.writeName("page_number").writeValue(meta.page_number)
             }
             let pathValue = meta.entry_path.trimAscii()
             if (pathValue.size > 0 && !isSyntheticEntryPath(pathValue)) {
-                w.writeName("path").writeValue(pathValue)
+                w.writeName("entry_path").writeValue(pathValue)
             }
             if (meta.title.trimAscii().size > 0) {
                 w.writeName("title").writeValue(meta.title)
@@ -785,11 +583,28 @@ public class MetadataPatchService {
                 w.writeName("thumb").writeValue(meta.thumb_asset_id)
             }
             if (meta.sort_index > 0) {
-                w.writeName("sort").writeValue(meta.sort_index)
+                w.writeName("order_index").writeValue(meta.sort_index)
             }
             if (meta.hidden_in_files) {
                 w.writeName("hidden_in_files").writeValue(meta.hidden_in_files)
             }
+            w.writeName("locator")
+            w.startObject()
+            w.writeName("entity_type").writeValue("page")
+            if (archiveId.trimAscii().size > 0) {
+                w.writeName("parent_entity_type").writeValue("archive")
+                w.writeName("parent_entity_id").writeValue(archiveId)
+            }
+            if (meta.page_number > 0) {
+                w.writeName("page_number").writeValue(meta.page_number)
+            }
+            if (pathValue.size > 0 && !isSyntheticEntryPath(pathValue)) {
+                w.writeName("entry_path").writeValue(pathValue)
+            }
+            if (meta.sort_index > 0) {
+                w.writeName("order_index").writeValue(meta.sort_index)
+            }
+            w.endObject()
             w.endObject()
         }
         w.endArray()
@@ -816,20 +631,15 @@ public class MetadataPatchService {
         w.writeName("title").writeValue(metadata.title)
         w.writeName("type").writeValue(0i32)
         w.writeName("description").writeValue(description)
-        w.writeName("summary").writeValue(description)
         writeMetadataTagsArrayFromList(w, metadata.tags)
         writeMetadataAssetsArrayFromList(w, metadata.assets)
         w.writeName("children")
-        w.startArray()
-        w.endArray()
-        w.writeName("archive")
         w.startArray()
         w.endArray()
         w.writeName("arcid").writeValue(archive.id)
         w.writeName("filename").writeValue(archive.filename)
         w.writeName("relative_path").writeValue(archive.relative_path)
         w.writeName("file_size").writeValue(archive.file_size)
-        w.writeName("size").writeValue(archive.file_size)
         w.writeName("pagecount").writeValue(archive.pagecount)
         w.writeName("progress").writeValue(progress)
         w.writeName("isnew").writeValue(isNew)
@@ -839,17 +649,10 @@ public class MetadataPatchService {
         w.writeName("created_at").writeValue(archive.created_at)
         w.writeName("updated_at").writeValue(updatedAt)
         if (includePages) {
-            writePageMetadataArray(w, MetadataDao.listPageMetadata(archive.id))
+            writePageMetadataArray(w, archive.id, MetadataDao.listPageMetadata(archive.id))
         }
         w.writeName("thumbnail_hash").writeValue(thumbnailHash)
         if (includeLocator) {
-            w.writeName("archive_id").writeValue(archive.id)
-            if (volumeNo > 0) {
-                w.writeName("volume_no").writeValue(volumeNo)
-            }
-            if (orderIndex > 0) {
-                w.writeName("order_index").writeValue(orderIndex)
-            }
             writeLocatorObject(w, "archive", archive.id, volumeNo: volumeNo, orderIndex: orderIndex)
         }
         w.endObject()
@@ -914,26 +717,12 @@ public class MetadataPatchService {
                         let w = JsonWriter(out)
                         w.startObject()
                         w.writeName("title").writeValue(metadata.title)
-                        w.writeName("name").writeValue(metadata.title)
                         w.writeName("type").writeValue(1i32)
                         w.writeName("description").writeValue(metadata.description)
-                        w.writeName("summary").writeValue(metadata.description)
                         writeMetadataTagsArrayFromList(w, metadata.tags)
                         writeMetadataAssetsArrayFromList(w, metadata.assets)
                         w.writeName("tankoubon_id").writeValue(tankoubonId)
-                        w.writeName("archives")
-                        w.startArray()
-                        for (child in children) {
-                            w.writeValue(child.entity_id)
-                        }
-                        w.endArray()
                         w.writeName("children")
-                        w.startArray()
-                        for (child in children) {
-                            writeTankoubonChildObject(w, child)
-                        }
-                        w.endArray()
-                        w.writeName("archive")
                         w.startArray()
                         if (!includeArchiveDetails) {
                             for (child in children) {

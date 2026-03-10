@@ -6,8 +6,6 @@ type ArchiveAssetSource = {
 
 type CoverAssetSource = {
   assets?: unknown;
-  cover_asset_id?: unknown;
-  coverAssetId?: unknown;
 } | null | undefined;
 
 function toPositiveAssetId(value: unknown): number | undefined {
@@ -108,9 +106,7 @@ export function getArchiveAssetId(source: ArchiveAssetSource, key: string = 'cov
 
 export function getCoverAssetId(source: CoverAssetSource): number | undefined {
   if (!source) return undefined;
-  const fromAssets = getArchiveAssetId(source, 'cover');
-  if (fromAssets !== undefined) return fromAssets;
-  return toPositiveAssetId(source.cover_asset_id ?? source.coverAssetId);
+  return getArchiveAssetId(source, 'cover');
 }
 
 export function resolveArchiveAssetUrl(

@@ -59,7 +59,7 @@ function HeaderPageClearlogo({
         const tank = await TankoubonService.getMetadata(detailId);
         if (cancelled) return;
         setPageClearlogoUrl(resolveArchiveAssetUrl(tank, 'clearlogo', tank.clearlogo));
-        setPageClearlogoAlt((tank.name || tank.title || '').trim());
+        setPageClearlogoAlt(String(tank.title || '').trim());
       } catch {
         if (cancelled) return;
         setPageClearlogoUrl('');

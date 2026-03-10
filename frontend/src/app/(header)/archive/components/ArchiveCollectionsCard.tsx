@@ -37,13 +37,13 @@ export function ArchiveCollectionsCard({
         ) : (
           tankoubons.map((tank) => {
             const archives = previewArchivesByTankoubonId[tank.tankoubon_id] || [];
-            const total = tank.archives?.length ?? tank.archive_count ?? 0;
+            const total = tank.children?.length ?? tank.archive_count ?? 0;
 
             return (
               <div key={tank.tankoubon_id} className="space-y-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="font-medium truncate">{tank.name}</div>
+                    <div className="font-medium truncate">{tank.title}</div>
                     <div className="text-xs text-muted-foreground">
                       {total} {t('tankoubon.archives')}
                     </div>

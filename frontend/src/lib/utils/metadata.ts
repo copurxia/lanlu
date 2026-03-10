@@ -2,6 +2,7 @@ import type {
   ArchiveAssets,
   ArchiveMetadata,
   MetadataAssetInput,
+  MetadataChild,
   MetadataLocator,
   MetadataObject,
   MetadataPagePatch,
@@ -31,16 +32,17 @@ function readNumber(value: unknown): number | undefined {
 
 function normalizeMetadataAssetInputs(rawAssets: unknown): MetadataAssetInput[] | undefined {
   if (Array.isArray(rawAssets)) {
-    return rawAssets
+    const rows = rawAssets
       .map((item) => {
         const row = asRecord(item);
-        const key = readString(row.key || row.type || row.name).toLowerCase();
+        const key = readString(row.key).toLowerCase();
         const value = row.value;
         if (!key) return null;
         if (typeof value !== 'string' && typeof value !== 'number') return null;
         return { key, value } satisfies MetadataAssetInput;
       })
       .filter((item): item is MetadataAssetInput => Boolean(item));
+    return rows.length > 0 ? rows : undefined;
   }
 
   const record = asRecord(rawAssets);
@@ -72,80 +74,31 @@ function normalizeMetadataAssetMap(rawAssets: unknown): ArchiveAssets | undefine
   return normalized;
 }
 
-function normalizeMetadataLocator(rawLocator: unknown, fallback?: Record<string, unknown>): MetadataLocator | undefined {
-  const locatorRow = asRecord(rawLocator);
-  const entityType = readString(locatorRow.entity_type || locatorRow.entityType || fallback?.entity_type || fallback?.entityType);
-  const entityId = readString(
-    locatorRow.entity_id ||
-      locatorRow.entityId ||
-      fallback?.entity_id ||
-      fallback?.entityId ||
-      fallback?.archive_id ||
-      fallback?.archiveId ||
-      fallback?.arcid ||
-      fallback?.tankoubon_id ||
-      fallback?.tankoubonId
-  );
-  const parentEntityType = readString(
-    locatorRow.parent_entity_type || locatorRow.parentEntityType || fallback?.parent_entity_type || fallback?.parentEntityType
-  );
-  const parentEntityId = readString(
-    locatorRow.parent_entity_id ||
-      locatorRow.parentEntityId ||
-      fallback?.parent_entity_id ||
-      fallback?.parentEntityId ||
-      fallback?.archive_id ||
-      fallback?.archiveId ||
-      fallback?.arcid
-  );
-  const archiveId = readString(locatorRow.archive_id || locatorRow.archiveId || fallback?.archive_id || fallback?.archiveId || fallback?.arcid);
-  const tankoubonId = readString(locatorRow.tankoubon_id || locatorRow.tankoubonId || fallback?.tankoubon_id || fallback?.tankoubonId);
-  const page = readNumber(
-    locatorRow.page ??
-      locatorRow.page_number ??
-      locatorRow.pageNumber ??
-      fallback?.page ??
-      fallback?.page_number ??
-      fallback?.pageNumber
-  );
-  const path = readString(
-    locatorRow.path ||
-      locatorRow.entry_path ||
-      locatorRow.entryPath ||
-      locatorRow.entry ||
-      fallback?.path ||
-      fallback?.entry_path ||
-      fallback?.entryPath ||
-      fallback?.entry
-  );
-  const volumeNo = readNumber(locatorRow.volume_no || locatorRow.volumeNo || fallback?.volume_no || fallback?.volumeNo);
-  const orderIndex = readNumber(
-    locatorRow.order_index || locatorRow.orderIndex || fallback?.order_index || fallback?.orderIndex || fallback?.sort
-  );
+function normalizeMetadataLocator(rawLocator: unknown): MetadataLocator | undefined {
+  const row = asRecord(rawLocator);
+  const entityType = readString(row.entity_type);
+  const entityId = readString(row.entity_id);
+  const parentEntityType = readString(row.parent_entity_type);
+  const parentEntityId = readString(row.parent_entity_id);
+  const pageNumber = readNumber(row.page_number);
+  const entryPath = readString(row.entry_path);
+  const volumeNo = readNumber(row.volume_no);
+  const orderIndex = readNumber(row.order_index);
 
   const locator: MetadataLocator = {};
   if (entityType) locator.entity_type = entityType;
   if (entityId) locator.entity_id = entityId;
   if (parentEntityType) locator.parent_entity_type = parentEntityType;
   if (parentEntityId) locator.parent_entity_id = parentEntityId;
-  if (archiveId) locator.archive_id = archiveId;
-  if (tankoubonId) locator.tankoubon_id = tankoubonId;
-  if (typeof page === 'number' && Number.isFinite(page)) {
-    locator.page = Math.trunc(page);
-    locator.page_number = Math.trunc(page);
-  }
-  if (path) {
-    locator.path = path;
-    locator.entry_path = path;
-    locator.entry = path;
-  }
+  if (typeof pageNumber === 'number' && Number.isFinite(pageNumber)) locator.page_number = Math.trunc(pageNumber);
+  if (entryPath) locator.entry_path = entryPath;
   if (typeof volumeNo === 'number' && Number.isFinite(volumeNo)) locator.volume_no = Math.trunc(volumeNo);
   if (typeof orderIndex === 'number' && Number.isFinite(orderIndex)) locator.order_index = Math.trunc(orderIndex);
 
   return Object.keys(locator).length > 0 ? locator : undefined;
 }
 
-function normalizeMetadataChildren(rawChildren: unknown): MetadataObject[] {
+function normalizeMetadataChildren(rawChildren: unknown): MetadataChild[] {
   if (!Array.isArray(rawChildren)) return [];
   return rawChildren.map((item) => normalizeMetadataObject(item));
 }
@@ -156,7 +109,10 @@ export function normalizeMetadataTags(rawTags: unknown): string[] {
   }
   const text = readString(rawTags);
   if (!text) return [];
-  return text.split(',').map((tag) => tag.trim()).filter(Boolean);
+  return text
+    .split(',')
+    .map((tag) => tag.trim())
+    .filter(Boolean);
 }
 
 export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
@@ -165,31 +121,25 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
   const normalized: MetadataPagePatch[] = [];
   for (const item of rawPages) {
     const row = asRecord(item);
-    const page = readNumber(row.page ?? row.page_number ?? row.pageNumber);
-    const sort = readNumber(row.sort ?? row.order_index ?? row.orderIndex);
-    const hiddenInFiles = row.hidden_in_files === true || row.hiddenInFiles === true;
-    const path = readString(row.path || row.entry_path || row.entryPath || row.entry);
+    const pageNumber = readNumber(row.page_number);
+    const orderIndex = readNumber(row.order_index);
+    const hiddenInFiles = row.hidden_in_files === true;
+    const entryPath = readString(row.entry_path);
     const title = readString(row.title);
-    const description = readString(row.description || row.summary);
-    const thumb = readString(row.thumb || asRecord(row.metadata).thumb);
+    const description = readString(row.description);
+    const thumb = readString(row.thumb);
 
-    if (!path && !(typeof page === 'number' && page > 0)) continue;
-
-    const normalizedPage = typeof page === 'number' && page > 0 ? Math.trunc(page) : undefined;
-    const normalizedSort = typeof sort === 'number' && Number.isFinite(sort) ? Math.trunc(sort) : undefined;
+    if (!entryPath && !(typeof pageNumber === 'number' && pageNumber > 0)) continue;
 
     normalized.push({
-      page: normalizedPage,
-      page_number: normalizedPage,
-      path: path || undefined,
-      entry_path: path || undefined,
+      page_number: typeof pageNumber === 'number' && pageNumber > 0 ? Math.trunc(pageNumber) : undefined,
+      entry_path: entryPath || undefined,
       title: title || undefined,
       description: description || undefined,
       thumb: thumb || undefined,
-      sort: normalizedSort,
-      order_index: normalizedSort,
+      order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
       hidden_in_files: hiddenInFiles || undefined,
-      locator: normalizeMetadataLocator(row.locator, row),
+      locator: normalizeMetadataLocator(row.locator),
     });
   }
 
@@ -198,25 +148,22 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
 
 export function normalizeMetadataObject(raw: unknown): MetadataObject {
   const row = asRecord(raw);
-  const rawChildren = Array.isArray(row.children) ? row.children : Array.isArray(row.archive) ? row.archive : [];
-  const children = normalizeMetadataChildren(rawChildren);
-  const orderIndex = readNumber(row.order_index || row.orderIndex || row.sort);
-  const volumeNo = readNumber(row.volume_no || row.volumeNo);
+  const children = normalizeMetadataChildren(row.children);
+  const orderIndex = readNumber(row.order_index);
+  const volumeNo = readNumber(row.volume_no);
 
   return {
     ...row,
-    title: readString(row.title || row.name) || undefined,
+    title: readString(row.title) || undefined,
     type: readNumber(row.type),
-    description: readString(row.description || row.summary) || undefined,
+    description: readString(row.description) || undefined,
     tags: normalizeMetadataTags(row.tags),
     assets: normalizeMetadataAssetMap(row.assets),
     children,
-    archive: children,
     pages: normalizeMetadataPages(row.pages),
-    locator: normalizeMetadataLocator(row.locator, row),
-    entity_type: readString(row.entity_type || row.entityType) || undefined,
-    entity_id: readString(row.entity_id || row.entityId) || undefined,
-    archive_id: readString(row.archive_id || row.archiveId || row.arcid || row.entity_id || row.entityId) || undefined,
+    locator: normalizeMetadataLocator(row.locator),
+    entity_type: readString(row.entity_type) || undefined,
+    entity_id: readString(row.entity_id) || undefined,
     volume_no: typeof volumeNo === 'number' && Number.isFinite(volumeNo) ? Math.trunc(volumeNo) : undefined,
     order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
   };
@@ -225,21 +172,20 @@ export function normalizeMetadataObject(raw: unknown): MetadataObject {
 export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
-  const archiveId = readString(metadata.archive_id || row.archive_id || row.archiveId || row.arcid || metadata.entity_id);
-  const description = readString(metadata.description || row.description || row.summary);
+  const description = readString(metadata.description || row.description);
   const pagecount = readNumber(row.pagecount);
   const progress = readNumber(row.progress);
   const fileSize = readNumber(row.file_size ?? row.size);
   const lastReadTime = readNumber(row.lastreadtime);
+  const arcid = readString(row.arcid || metadata.entity_id);
 
   const normalizedAssets = normalizeMetadataAssetMap(metadata.assets ?? row.assets);
   const rawAssets = metadata.assets ?? row.assets;
 
   return {
     ...metadata,
-    archive_id: archiveId,
-    arcid: archiveId,
-    summary: description,
+    arcid,
+    description,
     tags: metadata.tags || [],
     assets: normalizedAssets,
     cover: readMetadataAssetValue(rawAssets, 'cover') || readString(row.cover) || undefined,
@@ -265,14 +211,10 @@ export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
 export function normalizeTankoubonMemberMetadataPatch(raw: unknown): TankoubonMemberMetadataPatch {
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
-  const description = readString(metadata.description || row.description || row.summary);
-  const archiveId = readString(metadata.archive_id || row.archive_id || row.archiveId || row.arcid || metadata.entity_id);
 
   return {
     ...metadata,
-    archive_id: archiveId || undefined,
-    summary: description || undefined,
-    updated_at: readString(row.updated_at || row.updatedAt) || undefined,
+    updated_at: readString(row.updated_at) || undefined,
     cover: readMetadataAssetValue(row.assets, 'cover') || readString(row.cover) || undefined,
     backdrop: readMetadataAssetValue(row.assets, 'backdrop') || readString(row.backdrop) || undefined,
     clearlogo: readMetadataAssetValue(row.assets, 'clearlogo') || readString(row.clearlogo) || undefined,
@@ -283,13 +225,10 @@ export function normalizeTankoubonMemberMetadataPatch(raw: unknown): TankoubonMe
 export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
-  const description = readString(metadata.description || row.description || row.summary);
-  const childrenSource = Array.isArray(row.children) ? row.children : Array.isArray(row.archive) ? row.archive : [];
+  const description = readString(metadata.description || row.description);
+  const childrenSource = Array.isArray(row.children) ? row.children : [];
   const children = childrenSource.map((item) => normalizeTankoubonMemberMetadataPatch(item));
-  const archives = children
-    .map((item) => readString(item.archive_id || item.entity_id))
-    .filter(Boolean);
-  const archiveCount = readNumber(row.archive_count ?? row.archiveCount);
+  const archiveCount = readNumber(row.archive_count);
   const pagecount = readNumber(row.pagecount);
   const progress = readNumber(row.progress);
 
@@ -298,16 +237,12 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
 
   return {
     ...metadata,
-    tankoubon_id: readString(row.tankoubon_id || row.id || metadata.entity_id),
-    name: readString(row.name || metadata.title),
-    title: readString(metadata.title || row.name) || undefined,
-    description: description || undefined,
-    summary: description,
+    tankoubon_id: readString(row.tankoubon_id || metadata.entity_id),
+    title: readString(metadata.title || row.title),
+    description,
     tags: metadata.tags || [],
     assets: normalizedAssets,
     children,
-    archive: children,
-    archives,
     archive_count: typeof archiveCount === 'number' && Number.isFinite(archiveCount) ? Math.trunc(archiveCount) : children.length,
     pagecount: typeof pagecount === 'number' && Number.isFinite(pagecount) ? Math.trunc(pagecount) : undefined,
     progress: typeof progress === 'number' && Number.isFinite(progress) ? Math.trunc(progress) : undefined,

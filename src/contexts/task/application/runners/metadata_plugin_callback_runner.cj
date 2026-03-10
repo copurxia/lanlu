@@ -76,7 +76,7 @@ public class MetadataPluginCallbackRunner {
         TaskModel.updateTaskProgress(taskId, 70, "写回元数据")
 
         if (effectiveType == "tankoubon" || effectiveType == "tank") {
-            // Write back to Tankoubon (name/summary/tankoubon_tags).
+            // Write back to Tankoubon canonical metadata (title/description/tags/assets/children).
             match (TankoubonDao.getTankoubonById(targetId)) {
                 case None =>
                     failAndMaybeEnqueueFallback(taskId, "Tankoubon not found when updating", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
@@ -603,7 +603,7 @@ public class MetadataPluginCallbackRunner {
             w.endObject()
         }
         w.endArray()
-        w.writeName("archive")
+        w.writeName("children")
         w.startArray()
         w.endArray()
         w.endObject()

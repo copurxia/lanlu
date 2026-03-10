@@ -15,6 +15,11 @@ export class TankoubonService {
     const list = Array.isArray(result) ? result : [result];
     return list.map((item) => ({
       ...item,
+      title: String((item as any)?.title || '').trim(),
+      description: String((item as any)?.description || '').trim(),
+      children: Array.isArray((item as any)?.children)
+        ? (item as any).children.map((value: unknown) => String(value || '').trim()).filter(Boolean)
+        : [],
       assets: normalizeArchiveAssets((item as any)?.assets),
     }));
   }
