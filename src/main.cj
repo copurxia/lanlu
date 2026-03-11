@@ -64,6 +64,7 @@ main(): Int64 {
     MigrationRegistry.register(V010_ArchiveTankoubonAssetsJson())
     MigrationRegistry.register(V011_UnifiedMetadataStore())
     MigrationRegistry.register(V012_CanonicalMetadataCleanup())
+    MigrationRegistry.register(V013_MetadataTimeSemanticsUnification())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {

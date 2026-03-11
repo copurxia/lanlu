@@ -15,6 +15,9 @@ public class Tankoubon {
     public var archives: Array<String>
     public var cover_asset_id: Int64 = 0
     public var assets_raw: String = "{}"
+    public var release_at: String = ""
+    public var created_at: String = ""
+    public var updated_at: String = ""
 
     // 聚合字段（用于搜索结果显示）
     public var pagecount: Int32 = 0
@@ -54,6 +57,9 @@ public class Tankoubon {
         w.writeName("pagecount").writeValue(pagecount)
         w.writeName("progress").writeValue(progress)
         w.writeName("lastreadtime").writeValue(last_read_time)
+        w.writeName("release_at").writeValue(release_at)
+        w.writeName("created_at").writeValue(created_at)
+        w.writeName("updated_at").writeValue(updated_at)
         w.writeName("isnew").writeValue(isnew)
         w.writeName("isfavorite").writeValue(isfavorite)
         w.endObject()
@@ -90,6 +96,9 @@ public class Tankoubon {
         w.writeName("pagecount").writeValue(pagecount)
         w.writeName("progress").writeValue(progress)
         w.writeName("lastreadtime").writeValue(last_read_time)
+        w.writeName("release_at").writeValue(release_at)
+        w.writeName("created_at").writeValue(created_at)
+        w.writeName("updated_at").writeValue(updated_at)
         w.writeName("isnew").writeValue(isnew)
         w.writeName("archive_count").writeValue(archive_count)
         w.writeName("isfavorite").writeValue(isfavorite)
@@ -191,6 +200,9 @@ public class TankoubonModel {
         let tankoubon = Tankoubon(data.tankoubon_id, data.name, data.summary, "", data.archives)
         tankoubon.cover_asset_id = data.cover_asset_id
         tankoubon.assets_raw = data.assets_raw
+        tankoubon.release_at = data.release_at
+        tankoubon.created_at = data.created_at
+        tankoubon.updated_at = data.updated_at
         let (archiveCount, totalPages) = TankoubonDao.getTankoubonArchiveStats(data.tankoubon_id)
         tankoubon.archive_count = archiveCount
         tankoubon.pagecount = totalPages
@@ -207,6 +219,15 @@ public class TankoubonModel {
                     tankoubon.cover_asset_id = agg.cover_asset_id
                 }
                 tankoubon.assets_raw = agg.assets_raw
+                if (agg.release_at.size > 0) {
+                    tankoubon.release_at = agg.release_at
+                }
+                if (agg.created_at.size > 0) {
+                    tankoubon.created_at = agg.created_at
+                }
+                if (agg.updated_at.size > 0) {
+                    tankoubon.updated_at = agg.updated_at
+                }
                 tankoubon.pagecount = agg.pagecount
                 tankoubon.archive_count = agg.archive_count
                 tankoubon.progress = agg.progress
@@ -226,6 +247,9 @@ public class TankoubonModel {
                 let tankoubon = Tankoubon(aggData.tankoubon_id, aggData.name, aggData.summary, aggData.tags, [])
                 tankoubon.cover_asset_id = aggData.cover_asset_id
                 tankoubon.assets_raw = aggData.assets_raw
+                tankoubon.release_at = aggData.release_at
+                tankoubon.created_at = aggData.created_at
+                tankoubon.updated_at = aggData.updated_at
                 tankoubon.pagecount = aggData.pagecount
                 tankoubon.progress = aggData.progress
                 tankoubon.last_read_time = aggData.last_read_time

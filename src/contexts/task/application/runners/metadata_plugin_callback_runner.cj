@@ -63,14 +63,6 @@ public class MetadataPluginCallbackRunner {
         let newClearlogo = parsed.clearlogo
         let archivePatches = parsed.archives
         let archivesProvided = parsed.archivesProvided
-        // Some metadata plugins may emit a pseudo-tag like `updated_at:<unix_seconds>`.
-        // Map it to archives.updated_at and prevent it from being stored as a normal tag.
-        var pluginUpdatedAt = ""
-        if (parsed.tagsProvided) {
-            let (updatedAtCandidate, cleanedTags) = extractUpdatedAtFromTags(newTags)
-            pluginUpdatedAt = updatedAtCandidate
-            newTags = cleanedTags
-        }
 
         let effectiveType = targetType.trimAscii().toAsciiLower()
         TaskModel.updateTaskProgress(taskId, 70, "写回元数据")
@@ -86,10 +78,6 @@ public class MetadataPluginCallbackRunner {
                     if (parsed.tagsProvided) {
                         topPatch.tags = newTags
                         topPatch.tagsProvided = true
-                    }
-                    if (pluginUpdatedAt.size > 0) {
-                        topPatch.updatedAt = pluginUpdatedAt
-                        topPatch.updatedAtProvided = true
                     }
                     if (parsed.backdropProvided) {
                         topPatch.backdrop = newBackdrop
@@ -137,10 +125,6 @@ public class MetadataPluginCallbackRunner {
             if (parsed.tagsProvided) {
                 topPatch.tags = newTags
             }
-            if (pluginUpdatedAt.size > 0) {
-                topPatch.updatedAt = pluginUpdatedAt
-                topPatch.updatedAtProvided = true
-            }
             let ok = MetadataPatchService.applyArchiveMetadataPatch(taskId, targetId, topPatch, resolvedNamespace)
             if (!ok) {
                 failAndMaybeEnqueueFallback(taskId, "Failed to update archive metadata", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
@@ -150,7 +134,21 @@ public class MetadataPluginCallbackRunner {
 
         // 完成任务
         TaskModel.updateTaskProgress(taskId, 100, "元数据回调完成")
-        let resultJson = buildResultJson(effectiveType, targetId, resolvedNamespace, newTitle, newSummary, newTags, newCover, newBackdrop, newClearlogo, output, archivePatches.size)
+        let resultJson = buildResultJson(
+            effectiveType,
+            targetId,
+            resolvedNamespace,
+            newTitle,
+            newSummary,
+            newTags,
+            newCover,
+            newBackdrop,
+            newClearlogo,
+            parsed.releaseAt,
+            parsed.updatedAt,
+            output,
+            archivePatches.size
+        )
         TaskModel.completeTask(taskId, "metadata_plugin_callback completed")
         TaskIO.writeOutput(taskId, resultJson)
     }
@@ -556,7 +554,7 @@ public class MetadataPluginCallbackRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func buildResultJson(targetType: String, targetId: String, namespace: String, title: String, summary: String, tags: String, cover: String, backdrop: String, clearlogo: String, output: String, archivesCount: Int64): String {
+    private static func buildResultJson(targetType: String, targetId: String, namespace: String, title: String, summary: String, tags: String, cover: String, backdrop: String, clearlogo: String, releaseAt: String, updatedAt: String, output: String, archivesCount: Int64): String {
         let effectiveType = targetType.trimAscii().toAsciiLower()
         let metadataType = if (effectiveType == "tankoubon" || effectiveType == "tank") { 1i32 } else { 0i32 }
         let tagsArray = tags.trimAscii().split(",")
@@ -606,6 +604,8 @@ public class MetadataPluginCallbackRunner {
         w.writeName("children")
         w.startArray()
         w.endArray()
+        w.writeName("release_at").writeValue(releaseAt)
+        w.writeName("updated_at").writeValue(updatedAt)
         w.endObject()
         w.writeName("archives_count").writeValue(archivesCount)
         w.writeName("plugin_output").writeValue(output)

@@ -202,10 +202,10 @@ public class TagDao {
                             SELECT
                                 'archive',
                                 a.arcid,
-                                COALESCE(a.title, ''),
-                                COALESCE(a.summary, ''),
-                                a.created_at,
-                                a.updated_at
+                                '',
+                                '',
+                                CURRENT_TIMESTAMP,
+                                CURRENT_TIMESTAMP
                             FROM archives a
                             WHERE a.arcid = ?
                             RETURNING id
@@ -239,6 +239,13 @@ public class TagDao {
 
                     // 如果标签字符串为空，直接返回
                     if (tagsString.size == 0 || tagsString == "") {
+                        let touchStmt = conn.prepareStatement("UPDATE metadata_objects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                        try {
+                            touchStmt.set(0, metadataId)
+                            touchStmt.update()
+                        } finally {
+                            touchStmt.close()
+                        }
                         return true
                     }
 
@@ -265,6 +272,13 @@ public class TagDao {
                         }
                     }
 
+                    let touchStmt = conn.prepareStatement("UPDATE metadata_objects SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                    try {
+                        touchStmt.set(0, metadataId)
+                        touchStmt.update()
+                    } finally {
+                        touchStmt.close()
+                    }
                     true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("Error updating archive tags", ("error", e.message))

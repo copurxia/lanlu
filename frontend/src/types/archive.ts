@@ -32,6 +32,9 @@ export interface MetadataPagePatch {
   thumb?: string;
   order_index?: number;
   hidden_in_files?: boolean;
+  release_at?: string;
+  updated_at?: string;
+  readonly created_at?: string;
   locator?: MetadataLocator;
 }
 
@@ -40,6 +43,8 @@ export interface MetadataChild {
   entity_id?: string;
   volume_no?: number;
   order_index?: number;
+  release_at?: string;
+  updated_at?: string;
   title?: string;
   description?: string;
   tags?: string[];
@@ -55,6 +60,8 @@ export interface MetadataObject {
   type?: number;
   description?: string;
   tags?: string[];
+  release_at?: string;
+  updated_at?: string;
   assets?: MetadataAssets;
   children?: MetadataChild[];
   pages?: MetadataPagePatch[];
@@ -76,6 +83,9 @@ export interface Archive {
   filename: string;
   description: string;
   tags: string;
+  release_at?: string;
+  created_at?: string;
+  updated_at?: string;
   pagecount: number;
   progress: number;
   isnew: boolean;
@@ -140,7 +150,8 @@ export interface ArchiveMetadata extends MetadataObject {
   file_size?: number;
   size?: number;
   archivetype?: string;
-  created_at?: string;
+  release_at?: string;
+  readonly created_at?: string;
   updated_at?: string;
   relative_path?: string;
   thumbnail_hash?: string;

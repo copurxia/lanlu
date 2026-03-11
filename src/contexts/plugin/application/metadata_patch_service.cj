@@ -158,6 +158,7 @@ public class MetadataPatchService {
             sourceArchive.id,
             "",
             "",
+            releaseAt: sourceArchive.release_at,
             sourceNamespace: "system:bootstrap",
             createdAt: sourceArchive.created_at,
             updatedAt: sourceArchive.updated_at
@@ -187,6 +188,7 @@ public class MetadataPatchService {
             normalizedId,
             "",
             "",
+            releaseAt: tankoubon.release_at,
             sourceNamespace: "system:bootstrap",
             createdAt: tankoubon.created_at,
             updatedAt: tankoubon.updated_at
@@ -303,6 +305,15 @@ public class MetadataPatchService {
                         case "title" => patch.title = readStringFlexible()
                         case "description" => patch.description = readStringFlexible()
                         case "thumb" => patch.thumb = readStringFlexible().trimAscii()
+                        case "release_at" =>
+                            patch.releaseAt = readStringFlexible().trimAscii()
+                            patch.releaseAtProvided = true
+                        case "created_at" =>
+                            patch.createdAt = readStringFlexible().trimAscii()
+                            patch.createdAtProvided = true
+                        case "updated_at" =>
+                            patch.updatedAt = readStringFlexible().trimAscii()
+                            patch.updatedAtProvided = true
                         case "order_index" =>
                             patch.sort = readInt32Flexible()
                             patch.sortProvided = true
@@ -401,6 +412,12 @@ public class MetadataPatchService {
                         case "tags" =>
                             patch.tags = readTagsFlexible()
                             patch.tagsProvided = true
+                        case "release_at" =>
+                            patch.releaseAt = readStringFlexible().trimAscii()
+                            patch.releaseAtProvided = true
+                        case "created_at" =>
+                            patch.createdAt = readStringFlexible().trimAscii()
+                            patch.createdAtProvided = true
                         case "updated_at" =>
                             patch.updatedAt = readStringFlexible().trimAscii()
                             patch.updatedAtProvided = true
@@ -446,6 +463,15 @@ public class MetadataPatchService {
                     case "tags" =>
                         parsed.tags = readTagsFlexible()
                         parsed.tagsProvided = true
+                    case "release_at" =>
+                        parsed.releaseAt = readStringFlexible().trimAscii()
+                        parsed.releaseAtProvided = true
+                    case "created_at" =>
+                        parsed.createdAt = readStringFlexible().trimAscii()
+                        parsed.createdAtProvided = true
+                    case "updated_at" =>
+                        parsed.updatedAt = readStringFlexible().trimAscii()
+                        parsed.updatedAtProvided = true
                     case "assets" =>
                         let topPatch = parseAssetFieldsToPatch(ArchiveMetadataPatch())
                         if (topPatch.coverProvided) {
@@ -588,6 +614,15 @@ public class MetadataPatchService {
             if (meta.hidden_in_files) {
                 w.writeName("hidden_in_files").writeValue(meta.hidden_in_files)
             }
+            if (meta.release_at.trimAscii().size > 0) {
+                w.writeName("release_at").writeValue(meta.release_at)
+            }
+            if (meta.created_at.trimAscii().size > 0) {
+                w.writeName("created_at").writeValue(meta.created_at)
+            }
+            if (meta.updated_at.trimAscii().size > 0) {
+                w.writeName("updated_at").writeValue(meta.updated_at)
+            }
             w.writeName("locator")
             w.startObject()
             w.writeName("entity_type").writeValue("page")
@@ -625,7 +660,8 @@ public class MetadataPatchService {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         let description = metadata.description
-        let updatedAt = if (metadata.updated_at.trimAscii().size > 0) { metadata.updated_at } else { archive.updated_at }
+        let createdAt = if (metadata.created_at.trimAscii().size > 0) { metadata.created_at } else { archive.created_at }
+        let updatedAt = if (metadata.updated_at.trimAscii().size > 0) { metadata.updated_at } else { createdAt }
         let thumbnailHash = resolveArchiveThumbnailHash(archive, metadata.assets)
         w.startObject()
         w.writeName("title").writeValue(metadata.title)
@@ -646,7 +682,8 @@ public class MetadataPatchService {
         w.writeName("isfavorite").writeValue(isFavorite)
         w.writeName("lastreadtime").writeValue(lastReadTime)
         w.writeName("archivetype").writeValue(archive.archive_type)
-        w.writeName("created_at").writeValue(archive.created_at)
+        w.writeName("release_at").writeValue(metadata.release_at)
+        w.writeName("created_at").writeValue(createdAt)
         w.writeName("updated_at").writeValue(updatedAt)
         if (includePages) {
             writePageMetadataArray(w, archive.id, MetadataDao.listPageMetadata(archive.id))
@@ -762,8 +799,9 @@ public class MetadataPatchService {
                         w.writeName("lastreadtime").writeValue(lastReadTime)
                         w.writeName("isnew").writeValue(isNew)
                         w.writeName("isfavorite").writeValue(isFavorite)
-                        w.writeName("created_at").writeValue(tankoubon.created_at)
-                        w.writeName("updated_at").writeValue(if (metadata.updated_at.trimAscii().size > 0) { metadata.updated_at } else { tankoubon.updated_at })
+                        w.writeName("release_at").writeValue(metadata.release_at)
+                        w.writeName("created_at").writeValue(metadata.created_at)
+                        w.writeName("updated_at").writeValue(metadata.updated_at)
                         writeLocatorObject(w, "tankoubon", tankoubonId)
                         w.endObject()
                         w.flush()
@@ -780,9 +818,15 @@ public class MetadataPatchService {
         patch.cover = parsed.cover
         patch.backdrop = parsed.backdrop
         patch.clearlogo = parsed.clearlogo
+        patch.releaseAt = parsed.releaseAt
+        patch.createdAt = parsed.createdAt
+        patch.updatedAt = parsed.updatedAt
         patch.titleProvided = parsed.titleProvided
         patch.summaryProvided = parsed.summaryProvided
         patch.tagsProvided = parsed.tagsProvided
+        patch.releaseAtProvided = parsed.releaseAtProvided
+        patch.createdAtProvided = parsed.createdAtProvided
+        patch.updatedAtProvided = parsed.updatedAtProvided
         patch.coverProvided = parsed.coverProvided
         patch.backdropProvided = parsed.backdropProvided
         patch.clearlogoProvided = parsed.clearlogoProvided
@@ -814,6 +858,9 @@ public class MetadataPatchService {
             if (cleared && oldAssetId > 0) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
+            if (cleared) {
+                let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
+            }
             return
         }
 
@@ -824,6 +871,7 @@ public class MetadataPatchService {
                 if (oldAssetId > 0 && oldAssetId != directAssetId) {
                     PluginTaskService.deleteCoverAsset(oldAssetId)
                 }
+                let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
             } else {
                 logWarn(taskId, "failed to apply archive ${key} asset id=${directAssetId} archive=${archiveId}")
             }
@@ -864,6 +912,7 @@ public class MetadataPatchService {
             if (oldAssetId > 0 && oldAssetId != newAssetId) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
+            let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
         } else {
             PluginTaskService.deleteCoverAsset(newAssetId)
             logWarn(taskId, "failed to apply archive ${key} asset, removed new asset id=${newAssetId} archive=${archiveId}")
@@ -883,6 +932,9 @@ public class MetadataPatchService {
             if (cleared && oldAssetId > 0) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
+            if (cleared) {
+                let _ = MetadataDao.touchRootMetadataObject("tankoubon", tankoubonId)
+            }
             return
         }
 
@@ -893,6 +945,7 @@ public class MetadataPatchService {
                 if (oldAssetId > 0 && oldAssetId != directAssetId) {
                     PluginTaskService.deleteCoverAsset(oldAssetId)
                 }
+                let _ = MetadataDao.touchRootMetadataObject("tankoubon", tankoubonId)
             } else {
                 logWarn(taskId, "failed to apply tankoubon ${key} asset id=${directAssetId} tankoubon=${tankoubonId}")
             }
@@ -933,6 +986,7 @@ public class MetadataPatchService {
             if (oldAssetId > 0 && oldAssetId != newAssetId) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
+            let _ = MetadataDao.touchRootMetadataObject("tankoubon", tankoubonId)
         } else {
             PluginTaskService.deleteCoverAsset(newAssetId)
             logWarn(taskId, "failed to apply tankoubon ${key} asset, removed new asset id=${newAssetId} tankoubon=${tankoubonId}")
@@ -1093,6 +1147,9 @@ public class MetadataPatchService {
             item.title = patch.title
             item.description = patch.description
             item.extra_data = "{}"
+            item.release_at = ""
+            item.created_at = ""
+            item.updated_at = ""
 
             match (existingOpt) {
                 case Some(existing) =>
@@ -1107,7 +1164,20 @@ public class MetadataPatchService {
                     item.thumb_asset_id = existing.thumb_asset_id
                     item.thumbhash = existing.thumbhash
                     item.extra_data = existing.extra_data
+                    item.release_at = existing.release_at
+                    item.created_at = existing.created_at
+                    item.updated_at = existing.updated_at
                 case None => ()
+            }
+
+            if (patch.createdAtProvided) {
+                logWarn(taskId, "ignore page created_at patch (read-only): archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}")
+            }
+            if (patch.releaseAtProvided) {
+                item.release_at = patch.releaseAt.trimAscii()
+            }
+            if (patch.updatedAtProvided) {
+                item.updated_at = patch.updatedAt.trimAscii()
             }
 
             if (patch.sortProvided) {
@@ -1212,17 +1282,19 @@ public class MetadataPatchService {
                 return false
         }
 
-        let (updatedAtFromTags, cleanedPatchTags) = if (patch.tagsProvided) {
-            extractUpdatedAtFromTags(patch.tags)
-        } else {
-            ("", patch.tags)
+        if (patch.createdAtProvided) {
+            logWarn(taskId, "ignore archive created_at patch (read-only): ${archiveId}")
         }
-        let hasPatchUpdatedAt = patch.updatedAtProvided || updatedAtFromTags.trimAscii().size > 0
-        let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
+
         let nextTitle = if (patch.titleProvided) { patch.title.trimAscii() } else { existingMetadata.title }
         let nextDescription = if (patch.summaryProvided) { patch.summary } else { existingMetadata.description }
-        let nextUpdatedAt = if (hasPatchUpdatedAt) {
-            effectiveUpdatedAt
+        let nextReleaseAt = if (patch.releaseAtProvided) {
+            patch.releaseAt.trimAscii()
+        } else {
+            existingMetadata.release_at
+        }
+        let nextUpdatedAt = if (patch.updatedAtProvided) {
+            patch.updatedAt.trimAscii()
         } else if (existingMetadata.updated_at.trimAscii().size > 0) {
             existingMetadata.updated_at
         } else {
@@ -1234,8 +1306,8 @@ public class MetadataPatchService {
             archiveId,
             nextTitle,
             nextDescription,
+            releaseAt: nextReleaseAt,
             sourceNamespace: pluginNamespace,
-            createdAt: archive.created_at,
             updatedAt: nextUpdatedAt
         )
         if (!rootOk) {
@@ -1244,7 +1316,7 @@ public class MetadataPatchService {
         }
 
         if (patch.tagsProvided) {
-            let tagOk = MetadataDao.replaceMetadataTags("archive", archiveId, splitTagTokens(cleanedPatchTags))
+            let tagOk = MetadataDao.replaceMetadataTags("archive", archiveId, splitTagTokens(patch.tags))
             if (!tagOk) {
                 logWarn(taskId, "archive tag update failed: ${archiveId}")
             }
@@ -1280,17 +1352,19 @@ public class MetadataPatchService {
                 return false
         }
 
-        let (updatedAtFromTags, cleanedPatchTags) = if (patch.tagsProvided) {
-            extractUpdatedAtFromTags(patch.tags)
-        } else {
-            ("", patch.tags)
+        if (patch.createdAtProvided) {
+            logWarn(taskId, "ignore tankoubon created_at patch (read-only): ${tankoubonId}")
         }
-        let hasPatchUpdatedAt = patch.updatedAtProvided || updatedAtFromTags.trimAscii().size > 0
-        let effectiveUpdatedAt = if (patch.updatedAt.trimAscii().size > 0) { patch.updatedAt.trimAscii() } else { updatedAtFromTags }
+
         let nextTitle = if (patch.titleProvided) { patch.title.trimAscii() } else { existingMetadata.title }
         let nextDescription = if (patch.summaryProvided) { patch.summary } else { existingMetadata.description }
-        let nextUpdatedAt = if (hasPatchUpdatedAt) {
-            effectiveUpdatedAt
+        let nextReleaseAt = if (patch.releaseAtProvided) {
+            patch.releaseAt.trimAscii()
+        } else {
+            existingMetadata.release_at
+        }
+        let nextUpdatedAt = if (patch.updatedAtProvided) {
+            patch.updatedAt.trimAscii()
         } else if (existingMetadata.updated_at.trimAscii().size > 0) {
             existingMetadata.updated_at
         } else {
@@ -1302,8 +1376,8 @@ public class MetadataPatchService {
             tankoubonId,
             nextTitle,
             nextDescription,
+            releaseAt: nextReleaseAt,
             sourceNamespace: pluginNamespace,
-            createdAt: tankoubon.created_at,
             updatedAt: nextUpdatedAt
         )
         if (!rootOk) {
@@ -1312,7 +1386,7 @@ public class MetadataPatchService {
         }
 
         if (patch.tagsProvided) {
-            let tagOk = MetadataDao.replaceMetadataTags("tankoubon", tankoubonId, splitTagTokens(cleanedPatchTags))
+            let tagOk = MetadataDao.replaceMetadataTags("tankoubon", tankoubonId, splitTagTokens(patch.tags))
             if (!tagOk) {
                 logWarn(taskId, "tankoubon tag update failed: ${tankoubonId}")
             }

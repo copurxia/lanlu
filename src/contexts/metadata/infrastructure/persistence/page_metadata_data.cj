@@ -15,6 +15,7 @@ public class PageMetadataData {
     public var thumb_asset_id: Int64 = 0
     public var thumbhash: String = ""
     public var extra_data: String = "{}"
+    public var release_at: String = ""
     public var created_at: String = ""
     public var updated_at: String = ""
 }

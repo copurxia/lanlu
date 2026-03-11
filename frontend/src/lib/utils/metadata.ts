@@ -128,6 +128,9 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
     const title = readString(row.title);
     const description = readString(row.description);
     const thumb = readString(row.thumb);
+    const releaseAt = readString(row.release_at ?? row.releaseAt);
+    const updatedAt = readString(row.updated_at ?? row.updatedAt);
+    const createdAt = readString(row.created_at ?? row.createdAt);
 
     if (!entryPath && !(typeof pageNumber === 'number' && pageNumber > 0)) continue;
 
@@ -139,6 +142,9 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
       thumb: thumb || undefined,
       order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
       hidden_in_files: hiddenInFiles || undefined,
+      release_at: releaseAt || undefined,
+      updated_at: updatedAt || undefined,
+      created_at: createdAt || undefined,
       locator: normalizeMetadataLocator(row.locator),
     });
   }
@@ -151,6 +157,8 @@ export function normalizeMetadataObject(raw: unknown): MetadataObject {
   const children = normalizeMetadataChildren(row.children);
   const orderIndex = readNumber(row.order_index);
   const volumeNo = readNumber(row.volume_no);
+  const releaseAt = readString(row.release_at ?? row.releaseAt);
+  const updatedAt = readString(row.updated_at ?? row.updatedAt);
 
   return {
     ...row,
@@ -158,6 +166,8 @@ export function normalizeMetadataObject(raw: unknown): MetadataObject {
     type: readNumber(row.type),
     description: readString(row.description) || undefined,
     tags: normalizeMetadataTags(row.tags),
+    release_at: releaseAt || undefined,
+    updated_at: updatedAt || undefined,
     assets: normalizeMetadataAssetMap(row.assets),
     children,
     pages: normalizeMetadataPages(row.pages),
@@ -178,6 +188,9 @@ export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
   const fileSize = readNumber(row.file_size ?? row.size);
   const lastReadTime = readNumber(row.lastreadtime);
   const arcid = readString(row.arcid || metadata.entity_id);
+  const releaseAt = readString(row.release_at ?? row.releaseAt ?? metadata.release_at);
+  const updatedAt = readString(row.updated_at ?? row.updatedAt ?? metadata.updated_at);
+  const createdAt = readString(row.created_at ?? row.createdAt);
 
   const normalizedAssets = normalizeMetadataAssetMap(metadata.assets ?? row.assets);
   const rawAssets = metadata.assets ?? row.assets;
@@ -202,8 +215,9 @@ export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
     file_size: typeof fileSize === 'number' && Number.isFinite(fileSize) ? fileSize : undefined,
     size: typeof fileSize === 'number' && Number.isFinite(fileSize) ? fileSize : undefined,
     archivetype: readString(row.archivetype || row.archive_type) || undefined,
-    created_at: readString(row.created_at) || undefined,
-    updated_at: readString(row.updated_at) || undefined,
+    release_at: releaseAt || undefined,
+    created_at: createdAt || undefined,
+    updated_at: updatedAt || undefined,
     thumbnail_hash: readString(row.thumbnail_hash || row.thumbhash) || undefined,
   };
 }
@@ -211,10 +225,15 @@ export function normalizeArchiveMetadata(raw: unknown): ArchiveMetadata {
 export function normalizeTankoubonMemberMetadataPatch(raw: unknown): TankoubonMemberMetadataPatch {
   const row = asRecord(raw);
   const metadata = normalizeMetadataObject(raw);
+  const releaseAt = readString(row.release_at ?? row.releaseAt ?? metadata.release_at);
+  const updatedAt = readString(row.updated_at ?? row.updatedAt ?? metadata.updated_at);
+  const createdAt = readString(row.created_at ?? row.createdAt);
 
   return {
     ...metadata,
-    updated_at: readString(row.updated_at) || undefined,
+    release_at: releaseAt || undefined,
+    updated_at: updatedAt || undefined,
+    created_at: createdAt || undefined,
     cover: readMetadataAssetValue(row.assets, 'cover') || readString(row.cover) || undefined,
     backdrop: readMetadataAssetValue(row.assets, 'backdrop') || readString(row.backdrop) || undefined,
     clearlogo: readMetadataAssetValue(row.assets, 'clearlogo') || readString(row.clearlogo) || undefined,
@@ -231,6 +250,9 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
   const archiveCount = readNumber(row.archive_count);
   const pagecount = readNumber(row.pagecount);
   const progress = readNumber(row.progress);
+  const releaseAt = readString(row.release_at ?? row.releaseAt ?? metadata.release_at);
+  const updatedAt = readString(row.updated_at ?? row.updatedAt ?? metadata.updated_at);
+  const createdAt = readString(row.created_at ?? row.createdAt);
 
   const normalizedAssets = normalizeMetadataAssetMap(metadata.assets ?? row.assets);
   const rawAssets = metadata.assets ?? row.assets;
@@ -249,6 +271,9 @@ export function normalizeTankoubonMetadata(raw: unknown): TankoubonMetadata {
     lastreadtime: readString(row.lastreadtime || row.last_read_time) || undefined,
     isnew: row.isnew === true,
     isfavorite: row.isfavorite === true,
+    release_at: releaseAt || undefined,
+    updated_at: updatedAt || undefined,
+    created_at: createdAt || undefined,
     cover: readMetadataAssetValue(rawAssets, 'cover') || readString(row.cover) || undefined,
     backdrop: readMetadataAssetValue(rawAssets, 'backdrop') || readString(row.backdrop) || undefined,
     clearlogo: readMetadataAssetValue(rawAssets, 'clearlogo') || readString(row.clearlogo) || undefined,

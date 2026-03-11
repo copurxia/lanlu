@@ -33,6 +33,7 @@ public class MetadataObjectData {
     public var entry_path: String = ""
     public var extra_data: String = "{}"
     public var source_namespace: String = ""
+    public var release_at: String = ""
     public var created_at: String = ""
     public var updated_at: String = ""
     public var tags: Array<String> = Array<String>()
@@ -145,6 +146,7 @@ public class MetadataDao {
         data.source_namespace = rs.getOrNull<String>(12) ?? ""
         data.created_at = rs.getOrNull<String>(13) ?? ""
         data.updated_at = rs.getOrNull<String>(14) ?? ""
+        data.release_at = rs.getOrNull<String>(15) ?? ""
         return data
     }
 
@@ -249,7 +251,7 @@ public class MetadataDao {
                                COALESCE(title, ''), COALESCE(description, ''), COALESCE(volume_no, 0),
                                COALESCE(order_index, 0), COALESCE(page_number, 0), COALESCE(entry_path, ''),
                                COALESCE(CAST(extra_data AS TEXT), '{}'), COALESCE(source_namespace, ''),
-                               COALESCE(created_at::TEXT, ''), COALESCE(updated_at::TEXT, '')
+                               COALESCE(created_at::TEXT, ''), COALESCE(updated_at::TEXT, ''), COALESCE(release_at::TEXT, '')
                         FROM metadata_objects
                         WHERE entity_type = ? AND entity_id = ?
                         LIMIT 1
@@ -288,6 +290,7 @@ public class MetadataDao {
         entityId: String,
         title: String,
         description: String,
+        releaseAt!: String = "",
         sourceNamespace!: String = "",
         createdAt!: String = "",
         updatedAt!: String = ""
@@ -309,6 +312,7 @@ public class MetadataDao {
                             UPDATE metadata_objects
                             SET title = ?,
                                 description = ?,
+                                release_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), release_at),
                                 source_namespace = ?,
                                 updated_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
                             WHERE id = ?
@@ -316,9 +320,10 @@ public class MetadataDao {
                         try {
                             stmt.set(0, title)
                             stmt.set(1, description)
-                            stmt.set(2, sourceNamespace)
-                            stmt.set(3, updatedAt)
-                            stmt.set(4, existingId)
+                            stmt.set(2, releaseAt)
+                            stmt.set(3, sourceNamespace)
+                            stmt.set(4, updatedAt)
+                            stmt.set(5, existingId)
                             stmt.update()
                             return true
                         } finally {
@@ -330,10 +335,11 @@ public class MetadataDao {
                         INSERT INTO metadata_objects (
                             entity_type, entity_id, parent_entity_type, parent_entity_id,
                             title, description, volume_no, order_index, page_number, entry_path,
-                            extra_data, source_namespace, created_at, updated_at
+                            extra_data, source_namespace, release_at, created_at, updated_at
                         ) VALUES (
                             ?, ?, '', '', ?, ?, 0, 0, 0, '',
                             '{}'::jsonb, ?,
+                            CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP),
                             COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP),
                             COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
                         )
@@ -344,8 +350,9 @@ public class MetadataDao {
                         stmt.set(2, title)
                         stmt.set(3, description)
                         stmt.set(4, sourceNamespace)
-                        stmt.set(5, createdAt)
-                        stmt.set(6, updatedAt)
+                        stmt.set(5, releaseAt)
+                        stmt.set(6, createdAt)
+                        stmt.set(7, updatedAt)
                         stmt.update()
                         return true
                     } finally {
@@ -353,6 +360,40 @@ public class MetadataDao {
                     }
                 } catch (e: Exception) {
                     logger.error("upsertRootMetadataObject failed", ("entityType", normalizedType), ("entityId", normalizedId), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+    }
+
+    public static func touchRootMetadataObject(entityType: String, entityId: String): Bool {
+        let normalizedType = entityType.trimAscii().toAsciiLower()
+        let normalizedId = entityId.trimAscii()
+        if (normalizedId.size == 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return false
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE metadata_objects
+                        SET updated_at = CURRENT_TIMESTAMP
+                        WHERE entity_type = ? AND entity_id = ?
+                    """)
+                    try {
+                        stmt.set(0, normalizedType)
+                        stmt.set(1, normalizedId)
+                        let result = stmt.update()
+                        return result.rowCount > 0
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.error("touchRootMetadataObject failed", ("entityType", normalizedType), ("entityId", normalizedId), ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
@@ -599,6 +640,7 @@ public class MetadataDao {
                                COALESCE(mo.order_index, 0),
                                COALESCE(ma.asset_id, 0),
                                COALESCE(CAST(mo.extra_data AS TEXT), '{}'),
+                               COALESCE(mo.release_at::TEXT, ''),
                                COALESCE(mo.created_at::TEXT, ''),
                                COALESCE(mo.updated_at::TEXT, '')
                         FROM metadata_objects mo
@@ -626,8 +668,9 @@ public class MetadataDao {
                                 item.extra_data = rs.getOrNull<String>(7) ?? "{}"
                                 item.hidden_in_files = readExtraBool(item.extra_data, "hidden_in_files")
                                 item.thumbhash = readExtraString(item.extra_data, "thumbhash")
-                                item.created_at = rs.getOrNull<String>(8) ?? ""
-                                item.updated_at = rs.getOrNull<String>(9) ?? ""
+                                item.release_at = rs.getOrNull<String>(8) ?? ""
+                                item.created_at = rs.getOrNull<String>(9) ?? ""
+                                item.updated_at = rs.getOrNull<String>(10) ?? ""
                                 out.add(item)
                             }
                         } finally {
@@ -682,8 +725,9 @@ public class MetadataDao {
                                         jsonb_set(COALESCE(CAST(? AS JSONB), '{}'::jsonb), '{hidden_in_files}', to_jsonb(CAST(? AS BOOLEAN)), true),
                                         '{thumbhash}', to_jsonb(CAST(? AS TEXT)), true
                                     ),
+                                    release_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), release_at),
                                     source_namespace = ?,
-                                    updated_at = CURRENT_TIMESTAMP
+                                    updated_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
                                 WHERE id = ?
                             """)
                             try {
@@ -696,8 +740,10 @@ public class MetadataDao {
                                 stmt.set(6, item.extra_data)
                                 stmt.set(7, item.hidden_in_files)
                                 stmt.set(8, item.thumbhash)
-                                stmt.set(9, sourceNamespace)
-                                stmt.set(10, existingId)
+                                stmt.set(9, item.release_at)
+                                stmt.set(10, sourceNamespace)
+                                stmt.set(11, item.updated_at)
+                                stmt.set(12, existingId)
                                 stmt.update()
                             } finally {
                                 stmt.close()
@@ -707,7 +753,7 @@ public class MetadataDao {
                                 INSERT INTO metadata_objects (
                                     entity_type, entity_id, parent_entity_type, parent_entity_id,
                                     title, description, volume_no, order_index, page_number, entry_path,
-                                    extra_data, source_namespace, created_at, updated_at
+                                    extra_data, source_namespace, release_at, created_at, updated_at
                                 ) VALUES (
                                     'page', ?, 'archive', ?,
                                     ?, ?, 0, ?, ?, ?,
@@ -716,6 +762,7 @@ public class MetadataDao {
                                         '{thumbhash}', to_jsonb(CAST(? AS TEXT)), true
                                     ),
                                     ?,
+                                    CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP),
                                     COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP),
                                     COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
                                 )
@@ -732,8 +779,9 @@ public class MetadataDao {
                                 stmt.set(8, item.hidden_in_files)
                                 stmt.set(9, item.thumbhash)
                                 stmt.set(10, sourceNamespace)
-                                stmt.set(11, item.created_at)
-                                stmt.set(12, item.updated_at)
+                                stmt.set(11, item.release_at)
+                                stmt.set(12, item.created_at)
+                                stmt.set(13, item.updated_at)
                                 stmt.update()
                             } finally {
                                 stmt.close()

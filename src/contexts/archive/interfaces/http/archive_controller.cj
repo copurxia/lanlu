@@ -1467,6 +1467,7 @@ public class ArchiveController {
                         case None => "{}"
                     }
                     writeArchiveAssetsJson(w, assetsRaw)
+                    w.writeName("release_at").writeValue(archive.release_at)
                     w.writeName("created_at").writeValue(archive.created_at)
                     w.writeName("updated_at").writeValue(archive.updated_at)
                     w.writeName("last_read_time").writeValue(archive.last_read_time)
@@ -1542,6 +1543,7 @@ public class ArchiveController {
                         case None => "{}"
                     }
                     writeArchiveAssetsJson(w, assetsRaw)
+                    w.writeName("release_at").writeValue(archive.release_at)
                     w.writeName("created_at").writeValue(archive.created_at)
                     w.writeName("updated_at").writeValue(archive.updated_at)
                     w.writeName("last_read_time").writeValue(archive.last_read_time)

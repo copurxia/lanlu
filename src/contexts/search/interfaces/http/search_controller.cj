@@ -178,6 +178,9 @@ public class SearchController {
                         w.writeName("pagecount").writeValue(agg.pagecount)
                         w.writeName("progress").writeValue(agg.progress)
                         w.writeName("lastreadtime").writeValue(agg.last_read_time)
+                        w.writeName("release_at").writeValue(agg.release_at)
+                        w.writeName("created_at").writeValue(agg.created_at)
+                        w.writeName("updated_at").writeValue(agg.updated_at)
                         w.writeName("isnew").writeValue(agg.isnew)
                         w.writeName("archive_count").writeValue(agg.archive_count)
                         w.writeName("isfavorite").writeValue(true)
@@ -246,6 +249,7 @@ public class SearchController {
                 archive.summary = row.summary
                 archive.thumbhash = row.thumbhash
                 archive.cover_asset_id = row.cover_asset_id
+                archive.release_at = row.release_at
                 archive.created_at = row.created_at
                 archive.updated_at = row.updated_at
                 archive.relative_path = row.relative_path
@@ -372,6 +376,9 @@ public class SearchController {
                         w.writeName("pagecount").writeValue(tankoubon.pagecount)
                         w.writeName("progress").writeValue(tankoubon.progress)
                         w.writeName("lastreadtime").writeValue(tankoubon.last_read_time)
+                        w.writeName("release_at").writeValue(tankoubon.release_at)
+                        w.writeName("created_at").writeValue(tankoubon.created_at)
+                        w.writeName("updated_at").writeValue(tankoubon.updated_at)
                         w.writeName("isnew").writeValue(tankoubon.isnew)
                         w.writeName("archive_count").writeValue(tankoubon.archive_count)
                         w.writeName("isfavorite").writeValue(isTankFavorite)
@@ -443,6 +450,9 @@ public class SearchController {
                     w.writeName("description").writeValue(archive.summary)
                     w.writeName("tags").writeValue(translatedArchiveTags)
                     w.writeName("title").writeValue(archive.title)
+                    w.writeName("release_at").writeValue(archive.release_at)
+                    w.writeName("created_at").writeValue(archive.created_at)
+                    w.writeName("updated_at").writeValue(archive.updated_at)
                     w.endObject()
                 case None => ()
             }
@@ -542,6 +552,7 @@ public class SearchController {
                 archive.summary = row.summary
                 archive.thumbhash = row.thumbhash
                 archive.cover_asset_id = row.cover_asset_id
+                archive.release_at = row.release_at
                 archive.created_at = row.created_at
                 archive.updated_at = row.updated_at
                 archive.relative_path = row.relative_path
@@ -668,6 +679,9 @@ public class SearchController {
                         w.writeName("pagecount").writeValue(tankoubon.pagecount)
                         w.writeName("progress").writeValue(tankoubon.progress)
                         w.writeName("lastreadtime").writeValue(tankoubon.last_read_time)
+                        w.writeName("release_at").writeValue(tankoubon.release_at)
+                        w.writeName("created_at").writeValue(tankoubon.created_at)
+                        w.writeName("updated_at").writeValue(tankoubon.updated_at)
                         w.writeName("isnew").writeValue(tankoubon.isnew)
                         w.writeName("archive_count").writeValue(tankoubon.archive_count)
                         w.writeName("isfavorite").writeValue(isTankFavorite)
@@ -739,6 +753,9 @@ public class SearchController {
                     w.writeName("description").writeValue(archive.summary)
                     w.writeName("tags").writeValue(translatedRandomTags)
                     w.writeName("title").writeValue(archive.title)
+                    w.writeName("release_at").writeValue(archive.release_at)
+                    w.writeName("created_at").writeValue(archive.created_at)
+                    w.writeName("updated_at").writeValue(archive.updated_at)
                     w.endObject()
                 case None => ()
             }

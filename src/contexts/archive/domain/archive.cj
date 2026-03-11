@@ -1,7 +1,5 @@
 package lanlu.contexts.archive.domain
 
-import std.database.sql.*
-import lanlu.shared.config.*
 import std.collection.*
 import std.fs.*
 import lanlu.contexts.archive.infrastructure.persistence.*
@@ -20,6 +18,7 @@ public class Archive {
     public var summary: String = ""
     public var thumbhash: String = ""
     public var cover_asset_id: Int64 = 0
+    public var release_at: String = ""
     public var created_at: String = ""
     public var updated_at: String = ""
     public var relative_path: String = ""
@@ -68,49 +67,28 @@ public class ArchiveModel {
      * 获取所有归档
      */
     public static func getAllArchives(): Array<Archive> {
-        let connOpt = DatabaseConfig.createConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                var archives: ArrayList<Archive> = ArrayList<Archive>()
-                try {
-                    let stmt = conn.prepareStatement(
-                        "SELECT arcid, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, relative_path, file_size, pagecount, archive_type FROM archives ORDER BY id")
-                    try {
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let archive = Archive()
-                                archive.id = rs.getOrNull<String>(0) ?? ""
-                                archive.title = rs.getOrNull<String>(1) ?? ""
-                                archive.filename = rs.getOrNull<String>(2) ?? ""
-                                archive.summary = rs.getOrNull<String>(3) ?? ""
-                                archive.thumbhash = rs.getOrNull<String>(4) ?? ""
-                                archive.cover_asset_id = rs.getOrNull<Int64>(5) ?? 0
-                                archive.created_at = rs.getOrNull<String>(6) ?? ""
-                                archive.updated_at = rs.getOrNull<String>(7) ?? ""
-                                archive.relative_path = rs.getOrNull<String>(8) ?? ""
-                                archive.file_size = rs.getOrNull<Int64>(9) ?? 0
-                                archive.pagecount = rs.getOrNull<Int32>(10) ?? 0
-                                archive.archive_type = rs.getOrNull<String>(11) ?? "archive"
-                                archives.add(archive)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                    return archives.toArray()
-                } catch (e: Exception) {
-                    println("查询归档失败: ${e}")
-                    return Array<Archive>()
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
-                }
-            case None =>
-                println("无法连接到数据库")
-                return Array<Archive>()
+        let daoRows = ArchiveDao.getAllArchives()
+        var archives = ArrayList<Archive>()
+        for (row in daoRows) {
+            let archive = Archive()
+            archive.id = row.id
+            archive.internalId = row.internalId
+            archive.title = row.title
+            archive.filename = row.filename
+            archive.summary = row.summary
+            archive.thumbhash = row.thumbhash
+            archive.cover_asset_id = row.cover_asset_id
+            archive.release_at = row.release_at
+            archive.created_at = row.created_at
+            archive.updated_at = row.updated_at
+            archive.relative_path = row.relative_path
+            archive.file_size = row.file_size
+            archive.pagecount = row.pagecount
+            archive.archive_type = row.archive_type
+            archive.tags = row.tags
+            archives.add(archive)
         }
+        return archives.toArray()
     }
 
     /**
@@ -125,6 +103,7 @@ public class ArchiveModel {
         archive.summary = archiveData.summary
         archive.thumbhash = archiveData.thumbhash
         archive.cover_asset_id = archiveData.cover_asset_id
+        archive.release_at = archiveData.release_at
         archive.created_at = archiveData.created_at
         archive.updated_at = archiveData.updated_at
         archive.relative_path = archiveData.relative_path
@@ -160,6 +139,7 @@ public class ArchiveModel {
             archive.summary = data.summary
             archive.thumbhash = data.thumbhash
             archive.cover_asset_id = data.cover_asset_id
+            archive.release_at = data.release_at
             archive.created_at = data.created_at
             archive.updated_at = data.updated_at
             archive.relative_path = data.relative_path
@@ -215,6 +195,7 @@ public class ArchiveModel {
             archive.summary = data.summary
             archive.thumbhash = data.thumbhash
             archive.cover_asset_id = data.cover_asset_id
+            archive.release_at = data.release_at
             archive.created_at = data.created_at
             archive.updated_at = data.updated_at
             archive.relative_path = data.relative_path

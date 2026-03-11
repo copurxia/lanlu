@@ -83,6 +83,8 @@ export interface MetadataLocator {
   order_index?: number;
 }
 
+export type MetadataTimestamp = string | number;
+
 export interface MetadataObject {
   title: string;
   type: number;
@@ -97,6 +99,10 @@ export interface MetadataObject {
   volume_no?: number;
   order_index?: number;
   locator?: MetadataLocator;
+  release_at?: MetadataTimestamp;
+  // Host-managed creation timestamp. Plugins should treat this as read-only.
+  created_at?: MetadataTimestamp;
+  updated_at?: MetadataTimestamp;
   [key: string]: unknown;
 }
 
@@ -477,9 +483,32 @@ export abstract class BasePlugin {
         order_index: this.readIntField(locatorSource.order_index, 0) || undefined,
       };
     }
+    const releaseAt = this.normalizeMetadataTimestamp(
+      (source as Record<string, unknown>).release_at
+      ?? (source as Record<string, unknown>).releaseAt
+      ?? (source as Record<string, unknown>).release_date
+      ?? (source as Record<string, unknown>).releaseDate,
+    );
+    if (releaseAt !== undefined) {
+      result.release_at = releaseAt;
+    }
+    const createdAt = this.normalizeMetadataTimestamp(
+      (source as Record<string, unknown>).created_at
+      ?? (source as Record<string, unknown>).createdAt,
+    );
+    if (createdAt !== undefined) {
+      result.created_at = createdAt;
+    }
+    const updatedAt = this.normalizeMetadataTimestamp(
+      (source as Record<string, unknown>).updated_at
+      ?? (source as Record<string, unknown>).updatedAt,
+    );
+    if (updatedAt !== undefined) {
+      result.updated_at = updatedAt;
+    }
 
     for (const [key, value] of Object.entries(source)) {
-      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'children' || key === 'pages' || key === 'archive_id' || key === 'entity_id' || key === 'volume_no' || key === 'order_index' || key === 'locator') {
+      if (key === 'title' || key === 'type' || key === 'description' || key === 'tags' || key === 'assets' || key === 'archive' || key === 'children' || key === 'pages' || key === 'archive_id' || key === 'entity_id' || key === 'volume_no' || key === 'order_index' || key === 'locator' || key === 'release_at' || key === 'releaseAt' || key === 'release_date' || key === 'releaseDate' || key === 'created_at' || key === 'createdAt' || key === 'updated_at' || key === 'updatedAt') {
         continue;
       }
       result[key] = value;
@@ -536,6 +565,18 @@ export abstract class BasePlugin {
       deduped.push({ key, value: item.value });
     }
     return deduped;
+  }
+
+  private normalizeMetadataTimestamp(raw: unknown): MetadataTimestamp | undefined {
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return Math.trunc(raw);
+    }
+    if (typeof raw === 'string') {
+      const text = raw.trim();
+      if (!text) return undefined;
+      return text;
+    }
+    return undefined;
   }
 
   private normalizePageMetadataPatch(raw: unknown): PageMetadataPatch {

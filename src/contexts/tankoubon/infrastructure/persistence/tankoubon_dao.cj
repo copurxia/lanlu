@@ -22,6 +22,7 @@ public class TankoubonData {
     public var auto_created: Bool = false
     public var source_category_id: Int64 = 0
     public var source_relative_path: String = ""
+    public var release_at: String = ""
     public var created_at: String = ""
     public var updated_at: String = ""
     public var archives: Array<String> = Array<String>()  // Array of archive arcids
@@ -34,6 +35,9 @@ public class TankoubonAggregatedData {
     public var tankoubon_id: String = ""
     public var name: String = ""
     public var summary: String = ""
+    public var release_at: String = ""
+    public var created_at: String = ""
+    public var updated_at: String = ""
     public var cover_asset_id: Int64 = 0
     public var assets_raw: String = "{}"
     public var tags: String = ""  // 合并的标签：tankoubon tags + 所有 archive tags
@@ -83,25 +87,7 @@ public class TankoubonDao {
     private static func touchTankoubonUpdatedAt(tankoubonId: String): Bool {
         let normalized = tankoubonId.trimAscii()
         if (normalized.size == 0) { return false }
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("UPDATE tankoubons SET updated_at = CURRENT_TIMESTAMP WHERE tankoubon_id = ?")
-                    try {
-                        stmt.set(0, normalized)
-                        let result = stmt.update()
-                        return result.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-        }
+        return MetadataDao.touchRootMetadataObject("tankoubon", normalized)
     }
 
     private static func getArchivesInTankoubonWithConnection(conn: Connection, tankoubonId: String): Array<String> {
@@ -154,8 +140,9 @@ public class TankoubonDao {
                             COALESCE(t.auto_created, false),
                             COALESCE(t.source_category_id, 0),
                             COALESCE(t.source_relative_path, ''),
-                            t.created_at,
-                            t.updated_at
+                            COALESCE(mo.release_at::TEXT, ''),
+                            COALESCE(mo.created_at::TEXT, ''),
+                            COALESCE(mo.updated_at::TEXT, '')
                         FROM tankoubons t
                         LEFT JOIN metadata_objects mo
                                ON mo.entity_type = 'tankoubon'
@@ -188,8 +175,9 @@ public class TankoubonDao {
                                 tankoubon.auto_created = rs.getOrNull<Bool>(6) ?? false
                                 tankoubon.source_category_id = rs.getOrNull<Int64>(7) ?? 0
                                 tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(9) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(10) ?? ""
+                                tankoubon.release_at = rs.getOrNull<String>(9) ?? ""
+                                tankoubon.created_at = rs.getOrNull<String>(10) ?? ""
+                                tankoubon.updated_at = rs.getOrNull<String>(11) ?? ""
                                 tankoubons.add(tankoubon)
                             }
                         } finally {
@@ -235,8 +223,9 @@ public class TankoubonDao {
                             COALESCE(t.auto_created, false),
                             COALESCE(t.source_category_id, 0),
                             COALESCE(t.source_relative_path, ''),
-                            t.created_at,
-                            t.updated_at
+                            COALESCE(mo.release_at::TEXT, ''),
+                            COALESCE(mo.created_at::TEXT, ''),
+                            COALESCE(mo.updated_at::TEXT, '')
                         FROM tankoubons t
                         LEFT JOIN metadata_objects mo
                                ON mo.entity_type = 'tankoubon'
@@ -270,8 +259,9 @@ public class TankoubonDao {
                                 tankoubon.auto_created = rs.getOrNull<Bool>(6) ?? false
                                 tankoubon.source_category_id = rs.getOrNull<Int64>(7) ?? 0
                                 tankoubon.source_relative_path = rs.getOrNull<String>(8) ?? ""
-                                tankoubon.created_at = rs.getOrNull<String>(9) ?? ""
-                                tankoubon.updated_at = rs.getOrNull<String>(10) ?? ""
+                                tankoubon.release_at = rs.getOrNull<String>(9) ?? ""
+                                tankoubon.created_at = rs.getOrNull<String>(10) ?? ""
+                                tankoubon.updated_at = rs.getOrNull<String>(11) ?? ""
                                 resultOpt = Some(tankoubon)
                             }
                         } finally {
@@ -385,35 +375,12 @@ public class TankoubonDao {
      * 更新Tankoubon元数据
      */
     public static func updateTankoubon(tankoubonId: String, name: String, summary: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement(
-                        "UPDATE tankoubons SET updated_at = CURRENT_TIMESTAMP WHERE tankoubon_id = ?")
-                    try {
-                        stmt.set(0, tankoubonId)
-                        stmt.update()
-                        if (!MetadataDao.upsertRootMetadataObject("tankoubon", tankoubonId, name, summary)) {
-                            getLogger("tankoubon_dao").error("更新Tankoubon metadata失败", ("tankoubonId", tankoubonId))
-                            return false
-                        }
-                        getLogger("tankoubon_dao").info("更新Tankoubon成功", ("tankoubonId", tankoubonId))
-                        return true
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    getLogger("tankoubon_dao").error("更新Tankoubon失败", ("tankoubonId", tankoubonId), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (closeException: Exception) {}
-                }
-            case None =>
-                getLogger("tankoubon_dao").error("无法连接到数据库")
-                return false
+        if (!MetadataDao.upsertRootMetadataObject("tankoubon", tankoubonId, name, summary)) {
+            getLogger("tankoubon_dao").error("更新Tankoubon metadata失败", ("tankoubonId", tankoubonId))
+            return false
         }
+        getLogger("tankoubon_dao").info("更新Tankoubon成功", ("tankoubonId", tankoubonId))
+        return true
     }
 
     /**
@@ -828,7 +795,10 @@ public class TankoubonDao {
                     } finally { del.close() }
 
                     let trimmed = tagsString.trimAscii()
-                    if (trimmed.size == 0) { return true }
+                    if (trimmed.size == 0) {
+                        let _ = touchTankoubonUpdatedAt(tankoubonId)
+                        return true
+                    }
 
                     let parts = trimmed.split(",")
                     for (p in parts) {
@@ -867,6 +837,7 @@ public class TankoubonDao {
                             ins.update()
                         } finally { ins.close() }
                     }
+                    let _ = touchTankoubonUpdatedAt(tankoubonId)
                     return true
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("updateTankoubonTags failed", ("error", e.message))
@@ -1058,6 +1029,9 @@ public class TankoubonDao {
                             t.tankoubon_id,
                             COALESCE(mo.title, '') AS name,
                             COALESCE(mo.description, '') AS summary,
+                            COALESCE(mo.release_at::TEXT, '') AS release_at,
+                            COALESCE(mo.created_at::TEXT, '') AS created_at,
+                            COALESCE(mo.updated_at::TEXT, '') AS updated_at,
                             COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
                             COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
                             COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
@@ -1084,7 +1058,10 @@ public class TankoubonDao {
                         JOIN archives a ON a.id = ta.archive_id
                         LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
                         WHERE t.tankoubon_id = ?
-                        GROUP BY t.id, t.tankoubon_id, mo.title, mo.description, asset_map.cover_asset_id, asset_map.assets_json
+                        GROUP BY
+                            t.id, t.tankoubon_id, mo.title, mo.description,
+                            mo.release_at, mo.created_at, mo.updated_at,
+                            asset_map.cover_asset_id, asset_map.assets_json
                     """)
                     try {
                         stmt.set(0, userId)
@@ -1098,14 +1075,17 @@ public class TankoubonDao {
                                 data.tankoubon_id = rs.getOrNull<String>(0) ?? ""
                                 data.name = rs.getOrNull<String>(1) ?? ""
                                 data.summary = rs.getOrNull<String>(2) ?? ""
-                                data.cover_asset_id = rs.getOrNull<Int64>(3) ?? 0
-                                data.assets_raw = (rs.getOrNull<String>(4) ?? "").trimAscii()
+                                data.release_at = rs.getOrNull<String>(3) ?? ""
+                                data.created_at = rs.getOrNull<String>(4) ?? ""
+                                data.updated_at = rs.getOrNull<String>(5) ?? ""
+                                data.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
+                                data.assets_raw = (rs.getOrNull<String>(7) ?? "").trimAscii()
                                 if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
-                                data.pagecount = rs.getOrNull<Int32>(5) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(6) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(7) ?? ""
-                                data.progress = rs.getOrNull<Int32>(8) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(9) ?? true
+                                data.pagecount = rs.getOrNull<Int32>(8) ?? 0
+                                data.archive_count = rs.getOrNull<Int32>(9) ?? 0
+                                data.last_read_time = rs.getOrNull<String>(10) ?? ""
+                                data.progress = rs.getOrNull<Int32>(11) ?? 0
+                                data.isnew = rs.getOrNull<Bool>(12) ?? true
                                 dataOpt = Some(data)
                             }
                         } finally {
@@ -1428,6 +1408,9 @@ public class TankoubonDao {
                             t.tankoubon_id,
                             COALESCE(mo.title, '') AS name,
                             COALESCE(mo.description, '') AS summary,
+                            COALESCE(mo.release_at::TEXT, '') AS release_at,
+                            COALESCE(mo.created_at::TEXT, '') AS created_at,
+                            COALESCE(mo.updated_at::TEXT, '') AS updated_at,
                             COALESCE(asset_map.cover_asset_id, 0) AS cover_asset_id,
                             COALESCE(CAST(asset_map.assets_json AS TEXT), '{}') AS assets_raw,
                             COALESCE(SUM(a.pagecount), 0)::INT as total_pagecount,
@@ -1454,7 +1437,10 @@ public class TankoubonDao {
                         JOIN archives a ON a.id = ta.archive_id
                         LEFT JOIN user_archive_status uas ON uas.archive_id = a.id AND uas.user_id = ?
                         WHERE t.tankoubon_id IN (${placeholders})
-                        GROUP BY t.id, t.tankoubon_id, mo.title, mo.description, asset_map.cover_asset_id, asset_map.assets_json
+                        GROUP BY
+                            t.id, t.tankoubon_id, mo.title, mo.description,
+                            mo.release_at, mo.created_at, mo.updated_at,
+                            asset_map.cover_asset_id, asset_map.assets_json
                     """)
                     try {
                         stmt.set(0, userId)
@@ -1472,14 +1458,17 @@ public class TankoubonDao {
                                 data.tankoubon_id = rs.getOrNull<String>(0) ?? ""
                                 data.name = rs.getOrNull<String>(1) ?? ""
                                 data.summary = rs.getOrNull<String>(2) ?? ""
-                                data.cover_asset_id = rs.getOrNull<Int64>(3) ?? 0
-                                data.assets_raw = (rs.getOrNull<String>(4) ?? "").trimAscii()
+                                data.release_at = rs.getOrNull<String>(3) ?? ""
+                                data.created_at = rs.getOrNull<String>(4) ?? ""
+                                data.updated_at = rs.getOrNull<String>(5) ?? ""
+                                data.cover_asset_id = rs.getOrNull<Int64>(6) ?? 0
+                                data.assets_raw = (rs.getOrNull<String>(7) ?? "").trimAscii()
                                 if (data.assets_raw.size == 0) { data.assets_raw = "{}" }
-                                data.pagecount = rs.getOrNull<Int32>(5) ?? 0
-                                data.archive_count = rs.getOrNull<Int32>(6) ?? 0
-                                data.last_read_time = rs.getOrNull<String>(7) ?? ""
-                                data.progress = rs.getOrNull<Int32>(8) ?? 0
-                                data.isnew = rs.getOrNull<Bool>(9) ?? true
+                                data.pagecount = rs.getOrNull<Int32>(8) ?? 0
+                                data.archive_count = rs.getOrNull<Int32>(9) ?? 0
+                                data.last_read_time = rs.getOrNull<String>(10) ?? ""
+                                data.progress = rs.getOrNull<Int32>(11) ?? 0
+                                data.isnew = rs.getOrNull<Bool>(12) ?? true
                                 tempData[data.tankoubon_id] = data
                             }
                         } finally {
