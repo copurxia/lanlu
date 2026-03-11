@@ -11,3 +11,4 @@ data
 .devbrain
 CLAUDE.md
 build-script-cache
+*.macrocall
