@@ -1,0 +1,22 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "ahash"
+  description = "nothing here"
+  version = "0.1.0"
+  target-dir = ""
+  src-dir = ""
+  output-type = "static"
+  compile-option = "--int-overflow wrapping -Woff all"
+  override-compile-option = ""
+  link-option = ""
+
+[dependencies]
+  [dependencies.constrandom]
+    git = "https://gitcode.com/OpenCangjieCommunity/constrandom"
+    branch = "master"
+  [dependencies.i128]
+    git = "https://gitcode.com/OpenCangjieCommunity/i128"
+    branch = "master"
+  [dependencies.hash2]
+    git = "https://gitcode.com/OpenCangjieCommunity/hash2"
+    branch = "master"

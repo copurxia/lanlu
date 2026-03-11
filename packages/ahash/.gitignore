@@ -1,0 +1,7 @@
+.cache/
+.vscode/
+.xmake/
+build/
+target/
+*.cj.macrocall
+*.so

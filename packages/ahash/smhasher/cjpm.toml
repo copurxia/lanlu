@@ -1,0 +1,22 @@
+[package]
+  cjc-version = "1.0.4"
+  name = "ahash_smhasher"
+  description = "nothing here"
+  version = "0.1.0"
+  target-dir = ""
+  src-dir = ""
+  output-type = "executable"
+  compile-option = ""
+  override-compile-option = "--static-std -O2"
+  link-option = "--exclude-libs ALL --gc-sections"
+
+[package.package-configuration."ahash_smhasher"]
+  compile-option = "--static"
+
+[dependencies]
+  ahash = {path = "../"}
+
+[ffi.c]
+  SMHasher = {path = "./smhasher/build/"}
+# [profile.build]
+#   lto = "thin"
