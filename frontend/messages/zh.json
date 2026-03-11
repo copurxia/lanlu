@@ -923,6 +923,8 @@
     "pluginUpdateFailed": "插件更新失败",
     "pluginCheckUpdate": "检查更新",
     "pluginCheckUpdateFailed": "检查更新失败",
+    "pluginCheckUpdateSummary": "检查完成：{updates} 个可更新，{latest} 个已最新，{failed} 个失败",
+    "pluginNoCheckablePlugins": "没有可检查更新的插件",
     "pluginUpToDate": "插件已是最新",
     "pluginUpdateAvailable": "发现更新: {old} -> {new}",
     "pluginUpdateReason": "原因",

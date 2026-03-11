@@ -10,7 +10,7 @@ import { PluginService, Plugin, PluginCheckUpdateResult } from '@/lib/services/p
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Package, RefreshCw, Download } from 'lucide-react';
+import { Package, Download, Search } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirm } from '@/hooks/use-confirm';
 import { useToast } from '@/hooks/use-toast';
@@ -27,7 +27,7 @@ export default function SettingsPluginsPage() {
   const [selectedPlugin, setSelectedPlugin] = useState<Plugin | null>(null);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [checkingAllUpdates, setCheckingAllUpdates] = useState(false);
   const [activeType, setActiveType] = useState('all');
   const [checkResults, setCheckResults] = useState<Record<string, PluginCheckUpdateResult | null>>({});
   const [checkingNamespaces, setCheckingNamespaces] = useState<Record<string, boolean>>({});
@@ -71,12 +71,71 @@ export default function SettingsPluginsPage() {
     await fetchPlugins();
   };
 
-  const handleRefresh = async () => {
+  const handleCheckAllUpdates = async () => {
+    const checkablePlugins = plugins.filter((plugin) => plugin.update_url?.trim());
+
+    if (checkablePlugins.length === 0) {
+      showError(t('settings.pluginNoCheckablePlugins'));
+      return;
+    }
+
+    const checkingState = Object.fromEntries(checkablePlugins.map((plugin) => [plugin.namespace, true]));
+
     try {
-      setRefreshing(true);
-      await fetchPlugins();
+      setCheckingAllUpdates(true);
+      setCheckingNamespaces((prev) => ({ ...prev, ...checkingState }));
+
+      const results = await Promise.allSettled(
+        checkablePlugins.map(async (plugin) => ({
+          namespace: plugin.namespace,
+          result: await PluginService.checkUpdate(plugin.namespace),
+        }))
+      );
+
+      const nextResults: Record<string, PluginCheckUpdateResult | null> = {};
+      let hasUpdateCount = 0;
+      let upToDateCount = 0;
+      let failedCount = 0;
+
+      results.forEach((item, index) => {
+        const plugin = checkablePlugins[index];
+
+        if (item.status === 'fulfilled') {
+          nextResults[item.value.namespace] = item.value.result;
+          if (item.value.result?.has_update) {
+            hasUpdateCount += 1;
+          } else {
+            upToDateCount += 1;
+          }
+        } else {
+          nextResults[plugin.namespace] = null;
+          failedCount += 1;
+          logger.operationFailed(`check plugin update: ${plugin.namespace}`, item.reason);
+        }
+      });
+
+      setCheckResults((prev) => ({ ...prev, ...nextResults }));
+
+      const summary = t('settings.pluginCheckUpdateSummary', {
+        updates: hasUpdateCount,
+        latest: upToDateCount,
+        failed: failedCount,
+      });
+
+      if (failedCount > 0) {
+        showError(summary);
+      } else {
+        success(summary);
+      }
     } finally {
-      setRefreshing(false);
+      setCheckingAllUpdates(false);
+      setCheckingNamespaces((prev) => {
+        const next = { ...prev };
+        checkablePlugins.forEach((plugin) => {
+          next[plugin.namespace] = false;
+        });
+        return next;
+      });
     }
   };
 
@@ -229,13 +288,13 @@ export default function SettingsPluginsPage() {
       <Button
         variant="outline"
         size="icon"
-        onClick={handleRefresh}
-        disabled={refreshing}
+        onClick={handleCheckAllUpdates}
+        disabled={checkingAllUpdates}
         className="sm:hidden shrink-0"
-        aria-label={t('common.refresh')}
-        title={t('common.refresh')}
+        aria-label={t('settings.pluginCheckUpdate')}
+        title={t('settings.pluginCheckUpdate')}
       >
-        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+        <Search className={`w-4 h-4 ${checkingAllUpdates ? 'animate-pulse' : ''}`} />
       </Button>
 
       {/* Desktop: text buttons */}
@@ -249,12 +308,12 @@ export default function SettingsPluginsPage() {
       </Button>
       <Button
         variant="outline"
-        onClick={handleRefresh}
-        disabled={refreshing}
+        onClick={handleCheckAllUpdates}
+        disabled={checkingAllUpdates}
         className="hidden sm:inline-flex items-center space-x-2 shrink-0"
       >
-        <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-        <span>{t('common.refresh')}</span>
+        <Search className={`w-4 h-4 ${checkingAllUpdates ? 'animate-pulse' : ''}`} />
+        <span>{t('settings.pluginCheckUpdate')}</span>
       </Button>
     </div>
   );

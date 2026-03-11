@@ -917,6 +917,8 @@
     "pluginUpdateFailed": "Failed to update plugin",
     "pluginCheckUpdate": "Check Updates",
     "pluginCheckUpdateFailed": "Failed to check for updates",
+    "pluginCheckUpdateSummary": "Check complete: {updates} updates, {latest} up to date, {failed} failed",
+    "pluginNoCheckablePlugins": "No plugins support update checks",
     "pluginUpToDate": "Plugin is up to date",
     "pluginUpdateAvailable": "Update available: {old} -> {new}",
     "pluginUpdateReason": "Reason",
