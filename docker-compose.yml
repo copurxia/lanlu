@@ -9,7 +9,7 @@ services:
       - LOG_LEVEL=INFO
     volumes:
       - ./data/archive:/app/data/archive
-      - ./data/thumb:/app/data/thumb
+      - ./data/assets:/app/data/assets
       - ./data/logs:/app/data/logs
       - ./data/plugins:/app/data/plugins
       - ./data/cache:/app/data/cache
