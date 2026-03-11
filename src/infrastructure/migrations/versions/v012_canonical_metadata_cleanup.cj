@@ -110,42 +110,50 @@ public class V012_CanonicalMetadataCleanup <: Migration {
     }
 
     private func backfillTagsFromLegacyRelations(conn: Connection): Bool {
-        if (!MigrationHelpers.execUpdate(conn, """
-            INSERT INTO metadata_tags (metadata_id, tag)
-            SELECT
-                mo.id,
-                CASE
-                    WHEN COALESCE(tg.namespace, '') != '' THEN tg.namespace || ':' || tg.name
-                    ELSE tg.name
-                END AS tag_str
-            FROM metadata_objects mo
-            JOIN archives a
-              ON mo.entity_type = 'archive'
-             AND mo.entity_id = a.arcid
-            JOIN archive_tags atg ON atg.archive_id = a.id
-            JOIN tags tg ON tg.id = atg.tag_id
-            ON CONFLICT DO NOTHING
-        """)) {
-            return false
+        if (MigrationHelpers.tableExists(conn, "archive_tags") && MigrationHelpers.tableExists(conn, "tags")) {
+            if (!MigrationHelpers.execUpdate(conn, """
+                INSERT INTO metadata_tags (metadata_id, tag)
+                SELECT
+                    mo.id,
+                    CASE
+                        WHEN COALESCE(tg.namespace, '') != '' THEN tg.namespace || ':' || tg.name
+                        ELSE tg.name
+                    END AS tag_str
+                FROM metadata_objects mo
+                JOIN archives a
+                  ON mo.entity_type = 'archive'
+                 AND mo.entity_id = a.arcid
+                JOIN archive_tags atg ON atg.archive_id = a.id
+                JOIN tags tg ON tg.id = atg.tag_id
+                ON CONFLICT DO NOTHING
+            """)) {
+                return false
+            }
+        } else {
+            logger.warn("archive_tags relation missing; skipping legacy archive tag backfill")
         }
 
-        if (!MigrationHelpers.execUpdate(conn, """
-            INSERT INTO metadata_tags (metadata_id, tag)
-            SELECT
-                mo.id,
-                CASE
-                    WHEN COALESCE(tg.namespace, '') != '' THEN tg.namespace || ':' || tg.name
-                    ELSE tg.name
-                END AS tag_str
-            FROM metadata_objects mo
-            JOIN tankoubons t
-              ON mo.entity_type = 'tankoubon'
-             AND mo.entity_id = t.tankoubon_id
-            JOIN tankoubon_tags tt ON tt.tankoubon_id = t.id
-            JOIN tags tg ON tg.id = tt.tag_id
-            ON CONFLICT DO NOTHING
-        """)) {
-            return false
+        if (MigrationHelpers.tableExists(conn, "tankoubon_tags") && MigrationHelpers.tableExists(conn, "tags")) {
+            if (!MigrationHelpers.execUpdate(conn, """
+                INSERT INTO metadata_tags (metadata_id, tag)
+                SELECT
+                    mo.id,
+                    CASE
+                        WHEN COALESCE(tg.namespace, '') != '' THEN tg.namespace || ':' || tg.name
+                        ELSE tg.name
+                    END AS tag_str
+                FROM metadata_objects mo
+                JOIN tankoubons t
+                  ON mo.entity_type = 'tankoubon'
+                 AND mo.entity_id = t.tankoubon_id
+                JOIN tankoubon_tags tt ON tt.tankoubon_id = t.id
+                JOIN tags tg ON tg.id = tt.tag_id
+                ON CONFLICT DO NOTHING
+            """)) {
+                return false
+            }
+        } else {
+            logger.warn("tankoubon_tags relation missing; skipping legacy tankoubon tag backfill")
         }
 
         return true

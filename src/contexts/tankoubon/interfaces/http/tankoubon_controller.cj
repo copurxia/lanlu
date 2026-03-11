@@ -62,6 +62,7 @@ public class TankoubonController {
 
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
+        let lang = (ctx.query("lang") ?? "").trimAscii()
         if (id.trimAscii().size == 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
             ctx.json("{\"error\":\"Tankoubon ID not specified.\",\"operation\":\"get_tankoubon_metadata\",\"success\":0}")
@@ -88,7 +89,8 @@ public class TankoubonController {
             progress: tank.progress,
             isNew: tank.isnew,
             isFavorite: tank.isfavorite,
-            lastReadTime: tank.last_read_time
+            lastReadTime: tank.last_read_time,
+            lang: lang
         )
         if (!okMetadata) {
             let errorText = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Tankoubon not found" }

@@ -36,6 +36,7 @@ import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
+import { TagService } from '@/lib/services/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/utils/logger';
@@ -264,6 +265,7 @@ function TankoubonDetailContent() {
   const [rpcSelectRequest, setRpcSelectRequest] = useState<RpcSelectRequest | null>(null);
   const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = useState<number | null>(null);
   const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = useState<number | null>(null);
+  const [tagTranslationMap, setTagTranslationMap] = useState<Record<string, string>>({});
   const resolvedRpcSelectRequestIdsRef = useRef<Set<string>>(new Set());
 
 
@@ -331,13 +333,51 @@ function TankoubonDetailContent() {
     }
   }, []);
 
+  useEffect(() => {
+    if (!tankoubonId) return;
+    let cancelled = false;
+
+    void TagService.getTranslations(language, undefined, tankoubonId)
+      .then((map) => {
+        if (!cancelled) setTagTranslationMap(map || {});
+      })
+      .catch(() => {
+        if (!cancelled) setTagTranslationMap({});
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [language, tankoubonId]);
+
+  const tagReverseMap = useMemo(() => {
+    const rev: Record<string, string> = {};
+    for (const [canonical, translated] of Object.entries(tagTranslationMap || {})) {
+      const text = (translated || '').trim();
+      if (!text) continue;
+      const idx = canonical.indexOf(':');
+      if (idx > 0) {
+        const ns = canonical.slice(0, idx);
+        rev[`${ns}:${text}`] = canonical;
+      } else {
+        rev[text] = canonical;
+      }
+    }
+    return rev;
+  }, [tagTranslationMap]);
+
+  const toCanonicalTag = useCallback((tag: string): string => {
+    const key = String(tag || '').trim();
+    return tagReverseMap[key] || key;
+  }, [tagReverseMap]);
+
   // Fetch tankoubon details
   const fetchTankoubon = useCallback(async () => {
     if (!tankoubonId) return;
 
     try {
       setLoading(true);
-      const data = await TankoubonService.getMetadata(tankoubonId);
+      const data = await TankoubonService.getMetadata(tankoubonId, { lang: language });
       const normalizedName = data.title || '';
       const normalizedSummary = data.description || '';
       const normalizedTags = Array.isArray(data.tags) ? data.tags.map((tag) => String(tag || '').trim()).filter(Boolean) : [];
@@ -357,7 +397,7 @@ function TankoubonDetailContent() {
       setIsFavorite(Boolean(nextData.isfavorite));
       setEditName(normalizedName);
       setEditSummary(normalizedSummary);
-      setEditTags(normalizedTags);
+      setEditTags(normalizedTags.map(toCanonicalTag));
       setEditCover('');
       setEditBackdrop('');
       setEditClearlogo('');
@@ -369,7 +409,7 @@ function TankoubonDetailContent() {
     } finally {
       setLoading(false);
     }
-  }, [tankoubonId]);
+  }, [language, tankoubonId, toCanonicalTag]);
 
   // Fetch archives in tankoubon
   const fetchArchives = useCallback(async () => {
@@ -419,14 +459,14 @@ function TankoubonDetailContent() {
   }, []);
 
   const handleTagClick = useCallback((tag: string) => {
-    const canonical = String(tag || '').trim();
+    const canonical = toCanonicalTag(tag);
     if (!canonical) return;
     const q = canonical.includes(':') ? canonical : displayTag(canonical);
     const trimmed = q.trim();
     if (!trimmed) return;
     const exactQuery = trimmed.endsWith('$') ? trimmed : `${trimmed}$`;
     router.push(`/?q=${encodeURIComponent(exactQuery)}`);
-  }, [displayTag, router]);
+  }, [displayTag, router, toCanonicalTag]);
 
   const renderTagBadge = useCallback((tag: string, index: number) => {
     const key = String(tag || '').trim();

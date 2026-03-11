@@ -758,7 +758,8 @@ public class MetadataPatchService {
         progress!: Int32 = 0i32,
         isNew!: Bool = false,
         isFavorite!: Bool = false,
-        lastReadTime!: String = ""
+        lastReadTime!: String = "",
+        lang!: String = ""
     ): (Bool, String, String) {
         match (TankoubonDao.getTankoubonById(tankoubonId)) {
             case None => return (false, "", "Tankoubon not found")
@@ -770,13 +771,14 @@ public class MetadataPatchService {
                         let effectiveArchiveCount = if (archiveCount >= 0) { archiveCount } else { statsArchiveCount }
                         let effectivePageCount = if (pageCount >= 0) { pageCount } else { statsPageCount }
                         let children = MetadataDao.getTankoubonChildren(tankoubonId)
+                        let translatedTags = translateMetadataTags(metadata.tags, lang)
                         let out = ByteBuffer()
                         let w = JsonWriter(out)
                         w.startObject()
                         w.writeName("title").writeValue(metadata.title)
                         w.writeName("type").writeValue(1i32)
                         w.writeName("description").writeValue(metadata.description)
-                        writeMetadataTagsArrayFromList(w, metadata.tags)
+                        writeMetadataTagsArrayFromList(w, translatedTags)
                         writeMetadataAssetsArrayFromList(w, metadata.assets)
                         w.writeName("tankoubon_id").writeValue(tankoubonId)
                         w.writeName("children")
@@ -803,7 +805,8 @@ public class MetadataPatchService {
                                             true,
                                             child.volume_no,
                                             child.order_index,
-                                            includePages
+                                            includePages,
+                                            lang: lang
                                         )
                                         if (memberJson.trimAscii().size > 0) {
                                             w.jsonValue(memberJson)

@@ -585,9 +585,9 @@ export abstract class BasePlugin {
       : {};
 
     const patch: PageMetadataPatch = {};
-    const page = this.readIntField(source.page ?? source.page_number ?? source.pageNumber, 0);
+    const page = this.readIntField(source.page_number, 0);
     if (page > 0) patch.page = page;
-    const path = this.readStringField(source.path ?? source.entry ?? source.entry_path ?? source.entryPath);
+    const path = this.readStringField(source.entry_path);
     if (path) patch.entry_path = path;
     const title = this.readStringField(source.title);
     if (title) patch.title = title;
@@ -598,7 +598,7 @@ export abstract class BasePlugin {
       : {};
     const thumb = this.normalizeAssetValue(source.thumb ?? nestedMetadata.thumb);
     if (thumb) patch.thumb = thumb;
-    const sort = this.readIntField(source.sort ?? source.order_index, 0);
+    const sort = this.readIntField(source.order_index, 0);
     if (sort !== 0) patch.order_index = sort;
     if (typeof source.hidden_in_files === 'boolean') {
       patch.hidden_in_files = source.hidden_in_files;

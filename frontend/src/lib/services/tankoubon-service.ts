@@ -33,8 +33,11 @@ export class TankoubonService {
   }
 
 
-  static async getMetadata(id: string, options?: { includePages?: boolean }): Promise<TankoubonMetadata> {
+  static async getMetadata(id: string, options?: { includePages?: boolean; lang?: string }): Promise<TankoubonMetadata> {
     const params: Record<string, string> = {};
+    if (options?.lang) {
+      params.lang = options.lang;
+    }
     if (options?.includePages) {
       params.include_pages = '1';
     }
