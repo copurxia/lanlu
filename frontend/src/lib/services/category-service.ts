@@ -101,6 +101,24 @@ export class CategoryService {
   }
 
   /**
+   * Trigger media library scan
+   */
+  static async scanMediaLibrary(): Promise<{ success: boolean; task_id?: number; error?: string }> {
+    try {
+      const response = await apiClient.post<{ success: number; task_id?: number; error?: string; message?: string }>(
+        `${this.baseUrl}/scan`
+      );
+      return {
+        success: isSuccessResponse(response.data.success),
+        task_id: response.data.task_id,
+        error: response.data.error || response.data.message
+      };
+    } catch (error: unknown) {
+      return { success: false, error: extractApiError(error, 'Failed to trigger media library scan') };
+    }
+  }
+
+  /**
    * Trigger category scan
    */
   static async scanCategory(catid: string): Promise<{ success: boolean; task_id?: number; error?: string }> {

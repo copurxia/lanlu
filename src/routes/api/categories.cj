@@ -21,6 +21,11 @@ public func registerCategoryRoutes(router: App) {
         CategoryController.createCategory(ctx)
     })
 
+    // 触发媒体库扫描（需要管理员权限）
+    categories.post("/scan", { ctx =>
+        CategoryController.scanAllCategories(ctx)
+    })
+
     // 更新分类（需要管理员权限）
     categories.put("/:id", { ctx =>
         CategoryController.updateCategory(ctx)

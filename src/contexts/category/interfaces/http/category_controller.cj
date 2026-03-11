@@ -327,6 +327,28 @@ public class CategoryController {
     }
 
     /**
+     * POST /api/categories/scan - 扫描媒体库（触发所有分类扫描）
+     */
+    public static func scanAllCategories(ctx: Ctx) {
+        let result = CronService.getInstance().scanArchives()
+        if (result.taskId > 0) {
+            getLogger("category_controller").info("创建扫描所有分类任务", ("task_id", result.taskId.toString()))
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("operation").writeValue("scan_all_categories")
+            w.writeName("success").writeValue(1)
+            w.writeName("task_id").writeValue(result.taskId)
+            w.endObject()
+            w.flush()
+            ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+        } else {
+            ctx.status(500)
+            ResponseView.json(ctx, "{\"success\":0,\"error\":\"Failed to create scan task\"}")
+        }
+    }
+
+    /**
      * POST /api/categories/{id}/scan - 触发分类扫描
      */
     public static func scanCategory(ctx: Ctx) {

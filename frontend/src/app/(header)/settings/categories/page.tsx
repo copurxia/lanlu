@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Search, Edit2, Trash2, Play, FolderOpen, RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Play, FolderOpen, ChevronUp, ChevronDown } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { CategoryService, type Category, type CategoryCreateRequest, type CategoryUpdateRequest } from '@/lib/services/category-service';
@@ -269,6 +269,22 @@ export default function CategoriesSettingsPage() {
     }
   };
 
+  const handleScanMediaLibrary = async () => {
+    setLoading(true);
+    try {
+      const result = await CategoryService.scanMediaLibrary();
+      if (result.success) {
+        success(t('settings.categoryScanAllStarted'));
+      } else {
+        showError(result.error || t('settings.categoryScanAllFailed'));
+      }
+    } catch (e: any) {
+      showError(e?.response?.data?.message || e?.message || t('settings.categoryScanAllFailed'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (!isAuthenticated) {
     return (
       <div className="space-y-6">
@@ -347,33 +363,29 @@ export default function CategoriesSettingsPage() {
             </SelectContent>
           </Select>
 
-          {/* Mobile: icon-only clear */}
+          {/* Mobile: icon-only media library scan */}
           <Button
             type="button"
             variant="outline"
             size="icon"
             className="sm:hidden"
-            aria-label={t('common.reset')}
-            title={t('common.reset')}
-            onClick={() => {
-              setSearchQuery('');
-              setEnabledFilter('all');
-            }}
+            aria-label={t('settings.categoryScanMediaLibrary')}
+            title={t('settings.categoryScanMediaLibrary')}
+            onClick={handleScanMediaLibrary}
+            disabled={loading}
           >
-            <RotateCcw className="h-4 w-4" />
+            <Play className="h-4 w-4" />
           </Button>
-          {/* Desktop: normal reset */}
+          {/* Desktop: media library scan */}
           <Button
             type="button"
             variant="outline"
             className="hidden sm:inline-flex items-center gap-2"
-            onClick={() => {
-              setSearchQuery('');
-              setEnabledFilter('all');
-            }}
+            onClick={handleScanMediaLibrary}
+            disabled={loading}
           >
-            <RotateCcw className="h-4 w-4" />
-            {t('common.reset')}
+            <Play className="h-4 w-4" />
+            {t('settings.categoryScanMediaLibrary')}
           </Button>
 
           {/* Mobile: icon-only create */}
