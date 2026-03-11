@@ -296,14 +296,13 @@ export function BaseMediaCard({
       const success = await onFavoriteToggle(id, isFavorite)
       if (success) {
         setIsFavorite(!isFavorite)
-        emitRefresh()
       }
     } catch (error) {
       logger.operationFailed('toggle favorite', error, { id, type })
     } finally {
       setFavoriteLoading(false)
     }
-  }, [emitRefresh, favoriteLoading, id, isFavorite, onFavoriteToggle, type])
+  }, [favoriteLoading, id, isFavorite, onFavoriteToggle, type])
 
   const handleFavoriteClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
