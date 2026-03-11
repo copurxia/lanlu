@@ -32,9 +32,18 @@ export interface SortOption {
   label: string;
 }
 
+export const DEFAULT_SEARCH_SORT_BY = 'created_at';
+
+export function normalizeSearchSortBy(value?: string | null, fallback: string = DEFAULT_SEARCH_SORT_BY): string {
+  const normalized = String(value || '').trim();
+  if (!normalized) return fallback;
+  return normalized === 'date_added' ? DEFAULT_SEARCH_SORT_BY : normalized;
+}
+
 export const SORT_BY_OPTIONS: SortOption[] = [
   { value: '_default', label: 'default' },
-  { value: 'date_added', label: 'dateAdded' },
+  { value: 'created_at', label: 'createdAt' },
+  { value: 'release_at', label: 'releaseAt' },
   { value: 'updated_at', label: 'updatedAt' },
   { value: 'lastread', label: 'lastRead' },
   { value: 'title', label: 'title' },

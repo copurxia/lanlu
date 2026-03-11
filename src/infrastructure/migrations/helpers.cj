@@ -1,6 +1,7 @@
 package lanlu.infrastructure.migrations
 
 import std.database.sql.*
+import lanlu.shared.config.*
 import lanlu.shared.utils.*
 
 /**
@@ -95,6 +96,65 @@ public class MigrationHelpers {
             }
         } finally {
             stmt.close()
+        }
+    }
+
+    /**
+     * 检查数据库扩展是否已安装
+     */
+    public static func extensionInstalled(conn: Connection, extensionName: String): Bool {
+        let stmt = conn.prepareStatement(
+            "SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1"
+        )
+        try {
+            stmt.set(0, extensionName)
+            let rs = stmt.query()
+            try {
+                return rs.next()
+            } finally {
+                rs.close()
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to query pg_extension", ("error", e.message), ("extension", extensionName))
+            return false
+        } finally {
+            stmt.close()
+        }
+    }
+
+    /**
+     * 尝试自动安装数据库扩展
+     * 使用独立连接执行，避免污染主迁移连接
+     */
+    public static func ensureExtensionInstalled(extensionName: String): Bool {
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    if (extensionInstalled(conn, extensionName)) {
+                        return true
+                    }
+
+                    logger.info("Attempting to install database extension ${extensionName}")
+                    if (!execUpdate(conn, "CREATE EXTENSION IF NOT EXISTS ${extensionName}")) {
+                        logger.warn("Failed to auto-install database extension", ("extension", extensionName))
+                        return false
+                    }
+
+                    let installed = extensionInstalled(conn, extensionName)
+                    if (!installed) {
+                        logger.warn(
+                            "Extension still unavailable after CREATE EXTENSION",
+                            ("extension", extensionName)
+                        )
+                    }
+                    return installed
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.warn("Cannot get DB connection for extension installation", ("extension", extensionName))
+                return false
         }
     }
 

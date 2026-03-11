@@ -294,7 +294,9 @@ export default function SmartFiltersPage() {
   const getSortByLabel = (sortBy: string) => {
     if (!sortBy) return t('settings.smartFilterDefault');
     switch (sortBy) {
-      case 'date_added': return t('home.dateAdded');
+      case 'date_added':
+      case 'created_at': return t('home.createdAt');
+      case 'release_at': return t('home.releaseAt');
       case 'updated_at': return t('home.updatedAt');
       case 'lastread': return t('home.lastRead');
       case 'title': return t('home.titleSort');

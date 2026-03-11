@@ -1,32 +1,37 @@
-package lanlu.infrastructure.migrations.versions
+package lanlu.infrastructure.migrations.extensions
 
 import std.database.sql.*
 import lanlu.infrastructure.migrations.*
 import lanlu.shared.utils.*
 
 /**
- * V006: Speed up translated tag search (tags.translations::text ILIKE '%...%')
- * by enabling pg_trgm and adding a trigram GIN index.
+ * X013: Reconcile pg_trgm-backed indexes for the current schema state.
  */
-public class V006_TagTranslationTrgmIndex <: Migration {
-    private let logger = getLogger("migration_v006")
+public class X013_PgTrgmCurrentState <: ExtensionMigration {
+    private let logger = getLogger("extension_migration_x013_pg_trgm_current_state")
 
-    public func version(): String { return "V006" }
+    public func version(): String { return "X013TRGM" }
 
     public func description(): String {
-        return "Add pg_trgm + GIN trigram index for tags.translations::text"
+        return "Reconcile pg_trgm indexes for schema V013"
+    }
+
+    public func requiredExtensions(): Array<String> {
+        return ["pg_trgm"]
+    }
+
+    public func targetSchemaVersion(): String {
+        return "V013"
     }
 
     public func up(conn: Connection): Bool {
-        // Avoid CREATE EXTENSION here; some drivers/DBs error on it and poison the connection.
-        // If pg_trgm isn't already installed, skip index creation (best-effort optimization).
-        if (!isExtensionInstalled(conn, "pg_trgm")) {
-            logger.warn("pg_trgm not installed; skipping trigram index creation")
-            return true
+        if (!MigrationHelpers.ensureExtensionInstalled("pg_trgm")) {
+            logger.warn("pg_trgm not installed and auto-install failed")
+            return false
         }
 
         if (!MigrationHelpers.tableExists(conn, "tags")) {
-            logger.warn("tags table missing; skipping V006")
+            logger.warn("tags table missing; skipping X013 pg_trgm reconciliation")
             return true
         }
 
@@ -65,13 +70,9 @@ public class V006_TagTranslationTrgmIndex <: Migration {
 
         let titleIndex = "idx_archives_title_trgm"
         if (MigrationHelpers.indexExists(conn, titleIndex)) {
-            logger.debug("Index ${titleIndex} already exists")
-        } else {
-            logger.info("Creating trigram index ${titleIndex} on archives(title)")
-            if (!MigrationHelpers.execUpdate(conn,
-                "CREATE INDEX ${titleIndex} ON archives USING GIN (title gin_trgm_ops)"
-            )) {
-                logger.warn("Failed to create trigram index on archives.title; skipping")
+            logger.info("Dropping legacy trigram index ${titleIndex}")
+            if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS ${titleIndex}")) {
+                logger.warn("Failed to drop legacy trigram index on archives.title; skipping")
                 return true
             }
         }
@@ -91,38 +92,13 @@ public class V006_TagTranslationTrgmIndex <: Migration {
 
         let summaryIndex = "idx_archives_summary_trgm"
         if (MigrationHelpers.indexExists(conn, summaryIndex)) {
-            logger.debug("Index ${summaryIndex} already exists")
-        } else {
-            logger.info("Creating trigram index ${summaryIndex} on archives(summary)")
-            if (!MigrationHelpers.execUpdate(conn,
-                "CREATE INDEX ${summaryIndex} ON archives USING GIN (summary gin_trgm_ops)"
-            )) {
-                logger.warn("Failed to create trigram index on archives.summary; skipping")
+            logger.info("Dropping legacy trigram index ${summaryIndex}")
+            if (!MigrationHelpers.execUpdate(conn, "DROP INDEX IF EXISTS ${summaryIndex}")) {
+                logger.warn("Failed to drop legacy trigram index on archives.summary; skipping")
                 return true
             }
         }
         return true
     }
 
-    private func isExtensionInstalled(conn: Connection, name: String): Bool {
-        try {
-            let stmt = conn.prepareStatement(
-                "SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1"
-            )
-            try {
-                stmt.set(0, name)
-                let rs = stmt.query()
-                try {
-                    return rs.next()
-                } finally {
-                    rs.close()
-                }
-            } finally {
-                stmt.close()
-            }
-        } catch (e: Exception) {
-            logger.warn("Failed to query pg_extension", ("error", e.message))
-            return false
-        }
-    }
 }

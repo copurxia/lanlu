@@ -107,6 +107,20 @@ public class ArchiveDao {
         return (t, false)
     }
 
+    private static func normalizeSearchTimeField(field: String): String {
+        let normalized = field.trimAscii()
+        if (normalized == "date_added" || normalized == "created_at") {
+            return "created_at"
+        }
+        if (normalized == "release_at") {
+            return "release_at"
+        }
+        if (normalized == "updated_at") {
+            return "updated_at"
+        }
+        return "created_at"
+    }
+
     /**
      * 为 tags 构建“完全匹配单个 tag token”的条件（结构化查询）。
      * - token 含 namespace: 仅匹配该 namespace/name
@@ -479,6 +493,8 @@ public class ArchiveDao {
                                        ("order", order),
                                        ("newOnly", newOnly.toString()),
                                        ("untaggedOnly", untaggedOnly.toString()))
+
+                let resolvedDateField = normalizeSearchTimeField(sortby)
                 
                 // 首先获取总记录数
                 var countSql = "SELECT COUNT(*) FROM archive_metadata_search"
@@ -642,11 +658,11 @@ public class ArchiveDao {
 
 	                // 日期范围过滤
 	                if (dateFrom.size > 0) {
-	                    whereConditions.add("created_at >= ?")
+	                    whereConditions.add("${resolvedDateField} >= ?")
 	                    filterParams.add(dateFrom)
 	                }
 	                if (dateTo.size > 0) {
-	                    whereConditions.add("created_at <= ?")
+	                    whereConditions.add("${resolvedDateField} <= ?")
 	                    filterParams.add(dateTo + " 23:59:59")
 	                }
 
@@ -747,12 +763,15 @@ public class ArchiveDao {
 	                    // 按用户最后阅读时间排序，使用 user_archive_status.updated_at
 	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
 	                    sql += " ORDER BY (SELECT MAX(uas.updated_at) FROM user_archive_status uas JOIN (SELECT id, arcid AS archive_arcid FROM archives) a ON a.id = uas.archive_id WHERE a.archive_arcid = arcid AND uas.user_id = ${userId}) ${orderDirection}"
-                } else if (sortby == "date_added") {
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY created_at ${orderDirection}"
-                } else if (sortby == "updated_at") {
-                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
-                    sql += " ORDER BY updated_at ${orderDirection}"
+	                } else if (sortby == "date_added" || sortby == "created_at") {
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY created_at ${orderDirection}"
+	                } else if (sortby == "release_at") {
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY release_at ${orderDirection}"
+	                } else if (sortby == "updated_at") {
+	                    let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
+	                    sql += " ORDER BY updated_at ${orderDirection}"
                 } else if (sortby == "pagecount") {
                     let orderDirection = if (order == "desc") { "DESC" } else { "ASC" }
                     sql += " ORDER BY pagecount ${orderDirection}"
@@ -885,6 +904,8 @@ public class ArchiveDao {
                         ("newOnly", newOnly.toString()),
                         ("untaggedOnly", untaggedOnly.toString()))
 
+                    let resolvedDateField = normalizeSearchTimeField(sortby)
+
                     // Build WHERE conditions (mostly copied from searchArchives to keep semantics identical).
                     var whereConditions: ArrayList<String> = ArrayList<String>()
                     let searchResult = SearchFilter.parse(filter)
@@ -1014,14 +1035,14 @@ public class ArchiveDao {
                         filterParams.add(tankoubonId)
                     }
 
-                    if (dateFrom.size > 0) {
-                        whereConditions.add("archive_metadata_search.created_at >= ?")
-                        filterParams.add(dateFrom)
-                    }
-                    if (dateTo.size > 0) {
-                        whereConditions.add("archive_metadata_search.created_at <= ?")
-                        filterParams.add(dateTo + " 23:59:59")
-                    }
+	                    if (dateFrom.size > 0) {
+	                        whereConditions.add("archive_metadata_search.${resolvedDateField} >= ?")
+	                        filterParams.add(dateFrom)
+	                    }
+	                    if (dateTo.size > 0) {
+	                        whereConditions.add("archive_metadata_search.${resolvedDateField} <= ?")
+	                        filterParams.add(dateTo + " 23:59:59")
+	                    }
 
                     let relevanceExpr = buildRelevanceExpr(filter, "archive_metadata_search.")
                     let minRelevanceThreshold = 0.05
@@ -1082,13 +1103,17 @@ public class ArchiveDao {
                         let finalExpr = "(SELECT MAX(uas.updated_at) FROM user_archive_status uas JOIN (SELECT id, arcid AS archive_arcid FROM archives) a ON a.id = uas.archive_id WHERE a.archive_arcid = arcid AND uas.user_id = ${userId})"
                         windowOrderBy = "${windowExpr} ${dir}"
                         finalOrderBy = "${finalExpr} ${dir}"
-                    } else if (sortby == "date_added") {
-                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
-                        windowOrderBy = "created_at ${dir}"
-                        finalOrderBy = "created_at ${dir}"
-                    } else if (sortby == "updated_at") {
-                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
-                        windowOrderBy = "updated_at ${dir}"
+	                    } else if (sortby == "date_added" || sortby == "created_at") {
+	                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+	                        windowOrderBy = "created_at ${dir}"
+	                        finalOrderBy = "created_at ${dir}"
+	                    } else if (sortby == "release_at") {
+	                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+	                        windowOrderBy = "release_at ${dir}"
+	                        finalOrderBy = "release_at ${dir}"
+	                    } else if (sortby == "updated_at") {
+	                        let dir = if (order == "desc") { "DESC" } else { "ASC" }
+	                        windowOrderBy = "updated_at ${dir}"
                         finalOrderBy = "updated_at ${dir}"
                     } else if (sortby == "pagecount") {
                         let dir = if (order == "desc") { "DESC" } else { "ASC" }

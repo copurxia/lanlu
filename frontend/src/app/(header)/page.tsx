@@ -24,6 +24,10 @@ import { useDebounce, useGridColumnCount } from '@/hooks/common-hooks';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/utils/logger';
+import {
+  DEFAULT_SEARCH_SORT_BY,
+  normalizeSearchSortBy,
+} from '@/lib/utils/constants';
 
 // In-memory cache so random recommendations don't change when navigating away and back.
 // Keyed by `${gridColumnCount}:${language}`.
@@ -62,7 +66,7 @@ function HomePageContent() {
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
-  const [sortBy, setSortBy] = useState('date_added');
+  const [sortBy, setSortBy] = useState(DEFAULT_SEARCH_SORT_BY);
   const [sortOrder, setSortOrder] = useState('desc');
   const [searchQuery, setSearchQuery] = useState('');
   const [newonly, setNewonly] = useState(false);
@@ -86,7 +90,7 @@ function HomePageContent() {
 
   // 读取URL参数
   const urlQuery = searchParams?.get('q') || '';
-  const urlSortBy = searchParams?.get('sortby') || (urlQuery ? 'relevance' : 'date_added');
+  const urlSortBy = normalizeSearchSortBy(searchParams?.get('sortby'), urlQuery ? 'relevance' : DEFAULT_SEARCH_SORT_BY);
   const urlSortOrder = searchParams?.get('order') || 'desc';
   const urlNewonly = searchParams?.get('newonly') === 'true';
   const urlUntaggedonly = searchParams?.get('untaggedonly') === 'true';
@@ -218,7 +222,7 @@ function HomePageContent() {
 
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
-    if (sortBy !== 'date_added') params.set('sortby', sortBy);
+    if (sortBy !== DEFAULT_SEARCH_SORT_BY) params.set('sortby', sortBy);
     if (sortOrder !== 'desc') params.set('order', sortOrder);
     if (newonly) params.set('newonly', 'true');
     if (untaggedonly) params.set('untaggedonly', 'true');
@@ -295,7 +299,7 @@ function HomePageContent() {
     const handleSearchReset = () => {
       // 重置所有搜索相关状态
       setSearchQuery('');
-      setSortBy('date_added');
+      setSortBy(DEFAULT_SEARCH_SORT_BY);
       setSortOrder('desc');
       setNewonly(false);
       setUntaggedonly(false);
@@ -364,7 +368,7 @@ function HomePageContent() {
     }
     // 当有搜索查询且没有指定排序时，默认使用相关度排序
     if (params.sortBy) {
-      setSortBy(params.sortBy);
+      setSortBy(normalizeSearchSortBy(params.sortBy, DEFAULT_SEARCH_SORT_BY));
     } else if (params.query) {
       setSortBy('relevance');
     }
@@ -465,7 +469,7 @@ function HomePageContent() {
   const buildCategoryUrl = useCallback((nextCategoryId: string) => {
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
-    if (sortBy !== 'date_added') params.set('sortby', sortBy);
+    if (sortBy !== DEFAULT_SEARCH_SORT_BY) params.set('sortby', sortBy);
     if (sortOrder !== 'desc') params.set('order', sortOrder);
     if (newonly) params.set('newonly', 'true');
     if (untaggedonly) params.set('untaggedonly', 'true');
@@ -715,7 +719,8 @@ function HomePageContent() {
                       <SelectTrigger className="w-[120px] sm:w-[140px] h-8">
                         <SelectValue>
                           {sortBy === 'lastread' && t('home.lastRead')}
-                          {sortBy === 'date_added' && t('home.dateAdded')}
+                          {sortBy === 'created_at' && t('home.createdAt')}
+                          {sortBy === 'release_at' && t('home.releaseAt')}
                           {sortBy === 'updated_at' && t('home.updatedAt')}
                           {sortBy === 'title' && t('home.titleSort')}
                           {sortBy === 'relevance' && t('home.relevance')}
@@ -726,7 +731,8 @@ function HomePageContent() {
                       <SelectContent>
                         <SelectItem value="relevance">{t('home.relevance')}</SelectItem>
                         <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
-                        <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+                        <SelectItem value="created_at">{t('home.createdAt')}</SelectItem>
+                        <SelectItem value="release_at">{t('home.releaseAt')}</SelectItem>
                         <SelectItem value="updated_at">{t('home.updatedAt')}</SelectItem>
                         <SelectItem value="title">{t('home.titleSort')}</SelectItem>
                         <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>

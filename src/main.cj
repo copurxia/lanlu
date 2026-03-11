@@ -8,6 +8,7 @@ import lanlu.contexts.user.domain.*
 import lanlu.contexts.system.application.*
 import lanlu.infrastructure.migrations.*
 import lanlu.infrastructure.migrations.versions.*
+import lanlu.infrastructure.migrations.extensions.*
 import std.convert.*
 import ignite.*
 import cjdotenv.load
@@ -57,7 +58,6 @@ main(): Int64 {
     MigrationRegistry.register(V003_CategoryCoverAssetId())
     MigrationRegistry.register(V004_TankoubonCoverAssetGuard())
     MigrationRegistry.register(V005_ArchivesWithTagsCoverAsset())
-    MigrationRegistry.register(V006_TagTranslationTrgmIndex())
     MigrationRegistry.register(V007_TankoubonArchivesOrderIndex())
     MigrationRegistry.register(V008_ArchivesCategoryPathFilenameIndex())
     MigrationRegistry.register(V009_ArchivePageMetadata())
@@ -65,12 +65,21 @@ main(): Int64 {
     MigrationRegistry.register(V011_UnifiedMetadataStore())
     MigrationRegistry.register(V012_CanonicalMetadataCleanup())
     MigrationRegistry.register(V013_MetadataTimeSemanticsUnification())
+    ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {
         logger.info("Database migrations completed successfully")
     } else {
         logger.error("Failed to run database migrations")
+        return 1
+    }
+
+    let extensionMigrationsOk = ExtensionMigrationRunner.runReadyMigrations()
+    if (extensionMigrationsOk) {
+        logger.info("Extension migrations completed successfully")
+    } else {
+        logger.error("Failed to run extension migrations")
         return 1
     }
 

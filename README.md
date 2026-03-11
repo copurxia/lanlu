@@ -211,6 +211,8 @@ grep -nE "已创建默认管理员账户|用户名:|密码:" ./data/logs/system.
 - `"foo bar"`：引号内短语匹配
 - `-foo`：排除词
 - `tag$`：标签完全匹配（仅匹配完整标签 token；例如 `artist:abc$` 不会命中 `artist:abcd`）
+- `sortby`：支持 `created_at`、`release_at`、`updated_at`、`lastread`、`title`、`pagecount` 等；`date_added` 仍兼容但等价于 `created_at`
+- `date_from` / `date_to`：日期范围会跟随当前 `sortby` 的时间字段（`created_at` / `release_at` / `updated_at`）；非时间排序时默认按 `created_at` 过滤
 
 ## 致谢
 

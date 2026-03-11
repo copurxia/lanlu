@@ -9,6 +9,10 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { SortAsc, SortDesc } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { cn } from '@/lib/utils/utils';
+import {
+  DEFAULT_SEARCH_SORT_BY,
+  normalizeSearchSortBy,
+} from '@/lib/utils/constants';
 
 const DateRangePicker = dynamic(
   () => import('@/components/ui/date-range-picker').then((m) => m.DateRangePicker),
@@ -48,7 +52,7 @@ interface SearchSidebarProps {
 
 export function SearchSidebar({ onSearch, loading = false, filters, noPadding = false }: SearchSidebarProps) {
   const { t } = useLanguage();
-  const [sortBy, setSortBy] = useState(filters.sortBy);
+  const [sortBy, setSortBy] = useState(normalizeSearchSortBy(filters.sortBy));
   const [sortOrder, setSortOrder] = useState(filters.sortOrder);
   const [dateFrom, setDateFrom] = useState(filters.dateFrom);
   const [dateTo, setDateTo] = useState(filters.dateTo);
@@ -65,7 +69,7 @@ export function SearchSidebar({ onSearch, loading = false, filters, noPadding = 
   useEffect(() => {
     if (!mounted) return;
 
-    setSortBy(filters.sortBy);
+    setSortBy(normalizeSearchSortBy(filters.sortBy));
     setSortOrder(filters.sortOrder);
     setDateFrom(filters.dateFrom);
     setDateTo(filters.dateTo);
@@ -106,7 +110,7 @@ export function SearchSidebar({ onSearch, loading = false, filters, noPadding = 
     if (!mounted) return;
 
     const categoryParam = filters.categoryId !== 'all' ? filters.categoryId : undefined;
-    setSortBy('date_added');
+    setSortBy(DEFAULT_SEARCH_SORT_BY);
     setSortOrder('desc');
     setDateFrom('');
     setDateTo('');
@@ -115,7 +119,7 @@ export function SearchSidebar({ onSearch, loading = false, filters, noPadding = 
     setFavoriteonly(false);
     setGroupbyTanks(true);
     onSearch({
-      sortBy: 'date_added',
+      sortBy: DEFAULT_SEARCH_SORT_BY,
       sortOrder: 'desc',
       dateFrom: '',
       dateTo: '',
@@ -148,7 +152,8 @@ export function SearchSidebar({ onSearch, loading = false, filters, noPadding = 
           <SelectContent>
             <SelectItem value="relevance">{t('home.relevance')}</SelectItem>
             <SelectItem value="lastread">{t('home.lastRead')}</SelectItem>
-            <SelectItem value="date_added">{t('home.dateAdded')}</SelectItem>
+            <SelectItem value="created_at">{t('home.createdAt')}</SelectItem>
+            <SelectItem value="release_at">{t('home.releaseAt')}</SelectItem>
             <SelectItem value="updated_at">{t('home.updatedAt')}</SelectItem>
             <SelectItem value="title">{t('home.titleSort')}</SelectItem>
             <SelectItem value="pagecount">{t('home.pageCount')}</SelectItem>

@@ -82,7 +82,7 @@ public class MigrationRunner {
     /**
      * 确保 schema_migrations 表存在
      */
-    private static func ensureMigrationsTable(conn: Connection): Bool {
+    public static func ensureMigrationsTable(conn: Connection): Bool {
         if (MigrationHelpers.tableExists(conn, "schema_migrations")) {
             return true
         }
@@ -100,7 +100,7 @@ public class MigrationRunner {
     /**
      * 获取已执行的迁移版本列表
      */
-    private static func getAppliedVersions(conn: Connection): HashSet<String> {
+    public static func getAppliedVersions(conn: Connection): HashSet<String> {
         var versions = HashSet<String>()
         let stmt = conn.prepareStatement("SELECT version FROM schema_migrations")
         try {
@@ -124,7 +124,7 @@ public class MigrationRunner {
     /**
      * 记录成功的迁移
      */
-    private static func recordMigration(conn: Connection, version: String, description: String): Bool {
+    public static func recordMigration(conn: Connection, version: String, description: String): Bool {
         let stmt = conn.prepareStatement(
             "INSERT INTO schema_migrations (version, description) VALUES (?, ?)"
         )

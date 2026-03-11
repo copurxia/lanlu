@@ -79,7 +79,7 @@ function LibraryPageContent() {
           ArchiveService.search({
             favoriteonly: true,
             groupby_tanks: false,
-            sortby: 'date_added',
+            sortby: 'created_at',
             order: 'desc',
             page: 1,
             pageSize: 1000,
