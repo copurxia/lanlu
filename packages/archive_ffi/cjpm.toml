@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.0.4"
+  cjc-version = "1.1.0"
   name = "archive_ffi"
   description = "nothing here"
   version = "1.0.0"

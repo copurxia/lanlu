@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.0.4"
+  cjc-version = "1.1.0"
   name = "vips_ffi"
   description = "Minimal libvips FFI bindings (thumbnail/resize/crop/write)"
   version = "0.1.0"

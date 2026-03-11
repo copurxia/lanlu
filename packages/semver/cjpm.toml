@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.0.3"
+  cjc-version = "1.1.0"
   name = "semver"
   description = "Semantic versioning parser and comparator for Cangjie"
   version = "0.1.0"

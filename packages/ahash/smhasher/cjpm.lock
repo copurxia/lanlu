@@ -1,6 +1,0 @@
-version = 0
-
-[requires]
-  constrandom = {git = "https://gitcode.com/OpenCangjieCommunity/constrandom", commitId = "5ec4c6ad058bd8d0ca28f448f8f5103f0bb55d61", branch = "master"}
-  getrandom = {git = "https://gitcode.com/OpenCangjieCommunity/getrandom", commitId = "3e932c9899ea6a4c0a316ce19a98688524c821d2", branch = "master"}
-  i128 = {git = "https://gitcode.com/OpenCangjieCommunity/i128", commitId = "74e2557d1cd09e33a37d9e286f27693dc9ec1f12", branch = "master"}

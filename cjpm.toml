@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.0.4"
+  cjc-version = "1.1.0"
   name = "lanlu"
   description = "nothing here"
   version = "1.0.0"
@@ -13,10 +13,10 @@
   package-configuration = {}
 
 [dependencies]
-  ignite = { git = "https://gitcode.com/Cinexus/ignite-cangjie.git", branch = "main"}
-  opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", output-type = "static", branch="master"}
-  cjdotenv = { git = "https://gitcode.com/Cangjie-SIG/cjdotenv.git", tag = "master" }
-  ahash = { path = "packages/ahash" }
+  ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "main"}
+  opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", branch = "master", output-type = "static"}
+  cjdotenv = { git = "https://gitcode.com/copur/cjdotenv.git", branch = "master" }
+  ahash = { git = "https://gitcode.com/copur/ahash.git", branch = "master" }
   cjpminfo = { git = "https://github.com/ystyle/cjpminfo.git", tag = "master" }
   cjcron = { path = "packages/cjcron" }
   epub = { path = "packages/epub" }
@@ -29,4 +29,4 @@
   [target.x86_64-unknown-linux-gnu]
     compile-option = "--static -O2 --cfg \"ohos=false\""
     [target.x86_64-unknown-linux-gnu.bin-dependencies]
-      path-option = [ "${CANGJIE_STDX_PATH}/linux_x86_64_llvm/static/stdx" ]
+      path-option = [ "${CANGJIE_STDX_PATH}" ]

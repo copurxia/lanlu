@@ -1,12 +1,54 @@
 package lanlu.shared.utils
 
 import std.io.*
-import std.env.*
 import stdx.log.*
 import stdx.logger.*
+import std.sync.*
 import std.fs.*
-import std.env.getVariable
+import std.env.{getVariable, getStdOut}
 
+private class GlobalLoggerWrapper <: Logger {
+    static let instance = GlobalLoggerWrapper()
+
+    private let ref: AtomicReference<Logger>
+
+    private init() {
+        ref = AtomicReference<Logger>(SimpleLogger(getStdOut()))
+    }
+
+    public func replace(logger: Logger): Unit {
+        ref.store(logger)
+    }
+
+    private func load(): Logger {
+        ref.load()
+    }
+
+    public func close(): Unit {
+        load().close()
+    }
+
+    public func isClosed(): Bool {
+        load().isClosed()
+    }
+
+    public func log(record: LogRecord): Unit {
+        load().log(record)
+    }
+
+    public func withAttrs(attrs: Array<Attr>): Logger {
+        load().withAttrs(attrs)
+    }
+
+    public mut prop level: LogLevel {
+        get() {
+            load().level
+        }
+        set(value) {
+            load().level = value
+        }
+    }
+}
 
 public func initializeLogging(): Unit {
 
@@ -25,31 +67,22 @@ public func initializeLogging(): Unit {
     }
 
     logger.level = logLevel
-    setGlobalLogger(logger)
+    GlobalLoggerWrapper.instance.replace(logger)
 
-    let globalLogger = getGlobalLogger([("component", "logging")])
+    let globalLogger = GlobalLoggerWrapper.instance.withAttrs([("component", "logging")])
     globalLogger.info("Logging system initialized", ("level", logLevel.toString()), ("format", logFormat))
-
-    // 同时输出到控制台确认日志系统工作
-    let stdout = getStdOut()
-    stdout.write("✅ Logging system initialized - Level: ${logLevel.toString()}, Format: ${logFormat}\n")
-    stdout.flush()
 }
 
 public func getLogger(component: String): Logger {
-    getGlobalLogger([("component", component)])
+    GlobalLoggerWrapper.instance.withAttrs([("component", component)])
 }
 
 public func getLogger(attrs: Array<Attr>): Logger {
-    getGlobalLogger(attrs)
+    GlobalLoggerWrapper.instance.withAttrs(attrs)
 }
 
 private func getLogLevel(): LogLevel {
     let levelStr = getVariable("LOG_LEVEL") ?? "INFO"
-    // 输出调试信息到标准错误，这样我们可以看到实际读取的值
-    let stderr = getStdErr()
-    stderr.write("DEBUG: Log level from env: '${levelStr}'\n")
-    stderr.flush()
     match (levelStr) {
         case "TRACE" => LogLevel.TRACE
         case "DEBUG" => LogLevel.DEBUG
@@ -71,10 +104,7 @@ private func getLogOutput(): OutputStream {
             let file = File(logFile, OpenMode.Append)
             // 直接使用文件，不使用缓冲流，确保日志立即写入
             return file
-        } catch (e: Exception) {
-            let stderr = getStdErr()
-            stderr.write("Failed to create log file ${logFile}: ${e.toString()}")
-            stderr.flush()
+        } catch (_: Exception) {
             return getStdOut()
         }
     }

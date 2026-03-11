@@ -1,5 +1,5 @@
 [package]
-  cjc-version = "1.0.4"
+  cjc-version = "1.1.0"
   name = "avif_ffi"
   description = "AVIF image decoder FFI bindings"
   version = "0.1.0"
