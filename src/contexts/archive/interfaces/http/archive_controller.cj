@@ -86,6 +86,7 @@ public class ArchiveController {
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
+        let lang = (ctx.query("lang") ?? "").trimAscii()
         let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
         let includePages = includePagesRaw == "1" || includePagesRaw == "true"
 
@@ -122,7 +123,8 @@ public class ArchiveController {
             progress: progress,
             isNew: isNew,
             isFavorite: isFavorite,
-            lastReadTime: lastReadTime
+            lastReadTime: lastReadTime,
+            lang: lang
         )
         if (!okMetadata) {
             let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Failed to build archive metadata" }

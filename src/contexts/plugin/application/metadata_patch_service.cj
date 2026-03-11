@@ -11,6 +11,7 @@ import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
+import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.infrastructure.archivehandler.*
 
@@ -73,6 +74,21 @@ public class MetadataPatchService {
             }
         }
         w.endArray()
+    }
+
+    private static func translateMetadataTags(tags: Array<String>, lang: String): Array<String> {
+        let effectiveLang = lang.trimAscii()
+        if (tags.size == 0 || effectiveLang.size == 0) {
+            return tags
+        }
+
+        let translationsMap = TagDao.batchGetTranslations(tags, effectiveLang)
+        if (translationsMap.size == 0) {
+            return tags
+        }
+
+        let translatedTagsString = TagDao.translateTagsString(String.join(tags, delimiter: ", "), effectiveLang, translationsMap)
+        return splitTagTokens(translatedTagsString)
     }
 
     private static func writeMetadataAssetsArrayFromList(w: JsonWriter, assets: Array<MetadataAssetData>): Unit {
@@ -655,7 +671,8 @@ public class MetadataPatchService {
         progress!: Int32 = 0i32,
         isNew!: Bool = false,
         isFavorite!: Bool = false,
-        lastReadTime!: Int64 = 0i64
+        lastReadTime!: Int64 = 0i64,
+        lang!: String = ""
     ): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -663,11 +680,12 @@ public class MetadataPatchService {
         let createdAt = if (metadata.created_at.trimAscii().size > 0) { metadata.created_at } else { archive.created_at }
         let updatedAt = if (metadata.updated_at.trimAscii().size > 0) { metadata.updated_at } else { createdAt }
         let thumbnailHash = resolveArchiveThumbnailHash(archive, metadata.assets)
+        let translatedTags = translateMetadataTags(metadata.tags, lang)
         w.startObject()
         w.writeName("title").writeValue(metadata.title)
         w.writeName("type").writeValue(0i32)
         w.writeName("description").writeValue(description)
-        writeMetadataTagsArrayFromList(w, metadata.tags)
+        writeMetadataTagsArrayFromList(w, translatedTags)
         writeMetadataAssetsArrayFromList(w, metadata.assets)
         w.writeName("children")
         w.startArray()
@@ -705,7 +723,8 @@ public class MetadataPatchService {
         progress!: Int32 = 0i32,
         isNew!: Bool = false,
         isFavorite!: Bool = false,
-        lastReadTime!: Int64 = 0i64
+        lastReadTime!: Int64 = 0i64,
+        lang!: String = ""
     ): (Bool, String, String) {
         let archive = ArchiveDao.getArchiveById(archiveId)
         if (archive.id.size == 0) {
@@ -724,7 +743,8 @@ public class MetadataPatchService {
                     progress: progress,
                     isNew: isNew,
                     isFavorite: isFavorite,
-                    lastReadTime: lastReadTime
+                    lastReadTime: lastReadTime,
+                    lang: lang
                 ), "")
         }
     }

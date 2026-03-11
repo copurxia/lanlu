@@ -68,11 +68,11 @@ export interface MetadataAssetItem {
 
 export interface PageMetadataPatch {
   page?: number;
-  path?: string;
+  entry_path?: string;
   title?: string;
   description?: string;
   thumb?: string | number;
-  sort?: number;
+  order_index?: number;
   hidden_in_files?: boolean;
 }
 
@@ -588,7 +588,7 @@ export abstract class BasePlugin {
     const page = this.readIntField(source.page ?? source.page_number ?? source.pageNumber, 0);
     if (page > 0) patch.page = page;
     const path = this.readStringField(source.path ?? source.entry ?? source.entry_path ?? source.entryPath);
-    if (path) patch.path = path;
+    if (path) patch.entry_path = path;
     const title = this.readStringField(source.title);
     if (title) patch.title = title;
     const description = this.readStringField(source.description ?? source.summary);
@@ -598,8 +598,8 @@ export abstract class BasePlugin {
       : {};
     const thumb = this.normalizeAssetValue(source.thumb ?? nestedMetadata.thumb);
     if (thumb) patch.thumb = thumb;
-    const sort = this.readIntField(source.sort, 0);
-    if (sort !== 0) patch.sort = sort;
+    const sort = this.readIntField(source.sort ?? source.order_index, 0);
+    if (sort !== 0) patch.order_index = sort;
     if (typeof source.hidden_in_files === 'boolean') {
       patch.hidden_in_files = source.hidden_in_files;
     } else if (typeof source.hiddenInFiles === 'boolean') {
