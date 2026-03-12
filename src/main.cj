@@ -12,6 +12,7 @@ import lanlu.infrastructure.migrations.extensions.*
 import std.convert.*
 import ignite.*
 import cjdotenv.load
+import cjpminfo.*
 import std.env.getVariable
 import std.fs.exists
 
@@ -30,10 +31,15 @@ main(): Int64 {
 
     // 获取应用日志记录器
     let logger = getLogger("main")
+    let version: String = @ModuleVer("1.0.0")
+    let cjcVersion: String = @ModuleCjv("1.0.0")
+    let gitCommitIdShort: String = @GitCommitIdShort("unknown")
+    let gitBranch: String = @GitBranch("unknown")
+    let appVersion: String = "${version}-${gitBranch}.${gitCommitIdShort}(${cjcVersion})"
 
     // 测试日志输出
     logger.debug("=== LOGGING SYSTEM TEST ===")
-    logger.info("Starting LRR4CJ server", ("version", "1.0.0"))
+    logger.info("Starting LRR4CJ server", ("version", appVersion))
     logger.info("Application starting... step 1: logging initialized")
     logger.debug("This is a debug message")
     logger.warn("This is a warning message")
@@ -140,7 +146,7 @@ main(): Int64 {
     // 10MB 分片上传需预留 multipart 包装开销，因此请求体上限略高于 10MB
     let app = App(config: Config(
         appName: "lanlu",
-        appVersion: "1.0.0",
+        appVersion: appVersion,
         serverHeader: "Lanlu",
         bodyLimit: 12 * 1024 * 1024,
         enableSwagger: true,
