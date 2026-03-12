@@ -124,6 +124,14 @@ public class GenerateCategoryCoverTaskRunner {
         return UInt8(x)
     }
 
+    private static func copyPixels(src: Array<UInt8>): Array<UInt8> {
+        var copied = Array<UInt8>(src.size, repeat: 0u8)
+        for (i in 0..Int64(src.size)) {
+            copied[i] = src[i]
+        }
+        return copied
+    }
+
     private static func blendOver(
         pixels: Array<UInt8>,
         width: Int32,
@@ -255,6 +263,179 @@ public class GenerateCategoryCoverTaskRunner {
                     blendOver(pixels, width, xx, yy, r, g, b, a)
                 }
             }
+        }
+    }
+
+    private static func fillRoundedRectFromBaseMapping(
+        dst: Array<UInt8>,
+        dstW: Int32,
+        dstH: Int32,
+        x0: Int32,
+        y0: Int32,
+        w: Int32,
+        h: Int32,
+        radius: Int32,
+        base: Array<UInt8>,
+        baseW: Int32,
+        baseH: Int32,
+        srcCanvasW: Int32,
+        srcCanvasH: Int32,
+        centerX: Int32,
+        centerY: Int32,
+        cosA: Float64,
+        sinA: Float64,
+        scale: Float64
+    ): Unit {
+        if (w <= 0i32 || h <= 0i32) { return }
+        if (dstW <= 0i32 || dstH <= 0i32 || baseW <= 0i32 || baseH <= 0i32) { return }
+        if (scale <= 0.0) { return }
+
+        let rr = radius * radius
+        let x1 = x0 + w - 1
+        let y1 = y0 + h - 1
+        let halfW = Float64(srcCanvasW) / 2.0
+        let halfH = Float64(srcCanvasH) / 2.0
+
+        for (yy in 0..dstH) {
+            if (yy < y0 || yy > y1) { continue }
+            for (xx in 0..dstW) {
+                if (xx < x0 || xx > x1) { continue }
+
+                let dx = if (xx - x0 < x1 - xx) { xx - x0 } else { x1 - xx }
+                let dy = if (yy - y0 < y1 - yy) { yy - y0 } else { y1 - yy }
+
+                var inside = true
+                if (dx < radius && dy < radius) {
+                    let cx = radius - dx
+                    let cy = radius - dy
+                    inside = (cx * cx + cy * cy) <= rr
+                }
+                if (!inside) { continue }
+
+                // Map wall-local source coordinates to the final cover position so transparent
+                // source pixels flatten onto the already-painted gradient base instead of the
+                // wall's transparent buffer or shadow layer.
+                let rx = Float64(xx) - halfW
+                let ry = Float64(yy) - halfH
+                let fx = Float64(centerX) + scale * (cosA * rx - sinA * ry)
+                let fy = Float64(centerY) + scale * (sinA * rx + cosA * ry)
+                let bx = Int32(fx + 0.5)
+                let by = Int32(fy + 0.5)
+                if (bx < 0i32 || by < 0i32 || bx >= baseW || by >= baseH) { continue }
+
+                let bidx = (Int64(by) * Int64(baseW) + Int64(bx)) * 4
+                let br = Int32(base[bidx])
+                let bg = Int32(base[bidx + 1])
+                let bb = Int32(base[bidx + 2])
+                blendOver(dst, dstW, xx, yy, br, bg, bb, 255i32)
+            }
+        }
+    }
+
+    private static func paintGradientBackground(
+        pixels: Array<UInt8>,
+        width: Int32,
+        height: Int32,
+        r1: Int32,
+        g1: Int32,
+        b1: Int32,
+        r2: Int32,
+        g2: Int32,
+        b2: Int32,
+        rng: CategoryCoverRng,
+        seed: UInt64
+    ): Unit {
+        if (width <= 0i32 || height <= 0i32) { return }
+        for (yy in 0..height) {
+            for (xx in 0..width) {
+                let t = (Float64(xx) / Float64(width)) * 0.85 + (Float64(yy) / Float64(height)) * 0.08
+                let tr = Float64(r1) + (Float64(r2 - r1) * t)
+                let tg = Float64(g1) + (Float64(g2 - g1) * t)
+                let tb = Float64(b1) + (Float64(b2 - b1) * t)
+
+                let n = Int32(rng.nextU64() & 255u64) - 128i32
+                let delta = n / 80i32
+
+                let idx = (Int64(yy) * Int64(width) + Int64(xx)) * 4
+                pixels[idx] = clamp8(Int32(tr) + delta)
+                pixels[idx + 1] = clamp8(Int32(tg) + delta)
+                pixels[idx + 2] = clamp8(Int32(tb) + delta)
+                pixels[idx + 3] = 255u8
+            }
+        }
+
+        drawStarDots(pixels, width, height, seed, 540i32, 110i32)
+        drawRadialGlow(pixels, width, height, 200i32, 190i32, 260i32, 46i32)
+    }
+
+    private static func drawPlaceholderCard(
+        wall: Array<UInt8>,
+        wallW: Int32,
+        wallH: Int32,
+        x: Int32,
+        y: Int32,
+        cardW: Int32,
+        cardH: Int32,
+        radius: Int32,
+        backgroundPixels: Array<UInt8>,
+        backgroundW: Int32,
+        backgroundH: Int32,
+        srcCanvasW: Int32,
+        srcCanvasH: Int32,
+        centerX: Int32,
+        centerY: Int32,
+        cosA: Float64,
+        sinA: Float64,
+        scale: Float64
+    ): Unit {
+        fillRoundedRectFromBaseMapping(
+            wall,
+            wallW,
+            wallH,
+            x,
+            y,
+            cardW,
+            cardH,
+            radius,
+            backgroundPixels,
+            backgroundW,
+            backgroundH,
+            srcCanvasW,
+            srcCanvasH,
+            centerX,
+            centerY,
+            cosA,
+            sinA,
+            scale
+        )
+        drawRoundedRect(wall, wallW, wallH, x, y, cardW, cardH, radius, 255, 255, 255, 22)
+        drawRoundedRect(wall, wallW, wallH, x + 1i32, y + 1i32, cardW - 2i32, cardH - 2i32, radius - 1i32, 255, 255, 255, 10)
+    }
+
+    private static func flattenOntoOpaqueBase(pixels: Array<UInt8>, basePixels: Array<UInt8>): Unit {
+        if (pixels.size != basePixels.size) { return }
+        var idx: Int64 = 0
+        while (idx + 3 < Int64(pixels.size)) {
+            let alpha = Int32(pixels[idx + 3])
+            if (alpha >= 255i32) {
+                pixels[idx + 3] = 255u8
+                idx += 4
+                continue
+            }
+
+            let br = Int32(basePixels[idx])
+            let bg = Int32(basePixels[idx + 1])
+            let bb = Int32(basePixels[idx + 2])
+            let pr = Int32(pixels[idx])
+            let pg = Int32(pixels[idx + 1])
+            let pb = Int32(pixels[idx + 2])
+
+            let invA = 255i32 - alpha
+            pixels[idx] = clamp8((pr * alpha + br * invA) / 255i32)
+            pixels[idx + 1] = clamp8((pg * alpha + bg * invA) / 255i32)
+            pixels[idx + 2] = clamp8((pb * alpha + bb * invA) / 255i32)
+            pixels[idx + 3] = 255u8
+            idx += 4
         }
     }
 
@@ -461,33 +642,13 @@ public class GenerateCategoryCoverTaskRunner {
             let ((r1, g1, b1), (r2, g2, b2)) = pickPalette(rng)
             TaskIO.appendLog(taskId, "Cover step: palette (${r1.toString()},${g1.toString()},${b1.toString()}) -> (${r2.toString()},${g2.toString()},${b2.toString()})")
 
-            // Background: clean gradient + subtle dots.
+            // Background is a first-class stage: build a full opaque gradient canvas once,
+            // then compose all later elements on top of that immutable base.
             TaskIO.appendLog(taskId, "Cover step: background")
-            for (yy in 0..h) {
-                for (xx in 0..w) {
-                    // Mostly horizontal gradient, with tiny diagonal for depth.
-                    let t = (Float64(xx) / Float64(w)) * 0.85 + (Float64(yy) / Float64(h)) * 0.08
-                    let tr = Float64(r1) + (Float64(r2 - r1) * t)
-                    let tg = Float64(g1) + (Float64(g2 - g1) * t)
-                    let tb = Float64(b1) + (Float64(b2 - b1) * t)
-
-                    // Very subtle grain (keeps banding away without looking noisy).
-                    let n = Int32(rng.nextU64() & 255u64) - 128i32
-                    let delta = n / 80i32  // ~[-1..1]
-
-                    let idx = (Int64(yy) * Int64(w) + Int64(xx)) * 4
-                    pixels[idx] = clamp8(Int32(tr) + delta)
-                    pixels[idx + 1] = clamp8(Int32(tg) + delta)
-                    pixels[idx + 2] = clamp8(Int32(tb) + delta)
-                    pixels[idx + 3] = 255u8
-                }
-            }
-            // Sprinkle dots on the left to match the reference vibe.
-            drawStarDots(pixels, w, h, seed, 540i32, 110i32)
+            paintGradientBackground(pixels, w, h, r1, g1, b1, r2, g2, b2, rng, seed)
+            let backgroundPixels = copyPixels(pixels)
 
             TaskIO.appendLog(taskId, "Cover step: overlays")
-            // Gentle highlight behind title (cleaner than heavy fade overlays).
-            drawRadialGlow(pixels, w, h, 200i32, 190i32, 260i32, 46i32)
 
             // Poster wall: draw into an offscreen buffer, then rotate+blit.
             let wallW: Int32 = 760
@@ -503,6 +664,12 @@ public class GenerateCategoryCoverTaskRunner {
             let marginY: Int32 = 18
             let cols: Int32 = 4
             let rows: Int32 = 2
+            let wallCenterX: Int32 = 930i32
+            let wallCenterY: Int32 = 188i32
+            // Fixed angle avoids needing trig functions at runtime.
+            let cosA = 0.9781476
+            let sinA = 0.2079117
+            let wallScale = 0.98
 
             var imgIdx: Int64 = 0
             for (ry in 0..rows) {
@@ -521,22 +688,39 @@ public class GenerateCategoryCoverTaskRunner {
                     if (imgIdx < wallImages.size) {
                         match (wallImages[imgIdx]) {
                             case Some(img) =>
+                                fillRoundedRectFromBaseMapping(
+                                    wall,
+                                    wallW,
+                                    wallH,
+                                    x,
+                                    y,
+                                    cardW,
+                                    cardH,
+                                    18i32,
+                                    backgroundPixels,
+                                    w,
+                                    h,
+                                    wallW,
+                                    wallH,
+                                    wallCenterX,
+                                    wallCenterY,
+                                    cosA,
+                                    sinA,
+                                    wallScale
+                                )
                                 drawImageRounded(wall, wallW, wallH, x, y, cardW, cardH, 18, img.pixels)
                             case None =>
-                                drawRoundedRect(wall, wallW, wallH, x, y, cardW, cardH, 18, 255, 255, 255, 22)
+                                drawPlaceholderCard(wall, wallW, wallH, x, y, cardW, cardH, 18i32, backgroundPixels, w, h, wallW, wallH, wallCenterX, wallCenterY, cosA, sinA, wallScale)
                         }
                     } else {
-                        drawRoundedRect(wall, wallW, wallH, x, y, cardW, cardH, 18, 255, 255, 255, 22)
+                        drawPlaceholderCard(wall, wallW, wallH, x, y, cardW, cardH, 18i32, backgroundPixels, w, h, wallW, wallH, wallCenterX, wallCenterY, cosA, sinA, wallScale)
                     }
                     imgIdx += 1
                 }
             }
 
             // Rotate the wall slightly clockwise (matches the reference).
-            // Fixed angle avoids needing trig functions at runtime.
-            let cosA = 0.9781476
-            let sinA = 0.2079117
-            drawRotatedRgbaImageNearest(pixels, w, h, 930i32, 188i32, wall, wallW, wallH, cosA, sinA, 0.98)
+            drawRotatedRgbaImageNearest(pixels, w, h, wallCenterX, wallCenterY, wall, wallW, wallH, cosA, sinA, wallScale)
 
             // Title and optional description (rendered via libvips/pango).
             let safeTitle = title.trimAscii()
@@ -573,6 +757,8 @@ public class GenerateCategoryCoverTaskRunner {
                     case None => ()
                 }
             }
+
+            flattenOntoOpaqueBase(pixels, backgroundPixels)
 
             // Encode to AVIF.
             TaskIO.appendLog(taskId, "Cover step: encode_avif")
