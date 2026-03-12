@@ -2,6 +2,8 @@
 
 兰鹿 - 基于仓颉语言的漫画归档管理系统
 
+*Vibe Coding Warning*
+
 | 类型 | CNB | Gitea | GitHub |
 | :--: | :--: | :--: | :--: |
 | 服务 | [![CNB Build](https://cnb.cool/copurx/lanlu/-/badge/git/latest/ci/status/push?branch=main)](https://cnb.cool/copurx/lanlu/-/ci) | [![Gitea Build](https://git.copur.xyz/copur/lanlu/actions/workflows/build.yaml/badge.svg?branch=main)](https://git.copur.xyz/copur/lanlu/actions/workflows/build.yaml) | [![GitHub Build](https://github.com/copurxia/lanlu/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/copurxia/lanlu/actions/workflows/build.yml) |
