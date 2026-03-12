@@ -138,7 +138,13 @@ main(): Int64 {
     // 创建 app 实例并配置路由
     logger.debug("Application starting... step 14: creating web server")
     // 10MB 分片上传需预留 multipart 包装开销，因此请求体上限略高于 10MB
-    let app = App(config: Config(bodyLimit: 12 * 1024 * 1024))
+    let app = App(config: Config(
+        appName: "lanlu",
+        appVersion: "1.0.0",
+        serverHeader: "Lanlu",
+        bodyLimit: 12 * 1024 * 1024,
+        enableSwagger: true,
+        ))
 
     // 注册所有路由
     logger.debug("Application starting... step 15: registering routes")
