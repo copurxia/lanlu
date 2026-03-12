@@ -63,8 +63,7 @@ jobs:
 
       - name: Build backend
         env:
-          CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx
-          CANGJIE_STDX: ${{ github.workspace }}/stdx/linux_x86_64_llvm/dynamic/stdx
+          CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
         run: |
           cjc -v
           cjpm build -V
