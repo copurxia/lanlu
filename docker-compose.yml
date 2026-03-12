@@ -8,11 +8,7 @@ services:
       - DB_STRING=postgres://user:password@postgres:5432/lanlu?sslmode=disable
       - LOG_LEVEL=INFO
     volumes:
-      - ./data/archive:/app/data/archive
-      - ./data/assets:/app/data/assets
-      - ./data/logs:/app/data/logs
-      - ./data/plugins:/app/data/plugins
-      - ./data/cache:/app/data/cache
+      - ./data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -28,7 +24,7 @@ services:
       - POSTGRES_USER=user
       - POSTGRES_PASSWORD=password
     volumes:
-      - postgres-data:/var/lib/postgresql
+      - ./db:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d lanlu"]
       interval: 10s
