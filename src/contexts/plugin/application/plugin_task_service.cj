@@ -71,6 +71,18 @@ public class PluginTaskService {
         return PluginPaths.buildPluginFilePath(pluginType, entry)
     }
 
+    public static func isWasmEntry(entry: String): Bool {
+        return entry.trimAscii().toAsciiLower().endsWith(".wasm")
+    }
+
+    public static func isWasmPlugin(plugin: PluginTaskData): Bool {
+        return isWasmEntry(plugin.entry)
+    }
+
+    public static func getRunnerTaskType(plugin: PluginTaskData): String {
+        return "wasm_task"
+    }
+
     public static func installCoverAssetFromPluginPath(coverPath: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String, String) {
         return PluginCoverUtils.installCoverAssetFromPluginPath(coverPath, pluginNamespace, assetKind, originalName)
     }

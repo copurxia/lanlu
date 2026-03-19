@@ -6,6 +6,7 @@ import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import ignite.*
 import lanlu.contexts.archive.infrastructure.persistence.*
+import lanlu.contexts.plugin.application.PluginTaskService
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.application.*
@@ -83,7 +84,7 @@ public class MetadataPluginController {
      * param 可选：若为 JSON 对象字符串，会作为 --params 覆盖/补充插件配置；否则作为 --oneshot 传入
      *
      * 语义分支：
-     * - write_back=0（默认）：只运行 Metadata 插件，返回 deno_task 的 job id；不写回 archives/tags
+     * - write_back=0（默认）：只运行 Metadata 插件，返回 wasm_task 的 job id；不写回 archives/tags
      * - write_back=1：走 metadata_plugin + callback 流程，自动写回 archives/tags
      */
     public static func runMetadataPlugin(ctx: Ctx): Unit {
@@ -228,7 +229,15 @@ public class MetadataPluginController {
                 return
             }
 
-            // 预览/查询模式：只跑 deno_task，前端直接读取 deno_task 的 output（不写库）
+            let plugin = PluginTaskService.getPluginByNamespace(namespace)
+            if (plugin.namespace.size == 0 || plugin.plugin_type != "Metadata") {
+                ctx.status(404)
+                ctx.json("{\"success\":0,\"error\":\"metadata plugin not found\"}")
+                return
+            }
+            let previewTaskType = PluginTaskService.getRunnerTaskType(plugin)
+
+            // 预览/查询模式：直接跑具体插件任务，前端直接读取任务 output（不写库）
             let (oneshotOpt, extraParamsOpt) = splitParam(param)
             let out = ByteBuffer()
             let w = JsonWriter(out)
@@ -253,32 +262,32 @@ public class MetadataPluginController {
             w.writeName("groupId").writeValue(targetId)
             w.endObject()
             w.flush()
-            let denoParams = String.fromUtf8(readToEnd(out))
+            let pluginTaskParams = String.fromUtf8(readToEnd(out))
 
-            let denoTask = TaskModel.createTaskWithOptions(
+            let pluginTask = TaskModel.createTaskWithOptions(
                 "元数据插件执行(预览)",
-                "deno_task",
-                denoParams,
+                previewTaskType,
+                pluginTaskParams,
                 50,
                 targetId,
                 "metadata_plugin_preview"
             )
 
-            if (denoTask.id <= 0) {
+            if (pluginTask.id <= 0) {
                 ctx.status(500)
-                ctx.json("{\"success\":0,\"error\":\"failed to create deno_task\"}")
+                ctx.json("{\"success\":0,\"error\":\"failed to create plugin task\"}")
                 return
             }
 
-            TaskIO.appendLog(denoTask.id, "enqueued deno_task(metadata preview) target_type=${effectiveType} target_id=${targetId} namespace=${namespace}")
+            TaskIO.appendLog(pluginTask.id, "enqueued ${previewTaskType}(metadata preview) target_type=${effectiveType} target_id=${targetId} namespace=${namespace}")
             TaskPoolService.getInstance().notifyTaskAvailable()
 
             let out2 = ByteBuffer()
             let w2 = JsonWriter(out2)
             w2.startObject()
-            w2.writeName("job").writeValue(denoTask.id)
+            w2.writeName("job").writeValue(pluginTask.id)
             w2.writeName("operation").writeValue("metadata_preview")
-            w2.writeName("task_type").writeValue("deno_task")
+            w2.writeName("task_type").writeValue(previewTaskType)
             w2.writeName("write_back").writeValue(0)
             w2.writeName("success").writeValue(1)
             w2.writeName("target_type").writeValue(effectiveType)

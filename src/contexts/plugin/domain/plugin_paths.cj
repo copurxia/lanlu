@@ -32,8 +32,8 @@ public class PluginPaths {
     public static func buildPluginFilePath(_: String, entry: String): String {
         // 所有插件统一存放在 PLUGIN_PATH 根目录
         // entry 可以是：
-        // - 文件名：plugin.ts
-        // - 相对路径：subfolder/plugin.ts
+        // - 文件名：plugin.wasm
+        // - 相对路径：subfolder/plugin.wasm
         FileUtils.joinPath(getPluginStorageRoot(), entry)
     }
 

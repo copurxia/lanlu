@@ -380,8 +380,8 @@ export class CronService {
         return '数据库检查';
       case 'scan_plugins':
         return '插件扫描';
-      case 'deno_task':
-        return 'Deno任务';
+      case 'wasm_task':
+        return 'Wasm任务';
       case 'metadata_plugin_callback':
         return '元数据回调';
       case 'clear_cache':
@@ -430,7 +430,7 @@ export class CronService {
         return 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200';
       case 'generate_category_cover':
         return 'bg-fuchsia-100 text-fuchsia-800 dark:bg-fuchsia-900 dark:text-fuchsia-200';
-      case 'deno_task':
+      case 'wasm_task':
         return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200';
       case 'clear_cache':
       case 'clear_log':
@@ -475,7 +475,7 @@ export class CronService {
     { value: 'generate_category_cover' },
     { value: 'check_database' },
     { value: 'scan_plugins' },
-    { value: 'deno_task' },
+    { value: 'wasm_task' },
     { value: 'metadata_plugin_callback' },
     { value: 'clear_cache' },
     { value: 'clear_log' },

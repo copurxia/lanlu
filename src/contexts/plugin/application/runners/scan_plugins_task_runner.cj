@@ -14,7 +14,7 @@ import lanlu.contexts.plugin.infrastructure.persistence.*
 import semver.*
 
 /**
- * 插件扫描任务：扫描并注册TypeScript/Deno插件文件（Metadata、Login、Download 插件）
+ * 插件扫描任务：扫描并注册 WASM 插件文件（Metadata、Login、Download、Script 插件）
  */
 public class ScanPluginsTaskRunner {
 
@@ -112,7 +112,7 @@ public class ScanPluginsTaskRunner {
     }
 
     /**
-     * 查找插件文件 - 扫描目录下所有 .ts 文件（包括子目录）
+     * 查找插件文件（仅扫描 .wasm）
      */
     private static func findPluginFiles(taskId: Int64, dirPath: String): ArrayList<String> {
         var result: ArrayList<String> = ArrayList<String>()
@@ -128,12 +128,10 @@ public class ScanPluginsTaskRunner {
             for (entry in entries) {
                 let fullPath = joinPath(dirPath, entry)
 
-                if (fileExists(fullPath) && entry.endsWith(".ts")) {
-                    // 直接在根目录的 .ts 文件
+                if (fileExists(fullPath) && entry.endsWith(".wasm")) {
                     result.add(fullPath)
-                    TaskIO.appendLog(taskId, "Found TypeScript plugin: ${fullPath}")
+                    TaskIO.appendLog(taskId, "Found WASM plugin: ${fullPath}")
                 } else if (directoryExists(fullPath)) {
-                    // 递归扫描子目录
                     let subFiles = findPluginFilesInDir(taskId, fullPath)
                     result.add(all: subFiles)
                 }
@@ -157,11 +155,10 @@ public class ScanPluginsTaskRunner {
             for (entry in entries) {
                 let fullPath = joinPath(dirPath, entry)
 
-                if (fileExists(fullPath) && entry.endsWith(".ts")) {
+                if (fileExists(fullPath) && entry.endsWith(".wasm")) {
                     result.add(fullPath)
-                    TaskIO.appendLog(taskId, "Found TypeScript plugin: ${fullPath}")
+                    TaskIO.appendLog(taskId, "Found WASM plugin: ${fullPath}")
                 } else if (directoryExists(fullPath)) {
-                    // 递归扫描子目录
                     let subFiles = findPluginFilesInDir(taskId, fullPath)
                     result.add(all: subFiles)
                 }
@@ -183,16 +180,17 @@ public class ScanPluginsTaskRunner {
 
             TaskIO.appendLog(taskId, "Processing plugin file: ${fileName}")
 
-            // 计算相对于本次扫描根目录的路径，直接作为 entry 存储：
-            // - pluginRoot: /path/to/plugins
-            // - filePath:   /path/to/plugins/subfolder/plugin.ts
-            // - entryPath:  subfolder/plugin.ts
-            let entryPath = computeEntryPath(pluginRoot, filePath)
+            var entryPath = ""
+            var pluginMetadata = PluginMetadata()
 
-            TaskIO.appendLog(taskId, "Plugin entry path: ${entryPath}")
-
-            // 使用Deno解析插件元数据，类型从元数据获取
-            let pluginMetadata = parsePluginMetadataWithDeno(taskId, filePath)
+            let (okInfo, wasmPath, pluginInfoJson, wasmErr) = WasmPluginInfoRunner.runPluginInfo(filePath)
+            if (!okInfo) {
+                return ProcessResultData(false, "", "Failed to parse wasm plugin metadata: ${wasmErr}")
+            }
+            entryPath = computeEntryPath(pluginRoot, wasmPath)
+            TaskIO.appendLog(taskId, "WASM plugin entry path: ${entryPath}")
+            let runtimeMetadata = parsePluginMetadataJson(taskId, pluginInfoJson, wasmPath, "WASM")
+            pluginMetadata = runtimeMetadata
 
             if (pluginMetadata.name.size == 0) {
                 return ProcessResultData(false, "", "Failed to parse plugin metadata")
@@ -213,9 +211,8 @@ public class ScanPluginsTaskRunner {
 
                 match (compareResult) {
                     case Equal =>
-                        TaskIO.appendLog(taskId, "Plugin version unchanged: ${pluginMetadata.namespace} (${existingPlugin.version})")
-                        syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
-                        return ProcessResultData(true, pluginMetadata.namespace, "")
+                        TaskIO.appendLog(taskId, "Plugin version unchanged: ${pluginMetadata.namespace} (${existingPlugin.version}), refreshing metadata")
+                        return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, false)
                     case MajorUpgrade =>
                         TaskIO.appendLog(taskId, "Major upgrade detected for ${pluginMetadata.namespace}: ${existingPlugin.version} -> ${pluginMetadata.version}, clearing parameters")
                         return updateExistingPlugin(taskId, existingPlugin, pluginMetadata, fileName, entryPath, pluginType, true)
@@ -259,7 +256,7 @@ public class ScanPluginsTaskRunner {
             // 保存到数据库
             if (PluginDao.create(pluginData)) {
                 TaskIO.appendLog(taskId, "Successfully registered plugin: ${pluginData.namespace} (${pluginData.name})")
-                syncScriptScheduledTask(taskId, pluginMetadata, pluginType)
+                syncScriptScheduledTask(taskId, pluginMetadata, pluginType, entryPath.trimAscii().toAsciiLower().endsWith(".wasm"))
                 return ProcessResultData(true, pluginData.namespace, "")
             } else {
                 TaskIO.appendLog(taskId, "ERROR: Failed to save plugin to database")
@@ -270,125 +267,93 @@ public class ScanPluginsTaskRunner {
         }
     }
 
-    /**
-     * 使用Deno解析TypeScript插件元数据
-     */
-    private static func parsePluginMetadataWithDeno(taskId: Int64, filePath: String): PluginMetadata {
+    private static func parsePluginMetadataJson(taskId: Int64, rawJson: String, sourcePath: String, sourceKind: String): PluginMetadata {
         var metadata = PluginMetadata()
 
         try {
-            TaskIO.appendLog(taskId, "Parsing plugin metadata: ${filePath}")
+            var buf = ByteBuffer()
+            unsafe { buf.write(rawJson.trimAscii().rawData()) }
+            let r = JsonReader(buf)
 
-            // Use the shared runner so allow-read is scoped to the sandbox temp root.
-            let (exitCode, stdoutStr, stderrStr) = DenoPluginInfoRunner.runPluginInfo(filePath, taskId.toString())
-
-            if (exitCode == 0 && stdoutStr.trimAscii().size > 0) {
-                let jsonStr = stdoutStr.trimAscii()
-                TaskIO.appendLog(taskId, "Plugin metadata raw output: ${jsonStr}")
-
-                // 解析 NDJSON 格式的输出，查找 result 类型的消息
-                let pluginInfo = DenoPluginInfoRunner.extractPluginInfoDataFromNdjson(jsonStr)
-                if (pluginInfo.size > 0) {
-                    try {
-                        var buf = ByteBuffer()
-                        unsafe { buf.write(pluginInfo.rawData()) }
-                        let r = JsonReader(buf)
-
-                        func readBoolFlexible(): Bool {
-                            let v = r.readValue<String>().trimAscii().toAsciiLower()
-                            return v == "true" || v == "1"
-                        }
-                        func readInt32Flexible(defaultValue: Int32): Int32 {
+            func readBoolFlexible(): Bool {
+                let v = r.readValue<String>().trimAscii().toAsciiLower()
+                return v == "true" || v == "1"
+            }
+            func readInt32Flexible(defaultValue: Int32): Int32 {
+                let s = r.readValue<String>().trimAscii()
+                try { return Int32.parse(s) } catch (_: Exception) { return defaultValue }
+            }
+            func readCommaSeparated(): String {
+                match (r.peek()) {
+                    case Some(BeginArray) =>
+                        var out = ""
+                        var first = true
+                        r.startArray()
+                        while (r.peek() != EndArray) {
                             let s = r.readValue<String>().trimAscii()
-                            try { return Int32.parse(s) } catch (_: Exception) { return defaultValue }
+                            if (s.size == 0) { continue }
+                            if (!first) { out += "," } else { first = false }
+                            out += s
                         }
-                        func readCommaSeparated(): String {
-                            match (r.peek()) {
-                                case Some(BeginArray) =>
-                                    var out = ""
-                                    var first = true
-                                    r.startArray()
-                                    while (r.peek() != EndArray) {
-                                        let s = r.readValue<String>().trimAscii()
-                                        if (s.size == 0) { continue }
-                                        if (!first) { out += "," } else { first = false }
-                                        out += s
-                                    }
-                                    r.endArray()
-                                    return out
-                                case Some(_) =>
-                                    return r.readValue<String>().trimAscii()
-                                case None => return ""
-                            }
-                        }
-
-                        if (r.peek() == Some(BeginObject)) {
-                            r.startObject()
-                            while (r.peek() != EndObject) {
-                                let k = r.readName()
-                                match (k) {
-                                    case "name" => metadata.name = r.readValue<String>().trimAscii()
-                                    case "namespace" => metadata.namespace = r.readValue<String>().trimAscii()
-                                    case "version" => metadata.version = r.readValue<String>().trimAscii()
-                                    case "description" => metadata.description = r.readValue<String>()
-                                    case "author" => metadata.author = r.readValue<String>()
-                                    case "tags" => metadata.tags = r.readValue<String>()
-                                    case "permissions" => metadata.permissions = readCommaSeparated()
-                                    case "update_url" => metadata.update_url = r.readValue<String>().trimAscii()
-                                    case "parameters" =>
-                                        match (r.peek()) {
-                                            case Some(BeginArray) =>
-                                                let bytes = r.readValueBytes()
-                                                let raw = String.fromUtf8(bytes)
-                                                metadata.parameters = raw
-                                                let t = raw.trimAscii()
-                                                metadata.has_schema = t.size > 2 && t != "[]"
-                                            case Some(_) =>
-                                                r.skip()
-                                                metadata.parameters = "[]"
-                                                metadata.has_schema = false
-                                            case None => ()
-                                        }
-                                    case "url_regex" => metadata.url_regex = r.readValue<String>()
-                                    case "login_from" => metadata.login_from = r.readValue<String>()
-                                    case "icon" => metadata.icon = r.readValue<String>()
-                                    case "type" => metadata.plugin_type = r.readValue<String>().trimAscii()
-                                    case "cron_expression" => metadata.cron_expression = r.readValue<String>()
-                                    case "cron_enabled" => metadata.cron_enabled = readBoolFlexible()
-                                    case "cron_priority" => metadata.cron_priority = readInt32Flexible(50)
-                                    case "cron_timeout_seconds" => metadata.cron_timeout_seconds = readInt32Flexible(3600)
-                                    case _ => r.skip()
-                                }
-                            }
-                            r.endObject()
-
-                            if (metadata.name.size == 0) {
-                                metadata.name = Path(filePath).fileName.toString()
-                            }
-
-                            TaskIO.appendLog(taskId, "Successfully parsed plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, type=${metadata.plugin_type}")
-                        } else {
-                            TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON for ${filePath}")
-                        }
-                    } catch (_: Exception) {
-                        TaskIO.appendLog(taskId, "WARN: Failed to parse plugin metadata JSON for ${filePath}")
-                    }
-                } else {
-                    TaskIO.appendLog(taskId, "WARN: No result message found in plugin output for ${filePath}")
-                }
-            } else {
-                // 执行失败
-                if (stderrStr.size > 0) {
-                    TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stderr=${stderrStr}")
-                } else if (stdoutStr.size > 0) {
-                    // 某些情况下 Deno 的错误/提示会混在 stdout，保留以便排查
-                    TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, stdout=${stdoutStr}")
-                } else {
-                    TaskIO.appendLog(taskId, "ERROR: Failed to execute plugin metadata parsing: exitCode=${exitCode}, no output")
+                        r.endArray()
+                        return out
+                    case Some(_) =>
+                        return r.readValue<String>().trimAscii()
+                    case None => return ""
                 }
             }
-        } catch (e: Exception) {
-            TaskIO.appendLog(taskId, "ERROR: Error parsing plugin metadata for ${filePath}: ${e.message}")
+
+            if (r.peek() != Some(BeginObject)) {
+                return PluginMetadata()
+            }
+
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let k = r.readName()
+                match (k) {
+                    case "name" => metadata.name = r.readValue<String>().trimAscii()
+                    case "namespace" => metadata.namespace = r.readValue<String>().trimAscii()
+                    case "version" => metadata.version = r.readValue<String>().trimAscii()
+                    case "description" => metadata.description = r.readValue<String>()
+                    case "author" => metadata.author = r.readValue<String>()
+                    case "tags" => metadata.tags = r.readValue<String>()
+                    case "permissions" => metadata.permissions = readCommaSeparated()
+                    case "update_url" => metadata.update_url = r.readValue<String>().trimAscii()
+                    case "parameters" =>
+                        match (r.peek()) {
+                            case Some(BeginArray) =>
+                                let bytes = r.readValueBytes()
+                                let raw = String.fromUtf8(bytes)
+                                metadata.parameters = raw
+                                let t = raw.trimAscii()
+                                metadata.has_schema = t.size > 2 && t != "[]"
+                            case Some(_) =>
+                                r.skip()
+                                metadata.parameters = "[]"
+                                metadata.has_schema = false
+                            case None => ()
+                        }
+                    case "url_regex" => metadata.url_regex = r.readValue<String>()
+                    case "login_from" => metadata.login_from = r.readValue<String>()
+                    case "icon" => metadata.icon = r.readValue<String>()
+                    case "type" => metadata.plugin_type = r.readValue<String>().trimAscii()
+                    case "plugin_type" => metadata.plugin_type = r.readValue<String>().trimAscii()
+                    case "cron_expression" => metadata.cron_expression = r.readValue<String>()
+                    case "cron_enabled" => metadata.cron_enabled = readBoolFlexible()
+                    case "cron_priority" => metadata.cron_priority = readInt32Flexible(50)
+                    case "cron_timeout_seconds" => metadata.cron_timeout_seconds = readInt32Flexible(3600)
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+
+            if (metadata.name.size == 0) {
+                metadata.name = Path(sourcePath).fileName.toString()
+            }
+            TaskIO.appendLog(taskId, "Successfully parsed ${sourceKind} plugin metadata: name=${metadata.name}, namespace=${metadata.namespace}, version=${metadata.version}, type=${metadata.plugin_type}")
+        } catch (_: Exception) {
+            TaskIO.appendLog(taskId, "WARN: Failed to parse ${sourceKind} plugin metadata JSON for ${sourcePath}")
+            return PluginMetadata()
         }
 
         return metadata
@@ -413,8 +378,8 @@ public class ScanPluginsTaskRunner {
         return "plugin_script:${namespace}"
     }
 
-    private static func buildScriptDenoTaskParameters(namespace: String): String {
-        // deno_task parameters is a JSON string parsed by DenoTaskRunner.parseParameters().
+    private static func buildScriptTaskParameters(namespace: String): String {
+        // task parameters is a JSON string parsed by WasmTaskRunner.parseParameters().
         // extraParams is expected to be a JSON *string* (merged into plugin params at runtime).
         let groupId = "cron:script:${namespace}"
         let out = ByteBuffer()
@@ -431,20 +396,21 @@ public class ScanPluginsTaskRunner {
         return String.fromUtf8(readToEnd(out))
     }
 
-    private static func syncScriptScheduledTask(taskId: Int64, metadata: PluginMetadata, pluginType: String): Unit {
+    private static func syncScriptScheduledTask(taskId: Int64, metadata: PluginMetadata, pluginType: String, _: Bool): Unit {
         if (pluginType != "Script") { return }
         let ns = metadata.namespace.trimAscii()
         if (ns.size == 0) { return }
 
         let name = buildScriptScheduledTaskName(ns)
-        let denoParams = buildScriptDenoTaskParameters(ns)
+        let taskType = "wasm_task"
+        let taskParams = buildScriptTaskParameters(ns)
 
         match (ScheduledTaskModel.getByName(name)) {
             case Some(existing) =>
                 // Preserve user edits (cronExpression/enabled/priority/timeout); only keep wiring correct.
                 var updated = existing
-                updated.taskType = "deno_task"
-                updated.taskParameters = denoParams
+                updated.taskType = taskType
+                updated.taskParameters = taskParams
                 if (ScheduledTaskModel.update(updated)) {
                     TaskIO.appendLog(taskId, "Updated cron task for script plugin: ${name}")
                 } else {
@@ -461,8 +427,8 @@ public class ScanPluginsTaskRunner {
                 let task = ScheduledTask(
                     name: name,
                     cronExpression: cronExpr,
-                    taskType: "deno_task",
-                    taskParameters: denoParams,
+                    taskType: taskType,
+                    taskParameters: taskParams,
                     enabled: enabled,
                     priority: priority,
                     timeoutSeconds: timeout
@@ -569,7 +535,7 @@ public class ScanPluginsTaskRunner {
         if (PluginDao.update(pluginData)) {
             let action = if (clearParameters) { "updated (parameters cleared)" } else { "updated" }
             TaskIO.appendLog(taskId, "Plugin ${action}: ${pluginData.namespace} (${pluginData.name})")
-            syncScriptScheduledTask(taskId, newMetadata, pluginType)
+            syncScriptScheduledTask(taskId, newMetadata, pluginType, entryPath.trimAscii().toAsciiLower().endsWith(".wasm"))
             if (existingPlugin.plugin_type == "Script" && pluginType != "Script") {
                 let cronName = buildScriptScheduledTaskName(existingPlugin.namespace)
                 if (ScheduledTaskModel.deleteByName(cronName)) {
@@ -599,7 +565,10 @@ public class ScanPluginsTaskRunner {
         let normalizedRoot = normalizeRootPath(pluginPath)
         var existingEntries = HashSet<String>()
         for (filePath in existingFiles) {
-            existingEntries.add(computeEntryPath(normalizedRoot, filePath))
+            let entryKey = computeDiscoveredEntryKey(normalizedRoot, filePath)
+            if (entryKey.trimAscii().size > 0) {
+                existingEntries.add(entryKey)
+            }
         }
 
         let allPlugins = PluginDao.getAllPlugins()
@@ -685,5 +654,9 @@ public class ScanPluginsTaskRunner {
         return (entry, joinPath(normalizedRoot, entry))
     }
 
-    // NOTE: plugin_info execution + NDJSON parsing are now centralized in DenoPluginInfoRunner.
+    private static func computeDiscoveredEntryKey(pluginRoot: String, filePath: String): String {
+        return computeEntryPath(pluginRoot, filePath)
+    }
+
+    // NOTE: plugin_info execution is handled by WasmPluginInfoRunner.
 }

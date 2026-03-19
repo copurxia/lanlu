@@ -99,7 +99,7 @@ $:
             bash -lc '
               set -eux
               rm -rf app
-              mkdir -p app/frontend app/bin
+              mkdir -p app/frontend
 
               cp target/release/bin/main app/
               # Copy plugins dir to app/plugins (avoid app/plugins/plugins/* nesting).
@@ -122,15 +122,6 @@ $:
           settings:
             attachments:
               - dist/app-*.zip
-
-        - name: Bundle deno binary into ./app/bin
-          script: |
-            bash -lc '
-              set -eux
-              curl -fsSL https://deno.land/install.sh | sh
-              cp ~/.deno/bin/deno ./app/bin/deno
-              chmod +x ./app/main ./app/bin/deno
-            '
 
         - name: Set CNB Docker image tag
           # Avoid pushing images from non-main branches / PR builds.

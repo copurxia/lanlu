@@ -460,7 +460,7 @@ export class ArchiveService {
 
   /**
    * 执行元数据插件（支持 archive / tankoubon 目标）
-   * - Preview (writeBack=false): 返回 deno_task，前端读取输出并填充编辑表单
+   * - Preview (writeBack=false): 返回 wasm_task，前端读取输出并填充编辑表单
    * - Write-back (writeBack=true): 返回 metadata_plugin，再跟踪 callback 任务完成持久化
    */
   static async runMetadataPluginForTarget(
@@ -499,11 +499,11 @@ export class ArchiveService {
     }
 
     // Two modes:
-    // - Preview/query (default): API returns a `deno_task` job. Frontend reads plugin output from that task.
+    // - Preview/query (default): API returns a `wasm_task` job. Frontend reads plugin output from that task.
     // - Write-back: API returns a `metadata_plugin` job which spawns a callback that persists data.
     const taskType = String(response.data?.task_type || response.data?.taskType || '').trim();
     const writeBack = Boolean(response.data?.write_back ?? response.data?.writeBack ?? options?.writeBack);
-    if (!writeBack || taskType === 'deno_task') {
+    if (!writeBack || taskType === 'wasm_task') {
       return await this.waitForTaskCompletion(Number(jobId), (task) => {
         callbacks?.onUpdate?.(task);
       });

@@ -365,9 +365,9 @@ public class PluginsController {
             return
         }
 
-        // 验证 URL 格式（必须是 .ts 文件）
-        if (!url.endsWith(".ts")) {
-            ResponseView.errorJson(ctx, "URL must point to a .ts file")
+        // 验证 URL 格式（必须是 .wasm 文件）
+        if (!url.toAsciiLower().endsWith(".wasm")) {
+            ResponseView.errorJson(ctx, "URL must point to a .wasm file")
             return
         }
 

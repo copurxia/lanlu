@@ -121,6 +121,7 @@ public class SystemSettingsService {
         // TaskPool safety tick interval (seconds). Default 10 minutes.
         settings.add(createSetting("TASKPOOL_TICK_SECONDS", "600", "integer", "performance", "TaskPool 调度回退间隔（秒）"))
         settings.add(createSetting("SCAN_FALLBACK_INTERVAL_MS", "300000", "long", "performance", "扫描回退间隔（毫秒）"))
+        settings.add(createSetting("WASM_RUNTIME", "wasmedge", "string", "performance", "WASM 运行时（wasmedge）"))
 
         // 服务器信息设置 - 默认值
         settings.add(createSetting("SERVER_NAME", "兰鹿", "string", "server", "服务器名称"))
@@ -190,6 +191,7 @@ public class SystemSettingsService {
         translations["最大并发任务数"] = "Max Concurrent Jobs"
         translations["TaskPool 调度回退间隔（秒）"] = "TaskPool Dispatch Fallback Interval (seconds)"
         translations["扫描回退间隔（毫秒）"] = "Scan Fallback Interval (ms)"
+        translations["WASM 运行时（wasmedge）"] = "WASM runtime (wasmedge)"
         translations["启用数据库检查"] = "Enable Database Check"
         translations["数据库检查定时任务表达式"] = "Database Check Cron Expression"
         translations["启用初始数据库检查"] = "Enable Initial Database Check"

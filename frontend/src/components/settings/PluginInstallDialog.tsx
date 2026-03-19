@@ -31,8 +31,8 @@ export function PluginInstallDialog({
       return;
     }
 
-    if (!url.endsWith('.ts')) {
-      setError(t('settings.pluginInstallUrlInvalid') || 'URL must point to a .ts file');
+    if (!url.toLowerCase().endsWith('.wasm')) {
+      setError(t('settings.pluginInstallUrlInvalid') || 'URL must point to a .wasm file');
       return;
     }
 

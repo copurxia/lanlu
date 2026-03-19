@@ -683,8 +683,8 @@
         "check_databaseDesc": "Check database consistency and clean invalid records",
         "scan_plugins": "Plugin Scan",
         "scan_pluginsDesc": "Scan and load plugins",
-        "deno_task": "Deno Task",
-        "deno_taskDesc": "Run Deno plugin/script tasks",
+        "wasm_task": "Wasm Task",
+        "wasm_taskDesc": "Run wasm plugin/script tasks",
         "metadata_plugin_callback": "Metadata Callback",
         "metadata_plugin_callbackDesc": "Callback after metadata plugin completes",
         "clear_cache": "Clear Cache",
@@ -698,7 +698,7 @@
         "custom": "Custom Type",
         "customDesc": "Manually enter a task type (advanced/compatibility)"
       },
-      "taskTypeCustomPlaceholder": "Enter task type (e.g. deno_task)",
+      "taskTypeCustomPlaceholder": "Enter task type (e.g. wasm_task)",
       "formatJson": "Format JSON",
       "taskParametersInvalidJson": "Parameters are not valid JSON",
       "cronPresetLabels": {
@@ -907,7 +907,7 @@
     "pluginInstallTypePlaceholder": "Select plugin type",
     "pluginInstallUrlRequired": "URL is required",
     "pluginInstallTypeRequired": "Plugin type is required",
-    "pluginInstallUrlInvalid": "URL must point to a .ts file",
+    "pluginInstallUrlInvalid": "URL must point to a .wasm file",
     "pluginInstalling": "Installing...",
     "pluginInstallSuccess": "Plugin installed successfully",
     "pluginInstallFailed": "Failed to install plugin",

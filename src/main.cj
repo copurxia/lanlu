@@ -6,6 +6,7 @@ import lanlu.contexts.task.application.*
 import lanlu.shared.utils.*
 import lanlu.contexts.user.domain.*
 import lanlu.contexts.system.application.*
+import lanlu.contexts.plugin.domain.*
 import lanlu.infrastructure.migrations.*
 import lanlu.infrastructure.migrations.versions.*
 import lanlu.infrastructure.migrations.extensions.*
@@ -116,6 +117,20 @@ main(): Int64 {
         logger.info("System settings initialized successfully")
     } else {
         logger.error("Failed to initialize system settings")
+        return 1
+    }
+
+    let configuredWasmRuntime = SystemSettingsService.getString("WASM_RUNTIME").trimAscii().toAsciiLower()
+    if (configuredWasmRuntime != "wasmedge" && configuredWasmRuntime.size > 0) {
+        logger.warn("WASM runtime setting is ignored; host runtime is now fixed to wasmedge", ("configured", configuredWasmRuntime))
+    }
+    let effectiveWasmRuntime = "wasmedge"
+
+    let (wamrReady, wamrError) = WasmHostBridge.warmup()
+    if (wamrReady) {
+        logger.info("WASM runtime warmup ready", ("runtime", effectiveWasmRuntime))
+    } else {
+        logger.error("WASM runtime warmup failed", ("runtime", effectiveWasmRuntime), ("error", wamrError))
         return 1
     }
 

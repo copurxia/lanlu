@@ -40,7 +40,7 @@ public class TaskPoolService {
             "generate_category_cover",
             "check_database",
             "scan_plugins",
-            "deno_task",
+            "wasm_task",
             "metadata_plugin_callback",
             "clear_cache",
             "clear_log",
@@ -250,7 +250,7 @@ public class TaskPoolService {
             //
             // 原先的语义是：依赖失败则级联失败 waiting 任务。
             // 但像 download_url / metadata_plugin 这类“回调任务”需要在依赖失败时也能运行，
-            // 以便读取 deno_task 输出并把失败结果写回到父任务/做清理。
+            // 以便读取插件任务输出并把失败结果写回到父任务/做清理。
             TaskDao.activateWaitingTask(waitingTask.id)
             logger.debug(
                 "激活等待任务",
@@ -316,8 +316,8 @@ public class TaskPoolService {
                 CheckDatabaseTaskRunner.run(task.id, task.parameters, context)
             case "scan_plugins" =>
                 PluginTaskService.runScanPluginsTask(task.id, task.parameters, context)
-            case "deno_task" =>
-                DenoTaskRunner.run(task.id, task.parameters)
+            case "wasm_task" =>
+                WasmTaskRunner.run(task.id, task.parameters)
             case "metadata_plugin_callback" =>
                 MetadataPluginCallbackRunner.run(task.id, task.parameters, context)
             case "clear_cache" =>

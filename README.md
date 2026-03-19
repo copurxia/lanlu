@@ -98,7 +98,6 @@ lanlu/
 │   │   ├── lib/
 │   │   └── types/
 │   └── messages/
-├── plugins/                          # Deno 插件目录（Download/Login/Metadata/Script）
 ├── data/                             # 运行时数据目录
 │   ├── archive/
 │   ├── thumb/

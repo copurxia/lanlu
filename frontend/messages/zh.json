@@ -686,8 +686,8 @@
         "check_databaseDesc": "检查数据库一致性，清理无效记录",
         "scan_plugins": "插件扫描",
         "scan_pluginsDesc": "扫描并加载插件",
-        "deno_task": "Deno任务",
-        "deno_taskDesc": "运行Deno插件/脚本任务",
+        "wasm_task": "Wasm任务",
+        "wasm_taskDesc": "运行wasm插件/脚本任务",
         "metadata_plugin_callback": "元数据回调",
         "metadata_plugin_callbackDesc": "元数据插件完成后的回调处理",
         "clear_cache": "清理缓存",
@@ -701,7 +701,7 @@
         "custom": "自定义类型",
         "customDesc": "手动输入任务类型（用于高级/兼容场景）"
       },
-      "taskTypeCustomPlaceholder": "输入任务类型（例如：deno_task）",
+      "taskTypeCustomPlaceholder": "输入任务类型（例如：wasm_task）",
       "formatJson": "格式化JSON",
       "taskParametersInvalidJson": "任务参数不是有效的JSON",
       "cronPresetLabels": {
@@ -911,7 +911,7 @@
     "pluginInstallTypePlaceholder": "选择插件类型",
     "pluginInstallUrlRequired": "请输入插件URL",
     "pluginInstallTypeRequired": "请选择插件类型",
-    "pluginInstallUrlInvalid": "URL必须指向.ts文件",
+    "pluginInstallUrlInvalid": "URL必须指向.wasm文件",
     "pluginInstalling": "安装中...",
     "pluginInstallSuccess": "插件安装成功",
     "pluginInstallFailed": "插件安装失败",

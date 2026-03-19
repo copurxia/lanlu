@@ -80,11 +80,12 @@ public class MetadataPluginTaskRunner {
         // 生成 groupId 用于 KV store
         let groupId = "metadata_${taskId}_${DateTime.now().toUnixTimeStamp().toSeconds()}"
 
-        TaskModel.updateTaskProgress(taskId, 10, "创建 Deno 任务")
+        let pluginTaskType = PluginTaskService.getRunnerTaskType(plugin)
+        TaskModel.updateTaskProgress(taskId, 10, "创建插件运行任务")
 
         let (oneshotOpt, extraParamsOpt) = splitParam(param)
 
-        // 创建 deno_task 参数
+        // 创建插件任务参数
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -107,33 +108,33 @@ public class MetadataPluginTaskRunner {
         }
         w.endObject()
         w.flush()
-        let denoParams = String.fromUtf8(readToEnd(out))
+        let pluginTaskParams = String.fromUtf8(readToEnd(out))
 
-        // 创建并提交 deno_task
-        let denoTask = TaskModel.createTaskWithOptions(
+        // 创建并提交插件运行任务
+        let pluginTask = TaskModel.createTaskWithOptions(
             "执行元数据插件",
-            "deno_task",
-            denoParams,
+            pluginTaskType,
+            pluginTaskParams,
             50,
             groupId,
             "metadata_plugin:${taskId}"
         )
 
-        if (denoTask.id <= 0) {
-            failAndMaybeEnqueueFallback(taskId, "Failed to create deno_task", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
+        if (pluginTask.id <= 0) {
+            failAndMaybeEnqueueFallback(taskId, "Failed to create plugin task", effectiveType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
 
-        TaskIO.appendLog(taskId, "deno_task created: ${denoTask.id}")
+        TaskIO.appendLog(taskId, "${pluginTaskType} created: ${pluginTask.id}")
 
-        // 创建回调任务（等待 deno_task 完成后自动触发）
+        // 创建回调任务（等待插件任务完成后自动触发）
         TaskModel.updateTaskProgress(taskId, 20, "创建回调任务")
-        let callbackParams = buildCallbackParams(effectiveType, targetId, plugin.namespace, denoTask.id, param, metadataJson, fallbackNamespaces)
+        let callbackParams = buildCallbackParams(effectiveType, targetId, plugin.namespace, pluginTask.id, param, metadataJson, fallbackNamespaces)
         let callbackTask = TaskModel.createWaitingTask(
             "元数据写回",
             "metadata_plugin_callback",
             callbackParams,
-            denoTask.id,
+            pluginTask.id,
             groupId,
             "metadata_plugin:${taskId}"
         )
@@ -143,14 +144,14 @@ public class MetadataPluginTaskRunner {
             return
         }
 
-        TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for deno_task: ${denoTask.id}")
+        TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for ${pluginTaskType}: ${pluginTask.id}")
 
         // 通知 TaskPool 有新任务可用
         context.notifyTaskAvailable()
 
         // 立即完成原任务（不再等待）
         TaskModel.updateTaskProgress(taskId, 100, "任务已提交")
-        let resultJson = "{\"success\":1,\"deno_task_id\":${denoTask.id},\"callback_task_id\":${callbackTask.id},\"target_type\":\"${effectiveType}\",\"target_id\":\"${targetId}\"}"
+        let resultJson = "{\"success\":1,\"plugin_task_id\":${pluginTask.id},\"wasm_task_id\":${pluginTask.id},\"deno_task_id\":${pluginTask.id},\"callback_task_id\":${callbackTask.id},\"target_type\":\"${effectiveType}\",\"target_id\":\"${targetId}\",\"task_type\":\"${pluginTaskType}\"}"
         TaskModel.completeTask(taskId, "metadata_plugin task submitted")
         TaskIO.writeOutput(taskId, resultJson)
     }

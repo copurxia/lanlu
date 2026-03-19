@@ -67,10 +67,12 @@ public class DownloadUrlTaskRunner {
             // 生成 groupId 用于 KV store
             let groupId = "download_${taskId}_${DateTime.now().toUnixTimeStamp().toSeconds()}"
 
-            TaskModel.updateTaskProgress(taskId, 10, "创建 Deno 任务")
+            let runnerTaskType = PluginTaskService.getRunnerTaskType(plugin)
+            let runnerLabel = "WASM"
+            TaskModel.updateTaskProgress(taskId, 10, "创建 ${runnerLabel} 任务")
 
-            // 创建 deno_task 参数
-            // parentTaskId allows deno_task to mirror plugin logs/progress back to this download_url task.
+            // 创建 runner 参数
+            // parentTaskId allows plugin task to mirror logs/progress back to this download_url task.
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -82,36 +84,36 @@ public class DownloadUrlTaskRunner {
             w.writeName("url").writeValue(url)
             w.endObject()
             w.flush()
-            let denoParams = String.fromUtf8(readToEnd(out))
+            let runnerParams = String.fromUtf8(readToEnd(out))
 
-            // 创建并提交 deno_task
-            let denoTask = TaskModel.createTaskWithOptions(
+            // 创建并提交插件任务（wasm_task）
+            let pluginTask = TaskModel.createTaskWithOptions(
                 "执行下载插件",
-                "deno_task",
-                denoParams,
+                runnerTaskType,
+                runnerParams,
                 50,
                 "download_url:${taskId}",
                 "download_url:${taskId}"
             )
 
-            if (denoTask.id <= 0) {
-                fail(taskId, "Failed to create deno_task")
+            if (pluginTask.id <= 0) {
+                fail(taskId, "Failed to create plugin task")
                 return
             }
 
             // 通知 TaskPool
             context.notifyTaskAvailable()
 
-            // 创建回调任务（等待 deno_task 完成后自动触发）
+            // 创建回调任务（等待插件任务完成后自动触发）
             //
-            // 这里不再同步等待 deno_task，避免 worker 被占满导致 deno_task 无法被调度的死锁风险。
+            // 这里不再同步等待插件任务，避免 worker 被占满导致依赖任务无法被调度的死锁风险。
             TaskModel.updateTaskProgress(taskId, 15, "创建回调任务")
-            let callbackParams = buildCallbackParams(taskId, denoTask.id, categoryId, plugin.namespace)
+            let callbackParams = buildCallbackParams(taskId, pluginTask.id, categoryId, plugin.namespace)
             let callbackTask = TaskModel.createWaitingTask(
                 "下载后处理",
                 "download_url_callback",
                 callbackParams,
-                denoTask.id,
+                pluginTask.id,
                 "download_url:${taskId}",
                 "download_url:${taskId}"
             )
@@ -121,11 +123,11 @@ public class DownloadUrlTaskRunner {
                 return
             }
 
-            TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for deno_task: ${denoTask.id}")
+            TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for plugin task: ${pluginTask.id} (${runnerTaskType})")
 
             // 将当前任务置为 waiting：后续由 callback 负责将本任务标记为 completed/failed 并写回输出
             TaskDao.updateTaskStatus(taskId, "waiting", "等待下载插件执行", 20)
-            let submittedJson = "{\"success\":1,\"deno_task_id\":${denoTask.id},\"callback_task_id\":${callbackTask.id}}"
+            let submittedJson = "{\"success\":1,\"plugin_task_id\":${pluginTask.id},\"task_type\":\"${runnerTaskType}\",\"callback_task_id\":${callbackTask.id}}"
             TaskIO.writeOutput(taskId, submittedJson)
         } catch (e: Exception) {
             fail(taskId, e.message)
@@ -135,12 +137,12 @@ public class DownloadUrlTaskRunner {
     /**
      * 构建回调任务参数
      */
-    private static func buildCallbackParams(downloadTaskId: Int64, denoTaskId: Int64, categoryId: Int64, pluginNamespace: String): String {
+    private static func buildCallbackParams(downloadTaskId: Int64, pluginTaskId: Int64, categoryId: Int64, pluginNamespace: String): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
         w.writeName("downloadTaskId").writeValue(downloadTaskId)
-        w.writeName("denoTaskId").writeValue(denoTaskId)
+        w.writeName("pluginTaskId").writeValue(pluginTaskId)
         w.writeName("categoryId").writeValue(categoryId)
         w.writeName("pluginNamespace").writeValue(pluginNamespace)
         w.endObject()

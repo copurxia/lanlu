@@ -11,7 +11,7 @@ RUN set -eux; \
   apt-get update; \
   apt-get install -y --no-install-recommends \
     ca-certificates curl git wget unzip zip xz-utils \
-    build-essential clang ninja-build \
+    build-essential clang ninja-build cmake binutils \
     pkg-config \
     libarchive-dev libavif-dev \
     libvips-dev libheif-dev; \

@@ -40,6 +40,6 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 COPY ./app .
 
-RUN chmod +x /app/main /app/bin/deno
+RUN chmod +x /app/main
 
 CMD ["/app/main"]

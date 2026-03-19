@@ -3,14 +3,11 @@
   name = "lanlu"
   description = "nothing here"
   version = "1.0.0"
-  target-dir = ""
-  src-dir = ""
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""
   # vips_ffi uses libvips for general-purpose decode/resize/crop/encode.
-  link-option = "-larchive -lavif -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0"
-  package-configuration = {}
+  link-option = "-larchive -lavif -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s"
 
 [dependencies]
   ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "main"}
@@ -23,6 +20,7 @@
   archive_ffi = { path = "packages/archive_ffi" }
   avif_ffi = { path = "packages/avif_ffi" }
   vips_ffi = { path = "packages/vips_ffi" }
+  wasmedge_ffi = { git = "https://gitcode.com/copur/wasmedge_ffi.git", branch = "main" }
   semver = { path = "packages/semver" }
 
 [target]

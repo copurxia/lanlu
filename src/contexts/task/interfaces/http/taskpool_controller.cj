@@ -8,6 +8,7 @@ import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.task.application.*
 import lanlu.contexts.task.application.runners.*
+import lanlu.contexts.plugin.domain.*
 import lanlu.shared.utils.*
 
 /**
@@ -17,6 +18,7 @@ public class TaskPoolController {
     // SSE 推送频率：平衡实时性与数据库读取压力。
     private static let taskStreamTickMillis: Int64 = 800
     private static let taskStreamPingMillis: Int64 = 15000
+    private static let taskStreamLogMaxBytes: Int64 = 16 * 1024
 
     /**
      * 分页获取任务列表
@@ -157,7 +159,7 @@ public class TaskPoolController {
                 return
             }
 
-            let logText = TaskIO.readLog(taskId)
+            let logText = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
             let payload = buildTaskStreamData(task, logText)
             if (eventId == 1 || payload != lastPayload) {
                 let eventName = if (eventId == 1) { "snapshot" } else { "task" }
@@ -266,7 +268,7 @@ public class TaskPoolController {
     }
 
     /**
-     * 回应运行中 deno_task 发起的 rpc 选择请求
+     * 回应运行中 wasm_task 发起的 rpc 选择请求
      * POST /api/admin/taskpool/{taskId}/rpc/select
      * body: { request_id: string, selected_index: number }
      */
@@ -315,10 +317,16 @@ public class TaskPoolController {
             return
         }
 
-        let (ok, msg) = if (abort) {
-            DenoTaskRunner.abortRpcSelect(taskId, requestId)
+        var ok = false
+        var msg = "request not found"
+        if (abort) {
+            let (wasmOk, wasmMsg) = WasmHostBridge.abortRpcSelect(taskId, requestId)
+            ok = wasmOk
+            msg = wasmMsg
         } else {
-            DenoTaskRunner.resolveRpcSelect(taskId, requestId, selectedIndex)
+            let (wasmOk, wasmMsg) = WasmHostBridge.resolveRpcSelect(taskId, requestId, selectedIndex)
+            ok = wasmOk
+            msg = wasmMsg
         }
         if (!ok) {
             ctx.status(404)
@@ -474,11 +482,33 @@ public class TaskPoolController {
         let w = JsonWriter(out)
         w.startObject()
         w.writeName("task")
-        writeTaskDataJson(w, task)
+        writeTaskStreamTaskJson(w, task)
         w.writeName("log").writeValue(logText)
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func writeTaskStreamTaskJson(w: JsonWriter, task: TaskData): Unit {
+        w.startObject()
+        w.writeName("id").writeValue(task.id)
+        w.writeName("name").writeValue(task.name)
+        w.writeName("task_type").writeValue(task.taskType)
+        w.writeName("status").writeValue(task.status)
+        w.writeName("progress").writeValue(task.progress)
+        w.writeName("message").writeValue(task.message)
+        w.writeName("plugin_namespace").writeValue(task.pluginNamespace)
+        w.writeName("parameters").writeValue(task.parameters)
+        // Stream endpoint is for incremental status updates; fetch detail separately for final output.
+        w.writeName("result").writeValue("")
+        w.writeName("priority").writeValue(task.priority)
+        w.writeName("group_id").writeValue(task.groupId)
+        w.writeName("timeout_at").writeValue(task.timeoutAt)
+        w.writeName("trigger_source").writeValue(task.triggerSource)
+        w.writeName("created_at").writeValue(task.createdAt)
+        w.writeName("started_at").writeValue(task.startedAt)
+        w.writeName("completed_at").writeValue(task.completedAt)
+        w.endObject()
     }
 
     private static func isTerminalStatus(status: String): Bool {

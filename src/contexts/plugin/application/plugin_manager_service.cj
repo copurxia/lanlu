@@ -86,10 +86,10 @@ public class PluginManagerService {
 
     /**
      * 下载 URL 到指定文件。
-     * 统一使用 deno+fetch（避免容器/发行版环境下 HTTP 客户端行为不一致导致的 HTTP 0）。
+     * 使用 curl，避免依赖 Deno 运行时。
      */
     private static func downloadUrlToFile(url: String, outFile: Path, ifNoneMatch!: String = ""): (Bool, String, String, Bool) {
-        let (ok, err, etag, notModified) = downloadUrlToFileWithDeno(url, outFile, ifNoneMatch)
+        let (ok, err, etag, notModified) = downloadUrlToFileWithCurl(url, outFile, ifNoneMatch)
         if (ok) { return (true, "", etag, notModified) }
         return (false, "Failed to download plugin: ${err}", etag, notModified)
     }
@@ -101,30 +101,31 @@ public class PluginManagerService {
         return trimmed[0..maxLen] + "...(truncated,len=${trimmed.size.toString()})"
     }
 
-    private static func downloadUrlToFileWithDeno(url: String, outFile: Path, ifNoneMatch: String): (Bool, String, String, Bool) {
-        // 使用仓库内置脚本，避免运行时创建临时脚本文件。
-        let scriptPath = Path("./plugins/deno_fetch.ts")
-        if (!exists(scriptPath)) {
-            return (false, "missing ./plugins/deno_fetch.ts", "", false)
-        }
-
+    private static func downloadUrlToFileWithCurl(url: String, outFile: Path, ifNoneMatch: String): (Bool, String, String, Bool) {
         let tempDir = Path(getPluginTempRoot())
         FileUtils.ensureDirectoryExists(tempDir)
 
         try {
+            let timestamp = DateTime.now().toUnixTimeStamp().toSeconds().toString()
+            let outName = outFile.fileName.toString().replace("/", "_").replace("\\", "_")
+            let headersFile = Path("${tempDir.toString()}/curl_headers_${timestamp}_${outName}.txt")
             var args = ArrayList<String>()
-            args.add("run")
-            args.add("--allow-net")
-            args.add("--allow-write=${tempDir.toString()}")
-            args.add(scriptPath.toString())
-            args.add(url)
+            args.add("-L")
+            args.add("-sS")
+            args.add("-D")
+            args.add(headersFile.toString())
+            args.add("-o")
             args.add(outFile.toString())
+            args.add("-w")
+            args.add("%{http_code}")
             let etagTrimmed = ifNoneMatch.trimAscii()
             if (etagTrimmed.size > 0) {
-                args.add(etagTrimmed)
+                args.add("-H")
+                args.add("If-None-Match: ${etagTrimmed}")
             }
+            args.add(url)
 
-            let process = launch("deno", args.toArray(),
+            let process = launch("curl", args.toArray(),
                 stdIn: ProcessRedirect.Pipe,
                 stdOut: ProcessRedirect.Pipe,
                 stdErr: ProcessRedirect.Pipe)
@@ -133,50 +134,45 @@ public class PluginManagerService {
 
             let stderrStr = if (stderrBytes.size > 0) { String.fromUtf8(stderrBytes).trimAscii() } else { "" }
             let stdoutStr = if (stdoutBytes.size > 0) { String.fromUtf8(stdoutBytes).trimAscii() } else { "" }
+            let httpCode = stdoutStr.trimAscii()
 
-            // Parse stdout JSON: { not_modified: bool, etag: string }
-            var notModified = false
             var etag = ""
-            if (stdoutStr.trimAscii().size > 0) {
+            if (exists(headersFile)) {
                 try {
-                    var buf = ByteBuffer()
-                    unsafe { buf.write(stdoutStr.trimAscii().rawData()) }
-                    let r = JsonReader(buf)
-                    func readBoolFlexible(): Bool {
-                        let v = r.readValue<String>().trimAscii().toAsciiLower()
-                        return v == "true" || v == "1"
-                    }
-                    if (r.peek() == Some(BeginObject)) {
-                        r.startObject()
-                        while (r.peek() != EndObject) {
-                            let k = r.readName()
-                            match (k) {
-                                case "not_modified" => notModified = readBoolFlexible()
-                                case "etag" => etag = r.readValue<String>().trimAscii()
-                                case _ => r.skip()
-                            }
+                    let f = File(headersFile, Read)
+                    let reader = StringReader<InputStream>(f)
+                    let rawHeaders = reader.readToEnd()
+                    f.close()
+                    let lines = rawHeaders.split("\n")
+                    for (line in lines) {
+                        let trimmed = line.trimAscii()
+                        if (trimmed.toAsciiLower().startsWith("etag:")) {
+                            etag = trimmed[5..].trimAscii()
                         }
-                        r.endObject()
                     }
                 } catch (_: Exception) {}
             }
+            try { if (exists(headersFile)) { remove(headersFile) } } catch (_: Exception) {}
 
-            if (exitCode == 0 && exists(outFile)) {
-                return (true, "", etag, false)
-            }
-            if (exitCode == 0 && notModified) {
+            if (exitCode == 0 && httpCode == "304") {
+                try { if (exists(outFile)) { remove(outFile) } } catch (_: Exception) {}
                 return (true, "", etag, true)
             }
-            // deno_fetch.ts 会把可诊断信息写到 stderr
+            if (exitCode == 0 && (httpCode == "200" || httpCode == "201" || httpCode == "204") && exists(outFile)) {
+                return (true, "", etag, false)
+            }
+            if (httpCode.size > 0) {
+                return (false, "http status ${httpCode}", etag, false)
+            }
             if (stderrStr.size > 0) {
-                logger.error("deno fetch failed", ("url", url), ("stderr", truncateForLog(stderrStr, 1024)))
+                logger.error("curl download failed", ("url", url), ("stderr", truncateForLog(stderrStr, 1024)))
                 return (false, stderrStr, etag, false)
             }
             if (stdoutStr.size > 0) {
-                logger.error("deno fetch failed (stdout)", ("url", url), ("stdout", truncateForLog(stdoutStr, 1024)))
+                logger.error("curl download failed (stdout)", ("url", url), ("stdout", truncateForLog(stdoutStr, 1024)))
                 return (false, stdoutStr, etag, false)
             }
-            return (false, "deno fetch failed (exitCode=${exitCode.toString()})", etag, false)
+            return (false, "curl download failed (exitCode=${exitCode.toString()})", etag, false)
         } catch (e: Exception) {
             return (false, e.message, "", false)
         }
@@ -238,8 +234,8 @@ public class PluginManagerService {
             result.message = "URL is required"
             return result
         }
-        if (!trimmedUrl.endsWith(".ts")) {
-            result.message = "URL must point to a .ts file"
+        if (!trimmedUrl.toAsciiLower().endsWith(".wasm")) {
+            result.message = "URL must point to a .wasm file"
             return result
         }
 
@@ -271,7 +267,7 @@ public class PluginManagerService {
         result.plugin_type = info.pluginType
         result.namespace = info.namespace
         // Use namespace as the stable entry name to avoid collisions between different URLs sharing the same filename.
-        let storedEntry = sanitizeEntryName("${info.namespace}.ts")
+        let storedEntry = sanitizeEntryName("${info.namespace}.wasm")
         result.filename = storedEntry
 
         let targetFile = Path(buildPluginFilePath(info.pluginType, storedEntry))
@@ -636,26 +632,16 @@ public class PluginManagerService {
         }
     }
 
-    private static func parsePluginInfoFromFile(filePath: String, sourceUrl: String, typeDir: String): ParsedPluginInfo {
+    private static func parsePluginInfoFromFile(filePath: String, sourceUrl: String, _: String): ParsedPluginInfo {
         var result = ParsedPluginInfo()
 
         try {
-            let fileName = Path(filePath).fileName.toString()
-            let safeFileName = fileName.replace(".", "_")
-            let uniqueId = "plugin_manager_${typeDir}_${safeFileName}_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}"
-
-            let (exitCode, stdoutStr, stderrStr) = DenoPluginInfoRunner.runPluginInfo(filePath, uniqueId)
-            if (exitCode != 0) {
-                if (stderrStr.trimAscii().size > 0) {
-                    logger.warn("plugin_info failed", ("file", filePath), ("stderr", truncateForLog(stderrStr, 1024)))
+            let (okInfo, _, infoJson, errMsg) = WasmPluginInfoRunner.runPluginInfo(filePath)
+            if (!okInfo) {
+                if (errMsg.trimAscii().size > 0) {
+                    logger.warn("plugin_info failed", ("file", filePath), ("error", truncateForLog(errMsg, 1024)))
                 }
                 return result
-            }
-
-            // Prefer parsing NDJSON result->data; fall back to raw stdout if it looks like a single JSON object.
-            var infoJson = DenoPluginInfoRunner.extractPluginInfoDataFromNdjson(stdoutStr)
-            if (infoJson.trimAscii().size == 0) {
-                infoJson = stdoutStr
             }
             result = parsePluginInfoOutput(infoJson, sourceUrl)
         } catch (_: Exception) {}
@@ -677,6 +663,9 @@ public class PluginManagerService {
             func applyField(key: String): Unit {
                 match (key) {
                     case "type" =>
+                        let t = r.readValue<String>().trimAscii()
+                        result.pluginType = capitalizeFirst(t)
+                    case "plugin_type" =>
                         let t = r.readValue<String>().trimAscii()
                         result.pluginType = capitalizeFirst(t)
                     case "update_url" =>

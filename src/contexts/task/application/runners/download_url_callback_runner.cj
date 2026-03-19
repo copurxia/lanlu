@@ -14,7 +14,8 @@ import lanlu.shared.utils.*
 
 /**
  * download_url_callback 回调任务执行器
- * 在 deno_task 结束后触发：读取下载插件输出、搬运文件、创建 scan_archive，并将结果写回到 download_url 任务
+ * 在下载插件任务（wasm_task）结束后触发：
+ * 读取下载插件输出、搬运文件、创建 scan_archive，并将结果写回到 download_url 任务
  */
 public class DownloadUrlCallbackRunner {
     private static func writeErrorOutput(taskId: Int64, message: String): Unit {
@@ -26,33 +27,33 @@ public class DownloadUrlCallbackRunner {
         TaskIO.appendLog(taskId, "download_url_callback task started")
         TaskModel.updateTaskProgress(taskId, 10, "开始处理下载回调")
 
-        let (downloadTaskId, denoTaskId, categoryId, pluginNamespace) = parseParameters(parameters)
-        if (downloadTaskId <= 0 || denoTaskId <= 0 || categoryId <= 0 || pluginNamespace.size == 0) {
+        let (downloadTaskId, pluginTaskId, categoryId, pluginNamespace) = parseParameters(parameters)
+        if (downloadTaskId <= 0 || pluginTaskId <= 0 || categoryId <= 0 || pluginNamespace.size == 0) {
             fail(taskId, "Invalid callback parameters")
             return
         }
 
         TaskIO.appendLog(
             taskId,
-            "callback params: downloadTaskId=${downloadTaskId}, denoTaskId=${denoTaskId}, categoryId=${categoryId}, pluginNamespace=${pluginNamespace}"
+            "callback params: downloadTaskId=${downloadTaskId}, pluginTaskId=${pluginTaskId}, categoryId=${categoryId}, pluginNamespace=${pluginNamespace}"
         )
 
-        // 读取 deno_task 状态/输出（失败时依旧会写 output JSON，但 status=failed）
-        let denoTask = TaskDao.getTaskDataById(denoTaskId)
-        let pluginOutput = TaskIO.readOutput(denoTaskId)
+        // 读取插件任务状态/输出（失败时依旧可能写 output JSON，但 status=failed）
+        let pluginTask = TaskDao.getTaskDataById(pluginTaskId)
+        let pluginOutput = TaskIO.readOutput(pluginTaskId)
 
-        if (denoTask.status != "completed") {
+        if (pluginTask.status != "completed") {
             let errMsg =
-                if (denoTask.message.trimAscii().size > 0) { denoTask.message } else { "Deno task failed" }
+                if (pluginTask.message.trimAscii().size > 0) { pluginTask.message } else { "Plugin task failed" }
             // 将失败写回父任务，避免前端卡在 waiting
             TaskModel.failTask(downloadTaskId, errMsg)
             writeErrorOutput(downloadTaskId, errMsg)
-            fail(taskId, "Dependency deno_task not completed: ${denoTask.status} - ${errMsg}")
+            fail(taskId, "Dependency plugin task not completed: ${pluginTask.status} - ${errMsg}")
             return
         }
 
         if (pluginOutput.trimAscii().size == 0) {
-            let errMsg = "Deno task output is empty"
+            let errMsg = "Plugin task output is empty"
             TaskModel.failTask(downloadTaskId, errMsg)
             writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
@@ -263,7 +264,7 @@ public class DownloadUrlCallbackRunner {
         }
 
         var downloadTaskId: Int64 = 0
-        var denoTaskId: Int64 = 0
+        var pluginTaskId: Int64 = 0
         var categoryId: Int64 = 0
         var pluginNamespace = ""
 
@@ -284,7 +285,13 @@ public class DownloadUrlCallbackRunner {
                         let k = r.readName()
                         match (k) {
                             case "downloadTaskId" => downloadTaskId = readInt64Flexible()
-                            case "denoTaskId" => denoTaskId = readInt64Flexible()
+                            case "pluginTaskId" => pluginTaskId = readInt64Flexible()
+                            case "denoTaskId" =>
+                                if (pluginTaskId <= 0) {
+                                    pluginTaskId = readInt64Flexible()
+                                } else {
+                                    r.skip()
+                                }
                             case "categoryId" => categoryId = readInt64Flexible()
                             case "pluginNamespace" => pluginNamespace = r.readValue<String>().trimAscii()
                             case _ => r.skip()
@@ -295,7 +302,7 @@ public class DownloadUrlCallbackRunner {
             }
         } catch (_: Exception) {}
 
-        return (downloadTaskId, denoTaskId, categoryId, pluginNamespace)
+        return (downloadTaskId, pluginTaskId, categoryId, pluginNamespace)
     }
 
     private static func parsePluginError(output: String): String {
@@ -352,6 +359,7 @@ public class DownloadUrlCallbackRunner {
             }
 
             var ok = false
+            var parsedPaths = ArrayList<String>()
             if (r.peek() != Some(BeginObject)) { return paths }
             r.startObject()
             while (r.peek() != EndObject) {
@@ -359,7 +367,6 @@ public class DownloadUrlCallbackRunner {
                 match (k) {
                     case "success" => ok = readBoolFlexible()
                     case "data" =>
-                        if (!ok) { r.skip(); continue }
                         match (r.peek()) {
                             case Some(BeginArray) =>
                                 r.startArray()
@@ -376,7 +383,7 @@ public class DownloadUrlCallbackRunner {
                                                 }
                                             }
                                             r.endObject()
-                                            if (rp.size > 0) { paths.add(rp) }
+                                            if (rp.size > 0) { parsedPaths.add(rp) }
                                         case Some(_) => r.skip()
                                         case None => break
                                     }
@@ -389,6 +396,9 @@ public class DownloadUrlCallbackRunner {
                 }
             }
             r.endObject()
+            if (ok) {
+                paths = parsedPaths
+            }
         } catch (_: Exception) {}
         return paths
     }
@@ -408,6 +418,7 @@ public class DownloadUrlCallbackRunner {
             }
 
             var ok = false
+            var parsedSource = ""
             if (r.peek() != Some(BeginObject)) { return "" }
             r.startObject()
             while (r.peek() != EndObject) {
@@ -415,7 +426,6 @@ public class DownloadUrlCallbackRunner {
                 match (k) {
                     case "success" => ok = readBoolFlexible()
                     case "data" =>
-                        if (!ok) { r.skip(); continue }
                         match (r.peek()) {
                             case Some(BeginArray) =>
                                 r.startArray()
@@ -435,7 +445,7 @@ public class DownloadUrlCallbackRunner {
                                         // Skip the rest of the array quickly.
                                         while (r.peek() != EndArray) { r.skip() }
                                         r.endArray()
-                                        return source
+                                        parsedSource = source
                                     case Some(_) =>
                                         while (r.peek() != EndArray) { r.skip() }
                                         r.endArray()
@@ -448,6 +458,7 @@ public class DownloadUrlCallbackRunner {
                 }
             }
             r.endObject()
+            if (ok) { return parsedSource }
         } catch (_: Exception) {}
         return ""
     }
@@ -467,6 +478,7 @@ public class DownloadUrlCallbackRunner {
             }
 
             var ok = false
+            var parsedType = "archive"
             if (r.peek() != Some(BeginObject)) { return "archive" }
             r.startObject()
             while (r.peek() != EndObject) {
@@ -474,8 +486,30 @@ public class DownloadUrlCallbackRunner {
                 match (k) {
                     case "success" => ok = readBoolFlexible()
                     case "data" =>
-                        if (!ok) { r.skip(); continue }
                         match (r.peek()) {
+                            case Some(BeginArray) =>
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    match (r.peek()) {
+                                        case Some(BeginObject) =>
+                                            var t = ""
+                                            r.startObject()
+                                            while (r.peek() != EndObject) {
+                                                let fn = r.readName()
+                                                match (fn) {
+                                                    case "archive_type" => t = r.readValue<String>().trimAscii()
+                                                    case _ => r.skip()
+                                                }
+                                            }
+                                            r.endObject()
+                                            if (t == "archive" || t == "folder" || t == "pdf") {
+                                                parsedType = t
+                                            }
+                                        case Some(_) => r.skip()
+                                        case None => break
+                                    }
+                                }
+                                r.endArray()
                             case Some(BeginObject) =>
                                 var t = ""
                                 r.startObject()
@@ -487,7 +521,7 @@ public class DownloadUrlCallbackRunner {
                                     }
                                 }
                                 r.endObject()
-                                if (t == "archive" || t == "folder" || t == "pdf") { return t }
+                                if (t == "archive" || t == "folder" || t == "pdf") { parsedType = t }
                             case Some(_) => r.skip()
                             case None => ()
                         }
@@ -495,6 +529,7 @@ public class DownloadUrlCallbackRunner {
                 }
             }
             r.endObject()
+            if (ok) { return parsedType }
         } catch (_: Exception) {}
         return "archive"
     }

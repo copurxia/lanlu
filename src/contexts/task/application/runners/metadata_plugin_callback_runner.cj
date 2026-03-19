@@ -18,7 +18,7 @@ import lanlu.shared.utils.*
 
 /**
  * metadata_plugin_callback 回调任务执行器
- * 在 deno_task 完成后被触发，负责读取插件输出并写回元数据
+ * 在插件运行任务完成后被触发，负责读取插件输出并写回元数据
  */
 public class MetadataPluginCallbackRunner {
     public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
@@ -34,15 +34,15 @@ public class MetadataPluginCallbackRunner {
 
         let resolvedNamespace = resolvePluginNamespace(namespace, denoTaskId)
         if (namespace.trimAscii().size == 0 && resolvedNamespace.size > 0) {
-            TaskIO.appendLog(taskId, "resolved callback namespace from deno task: ${resolvedNamespace}")
+            TaskIO.appendLog(taskId, "resolved callback namespace from plugin task: ${resolvedNamespace}")
         }
         TaskIO.appendLog(taskId, "callback params: targetType=${targetType}, targetId=${targetId}, namespace=${resolvedNamespace}, denoTaskId=${denoTaskId}")
 
-        // 读取 deno_task 输出
+        // 读取插件运行任务输出
         TaskModel.updateTaskProgress(taskId, 30, "读取插件输出")
         let output = TaskIO.readOutput(denoTaskId)
         if (output.size == 0) {
-            failAndMaybeEnqueueFallback(taskId, "Deno task output is empty", targetType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
+            failAndMaybeEnqueueFallback(taskId, "Plugin task output is empty", targetType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
             return
         }
         TaskIO.appendLog(taskId, "plugin output: ${output}")

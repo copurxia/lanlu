@@ -144,6 +144,8 @@ export class TaskPoolService {
       handlers.onTask?.(parsed.task, parsed.log);
       if (forceDone || this.isTerminalStatus(parsed.task.status)) {
         handlers.onDone?.(parsed.task, parsed.log);
+        closed = true;
+        source.close();
       }
     };
 
@@ -190,8 +192,10 @@ export class TaskPoolService {
 
     return await new Promise<Task>((resolve, reject) => {
       let settled = false;
+      let resolvingTerminal = false;
       let unsubscribe: () => void = () => {};
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      let lastLog: string | undefined;
 
       const finish = (task: Task) => {
         if (settled) return;
@@ -201,27 +205,66 @@ export class TaskPoolService {
         resolve(task);
       };
 
-      const fail = (error: Error) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutHandle) clearTimeout(timeoutHandle);
-        unsubscribe();
-        reject(error);
+      const loadLatestTerminalTask = async (fallbackTask: Task): Promise<Task> => {
+        try {
+          const latestTask = await this.getTaskById(taskId);
+          if (this.isTerminalStatus(latestTask.status)) {
+            return latestTask;
+          }
+        } catch (error) {
+          console.warn(`Failed to hydrate terminal task ${taskId}:`, error);
+        }
+        return fallbackTask;
+      };
+
+      const finishWithLatestTask = async (fallbackTask: Task) => {
+        if (settled || resolvingTerminal) return;
+        resolvingTerminal = true;
+        const latestTask = await loadLatestTerminalTask(fallbackTask);
+        options.onUpdate?.(latestTask, { transport: 'sse', log: lastLog });
+        finish(latestTask);
+      };
+
+      const recoverFromDisconnect = async () => {
+        if (settled || resolvingTerminal) return;
+        const latestTask = await loadLatestTerminalTask({
+          id: taskId,
+          name: '',
+          status: 'running',
+          progress: 0,
+          message: '',
+          taskType: '',
+          pluginNamespace: '',
+          parameters: {},
+          result: '',
+          createdAt: '',
+          startedAt: '',
+          completedAt: '',
+          priority: 50,
+          groupId: '',
+          timeoutAt: '',
+          triggerSource: ''
+        });
+
+        if (this.isTerminalStatus(latestTask.status)) {
+          await finishWithLatestTask(latestTask);
+        }
       };
 
       unsubscribe = this.subscribeTask(taskId, {
         onTask: (task, log) => {
+          lastLog = log;
           options.onUpdate?.(task, { transport: 'sse', log });
           if (this.isTerminalStatus(task.status)) {
-            finish(task);
+            void finishWithLatestTask(task);
           }
         },
         onDone: (task, log) => {
-          options.onUpdate?.(task, { transport: 'sse', log });
-          finish(task);
+          lastLog = log;
+          void finishWithLatestTask(task);
         },
-        onError: (error) => {
-          fail(error);
+        onError: () => {
+          void recoverFromDisconnect();
         },
       });
 
