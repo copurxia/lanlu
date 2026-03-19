@@ -61,10 +61,19 @@ jobs:
           wget -O s.zip "$STDX_URL"
           unzip -q s.zip -d stdx
 
+      - name: Checkout WasmEdge source (public)
+        uses: actions/checkout@v4
+        with:
+          repository: WasmEdge/WasmEdge
+          path: build-script-cache/WasmEdge
+          fetch-depth: 1
+
       - name: Build backend
         env:
           CANGJIE_STDX_PATH: ${{ github.workspace }}/stdx/linux_x86_64_cjnative/static/stdx
+          WASMEDGE_REPO_DIR: ${{ github.workspace }}/build-script-cache/WasmEdge
         run: |
+          unset GIT_DIR GIT_WORK_TREE
           cjc -v
           cjpm build -V
 
