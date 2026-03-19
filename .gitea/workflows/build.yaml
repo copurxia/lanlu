@@ -92,7 +92,6 @@ jobs:
           mkdir -p app
           mkdir -p app/frontend
           cp target/release/bin/main app/
-          cp -r plugins app/plugins
           cp -r frontend/out app/frontend/out
       - name: Archive production artifacts
         uses: actions/upload-artifact@v3
@@ -102,7 +101,6 @@ jobs:
             app/main
             app/lib*
             app/frontend
-            app/plugins
   package:
     needs: build
     runs-on: ubuntu-latest

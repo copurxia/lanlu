@@ -118,8 +118,6 @@ $:
               mkdir -p app/frontend
 
               cp target/release/bin/main app/
-              # Copy plugins dir to app/plugins (avoid app/plugins/plugins/* nesting).
-              cp -r plugins app/
               cp -r frontend/out app/frontend/out
             '
 
