@@ -24,6 +24,7 @@ jobs:
             sudo apt-get install -y --no-install-recommends \
               ca-certificates curl git wget unzip zip xz-utils \
               build-essential clang ninja-build cmake binutils \
+              xmake \
               pkg-config \
               libarchive-dev libavif-dev \
               libvips-dev libheif-dev
@@ -32,20 +33,15 @@ jobs:
             apt-get install -y --no-install-recommends \
               ca-certificates curl git wget unzip zip xz-utils \
               build-essential clang ninja-build cmake binutils \
+              xmake \
               pkg-config \
               libarchive-dev libavif-dev \
               libvips-dev libheif-dev
           fi
 
-      - name: Install xmake (official installer)
+      - name: Verify xmake
         run: |
           set -eux
-          curl -fsSL https://xmake.io/shget.text | bash
-          if command -v sudo >/dev/null 2>&1; then
-            sudo ln -sf "$HOME/.local/bin/xmake" /usr/local/bin/xmake
-          else
-            ln -sf "$HOME/.local/bin/xmake" /usr/local/bin/xmake
-          fi
           xmake --version
       - name: Unzip Cangjie
         run: |
