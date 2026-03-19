@@ -58,26 +58,18 @@ jobs:
         with:
           repository: WasmEdge/WasmEdge
           path: build-script-cache/WasmEdge
-          fetch-depth: 1
+          fetch-depth: 0
       - name: Set Up Cangjie and build
         run: |
           export CANGJIE_STDX_PATH="$PWD/stdx/linux_x86_64_cjnative/static/stdx"
           export WASMEDGE_REPO_DIR="$PWD/build-script-cache/WasmEdge"
-          WASMEDGE_COMMIT="$(awk '/wasmedge_ffi = \{git/{ if (match($0, /commitId = "([0-9a-f]+)"/, m)) { print m[1]; exit } }' cjpm.lock || true)"
-          if [ -n "${WASMEDGE_COMMIT:-}" ]; then
-            WASMEDGE_DEP_DIR="$HOME/.cjpm/git/wasmedge_ffi/$WASMEDGE_COMMIT"
-            if [ ! -d "$WASMEDGE_DEP_DIR" ]; then
-              cjpm update
-            fi
-            if [ -f "$WASMEDGE_DEP_DIR/build_native.sh" ]; then
-              if ! grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$WASMEDGE_DEP_DIR/build_native.sh"; then
-                sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$WASMEDGE_DEP_DIR/build_native.sh"
-              fi
-            fi
-          fi
           unset GIT_DIR GIT_WORK_TREE
           # ln -s "$PWD/stdx/linux_x86_64_cjnative" "$PWD/stdx/linux_x86_64_llvm"
           source cangjie/envsetup.sh
+          cjpm update
+          for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
+            grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
+          done
           cjc -v
           cjpm build -V
       - name: Setup Node.js

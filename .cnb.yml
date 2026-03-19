@@ -71,7 +71,6 @@ $:
           image: tencentcom/git-clone
           settings:
             git_url: https://github.com/WasmEdge/WasmEdge.git
-            depth: 1
             dist: build-script-cache
 
         - name: Build backend (cjpm)
@@ -83,20 +82,6 @@ $:
               export WASMEDGE_REPO_DIR="$PWD/build-script-cache/WasmEdge"
               # Some runners may leak git env into child processes.
               unset GIT_DIR GIT_WORK_TREE
-              # cjpm may execute git-dependency build scripts with GIT_* set.
-              # Patch wasmedge_ffi native build script to clear git env before nested git/cmake steps.
-              WASMEDGE_COMMIT="$(awk '"'"'/wasmedge_ffi = \{git/{ if (match($0, /commitId = "([0-9a-f]+)"/, m)) { print m[1]; exit } }'"'"' cjpm.lock || true)"
-              if [ -n "${WASMEDGE_COMMIT:-}" ]; then
-                WASMEDGE_DEP_DIR="$HOME/.cjpm/git/wasmedge_ffi/$WASMEDGE_COMMIT"
-                if [ ! -d "$WASMEDGE_DEP_DIR" ]; then
-                  cjpm update
-                fi
-                if [ -f "$WASMEDGE_DEP_DIR/build_native.sh" ]; then
-                  if ! grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$WASMEDGE_DEP_DIR/build_native.sh"; then
-                    sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$WASMEDGE_DEP_DIR/build_native.sh"
-                  fi
-                fi
-              fi
               # ln -s "$PWD/stdx/linux_x86_64_cjnative" "$PWD/stdx/linux_x86_64_llvm"
 
               # envsetup.sh references LD_LIBRARY_PATH and may fail under `set -u` if it is unset.
@@ -104,6 +89,13 @@ $:
               set +u
               source ./cangjie/envsetup.sh
               set -u
+
+              cjpm update
+              # cjpm may execute git-dependency build scripts with GIT_* set.
+              # Patch wasmedge_ffi native build script to clear git env before nested git/cmake steps.
+              for f in $(find "$HOME/.cjpm/git/wasmedge_ffi" -type f -name build_native.sh 2>/dev/null); do
+                grep -q "^unset GIT_DIR GIT_WORK_TREE$" "$f" || sed -i "2iunset GIT_DIR GIT_WORK_TREE" "$f"
+              done
 
               cjc -v
               cjpm build -V
