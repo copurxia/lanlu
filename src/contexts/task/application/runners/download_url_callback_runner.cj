@@ -60,20 +60,23 @@ public class DownloadUrlCallbackRunner {
             return
         }
 
-        // 插件自行下载并回传 relative_path（相对于缓存目录）
+        // 解析插件下载结果：
+        // - 优先使用 plugin_relative_path（相对于插件运行目录）
+        // - 兼容旧字段 relative_path / filename
+        // 最终由系统拼接到 plugins/<pluginNamespace>/ 下
         TaskModel.updateTaskProgress(taskId, 30, "解析插件输出")
-        let downloadedRelativePaths = parseDownloadedRelativePath(pluginOutput)
+        let downloadedPluginRelativePaths = parseDownloadedPluginRelativePath(pluginOutput)
         let downloadedSource = parseDownloadedSource(pluginOutput)
 
-        if (downloadedRelativePaths.size == 0) {
+        if (downloadedPluginRelativePaths.size == 0) {
             let pluginErr = parsePluginError(pluginOutput)
-            let errMsg = if (pluginErr.size > 0) { pluginErr } else { "Plugin did not return relative_path" }
+            let errMsg = if (pluginErr.size > 0) { pluginErr } else { "Plugin did not return downloadable path" }
             TaskModel.failTask(downloadTaskId, errMsg)
             writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
-        if (downloadedRelativePaths.size > 1) {
+        if (downloadedPluginRelativePaths.size > 1) {
             let errMsg = "Multiple archives not yet supported in this version"
             TaskModel.failTask(downloadTaskId, errMsg)
             writeErrorOutput(downloadTaskId, errMsg)
@@ -81,41 +84,15 @@ public class DownloadUrlCallbackRunner {
             return
         }
 
-        let downloadedRelativePath = downloadedRelativePaths.get(0).getOrThrow()
-        // Validate plugin output path:
-        // - must be a relative path under plugins/<namespace>/
-        // - must not contain path traversal segments (.. or .) or empty segments
-        // NOTE: do NOT use substring checks like `contains("..")` because filenames may legally contain "..."
-        // (which would otherwise be falsely rejected).
-        let expectedPrefix = "plugins/${pluginNamespace}/"
-        var invalidPath = false
-        if (downloadedRelativePath.trimAscii().size == 0 ||
-            downloadedRelativePath.startsWith("/") || downloadedRelativePath.startsWith("\\") ||
-            downloadedRelativePath.contains("\\") ||
-            !downloadedRelativePath.startsWith(expectedPrefix)) {
-            invalidPath = true
-        } else {
-            let parts = downloadedRelativePath.split("/")
-            // Expect at least: plugins / <namespace> / <filename>
-            if (parts.size < 3 || parts[0] != "plugins" || parts[1] != pluginNamespace) {
-                invalidPath = true
-            } else {
-                for (p in parts) {
-                    if (p.size == 0 || p == "." || p == "..") {
-                        invalidPath = true
-                        break
-                    }
-                }
-            }
-        }
-
-        if (invalidPath) {
+        let pluginRelativePath = downloadedPluginRelativePaths.get(0).getOrThrow()
+        if (pluginRelativePath.size == 0) {
             let errMsg = "Plugin returned invalid relative_path"
             TaskModel.failTask(downloadTaskId, errMsg)
             writeErrorOutput(downloadTaskId, errMsg)
             fail(taskId, errMsg)
             return
         }
+        let downloadedRelativePath = "plugins/${pluginNamespace}/${pluginRelativePath}"
 
         // 获取分类信息
         let categoryOpt = CategoryDao.getCategoryByInternalId(categoryId)
@@ -343,7 +320,42 @@ public class DownloadUrlCallbackRunner {
         return ""
     }
 
-    private static func parseDownloadedRelativePath(output: String): ArrayList<String> {
+    private static func normalizePluginRelativePath(rawPath: String): String {
+        var normalized = rawPath.trimAscii()
+        if (normalized.size == 0) {
+            return ""
+        }
+        if (normalized.startsWith("/") || normalized.startsWith("\\") || normalized.contains("\\")) {
+            return ""
+        }
+
+        // 兼容旧协议：plugins/<any-namespace>/<path...>，系统统一剥离前缀并按当前 namespace 重新拼接。
+        if (normalized.startsWith("plugins/")) {
+            let parts = normalized.split("/")
+            if (parts.size >= 3 && parts[0] == "plugins") {
+                var rebuilt = ""
+                var first = true
+                for (i in 2..parts.size) {
+                    if (!first) { rebuilt += "/" } else { first = false }
+                    rebuilt += parts[i]
+                }
+                normalized = rebuilt
+            }
+        }
+
+        let segs = normalized.split("/")
+        if (segs.size == 0) {
+            return ""
+        }
+        for (seg in segs) {
+            if (seg.size == 0 || seg == "." || seg == "..") {
+                return ""
+            }
+        }
+        return normalized
+    }
+
+    private static func parseDownloadedPluginRelativePath(output: String): ArrayList<String> {
         var paths = ArrayList<String>()
         if (output.size == 0) {
             return paths
@@ -373,17 +385,25 @@ public class DownloadUrlCallbackRunner {
                                 while (r.peek() != EndArray) {
                                     match (r.peek()) {
                                         case Some(BeginObject) =>
-                                            var rp = ""
+                                            var pluginRelativePath = ""
+                                            var legacyRelativePath = ""
+                                            var filename = ""
                                             r.startObject()
                                             while (r.peek() != EndObject) {
                                                 let fn = r.readName()
                                                 match (fn) {
-                                                    case "relative_path" => rp = r.readValue<String>().trimAscii()
+                                                    case "plugin_relative_path" => pluginRelativePath = r.readValue<String>().trimAscii()
+                                                    case "relative_path" => legacyRelativePath = r.readValue<String>().trimAscii()
+                                                    case "filename" => filename = r.readValue<String>().trimAscii()
                                                     case _ => r.skip()
                                                 }
                                             }
                                             r.endObject()
-                                            if (rp.size > 0) { parsedPaths.add(rp) }
+                                            var candidate = pluginRelativePath
+                                            if (candidate.size == 0) { candidate = legacyRelativePath }
+                                            if (candidate.size == 0) { candidate = filename }
+                                            let normalized = normalizePluginRelativePath(candidate)
+                                            if (normalized.size > 0) { parsedPaths.add(normalized) }
                                         case Some(_) => r.skip()
                                         case None => break
                                     }
