@@ -16,6 +16,7 @@ import lanlu.contexts.task.application.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
+import lanlu.contexts.plugin.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.shared.views.*
 
@@ -543,7 +544,7 @@ public class AssetUploadController {
     }
 
     private static func isSupportedTargetType(targetType: String): Bool {
-        return targetType == "archive" || targetType == "tag_icon" || targetType == "tag_background" || targetType == "user_avatar" || targetType == "metadata_asset"
+        return targetType == "archive" || targetType == "tag_icon" || targetType == "tag_background" || targetType == "user_avatar" || targetType == "metadata_asset" || targetType == "plugin"
     }
 
     private static func validateInitTarget(
@@ -614,6 +615,26 @@ public class AssetUploadController {
             return true
         }
 
+        if (targetType == "plugin") {
+            if (!UserDao.isAdmin(userId)) {
+                ctx.status(HttpStatusCode.STATUS_FORBIDDEN)
+                ResponseView.errorJson(ctx, "Administrator privileges required.", 403)
+                return false
+            }
+            if (!filename.toAsciiLower().endsWith(".wasm")) {
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ResponseView.errorJson(ctx, "plugin upload must be .wasm", 400)
+                return false
+            }
+            let namespace = targetId.trimAscii()
+            if (namespace.size > 0 && !PluginDao.exists(namespace)) {
+                ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
+                ResponseView.errorJson(ctx, "target plugin namespace not found", 404)
+                return false
+            }
+            return true
+        }
+
         return false
     }
 
@@ -624,6 +645,7 @@ public class AssetUploadController {
             case "tag_background" => return "上传标签背景资源"
             case "user_avatar" => return "上传头像资源"
             case "metadata_asset" => return "上传元数据资源"
+            case "plugin" => return "上传插件资源"
             case _ => return "上传资源"
         }
     }

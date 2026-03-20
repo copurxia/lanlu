@@ -10,7 +10,7 @@ export interface UploadMetadata {
   categoryId?: string | number;
   fileChecksum?: string;
   overwrite?: boolean;  // 是否覆盖已存在的文件
-  targetType?: 'archive' | 'tag_icon' | 'tag_background' | 'user_avatar' | 'metadata_asset';
+  targetType?: 'archive' | 'tag_icon' | 'tag_background' | 'user_avatar' | 'metadata_asset' | 'plugin';
   targetId?: string | number;
   contentType?: string;
 }

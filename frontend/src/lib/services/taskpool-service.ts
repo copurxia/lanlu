@@ -385,6 +385,7 @@ export class TaskPoolService {
         return 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200';
       case 'tag_asset_consume':
       case 'avatar_asset_consume':
+      case 'plugin_asset_consume':
         return 'bg-rose-100 text-rose-800 dark:bg-rose-900 dark:text-rose-200';
       case 'scan_all_categories':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
@@ -424,6 +425,8 @@ export class TaskPoolService {
         return '标签资产消费';
       case 'avatar_asset_consume':
         return '头像资产消费';
+      case 'plugin_asset_consume':
+        return '插件资产消费';
       case 'scan_all_categories':
         return '扫描所有分类';
       case 'scan_single_category':

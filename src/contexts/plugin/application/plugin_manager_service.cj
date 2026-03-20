@@ -318,6 +318,106 @@ public class PluginManagerService {
         return result
     }
 
+    public static func installFromUploadedFile(filePath: String, originalFilename: String): PluginInstallResult {
+        ensurePluginDirs()
+        var result = PluginInstallResult()
+
+        let trimmedPath = filePath.trimAscii()
+        if (trimmedPath.size == 0) {
+            result.message = "Plugin file path is required"
+            return result
+        }
+
+        let uploadFile = Path(trimmedPath)
+        if (!exists(uploadFile)) {
+            result.message = "Uploaded plugin file not found"
+            return result
+        }
+
+        let filename = originalFilename.trimAscii()
+        if (filename.size > 0 && !filename.toAsciiLower().endsWith(".wasm")) {
+            result.message = "Uploaded file must be a .wasm plugin"
+            return result
+        }
+
+        let info = parsePluginInfoFromFile(uploadFile.toString(), "", "Upload")
+        if (info.pluginType.size == 0 || info.namespace.size == 0) {
+            result.message = "Failed to get plugin info"
+            return result
+        }
+
+        result.plugin_type = info.pluginType
+        result.namespace = info.namespace
+
+        let existing = PluginDao.getPluginByNamespace(info.namespace)
+        if (existing.namespace.size > 0) {
+            if (existing.plugin_type != info.pluginType) {
+                result.message = "Plugin type mismatch after upload"
+                return result
+            }
+            let compareResult = compare(existing.version, info.version)
+            match (compareResult) {
+                case Downgrade =>
+                    result.message = "Refusing plugin downgrade from uploaded file"
+                    return result
+                case Invalid =>
+                    result.message = "Refusing plugin update with invalid version from uploaded file"
+                    return result
+                case _ => ()
+            }
+        }
+
+        let storedEntry = if (existing.namespace.size > 0) {
+            sanitizeEntryName(existing.entry)
+        } else {
+            sanitizeEntryName("${info.namespace}.wasm")
+        }
+        result.filename = storedEntry
+
+        let targetFile = Path(buildPluginFilePath(info.pluginType, storedEntry))
+
+        var backupPath = Path("")
+        if (exists(targetFile)) {
+            backupPath = Path("${getPluginTempRoot()}/backup_upload_${DateTime.now().toUnixTimeStamp().toSeconds().toString()}_${storedEntry}")
+            try { copy(targetFile, to: backupPath, overwrite: true) } catch (_: Exception) {}
+        }
+
+        let writeOk = atomicReplaceFile(targetFile, uploadFile)
+        if (!writeOk) {
+            result.message = "Failed to write plugin file"
+            return result
+        }
+
+        let upsert = upsertPluginInDatabase(info, storedEntry)
+        if (upsert.error.size > 0) {
+            if (backupPath.toString().trimAscii().size > 0 && exists(backupPath)) {
+                try {
+                    if (exists(targetFile)) { try { remove(targetFile) } catch (_: Exception) {} }
+                    rename(backupPath, to: targetFile)
+                } catch (_: Exception) {}
+            } else {
+                try { remove(targetFile) } catch (_: Exception) {}
+            }
+            result.message = upsert.error
+            return result
+        }
+
+        if (backupPath.toString().trimAscii().size > 0) {
+            try { remove(backupPath) } catch (_: Exception) {}
+        }
+
+        let scanTask = enqueueScanPluginsTask("plugin_upload")
+        result.scan_task_id = scanTask
+
+        result.success = true
+        result.message = "Plugin uploaded successfully."
+        result.old_version = upsert.oldVersion
+        result.new_version = upsert.newVersion
+        result.clear_parameters = upsert.clearParameters
+        result.reason = upsert.reason
+        return result
+    }
+
     public static func updateFromDatabase(namespace: String, force!: Bool = false): PluginInstallResult {
         ensurePluginDirs()
         var result = PluginInstallResult()

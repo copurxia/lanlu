@@ -30,6 +30,7 @@ public class TaskPoolService {
             "tag_asset_consume",
             "avatar_asset_consume",
             "metadata_asset_consume",
+            "plugin_asset_consume",
             "metadata_plugin",
             "download_url_callback",
             "tag_import",
@@ -296,6 +297,8 @@ public class TaskPoolService {
                 AvatarAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "metadata_asset_consume" =>
                 MetadataAssetConsumeTaskRunner.run(task.id, task.parameters, context)
+            case "plugin_asset_consume" =>
+                PluginAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "metadata_plugin" =>
                 MetadataPluginTaskRunner.run(task.id, task.parameters, context)
             case "download_url_callback" =>

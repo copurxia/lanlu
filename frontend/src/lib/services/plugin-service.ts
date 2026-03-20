@@ -1,6 +1,7 @@
 'use client';
 
 import { apiClient } from '../api';
+import { ChunkedUploadService } from './chunked-upload-service';
 
 export interface Plugin {
   id: number;
@@ -121,6 +122,39 @@ export class PluginService {
       console.error('Failed to install plugin:', error);
       throw error;
     }
+  }
+
+  static async uploadPlugin(file: File): Promise<{
+    success: boolean;
+    message?: string;
+    namespace?: string;
+    plugin_type?: string;
+    old_version?: string;
+    new_version?: string;
+    clear_parameters?: boolean;
+    reason?: string;
+    scan_task_id?: number;
+  }> {
+    const result = await ChunkedUploadService.uploadWithChunks(
+      file,
+      {
+        targetType: 'plugin',
+        overwrite: true,
+        contentType: file.type || 'application/wasm',
+      },
+      {
+        onProgress: () => {},
+      }
+    );
+
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to upload plugin');
+    }
+
+    return {
+      success: true,
+      ...(result.data || {}),
+    };
   }
 
   /**
