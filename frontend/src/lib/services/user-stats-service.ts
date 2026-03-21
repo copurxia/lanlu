@@ -20,6 +20,12 @@ export interface RecentActivity {
   recentFavorites: Archive[];
 }
 
+function isSuccessfulPayload(payload: any): boolean {
+  if (!payload || typeof payload !== 'object') return false;
+  if (payload.code === 200) return true;
+  return false;
+}
+
 function normalizeSearchArchives(payload: any): Archive[] {
   const list = payload?.data;
   if (!Array.isArray(list)) return [];
@@ -33,7 +39,7 @@ export class UserStatsService {
   static async getStats(): Promise<UserStats> {
     try {
       const response = await apiClient.get('/api/user/stats');
-      if (response.data.success === 1 && response.data.data) {
+      if (isSuccessfulPayload(response.data) && response.data?.data) {
         return response.data.data;
       }
       return {
@@ -60,7 +66,7 @@ export class UserStatsService {
       const response = await apiClient.get('/api/user/trend', {
         params: { days: safeDays }
       });
-      if (response.data.success === 1 && Array.isArray(response.data.data)) {
+      if (isSuccessfulPayload(response.data) && Array.isArray(response.data?.data)) {
         return response.data.data as ReadingTrendItem[];
       }
       return [];
