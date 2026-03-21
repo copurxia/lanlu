@@ -1,21 +1,27 @@
 import { Task, TaskPageResult } from '@/types/task';
 import { api, getApiUrl } from '@/lib/api';
 
-type TaskStreamPayload = {
+export type TaskStreamPayload = {
   task: Task;
+  event?: string;
   log?: string;
+  logTail?: string;
+  logDelta?: string;
+  logBytes?: number;
+  mode?: 'snapshot' | 'delta' | string;
+  version?: number;
 };
 
 type TaskStreamHandlers = {
-  onTask?: (task: Task, log?: string) => void;
-  onDone?: (task: Task, log?: string) => void;
+  onTask?: (task: Task, payload: TaskStreamPayload) => void;
+  onDone?: (task: Task, payload: TaskStreamPayload) => void;
   onError?: (error: Error) => void;
   onOpen?: () => void;
 };
 
 type WaitTaskOptions = {
   timeoutMs?: number;
-  onUpdate?: (task: Task, meta: { transport: 'sse'; log?: string }) => void;
+  onUpdate?: (task: Task, meta: { transport: 'sse'; log?: string; payload?: TaskStreamPayload }) => void;
 };
 
 /**
@@ -141,9 +147,10 @@ export class TaskPoolService {
       const parsed = this.parseTaskStreamPayload(event.data);
       if (!parsed) return;
 
-      handlers.onTask?.(parsed.task, parsed.log);
+      const payload = { ...parsed, event: event.type };
+      handlers.onTask?.(parsed.task, payload);
       if (forceDone || this.isTerminalStatus(parsed.task.status)) {
-        handlers.onDone?.(parsed.task, parsed.log);
+        handlers.onDone?.(parsed.task, payload);
         closed = true;
         source.close();
       }
@@ -196,6 +203,7 @@ export class TaskPoolService {
       let unsubscribe: () => void = () => {};
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       let lastLog: string | undefined;
+      let lastPayload: TaskStreamPayload | undefined;
 
       const finish = (task: Task) => {
         if (settled) return;
@@ -221,7 +229,7 @@ export class TaskPoolService {
         if (settled || resolvingTerminal) return;
         resolvingTerminal = true;
         const latestTask = await loadLatestTerminalTask(fallbackTask);
-        options.onUpdate?.(latestTask, { transport: 'sse', log: lastLog });
+        options.onUpdate?.(latestTask, { transport: 'sse', log: lastLog, payload: lastPayload });
         finish(latestTask);
       };
 
@@ -252,15 +260,17 @@ export class TaskPoolService {
       };
 
       unsubscribe = this.subscribeTask(taskId, {
-        onTask: (task, log) => {
-          lastLog = log;
-          options.onUpdate?.(task, { transport: 'sse', log });
+        onTask: (task, payload) => {
+          lastPayload = payload;
+          lastLog = payload.logDelta ?? payload.logTail ?? payload.log;
+          options.onUpdate?.(task, { transport: 'sse', log: lastLog, payload });
           if (this.isTerminalStatus(task.status)) {
             void finishWithLatestTask(task);
           }
         },
-        onDone: (task, log) => {
-          lastLog = log;
+        onDone: (task, payload) => {
+          lastPayload = payload;
+          lastLog = payload.logDelta ?? payload.logTail ?? payload.log;
           void finishWithLatestTask(task);
         },
         onError: () => {
@@ -606,12 +616,35 @@ export class TaskPoolService {
       if (!taskCandidate || typeof taskCandidate !== 'object') return null;
 
       const task = this.normalizeTask(taskCandidate);
-      const log =
-        typeof (parsed as any).log === 'string'
-          ? (parsed as any).log
-          : undefined;
+      const stream = (parsed as any).stream;
+      const log = typeof (parsed as any).log === 'string' ? (parsed as any).log : undefined;
+      const logTail =
+        typeof stream?.log_tail === 'string'
+          ? stream.log_tail
+          : typeof (parsed as any).log_tail === 'string'
+            ? (parsed as any).log_tail
+            : undefined;
+      const logDelta =
+        typeof stream?.log_delta === 'string'
+          ? stream.log_delta
+          : typeof (parsed as any).log_delta === 'string'
+            ? (parsed as any).log_delta
+            : undefined;
+      const logBytes =
+        typeof stream?.log_bytes === 'number'
+          ? stream.log_bytes
+          : typeof (parsed as any).log_bytes === 'number'
+            ? (parsed as any).log_bytes
+            : undefined;
+      const mode =
+        typeof stream?.mode === 'string'
+          ? stream.mode
+          : typeof (parsed as any).mode === 'string'
+            ? (parsed as any).mode
+            : undefined;
+      const version = typeof (parsed as any).v === 'number' ? (parsed as any).v : undefined;
 
-      return { task, log };
+      return { task, log, logTail, logDelta, logBytes, mode, version };
     } catch {
       return null;
     }
