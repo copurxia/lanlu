@@ -4,7 +4,7 @@ import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
 import { TaskPoolService } from './taskpool-service';
-import { isSuccessResponse } from '@/lib/utils/api-utils';
+import { buildQueryParams, isSuccessResponse } from '@/lib/utils/api-utils';
 import type { Task } from '@/types/task';
 import { normalizeArchiveAssets, normalizeArchivePayload } from '@/lib/utils/archive-assets';
 import { normalizeArchiveMetadata } from '@/lib/utils/metadata';
@@ -217,10 +217,7 @@ export class ArchiveService {
     metadata: MetadataUpdatePayload,
     lang?: string
   ): Promise<void> {
-    const params = new URLSearchParams();
-    if (lang) {
-      params.append('lang', lang);
-    }
+    const params = buildQueryParams({ lang: lang || undefined });
     const query = params.toString();
     const url = query ? `/api/archives/${id}/metadata?${query}` : `/api/archives/${id}/metadata`;
     await apiClient.put(url, metadata);

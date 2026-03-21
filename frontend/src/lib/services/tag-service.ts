@@ -2,6 +2,7 @@
 
 import { apiClient, uploadClient } from '../api';
 import { ChunkedUploadService } from './chunked-upload-service';
+import { buildQueryParams } from '@/lib/utils/api-utils';
 
 export type TagTranslation = {
   text: string;
@@ -54,11 +55,12 @@ export class TagService {
     const offset = params.offset ?? 0;
     const namespace = params.namespace ?? '';
 
-    const queryParams = new URLSearchParams();
-    if (q) queryParams.set('q', q);
-    queryParams.set('limit', String(limit));
-    queryParams.set('offset', String(offset));
-    if (namespace) queryParams.set('namespace', namespace);
+    const queryParams = buildQueryParams({
+      q: q || undefined,
+      limit,
+      offset,
+      namespace: namespace || undefined,
+    });
 
     const url = `/api/tags?${queryParams.toString()}`;
     const resp = await apiClient.get(url);

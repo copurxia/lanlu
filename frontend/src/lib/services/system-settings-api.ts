@@ -1,3 +1,6 @@
+import { apiClient } from '@/lib/api';
+import { isSuccessResponse, parseApiPayload } from '@/lib/utils/api-utils';
+
 export interface SystemSetting {
   id: number;
   key: string;
@@ -18,52 +21,38 @@ export interface SystemSettingsApi {
 
 export const SystemSettingsApi: SystemSettingsApi = {
   async getAllSettings() {
-    const response = await fetch('/api/admin/system/settings');
-    const data = await response.json();
-    if (data.success) {
-      return data.data;
+    const response = await apiClient.get('/api/admin/system/settings');
+    const data = parseApiPayload<any>(response.data, {});
+    if (isSuccessResponse(data.success)) {
+      return Array.isArray(data.data) ? (data.data as SystemSetting[]) : [];
     }
     throw new Error(data.message || '获取设置失败');
   },
 
   async updateSetting(key: string, value: string) {
-    const response = await fetch('/api/admin/system/settings', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ key, value }),
-    });
-    const data = await response.json();
-    return data.success;
+    const response = await apiClient.put('/api/admin/system/settings', { key, value });
+    const data = parseApiPayload<any>(response.data, {});
+    return isSuccessResponse(data.success);
   },
 
   async updateSettings(settings: Record<string, string>) {
-    const response = await fetch('/api/admin/system/settings/batch', {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ settings }),
-    });
-    const data = await response.json();
-    return data.success;
+    const response = await apiClient.put('/api/admin/system/settings/batch', { settings });
+    const data = parseApiPayload<any>(response.data, {});
+    return isSuccessResponse(data.success);
   },
 
   async getCategories() {
-    const response = await fetch('/api/admin/system/settings/categories');
-    const data = await response.json();
-    if (data.success) {
-      return data.data;
+    const response = await apiClient.get('/api/admin/system/settings/categories');
+    const data = parseApiPayload<any>(response.data, {});
+    if (isSuccessResponse(data.success)) {
+      return Array.isArray(data.data) ? (data.data as string[]) : [];
     }
     throw new Error(data.message || '获取分类失败');
   },
 
   async reloadCache() {
-    const response = await fetch('/api/admin/system/settings/reload', {
-      method: 'POST',
-    });
-    const data = await response.json();
-    return data.success;
+    const response = await apiClient.post('/api/admin/system/settings/reload');
+    const data = parseApiPayload<any>(response.data, {});
+    return isSuccessResponse(data.success);
   },
 };

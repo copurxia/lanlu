@@ -41,8 +41,9 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
-import { getArchiveAssetId, getCoverAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets';
+import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata';
+import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
 import type { TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
@@ -823,57 +824,26 @@ function TankoubonDetailContent() {
       }
 
       // Preview mode: parse plugin output and fill the edit form (no DB write-back).
-      try {
-        const out = finalTask.result ? JSON.parse(finalTask.result) : null;
-        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true';
-        if (!ok) {
-          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+      const previewResult = parseMetadataPluginPreviewResult(finalTask.result);
+      if (!previewResult.ok) {
+        if (!previewResult.parseFailed) {
+          const err = previewResult.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
           logger.operationFailed('run metadata plugin (tankoubon)', new Error(err));
           return;
         }
-
-        const data = out?.data || {};
-        const nextTitle = typeof data.title === 'string' ? data.title : '';
-        const nextSummary = typeof data.description === 'string' ? data.description : '';
-        const nextTags = Array.isArray(data.tags)
-          ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
-          : [];
-        const nextCover = readMetadataAssetValue(data.assets, 'cover');
-        const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
-        const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
-        const nextArchives = Array.isArray(data.children) ? data.children : [];
-        const applyAssetPreview = (
-          rawValue: string,
-          setPathValue: (next: string) => void,
-          setAssetIdValue: (next: string) => void
-        ) => {
-          const trimmed = rawValue.trim();
-          if (!trimmed) return;
-          if (/^\d+$/.test(trimmed)) {
-            const id = Number.parseInt(trimmed, 10);
-            if (Number.isFinite(id) && id > 0) {
-              setAssetIdValue(String(id));
-              setPathValue('');
-              return;
-            }
-          }
-          setPathValue(trimmed);
-        };
-
-        if (nextTitle.trim()) setEditName(nextTitle);
-        setEditSummary(nextSummary);
-        setEditTags(nextTags);
-        applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId);
-        applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId);
-        applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId);
-
+      } else {
+        const nextData = previewResult.data;
+        if (nextData.title.trim()) setEditName(nextData.title);
+        setEditSummary(nextData.summary);
+        setEditTags(nextData.tags);
+        applyAssetPreviewValue(nextData.cover, setEditCover, setEditAssetCoverId);
+        applyAssetPreviewValue(nextData.backdrop, setEditBackdrop, setEditAssetBackdropId);
+        applyAssetPreviewValue(nextData.clearlogo, setEditClearlogo, setEditAssetClearlogoId);
         setMetadataArchivePatches(
-          nextArchives
+          nextData.children
             .map((item: unknown) => normalizeTankoubonMemberMetadataPatch(item))
             .filter((item: TankoubonMemberMetadataPatch) => item.entity_id || item.volume_no)
         );
-      } catch {
-        // ignore parse errors
       }
 
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'));

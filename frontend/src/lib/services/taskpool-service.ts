@@ -1,5 +1,6 @@
 import { Task, TaskPageResult } from '@/types/task';
 import { api, getApiUrl } from '@/lib/api';
+import { buildQueryParams, parseApiPayload } from '@/lib/utils/api-utils';
 
 export type TaskStreamPayload = {
   task: Task;
@@ -35,7 +36,7 @@ export class TaskPoolService {
    */
   static async getTasks(page: number = 1, pageSize: number = 10, status?: string): Promise<TaskPageResult> {
     try {
-      const qs = new URLSearchParams({
+      const qs = buildQueryParams({
         page: String(page),
         pageSize: String(pageSize),
       });
@@ -44,17 +45,7 @@ export class TaskPoolService {
       const response = await api.get(`${this.BASE_URL}/tasks?${qs.toString()}`);
 
       if (response.success) {
-        let data = response.data;
-
-        // 如果response.data是字符串，需要解析为JSON
-        if (typeof response.data === 'string') {
-          try {
-            data = JSON.parse(response.data);
-          } catch (parseError) {
-            console.error('Failed to parse response.data as JSON:', parseError);
-            throw new Error('Invalid JSON response from server');
-          }
-        }
+        const data = parseApiPayload<any>(response.data, {});
 
         // 转换后端的下划线命名为前端的驼峰命名
         const tasks = Array.isArray(data.tasks)
@@ -119,7 +110,7 @@ export class TaskPoolService {
       const response = await api.get(`${this.BASE_URL}/${id}`);
 
       if (response.success) {
-        return this.normalizeTask(response.data);
+        return this.normalizeTask(parseApiPayload<any>(response.data, {}));
       } else {
         throw new Error(response.error || 'Failed to fetch task');
       }

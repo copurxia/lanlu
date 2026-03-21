@@ -20,8 +20,9 @@ import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { logger } from '@/lib/utils/logger';
 import { useMounted } from '@/hooks/common-hooks';
-import { getArchiveAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets';
-import { buildMetadataAssetInputs, normalizeMetadataPages } from '@/lib/utils/metadata';
+import { getArchiveAssetId } from '@/lib/utils/archive-assets';
+import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
+import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
@@ -512,53 +513,23 @@ export function ArchiveDetailContent() {
       }
 
       // Preview mode: parse plugin output and fill the edit form (no DB write-back).
-      try {
-        const out = finalTask.result ? JSON.parse(finalTask.result) : null;
-        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true';
-        if (!ok) {
-          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
+      const previewResult = parseMetadataPluginPreviewResult(finalTask.result);
+      if (!previewResult.ok) {
+        if (!previewResult.parseFailed) {
+          const err = previewResult.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed');
           showError(err);
           return;
         }
-
-        const data = out?.data || {};
-        const nextTitle = typeof data.title === 'string' ? data.title : '';
-        const nextSummary = typeof data.description === 'string' ? data.description : '';
-        const nextTags = Array.isArray(data.tags)
-          ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
-          : [];
-        const nextCover = readMetadataAssetValue(data.assets, 'cover');
-        const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop');
-        const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo');
-        const nextPages = normalizeMetadataPages(data.pages);
-        const applyAssetPreview = (
-          rawValue: string,
-          setPathValue: (next: string) => void,
-          setAssetIdValue: (next: string) => void
-        ) => {
-          const trimmed = rawValue.trim();
-          if (!trimmed) return;
-          if (/^\d+$/.test(trimmed)) {
-            const id = Number.parseInt(trimmed, 10);
-            if (Number.isFinite(id) && id > 0) {
-              setAssetIdValue(String(id));
-              setPathValue('');
-              return;
-            }
-          }
-          setPathValue(trimmed);
-        };
-
-        if (nextTitle.trim()) setEditTitle(nextTitle.trim());
-        setEditSummary(nextSummary);
-        setEditTags(nextTags.map((tag: string) => toCanonicalTag(tag)));
-        applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId);
-        applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId);
-        applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId);
-        setMetadataPluginPreviewPages(nextPages);
+      } else {
+        const nextData = previewResult.data;
+        if (nextData.title.trim()) setEditTitle(nextData.title.trim());
+        setEditSummary(nextData.summary);
+        setEditTags(nextData.tags.map((tag) => toCanonicalTag(tag)));
+        applyAssetPreviewValue(nextData.cover, setEditCover, setEditAssetCoverId);
+        applyAssetPreviewValue(nextData.backdrop, setEditBackdrop, setEditAssetBackdropId);
+        applyAssetPreviewValue(nextData.clearlogo, setEditClearlogo, setEditAssetClearlogoId);
+        setMetadataPluginPreviewPages(nextData.pages);
         setEditDialogOpen(true);
-      } catch {
-        // If output isn't JSON, still mark as completed and let user view logs/result.
       }
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'));
       setMetadataPluginProgress(100);

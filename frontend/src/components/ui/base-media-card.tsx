@@ -22,8 +22,9 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider'
 import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
-import { getCoverAssetId, readMetadataAssetValue } from '@/lib/utils/archive-assets'
-import { buildMetadataAssetInputs, normalizeMetadataPages, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata'
+import { getCoverAssetId } from '@/lib/utils/archive-assets'
+import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata'
+import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview'
 import type { MetadataPagePatch } from '@/types/archive'
 import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon'
 import type { Plugin } from '@/lib/services/plugin-service'
@@ -604,65 +605,31 @@ export function BaseMediaCard({
         return
       }
 
-      try {
-        const out = finalTask.result ? JSON.parse(finalTask.result) : null
-        const ok = out?.success === true || out?.success === 1 || out?.success === '1' || out?.success === 'true'
-        if (!ok) {
-          const err = out?.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
+      const previewResult = parseMetadataPluginPreviewResult(finalTask.result)
+      if (!previewResult.ok) {
+        if (!previewResult.parseFailed) {
+          const err = previewResult.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
           showError(err)
           return
         }
-
-        const data = out?.data || {}
-        const nextTitle =
-          typeof data.title === 'string'
-            ? data.title
-            : ''
-        const nextSummary = typeof data.description === 'string' ? data.description : ''
-        const nextTags = Array.isArray(data.tags)
-          ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
-          : []
-        const nextCover = readMetadataAssetValue(data.assets, 'cover')
-        const nextBackdrop = readMetadataAssetValue(data.assets, 'backdrop')
-        const nextClearlogo = readMetadataAssetValue(data.assets, 'clearlogo')
-        const nextArchives = Array.isArray(data.children) ? data.children : []
-        const nextPages = normalizeMetadataPages(data.pages)
-        const applyAssetPreview = (
-          rawValue: string,
-          setPathValue: (next: string) => void,
-          setAssetIdValue: (next: string) => void
-        ) => {
-          const trimmed = rawValue.trim()
-          if (!trimmed) return
-          if (/^\d+$/.test(trimmed)) {
-            const parsedId = Number.parseInt(trimmed, 10)
-            if (Number.isFinite(parsedId) && parsedId > 0) {
-              setAssetIdValue(String(parsedId))
-              setPathValue('')
-              return
-            }
-          }
-          setPathValue(trimmed)
-        }
-
-        if (nextTitle.trim()) setEditTitle(nextTitle.trim())
-        setEditSummary(nextSummary)
-        setEditTags(nextTags)
-        applyAssetPreview(nextCover, setEditCover, setEditAssetCoverId)
-        applyAssetPreview(nextBackdrop, setEditBackdrop, setEditAssetBackdropId)
-        applyAssetPreview(nextClearlogo, setEditClearlogo, setEditAssetClearlogoId)
+      } else {
+        const nextData = previewResult.data
+        if (nextData.title.trim()) setEditTitle(nextData.title.trim())
+        setEditSummary(nextData.summary)
+        setEditTags(nextData.tags)
+        applyAssetPreviewValue(nextData.cover, setEditCover, setEditAssetCoverId)
+        applyAssetPreviewValue(nextData.backdrop, setEditBackdrop, setEditAssetBackdropId)
+        applyAssetPreviewValue(nextData.clearlogo, setEditClearlogo, setEditAssetClearlogoId)
         if (type === 'archive') {
-          setMetadataPreviewPages(nextPages)
+          setMetadataPreviewPages(nextData.pages)
         }
         if (type === 'tankoubon') {
           setMetadataArchivePatches(
-            nextArchives
+            nextData.children
               .map((item: unknown) => normalizeTankoubonMemberMetadataPatch(item))
               .filter((item: TankoubonMemberMetadataPatch) => item.archive_id || item.volume_no)
           )
         }
-      } catch {
-        // Ignore parse errors and keep the task result visible in the status line.
       }
 
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'))

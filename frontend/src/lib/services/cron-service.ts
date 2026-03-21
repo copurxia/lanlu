@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import { parseApiPayload } from '@/lib/utils/api-utils';
 
 /**
  * 定时任务类型
@@ -83,14 +84,11 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/status`);
       if (response.success) {
-        let data = response.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
-        }
+        const data = parseApiPayload<Record<string, unknown>>(response.data, {});
         return {
-          running: data.running ?? false,
-          totalTasks: data.totalTasks ?? 0,
-          enabledTasks: data.enabledTasks ?? 0,
+          running: Boolean(data.running ?? false),
+          totalTasks: Number(data.totalTasks ?? 0),
+          enabledTasks: Number(data.enabledTasks ?? 0),
         };
       }
       throw new Error(response.error || 'Failed to get cron service status');
@@ -133,14 +131,11 @@ export class CronService {
     try {
       const response = await api.post(`${this.BASE_URL}/validate`, { expression });
       if (response.success) {
-        let data = response.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
-        }
+        const data = parseApiPayload<Record<string, unknown>>(response.data, {});
         return {
-          valid: data.valid ?? false,
-          error: data.error ?? '',
-          nextRuns: data.nextRuns ?? [],
+          valid: Boolean(data.valid ?? false),
+          error: String(data.error ?? ''),
+          nextRuns: Array.isArray(data.nextRuns) ? (data.nextRuns as string[]) : [],
         };
       }
       return { valid: false, error: response.error || 'Validation failed', nextRuns: [] };
@@ -158,10 +153,7 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/task-types`);
       if (response.success) {
-        let data = response.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
-        }
+        const data = parseApiPayload<any>(response.data, {});
         const rawTypes = (data?.types ?? data) as any;
         const values = Array.isArray(rawTypes) ? rawTypes.filter((t) => typeof t === 'string') : [];
         this.taskTypesCache = values.map((value) => ({ value }));
@@ -182,10 +174,7 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/tasks?page=${page}&pageSize=${pageSize}`);
       if (response.success) {
-        let data = response.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
-        }
+        const data = parseApiPayload<any>(response.data, {});
         const tasks = Array.isArray(data.tasks)
           ? data.tasks.map((task: any) => this.normalizeTask(task))
           : [];
@@ -211,10 +200,7 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/tasks/${id}`);
       if (response.success) {
-        let data = response.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
-        }
+        const data = parseApiPayload<any>(response.data, {});
         return this.normalizeTask(data);
       }
       return null;
@@ -231,10 +217,7 @@ export class CronService {
     try {
       const response = await api.post(`${this.BASE_URL}/tasks`, input);
       if (response.success) {
-        let data = response.data;
-        if (typeof data === 'string') {
-          data = JSON.parse(data);
-        }
+        const data = parseApiPayload<any>(response.data, {});
         return {
           success: true,
           task: data.task ? this.normalizeTask(data.task) : undefined,

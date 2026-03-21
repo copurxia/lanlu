@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/api';
+import { buildQueryParams } from '@/lib/utils/api-utils';
 
 export interface SmartFilter {
   id: number;
@@ -51,23 +52,18 @@ export function resolveSmartFilterDate(value: string): string {
 }
 
 export function buildSmartFilterHref(filter: SmartFilter): string {
-  const params = new URLSearchParams();
-
-  if (filter.query?.trim()) params.set('q', filter.query.trim());
-  if (filter.sort_by?.trim() && filter.sort_by !== '_default') {
-    params.set('sortby', filter.sort_by.trim());
-  }
-  if (filter.sort_order?.trim() && filter.sort_order !== 'desc') {
-    params.set('order', filter.sort_order.trim());
-  }
-
   const dateFrom = resolveSmartFilterDate(filter.date_from);
   const dateTo = resolveSmartFilterDate(filter.date_to);
-  if (dateFrom) params.set('date_from', dateFrom);
-  if (dateTo) params.set('date_to', dateTo);
-  if (filter.newonly) params.set('newonly', 'true');
-  if (filter.untaggedonly) params.set('untaggedonly', 'true');
-  params.set('groupby_tanks', 'true');
+  const params = buildQueryParams({
+    q: filter.query?.trim() || undefined,
+    sortby: filter.sort_by?.trim() && filter.sort_by !== '_default' ? filter.sort_by.trim() : undefined,
+    order: filter.sort_order?.trim() && filter.sort_order !== 'desc' ? filter.sort_order.trim() : undefined,
+    date_from: dateFrom || undefined,
+    date_to: dateTo || undefined,
+    newonly: filter.newonly ? 'true' : undefined,
+    untaggedonly: filter.untaggedonly ? 'true' : undefined,
+    groupby_tanks: 'true',
+  });
 
   const queryString = params.toString();
   return queryString ? `/?${queryString}` : '/';

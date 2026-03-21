@@ -81,3 +81,19 @@ export async function safeApiCall<T>(
     return defaultValue;
   }
 }
+
+/**
+ * 解析 API 返回的数据体
+ * 兼容 data 直接为对象或 JSON 字符串两种形式
+ */
+export function parseApiPayload<T>(raw: unknown, fallback: T): T {
+  if (raw == null) return fallback;
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
+  }
+  return raw as T;
+}
