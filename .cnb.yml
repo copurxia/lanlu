@@ -67,11 +67,18 @@ $:
               fi
             '
 
-        - name: Clone WasmEdge source (public)
-          image: tencentcom/git-clone
-          settings:
-            git_url: https://github.com/WasmEdge/WasmEdge.git
-            dist: build-script-cache
+        - name: Sync WasmEdge source (public)
+          script: |
+            bash -lc '
+              set -eux
+              mkdir -p build-script-cache
+              if [ -d "build-script-cache/WasmEdge/.git" ]; then
+                git -C build-script-cache/WasmEdge fetch --all --prune
+                git -C build-script-cache/WasmEdge reset --hard origin/HEAD
+              else
+                git clone https://github.com/WasmEdge/WasmEdge.git build-script-cache/WasmEdge
+              fi
+            '
 
         - name: Build backend (cjpm)
           script: |
