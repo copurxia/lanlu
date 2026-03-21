@@ -18,7 +18,8 @@ public class TaskPoolController {
     // SSE 推送频率：平衡实时性与数据库读取压力。
     private static let taskStreamTickMillis: Int64 = 800
     private static let taskStreamPingMillis: Int64 = 15000
-    private static let taskStreamLogMaxBytes: Int64 = 16 * 1024
+    // 第一阶段性能优化：将单次日志读取上限下调到 4KB。
+    private static let taskStreamLogMaxBytes: Int64 = 4 * 1024
 
     /**
      * 分页获取任务列表
@@ -150,6 +151,7 @@ public class TaskPoolController {
         let sse = ctx.sse()
         var eventId = 1i64
         var lastPayload = ""
+        var lastLogTail = ""
         var elapsedSincePing = 0i64
 
         while (true) {
@@ -159,12 +161,15 @@ public class TaskPoolController {
                 return
             }
 
-            let logText = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
-            let payload = buildTaskStreamData(task, logText)
+            // v2 stream payload: send bounded tail + delta to reduce client-side update cost.
+            let logTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+            let logDelta = computeLogDelta(lastLogTail, logTail)
+            let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1)
             if (eventId == 1 || payload != lastPayload) {
                 let eventName = if (eventId == 1) { "snapshot" } else { "task" }
                 sse.sendEvent(payload, event: eventName, id: "${eventId}")
                 lastPayload = payload
+                lastLogTail = logTail
                 eventId += 1
             }
 
@@ -477,16 +482,39 @@ public class TaskPoolController {
         return task
     }
 
-    private static func buildTaskStreamData(task: TaskData, logText: String): String {
+    private static func buildTaskStreamData(task: TaskData, logTail: String, logDelta: String, isSnapshot: Bool): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
+        w.writeName("v").writeValue(2)
         w.writeName("task")
         writeTaskStreamTaskJson(w, task)
-        w.writeName("log").writeValue(logText)
+        w.writeName("stream")
+        w.startObject()
+        w.writeName("mode").writeValue(if (isSnapshot) { "snapshot" } else { "delta" })
+        w.writeName("log_tail").writeValue(logTail)
+        w.writeName("log_delta").writeValue(logDelta)
+        w.writeName("log_bytes").writeValue(Int64(logTail.size))
+        w.endObject()
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func computeLogDelta(previous: String, current: String): String {
+        if (current.size == 0) {
+            return ""
+        }
+        if (previous.size == 0) {
+            return current
+        }
+        if (current == previous) {
+            return ""
+        }
+        if (current.startsWith(previous) && current.size >= previous.size) {
+            return current[previous.size..current.size]
+        }
+        return current
     }
 
     private static func writeTaskStreamTaskJson(w: JsonWriter, task: TaskData): Unit {

@@ -60,8 +60,13 @@ export type TaskPoolTask = {
 
 export type TaskStreamPayload = {
   task: TaskPoolTask;
-  log?: string;
   event: string;
+  version?: number;
+  log?: string;
+  logTail?: string;
+  logDelta?: string;
+  logBytes?: number;
+  mode?: "snapshot" | "delta" | string;
 };
 
 type TaskStreamHandlers = {
@@ -192,8 +197,33 @@ export function subscribeTaskStream(
 
     const payload: TaskStreamPayload = {
       task: taskCandidate,
-      log: typeof parsed.log === "string" ? parsed.log : undefined,
       event: event.type,
+      version: typeof parsed.v === "number" ? parsed.v : undefined,
+      log: typeof parsed.log === "string" ? parsed.log : undefined,
+      logTail:
+        isRecord(parsed.stream) && typeof parsed.stream.log_tail === "string"
+          ? parsed.stream.log_tail
+          : typeof parsed.log_tail === "string"
+            ? parsed.log_tail
+            : undefined,
+      logDelta:
+        isRecord(parsed.stream) && typeof parsed.stream.log_delta === "string"
+          ? parsed.stream.log_delta
+          : typeof parsed.log_delta === "string"
+            ? parsed.log_delta
+            : undefined,
+      logBytes:
+        isRecord(parsed.stream) && typeof parsed.stream.log_bytes === "number"
+          ? parsed.stream.log_bytes
+          : typeof parsed.log_bytes === "number"
+            ? parsed.log_bytes
+            : undefined,
+      mode:
+        isRecord(parsed.stream) && typeof parsed.stream.mode === "string"
+          ? parsed.stream.mode
+          : typeof parsed.mode === "string"
+            ? parsed.mode
+            : undefined,
     };
 
     handlers.onTask?.(payload);

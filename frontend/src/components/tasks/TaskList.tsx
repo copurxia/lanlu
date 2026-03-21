@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Task, TaskPageResult } from '@/types/task';
-import { TaskPoolService } from '@/lib/services/taskpool-service';
+import { TaskPoolService, type TaskStreamPayload } from '@/lib/services/taskpool-service';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,7 +19,7 @@ import {
   XCircle,
   PauseCircle,
   RefreshCw,
-  ListTodo
+  ListTodo,
 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
@@ -27,6 +27,12 @@ import { useToast } from '@/hooks/use-toast';
 
 const ALLOWED_FILTERS = ['all', 'pending', 'running', 'completed', 'failed'] as const;
 type AllowedFilter = (typeof ALLOWED_FILTERS)[number];
+
+const STREAM_FLUSH_INTERVAL_MS = 300;
+const LOG_PREVIEW_RECENT_LINES = 80;
+const LOG_PREVIEW_LAST_LINE_MAX = 160;
+
+type TranslateFn = (key: string, options?: Record<string, any>) => string;
 
 function normalizeFilter(value: string | null): AllowedFilter {
   if (!value) return 'all';
@@ -39,6 +45,320 @@ function normalizePageIndex(value: string | null): number {
   if (!Number.isFinite(parsed) || parsed < 1) return 0;
   return parsed - 1;
 }
+
+function isTerminalStatus(status: string): boolean {
+  return status === 'completed' || status === 'failed' || status === 'stopped';
+}
+
+function formatTimestamp(value?: string): string {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString();
+}
+
+function getStatusIcon(status: string) {
+  switch (status.toLowerCase()) {
+    case 'pending':
+      return <Clock className="w-4 h-4" />;
+    case 'running':
+      return <RefreshCw className="w-4 h-4 animate-spin" />;
+    case 'completed':
+      return <CheckCircle className="w-4 h-4" />;
+    case 'failed':
+      return <XCircle className="w-4 h-4" />;
+    case 'stopped':
+      return <PauseCircle className="w-4 h-4" />;
+    default:
+      return <Clock className="w-4 h-4" />;
+  }
+}
+
+function deriveLogModel(message: string): {
+  full: string;
+  preview: string;
+  lastLine: string;
+  hiddenLineCount: number;
+  isTruncated: boolean;
+} {
+  const full = message || '';
+  if (!full) {
+    return {
+      full: '',
+      preview: '',
+      lastLine: '',
+      hiddenLineCount: 0,
+      isTruncated: false,
+    };
+  }
+
+  const lines = full.split('\n');
+  const recentLines = lines.slice(-LOG_PREVIEW_RECENT_LINES);
+  const hiddenLineCount = Math.max(0, lines.length - recentLines.length);
+  const preview = recentLines.join('\n').trim();
+  const lastLineRaw = [...lines].reverse().find((line) => line.trim().length > 0) ?? lines[lines.length - 1] ?? '';
+  const lastLine =
+    lastLineRaw.length > LOG_PREVIEW_LAST_LINE_MAX
+      ? `${lastLineRaw.slice(0, LOG_PREVIEW_LAST_LINE_MAX)}…`
+      : lastLineRaw;
+
+  return {
+    full,
+    preview,
+    lastLine,
+    hiddenLineCount,
+    isTruncated: hiddenLineCount > 0,
+  };
+}
+
+function prettyPrintResult(result: string): string {
+  if (!result) return '';
+  try {
+    return JSON.stringify(JSON.parse(result), null, 2);
+  } catch {
+    return result;
+  }
+}
+
+interface TaskCardProps {
+  task: Task;
+  t: TranslateFn;
+  onCancelTask: (taskId: number) => void;
+  onRetryTask: (taskId: number) => void;
+}
+
+const TaskCard = memo(function TaskCard({ task, t, onCancelTask, onRetryTask }: TaskCardProps) {
+  const [logExpanded, setLogExpanded] = useState(false);
+
+  useEffect(() => {
+    setLogExpanded(false);
+  }, [task.id]);
+
+  const logModel = useMemo(() => deriveLogModel(task.message || ''), [task.message]);
+  const formattedCreatedAt = useMemo(() => formatTimestamp(task.createdAt), [task.createdAt]);
+  const formattedStartedAt = useMemo(() => formatTimestamp(task.startedAt), [task.startedAt]);
+  const formattedCompletedAt = useMemo(() => formatTimestamp(task.completedAt), [task.completedAt]);
+  const formattedTimeoutAt = useMemo(() => formatTimestamp(task.timeoutAt), [task.timeoutAt]);
+  const formattedResult = useMemo(() => prettyPrintResult(task.result), [task.result]);
+
+  const taskParams = useMemo(() => {
+    if (!['upload', 'asset_upload', 'upload_process', 'asset_upload_process', 'download_url'].includes(task.taskType)) {
+      return null;
+    }
+    return TaskPoolService.parseTaskParameters(task.parameters);
+  }, [task.parameters, task.taskType]);
+
+  const statusAction = useMemo(() => {
+    switch (task.status.toLowerCase()) {
+      case 'pending':
+      case 'running':
+        return (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onCancelTask(task.id)}
+            className="flex items-center space-x-1 text-red-600 hover:text-red-700"
+          >
+            <Square className="w-3 h-3" />
+            <span>{t('settings.taskManagement.cancel')}</span>
+          </Button>
+        );
+      case 'failed':
+      case 'stopped':
+        return (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onRetryTask(task.id)}
+            className="flex items-center space-x-1 text-blue-600 hover:text-blue-700"
+          >
+            <Play className="w-3 h-3" />
+            <span>{t('settings.taskManagement.retry')}</span>
+          </Button>
+        );
+      default:
+        return null;
+    }
+  }, [onCancelTask, onRetryTask, t, task.id, task.status]);
+
+  return (
+    <Card className="w-full">
+      <CardHeader className="pb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <CardTitle className="text-base truncate min-w-0">{task.name}</CardTitle>
+            <Badge className={TaskPoolService.getStatusColor(task.status)} variant="secondary">
+              <div className="flex items-center gap-1 whitespace-nowrap">
+                {getStatusIcon(task.status)}
+                <span>{TaskPoolService.getStatusLabel(task.status, t)}</span>
+              </div>
+            </Badge>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <Badge variant="outline" className="font-mono text-xs whitespace-nowrap">
+              Job #{task.id}
+            </Badge>
+            <Badge className={TaskPoolService.getPriorityColor(task.priority)} title={`P${task.priority}`}>
+              P{task.priority}
+            </Badge>
+            <Badge className={TaskPoolService.getTaskTypeColor(task.taskType)} variant="secondary">
+              {TaskPoolService.getTaskTypeLabel(task.taskType)}
+            </Badge>
+            {task.triggerSource && (
+              <Badge variant="outline" className="whitespace-nowrap">
+                {TaskPoolService.getTriggerSourceLabel(task.triggerSource)}
+              </Badge>
+            )}
+            {statusAction}
+          </div>
+        </div>
+        {task.groupId && (
+          <div className="mt-2">
+            <Badge variant="secondary" className="text-xs">
+              Group: {task.groupId}
+            </Badge>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span>{t('settings.taskManagement.progress')}</span>
+            <span>{task.progress}%</span>
+          </div>
+          <Progress value={task.progress} className="w-full" />
+        </div>
+
+        {!!task.message && (
+          <div className="text-sm text-muted-foreground">
+            <strong>{t('settings.taskManagement.latestLog')}:</strong> {logModel.lastLine}
+            <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-28 overflow-y-auto whitespace-pre-wrap">
+              {logExpanded ? logModel.full : logModel.preview}
+            </div>
+            {logModel.isTruncated && (
+              <div className="mt-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  onClick={() => setLogExpanded((prev) => !prev)}
+                >
+                  {logExpanded
+                    ? t('common.collapse')
+                    : `${t('common.expand')} (${logModel.hiddenLineCount} lines hidden)`}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground">
+          <div>
+            <strong>{t('settings.taskManagement.createdAt')}:</strong>
+            <br />
+            {formattedCreatedAt}
+          </div>
+          {task.startedAt && (
+            <div>
+              <strong>{t('settings.taskManagement.startedAt')}:</strong>
+              <br />
+              {formattedStartedAt}
+            </div>
+          )}
+          {task.completedAt && (
+            <div>
+              <strong>{t('settings.taskManagement.completedAt')}:</strong>
+              <br />
+              {formattedCompletedAt}
+            </div>
+          )}
+          {task.timeoutAt && (
+            <div className="md:col-span-3">
+              <strong>{t('settings.taskManagement.timeoutAt')}:</strong>
+              <br />
+              {formattedTimeoutAt}
+            </div>
+          )}
+        </div>
+
+        {task.pluginNamespace && (
+          <div className="text-sm">
+            <strong>{t('settings.taskManagement.plugin')}:</strong> {task.pluginNamespace}
+          </div>
+        )}
+
+        {(task.status === 'completed' || task.status === 'failed') && task.result && (
+          <div className="text-sm">
+            <strong>{t('settings.taskManagement.result')}:</strong>
+            <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-20 overflow-y-auto overflow-x-auto whitespace-pre-wrap font-mono">
+              {formattedResult}
+            </div>
+          </div>
+        )}
+
+        {taskParams && (
+          <div className="text-sm border-t pt-3">
+            <strong>{t('settings.taskManagement.taskDetails')}:</strong>
+            <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              {taskParams.url && (
+                <div className="md:col-span-2 break-all">
+                  <strong>{t('settings.taskManagement.url')}:</strong> {taskParams.url}
+                </div>
+              )}
+              {taskParams.filename && (
+                <div className="md:col-span-2">
+                  <strong>{t('settings.taskManagement.filename')}:</strong> {taskParams.filename}
+                </div>
+              )}
+              {taskParams.filesize && (
+                <div>
+                  <strong>{t('settings.taskManagement.fileSize')}:</strong> {TaskPoolService.formatFileSize(taskParams.filesize)}
+                </div>
+              )}
+              {taskParams.total_chunks && (
+                <div>
+                  <strong>{t('settings.taskManagement.chunkCount')}:</strong> {taskParams.total_chunks}
+                </div>
+              )}
+              {taskParams.chunk_size && (
+                <div>
+                  <strong>{t('settings.taskManagement.chunkSize')}:</strong> {TaskPoolService.formatFileSize(taskParams.chunk_size)}
+                </div>
+              )}
+              {taskParams.title && taskParams.title !== taskParams.filename && (
+                <div className="md:col-span-2">
+                  <strong>{t('settings.taskManagement.title')}:</strong> {taskParams.title}
+                </div>
+              )}
+              {taskParams.tags && (
+                <div className="md:col-span-2">
+                  <strong>{t('settings.taskManagement.tags')}:</strong> {taskParams.tags}
+                </div>
+              )}
+              {taskParams.summary && (
+                <div className="md:col-span-2">
+                  <strong>{t('settings.taskManagement.summary')}:</strong> {taskParams.summary}
+                </div>
+              )}
+              {(taskParams.category_id || taskParams.categoryId) && (
+                <div className="md:col-span-2">
+                  <strong>{t('settings.taskManagement.category')}:</strong> {taskParams.category_id || taskParams.categoryId}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}, (prev, next) => {
+  return (
+    prev.task === next.task &&
+    prev.t === next.t &&
+    prev.onCancelTask === next.onCancelTask &&
+    prev.onRetryTask === next.onRetryTask
+  );
+});
 
 interface TaskListProps {
   className?: string;
@@ -61,18 +381,18 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
   const latestFetchIdRef = useRef(0);
   const taskStreamUnsubsRef = useRef<Map<number, () => void>>(new Map());
   const streamRefreshScheduledRef = useRef(false);
+  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const streamBufferRef = useRef<Map<number, TaskStreamPayload>>(new Map());
+  const streamEventCountRef = useRef(0);
+  const streamFlushCountRef = useRef(0);
 
-  // Pagination state
   const [currentPage, setCurrentPage] = useState(() => normalizePageIndex(searchParams.get('page')));
   const [pageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
   const [totalAll, setTotalAll] = useState<number | null>(null);
 
-  // Filter state
-  const [activeFilter, setActiveFilter] = useState<AllowedFilter>(() =>
-    normalizeFilter(searchParams.get('tab'))
-  );
+  const [activeFilter, setActiveFilter] = useState<AllowedFilter>(() => normalizeFilter(searchParams.get('tab')));
 
   const updateUrl = useCallback(
     (nextFilter: AllowedFilter, nextPageIndex: number) => {
@@ -89,7 +409,6 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
     [pathname, router, searchParams]
   );
 
-  // Sync state from URL (supports refresh + back/forward navigation).
   useEffect(() => {
     const urlFilter = normalizeFilter(searchParams.get('tab'));
     const urlPageIndex = normalizePageIndex(searchParams.get('page'));
@@ -110,7 +429,6 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
 
       try {
         setError(null);
-        // Keep the list stable during tab/page switching; only show the big spinner on first load.
         if (mode === 'initial') setLoading(true);
         if (mode === 'update') setUpdating(true);
         if (mode === 'manual') setRefreshing(true);
@@ -143,15 +461,13 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
         setUpdating(false);
       }
     },
-    [activeFilter, pageSize] 
+    [activeFilter, pageSize]
   );
 
-  // Fetch data when page/filter changes.
   useEffect(() => {
     fetchTasks(currentPage, { mode: hasLoadedOnceRef.current ? 'update' : 'initial' });
   }, [currentPage, activeFilter, fetchTasks]);
 
-  // External refresh signal (from parent) without remounting the list.
   useEffect(() => {
     if (!hasLoadedOnceRef.current) return;
     if (typeof refreshToken !== 'number') return;
@@ -159,24 +475,84 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
     fetchTasks(currentPage, { mode: 'manual' });
   }, [currentPage, fetchTasks, refreshToken]);
 
-  // Unsubscribe all task streams on unmount.
+  const handleRefresh = useCallback(async () => {
+    await fetchTasks(currentPage, { mode: 'manual' });
+  }, [currentPage, fetchTasks]);
+
+  const handleCancelTask = useCallback(
+    async (taskId: number) => {
+      const confirmed = await confirm({
+        title: t('settings.taskManagement.confirmCancel'),
+        description: '',
+        confirmText: t('common.yes'),
+        cancelText: t('common.no'),
+        variant: 'destructive',
+      });
+
+      if (!confirmed) return;
+
+      try {
+        const ok = await TaskPoolService.cancelTask(taskId);
+        if (ok) {
+          await handleRefresh();
+          showSuccess(t('settings.taskManagement.canceled'));
+        } else {
+          setError(t('settings.taskManagement.failedToCancel'));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('settings.taskManagement.failedToCancel'));
+      }
+    },
+    [confirm, handleRefresh, showSuccess, t]
+  );
+
+  const handleRetryTask = useCallback(
+    async (taskId: number) => {
+      try {
+        const result = await TaskPoolService.retryTask(taskId);
+        if (result.success) {
+          await handleRefresh();
+        } else {
+          setError(t('settings.taskManagement.failedToRetry'));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : t('settings.taskManagement.failedToRetry'));
+      }
+    },
+    [handleRefresh, t]
+  );
+
+  const handleFilterChange = (value: string) => {
+    const nextFilter = normalizeFilter(value);
+    setUpdating(true);
+    setActiveFilter(nextFilter);
+    setCurrentPage(0);
+    updateUrl(nextFilter, 0);
+  };
+
+  const handlePageChange = (page: number) => {
+    setUpdating(true);
+    setCurrentPage(page);
+    updateUrl(activeFilter, page);
+  };
+
   useEffect(() => {
     return () => {
+      if (streamFlushTimerRef.current) {
+        clearTimeout(streamFlushTimerRef.current);
+        streamFlushTimerRef.current = null;
+      }
       taskStreamUnsubsRef.current.forEach((unsubscribe) => unsubscribe());
       taskStreamUnsubsRef.current.clear();
     };
   }, []);
 
-  // Active task stream updates (SSE) with list refresh fallback.
   useEffect(() => {
     if (!hasLoadedOnceRef.current || loading || refreshing || updating) return;
 
-    const activeTasks = tasks.filter(
-      (task) => task?.status === 'running' || task?.status === 'pending'
-    );
+    const activeTasks = tasks.filter((task) => task?.status === 'running' || task?.status === 'pending');
     const activeTaskIds = new Set(activeTasks.map((task) => task.id));
 
-    // Remove streams that are no longer active.
     taskStreamUnsubsRef.current.forEach((unsubscribe, taskId) => {
       if (activeTaskIds.has(taskId)) return;
       unsubscribe();
@@ -191,30 +567,82 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
       });
     };
 
+    const flushBufferedUpdates = (opts: { forceRefresh?: boolean } = {}) => {
+      const buffered = streamBufferRef.current;
+      if (buffered.size === 0) {
+        if (opts.forceRefresh) scheduleRefresh();
+        return;
+      }
+
+      const updatesByTaskId = new Map(buffered);
+      buffered.clear();
+      streamFlushCountRef.current += 1;
+
+      let terminalSeen = false;
+      setTasks((prev) =>
+        prev.map((item) => {
+          const payload = updatesByTaskId.get(item.id);
+          if (!payload) return item;
+
+          const nextLog = payload.logDelta ?? payload.logTail ?? payload.log;
+          if (isTerminalStatus(payload.task.status)) terminalSeen = true;
+
+          if (!nextLog || nextLog.trim().length === 0) {
+            return { ...item, ...payload.task };
+          }
+
+          const mergedMessage = payload.mode === 'delta'
+            ? `${item.message || ''}${nextLog}`
+            : nextLog;
+
+          return { ...item, ...payload.task, message: mergedMessage };
+        })
+      );
+
+      if (opts.forceRefresh || terminalSeen) {
+        scheduleRefresh();
+      }
+
+      // SSE 可观测计数，便于确认节流后刷新频率和批量规模。
+      if (streamFlushCountRef.current % 5 === 0) {
+        console.debug('[TaskList:SSE]', {
+          events: streamEventCountRef.current,
+          flushes: streamFlushCountRef.current,
+          bufferedTasks: updatesByTaskId.size,
+        });
+      }
+    };
+
+    const scheduleFlush = (opts: { immediate?: boolean; forceRefresh?: boolean } = {}) => {
+      if (opts.immediate) {
+        if (streamFlushTimerRef.current) {
+          clearTimeout(streamFlushTimerRef.current);
+          streamFlushTimerRef.current = null;
+        }
+        flushBufferedUpdates({ forceRefresh: opts.forceRefresh });
+        return;
+      }
+
+      if (streamFlushTimerRef.current) return;
+      streamFlushTimerRef.current = setTimeout(() => {
+        streamFlushTimerRef.current = null;
+        flushBufferedUpdates({ forceRefresh: opts.forceRefresh });
+      }, STREAM_FLUSH_INTERVAL_MS);
+    };
+
     for (const task of activeTasks) {
       if (taskStreamUnsubsRef.current.has(task.id)) continue;
 
       const unsubscribe = TaskPoolService.subscribeTask(task.id, {
-        onTask: (nextTask, log) => {
-          setTasks((prev) =>
-            prev.map((item) => {
-              if (item.id !== nextTask.id) return item;
-              const nextMessage =
-                typeof log === 'string' && log.trim().length > 0 ? log : nextTask.message;
-              return { ...item, ...nextTask, message: nextMessage };
-            })
-          );
+        onTask: (_nextTask, payload) => {
+          streamEventCountRef.current += 1;
+          streamBufferRef.current.set(payload.task.id, payload);
+          scheduleFlush();
         },
-        onDone: (nextTask, log) => {
-          setTasks((prev) =>
-            prev.map((item) => {
-              if (item.id !== nextTask.id) return item;
-              const nextMessage =
-                typeof log === 'string' && log.trim().length > 0 ? log : nextTask.message;
-              return { ...item, ...nextTask, message: nextMessage };
-            })
-          );
-          scheduleRefresh();
+        onDone: (_nextTask, payload) => {
+          streamEventCountRef.current += 1;
+          streamBufferRef.current.set(payload.task.id, payload);
+          scheduleFlush({ immediate: true, forceRefresh: true });
         },
         onError: () => {
           scheduleRefresh();
@@ -224,130 +652,6 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
       taskStreamUnsubsRef.current.set(task.id, unsubscribe);
     }
   }, [tasks, currentPage, loading, refreshing, updating, fetchTasks]);
-
-  const handleRefresh = async () => {
-    await fetchTasks(currentPage, { mode: 'manual' });
-  };
-
-  const handleFilterChange = (value: string) => {
-    const nextFilter = normalizeFilter(value);
-    setUpdating(true);
-    setActiveFilter(nextFilter);
-    setCurrentPage(0); // keep pagination consistent when switching tabs
-    updateUrl(nextFilter, 0);
-  };
-
-  const handlePageChange = (page: number) => {
-    setUpdating(true);
-    setCurrentPage(page);
-    updateUrl(activeFilter, page);
-  };
-
-  const handleCancelTask = async (taskId: number) => {
-    const confirmed = await confirm({
-      title: t('settings.taskManagement.confirmCancel'),
-      description: '',
-      confirmText: t('common.yes'),
-      cancelText: t('common.no'),
-      variant: 'destructive',
-    });
-
-    if (!confirmed) return;
-
-    try {
-      const success = await TaskPoolService.cancelTask(taskId);
-      if (success) {
-        await handleRefresh();
-        showSuccess(t('settings.taskManagement.canceled'));
-      } else {
-        setError(t('settings.taskManagement.failedToCancel'));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('settings.taskManagement.failedToCancel'));
-    }
-  };
-
-  const handleRetryTask = async (taskId: number) => {
-    try {
-      const result = await TaskPoolService.retryTask(taskId);
-      if (result.success) {
-        await handleRefresh();
-      } else {
-        setError(t('settings.taskManagement.failedToRetry'));
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : t('settings.taskManagement.failedToRetry'));
-    }
-  };
-
-  const getStatusIcon = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'pending':
-        return <Clock className="w-4 h-4" />;
-      case 'running':
-        return <RefreshCw className="w-4 h-4 animate-spin" />;
-      case 'completed':
-        return <CheckCircle className="w-4 h-4" />;
-      case 'failed':
-        return <XCircle className="w-4 h-4" />;
-      case 'stopped':
-        return <PauseCircle className="w-4 h-4" />;
-      default:
-        return <Clock className="w-4 h-4" />;
-    }
-  };
-
-  const getStatusActionButtons = (task: Task) => {
-    switch (task.status.toLowerCase()) {
-      case 'pending':
-        return (
-          <div className="flex space-x-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleCancelTask(task.id)}
-              className="flex items-center space-x-1 text-red-600 hover:text-red-700"
-            >
-              <Square className="w-3 h-3" />
-              <span>{t('settings.taskManagement.cancel')}</span>
-            </Button>
-          </div>
-        );
-      case 'running':
-        return (
-          <div className="flex space-x-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleCancelTask(task.id)}
-              className="flex items-center space-x-1 text-red-600 hover:text-red-700"
-            >
-              <Square className="w-3 h-3" />
-              <span>{t('settings.taskManagement.cancel')}</span>
-            </Button>
-          </div>
-        );
-      case 'failed':
-      case 'stopped':
-        return (
-          <div className="flex space-x-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleRetryTask(task.id)}
-              className="flex items-center space-x-1 text-blue-600 hover:text-blue-700"
-            >
-              <Play className="w-3 h-3" />
-              <span>{t('settings.taskManagement.retry')}</span>
-            </Button>
-          </div>
-        );
-      case 'completed':
-        return null;
-      default:
-        return null;
-    }
-  };
 
   if (loading && tasks.length === 0) {
     return (
@@ -360,14 +664,12 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
 
   return (
     <div className={`space-y-6 ${className || ''}`}>
-      {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
           <p className="text-sm">{error}</p>
         </div>
       )}
 
-      {/* Filters */}
       <div className="flex items-center justify-between gap-3">
         <Tabs value={activeFilter} onValueChange={handleFilterChange} className="flex-1 min-w-0">
           <TabsList className="flex w-full justify-start overflow-x-auto">
@@ -403,196 +705,16 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
         )}
       </div>
 
-      {/* Task List */}
       {tasks.length > 0 ? (
         <div className="space-y-4">
           {tasks.map((task) => (
-            <Card key={task.id} className="w-full">
-              <CardHeader className="pb-3">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <CardTitle className="text-base truncate min-w-0">{task.name}</CardTitle>
-                    <Badge
-                      className={TaskPoolService.getStatusColor(task.status)}
-                      variant="secondary"
-                    >
-                      <div className="flex items-center gap-1 whitespace-nowrap">
-                        {getStatusIcon(task.status)}
-                        <span>{TaskPoolService.getStatusLabel(task.status, t)}</span>
-                      </div>
-                    </Badge>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                    <Badge variant="outline" className="font-mono text-xs whitespace-nowrap">
-                      Job #{task.id}
-                    </Badge>
-                    {/* 优先级徽章 - 新增 */}
-                    <Badge className={TaskPoolService.getPriorityColor(task.priority)} title={`P${task.priority}`}>
-                      P{task.priority}
-                    </Badge>
-                    <Badge
-                      className={TaskPoolService.getTaskTypeColor(task.taskType)}
-                      variant="secondary"
-                    >
-                      {TaskPoolService.getTaskTypeLabel(task.taskType)}
-                    </Badge>
-                    {/* 触发源徽章 - 新增 */}
-                    {task.triggerSource && (
-                      <Badge variant="outline" className="whitespace-nowrap">
-                        {TaskPoolService.getTriggerSourceLabel(task.triggerSource)}
-                      </Badge>
-                    )}
-                    {getStatusActionButtons(task)}
-                  </div>
-                </div>
-                {/* 分组ID - 新增 */}
-                {task.groupId && (
-                  <div className="mt-2">
-                    <Badge variant="secondary" className="text-xs">
-                      Group: {task.groupId}
-                    </Badge>
-                  </div>
-                )}
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {/* Progress */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>{t('settings.taskManagement.progress')}</span>
-                    <span>{task.progress}%</span>
-                  </div>
-                  <Progress value={task.progress} className="w-full" />
-                </div>
-
-                {/* Message */}
-                {task.message && (
-                  <div className="text-sm text-muted-foreground">
-                    <strong>{t('settings.taskManagement.latestLog')}:</strong>{' '}
-                    {(() => {
-                      const lines = task.message.split('\n').map(s => s.trim()).filter(Boolean);
-                      const last = lines.length > 0 ? lines[lines.length - 1] : task.message;
-                      return last.length > 160 ? `${last.slice(0, 160)}…` : last;
-                    })()}
-                    <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-24 overflow-y-auto whitespace-pre-wrap">
-                      {task.message}
-                    </div>
-                  </div>
-                )}
-
-                {/* Time Information */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-muted-foreground">
-                  <div>
-                    <strong>{t('settings.taskManagement.createdAt')}:</strong>
-                    <br />
-                    {new Date(task.createdAt).toLocaleString()}
-                  </div>
-                  {task.startedAt && (
-                    <div>
-                      <strong>{t('settings.taskManagement.startedAt')}:</strong>
-                      <br />
-                      {new Date(task.startedAt).toLocaleString()}
-                    </div>
-                  )}
-                  {task.completedAt && (
-                    <div>
-                      <strong>{t('settings.taskManagement.completedAt')}:</strong>
-                      <br />
-                      {new Date(task.completedAt).toLocaleString()}
-                    </div>
-                  )}
-                  {/* 超时时间 - 新增 */}
-                  {task.timeoutAt && (
-                    <div className="md:col-span-3">
-                      <strong>{t('settings.taskManagement.timeoutAt')}:</strong>
-                      <br />
-                      {new Date(task.timeoutAt).toLocaleString()}
-                    </div>
-                  )}
-                </div>
-
-                {/* Plugin Info */}
-                {task.pluginNamespace && (
-                  <div className="text-sm">
-                    <strong>{t('settings.taskManagement.plugin')}:</strong> {task.pluginNamespace}
-                  </div>
-                )}
-
-                {/* Result (for completed/failed tasks) */}
-                {(task.status === 'completed' || task.status === 'failed') && task.result && (
-                  <div className="text-sm">
-                    <strong>{t('settings.taskManagement.result')}:</strong>
-                    <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-20 overflow-y-auto overflow-x-auto whitespace-pre-wrap font-mono">
-                      {(() => {
-                        try {
-                          return JSON.stringify(JSON.parse(task.result), null, 2);
-                        } catch {
-                          return task.result;
-                        }
-                      })()}
-                    </div>
-                  </div>
-                )}
-
-                {/* Upload / URL Download Details */}
-                {(['upload', 'asset_upload', 'upload_process', 'asset_upload_process', 'download_url'].includes(task.taskType) && task.parameters) && (
-                  <div className="text-sm border-t pt-3">
-                    <strong>{t('settings.taskManagement.taskDetails')}:</strong>
-                    {(() => {
-                      const params = TaskPoolService.parseTaskParameters(task.parameters);
-                      return (
-                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                          {params.url && (
-                            <div className="md:col-span-2 break-all">
-                              <strong>{t('settings.taskManagement.url')}:</strong> {params.url}
-                            </div>
-                          )}
-                          {params.filename && (
-                            <div className="md:col-span-2">
-                              <strong>{t('settings.taskManagement.filename')}:</strong> {params.filename}
-                            </div>
-                          )}
-                          {params.filesize && (
-                            <div>
-                              <strong>{t('settings.taskManagement.fileSize')}:</strong> {TaskPoolService.formatFileSize(params.filesize)}
-                            </div>
-                          )}
-                          {params.total_chunks && (
-                            <div>
-                              <strong>{t('settings.taskManagement.chunkCount')}:</strong> {params.total_chunks}
-                            </div>
-                          )}
-                          {params.chunk_size && (
-                            <div>
-                              <strong>{t('settings.taskManagement.chunkSize')}:</strong> {TaskPoolService.formatFileSize(params.chunk_size)}
-                            </div>
-                          )}
-                          {params.title && params.title !== params.filename && (
-                            <div className="md:col-span-2">
-                              <strong>{t('settings.taskManagement.title')}:</strong> {params.title}
-                            </div>
-                          )}
-                          {params.tags && (
-                            <div className="md:col-span-2">
-                              <strong>{t('settings.taskManagement.tags')}:</strong> {params.tags}
-                            </div>
-                          )}
-                          {params.summary && (
-                            <div className="md:col-span-2">
-                              <strong>{t('settings.taskManagement.summary')}:</strong> {params.summary}
-                            </div>
-                          )}
-                          {(params.category_id || params.categoryId) && (
-                            <div className="md:col-span-2">
-                              <strong>{t('settings.taskManagement.category')}:</strong> {params.category_id || params.categoryId}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })()}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <TaskCard
+              key={task.id}
+              task={task}
+              t={t as TranslateFn}
+              onCancelTask={handleCancelTask}
+              onRetryTask={handleRetryTask}
+            />
           ))}
         </div>
       ) : (
@@ -611,17 +733,10 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
         </Card>
       )}
 
-      {/* Pagination */}
       {totalPages > 0 && (
         <div className="flex items-center justify-between">
-          <p className="text-sm text-muted-foreground">
-            {t('settings.taskManagement.totalTasks', { count: total })}
-          </p>
-          <Pagination
-            currentPage={currentPage}
-            totalPages={totalPages}
-            onPageChange={handlePageChange}
-          />
+          <p className="text-sm text-muted-foreground">{t('settings.taskManagement.totalTasks', { count: total })}</p>
+          <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={handlePageChange} />
         </div>
       )}
     </div>

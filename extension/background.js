@@ -692,14 +692,17 @@ async function handleSseEvent(entryId, kind, event) {
   }
 
   if (!isRecord(parsed)) return;
+  const stream = isRecord(parsed.stream) ? parsed.stream : null;
   const task = isRecord(parsed.task) ? parsed.task : parsed;
   if (typeof task.id !== "number" || typeof task.status !== "string") return;
+  const logDelta = stream && typeof stream.log_delta === "string" ? stream.log_delta : null;
+  const logTail = stream && typeof stream.log_tail === "string" ? stream.log_tail : null;
 
   const status = normalizeStatus(task.status);
 
   if (kind === "download") {
     const downloadProgress = clampProgress(task.progress);
-    const downloadMessage = task.message || "";
+    const downloadMessage = task.message || logDelta || logTail || "";
     const patch = {
       status,
       downloadProgress,
@@ -719,7 +722,7 @@ async function handleSseEvent(entryId, kind, event) {
     await writeQueueEntry(entryId, patch);
   } else if (kind === "scan") {
     const scanProgress = clampProgress(task.progress);
-    const scanMessage = task.message || "";
+    const scanMessage = task.message || logDelta || logTail || "";
     const archiveId = task.status === "completed" ? await resolveArchiveIdFromTask(task) : null;
 
     const patch = {
