@@ -537,13 +537,14 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
   };
 
   useEffect(() => {
+    const unsubs = taskStreamUnsubsRef.current;
     return () => {
       if (streamFlushTimerRef.current) {
         clearTimeout(streamFlushTimerRef.current);
         streamFlushTimerRef.current = null;
       }
-      taskStreamUnsubsRef.current.forEach((unsubscribe) => unsubscribe());
-      taskStreamUnsubsRef.current.clear();
+      unsubs.forEach((unsubscribe) => unsubscribe());
+      unsubs.clear();
     };
   }, []);
 

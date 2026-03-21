@@ -54,7 +54,7 @@ export function useReaderArchiveMetadata({
     return Array.isArray(archiveMetadata?.tags)
       ? archiveMetadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean)
       : [];
-  }, [archiveMetadata?.tags]);
+  }, [archiveMetadata]);
 
   const toggleFavorite = useCallback(
     async (e?: React.MouseEvent) => {

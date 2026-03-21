@@ -6,7 +6,6 @@ import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
-const HORIZONTAL_PADDING_PX = 24;
 const GRID_GAP_PX = 8;
 const OVERSCAN_PX = 480;
 const DEFAULT_ASPECT_RATIO = 3 / 4;

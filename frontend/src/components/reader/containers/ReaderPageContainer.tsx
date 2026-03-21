@@ -283,7 +283,6 @@ function ReaderContent() {
 
   const {
     sourceArchiveId,
-    setSourceArchiveId,
     pages,
     setPages,
     segments,
@@ -291,7 +290,6 @@ function ReaderContent() {
     currentPage,
     setCurrentPage,
     loading,
-    setLoading,
     error,
     setError,
     initialPreloadPage,
@@ -354,7 +352,6 @@ function ReaderContent() {
     [currentPage, doublePageMode, effectiveSegments, pages, readingMode, seamlessEnabled, sourceArchiveId, streamPages]
   );
   const {
-    currentStreamItem,
     activeSegment,
     activeArchiveId,
     activeLocalPage,
@@ -706,7 +703,7 @@ function ReaderContent() {
       next[index] = { ...next[index], title: archive.archiveTitle };
       return next;
     });
-  }, [activeArchiveId, archive.archiveTitle]);
+  }, [activeArchiveId, archive.archiveTitle, setSegments]);
 
   useEffect(() => {
     if (!seamlessEnabled) return;
@@ -778,7 +775,14 @@ function ReaderContent() {
     } finally {
       seamlessAppendInFlightRef.current = false;
     }
-  }, [resolveNextArchiveCandidateCached, seamlessEnabled, segments, setResolvedNextArchive]);
+  }, [
+    resolveNextArchiveCandidateCached,
+    seamlessEnabled,
+    segments,
+    setPages,
+    setResolvedNextArchive,
+    setSegments,
+  ]);
 
   const handleWebtoonScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -830,7 +834,7 @@ function ReaderContent() {
     } else if (error === 'Failed to fetch archive pages') {
       setError(t('reader.fetchError'));
     }
-  }, [error, t]);
+  }, [error, setError, t]);
 
   // 切换全屏模式
   const toggleFullscreen = useCallback(async () => {
@@ -1099,6 +1103,7 @@ function ReaderContent() {
     pages.length,
     streamIndexByRealPage,
     streamVirtualIndexBySegment,
+    setCurrentPage,
     virtualPageIndex,
   ]);
 
@@ -1296,6 +1301,7 @@ function ReaderContent() {
       resetTransform,
       readingMode,
       seamlessEnabled,
+      setCurrentPage,
       streamIndexByRealPage,
       webtoonVirtualization.containerHeight,
       webtoonVirtualization.imageHeights,
@@ -1443,6 +1449,9 @@ function ReaderContent() {
     splitCoverMode,
     streamIndexByRealPage,
     tryTurnHtmlSpread,
+    activeSegmentLastRealPage,
+    setCurrentPage,
+    totalPages,
   ]);
 
   const handleNextPage = useCallback(() => {
@@ -1497,6 +1506,7 @@ function ReaderContent() {
     resetTransform,
     doublePageMode,
     isHtmlSpreadView,
+    setCurrentPage,
     splitCoverMode,
     tryTurnHtmlSpread,
   ]);
@@ -1644,7 +1654,7 @@ function ReaderContent() {
         }
       }
     }
-  }, [splitCoverMode, doublePageMode, currentPage, pages.length, isCurrentOrTailHtmlPage]);
+  }, [splitCoverMode, doublePageMode, currentPage, pages.length, isCurrentOrTailHtmlPage, setCurrentPage]);
 
   const displayArchiveTitle = activeSegment?.title || archive.archiveTitle;
   const shouldRenderSidebar = sidebar.sidebarOpen || sidebar.sidebarLoading;

@@ -1,22 +1,15 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { TaskList } from '@/components/tasks/TaskList';
 import { ListTodo, RefreshCw } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 
 export default function SettingsTasksPage() {
   const { t } = useLanguage();
-  const { user, isAuthenticated } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
-
-  // Check if current user is admin
-  const isAdmin = useMemo(() => {
-    return isAuthenticated && user?.isAdmin === true;
-  }, [isAuthenticated, user?.isAdmin]);
 
   const handleRefresh = () => {
     setRefreshKey(prev => prev + 1);

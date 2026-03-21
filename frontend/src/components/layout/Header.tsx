@@ -10,7 +10,7 @@ import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { UserMenu } from '@/components/user/UserMenu';
 import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';

@@ -254,7 +254,7 @@ export function BaseMediaCard({
         setEditAssetCoverId(String(getCoverAssetId(tank) || ''))
         setEditAssetBackdropId(String(tank.assets?.backdrop || ''))
         setEditAssetClearlogoId(String(tank.assets?.clearlogo || ''))
-      } catch (_error) {
+      } catch {
         // Keep fallback values when detail request fails.
       }
     })()
@@ -690,6 +690,7 @@ export function BaseMediaCard({
     editTags,
     editTitle,
     id,
+    metadataArchivePatches,
     metadataPluginParam,
     selectedMetadataPlugin,
     showError,
@@ -810,6 +811,7 @@ export function BaseMediaCard({
     emitRefresh,
     id,
     metadataArchivePatches,
+    metadataPreviewPages,
     selectedMetadataPlugin,
     showError,
     t,

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { PluginService } from '@/lib/services/plugin-service';
-import { Download, Upload } from 'lucide-react';
+import { Download } from 'lucide-react';
 
 interface PluginInstallDialogProps {
   open: boolean;
