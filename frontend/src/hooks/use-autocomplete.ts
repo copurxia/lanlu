@@ -76,7 +76,7 @@ export function useAutocomplete(options: UseAutocompleteOptions): UseAutocomplet
     } finally {
       setLoading(false);
     }
-  }, [language, maxResults, minQueryLength, filterFn]);
+  }, [filterFn, language, maxResults, minQueryLength, requireBoundTags]);
 
   const fetchSuggestions = React.useCallback((query: string) => {
     if (debounceRef.current) {
