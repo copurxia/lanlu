@@ -76,6 +76,24 @@ export interface PageInfo {
 }
 
 export class ArchiveService {
+  private static readonly METADATA_CACHE_TTL_MS = 30_000;
+  private static readonly metadataCache = new Map<string, { expiresAt: number; data: ArchiveMetadata }>();
+  private static readonly metadataInflight = new Map<string, Promise<ArchiveMetadata>>();
+
+  private static buildMetadataCacheKey(id: string, lang?: string, options?: { includePages?: boolean }): string {
+    return `${id}|${lang || ''}|${options?.includePages ? 'pages' : 'meta'}`;
+  }
+
+  private static invalidateMetadataCache(id: string): void {
+    const prefix = `${id}|`;
+    for (const key of this.metadataCache.keys()) {
+      if (key.startsWith(prefix)) this.metadataCache.delete(key);
+    }
+    for (const key of this.metadataInflight.keys()) {
+      if (key.startsWith(prefix)) this.metadataInflight.delete(key);
+    }
+  }
+
   private static isArchiveItem(item: unknown): item is Archive {
     return Boolean(item) && typeof item === 'object' && 'arcid' in (item as Record<string, unknown>);
   }
@@ -159,15 +177,39 @@ export class ArchiveService {
   }
 
   static async getMetadata(id: string, lang?: string, options?: { includePages?: boolean }): Promise<ArchiveMetadata> {
-    const params: Record<string, string> = {};
-    if (lang) {
-      params.lang = lang;
+    const cacheKey = this.buildMetadataCacheKey(id, lang, options);
+    const now = Date.now();
+    const cached = this.metadataCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      return cached.data;
     }
-    if (options?.includePages) {
-      params.include_pages = '1';
+
+    const inflight = this.metadataInflight.get(cacheKey);
+    if (inflight) {
+      return inflight;
     }
-    const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
-    return normalizeArchiveMetadata(response.data);
+
+    const request = (async () => {
+      const params: Record<string, string> = {};
+      if (lang) {
+        params.lang = lang;
+      }
+      if (options?.includePages) {
+        params.include_pages = '1';
+      }
+      const response = await apiClient.get(`/api/archives/${id}/metadata`, { params });
+      const normalized = normalizeArchiveMetadata(response.data);
+      this.metadataCache.set(cacheKey, {
+        data: normalized,
+        expiresAt: Date.now() + this.METADATA_CACHE_TTL_MS,
+      });
+      return normalized;
+    })().finally(() => {
+      this.metadataInflight.delete(cacheKey);
+    });
+
+    this.metadataInflight.set(cacheKey, request);
+    return request;
   }
 
   static async updateMetadata(
@@ -182,6 +224,7 @@ export class ArchiveService {
     const query = params.toString();
     const url = query ? `/api/archives/${id}/metadata?${query}` : `/api/archives/${id}/metadata`;
     await apiClient.put(url, metadata);
+    this.invalidateMetadataCache(id);
   }
 
   static async getFiles(id: string): Promise<{ pages: PageInfo[]; progress: number }> {
@@ -231,6 +274,7 @@ export class ArchiveService {
    */
   static async setIsNew(id: string): Promise<void> {
     await apiClient.put(`/api/archives/${id}/isnew`);
+    this.invalidateMetadataCache(id);
   }
 
   /**
@@ -238,6 +282,7 @@ export class ArchiveService {
    */
   static async clearIsNew(id: string): Promise<void> {
     await apiClient.delete(`/api/archives/${id}/isnew`);
+    this.invalidateMetadataCache(id);
   }
 
   /**
@@ -245,6 +290,7 @@ export class ArchiveService {
    */
   static async updateProgress(id: string, page: number): Promise<void> {
     await apiClient.put(`/api/archives/${id}/progress/${page}`);
+    this.invalidateMetadataCache(id);
   }
 
   /**
@@ -252,6 +298,7 @@ export class ArchiveService {
    */
   static async deleteArchive(id: string): Promise<void> {
     await apiClient.delete(`/api/archives/${id}`);
+    this.invalidateMetadataCache(id);
   }
 
   static getAssetUrl(assetId?: number): string {

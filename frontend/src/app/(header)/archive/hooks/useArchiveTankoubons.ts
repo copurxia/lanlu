@@ -20,6 +20,62 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const seqRef = useRef(0);
+  const searchCacheRef = useRef<Map<string, Archive[]>>(new Map());
+
+  const getPreviewArchives = useCallback(
+    async (tank: Tankoubon, windowSize: number): Promise<{ tankoubonId: string; archives: Archive[] }> => {
+      const arcids = (tank.children || []).filter((id) => id);
+      const idx = archiveId ? arcids.indexOf(archiveId) : -1;
+      const start = idx >= 0 ? Math.max(0, idx - Math.floor(windowSize / 2)) : 0;
+      const page = Math.floor(start / windowSize) + 1;
+      const cacheKey = `${language}|${tank.tankoubon_id}|${page}|${windowSize}`;
+
+      const cached = searchCacheRef.current.get(cacheKey);
+      if (cached) {
+        return { tankoubonId: tank.tankoubon_id, archives: cached };
+      }
+
+      const resp = await ArchiveService.search({
+        tankoubon_id: tank.tankoubon_id,
+        sortby: 'tank_order',
+        order: 'asc',
+        page,
+        pageSize: windowSize,
+        groupby_tanks: false,
+        lang: language,
+      });
+
+      const archives = resp.data.filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item);
+      searchCacheRef.current.set(cacheKey, archives);
+      return { tankoubonId: tank.tankoubon_id, archives };
+    },
+    [archiveId, language]
+  );
+
+  const runWithConcurrency = useCallback(
+    async <T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<Array<PromiseSettledResult<R>>> => {
+      const safeLimit = Math.max(1, limit);
+      const results: Array<PromiseSettledResult<R>> = new Array(items.length);
+      let nextIndex = 0;
+      const workerRun = async () => {
+        while (true) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+          if (currentIndex >= items.length) break;
+          try {
+            const value = await worker(items[currentIndex]);
+            results[currentIndex] = { status: 'fulfilled', value };
+          } catch (reason) {
+            results[currentIndex] = { status: 'rejected', reason };
+          }
+        }
+      };
+
+      await Promise.all(Array.from({ length: Math.min(safeLimit, items.length) }, () => workerRun()));
+      return results;
+    },
+    []
+  );
 
   const refetch = useCallback(async () => {
     const seq = ++seqRef.current;
@@ -44,25 +100,10 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
       }
 
       const windowSize = Math.max(1, maxPreviewArchivesPerTankoubon);
-      const results = await Promise.allSettled(
-        tanks.map(async (tank) => {
-          const arcids = (tank.children || []).filter((id) => id);
-          const idx = archiveId ? arcids.indexOf(archiveId) : -1;
-          const start = idx >= 0 ? Math.max(0, idx - Math.floor(windowSize / 2)) : 0;
-
-          const resp = await ArchiveService.search({
-            tankoubon_id: tank.tankoubon_id,
-            sortby: 'tank_order',
-            order: 'asc',
-            page: Math.floor(start / windowSize) + 1,
-            pageSize: windowSize,
-            groupby_tanks: false,
-            lang: language,
-          });
-
-          const archives = resp.data.filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item);
-          return { tankoubonId: tank.tankoubon_id, archives };
-        })
+      const results = await runWithConcurrency(
+        tanks,
+        4,
+        async (tank) => getPreviewArchives(tank, windowSize)
       );
 
       if (seq !== seqRef.current) return;
@@ -81,7 +122,7 @@ export function useArchiveTankoubons({ archiveId, maxPreviewArchivesPerTankoubon
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
-  }, [archiveId, language, maxPreviewArchivesPerTankoubon]);
+  }, [archiveId, getPreviewArchives, maxPreviewArchivesPerTankoubon, runWithConcurrency]);
 
   useEffect(() => {
     refetch();

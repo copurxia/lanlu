@@ -2,6 +2,7 @@
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import Image from 'next/image';
 import { ArchiveService, type MetadataPagePatchInput } from '@/lib/services/archive-service';
@@ -24,15 +25,25 @@ import { buildMetadataAssetInputs, normalizeMetadataPages } from '@/lib/utils/me
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
-import { ArchivePreviewCard } from './components/ArchivePreviewCard';
 import { ArchiveBasicInfoCard } from './components/ArchiveBasicInfoCard';
 import { ArchiveMobileActions } from './components/ArchiveMobileActions';
-import { ArchiveCollectionsCard } from './components/ArchiveCollectionsCard';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
-import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
+import type { RpcSelectRequest } from '@/components/archive/ArchiveMetadataEditDialog';
 import { ArchiveSearchTagBadge } from '@/components/archive/ArchiveSearchTagBadge';
-import { ArchiveMetadataEditDialog, type RpcSelectRequest } from '@/components/archive/ArchiveMetadataEditDialog';
 import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, FolderPlus } from 'lucide-react';
+
+const AddToTankoubonDialog = dynamic(
+  () => import('@/components/tankoubon/AddToTankoubonDialog').then((m) => m.AddToTankoubonDialog)
+);
+const ArchiveMetadataEditDialog = dynamic(
+  () => import('@/components/archive/ArchiveMetadataEditDialog').then((m) => m.ArchiveMetadataEditDialog)
+);
+const ArchivePreviewCard = dynamic(
+  () => import('./components/ArchivePreviewCard').then((m) => m.ArchivePreviewCard)
+);
+const ArchiveCollectionsCard = dynamic(
+  () => import('./components/ArchiveCollectionsCard').then((m) => m.ArchiveCollectionsCard)
+);
 
 function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
   const prefix = '[RPC_SELECT]';
@@ -861,52 +872,54 @@ export function ArchiveDetailContent() {
             </div>
           </div>
 
-          <ArchiveMetadataEditDialog
-            open={editDialogOpen}
-            onOpenChange={setEditDialogOpen}
-            t={t}
-            title={editTitle}
-            onTitleChange={setEditTitle}
-            summary={editSummary}
-            onSummaryChange={setEditSummary}
-            assetCoverId={editAssetCoverId}
-            onAssetCoverIdChange={setEditAssetCoverId}
-            assetBackdropId={editAssetBackdropId}
-            onAssetBackdropIdChange={setEditAssetBackdropId}
-            assetClearlogoId={editAssetClearlogoId}
-            onAssetClearlogoIdChange={setEditAssetClearlogoId}
-            assetCoverValue={editCover}
-            assetBackdropValue={editBackdrop}
-            assetClearlogoValue={editClearlogo}
-            onUploadAssetCover={() => uploadMetadataAsset('cover')}
-            onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
-            onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
-            uploadingAssetCover={coverUploading}
-            uploadingAssetBackdrop={backdropUploading}
-            uploadingAssetClearlogo={clearlogoUploading}
-            tags={editTags}
-            onTagsChange={setEditTags}
-            isSaving={isSaving}
-            saveDisabled={!editTitle.trim()}
-            onSave={saveEdit}
-            metadataPlugins={metadataPlugins}
-            selectedMetadataPlugin={selectedMetadataPlugin}
-            onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
-            metadataPluginParam={metadataPluginParam}
-            onMetadataPluginParamChange={setMetadataPluginParam}
-            isMetadataPluginRunning={isMetadataPluginRunning}
-            metadataPluginProgress={metadataPluginProgress}
-            metadataPluginMessage={metadataPluginMessage}
-            onRunMetadataPlugin={runMetadataPlugin}
-            rpcSelect={{
-              request: rpcSelectRequest,
-              selectedIndex: rpcSelectSelectedIndex,
-              remainingSeconds: rpcSelectRemainingSeconds,
-              onSelectIndex: setRpcSelectSelectedIndex,
-              onAbort: abortRpcSelect,
-              onSubmit: submitRpcSelect,
-            }}
-          />
+          {editDialogOpen ? (
+            <ArchiveMetadataEditDialog
+              open={editDialogOpen}
+              onOpenChange={setEditDialogOpen}
+              t={t}
+              title={editTitle}
+              onTitleChange={setEditTitle}
+              summary={editSummary}
+              onSummaryChange={setEditSummary}
+              assetCoverId={editAssetCoverId}
+              onAssetCoverIdChange={setEditAssetCoverId}
+              assetBackdropId={editAssetBackdropId}
+              onAssetBackdropIdChange={setEditAssetBackdropId}
+              assetClearlogoId={editAssetClearlogoId}
+              onAssetClearlogoIdChange={setEditAssetClearlogoId}
+              assetCoverValue={editCover}
+              assetBackdropValue={editBackdrop}
+              assetClearlogoValue={editClearlogo}
+              onUploadAssetCover={() => uploadMetadataAsset('cover')}
+              onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
+              onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
+              uploadingAssetCover={coverUploading}
+              uploadingAssetBackdrop={backdropUploading}
+              uploadingAssetClearlogo={clearlogoUploading}
+              tags={editTags}
+              onTagsChange={setEditTags}
+              isSaving={isSaving}
+              saveDisabled={!editTitle.trim()}
+              onSave={saveEdit}
+              metadataPlugins={metadataPlugins}
+              selectedMetadataPlugin={selectedMetadataPlugin}
+              onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
+              metadataPluginParam={metadataPluginParam}
+              onMetadataPluginParamChange={setMetadataPluginParam}
+              isMetadataPluginRunning={isMetadataPluginRunning}
+              metadataPluginProgress={metadataPluginProgress}
+              metadataPluginMessage={metadataPluginMessage}
+              onRunMetadataPlugin={runMetadataPlugin}
+              rpcSelect={{
+                request: rpcSelectRequest,
+                selectedIndex: rpcSelectSelectedIndex,
+                remainingSeconds: rpcSelectRemainingSeconds,
+                onSelectIndex: setRpcSelectSelectedIndex,
+                onAbort: abortRpcSelect,
+                onSubmit: submitRpcSelect,
+              }}
+            />
+          ) : null}
 
           <ArchivePreviewCard
             metadata={metadata}

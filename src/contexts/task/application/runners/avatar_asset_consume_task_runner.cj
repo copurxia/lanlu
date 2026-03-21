@@ -1,6 +1,5 @@
 package lanlu.contexts.task.application.runners
 
-import stdx.log.*
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
@@ -19,44 +18,44 @@ public class AvatarAssetConsumeTaskRunner {
     public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         TaskIO.appendLog(taskId, "avatar_asset_consume task started")
 
-        let stagingAssetId = parseInt64Safely(parseField(parameters, "staging_asset_id"))
-        let targetType = parseField(parameters, "target_type").trimAscii().toAsciiLower()
-        let uploadUserId = parseInt64Safely(parseField(parameters, "upload_user_id"))
-        let originalFilename = parseField(parameters, "filename")
+        let stagingAssetId = TaskRunnerUtils.parseInt64Safely(TaskRunnerUtils.parseField(parameters, "staging_asset_id"))
+        let targetType = TaskRunnerUtils.parseField(parameters, "target_type").trimAscii().toAsciiLower()
+        let uploadUserId = TaskRunnerUtils.parseInt64Safely(TaskRunnerUtils.parseField(parameters, "upload_user_id"))
+        let originalFilename = TaskRunnerUtils.parseField(parameters, "filename")
 
         if (stagingAssetId <= 0) {
-            fail(taskId, "staging_asset_id is required")
+            TaskRunnerUtils.fail(taskId, "staging_asset_id is required")
             return
         }
         if (targetType != "user_avatar") {
-            fail(taskId, "target_type must be user_avatar")
+            TaskRunnerUtils.fail(taskId, "target_type must be user_avatar")
             return
         }
         if (uploadUserId <= 0) {
-            cleanupStagingAsset(context.paths.assetPath, stagingAssetId, "")
-            fail(taskId, "upload_user_id is required")
+            TaskRunnerUtils.cleanupStagingAssetInRoot(context.paths.assetPath, stagingAssetId, "")
+            TaskRunnerUtils.fail(taskId, "upload_user_id is required")
             return
         }
 
         let user = UserDao.getById(uploadUserId)
         if (user.id <= 0) {
-            cleanupStagingAsset(context.paths.assetPath, stagingAssetId, "")
-            fail(taskId, "user not found")
+            TaskRunnerUtils.cleanupStagingAssetInRoot(context.paths.assetPath, stagingAssetId, "")
+            TaskRunnerUtils.fail(taskId, "user not found")
             return
         }
 
         let staging = AssetDao.getById(stagingAssetId)
         if (staging.id <= 0) {
-            fail(taskId, "staging asset not found")
+            TaskRunnerUtils.fail(taskId, "staging asset not found")
             return
         }
 
-        let stagingExt = resolveAssetExt(staging, originalFilename)
+        let stagingExt = TaskRunnerUtils.resolveAssetExt(staging, originalFilename)
         let assetRoot = context.paths.assetPath
         let stagingPath = FileUtils.joinPath(assetRoot, "${stagingAssetId}.${stagingExt}")
         if (!exists(Path(stagingPath))) {
             let _ = AssetDao.deleteById(stagingAssetId)
-            fail(taskId, "staging asset file missing")
+            TaskRunnerUtils.fail(taskId, "staging asset file missing")
             return
         }
 
@@ -73,8 +72,8 @@ public class AvatarAssetConsumeTaskRunner {
         let (convertRes, thumbHashFromConvert) = ArchiveUtils.convertAvatarToAvifWithThumbHash(stagingPath, outputAvifPath, tempDir)
         if (!convertRes.success) {
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            cleanupStagingAsset(assetRoot, stagingAssetId, stagingExt)
-            fail(taskId, "avatar conversion failed")
+            TaskRunnerUtils.cleanupStagingAssetInRoot(assetRoot, stagingAssetId, stagingExt)
+            TaskRunnerUtils.fail(taskId, "avatar conversion failed")
             return
         }
 
@@ -87,8 +86,8 @@ public class AvatarAssetConsumeTaskRunner {
             case Some(id) => id
             case None =>
                 let _ = FileUtils.removeFileOrDirectory(tempDir)
-                cleanupStagingAsset(assetRoot, stagingAssetId, stagingExt)
-                fail(taskId, "failed to create avatar asset")
+                TaskRunnerUtils.cleanupStagingAssetInRoot(assetRoot, stagingAssetId, stagingExt)
+                TaskRunnerUtils.fail(taskId, "failed to create avatar asset")
                 return
         }
 
@@ -98,8 +97,8 @@ public class AvatarAssetConsumeTaskRunner {
         } catch (e: Exception) {
             let _ = AssetDao.deleteById(newAssetId)
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            cleanupStagingAsset(assetRoot, stagingAssetId, stagingExt)
-            fail(taskId, "failed to store avatar asset: ${e.message}")
+            TaskRunnerUtils.cleanupStagingAssetInRoot(assetRoot, stagingAssetId, stagingExt)
+            TaskRunnerUtils.fail(taskId, "failed to store avatar asset: ${e.message}")
             return
         }
 
@@ -107,8 +106,8 @@ public class AvatarAssetConsumeTaskRunner {
             try { remove(Path(finalPath)) } catch (_: Exception) {}
             let _ = AssetDao.deleteById(newAssetId)
             let _ = FileUtils.removeFileOrDirectory(tempDir)
-            cleanupStagingAsset(assetRoot, stagingAssetId, stagingExt)
-            fail(taskId, "failed to update user avatar")
+            TaskRunnerUtils.cleanupStagingAssetInRoot(assetRoot, stagingAssetId, stagingExt)
+            TaskRunnerUtils.fail(taskId, "failed to update user avatar")
             return
         }
 
@@ -121,7 +120,7 @@ public class AvatarAssetConsumeTaskRunner {
         }
 
         let _ = FileUtils.removeFileOrDirectory(tempDir)
-        cleanupStagingAsset(assetRoot, stagingAssetId, stagingExt)
+        TaskRunnerUtils.cleanupStagingAssetInRoot(assetRoot, stagingAssetId, stagingExt)
 
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -139,70 +138,4 @@ public class AvatarAssetConsumeTaskRunner {
         TaskIO.appendLog(taskId, "avatar_asset_consume completed: user=${uploadUserId.toString()} asset=${newAssetId.toString()}")
     }
 
-    private static func parseField(parameters: String, key: String): String {
-        let trimmed = parameters.trimAscii()
-        if (trimmed.size == 0) {
-            return ""
-        }
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) { return "" }
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let k = r.readName()
-                if (k == key) {
-                    return r.readValue<String>().trimAscii()
-                } else {
-                    r.skip()
-                }
-            }
-            r.endObject()
-        } catch (_: Exception) {}
-        return ""
-    }
-
-    private static func parseInt64Safely(value: String): Int64 {
-        if (value.size == 0) {
-            return 0
-        }
-        try {
-            return Int64.parse(value)
-        } catch (_: Exception) {
-            return 0
-        }
-    }
-
-    private static func resolveAssetExt(asset: AssetRow, filename: String): String {
-        if (asset.fileExt.trimAscii().size > 0) {
-            return asset.fileExt.trimAscii().toAsciiLower()
-        }
-        let ext = FileUtils.getFileExtensionWithoutDot(filename).trimAscii().toAsciiLower()
-        if (ext.size > 0) {
-            return ext
-        }
-        return "bin"
-    }
-
-    private static func cleanupStagingAsset(assetRoot: String, assetId: Int64, extHint: String): Unit {
-        if (assetId <= 0) {
-            return
-        }
-        let row = AssetDao.getById(assetId)
-        let ext = if (extHint.size > 0) { extHint }
-            else if (row.fileExt.trimAscii().size > 0) { row.fileExt.trimAscii().toAsciiLower() }
-            else { "bin" }
-        let path = FileUtils.joinPath(assetRoot, "${assetId}.${ext}")
-        try {
-            if (exists(Path(path))) {
-                try { remove(Path(path)) } catch (_: Exception) {}
-            }
-        } catch (_: Exception) {}
-        let _ = AssetDao.deleteById(assetId)
-    }
-
-    private static func fail(taskId: Int64, message: String): Unit {
-        TaskRunnerOutput.fail(taskId, message)
-    }
 }

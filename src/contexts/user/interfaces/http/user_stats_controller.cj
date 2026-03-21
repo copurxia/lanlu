@@ -2,8 +2,66 @@ package lanlu.contexts.user.interfaces.http
 
 import ignite.*
 import std.convert.*
+import stdx.encoding.json.stream.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.infrastructure.middleware.*
+import lanlu.shared.views.*
+
+class UserStatsDataView <: JsonSerializable {
+    let favoriteCount: Int64
+    let readCount: Int64
+    let totalPagesRead: Int64
+    let totalArchives: Int64
+
+    public init(favoriteCount: Int64, readCount: Int64, totalPagesRead: Int64, totalArchives: Int64) {
+        this.favoriteCount = favoriteCount
+        this.readCount = readCount
+        this.totalPagesRead = totalPagesRead
+        this.totalArchives = totalArchives
+    }
+
+    public func toJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("favoriteCount").writeValue(favoriteCount)
+        w.writeName("readCount").writeValue(readCount)
+        w.writeName("totalPagesRead").writeValue(totalPagesRead)
+        w.writeName("totalArchives").writeValue(totalArchives)
+        w.endObject()
+    }
+}
+
+class UserTrendItemView <: JsonSerializable {
+    let date: String
+    let count: Int64
+
+    public init(date: String, count: Int64) {
+        this.date = date
+        this.count = count
+    }
+
+    public func toJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("date").writeValue(date)
+        w.writeName("count").writeValue(count)
+        w.endObject()
+    }
+}
+
+class UserTrendDataView <: JsonSerializable {
+    let items: Array<UserTrendItemView>
+
+    public init(items: Array<UserTrendItemView>) {
+        this.items = items
+    }
+
+    public func toJson(w: JsonWriter): Unit {
+        w.startArray()
+        for (item in items) {
+            w.writeValue(item)
+        }
+        w.endArray()
+    }
+}
 
 /**
  * 用户统计控制器
@@ -22,19 +80,13 @@ public class UserStatsController {
                 let readCount = UserStatsDao.getReadCount(userId)
                 let totalPagesRead = UserStatsDao.getTotalPagesRead(userId)
                 let totalArchives = UserStatsDao.getTotalArchives()
-
-                var dataJson = "{"
-                dataJson += "\"favoriteCount\":${favoriteCount},"
-                dataJson += "\"readCount\":${readCount},"
-                dataJson += "\"totalPagesRead\":${totalPagesRead},"
-                dataJson += "\"totalArchives\":${totalArchives}"
-                dataJson += "}"
-
-                let result = "{\"operation\":\"get_user_stats\",\"data\":${dataJson},\"success\":1}"
-                ctx.json(result)
+                ResponseView.json(ctx, ApiResponse<UserStatsDataView>(
+                    200,
+                    "ok",
+                    Some(UserStatsDataView(favoriteCount, readCount, totalPagesRead, totalArchives))
+                ))
             case None =>
-                let errorResponse = "{\"operation\":\"get_user_stats\",\"error\":\"未登录\",\"success\":0}"
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, ApiResponse<String>(401, "未登录", None))
         }
     }
 
@@ -58,23 +110,13 @@ public class UserStatsController {
                 }
 
                 let trendData = UserStatsDao.getReadingTrend(userId, days)
-
-                var dataJson = "["
-                var isFirst = true
-                for (item in trendData) {
-                    if (!isFirst) {
-                        dataJson += ","
-                    }
-                    isFirst = false
-                    dataJson += "{\"date\":\"${item.date}\",\"count\":${item.count}}"
+                var items = Array<UserTrendItemView>(trendData.size, { _ => UserTrendItemView("", 0) })
+                for (i in 0..trendData.size) {
+                    items[i] = UserTrendItemView(trendData[i].date, trendData[i].count)
                 }
-                dataJson += "]"
-
-                let result = "{\"operation\":\"get_user_trend\",\"data\":${dataJson},\"success\":1}"
-                ctx.json(result)
+                ResponseView.json(ctx, ApiResponse<UserTrendDataView>(200, "ok", Some(UserTrendDataView(items))))
             case None =>
-                let errorResponse = "{\"operation\":\"get_user_trend\",\"error\":\"未登录\",\"success\":0}"
-                ctx.json(errorResponse)
+                ResponseView.json(ctx, ApiResponse<String>(401, "未登录", None))
         }
     }
 }

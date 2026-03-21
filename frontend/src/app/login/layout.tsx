@@ -1,7 +1,9 @@
+import { ServerInfoProvider } from '@/contexts/ServerInfoContext';
+
 export default function LoginLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return <ServerInfoProvider>{children}</ServerInfoProvider>;
 }

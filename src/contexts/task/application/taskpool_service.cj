@@ -274,7 +274,7 @@ public class TaskPoolService {
         match (task.taskType) {
             case "upload" =>
                 // upload 任务类型只是一个占位符，用于让 TaskPool 调度机制介入
-                // 实际上传由前端通过 /api/archives/upload/chunk 与 /complete 驱动。
+                // 实际上传由前端通过 /api/assets/upload/chunk 与上传结束动作驱动。
                 // 这里需要阻塞 worker，直到任务进入终态，确保上传并发受 TaskPool 限制。
                 let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 TaskIO.appendLog(task.id, "upload task is now running, waiting for complete/failed")

@@ -3,6 +3,7 @@
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'react';
 import type React from 'react';
+import dynamic from 'next/dynamic';
 import { ArchiveService } from '@/lib/services/archive-service';
 import type { Archive } from '@/types/archive';
 import { Button } from '@/components/ui/button';
@@ -10,12 +11,8 @@ import { Spinner } from '@/components/ui/spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { MediaInfoOverlay } from '@/components/reader/components/MediaInfoOverlay';
 import { ReaderFloatingControls } from '@/components/reader/components/ReaderFloatingControls';
-import { ReaderCollectionEndPage } from '@/components/reader/components/ReaderCollectionEndPage';
-import { ReaderPreloadArea } from '@/components/reader/components/ReaderPreloadArea';
-import { ReaderSidebar } from '@/components/reader/components/ReaderSidebar';
 import { ReaderSingleModeView } from '@/components/reader/components/ReaderSingleModeView';
 import { ReaderTopBar } from '@/components/reader/components/ReaderTopBar';
-import { ReaderWebtoonModeView } from '@/components/reader/components/ReaderWebtoonModeView';
 import { useReaderArchiveMetadata } from '@/components/reader/hooks/useReaderArchiveMetadata';
 import { useReaderHtmlPages } from '@/components/reader/hooks/useReaderHtmlPages';
 import { useReaderKeyboardNavigation } from '@/components/reader/hooks/useReaderKeyboardNavigation';
@@ -73,6 +70,19 @@ import { deriveReaderPosition } from '@/features/reader/application/use-cases/de
 import { mapPageDtosToReaderPageItems } from '@/features/reader/domain/mappers/page-dto-mapper';
 import { computeCollectionEndNextAction, computeCollectionEndReturnRealPage, computePrevBoundaryAction } from '@/features/reader/application/use-cases/compute-reader-boundary-navigation';
 import { useReaderSourceSession } from '@/features/reader/presentation/hooks/useReaderSourceSession';
+
+const ReaderSidebar = dynamic(
+  () => import('@/components/reader/components/ReaderSidebar').then((m) => m.ReaderSidebar)
+);
+const ReaderCollectionEndPage = dynamic(
+  () => import('@/components/reader/components/ReaderCollectionEndPage').then((m) => m.ReaderCollectionEndPage)
+);
+const ReaderPreloadArea = dynamic(
+  () => import('@/components/reader/components/ReaderPreloadArea').then((m) => m.ReaderPreloadArea)
+);
+const ReaderWebtoonModeView = dynamic(
+  () => import('@/components/reader/components/ReaderWebtoonModeView').then((m) => m.ReaderWebtoonModeView)
+);
 
 function ReaderContent() {
   type EndPageNextArchive = {
@@ -1637,6 +1647,7 @@ function ReaderContent() {
   }, [splitCoverMode, doublePageMode, currentPage, pages.length, isCurrentOrTailHtmlPage]);
 
   const displayArchiveTitle = activeSegment?.title || archive.archiveTitle;
+  const shouldRenderSidebar = sidebar.sidebarOpen || sidebar.sidebarLoading;
 
   if (loading) {
     return (
@@ -1714,21 +1725,23 @@ function ReaderContent() {
         ) : null}
 
         {/* 侧边栏导航 */}
-        <ReaderSidebar
-          open={sidebar.sidebarOpen}
-          allPages={pages}
-          sidebarScrollRef={sidebar.sidebarScrollRef}
-          sidebarLoading={sidebar.sidebarLoading}
-          isEpub={sidebar.isEpub}
-          sidebarDisplayPages={sidebar.sidebarDisplayPages}
-          currentPage={readingMode === 'webtoon' ? currentRealPage : currentPage}
-          pagesLength={pages.length}
-          canLoadMore={sidebar.sidebarLoadedCount < pages.length}
-          onSelectPage={sidebar.handleSidebarPageSelect}
-          onLoadMore={sidebar.handleLoadMoreSidebarPages}
-          onOpenChange={sidebar.setSidebarOpen}
-          t={t}
-        />
+        {shouldRenderSidebar ? (
+          <ReaderSidebar
+            open={sidebar.sidebarOpen}
+            allPages={pages}
+            sidebarScrollRef={sidebar.sidebarScrollRef}
+            sidebarLoading={sidebar.sidebarLoading}
+            isEpub={sidebar.isEpub}
+            sidebarDisplayPages={sidebar.sidebarDisplayPages}
+            currentPage={readingMode === 'webtoon' ? currentRealPage : currentPage}
+            pagesLength={pages.length}
+            canLoadMore={sidebar.sidebarLoadedCount < pages.length}
+            onSelectPage={sidebar.handleSidebarPageSelect}
+            onLoadMore={sidebar.handleLoadMoreSidebarPages}
+            onOpenChange={sidebar.setSidebarOpen}
+            t={t}
+          />
+        ) : null}
 
         {/* 单页模式 */}
  	        <ReaderSingleModeView
