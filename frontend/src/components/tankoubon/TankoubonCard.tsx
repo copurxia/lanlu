@@ -10,12 +10,22 @@ interface TankoubonCardProps {
   tankoubon: Tankoubon;
   priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
   disableContentVisibility?: boolean;
+  selectable?: boolean;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (selected: boolean) => void;
+  onRequestEnterSelection?: () => void;
 }
 
 export function TankoubonCard({
   tankoubon,
   priority = false,
   disableContentVisibility = false,
+  selectable = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+  onRequestEnterSelection,
 }: TankoubonCardProps) {
   const { t } = useLanguage();
   const firstArchiveId = tankoubon.children?.[0];
@@ -54,6 +64,11 @@ export function TankoubonCard({
         </Badge>
       }
       onFavoriteToggle={handleFavoriteToggle}
+      selectable={selectable}
+      selectionMode={selectionMode}
+      selected={selected}
+      onToggleSelect={onToggleSelect}
+      onRequestEnterSelection={onRequestEnterSelection}
     />
   );
 }

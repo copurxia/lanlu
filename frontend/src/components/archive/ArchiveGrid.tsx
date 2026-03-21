@@ -16,13 +16,27 @@ interface ArchiveGridProps {
   variant?: 'default' | 'home' | 'random';
   preloadTankoubonDetails?: boolean; // 新增选项
   priorityCount?: number; // 首屏优先加载的图片数量（用于 LCP 优化）
+  selectable?: boolean;
+  selectionMode?: boolean;
+  selectedArchives?: Set<string>;
+  selectedTankoubons?: Set<string>;
+  onToggleArchiveSelect?: (id: string, selected: boolean) => void;
+  onToggleTankoubonSelect?: (id: string, selected: boolean) => void;
+  onRequestEnterSelection?: () => void;
 }
 
 export function ArchiveGrid({
   archives,
   variant = 'default',
   preloadTankoubonDetails = true,  // 默认启用预加载
-  priorityCount = 0  // 默认不优先加载，首页可传入首屏可见卡片数
+  priorityCount = 0,  // 默认不优先加载，首页可传入首屏可见卡片数
+  selectable = false,
+  selectionMode = false,
+  selectedArchives,
+  selectedTankoubons,
+  onToggleArchiveSelect,
+  onToggleTankoubonSelect,
+  onRequestEnterSelection,
 }: ArchiveGridProps) {
   const { t } = useLanguage();
 
@@ -85,6 +99,11 @@ export function ArchiveGrid({
               key={item.tankoubon_id}
               tankoubon={item}
               priority={index < priorityCount}
+              selectable={selectable}
+              selectionMode={selectionMode}
+              selected={selectedTankoubons?.has(item.tankoubon_id) ?? false}
+              onToggleSelect={(selected) => onToggleTankoubonSelect?.(item.tankoubon_id, selected)}
+              onRequestEnterSelection={onRequestEnterSelection}
             />
           );
         } else {
@@ -94,6 +113,11 @@ export function ArchiveGrid({
               archive={item}
               index={index}
               priority={index < priorityCount}
+              selectable={selectable}
+              selectionMode={selectionMode}
+              selected={selectedArchives?.has(item.arcid) ?? false}
+              onToggleSelect={(selected) => onToggleArchiveSelect?.(item.arcid, selected)}
+              onRequestEnterSelection={onRequestEnterSelection}
             />
           );
         }

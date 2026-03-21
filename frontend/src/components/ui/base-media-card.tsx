@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { BookOpen, CheckCircle, Download, Edit, Eye, Heart, RotateCcw, Trash2 } from 'lucide-react'
+import { BookOpen, Check, CheckCircle, Download, Edit, Eye, Heart, RotateCcw, Square, Trash2 } from 'lucide-react'
 import { ArchiveService } from '@/lib/services/archive-service'
 import { TankoubonService } from '@/lib/services/tankoubon-service'
 import { ChunkedUploadService } from '@/lib/services/chunked-upload-service'
@@ -57,6 +57,11 @@ export interface BaseMediaCardProps {
 
   // 收藏回调
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
+  selectable?: boolean
+  selectionMode?: boolean
+  selected?: boolean
+  onToggleSelect?: (selected: boolean) => void
+  onRequestEnterSelection?: () => void
 }
 
 function toTagList(raw?: string): string[] {
@@ -102,6 +107,11 @@ export function BaseMediaCard({
   hideMetaOnMobile = false,
   disableContentVisibility = false,
   onFavoriteToggle,
+  selectable = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+  onRequestEnterSelection,
 }: BaseMediaCardProps) {
   const router = useRouter()
   const { t } = useLanguage()
@@ -291,6 +301,13 @@ export function BaseMediaCard({
     router.push(readerPath)
   }, [readerPath, router])
 
+  const toggleSelected = React.useCallback((nextSelected?: boolean) => {
+    if (!selectable || !onToggleSelect) return
+    const value = typeof nextSelected === 'boolean' ? nextSelected : !selected
+    if (value && !selectionMode) onRequestEnterSelection?.()
+    onToggleSelect(value)
+  }, [onRequestEnterSelection, onToggleSelect, selectable, selected, selectionMode])
+
   const toggleFavorite = React.useCallback(async () => {
     if (favoriteLoading || !onFavoriteToggle) return
     setFavoriteLoading(true)
@@ -314,6 +331,7 @@ export function BaseMediaCard({
   const handleContextMenu = (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (selectionMode) return
     setMenuPosition({ x: e.clientX, y: e.clientY })
     setMenuOpen(true)
   }
@@ -849,6 +867,19 @@ export function BaseMediaCard({
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" side="bottom" className="w-52">
+          {selectable && !selectionMode && (
+            <>
+              <DropdownMenuItem
+                onSelect={() => {
+                  toggleSelected(true)
+                }}
+              >
+                <Square className="mr-2 h-4 w-4" />
+                {t('home.useMultiSelect')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           <DropdownMenuItem disabled={!readerTargetId} onSelect={() => navigateToReader()}>
             <BookOpen className="mr-2 h-4 w-4" />
             {t('archive.startReading')}
@@ -917,7 +948,17 @@ export function BaseMediaCard({
               }),
         }}
         title={hoverTitleParts.length > 0 ? `${displayTitle}\n${hoverTitleParts.join('\n')}` : displayTitle}
-        onClick={navigateToReader}
+        onClick={(e) => {
+          if (selectionMode && selectable) {
+            e.preventDefault()
+            toggleSelected()
+            return
+          }
+          navigateToReader()
+        }}
+        onContextMenuCapture={(e) => {
+          e.preventDefault()
+        }}
         onContextMenu={handleContextMenu}
       >
         <Card className="overflow-hidden bg-card/70 transition-shadow hover:shadow-lg dark:bg-card/70">
@@ -927,10 +968,18 @@ export function BaseMediaCard({
                 src={imageSrc}
                 alt={displayTitle}
                 fill
-                className="object-cover"
+                className="object-cover select-none"
                 priority={priority}
                 sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, (max-width: 1024px) 25vw, (max-width: 1280px) 20vw, 16vw"
                 decoding="async"
+                draggable={false}
+                style={{
+                  WebkitTouchCallout: 'none',
+                  WebkitUserSelect: 'none',
+                  userSelect: 'none',
+                }}
+                onContextMenu={(e) => e.preventDefault()}
+                onDragStart={(e) => e.preventDefault()}
                 onError={() => setImageError(true)}
               />
             ) : (
@@ -938,9 +987,40 @@ export function BaseMediaCard({
                 <span className="text-muted-foreground">{t('archive.noCover')}</span>
               </div>
             )}
+            {selectionMode && !selected && (
+              <div className="absolute inset-0 z-[1] bg-black/45 pointer-events-none" />
+            )}
 
             {/* Badges */}
             {badge && <div className="absolute top-2 left-2 z-30">{badge}</div>}
+            {selectable && (
+              <div
+                className={[
+                  "absolute top-2 left-2 z-40 transition-all",
+                  selectionMode || selected
+                    ? "opacity-100 translate-y-0 pointer-events-auto"
+                    : "opacity-0 -translate-y-1 pointer-events-none md:group-hover:opacity-100 md:group-hover:translate-y-0 md:group-hover:pointer-events-auto",
+                ].join(" ")}
+              >
+                <button
+                  type="button"
+                  className={[
+                    "inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur-sm transition-colors",
+                    selected
+                      ? "bg-primary text-primary-foreground border-primary/60 shadow-sm"
+                      : "bg-black/50 text-white border-white/40 hover:bg-black/65",
+                  ].join(" ")}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    toggleSelected()
+                  }}
+                  aria-label={selected ? t('home.unselectItem') : t('home.selectItem')}
+                  title={selected ? t('home.unselectItem') : t('home.selectItem')}
+                >
+                  {selected ? <Check className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                </button>
+              </div>
+            )}
             {isNew && (
               <Badge className="absolute top-2 right-2 z-30 bg-red-500">
                 {t('archive.new')}
@@ -954,9 +1034,9 @@ export function BaseMediaCard({
                 // Align with the tag/summary padding (`p-3`) so chips and buttons share the same left edge.
                 "absolute bottom-3 left-3 z-20 items-center gap-2",
                 // Default hidden on all viewports; show on hover/focus for pointer devices.
-                "flex opacity-0 translate-y-1 transition-all",
+                "flex",
+                "opacity-0 translate-y-1 transition-all",
                 "group-hover:opacity-100 group-hover:translate-y-0",
-                "group-focus-within:opacity-100 group-focus-within:translate-y-0",
               ].filter(Boolean).join(" ")}
               onClick={(e) => e.stopPropagation()}
             >
@@ -995,7 +1075,7 @@ export function BaseMediaCard({
               className={[
                 "pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent transition-opacity",
                 // Default hidden on all viewports; show on hover/focus behind floating actions / tag chips.
-                "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                "opacity-0 group-hover:opacity-100",
               ].join(" ")}
             >
               {(allTags.length > 0 || displaySummary) && (
