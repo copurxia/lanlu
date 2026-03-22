@@ -49,28 +49,44 @@ export const MemoizedVideo = memo(
       src,
       className,
       style,
+      showNativeControls = false,
       onLoadedData,
       onError,
     }: {
       src: string;
       className?: string;
       style?: React.CSSProperties;
+      showNativeControls?: boolean;
       onLoadedData?: () => void;
       onError?: () => void;
     },
     ref: React.ForwardedRef<HTMLVideoElement>
   ) {
+    const handleTogglePlay = (e: React.MouseEvent<HTMLVideoElement>) => {
+      e.stopPropagation();
+      const video = e.currentTarget;
+      if (video.paused) {
+        void video.play().catch(() => {});
+        return;
+      }
+      video.pause();
+    };
+
     return (
       <video
         ref={ref}
         src={src}
-        controls
+        controls={showNativeControls}
         playsInline
         preload="metadata"
         className={className}
         style={style}
         onLoadedData={onLoadedData}
         onError={onError}
+        onClick={showNativeControls ? undefined : handleTogglePlay}
+        onTouchStart={(e) => {
+          if (!showNativeControls) e.stopPropagation();
+        }}
       />
     );
   })

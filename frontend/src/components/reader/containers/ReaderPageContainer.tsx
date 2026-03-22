@@ -11,6 +11,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { MediaInfoOverlay } from '@/components/reader/components/MediaInfoOverlay';
 import { ReaderFloatingControls } from '@/components/reader/components/ReaderFloatingControls';
+import type { ReaderProgressLane } from '@/components/reader/components/ReaderFloatingControls';
 import { ReaderSingleModeView } from '@/components/reader/components/ReaderSingleModeView';
 import { ReaderTopBar } from '@/components/reader/components/ReaderTopBar';
 import { useReaderArchiveMetadata } from '@/components/reader/hooks/useReaderArchiveMetadata';
@@ -56,6 +57,8 @@ import {
   Info,
   MousePointerClick,
   Link2,
+  Film,
+  Clapperboard,
 } from 'lucide-react';
 import Link from 'next/link';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
@@ -67,6 +70,7 @@ import { logger } from '@/lib/utils/logger';
 import { buildReaderStream } from '@/features/reader/application/use-cases/build-reader-stream';
 import { computeReaderAdjacentPage } from '@/features/reader/application/use-cases/compute-reader-adjacent-page';
 import { deriveReaderPosition } from '@/features/reader/application/use-cases/derive-reader-position';
+import { buildReaderProgressLaneSpecs } from '@/features/reader/application/use-cases/build-reader-progress-lane-specs';
 import { mapPageDtosToReaderPageItems } from '@/features/reader/domain/mappers/page-dto-mapper';
 import { computeCollectionEndNextAction, computeCollectionEndReturnRealPage, computePrevBoundaryAction } from '@/features/reader/application/use-cases/compute-reader-boundary-navigation';
 import { useReaderSourceSession } from '@/features/reader/presentation/hooks/useReaderSourceSession';
@@ -83,6 +87,17 @@ const ReaderPreloadArea = dynamic(
 const ReaderWebtoonModeView = dynamic(
   () => import('@/components/reader/components/ReaderWebtoonModeView').then((m) => m.ReaderWebtoonModeView)
 );
+
+function formatVideoClock(seconds: number): string {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? Math.floor(seconds) : 0;
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = safe % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
 
 function ReaderContent() {
   type EndPageNextArchive = {
@@ -127,6 +142,10 @@ function ReaderContent() {
   const nextArchiveCandidateRequestRef = useRef<Map<string, Promise<EndPageNextArchive | null>>>(new Map());
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [expandedProgressLaneId, setExpandedProgressLaneId] = useState<string | null>(null);
+  const [videoTimelineByPageIndex, setVideoTimelineByPageIndex] = useState<
+    Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number }>
+  >({});
   const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
   const [prevArchiveId, setPrevArchiveId] = useState<string | null>(null);
   const [nextArchiveByArchiveId, setNextArchiveByArchiveId] = useState<Record<string, EndPageNextArchive | null>>({});
@@ -1308,6 +1327,199 @@ function ReaderContent() {
     ]
   );
 
+  const progressLaneSpecs = useMemo(
+    () =>
+      buildReaderProgressLaneSpecs({
+        readingMode,
+        doublePageMode,
+        splitCoverMode,
+        isHtmlSpreadView,
+        currentPage: readingMode === 'webtoon' ? currentRealPage : currentPage,
+        pagesLength: pages.length,
+        getPageType: (pageIndex) => pages[pageIndex]?.type ?? null,
+      }),
+    [currentPage, currentRealPage, doublePageMode, isHtmlSpreadView, pages, readingMode, splitCoverMode]
+  );
+
+  const videoLanePageIndexes = useMemo(
+    () =>
+      progressLaneSpecs
+        .filter((lane) => lane.kind === 'video' && typeof lane.videoPageIndex === 'number')
+        .map((lane) => lane.videoPageIndex as number),
+    [progressLaneSpecs]
+  );
+
+  useEffect(() => {
+    if (videoLanePageIndexes.length <= 0) return;
+
+    const cleanups: Array<() => void> = [];
+    for (const pageIndex of videoLanePageIndexes) {
+      const el = videoRefs.current[pageIndex];
+      if (!el) continue;
+
+      const sync = () => {
+        const nextCurrent = Number.isFinite(el.currentTime) && el.currentTime >= 0 ? el.currentTime : 0;
+        const nextDuration = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : 0;
+        const nextPaused = el.paused;
+        const nextMuted = el.muted;
+        const nextVolume = Number.isFinite(el.volume) ? Math.max(0, Math.min(1, el.volume)) : 1;
+        setVideoTimelineByPageIndex((prev) => {
+          const previous = prev[pageIndex];
+          if (
+            previous &&
+            previous.currentTime === nextCurrent &&
+            previous.duration === nextDuration &&
+            previous.paused === nextPaused &&
+            previous.muted === nextMuted &&
+            previous.volume === nextVolume
+          ) {
+            return prev;
+          }
+          return {
+            ...prev,
+            [pageIndex]: {
+              currentTime: nextCurrent,
+              duration: nextDuration,
+              paused: nextPaused,
+              muted: nextMuted,
+              volume: nextVolume,
+            },
+          };
+        });
+      };
+
+      sync();
+      el.addEventListener('timeupdate', sync);
+      el.addEventListener('durationchange', sync);
+      el.addEventListener('loadedmetadata', sync);
+      el.addEventListener('seeked', sync);
+      el.addEventListener('play', sync);
+      el.addEventListener('pause', sync);
+      el.addEventListener('volumechange', sync);
+
+      cleanups.push(() => {
+        el.removeEventListener('timeupdate', sync);
+        el.removeEventListener('durationchange', sync);
+        el.removeEventListener('loadedmetadata', sync);
+        el.removeEventListener('seeked', sync);
+        el.removeEventListener('play', sync);
+        el.removeEventListener('pause', sync);
+        el.removeEventListener('volumechange', sync);
+      });
+    }
+
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [videoLanePageIndexes]);
+
+  const progressLanes = useMemo<ReaderProgressLane[]>(() => {
+    const hasVideoLane = progressLaneSpecs.some((lane) => lane.kind === 'video');
+    if (!hasVideoLane) return [];
+
+    return progressLaneSpecs.map((lane) => {
+      if (lane.kind === 'book') {
+        return {
+          id: 'book',
+          kind: 'book',
+          icon: Book,
+          label: lane.label,
+          value: sliderCurrentPage,
+          min: 0,
+          max: Math.max(0, sliderTotalPages - 1),
+          step: 1,
+          valueText: `${sliderCurrentPage + 1}/${sliderTotalPages}`,
+          onChange: (nextValue: number) => handleSliderChangePage(Math.round(nextValue)),
+        };
+      }
+
+      const pageIndex = lane.videoPageIndex ?? -1;
+      const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
+      const snapshot = pageIndex >= 0 ? videoTimelineByPageIndex[pageIndex] : undefined;
+      const currentTime =
+        snapshot?.currentTime ??
+        (videoElement && Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0);
+      const duration =
+        snapshot?.duration ??
+        (videoElement && Number.isFinite(videoElement.duration) && videoElement.duration > 0 ? videoElement.duration : 0);
+      const isPlaying = snapshot ? !snapshot.paused : Boolean(videoElement && !videoElement.paused);
+      const isMuted = snapshot?.muted ?? Boolean(videoElement?.muted);
+      const volume = snapshot?.volume ?? (videoElement && Number.isFinite(videoElement.volume) ? videoElement.volume : 1);
+      const max = duration > 0 ? duration : 1;
+
+      return {
+        id: lane.id,
+        kind: 'video',
+        icon: lane.id === 'video-right' ? Clapperboard : Film,
+        label: lane.label,
+        value: Math.max(0, Math.min(max, currentTime)),
+        min: 0,
+        max,
+        step: 0.1,
+        valueText: `${formatVideoClock(currentTime)}/${formatVideoClock(duration)}`,
+        onChange: (nextValue: number) => {
+          if (!videoElement) return;
+          const clamped = Math.max(0, Math.min(max, nextValue));
+          videoElement.currentTime = clamped;
+          setVideoTimelineByPageIndex((prev) => ({
+            ...prev,
+            [pageIndex]: {
+              currentTime: clamped,
+              duration,
+              paused: videoElement.paused,
+              muted: videoElement.muted,
+              volume: Number.isFinite(videoElement.volume) ? videoElement.volume : 1,
+            },
+          }));
+        },
+        isPlaying,
+        isMuted,
+        volume,
+        onTogglePlay: () => {
+          if (!videoElement) return;
+          if (videoElement.paused) {
+            void videoElement.play().catch(() => {});
+          } else {
+            videoElement.pause();
+          }
+        },
+        onSeekRelative: (deltaSeconds: number) => {
+          if (!videoElement) return;
+          const current = Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0;
+          const target = Math.max(0, Math.min(max, current + deltaSeconds));
+          videoElement.currentTime = target;
+        },
+        onToggleMute: () => {
+          if (!videoElement) return;
+          videoElement.muted = !videoElement.muted;
+        },
+        onVolumeChange: (nextVolume: number) => {
+          if (!videoElement) return;
+          const target = Math.max(0, Math.min(1, nextVolume));
+          videoElement.volume = target;
+          if (target > 0 && videoElement.muted) {
+            videoElement.muted = false;
+          }
+        },
+      };
+    });
+  }, [progressLaneSpecs, sliderCurrentPage, sliderTotalPages, handleSliderChangePage, videoTimelineByPageIndex]);
+
+  useEffect(() => {
+    if (progressLanes.length <= 0) {
+      setExpandedProgressLaneId(null);
+      return;
+    }
+    if (expandedProgressLaneId && progressLanes.some((lane) => lane.id === expandedProgressLaneId)) {
+      return;
+    }
+    setExpandedProgressLaneId(progressLanes[0]?.id ?? null);
+  }, [expandedProgressLaneId, progressLanes]);
+
+  const handleToggleProgressLane = useCallback((laneId: string) => {
+    setExpandedProgressLaneId((prev) => (prev === laneId ? null : laneId));
+  }, []);
+
   // 处理双击放大
   const handleDoubleClick = useCallback((e: React.MouseEvent) => {
     if (!doubleTapZoom) return;
@@ -1705,6 +1917,9 @@ function ReaderContent() {
 	        currentPage={sliderCurrentPage}
 	        totalPages={sliderTotalPages}
 	        onChangePage={handleSliderChangePage}
+          progressLanes={progressLanes}
+          expandedLaneId={expandedProgressLaneId}
+          onToggleLane={handleToggleProgressLane}
 	        settingsOpen={settingsOpen}
 	        onSettingsOpenChange={setSettingsOpen}
 	        archiveTitle={displayArchiveTitle}

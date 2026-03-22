@@ -10,10 +10,15 @@ interface SliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 
   max?: number
   min?: number
   step?: number
+  trackClassName?: string
+  rangeClassName?: string
 }
 
 const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
-  ({ className, value = [0], onValueChange, max = 100, min = 0, step = 1, ...props }, ref) => {
+  (
+    { className, value = [0], onValueChange, max = 100, min = 0, step = 1, trackClassName, rangeClassName, ...props },
+    ref
+  ) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = [parseFloat(e.target.value)];
       onValueChange?.(newValue);
@@ -21,9 +26,9 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
 
     return (
       <div className={cn("relative flex w-full touch-none select-none items-center", className)}>
-        <div className="relative h-2 w-full grow overflow-hidden rounded-full bg-secondary">
+        <div className={cn("relative h-2 w-full grow overflow-hidden rounded-full bg-secondary", trackClassName)}>
           <div 
-            className="absolute h-full bg-primary"
+            className={cn("absolute h-full bg-primary", rangeClassName)}
             style={{ width: `${((value[0] - min) / (max - min)) * 100}%` }}
           />
         </div>

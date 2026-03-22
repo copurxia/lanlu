@@ -133,7 +133,7 @@ export function ReaderSettingsSheet({
             rounded-full h-11 w-11 p-1
             transition-all duration-150 ease-out
             hover:scale-110 active:scale-95
-            text-muted-foreground hover:text-foreground hover:bg-accent
+            text-foreground/70 hover:text-foreground hover:bg-white/30 hover:border hover:border-white/60
             will-change-transform
           `}
           title={t('reader.settings')}
