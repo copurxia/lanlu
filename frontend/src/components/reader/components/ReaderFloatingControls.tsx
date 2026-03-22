@@ -7,7 +7,7 @@ import type React from 'react';
 
 export type ReaderProgressLane = {
   id: string;
-  kind: 'book' | 'video';
+  kind: 'book' | 'video' | 'audio';
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: number;
@@ -115,7 +115,7 @@ export function ReaderFloatingControls({
                       ${isExpanded ? 'max-w-[84vw] sm:max-w-[560px] opacity-100 scale-100' : 'max-w-0 opacity-0 scale-95'}
                     `}
                   >
-                    {lane.kind === 'video' ? (
+                    {lane.kind === 'video' || lane.kind === 'audio' ? (
                       <>
                         <Button
                           variant="ghost"
@@ -161,7 +161,7 @@ export function ReaderFloatingControls({
                       {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
                     </span>
 
-                    {lane.kind === 'video' ? (
+                    {lane.kind === 'video' || lane.kind === 'audio' ? (
                       <>
                         <Button
                           variant="ghost"

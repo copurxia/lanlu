@@ -77,12 +77,12 @@ export function ReaderTopBar({
 
           {archiveTitle && (
             <div
-              className={`hidden lg:flex items-center justify-center flex-1 px-4 transition-all duration-250 ease-out delay-75 ${
+              className={`flex items-center justify-center flex-1 min-w-0 px-2 sm:px-4 transition-all duration-250 ease-out delay-75 ${
                 showToolbar ? 'opacity-100 scale-100' : 'opacity-0 scale-95'
               }`}
             >
               <h1
-                className="text-sm font-medium text-foreground truncate max-w-md text-center"
+                className="text-xs sm:text-sm font-medium text-foreground truncate max-w-[42vw] sm:max-w-md text-center"
                 title={archiveTitle}
               >
                 {archiveTitle}

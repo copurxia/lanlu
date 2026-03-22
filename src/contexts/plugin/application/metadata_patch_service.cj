@@ -225,6 +225,90 @@ public class MetadataPatchService {
         }
     }
 
+    private static func readExtraInt64(extraData: String, key: String): Int64 {
+        let normalized = extraData.trimAscii()
+        if (normalized.size == 0 || normalized == "null") {
+            return 0
+        }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(normalized.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return 0
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == key) {
+                    let raw = readJsonScalarAsString(r).trimAscii()
+                    try {
+                        let parsed = Int64.parse(raw)
+                        return if (parsed > 0) { parsed } else { 0 }
+                    } catch (_: Exception) {
+                        return 0
+                    }
+                }
+                r.skip()
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return 0
+    }
+
+    private static func writeExtraInt64(extraData: String, key: String, value: Int64, provided: Bool): String {
+        if (!provided) {
+            return extraData
+        }
+
+        let fields = HashMap<String, String>()
+        let normalized = extraData.trimAscii()
+        if (normalized.size > 0 && normalized != "null") {
+            try {
+                var buf = ByteBuffer()
+                unsafe { buf.write(normalized.rawData()) }
+                let r = JsonReader(buf)
+                if (r.peek() == Some(BeginObject)) {
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let name = r.readName().trimAscii()
+                        if (name.size == 0) {
+                            r.skip()
+                            continue
+                        }
+                        let rawValue = String.fromUtf8(r.readValueBytes())
+                        fields[name] = rawValue
+                    }
+                    r.endObject()
+                }
+            } catch (_: Exception) {}
+        }
+
+        if (value > 0) {
+            fields[key] = value.toString()
+        } else {
+            fields.remove(key)
+        }
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        for ((name, rawValue) in fields) {
+            if (name.trimAscii().size == 0) {
+                continue
+            }
+            w.writeName(name)
+            if (rawValue.trimAscii().size == 0) {
+                w.writeValue("")
+            } else {
+                w.jsonValue(rawValue)
+            }
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
     private static func isSyntheticEntryPath(entryPath: String): Bool {
         let trimmed = entryPath.trimAscii()
         return trimmed.startsWith("__page_")
@@ -286,6 +370,11 @@ public class MetadataPatchService {
                 try { return Int32.parse(s) } catch (_: Exception) { return 0 }
             }
 
+            func readInt64Flexible(): Int64 {
+                let s = readStringFlexible().trimAscii()
+                try { return Int64.parse(s) } catch (_: Exception) { return 0 }
+            }
+
             func readTagsFlexible(): String {
                 match (r.peek()) {
                     case Some(BeginArray) =>
@@ -321,6 +410,12 @@ public class MetadataPatchService {
                         case "title" => patch.title = readStringFlexible()
                         case "description" => patch.description = readStringFlexible()
                         case "thumb" => patch.thumb = readStringFlexible().trimAscii()
+                        case "lyrics" =>
+                            patch.lyrics = readStringFlexible().trimAscii()
+                            patch.lyricsProvided = true
+                        case "lyrics_asset_id" =>
+                            patch.lyricsAssetId = readInt64Flexible()
+                            patch.lyricsAssetIdProvided = true
                         case "release_at" =>
                             patch.releaseAt = readStringFlexible().trimAscii()
                             patch.releaseAtProvided = true
@@ -623,6 +718,10 @@ public class MetadataPatchService {
             }
             if (meta.thumb_asset_id > 0) {
                 w.writeName("thumb").writeValue(meta.thumb_asset_id)
+            }
+            let pageLyricsAssetId = readExtraInt64(meta.extra_data, "lyrics_asset_id")
+            if (pageLyricsAssetId > 0) {
+                w.writeName("lyrics_asset_id").writeValue(pageLyricsAssetId)
             }
             if (meta.sort_index > 0) {
                 w.writeName("order_index").writeValue(meta.sort_index)
@@ -1250,6 +1349,57 @@ public class MetadataPatchService {
                     }
                 } else {
                     logWarn(taskId, "skip page thumb patch without metadata namespace archive=${archiveId}, path=${entryPath}")
+                }
+            }
+
+            var oldLyricsAssetId = readExtraInt64(item.extra_data, "lyrics_asset_id")
+            if (patch.lyricsAssetIdProvided || patch.lyricsProvided) {
+                var nextLyricsAssetId = oldLyricsAssetId
+                var shouldApplyLyricsField = true
+                if (patch.lyricsAssetIdProvided) {
+                    nextLyricsAssetId = if (patch.lyricsAssetId > 0) { patch.lyricsAssetId } else { 0 }
+                } else {
+                    let patchLyrics = patch.lyrics.trimAscii()
+                    if (patchLyrics.size == 0) {
+                        nextLyricsAssetId = 0
+                    } else {
+                        let directLyricsAssetId = parsePositiveAssetId(patchLyrics)
+                        if (directLyricsAssetId > 0) {
+                            nextLyricsAssetId = directLyricsAssetId
+                        } else if (pluginNamespace.trimAscii().size > 0) {
+                            let pageToken = if (item.page_number > 0) {
+                                item.page_number.toString()
+                            } else if (item.entry_path.trimAscii().size > 0) {
+                                item.entry_path.trimAscii().replace("/", "_")
+                            } else {
+                                DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
+                            }
+                            let (okLyrics, newLyricsAssetId, lyricsErr) = PluginTaskService.installRawAssetFromPluginPath(
+                                patchLyrics,
+                                pluginNamespace,
+                                "page_lyrics",
+                                "${archiveId}_${pageToken}.lrc"
+                            )
+                            if (okLyrics && newLyricsAssetId > 0) {
+                                nextLyricsAssetId = newLyricsAssetId
+                                cleanupNewAssetIds.add(newLyricsAssetId)
+                            } else {
+                                shouldApplyLyricsField = false
+                                logWarn(taskId, "failed to install page lyrics from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}): ${lyricsErr}")
+                            }
+                        } else {
+                            shouldApplyLyricsField = false
+                            logWarn(taskId, "skip page lyrics patch without metadata namespace archive=${archiveId}, path=${entryPath}")
+                        }
+                    }
+                }
+
+                if (shouldApplyLyricsField) {
+                    item.extra_data = writeExtraInt64(item.extra_data, "lyrics_asset_id", nextLyricsAssetId, true)
+                    if (oldLyricsAssetId > 0 && oldLyricsAssetId != nextLyricsAssetId) {
+                        deleteOldAssetIds.add(oldLyricsAssetId)
+                    }
+                    oldLyricsAssetId = nextLyricsAssetId
                 }
             }
 

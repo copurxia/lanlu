@@ -1,12 +1,18 @@
 import type { ReaderContentItemType } from '@/features/reader/domain/models/reader-item';
 
-export type ReaderProgressLaneId = 'book' | 'video-left' | 'video-right' | (string & {});
+export type ReaderProgressLaneId =
+  | 'book'
+  | 'video-left'
+  | 'video-right'
+  | 'audio-left'
+  | 'audio-right'
+  | (string & {});
 
 export type ReaderProgressLaneSpec = {
   id: ReaderProgressLaneId;
-  kind: 'book' | 'video';
+  kind: 'book' | 'video' | 'audio';
   label: string;
-  videoPageIndex?: number;
+  mediaPageIndex?: number;
 };
 
 export type BuildReaderProgressLaneSpecsInput = {
@@ -32,22 +38,35 @@ export function buildReaderProgressLaneSpecs({
 }: BuildReaderProgressLaneSpecsInput): ReaderProgressLaneSpec[] {
   const specs: ReaderProgressLaneSpec[] = [];
 
-  const tryAddVideoLane = (id: ReaderProgressLaneId, label: string, pageIndex: number) => {
+  const tryAddMediaLane = (id: ReaderProgressLaneId, pageIndex: number, shortLabel: string) => {
     if (pageIndex < 0 || pageIndex >= pagesLength) return;
-    if (getPageType(pageIndex) !== 'video') return;
+    const pageType = getPageType(pageIndex);
+    if (pageType !== 'video' && pageType !== 'audio') return;
+    const kind = pageType === 'audio' ? 'audio' : 'video';
+    const laneLabel = (kind === 'audio' ? `Audio ${shortLabel}` : `Video ${shortLabel}`).trim();
     specs.push({
       id,
-      kind: 'video',
-      label,
-      videoPageIndex: pageIndex,
+      kind,
+      label: laneLabel,
+      mediaPageIndex: pageIndex,
     });
   };
 
   if (readingMode === 'webtoon') {
-    tryAddVideoLane('video-left', 'Video', currentPage);
+    const pageType = getPageType(currentPage);
+    if (pageType === 'audio') {
+      tryAddMediaLane('audio-left', currentPage, '');
+    } else {
+      tryAddMediaLane('video-left', currentPage, '');
+    }
   } else {
     const leftPage = currentPage;
-    tryAddVideoLane('video-left', 'Video L', leftPage);
+    const leftType = getPageType(leftPage);
+    if (leftType === 'audio') {
+      tryAddMediaLane('audio-left', leftPage, 'L');
+    } else {
+      tryAddMediaLane('video-left', leftPage, 'L');
+    }
 
     const hasRightPage =
       doublePageMode &&
@@ -56,7 +75,13 @@ export function buildReaderProgressLaneSpecs({
       currentPage + 1 < pagesLength;
 
     if (hasRightPage) {
-      tryAddVideoLane('video-right', 'Video R', currentPage + 1);
+      const rightPage = currentPage + 1;
+      const rightType = getPageType(rightPage);
+      if (rightType === 'audio') {
+        tryAddMediaLane('audio-right', rightPage, 'R');
+      } else {
+        tryAddMediaLane('video-right', rightPage, 'R');
+      }
     }
   }
 

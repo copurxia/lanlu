@@ -128,6 +128,8 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
     const title = readString(row.title);
     const description = readString(row.description);
     const thumb = readString(row.thumb);
+    const lyrics = readString(row.lyrics);
+    const lyricsAssetId = readNumber(row.lyrics_asset_id);
     const releaseAt = readString(row.release_at ?? row.releaseAt);
     const updatedAt = readString(row.updated_at ?? row.updatedAt);
     const createdAt = readString(row.created_at ?? row.createdAt);
@@ -140,6 +142,11 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
       title: title || undefined,
       description: description || undefined,
       thumb: thumb || undefined,
+      lyrics: lyrics || undefined,
+      lyrics_asset_id:
+        typeof lyricsAssetId === 'number' && Number.isFinite(lyricsAssetId) && lyricsAssetId > 0
+          ? Math.trunc(lyricsAssetId)
+          : undefined,
       order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
       hidden_in_files: hiddenInFiles || undefined,
       release_at: releaseAt || undefined,

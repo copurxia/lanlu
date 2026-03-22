@@ -30,6 +30,8 @@ export interface MetadataPagePatch {
   title?: string;
   description?: string;
   thumb?: string;
+  lyrics?: string;
+  lyrics_asset_id?: number;
   order_index?: number;
   hidden_in_files?: boolean;
   release_at?: string;

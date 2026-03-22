@@ -781,6 +781,8 @@ public class WasmHostBridge {
         registerHostMethod("archive.read_text", { ctx => handleArchiveReadText(ctx) })
         registerHostMethod("archive.readText", { ctx => handleArchiveReadText(ctx) })
         registerHostMethod("archive.get_metadata", { ctx => handleArchiveGetMetadata(ctx) })
+        registerHostMethod("archive.export_entries", { ctx => handleArchiveExportEntries(ctx) })
+        registerHostMethod("archive.exportEntries", { ctx => handleArchiveExportEntries(ctx) })
         registerHostMethod("archive.export_cover_for_search", { ctx => handleHostArchiveExportCoverForSearch(ctx) })
         registerHostMethod("tankoubon.list_archives", { ctx => handleTankoubonListArchives(ctx) })
         registerHostMethod("tags.list", { ctx => handleTagsList(ctx) })
@@ -1038,6 +1040,40 @@ public class WasmHostBridge {
         return (archiveId, entryName)
     }
 
+    private static func parseArchiveExportEntriesParams(raw: String): (String, ArrayList<String>, Int64) {
+        var archiveId = ""
+        var entries = ArrayList<String>()
+        var levelsUp: Int64 = 0
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(raw.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return ("", ArrayList<String>(), 0)
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                match (name) {
+                    case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                    case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                    case "levels_up" => levelsUp = parseInt64Loose(r.readValue<String>(), 0)
+                    case "levelsUp" => levelsUp = parseInt64Loose(r.readValue<String>(), 0)
+                    case "entries" => readFileNameArrayInto(r, entries)
+                    case "entry_names" => readFileNameArrayInto(r, entries)
+                    case "entryNames" => readFileNameArrayInto(r, entries)
+                    case "entry_name" => readFileNameArrayInto(r, entries)
+                    case "entryName" => readFileNameArrayInto(r, entries)
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return (archiveId, entries, levelsUp)
+    }
+
     private static func parseTankoubonListArchivesParams(raw: String): String {
         var tankoubonId = ""
 
@@ -1258,7 +1294,7 @@ public class WasmHostBridge {
 
     private static func isAdjacentAssetField(field: String): Bool {
         let f = field.trimAscii().toAsciiLower()
-        return f == "cover" || f == "backdrop" || f == "clearlogo" || f == "thumb"
+        return f == "cover" || f == "backdrop" || f == "clearlogo" || f == "thumb" || f == "lyrics"
     }
 
     private static func maybeMaterializeAdjacentRef(
@@ -1497,6 +1533,20 @@ public class WasmHostBridge {
         return buildArchiveMetadataResponse(ctx.effectiveParams)
     }
 
+    private static func handleArchiveExportEntries(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["archive.export_entries"], "archive.export_entries")
+        if (!allowed) { return (false, "{}", err) }
+
+        let (archiveId, entries, levelsUpRaw) = parseArchiveExportEntriesParams(ctx.effectiveParams)
+        if (archiveId.size == 0) {
+            return (false, "{}", "missing archive_id")
+        }
+        if (entries.size == 0) {
+            return (false, "{}", "missing entries")
+        }
+        return exportArchiveEntriesToPluginRuntime(ctx.executionId, ctx.pluginNamespace, archiveId, entries, levelsUpRaw)
+    }
+
     private static func handleHostArchiveExportCoverForSearch(ctx: WasmHostCallContext): (Bool, String, String) {
         let (allowed, err) = ensureHostCapability(ctx.executionId, ["archive.export_cover_for_search"], "archive.export_cover_for_search")
         if (!allowed) { return (false, "{}", err) }
@@ -1712,16 +1762,50 @@ public class WasmHostBridge {
         w.endArray()
     }
 
+    private static func readExtraInt64(extraData: String, key: String): Int64 {
+        let normalized = extraData.trimAscii()
+        if (normalized.size == 0 || normalized == "null") {
+            return 0
+        }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(normalized.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return 0
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == key) {
+                    let raw = String.fromUtf8(r.readValueBytes()).trimAscii()
+                    try {
+                        let parsed = Int64.parse(raw)
+                        return if (parsed > 0) { parsed } else { 0 }
+                    } catch (_: Exception) {
+                        return 0
+                    }
+                }
+                r.skip()
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return 0
+    }
+
     private static func writePageMetadataArray(w: JsonWriter, archiveId: String, pages: Array<PageMetadataData>): Unit {
         w.writeName("pages")
         w.startArray()
         for (page in pages) {
+            let lyricsAssetId = readExtraInt64(page.extra_data, "lyrics_asset_id")
             w.startObject()
             w.writeName("title").writeValue(page.title)
             w.writeName("description").writeValue(page.description)
             w.writeName("page_number").writeValue(page.page_number)
             w.writeName("entry_path").writeValue(page.entry_path)
             w.writeName("archive_id").writeValue(archiveId)
+            w.writeName("thumb").writeValue(page.thumb_asset_id)
+            w.writeName("lyrics_asset_id").writeValue(lyricsAssetId)
             w.writeName("release_at").writeValue(page.release_at)
             w.writeName("created_at").writeValue(page.created_at)
             w.writeName("updated_at").writeValue(page.updated_at)
@@ -1869,6 +1953,109 @@ public class WasmHostBridge {
                 w.flush()
                 return (true, String.fromUtf8(readToEnd(out)), "")
         }
+    }
+
+    private static func exportArchiveEntriesToPluginRuntime(
+        executionId: Int64,
+        pluginNamespace: String,
+        archiveIdRaw: String,
+        entries: ArrayList<String>,
+        levelsUpRaw: Int64
+    ): (Bool, String, String) {
+        let trimmedArchiveId = archiveIdRaw.trimAscii()
+        if (trimmedArchiveId.size == 0) {
+            return (false, "{}", "missing archive_id")
+        }
+        if (pluginNamespace.trimAscii().size == 0) {
+            return (false, "{}", "missing pluginNamespace context")
+        }
+
+        let safeArchiveId = normalizeSafeRelPath(trimmedArchiveId)
+        if (safeArchiveId.size == 0 || safeArchiveId != trimmedArchiveId) {
+            return (false, "{}", "invalid archive_id")
+        }
+
+        let pluginDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), pluginNamespace.trimAscii())
+        if (!ensureUnderRuntimeRoot(pluginDir)) {
+            return (false, "{}", "invalid plugin runtime dir")
+        }
+        let levelsUp = normalizeLevelsUp(levelsUpRaw)
+
+        var archiveType = ""
+        var actualPath = ""
+        match (resolveArchiveActualPath(trimmedArchiveId)) {
+            case Some((resolvedType, resolvedPath)) =>
+                archiveType = resolvedType
+                actualPath = resolvedPath
+            case None => ()
+        }
+
+        var handler: Option<ArchiveHandler> = None
+        if (archiveType.size > 0 && actualPath.size > 0) {
+            handler = Some(ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType))
+        }
+
+        var seen = HashMap<String, Bool>()
+        var exported = ArrayList<(String, String)>()
+
+        for (rawEntry in entries) {
+            let safeRelPath = normalizeSafeRelPath(rawEntry)
+            if (safeRelPath.size == 0) {
+                continue
+            }
+            match (seen.get(safeRelPath)) {
+                case Some(_) => continue
+                case None => seen[safeRelPath] = true
+            }
+
+            let relativeOut = "exports/${safeArchiveId}/${safeRelPath}"
+            let outputPath = FileUtils.joinPath(pluginDir, relativeOut)
+            var exportedOk = false
+
+            match (handler) {
+                case Some(h) =>
+                    exportedOk = h.extractEntryToFile(actualPath, safeRelPath, outputPath)
+                case None => ()
+            }
+
+            if (!exportedOk) {
+                let sourcePath = resolveAdjacentSourcePathForArchive(executionId, trimmedArchiveId, levelsUp, safeRelPath)
+                if (sourcePath.size > 0) {
+                    try {
+                        FileUtils.ensureDirectoryExists(Path(outputPath).parent)
+                        copy(Path(sourcePath), to: Path(outputPath), overwrite: true)
+                        exportedOk = true
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (exportedOk) {
+                exported.add((safeRelPath, relativeOut))
+            }
+        }
+
+        if (exported.size <= 0) {
+            return (false, "{}", "no entries exported")
+        }
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("archive_id").writeValue(trimmedArchiveId)
+        w.writeName("levels_up").writeValue(levelsUp)
+        w.writeName("files")
+        w.startArray()
+        for ((sourcePath, relativePath) in exported) {
+            w.startObject()
+            w.writeName("source").writeValue(sourcePath)
+            w.writeName("relative_path").writeValue(relativePath)
+            w.endObject()
+        }
+        w.endArray()
+        w.writeName("count").writeValue(Int64(exported.size))
+        w.endObject()
+        w.flush()
+        return (true, String.fromUtf8(readToEnd(out)), "")
     }
 
     private static func ensureUnderRuntimeRoot(pluginDir: String): Bool {
@@ -2627,6 +2814,7 @@ public class WasmHostBridge {
         appendHostCallMetricLog(state, "archive.list_files")
         appendHostCallMetricLog(state, "archive.read_text")
         appendHostCallMetricLog(state, "archive.get_metadata")
+        appendHostCallMetricLog(state, "archive.export_entries")
         appendHostCallMetricLog(state, "tankoubon.list_archives")
         appendHostCallMetricLog(state, "tags.list")
         appendHostCallMetricLog(state, "tags.merge")

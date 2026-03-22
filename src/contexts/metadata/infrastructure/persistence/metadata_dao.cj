@@ -1,6 +1,7 @@
 package lanlu.contexts.metadata.infrastructure.persistence
 
 import std.collection.*
+import std.convert.*
 import std.database.sql.*
 import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
@@ -847,6 +848,29 @@ public class MetadataDao {
             if (page.thumb_asset_id > 0 && !seen.contains(page.thumb_asset_id)) {
                 seen.add(page.thumb_asset_id)
                 out.add(page.thumb_asset_id)
+            }
+        }
+        return out.toArray()
+    }
+
+    public static func getPageLyricsAssetIds(parentArchiveId: String): Array<Int64> {
+        let pages = listPageMetadata(parentArchiveId)
+        let out = ArrayList<Int64>()
+        let seen = HashSet<Int64>()
+        for (page in pages) {
+            let rawValue = readExtraString(page.extra_data, "lyrics_asset_id").trimAscii()
+            if (rawValue.size == 0) {
+                continue
+            }
+            let assetId = try {
+                let parsed = Int64.parse(rawValue)
+                if (parsed > 0) { parsed } else { 0 }
+            } catch (_: Exception) {
+                0
+            }
+            if (assetId > 0 && !seen.contains(assetId)) {
+                seen.add(assetId)
+                out.add(assetId)
             }
         }
         return out.toArray()

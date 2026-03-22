@@ -46,6 +46,18 @@ export function ReaderPreloadArea({
           );
         }
 
+        if (page.type === 'audio') {
+          return (
+            <audio
+              key={`preload-${pageIndex}`}
+              src={page.url}
+              preload="metadata"
+              onLoadedData={() => onLoaded(pageIndex)}
+              onError={() => onError(pageIndex)}
+            />
+          );
+        }
+
         return (
           <Image
             key={`preload-${pageIndex}`}

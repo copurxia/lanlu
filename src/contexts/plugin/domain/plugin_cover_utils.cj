@@ -52,10 +52,10 @@ public class PluginCoverUtils {
         return "plugins/${ns}/cache/${rel}"
     }
 
-    private static func resolvePluginCoverPath(coverPath: String, pluginNamespace: String): (String, String) {
-        let rel = normalizePluginCoverRelativePath(coverPath, pluginNamespace)
+    private static func resolvePluginRuntimePath(rawPath: String, pluginNamespace: String): (String, String) {
+        let rel = normalizePluginCoverRelativePath(rawPath, pluginNamespace)
         if (rel.size == 0) {
-            return ("", "invalid plugin cover path")
+            return ("", "invalid plugin runtime path")
         }
 
         let cacheRoot = SystemSettingsService.getPath("CACHE_PATH")
@@ -75,13 +75,65 @@ public class PluginCoverUtils {
         while (cleanAbs.size > 1 && cleanAbs.endsWith("/")) { cleanAbs = cleanAbs[0..(cleanAbs.size - 1)] }
 
         if (!(cleanAbs == cleanRoot || cleanAbs.startsWith("${cleanRoot}/"))) {
-            return ("", "cover path is outside plugin runtime root")
+            return ("", "plugin path is outside plugin runtime root")
         }
         if (!exists(Path(cleanAbs))) {
-            return ("", "cover file not found")
+            return ("", "plugin file not found")
         }
 
         return (cleanAbs, "")
+    }
+
+    private static func resolvePluginCoverPath(coverPath: String, pluginNamespace: String): (String, String) {
+        let (resolvedPath, err) = resolvePluginRuntimePath(coverPath, pluginNamespace)
+        if (resolvedPath.size == 0) {
+            if (err.trimAscii().size == 0) {
+                return ("", "invalid plugin cover path")
+            }
+            return ("", err.replace("plugin file", "cover file"))
+        }
+        return (resolvedPath, "")
+    }
+
+    private static func inferExtensionFromPath(path: String): String {
+        let normalized = path.trimAscii().toAsciiLower().replace("\\", "/")
+        let fileName = if (normalized.contains("/")) {
+            let parts = normalized.split("/")
+            parts[parts.size - 1]
+        } else {
+            normalized
+        }
+        let ext = FileUtils.getFileExtensionWithoutDot(fileName).trimAscii().toAsciiLower()
+        if (ext.size == 0) {
+            return "bin"
+        }
+        return ext
+    }
+
+    private static func inferMimeTypeByExtension(ext: String): String {
+        let normalized = ext.trimAscii().toAsciiLower()
+        match (normalized) {
+            case "txt" => return "text/plain"
+            case "lrc" => return "text/plain"
+            case "json" => return "application/json"
+            case "xml" => return "application/xml"
+            case "srt" => return "application/x-subrip"
+            case "vtt" => return "text/vtt"
+            case "mp3" => return "audio/mpeg"
+            case "flac" => return "audio/flac"
+            case "m4a" => return "audio/mp4"
+            case "aac" => return "audio/aac"
+            case "ogg" => return "audio/ogg"
+            case "opus" => return "audio/opus"
+            case "wav" => return "audio/wav"
+            case "jpg" => return "image/jpeg"
+            case "jpeg" => return "image/jpeg"
+            case "png" => return "image/png"
+            case "webp" => return "image/webp"
+            case "gif" => return "image/gif"
+            case "avif" => return "image/avif"
+            case _ => return "application/octet-stream"
+        }
     }
 
     /**
@@ -129,6 +181,47 @@ public class PluginCoverUtils {
             case None =>
                 try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
                 return (false, 0, "", "failed to create asset record")
+        }
+    }
+
+    /**
+     * Copy plugin runtime file into asset storage without conversion.
+     * Returns: (ok, assetId, error)
+     */
+    public static func installRawAssetFromPluginPath(path: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String) {
+        let (sourcePath, resolveErr) = resolvePluginRuntimePath(path, pluginNamespace)
+        if (sourcePath.size == 0) {
+            return (false, 0, resolveErr)
+        }
+
+        let ext = inferExtensionFromPath(sourcePath)
+        let contentType = inferMimeTypeByExtension(ext)
+        let sourceSize = try { Int64(FileInfo(Path(sourcePath)).size) } catch (_: Exception) { 0 }
+        let safeOriginalName = if (originalName.trimAscii().size > 0) {
+            originalName.trimAscii()
+        } else {
+            "plugin_asset.${ext}"
+        }
+
+        let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
+        try {
+            FileUtils.ensureDirectoryExists(Path(assetRoot))
+        } catch (e: Exception) {
+            return (false, 0, "failed to prepare asset directory: ${e.message}")
+        }
+
+        match (AssetDao.create(None, assetKind, safeOriginalName, contentType, ext, sourceSize, "")) {
+            case Some(assetId) =>
+                let finalPath = FileUtils.joinPath(assetRoot, "${assetId}.${ext}")
+                try {
+                    copy(Path(sourcePath), to: Path(finalPath), overwrite: true)
+                    return (true, assetId, "")
+                } catch (e: Exception) {
+                    let _ = AssetDao.deleteById(assetId)
+                    return (false, 0, "failed to copy plugin asset file: ${e.message}")
+                }
+            case None =>
+                return (false, 0, "failed to create asset record")
         }
     }
 

@@ -1,4 +1,4 @@
-export type ReaderContentItemType = "image" | "video" | "html";
+export type ReaderContentItemType = "image" | "video" | "audio" | "html";
 export type ReaderItemType = ReaderContentItemType | "virtual-end";
 
 export type ReaderItemMetadata = {
@@ -6,6 +6,7 @@ export type ReaderItemMetadata = {
   description?: string;
   thumb_asset_id?: number;
   thumb?: string;
+  lyrics_asset_id?: number;
 };
 
 export type ReaderPageItem = {

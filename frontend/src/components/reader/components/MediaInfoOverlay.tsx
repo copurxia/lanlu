@@ -117,7 +117,7 @@ function parseMediaBlocks(lines: string[]) {
     if (!block.title) {
       const type = tokens[0];
       const name = tokens[1] || '';
-      if (type === 'image' || type === 'video' || type === 'html') {
+      if (type === 'image' || type === 'video' || type === 'audio' || type === 'html') {
         block.title = { type, name, flags: tokens.slice(2) };
         continue;
       }

@@ -87,6 +87,10 @@ public class PluginTaskService {
         return PluginCoverUtils.installCoverAssetFromPluginPath(coverPath, pluginNamespace, assetKind, originalName)
     }
 
+    public static func installRawAssetFromPluginPath(path: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String) {
+        return PluginCoverUtils.installRawAssetFromPluginPath(path, pluginNamespace, assetKind, originalName)
+    }
+
     public static func deleteCoverAsset(assetId: Int64): Unit {
         PluginCoverUtils.deleteAsset(assetId)
     }

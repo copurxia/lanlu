@@ -68,6 +68,12 @@ public class FolderHandler <: ArchiveHandler {
         "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V", "M2TS", "MTS", "TS"
     ]
 
+    // 允许的音频文件扩展名（与 archive_file_handler 保持一致）
+    private static let ALLOWED_AUDIO_EXTENSIONS: Array<String> = [
+        "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "ape", "alac",
+        "MP3", "FLAC", "M4A", "AAC", "OGG", "OPUS", "WAV", "WMA", "APE", "ALAC"
+    ]
+
     /**
      * Cheap filename-only check for whether a single entry could be treated as media.
      * Used by scanners to avoid re-reading directories just to know if a folder can be handled.
@@ -85,6 +91,11 @@ public class FolderHandler <: ArchiveHandler {
             }
         }
         for (allowedExt in ALLOWED_VIDEO_EXTENSIONS) {
+            if (extension == allowedExt) {
+                return true
+            }
+        }
+        for (allowedExt in ALLOWED_AUDIO_EXTENSIONS) {
             if (extension == allowedExt) {
                 return true
             }
@@ -430,9 +441,26 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     /**
-     * 检查文件是否为媒体文件（图片或视频）
+     * 检查文件是否为音频格式（与 archive_file_handler 保持一致）
+     */
+    private func isAudioFile(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let extension = parts[parts.size - 1]
+        for (ext in ALLOWED_AUDIO_EXTENSIONS) {
+            if (extension == ext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * 检查文件是否为媒体文件（图片/视频/音频）
      */
     private func isMediaFile(filename: String): Bool {
-        return isImageFile(filename) || isVideoFile(filename)
+        return isImageFile(filename) || isVideoFile(filename) || isAudioFile(filename)
     }
 }

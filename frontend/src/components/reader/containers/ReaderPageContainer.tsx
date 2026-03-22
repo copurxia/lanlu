@@ -59,6 +59,7 @@ import {
   Link2,
   Film,
   Clapperboard,
+  Music2,
 } from 'lucide-react';
 import Link from 'next/link';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
@@ -302,7 +303,7 @@ function ReaderContent() {
   const [mediaInfoEnabled, setMediaInfoEnabled] = useMediaInfoEnabled();
   const [longPageEnabled, setLongPageEnabled] = useLongPageEnabled();
   const [seamlessNextEnabled, setSeamlessNextEnabled] = useSeamlessNextEnabled();
-  const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
+  const videoRefs = useRef<(HTMLMediaElement | null)[]>([]);
   const htmlContainerRefs = useRef<(HTMLDivElement | null)[]>([]);
   const imageRequestUrls = useRef<(string | null)[]>([]);
   const [mediaInfoTick, setMediaInfoTick] = useState(0);
@@ -1350,19 +1351,19 @@ function ReaderContent() {
     [currentPage, currentRealPage, doublePageMode, isHtmlSpreadView, pages, readingMode, splitCoverMode]
   );
 
-  const videoLanePageIndexes = useMemo(
+  const mediaLanePageIndexes = useMemo(
     () =>
       progressLaneSpecs
-        .filter((lane) => lane.kind === 'video' && typeof lane.videoPageIndex === 'number')
-        .map((lane) => lane.videoPageIndex as number),
+        .filter((lane) => (lane.kind === 'video' || lane.kind === 'audio') && typeof lane.mediaPageIndex === 'number')
+        .map((lane) => lane.mediaPageIndex as number),
     [progressLaneSpecs]
   );
 
   useEffect(() => {
-    if (videoLanePageIndexes.length <= 0) return;
+    if (mediaLanePageIndexes.length <= 0) return;
 
     const cleanups: Array<() => void> = [];
-    for (const pageIndex of videoLanePageIndexes) {
+    for (const pageIndex of mediaLanePageIndexes) {
       const el = videoRefs.current[pageIndex];
       if (!el) continue;
 
@@ -1420,11 +1421,11 @@ function ReaderContent() {
     return () => {
       for (const cleanup of cleanups) cleanup();
     };
-  }, [videoLanePageIndexes]);
+  }, [mediaLanePageIndexes]);
 
   const progressLanes = useMemo<ReaderProgressLane[]>(() => {
-    const hasVideoLane = progressLaneSpecs.some((lane) => lane.kind === 'video');
-    if (!hasVideoLane) return [];
+    const hasMediaLane = progressLaneSpecs.some((lane) => lane.kind === 'video' || lane.kind === 'audio');
+    if (!hasMediaLane) return [];
 
     return progressLaneSpecs.map((lane) => {
       if (lane.kind === 'book') {
@@ -1442,7 +1443,7 @@ function ReaderContent() {
         };
       }
 
-      const pageIndex = lane.videoPageIndex ?? -1;
+      const pageIndex = lane.mediaPageIndex ?? -1;
       const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
       const snapshot = pageIndex >= 0 ? videoTimelineByPageIndex[pageIndex] : undefined;
       const currentTime =
@@ -1458,8 +1459,13 @@ function ReaderContent() {
 
       return {
         id: lane.id,
-        kind: 'video',
-        icon: lane.id === 'video-right' ? Clapperboard : Film,
+        kind: lane.kind,
+        icon:
+          lane.kind === 'audio'
+            ? Music2
+            : lane.id === 'video-right'
+              ? Clapperboard
+              : Film,
         label: lane.label,
         value: Math.max(0, Math.min(max, currentTime)),
         min: 0,

@@ -70,7 +70,7 @@ export function useMediaInfoOverlayLines({
   loadedImages: Set<number>;
   visibleRange: { start: number; end: number };
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
-  videoRefs: React.MutableRefObject<(HTMLVideoElement | null)[]>;
+  videoRefs: React.MutableRefObject<(HTMLMediaElement | null)[]>;
   htmlContainerRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   imageRequestUrls: React.MutableRefObject<(string | null)[]>;
 }) {
@@ -111,15 +111,16 @@ export function useMediaInfoOverlayLines({
       };
     };
 
-    const readVideoInfo = (index: number) => {
+    const readMediaInfo = (index: number) => {
       const element = videoRefs.current[index];
       if (!element) return null;
       const timing = getLatestResourceTiming(element.currentSrc || element.src);
       const buffered = element.buffered;
       const bufferedEnd = buffered && buffered.length > 0 ? buffered.end(buffered.length - 1) : 0;
+      const videoElement = element instanceof HTMLVideoElement ? element : null;
       return {
-        videoWidth: element.videoWidth,
-        videoHeight: element.videoHeight,
+        videoWidth: videoElement?.videoWidth ?? 0,
+        videoHeight: videoElement?.videoHeight ?? 0,
         duration: element.duration,
         currentTime: element.currentTime,
         playbackRate: element.playbackRate,
@@ -214,13 +215,17 @@ export function useMediaInfoOverlayLines({
       const state = loadedImages.has(index) ? 'loaded' : imagesLoading.has(index) ? 'loading' : 'idle';
       lines.push(`${prefix}${p.type}  ${getLastPathSegment(src)}  ${state}${cached ? '  cached' : ''}`);
 
-      if (p.type === 'video') {
-        const info = readVideoInfo(index);
+      if (p.type === 'video' || p.type === 'audio') {
+        const info = readMediaInfo(index);
         if (info) {
           const time = `${formatSeconds(info.currentTime)}/${formatSeconds(info.duration)}`;
           const bufferedPct =
             info.duration > 0 ? formatPercent(Math.min(1, Math.max(0, info.bufferedEnd / info.duration))) : '--%';
-          lines.push(`${prefix}${joinPairs(['dim', `${info.videoWidth}x${info.videoHeight}`], ['t', time], ['buf', bufferedPct])}`);
+          if (p.type === 'video') {
+            lines.push(`${prefix}${joinPairs(['dim', `${info.videoWidth}x${info.videoHeight}`], ['t', time], ['buf', bufferedPct])}`);
+          } else {
+            lines.push(`${prefix}${joinPairs(['t', time], ['buf', bufferedPct])}`);
+          }
           lines.push(
             `${prefix}${joinPairs(
               ['state', info.paused ? 'paused' : 'playing'],

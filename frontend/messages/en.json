@@ -317,7 +317,10 @@
     "sidebarList": "List",
     "fileTree": "File Tree",
     "fileTreeEmpty": "No file structure available",
-    "unknownArchive": "Unknown Archive"
+    "unknownArchive": "Unknown Archive",
+    "audioLyricsLoading": "Loading lyrics...",
+    "audioLyricsLoadFailed": "Failed to load lyrics.",
+    "audioLyricsEmpty": "No lyrics available."
   },
   "login": {
     "description": "Manage your comic archives with ease and style",

@@ -125,6 +125,124 @@
   height: auto;
 }
 
+/* Reader audio stage line waves */
+@keyframes reader-audio-line-shift {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(var(--wave-drift, 0px));
+  }
+}
+
+.reader-audio-line-wave {
+  position: absolute;
+  left: -50%;
+  width: 200%;
+  overflow: hidden;
+  --wave-shift-duration: 6s;
+  animation: reader-audio-line-shift var(--wave-shift-duration) linear infinite;
+}
+
+.reader-audio-line-shape {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: center center;
+  transform: scaleY(calc(1 + var(--wave-beat, 0) * var(--wave-scale, 1.2)));
+  transition: transform 56ms linear;
+}
+
+.reader-audio-line-path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.reader-audio-line-wave-a {
+  bottom: 2px;
+  height: 30px;
+  --wave-scale: 0.9;
+  --wave-drift: 10px;
+}
+
+.reader-audio-line-wave-b {
+  bottom: 11px;
+  height: 22px;
+  --wave-scale: 0.64;
+  --wave-drift: -8px;
+}
+
+.reader-audio-line-wave-c {
+  bottom: 18px;
+  height: 16px;
+  --wave-scale: 0.46;
+  --wave-drift: 6px;
+}
+
+.reader-audio-line-path-a {
+  stroke: rgba(255, 255, 255, 0.42);
+  stroke-width: 1.6;
+}
+
+.reader-audio-line-path-b {
+  stroke: rgba(255, 255, 255, 0.31);
+  stroke-width: 1.35;
+}
+
+.reader-audio-line-path-c {
+  stroke: rgba(255, 255, 255, 0.22);
+  stroke-width: 1.1;
+}
+
+.reader-audio-wave-stage-active .reader-audio-line-wave-a {
+  --wave-shift-duration: 2.6s;
+  --wave-scale: 1.22;
+  --wave-drift: 18px;
+}
+
+.reader-audio-wave-stage-active .reader-audio-line-wave-b {
+  --wave-shift-duration: 3.3s;
+  --wave-scale: 0.9;
+  --wave-drift: -14px;
+}
+
+.reader-audio-wave-stage-active .reader-audio-line-wave-c {
+  --wave-shift-duration: 4.1s;
+  --wave-scale: 0.68;
+  --wave-drift: 11px;
+}
+
+.reader-audio-wave-stage-idle {
+  --wave-beat: 0;
+}
+
+.reader-audio-wave-stage-idle .reader-audio-line-wave-a {
+  --wave-shift-duration: 8s;
+  --wave-scale: 0;
+}
+
+.reader-audio-wave-stage-idle .reader-audio-line-wave-b {
+  --wave-shift-duration: 10s;
+  --wave-scale: 0;
+}
+
+.reader-audio-wave-stage-idle .reader-audio-line-wave-c {
+  --wave-shift-duration: 12s;
+  --wave-scale: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-audio-line-wave {
+    animation: none;
+  }
+  .reader-audio-line-shape {
+    transform: none;
+    transition: none;
+  }
+}
+
 /* 自定义滑动条样式 */
 input[type="range"] {
   -webkit-appearance: none;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
-import { Film, FileText } from 'lucide-react';
+import { Film, FileText, Music } from 'lucide-react';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
@@ -211,7 +211,8 @@ export function MasonryThumbnailGrid({
     const isCurrentPage = currentPage === index;
     const metadataThumb = getPageDisplayThumb(page);
     const showVideoPreview = page.type === 'video' && !metadataThumb;
-    const thumbSrc = metadataThumb || page.url;
+    const thumbSrc = metadataThumb || (page.type === 'image' ? page.url : '');
+    const showImageThumb = Boolean(thumbSrc);
     const displayTitle = getPageDisplayTitle(page, index, t);
     const hasCustomTitle = getPageCustomTitle(page).length > 0;
     const captionText = hasCustomTitle ? displayTitle : String(index + 1);
@@ -223,6 +224,7 @@ export function MasonryThumbnailGrid({
         <div className="pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur-sm">
           <span>{index + 1}</span>
           {page.type === 'video' ? <Film className="h-3 w-3" /> : null}
+          {page.type === 'audio' ? <Music className="h-3 w-3" /> : null}
           {page.type === 'html' ? <FileText className="h-3 w-3" /> : null}
         </div>
 
@@ -244,7 +246,7 @@ export function MasonryThumbnailGrid({
                 video.currentTime = 0;
               }}
             />
-          ) : (
+          ) : showImageThumb ? (
             <MemoizedImage
               src={thumbSrc}
               alt={displayTitle || t('archive.previewPage').replace('{current}', String(index + 1)).replace('{total}', String(pages.length))}
@@ -254,6 +256,10 @@ export function MasonryThumbnailGrid({
               draggable={false}
               onLoad={(e) => handleImageLoad(page, index, e.currentTarget)}
             />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-muted-foreground/80">
+              {page.type === 'audio' ? <Music className="h-7 w-7" /> : <FileText className="h-7 w-7" />}
+            </div>
           )}
         </div>
 

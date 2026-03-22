@@ -57,6 +57,8 @@ export interface MetadataPagePatchInput {
   title?: string;
   description?: string;
   thumb?: string;
+  lyrics?: string;
+  lyrics_asset_id?: number;
   order_index?: number;
   hidden_in_files?: boolean;
 }
@@ -65,13 +67,14 @@ export interface MetadataPagePatchInput {
 export interface PageInfo {
   path: string;
   url: string;
-  type: 'image' | 'video' | 'html';
+  type: 'image' | 'video' | 'audio' | 'html';
   title?: string;  // 章节标题（EPUB类型会有值）
   metadata?: {
     title?: string;
     description?: string;
     thumb_asset_id?: number;
     thumb?: string;
+    lyrics_asset_id?: number;
   };
 }
 
@@ -239,6 +242,8 @@ export class ArchiveService {
 
         const rawThumbAssetId = Number(rawPage.metadata.thumb_asset_id || 0);
         const thumbAssetId = Number.isFinite(rawThumbAssetId) && rawThumbAssetId > 0 ? rawThumbAssetId : 0;
+        const rawLyricsAssetId = Number(rawPage.metadata.lyrics_asset_id || 0);
+        const lyricsAssetId = Number.isFinite(rawLyricsAssetId) && rawLyricsAssetId > 0 ? rawLyricsAssetId : 0;
         const legacyThumb = typeof rawPage.metadata.thumb === 'string' ? rawPage.metadata.thumb : '';
         const thumbUrl = thumbAssetId > 0
           ? this.addTokenToUrl(`/api/assets/${thumbAssetId}`)
@@ -250,6 +255,7 @@ export class ArchiveService {
           ...rawPage.metadata,
           thumb_asset_id: thumbAssetId > 0 ? thumbAssetId : undefined,
           thumb: thumbUrl || undefined,
+          lyrics_asset_id: lyricsAssetId > 0 ? lyricsAssetId : undefined,
         };
       })();
 

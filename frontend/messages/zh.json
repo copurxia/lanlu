@@ -320,7 +320,10 @@
     "sidebarList": "列表",
     "fileTree": "文件树",
     "fileTreeEmpty": "暂无文件结构",
-    "unknownArchive": "未知归档"
+    "unknownArchive": "未知归档",
+    "audioLyricsLoading": "歌词加载中...",
+    "audioLyricsLoadFailed": "歌词加载失败。",
+    "audioLyricsEmpty": "暂无歌词。"
   },
   "login": {
     "description": "轻松优雅地管理您的漫画归档",

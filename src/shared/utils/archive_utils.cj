@@ -77,6 +77,12 @@ public class ArchiveUtils {
         "MP4", "WEBM", "MKV", "AVI", "MOV", "M4V", "M2TS", "MTS", "TS"
     ]
 
+    // 支持的音频格式（与处理器保持一致）
+    public static let SUPPORTED_AUDIO_EXTENSIONS: Array<String> = [
+        "mp3", "flac", "m4a", "aac", "ogg", "opus", "wav", "wma", "ape", "alac",
+        "MP3", "FLAC", "M4A", "AAC", "OGG", "OPUS", "WAV", "WMA", "APE", "ALAC"
+    ]
+
     // ==================== 从 ShinobuService 迁移的工具方法 ====================
 
     /**
@@ -114,10 +120,27 @@ public class ArchiveUtils {
     }
 
     /**
-     * 检查文件是否为媒体文件（图片或视频）
+     * 检查文件是否为音频格式
+     */
+    public static func isAudioFile(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let extension = parts[parts.size - 1]
+        for (ext in SUPPORTED_AUDIO_EXTENSIONS) {
+            if (extension == ext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * 检查文件是否为媒体文件（图片/视频/音频）
      */
     public static func isMediaFile(filename: String): Bool {
-        return isImageFile(filename) || isVideoFile(filename)
+        return isImageFile(filename) || isVideoFile(filename) || isAudioFile(filename)
     }
 
     /**

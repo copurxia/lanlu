@@ -83,6 +83,37 @@ public class ArchiveController {
         return stem.trimAscii()
     }
 
+    private static func readExtraInt64(extraData: String, key: String): Int64 {
+        let normalized = extraData.trimAscii()
+        if (normalized.size == 0 || normalized == "null") {
+            return 0
+        }
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(normalized.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return 0
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                if (name == key) {
+                    let raw = r.readValue<String>().trimAscii()
+                    try {
+                        let parsed = Int64.parse(raw)
+                        return if (parsed > 0) { parsed } else { 0 }
+                    } catch (_: Exception) {
+                        return 0
+                    }
+                }
+                r.skip()
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return 0
+    }
+
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
@@ -331,6 +362,7 @@ public class ArchiveController {
                     }
                     item.description = meta.description
                     item.thumbAssetId = meta.thumb_asset_id
+                    item.lyricsAssetId = readExtraInt64(meta.extra_data, "lyrics_asset_id")
                     item.hidden = meta.hidden_in_files
                     if (meta.sort_index > 0) {
                         item.hasSort = true
@@ -429,6 +461,8 @@ public class ArchiveController {
                 "html"
             } else if (ArchiveUtils.isVideoFile(href)) {
                 "video"
+            } else if (ArchiveUtils.isAudioFile(href)) {
+                "audio"
             } else {
                 "image"
             }
@@ -442,6 +476,7 @@ public class ArchiveController {
             w.writeName("title").writeValue(metadataTitle)
             w.writeName("description").writeValue(metadataDescription)
             w.writeName("thumb_asset_id").writeValue(metadataThumbAssetId)
+            w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
             w.endObject()
             w.endObject()
         }
@@ -513,6 +548,7 @@ public class ArchiveController {
                     rootAssetIds.add(coverAssetId)
                 }
                 let pageThumbAssetIds = MetadataDao.getPageThumbAssetIds(id)
+                let pageLyricsAssetIds = MetadataDao.getPageLyricsAssetIds(id)
                 let archivePath = getArchiveBasePath(archive.id)
 
                 // 4. 删除档案记录
@@ -523,6 +559,11 @@ public class ArchiveController {
                     let _ = MetadataDao.deletePageMetadata(id)
                     let _ = MetadataDao.deleteEntity("archive", id)
                     for (assetId in pageThumbAssetIds) {
+                        if (assetId > 0) {
+                            rootAssetIds.add(assetId)
+                        }
+                    }
+                    for (assetId in pageLyricsAssetIds) {
                         if (assetId > 0) {
                             rootAssetIds.add(assetId)
                         }
@@ -1077,6 +1118,27 @@ public class ArchiveController {
             return "video/x-msvideo"
         } else if (lowerPath.endsWith(".mov")) {
             return "video/quicktime"
+        // 音频类型
+        } else if (lowerPath.endsWith(".mp3")) {
+            return "audio/mpeg"
+        } else if (lowerPath.endsWith(".flac")) {
+            return "audio/flac"
+        } else if (lowerPath.endsWith(".m4a")) {
+            return "audio/mp4"
+        } else if (lowerPath.endsWith(".aac")) {
+            return "audio/aac"
+        } else if (lowerPath.endsWith(".ogg")) {
+            return "audio/ogg"
+        } else if (lowerPath.endsWith(".opus")) {
+            return "audio/opus"
+        } else if (lowerPath.endsWith(".wav")) {
+            return "audio/wav"
+        } else if (lowerPath.endsWith(".wma")) {
+            return "audio/x-ms-wma"
+        } else if (lowerPath.endsWith(".ape")) {
+            return "audio/ape"
+        } else if (lowerPath.endsWith(".alac")) {
+            return "audio/alac"
         } else {
             return "application/octet-stream"
         }
@@ -1568,6 +1630,7 @@ private class ArchiveFilesPageItem {
     public var title: String = ""
     public var description: String = ""
     public var thumbAssetId: Int64 = 0
+    public var lyricsAssetId: Int64 = 0
     public var sortIndex: Int32 = 0
     public var originalIndex: Int32 = 0
     public var hidden: Bool = false

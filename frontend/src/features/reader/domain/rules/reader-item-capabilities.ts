@@ -31,7 +31,7 @@ export function isVirtualEndReaderItem(
 }
 
 export function isReaderContentType(type: string | null | undefined): type is ReaderContentItemType {
-  return type === "image" || type === "video" || type === "html";
+  return type === "image" || type === "video" || type === "audio" || type === "html";
 }
 
 export function supportsSplitCoverProgressAdjustment(type: string | null | undefined): boolean {

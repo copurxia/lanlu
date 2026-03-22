@@ -174,10 +174,14 @@ public class PageMetadataPatch {
     public var title: String = ""
     public var description: String = ""
     public var thumb: String = ""
+    public var lyrics: String = ""
+    public var lyricsAssetId: Int64 = 0
     public var releaseAt: String = ""
     public var createdAt: String = ""
     public var updatedAt: String = ""
     public var sort: Int32 = 0
+    public var lyricsProvided: Bool = false
+    public var lyricsAssetIdProvided: Bool = false
     public var releaseAtProvided: Bool = false
     public var createdAtProvided: Bool = false
     public var updatedAtProvided: Bool = false

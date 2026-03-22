@@ -2,6 +2,7 @@
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { ReaderAudioStage } from '@/components/reader/components/ReaderAudioStage';
 import { getTapTurnAction } from '@/components/reader/hooks/useReaderInteractionHandlers';
 import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
 import type { PageInfo } from '@/lib/services/archive-service';
@@ -56,7 +57,7 @@ export function ReaderSingleModeView({
   translateY: number;
   htmlContents: Record<number, string>;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
-  videoRefs: React.MutableRefObject<(HTMLVideoElement | null)[]>;
+  videoRefs: React.MutableRefObject<(HTMLMediaElement | null)[]>;
   htmlContainerRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   imageRequestUrls: React.MutableRefObject<(string | null)[]>;
   onImageLoaded: (pageIndex: number) => void;
@@ -428,6 +429,24 @@ export function ReaderSingleModeView({
                     onLoadedData={() => onImageLoaded(currentPage)}
                     onError={() => onImageError(currentPage)}
                   />
+                ) : pages[currentPage]?.type === 'audio' ? (
+                  <ReaderAudioStage
+                    title={
+                      pages[currentPage]?.metadata?.title ||
+                      pages[currentPage]?.title ||
+                      t('reader.pageAlt').replace('{page}', String(currentPage + 1))
+                    }
+                    description={pages[currentPage]?.metadata?.description}
+                    thumb={pages[currentPage]?.metadata?.thumb}
+                    lyricsAssetId={pages[currentPage]?.metadata?.lyrics_asset_id}
+                    audioUrl={pages[currentPage].url}
+                    audioRef={(el) => {
+                      videoRefs.current[currentPage] = el;
+                    }}
+                    onLoadedData={() => onImageLoaded(currentPage)}
+                    onError={() => onImageError(currentPage)}
+                    t={t}
+                  />
                 ) : pages[currentPage]?.type === 'html' ? (
                   <div
                     ref={(el) => {
@@ -596,6 +615,24 @@ export function ReaderSingleModeView({
                       }}
                       onLoadedData={() => onImageLoaded(currentPage + 1)}
                       onError={() => onImageError(currentPage + 1)}
+                    />
+                  ) : pages[currentPage + 1]?.type === 'audio' ? (
+                    <ReaderAudioStage
+                      title={
+                        pages[currentPage + 1]?.metadata?.title ||
+                        pages[currentPage + 1]?.title ||
+                        t('reader.pageAlt').replace('{page}', String(currentPage + 2))
+                      }
+                      description={pages[currentPage + 1]?.metadata?.description}
+                      thumb={pages[currentPage + 1]?.metadata?.thumb}
+                      lyricsAssetId={pages[currentPage + 1]?.metadata?.lyrics_asset_id}
+                      audioUrl={pages[currentPage + 1].url}
+                      audioRef={(el) => {
+                        videoRefs.current[currentPage + 1] = el;
+                      }}
+                      onLoadedData={() => onImageLoaded(currentPage + 1)}
+                      onError={() => onImageError(currentPage + 1)}
+                      t={t}
                     />
                   ) : pages[currentPage + 1]?.type === 'html' ? (
                     <div

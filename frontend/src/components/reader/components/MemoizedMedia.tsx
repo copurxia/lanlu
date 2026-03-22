@@ -93,3 +93,39 @@ export const MemoizedVideo = memo(
 );
 
 MemoizedVideo.displayName = 'MemoizedVideo';
+
+export const MemoizedAudio = memo(
+  forwardRef(function MemoizedAudio(
+    {
+      src,
+      className,
+      style,
+      showNativeControls = false,
+      onLoadedData,
+      onError,
+    }: {
+      src: string;
+      className?: string;
+      style?: React.CSSProperties;
+      showNativeControls?: boolean;
+      onLoadedData?: () => void;
+      onError?: () => void;
+    },
+    ref: React.ForwardedRef<HTMLAudioElement>
+  ) {
+    return (
+      <audio
+        ref={ref}
+        src={src}
+        controls={showNativeControls}
+        preload="metadata"
+        className={className}
+        style={style}
+        onLoadedData={onLoadedData}
+        onError={onError}
+      />
+    );
+  })
+);
+
+MemoizedAudio.displayName = 'MemoizedAudio';

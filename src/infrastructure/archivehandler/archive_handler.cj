@@ -134,7 +134,7 @@ public interface ArchiveHandler {
     func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool
 
     /**
-     * 获取媒体文件数量（图片+视频）
+     * 获取媒体文件数量（图片+视频+音频）
      * @param archivePath 档案路径
      * @return 媒体文件数量
      */

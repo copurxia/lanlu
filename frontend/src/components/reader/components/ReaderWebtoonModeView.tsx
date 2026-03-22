@@ -2,6 +2,7 @@
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { ReaderAudioStage } from '@/components/reader/components/ReaderAudioStage';
 import { ReaderCollectionEndPage } from '@/components/reader/components/ReaderCollectionEndPage';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
@@ -77,7 +78,7 @@ export function ReaderWebtoonModeView({
   htmlContents: Record<number, string>;
   webtoonPageElementRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
-  videoRefs: React.MutableRefObject<(HTMLVideoElement | null)[]>;
+  videoRefs: React.MutableRefObject<(HTMLMediaElement | null)[]>;
   htmlContainerRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   imageRequestUrls: React.MutableRefObject<(string | null)[]>;
   onImageLoaded: (pageIndex: number) => void;
@@ -212,6 +213,20 @@ export function ReaderWebtoonModeView({
                           }}
                           onLoadedData={() => onImageLoaded(actualIndex)}
                           onError={() => onImageError(actualIndex)}
+                        />
+                      ) : page.type === 'audio' ? (
+                        <ReaderAudioStage
+                          title={page.metadata?.title || page.title || t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
+                          description={page.metadata?.description}
+                          thumb={page.metadata?.thumb}
+                          lyricsAssetId={page.metadata?.lyrics_asset_id}
+                          audioUrl={page.url}
+                          audioRef={(el) => {
+                            videoRefs.current[actualIndex] = el;
+                          }}
+                          onLoadedData={() => onImageLoaded(actualIndex)}
+                          onError={() => onImageError(actualIndex)}
+                          t={t}
                         />
                       ) : page.type === 'html' ? (
                         <div
