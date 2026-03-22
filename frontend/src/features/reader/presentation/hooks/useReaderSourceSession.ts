@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type React from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { logger } from '@/lib/utils/logger';
@@ -54,6 +54,11 @@ export function useReaderSourceSession({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [initialPreloadPage, setInitialPreloadPage] = useState<number | null>(null);
+  const latestPageParamRef = useRef<string | null>(pageParam);
+
+  useEffect(() => {
+    latestPageParamRef.current = pageParam;
+  }, [pageParam]);
 
   useEffect(() => {
     if (!queryArchiveId) {
@@ -113,15 +118,16 @@ export function useReaderSourceSession({
           ? localStorage.getItem('splitCoverMode') === 'true'
           : false;
 
+        const initialPageParam = latestPageParamRef.current;
         const rawInitialPageCandidate = (() => {
-          const urlPage = Number.parseInt(pageParam || '', 10);
+          const urlPage = Number.parseInt(initialPageParam || '', 10);
           if (!Number.isNaN(urlPage) && urlPage > 0) return urlPage - 1;
           if (data.progress > 0) return data.progress - 1;
           return 0;
         })();
 
         const initialPageResolution = resolveReaderInitialPage({
-          pageParam,
+          pageParam: initialPageParam,
           progress: data.progress,
           pagesLength: initialPages.length,
           doublePageMode: doublePageModeFromStorage,
@@ -167,7 +173,6 @@ export function useReaderSourceSession({
     pendingUrlPageRawRef,
     pendingWebtoonScrollToEdgeRef,
     pendingWebtoonScrollToIndexRef,
-    pageParam,
     readingMode,
     seamlessAppendInFlightRef,
     seamlessAppendTriggeredRef,
