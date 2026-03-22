@@ -155,7 +155,7 @@ export function ReaderFloatingControls({
                       step={lane.step ?? 1}
                       className="w-28 sm:w-52 h-2"
                       trackClassName="bg-white/35 border border-white/55"
-                      rangeClassName="bg-white/90"
+                      rangeClassName="bg-black/90"
                     />
                     <span className="text-sm whitespace-nowrap font-medium text-foreground min-w-[84px] text-right">
                       {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
@@ -180,7 +180,7 @@ export function ReaderFloatingControls({
                           step={0.01}
                           className="w-16 sm:w-24 h-2"
                           trackClassName="bg-white/35 border border-white/55"
-                          rangeClassName="bg-white/90"
+                          rangeClassName="bg-black/90"
                         />
                       </>
                     ) : null}
@@ -201,7 +201,7 @@ export function ReaderFloatingControls({
               step={1}
               className="w-40 sm:w-64 h-2"
               trackClassName="bg-white/35 border border-white/55"
-              rangeClassName="bg-white/90"
+              rangeClassName="bg-black/90"
             />
             <span className="text-sm whitespace-nowrap font-medium text-foreground">
               {currentPage + 1}/{totalPages}
