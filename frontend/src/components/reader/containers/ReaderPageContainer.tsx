@@ -99,6 +99,15 @@ function formatVideoClock(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+function getPageHeaderTitle(page?: { title?: string; metadata?: { title?: string } } | null): string {
+  if (!page) return '';
+  const metaTitle = page.metadata?.title?.trim();
+  if (metaTitle) return metaTitle;
+  const pageTitle = page.title?.trim();
+  if (pageTitle) return pageTitle;
+  return '';
+}
+
 function ReaderContent() {
   type EndPageNextArchive = {
     id: string;
@@ -1868,7 +1877,36 @@ function ReaderContent() {
     }
   }, [splitCoverMode, doublePageMode, currentPage, pages.length, isCurrentOrTailHtmlPage, setCurrentPage]);
 
-  const displayArchiveTitle = activeSegment?.title || archive.archiveTitle;
+  const displayArchiveTitle = useMemo(() => {
+    if (!isCollectionEndPage) {
+      const primaryIndex = currentRealPage;
+      const primaryPageTitle = getPageHeaderTitle(pages[primaryIndex]);
+      if (primaryPageTitle) return primaryPageTitle;
+
+      const hasSecondVisiblePage =
+        readingMode !== 'webtoon' &&
+        doublePageMode &&
+        !isHtmlSpreadView &&
+        !(splitCoverMode && currentPage === 0);
+      if (hasSecondVisiblePage) {
+        const secondaryPageTitle = getPageHeaderTitle(pages[primaryIndex + 1]);
+        if (secondaryPageTitle) return secondaryPageTitle;
+      }
+    }
+
+    return activeSegment?.title || archive.archiveTitle;
+  }, [
+    activeSegment?.title,
+    archive.archiveTitle,
+    currentPage,
+    currentRealPage,
+    doublePageMode,
+    isCollectionEndPage,
+    isHtmlSpreadView,
+    pages,
+    readingMode,
+    splitCoverMode,
+  ]);
   const shouldRenderSidebar = sidebar.sidebarOpen || sidebar.sidebarLoading;
 
   if (loading) {
