@@ -641,7 +641,7 @@ export function ArchiveDetailContent() {
     <div className="relative min-h-dvh bg-background pb-[calc(env(safe-area-inset-bottom)+4rem)] lg:pb-0">
       {backdropUrl ? (
         <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
-          <Image src={backdropUrl} alt="" fill className="object-cover opacity-30" unoptimized />
+          <Image src={backdropUrl} alt="" fill className="scale-105 object-cover opacity-30 blur-[2px]" unoptimized />
           <div className="absolute inset-0 bg-gradient-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
         </div>
       ) : null}
