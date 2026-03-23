@@ -16,7 +16,7 @@ const SheetClose = SheetPrimitive.Close
 const SheetPortal = SheetPrimitive.Portal
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-background p-6 shadow-lg will-change-transform motion-reduce:animate-none max-h-dvh overflow-y-auto overscroll-contain touch-pan-y",
+  "fixed z-50 gap-4 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl border-white/22 dark:border-white/12 p-6 shadow-[0_18px_45px_rgba(15,23,42,0.18)] will-change-transform motion-reduce:animate-none max-h-dvh overflow-y-auto overscroll-contain touch-pan-y",
   {
     variants: {
       side: {

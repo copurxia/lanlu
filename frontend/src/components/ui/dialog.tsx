@@ -153,7 +153,7 @@ const DialogContent: React.FC<{
         role="dialog"
         aria-modal="true"
         className={cn(
-          "relative z-modal-content w-full border bg-background shadow-lg overflow-hidden flex flex-col",
+          "relative z-modal-content w-full border border-white/22 dark:border-white/12 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl shadow-[0_18px_45px_rgba(15,23,42,0.18)] overflow-hidden flex flex-col",
           "transition-[transform,opacity] duration-200 ease-out will-change-transform motion-reduce:transition-none",
           isMobile
             ? cn(
