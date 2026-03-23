@@ -35,10 +35,14 @@ const mobileActionButtonClass =
   'rounded-full h-11 w-11 p-0 text-foreground/80 hover:bg-white/20 hover:text-foreground active:scale-95';
 const laneToggleButtonClass =
   'rounded-full h-9 w-9 p-0 border border-white/[0.28] bg-white/[0.06] text-foreground/70 transition-all duration-150 ease-out hover:bg-white/[0.20] hover:border-white/[0.55] hover:text-foreground';
+const mobileLaneToggleButtonClass =
+  'rounded-full h-9 w-9 p-0 border border-[hsl(var(--border)/0.7)] bg-[hsl(var(--background)/0.24)] text-foreground/70 transition-all duration-150 ease-out hover:bg-[hsl(var(--background)/0.36)] hover:border-[hsl(var(--border)/0.85)] hover:text-foreground';
 const mobileMediaButtonClass =
-  'rounded-full h-9 w-9 p-0 text-foreground/80 hover:bg-white/20 hover:text-foreground active:scale-95';
+  'rounded-full h-9 w-9 p-0 text-foreground/80 hover:bg-[hsl(var(--background)/0.28)] hover:text-foreground active:scale-95';
 const mobileFloatingPanelClass =
-  'relative overflow-hidden rounded-full px-2.5 py-2 bg-white/[0.18] backdrop-blur-xl border border-white/[0.30] shadow-[0_18px_45px_rgba(15,23,42,0.14)]';
+  'relative overflow-hidden rounded-full px-2.5 py-2 bg-[hsl(var(--background)/0.55)] backdrop-blur-xl border border-[hsl(var(--border)/0.8)] shadow-lg';
+const activeLaneToggleButtonClass =
+  'bg-[hsl(var(--background)/0.55)] text-foreground border-[hsl(var(--border)/0.85)] shadow-sm';
 
 function isMediaLane(
   lane: ReaderProgressLane | null | undefined
@@ -64,8 +68,8 @@ function MobileBookControls({
         min={0}
         step={1}
         className="min-w-0 flex-1 h-2"
-        trackClassName="bg-white/30 border border-white/45"
-        rangeClassName="bg-black/90"
+        trackClassName="bg-secondary"
+        rangeClassName="bg-primary"
       />
       <span className="min-w-[44px] text-right text-sm font-medium tabular-nums text-foreground/95">
         {currentPage + 1}/{totalPages}
@@ -101,8 +105,8 @@ function MobileMediaControls({
           min={lane.min ?? 0}
           step={lane.step ?? 1}
           className="min-w-0 flex-1 h-2"
-          trackClassName="bg-white/30 border border-white/45"
-          rangeClassName="bg-black/90"
+          trackClassName="bg-secondary"
+          rangeClassName="bg-primary"
         />
         <span className="min-w-[72px] text-right text-xs font-medium tabular-nums text-foreground/95">
           {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
@@ -273,7 +277,7 @@ export function ReaderFloatingControls({
 
               {resolvedActiveLane ? (
                 <div className={mobileFloatingPanelClass}>
-                  <div aria-hidden className="pointer-events-none absolute inset-[1px] rounded-full bg-white/10" />
+                  <div aria-hidden className="pointer-events-none absolute inset-[1px] rounded-full bg-[hsl(var(--background)/0.12)]" />
                   <div className="relative z-10 flex items-center gap-2">
                     <div className="flex shrink-0 items-center gap-1">
                       {resolvedLanes.map((lane) => {
@@ -286,9 +290,8 @@ export function ReaderFloatingControls({
                             size="sm"
                             onClick={() => onToggleLane(lane.id)}
                             className={cn(
-                              laneToggleButtonClass,
-                              isActive &&
-                                'bg-white/[0.45] text-foreground border border-white/[0.70] shadow-[0_6px_18px_rgba(255,255,255,0.18)]'
+                              mobileLaneToggleButtonClass,
+                              isActive && activeLaneToggleButtonClass
                             )}
                             title={lane.label}
                           >
