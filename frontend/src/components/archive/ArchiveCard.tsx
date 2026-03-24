@@ -8,11 +8,13 @@ interface ArchiveCardProps {
   index?: number;
   priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
   disableContentVisibility?: boolean;
+  coverHeight?: number;
   selectable?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (selected: boolean) => void;
   onRequestEnterSelection?: () => void;
+  onCoverAspectRatioChange?: (aspectRatio: number) => void;
 }
 
 export function ArchiveCard({
@@ -20,11 +22,13 @@ export function ArchiveCard({
   index = 0,
   priority = false,
   disableContentVisibility = false,
+  coverHeight,
   selectable = false,
   selectionMode = false,
   selected = false,
   onToggleSelect,
   onRequestEnterSelection,
+  onCoverAspectRatioChange,
 }: ArchiveCardProps) {
   const coverAssetId = getArchiveAssetId(archive, 'cover');
 
@@ -48,12 +52,14 @@ export function ArchiveCard({
       index={index}
       priority={priority}
       disableContentVisibility={disableContentVisibility}
+      coverHeight={coverHeight}
       onFavoriteToggle={handleFavoriteToggle}
       selectable={selectable}
       selectionMode={selectionMode}
       selected={selected}
       onToggleSelect={onToggleSelect}
       onRequestEnterSelection={onRequestEnterSelection}
+      onCoverAspectRatioChange={onCoverAspectRatioChange}
     />
   );
 }

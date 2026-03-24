@@ -10,22 +10,26 @@ interface TankoubonCardProps {
   tankoubon: Tankoubon;
   priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
   disableContentVisibility?: boolean;
+  coverHeight?: number;
   selectable?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (selected: boolean) => void;
   onRequestEnterSelection?: () => void;
+  onCoverAspectRatioChange?: (aspectRatio: number) => void;
 }
 
 export function TankoubonCard({
   tankoubon,
   priority = false,
   disableContentVisibility = false,
+  coverHeight,
   selectable = false,
   selectionMode = false,
   selected = false,
   onToggleSelect,
   onRequestEnterSelection,
+  onCoverAspectRatioChange,
 }: TankoubonCardProps) {
   const { t } = useLanguage();
   const firstArchiveId = tankoubon.children?.[0];
@@ -50,6 +54,7 @@ export function TankoubonCard({
       type="tankoubon"
       priority={priority}
       disableContentVisibility={disableContentVisibility}
+      coverHeight={coverHeight}
       detailsLabel={t('common.details')}
       pagesLabel={t('tankoubon.totalPages').replace('{count}', String(tankoubon.pagecount || 0))}
       badge={
@@ -69,6 +74,7 @@ export function TankoubonCard({
       selected={selected}
       onToggleSelect={onToggleSelect}
       onRequestEnterSelection={onRequestEnterSelection}
+      onCoverAspectRatioChange={onCoverAspectRatioChange}
     />
   );
 }

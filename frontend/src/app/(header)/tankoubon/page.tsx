@@ -38,6 +38,7 @@ import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { TagService } from '@/lib/services/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useGridRowCoverHeights } from '@/hooks/use-grid-row-cover-heights';
 import { useToast } from '@/hooks/use-toast';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
@@ -985,6 +986,15 @@ function TankoubonDetailContent() {
       return title.includes(q) || tags.includes(q);
     });
   }, [archives, archiveFilter]);
+  const filteredArchiveKeys = useMemo(
+    () => filteredArchives.map((archive) => `tankoubon-archive:${archive.arcid}`),
+    [filteredArchives]
+  );
+  const {
+    containerRef: archiveGridRef,
+    coverHeights: archiveGridCoverHeights,
+    reportCoverAspectRatio: reportArchiveGridCoverAspectRatio,
+  } = useGridRowCoverHeights(filteredArchiveKeys);
 
   if (loading) {
     return (
@@ -1309,12 +1319,21 @@ function TankoubonDetailContent() {
           </div>
         ) : archiveViewMode === 'grid' ? (
           <div className="space-y-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
+            <div
+              ref={archiveGridRef}
+              className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4"
+            >
               {filteredArchives.map((archive, index) => {
                 const isRemoving = removingArcids.has(archive.arcid);
+                const itemKey = `tankoubon-archive:${archive.arcid}`;
                 return (
                   <div key={archive.arcid} className="relative group">
-                    <ArchiveCard archive={archive} index={index} />
+                    <ArchiveCard
+                      archive={archive}
+                      index={index}
+                      coverHeight={archiveGridCoverHeights[itemKey]}
+                      onCoverAspectRatioChange={(aspectRatio) => reportArchiveGridCoverAspectRatio(itemKey, aspectRatio)}
+                    />
                     <Button
                       type="button"
                       variant="secondary"

@@ -7,6 +7,7 @@ import type { Archive } from '@/types/archive';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
+import { useGridRowCoverHeights } from '@/hooks/use-grid-row-cover-heights';
 
 type Props = {
   t: (key: string) => string;
@@ -16,6 +17,43 @@ type Props = {
   loading: boolean;
 };
 
+function CollectionPreviewGrid({
+  tankoubonId,
+  archives,
+  currentArchiveId,
+}: {
+  tankoubonId: string;
+  archives: Archive[];
+  currentArchiveId: string;
+}) {
+  const itemKeys = archives.map((archive) => `${tankoubonId}:${archive.arcid}`);
+  const { containerRef, coverHeights, reportCoverAspectRatio } = useGridRowCoverHeights(itemKeys);
+
+  return (
+    <div
+      ref={containerRef}
+      className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4"
+    >
+      {archives.map((archive, index) => {
+        const itemKey = `${tankoubonId}:${archive.arcid}`;
+        return (
+          <div
+            key={itemKey}
+            className={archive.arcid === currentArchiveId ? 'opacity-90' : undefined}
+          >
+            <ArchiveCard
+              archive={archive}
+              index={index}
+              coverHeight={coverHeights[itemKey]}
+              onCoverAspectRatioChange={(aspectRatio) => reportCoverAspectRatio(itemKey, aspectRatio)}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function ArchiveCollectionsCard({
   t,
   currentArchiveId,
@@ -23,6 +61,7 @@ export function ArchiveCollectionsCard({
   previewArchivesByTankoubonId,
   loading,
 }: Props) {
+
   return (
     <Card className="bg-card/70 backdrop-blur dark:bg-card/70">
       <CardHeader className="pb-2">
@@ -53,16 +92,11 @@ export function ArchiveCollectionsCard({
                   </Button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4">
-                  {archives.map((a, index) => (
-                    <div
-                      key={`${tank.tankoubon_id}:${a.arcid}`}
-                      className={a.arcid === currentArchiveId ? 'opacity-90' : undefined}
-                    >
-                      <ArchiveCard archive={a} index={index} />
-                    </div>
-                  ))}
-                </div>
+                <CollectionPreviewGrid
+                  tankoubonId={tank.tankoubon_id}
+                  archives={archives}
+                  currentArchiveId={currentArchiveId}
+                />
               </div>
             );
           })

@@ -29,6 +29,21 @@ import type { MetadataPagePatch } from '@/types/archive'
 import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon'
 import type { Plugin } from '@/lib/services/plugin-service'
 
+const DEFAULT_COVER_ASPECT_RATIO = 3 / 4
+const coverAspectRatioCache = new Map<string, number>()
+
+function normalizeCoverAspectRatio(width: number, height: number): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return DEFAULT_COVER_ASPECT_RATIO
+  }
+  return width / height
+}
+
+function getCachedCoverAspectRatio(src: string): number {
+  if (!src) return DEFAULT_COVER_ASPECT_RATIO
+  return coverAspectRatioCache.get(src) ?? DEFAULT_COVER_ASPECT_RATIO
+}
+
 export interface BaseMediaCardProps {
   // 基础信息
   id: string
@@ -55,6 +70,7 @@ export interface BaseMediaCardProps {
   priority?: boolean  // 优先加载图片（用于 LCP 优化）
   hideMetaOnMobile?: boolean
   disableContentVisibility?: boolean
+  coverHeight?: number
 
   // 收藏回调
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
@@ -63,6 +79,7 @@ export interface BaseMediaCardProps {
   selected?: boolean
   onToggleSelect?: (selected: boolean) => void
   onRequestEnterSelection?: () => void
+  onCoverAspectRatioChange?: (aspectRatio: number) => void
 }
 
 function toTagList(raw?: string): string[] {
@@ -107,13 +124,20 @@ export function BaseMediaCard({
   priority = false,
   hideMetaOnMobile = false,
   disableContentVisibility = false,
+  coverHeight,
   onFavoriteToggle,
   selectable = false,
   selectionMode = false,
   selected = false,
   onToggleSelect,
   onRequestEnterSelection,
+  onCoverAspectRatioChange,
 }: BaseMediaCardProps) {
+  const imageSrc = thumbnailUrl && thumbnailUrl.trim().length > 0
+    ? thumbnailUrl
+    : ArchiveService.getAssetUrl(thumbnailAssetId)
+  const hasImage = imageSrc.trim().length > 0
+
   const router = useRouter()
   const { t } = useLanguage()
   const { isAuthenticated, user } = useAuth()
@@ -126,6 +150,7 @@ export function BaseMediaCard({
   const [isNewStatusLoading, setIsNewStatusLoading] = React.useState(false)
   const [deleting, setDeleting] = React.useState(false)
   const [imageError, setImageError] = React.useState(false)
+  const [coverNaturalAspectRatio, setCoverNaturalAspectRatio] = React.useState(() => getCachedCoverAspectRatio(imageSrc))
   const [displayTitle, setDisplayTitle] = React.useState(title)
   const [displaySummary, setDisplaySummary] = React.useState(summary || '')
   const [displayTags, setDisplayTags] = React.useState(tags || '')
@@ -182,6 +207,15 @@ export function BaseMediaCard({
   React.useEffect(() => {
     setIsNew(isnew)
   }, [isnew])
+
+  React.useEffect(() => {
+    setImageError(false)
+    setCoverNaturalAspectRatio(getCachedCoverAspectRatio(imageSrc))
+  }, [imageSrc])
+
+  React.useEffect(() => {
+    onCoverAspectRatioChange?.(coverNaturalAspectRatio)
+  }, [coverNaturalAspectRatio, onCoverAspectRatioChange])
 
   React.useEffect(() => {
     if (!editOpen || !isAuthenticated) return
@@ -288,11 +322,21 @@ export function BaseMediaCard({
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
   const readerTargetId = type === 'archive' ? id : thumbnailId
   const readerPath = readerTargetId ? `/reader?id=${readerTargetId}` : detailPath
-  const imageSrc = thumbnailUrl && thumbnailUrl.trim().length > 0
-    ? thumbnailUrl
-    : ArchiveService.getAssetUrl(thumbnailAssetId)
-  const hasImage = imageSrc.trim().length > 0
   const progressPercent = pagecount > 0 ? Math.round((progress / pagecount) * 100) : 0
+
+  const handleImageLoad = React.useCallback((event: React.SyntheticEvent<HTMLImageElement>) => {
+    const element = event.currentTarget
+    const nextAspectRatio = normalizeCoverAspectRatio(element.naturalWidth || element.width, element.naturalHeight || element.height)
+
+    if (imageSrc) {
+      coverAspectRatioCache.set(imageSrc, nextAspectRatio)
+    }
+
+    setCoverNaturalAspectRatio((current) => {
+      if (Math.abs(current - nextAspectRatio) < 0.001) return current
+      return nextAspectRatio
+    })
+  }, [imageSrc])
 
   const emitRefresh = React.useCallback(() => {
     appEvents.emit(AppEvents.ARCHIVES_REFRESH)
@@ -931,7 +975,10 @@ export function BaseMediaCard({
         onContextMenu={handleContextMenu}
       >
         <Card className="overflow-hidden bg-card/70 transition-shadow hover:shadow-lg dark:bg-card/70">
-          <div className="aspect-[3/4] bg-muted relative">
+          <div
+            className="bg-muted relative"
+            style={coverHeight != null ? { height: `${coverHeight}px` } : { aspectRatio: String(coverNaturalAspectRatio) }}
+          >
             {!imageError && hasImage ? (
               <Image
                 src={imageSrc}
@@ -947,9 +994,13 @@ export function BaseMediaCard({
                   WebkitUserSelect: 'none',
                   userSelect: 'none',
                 }}
+                onLoad={handleImageLoad}
                 onContextMenu={(e) => e.preventDefault()}
                 onDragStart={(e) => e.preventDefault()}
-                onError={() => setImageError(true)}
+                onError={() => {
+                  setImageError(true)
+                  setCoverNaturalAspectRatio(DEFAULT_COVER_ASPECT_RATIO)
+                }}
               />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">

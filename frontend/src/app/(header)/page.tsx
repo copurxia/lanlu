@@ -24,7 +24,7 @@ import { appEvents, AppEvents } from '@/lib/utils/events';
 import { Check, Download, Heart, Pencil, RotateCcw, Trash2, X, ChevronRight, RefreshCw } from 'lucide-react';
 import { useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useDebounce, useGridColumnCount } from '@/hooks/common-hooks';
+import { useDebounce, useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import Link from 'next/link';
@@ -50,6 +50,133 @@ function isAbortLikeError(err: any) {
 
 function isTankoubonItem(item: any): item is Tankoubon {
   return item && 'tankoubon_id' in item;
+}
+
+const DEFAULT_CARD_COVER_ASPECT_RATIO = 3 / 4;
+
+function getScrollableCardWidth(viewportWidth: number): number {
+  if (viewportWidth < 640) return 128;
+  if (viewportWidth < 768) return 144;
+  if (viewportWidth < 1024) return 160;
+  if (viewportWidth < 1280) return 176;
+  return 192;
+}
+
+function HomeScrollableCardRow({
+  items,
+  selectionMode,
+  selectedArchiveIds,
+  selectedTankoubonIds,
+  enterSelectionMode,
+  toggleArchiveSelect,
+  toggleTankoubonSelect,
+}: {
+  items: (Archive | Tankoubon)[];
+  selectionMode: boolean;
+  selectedArchiveIds: Set<string>;
+  selectedTankoubonIds: Set<string>;
+  enterSelectionMode: () => void;
+  toggleArchiveSelect: (id: string, selected: boolean) => void;
+  toggleTankoubonSelect: (id: string, selected: boolean) => void;
+}) {
+  const { width } = useWindowSize();
+  const itemKeys = useMemo(() => items.map((item) => (
+    isTankoubonItem(item) ? `tankoubon:${item.tankoubon_id}` : `archive:${item.arcid}`
+  )), [items]);
+  const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    setAspectRatios((current) => {
+      const next: Record<string, number> = {};
+      for (const key of itemKeys) {
+        if (current[key] != null) {
+          next[key] = current[key];
+        }
+      }
+      const currentKeys = Object.keys(current);
+      if (currentKeys.length !== Object.keys(next).length) {
+        return next;
+      }
+      for (const key of currentKeys) {
+        if (!(key in next)) {
+          return next;
+        }
+      }
+      return current;
+    });
+  }, [itemKeys]);
+
+  const reportAspectRatio = useCallback((key: string, aspectRatio: number) => {
+    const normalized = Number.isFinite(aspectRatio) && aspectRatio > 0
+      ? aspectRatio
+      : DEFAULT_CARD_COVER_ASPECT_RATIO;
+
+    setAspectRatios((current) => {
+      if (Math.abs((current[key] ?? DEFAULT_CARD_COVER_ASPECT_RATIO) - normalized) < 0.001) {
+        return current;
+      }
+      return {
+        ...current,
+        [key]: normalized,
+      };
+    });
+  }, []);
+
+  const sharedCoverHeight = useMemo(() => {
+    if (items.length === 0) return undefined;
+    const itemWidth = getScrollableCardWidth(width);
+    let maxHeight = 0;
+
+    for (const key of itemKeys) {
+      const aspectRatio = aspectRatios[key] ?? DEFAULT_CARD_COVER_ASPECT_RATIO;
+      maxHeight = Math.max(maxHeight, itemWidth / aspectRatio);
+    }
+
+    return Math.round(maxHeight);
+  }, [aspectRatios, itemKeys, items.length, width]);
+
+  return (
+    <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
+      {items.map((item, index) => {
+        const itemKey = isTankoubonItem(item) ? `tankoubon:${item.tankoubon_id}` : `archive:${item.arcid}`;
+        return (
+          <div
+            key={itemKey}
+            className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0"
+          >
+            {isTankoubonItem(item) ? (
+              <TankoubonCard
+                tankoubon={item}
+                priority={index < 2}
+                disableContentVisibility
+                coverHeight={sharedCoverHeight}
+                selectable
+                selectionMode={selectionMode}
+                selected={selectedTankoubonIds.has(item.tankoubon_id)}
+                onRequestEnterSelection={enterSelectionMode}
+                onToggleSelect={(selected) => toggleTankoubonSelect(item.tankoubon_id, selected)}
+                onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
+              />
+            ) : (
+              <ArchiveCard
+                archive={item}
+                index={index}
+                priority={index < 2}
+                disableContentVisibility
+                coverHeight={sharedCoverHeight}
+                selectable
+                selectionMode={selectionMode}
+                selected={selectedArchiveIds.has(item.arcid)}
+                onRequestEnterSelection={enterSelectionMode}
+                onToggleSelect={(selected) => toggleArchiveSelect(item.arcid, selected)}
+                onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function HomePageContent() {
@@ -928,39 +1055,15 @@ function HomePageContent() {
             </div>
 
             {randomArchives.length > 0 ? (
-              <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
-                {randomArchives.map((item, index) => (
-                  <div
-                    key={isTankoubonItem(item) ? item.tankoubon_id : item.arcid}
-                    className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0"
-                  >
-                    {isTankoubonItem(item) ? (
-                      <TankoubonCard
-                        tankoubon={item}
-                        priority={index < 2}
-                        disableContentVisibility
-                        selectable
-                        selectionMode={selectionMode}
-                        selected={selectedTankoubonIds.has(item.tankoubon_id)}
-                        onRequestEnterSelection={enterSelectionMode}
-                        onToggleSelect={(selected) => toggleTankoubonSelect(item.tankoubon_id, selected)}
-                      />
-                    ) : (
-                      <ArchiveCard
-                        archive={item as Archive}
-                        index={index}
-                        priority={index < 2}
-                        disableContentVisibility
-                        selectable
-                        selectionMode={selectionMode}
-                        selected={selectedArchiveIds.has((item as Archive).arcid)}
-                        onRequestEnterSelection={enterSelectionMode}
-                        onToggleSelect={(selected) => toggleArchiveSelect((item as Archive).arcid, selected)}
-                      />
-                    )}
-                  </div>
-                ))}
-              </div>
+              <HomeScrollableCardRow
+                items={randomArchives}
+                selectionMode={selectionMode}
+                selectedArchiveIds={selectedArchiveIds}
+                selectedTankoubonIds={selectedTankoubonIds}
+                enterSelectionMode={enterSelectionMode}
+                toggleArchiveSelect={toggleArchiveSelect}
+                toggleTankoubonSelect={toggleTankoubonSelect}
+              />
             ) : !randomLoading ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">{t('home.noRecommendations')}</p>
@@ -1056,39 +1159,15 @@ function HomePageContent() {
                           ))}
                         </div>
                       ) : rowItems.length > 0 ? (
-                        <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
-                          {rowItems.map((item, index) => (
-                            <div
-                              key={isTankoubonItem(item) ? item.tankoubon_id : item.arcid}
-                              className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0"
-                            >
-                              {isTankoubonItem(item) ? (
-                                <TankoubonCard
-                                  tankoubon={item}
-                                  priority={index < 2}
-                                  disableContentVisibility
-                                  selectable
-                                  selectionMode={selectionMode}
-                                  selected={selectedTankoubonIds.has(item.tankoubon_id)}
-                                  onRequestEnterSelection={enterSelectionMode}
-                                  onToggleSelect={(selected) => toggleTankoubonSelect(item.tankoubon_id, selected)}
-                                />
-                              ) : (
-                                <ArchiveCard
-                                  archive={item as Archive}
-                                  index={index}
-                                  priority={index < 2}
-                                  disableContentVisibility
-                                  selectable
-                                  selectionMode={selectionMode}
-                                  selected={selectedArchiveIds.has((item as Archive).arcid)}
-                                  onRequestEnterSelection={enterSelectionMode}
-                                  onToggleSelect={(selected) => toggleArchiveSelect((item as Archive).arcid, selected)}
-                                />
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                        <HomeScrollableCardRow
+                          items={rowItems}
+                          selectionMode={selectionMode}
+                          selectedArchiveIds={selectedArchiveIds}
+                          selectedTankoubonIds={selectedTankoubonIds}
+                          enterSelectionMode={enterSelectionMode}
+                          toggleArchiveSelect={toggleArchiveSelect}
+                          toggleTankoubonSelect={toggleTankoubonSelect}
+                        />
                       ) : (
                         <div className="text-sm text-muted-foreground">{t('home.noArchives')}</div>
                       )}

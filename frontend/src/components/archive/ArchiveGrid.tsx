@@ -1,10 +1,11 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { ArchiveCard } from './ArchiveCard';
 import { TankoubonCard } from '../tankoubon/TankoubonCard';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useGridRowCoverHeights } from '@/hooks/use-grid-row-cover-heights';
 
 // Type guard to check if an item is a Tankoubon
 function isTankoubon(item: any): item is Tankoubon {
@@ -39,6 +40,10 @@ export function ArchiveGrid({
   onRequestEnterSelection,
 }: ArchiveGridProps) {
   const { t } = useLanguage();
+  const itemKeys = useMemo(() => archives.map((item) => (
+    isTankoubon(item) ? `tankoubon:${item.tankoubon_id}` : `archive:${item.arcid}`
+  )), [archives]);
+  const { containerRef, coverHeights, reportCoverAspectRatio } = useGridRowCoverHeights(itemKeys);
 
   // 预加载 tankoubon 详细信息
   useEffect(() => {
@@ -91,33 +96,39 @@ export function ArchiveGrid({
     : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-6 3xl:grid-cols-7 4xl:grid-cols-8 5xl:grid-cols-9 gap-4';
 
   return (
-    <div className={gridClasses}>
+    <div ref={containerRef} className={gridClasses}>
       {archives.map((item, index) => {
         if (isTankoubon(item)) {
+          const itemKey = `tankoubon:${item.tankoubon_id}`;
           return (
             <TankoubonCard
               key={item.tankoubon_id}
               tankoubon={item}
               priority={index < priorityCount}
+              coverHeight={coverHeights[itemKey]}
               selectable={selectable}
               selectionMode={selectionMode}
               selected={selectedTankoubons?.has(item.tankoubon_id) ?? false}
               onToggleSelect={(selected) => onToggleTankoubonSelect?.(item.tankoubon_id, selected)}
               onRequestEnterSelection={onRequestEnterSelection}
+              onCoverAspectRatioChange={(aspectRatio) => reportCoverAspectRatio(itemKey, aspectRatio)}
             />
           );
         } else {
+          const itemKey = `archive:${item.arcid}`;
           return (
             <ArchiveCard
               key={item.arcid}
               archive={item}
               index={index}
               priority={index < priorityCount}
+              coverHeight={coverHeights[itemKey]}
               selectable={selectable}
               selectionMode={selectionMode}
               selected={selectedArchives?.has(item.arcid) ?? false}
               onToggleSelect={(selected) => onToggleArchiveSelect?.(item.arcid, selected)}
               onRequestEnterSelection={onRequestEnterSelection}
+              onCoverAspectRatioChange={(aspectRatio) => reportCoverAspectRatio(itemKey, aspectRatio)}
             />
           );
         }
