@@ -65,6 +65,7 @@ export function MasonryThumbnailGrid({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({});
+  const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
 
   const getLayoutKey = useCallback((page: PageInfo, index: number) => {
     const path = String(page.path || '').trim();
@@ -91,6 +92,38 @@ export function MasonryThumbnailGrid({
       return {
         ...prev,
         [key]: nextRatio,
+      };
+    });
+  }, [getLayoutKey]);
+
+  const handleVideoMetadataLoad = useCallback((page: PageInfo, index: number, video: HTMLVideoElement) => {
+    const naturalWidth = video.videoWidth;
+    const naturalHeight = video.videoHeight;
+    if (!naturalWidth || !naturalHeight) return;
+
+    const nextRatio = naturalWidth / naturalHeight;
+    if (!Number.isFinite(nextRatio) || nextRatio <= 0) return;
+
+    const key = getLayoutKey(page, index);
+    setAspectRatios((prev) => {
+      const prevRatio = prev[key];
+      if (prevRatio && Math.abs(prevRatio - nextRatio) < 0.01) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [key]: nextRatio,
+      };
+    });
+  }, [getLayoutKey]);
+
+  const handleVideoReady = useCallback((page: PageInfo, index: number) => {
+    const key = getLayoutKey(page, index);
+    setVideoReadyMap((prev) => {
+      if (prev[key]) return prev;
+      return {
+        ...prev,
+        [key]: true,
       };
     });
   }, [getLayoutKey]);
@@ -210,9 +243,11 @@ export function MasonryThumbnailGrid({
     const { page, index, top, left, mediaHeight, cardHeight } = item;
     const isCurrentPage = currentPage === index;
     const metadataThumb = getPageDisplayThumb(page);
-    const showVideoPreview = page.type === 'video' && !metadataThumb;
-    const thumbSrc = metadataThumb || (page.type === 'image' ? page.url : '');
+    const isVideoPage = page.type === 'video';
+    const thumbSrc = isVideoPage ? '' : metadataThumb || (page.type === 'image' ? page.url : '');
     const showImageThumb = Boolean(thumbSrc);
+    const itemKey = getLayoutKey(page, index);
+    const isVideoReady = Boolean(videoReadyMap[itemKey]);
     const displayTitle = getPageDisplayTitle(page, index, t);
     const hasCustomTitle = getPageCustomTitle(page).length > 0;
     const captionText = hasCustomTitle ? displayTitle : String(index + 1);
@@ -229,23 +264,48 @@ export function MasonryThumbnailGrid({
         </div>
 
         <div className="w-full overflow-hidden bg-muted/70" style={{ height: `${mediaHeight}px` }}>
-          {showVideoPreview ? (
-            <video
-              src={page.url}
-              className="block h-full w-full object-cover"
-              muted
-              loop
-              playsInline
-              onMouseEnter={(e) => {
-                const video = e.target as HTMLVideoElement;
-                video.play().catch(() => {});
-              }}
-              onMouseLeave={(e) => {
-                const video = e.target as HTMLVideoElement;
-                video.pause();
-                video.currentTime = 0;
-              }}
-            />
+          {isVideoPage ? (
+            <div className="relative h-full w-full bg-muted/80">
+              {!isVideoReady ? (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-muted/85 text-muted-foreground">
+                  <div className="flex flex-col items-center gap-2 px-3 text-center">
+                    <Film className="h-8 w-8" />
+                    <span className="line-clamp-2 text-xs font-medium">{displayTitle}</span>
+                  </div>
+                </div>
+              ) : null}
+              <video
+                src={page.url}
+                poster={metadataThumb || undefined}
+                className="block h-full w-full object-cover"
+                muted
+                loop
+                playsInline
+                preload={metadataThumb ? 'metadata' : 'auto'}
+                onLoadedMetadata={(e) => handleVideoMetadataLoad(page, index, e.currentTarget)}
+                onLoadedData={(e) => {
+                  const video = e.currentTarget;
+                  handleVideoReady(page, index);
+                  if (metadataThumb || video.dataset.previewBootstrapped === '1') return;
+                  video.dataset.previewBootstrapped = '1';
+                  void video.play()
+                    .then(() => {
+                      window.setTimeout(() => {
+                        video.pause();
+                      }, 80);
+                    })
+                    .catch(() => {});
+                }}
+                onMouseEnter={(e) => {
+                  const video = e.target as HTMLVideoElement;
+                  video.play().catch(() => {});
+                }}
+                onMouseLeave={(e) => {
+                  const video = e.target as HTMLVideoElement;
+                  video.pause();
+                }}
+              />
+            </div>
           ) : showImageThumb ? (
             <MemoizedImage
               src={thumbSrc}

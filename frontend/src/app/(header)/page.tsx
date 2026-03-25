@@ -15,6 +15,7 @@ import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { HomeMediaList } from '@/components/home/HomeMediaList';
 import { HomeMediaMasonry } from '@/components/home/HomeMediaMasonry';
+import { HomeMediaChannel } from '@/components/home/HomeMediaChannel';
 import { HomeMediaTweet } from '@/components/home/HomeMediaTweet';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
@@ -259,7 +260,7 @@ function HomePageContent() {
 
   const effectiveCategoryId = searchQuery ? 'all' : categoryId;
   const centeredFeedClassName =
-    homeViewMode === 'tweet'
+    homeViewMode === 'tweet' || homeViewMode === 'channel'
       ? 'mx-auto w-full max-w-[42rem]'
       : homeViewMode === 'list'
         ? 'mx-auto w-full max-w-6xl'
@@ -1377,6 +1378,16 @@ function HomePageContent() {
                         onToggleArchiveSelect={toggleArchiveSelect}
                         onToggleTankoubonSelect={toggleTankoubonSelect}
                       />
+                    ) : homeViewMode === 'channel' ? (
+                      <HomeMediaChannel
+                        items={archives}
+                        selectionMode={selectionMode}
+                        selectedArchiveIds={selectedArchiveIds}
+                        selectedTankoubonIds={selectedTankoubonIds}
+                        onRequestEnterSelection={enterSelectionMode}
+                        onToggleArchiveSelect={toggleArchiveSelect}
+                        onToggleTankoubonSelect={toggleTankoubonSelect}
+                      />
                     ) : (
                       <ArchiveGrid
                         archives={archives}
@@ -1427,15 +1438,15 @@ function HomePageContent() {
                     {searchQuery ? t('home.noMatchingArchives') : t('home.noArchives')}
                   </p>
                 </div>
-              ) : homeViewMode === 'list' || homeViewMode === 'tweet' ? (
+              ) : homeViewMode === 'list' || homeViewMode === 'tweet' || homeViewMode === 'channel' ? (
                 <div className={cn('space-y-3', centeredFeedClassName)}>
                   {Array.from({ length: 4 }).map((_, idx) => (
                     <div
                       key={idx}
-                      className={`rounded-lg border bg-card ${homeViewMode === 'tweet' ? 'p-4 sm:p-5' : 'p-3 sm:p-4'}`}
+                      className={`rounded-lg border bg-card ${homeViewMode === 'tweet' || homeViewMode === 'channel' ? 'p-4 sm:p-5' : 'p-3 sm:p-4'}`}
                     >
                       <div className="flex gap-3 sm:gap-4">
-                        {homeViewMode === 'tweet' ? (
+                        {homeViewMode === 'tweet' || homeViewMode === 'channel' ? (
                           <Skeleton className="h-11 w-11 shrink-0 rounded-full" />
                         ) : (
                           <Skeleton className="h-24 w-16 shrink-0 rounded-md sm:h-28 sm:w-20" />
@@ -1445,7 +1456,7 @@ function HomePageContent() {
                           <Skeleton className="h-4 w-1/3" />
                           <Skeleton className="h-4 w-full" />
                           <Skeleton className="h-4 w-5/6" />
-                          {homeViewMode === 'tweet' && <Skeleton className="mt-3 aspect-[16/10] w-full rounded-2xl" />}
+                          {(homeViewMode === 'tweet' || homeViewMode === 'channel') && <Skeleton className="mt-3 aspect-[16/10] w-full rounded-2xl" />}
                         </div>
                       </div>
                     </div>

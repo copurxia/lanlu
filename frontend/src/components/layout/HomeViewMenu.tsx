@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { LayoutGrid, List, MessageSquareText, Rows3 } from 'lucide-react';
+import { LayoutGrid, List, MessageCircle, MessageSquareText, Rows3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { appEvents, AppEvents } from '@/lib/utils/events';
@@ -22,12 +22,14 @@ const VIEW_OPTIONS: ViewOption[] = [
   { value: 'masonry', labelKey: 'home.masonryView' },
   { value: 'list', labelKey: 'home.listView' },
   { value: 'tweet', labelKey: 'home.tweetView' },
+  { value: 'channel', labelKey: 'home.channelView' },
 ];
 
 function getViewIcon(mode: HomeViewMode) {
   if (mode === 'masonry') return LayoutGrid;
   if (mode === 'list') return List;
   if (mode === 'tweet') return MessageSquareText;
+  if (mode === 'channel') return MessageCircle;
   return Rows3;
 }
 

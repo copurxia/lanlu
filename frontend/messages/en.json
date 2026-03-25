@@ -86,6 +86,7 @@
     "masonryView": "Masonry",
     "listView": "List",
     "tweetView": "Tweet",
+    "channelView": "Channel",
     "unknownArtist": "Unknown artist",
     "sortBy": "Sort by:",
     "lastRead": "Last Read",
