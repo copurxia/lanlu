@@ -3,15 +3,15 @@
 import type { MouseEvent } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { Check, Eye, Film, Heart, Square } from 'lucide-react';
+import { HomeMediaItemMenu } from '@/components/home/HomeMediaItemMenu';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useMounted } from '@/hooks/common-hooks';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
-import { FavoriteService } from '@/lib/services/favorite-service';
+import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import {
   computeChannelPreviewLayout,
   DEFAULT_CHANNEL_ASPECT_RATIO,
@@ -50,20 +50,22 @@ type ChannelPreviewItem = {
 };
 
 type HomeMediaChannelCardProps = {
-  itemId: string;
-  title: string;
   description: string;
-  author: string;
   detailPath: string;
-  readerPath: string;
+  id: string;
+  isFavorite: boolean;
+  isNew?: boolean;
+  rawTags: string;
+  readerTargetId?: string;
   previewArchiveId?: string;
   contentMeta: string;
-  tags: ChannelTag[];
   selectionMode: boolean;
   selected: boolean;
-  isFavorite: boolean;
+  thumbnailAssetId?: number;
+  title: string;
+  type: 'archive' | 'tankoubon';
   onToggleSelected: (selected: boolean) => void;
-  onToggleFavorite: () => Promise<void>;
+  onRequestEnterSelection: () => void;
 };
 
 function isTankoubonItem(item: Archive | Tankoubon): item is Tankoubon {
@@ -393,49 +395,30 @@ function ChannelPreviewMedia({
 }
 
 function HomeMediaChannelCard({
-  itemId,
-  title,
   description,
-  author,
   detailPath,
-  readerPath,
+  id,
+  isFavorite,
+  isNew = false,
+  rawTags,
+  readerTargetId,
   previewArchiveId,
   contentMeta,
-  tags,
+  selectionMode,
   selected,
-  isFavorite,
+  thumbnailAssetId,
+  title,
+  type,
   onToggleSelected,
-  onToggleFavorite,
+  onRequestEnterSelection,
 }: HomeMediaChannelCardProps) {
-  const router = useRouter();
   const { t } = useLanguage();
-  const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [shouldLoadPreview, setShouldLoadPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewPages, setPreviewPages] = useState<PageInfo[]>([]);
   const [previewAspectRatios, setPreviewAspectRatios] = useState<Record<string, number>>({});
   const [contentExpanded, setContentExpanded] = useState(false);
   const previewRef = useRef<HTMLButtonElement | null>(null);
-
-  const handleOpenReader = useCallback(() => {
-    router.push(readerPath);
-  }, [readerPath, router]);
-
-  const handleToggleSelected = useCallback((event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    onToggleSelected(!selected);
-  }, [onToggleSelected, selected]);
-
-  const handleToggleFavorite = useCallback(async (event: MouseEvent<HTMLButtonElement>) => {
-    event.stopPropagation();
-    if (favoriteLoading) return;
-    setFavoriteLoading(true);
-    try {
-      await onToggleFavorite();
-    } finally {
-      setFavoriteLoading(false);
-    }
-  }, [favoriteLoading, onToggleFavorite]);
 
   const handleMeasurePreview = useCallback((id: string, aspectRatio: number) => {
     const normalized = Number.isFinite(aspectRatio) && aspectRatio > 0
@@ -452,27 +435,6 @@ function HomeMediaChannelCard({
       };
     });
   }, []);
-
-  const contentText = [title.trim(), description.trim()].filter(Boolean).join('\n\n');
-  const canToggleContent = useMemo(() => {
-    if (!contentText) return false;
-    return contentText.length > 180 || contentText.includes('\n');
-  }, [contentText]);
-  const previewItems = useMemo(() => {
-    return previewPages
-      .flatMap((page, index) => {
-        const media = getPagePreviewMedia(page);
-        if (!media) return [];
-        return [{
-          alt: page.title || `${title || author} ${index + 1}`,
-          id: `${itemId}-${page.path || index}`,
-          ...(media.posterSrc ? { posterSrc: media.posterSrc } : {}),
-          src: media.src,
-          type: page.type,
-        }];
-      })
-      .slice(0, CHANNEL_PREVIEW_LIMIT);
-  }, [author, itemId, previewPages, title]);
 
   useEffect(() => {
     if (!previewRef.current || shouldLoadPreview) return;
@@ -524,127 +486,189 @@ function HomeMediaChannelCard({
   }, [previewArchiveId, shouldLoadPreview]);
 
   return (
-    <article className={cn('px-1 py-2', selected && 'rounded-3xl bg-primary/5')}>
-      <div className="flex items-end gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700 dark:bg-sky-950/60 dark:text-sky-300">
-          {getAuthorInitial(author)}
-        </div>
+    <HomeMediaItemMenu
+      id={id}
+      type={type}
+      title={title}
+      description={description}
+      tags={rawTags}
+      thumbnailAssetId={thumbnailAssetId}
+      readerTargetId={readerTargetId}
+      isFavorite={isFavorite}
+      isNew={isNew}
+      selectable
+      selectionMode={selectionMode}
+      selected={selected}
+      onToggleSelect={onToggleSelected}
+      onRequestEnterSelection={onRequestEnterSelection}
+    >
+      {({
+        displayDescription,
+        displayTags,
+        displayTitle,
+        favoriteLoading,
+        handleContextMenu,
+        handleContextMenuCapture,
+        isFavorite: nextIsFavorite,
+        navigateToReader,
+        toggleFavorite,
+        toggleSelected,
+      }) => {
+        const author = extractAuthor(displayTags, type === 'archive' ? t('home.unknownArtist') : t('tankoubon.collection'));
+        const tags = buildChannelTags(displayTags);
+        const contentText = [displayTitle.trim(), displayDescription.trim()].filter(Boolean).join('\n\n');
+        const canToggleContent = contentText.length > 180 || contentText.includes('\n');
+        const previewItems = previewPages
+          .flatMap((page, index) => {
+            const media = getPagePreviewMedia(page);
+            if (!media) return [];
+            return [{
+              alt: page.title || `${displayTitle || author} ${index + 1}`,
+              id: `${id}-${page.path || index}`,
+              ...(media.posterSrc ? { posterSrc: media.posterSrc } : {}),
+              src: media.src,
+              type: page.type,
+            }];
+          })
+          .slice(0, CHANNEL_PREVIEW_LIMIT);
 
-        <div className="min-w-0 flex-1">
-          <div
-            className={cn(
-              'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-sm',
-              selected && 'ring-2 ring-primary/30'
-            )}
-          >
-            <div className="pointer-events-none absolute right-3 top-3 z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-              <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/92 px-2 py-1 shadow-sm ring-1 ring-black/5 backdrop-blur">
-                <Button
-                  asChild
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-full text-muted-foreground"
-                  title={t('archive.details')}
-                >
-                  <Link href={detailPath} prefetch={false} onClick={(event) => event.stopPropagation()}>
-                    <Eye className="h-4 w-4" />
-                  </Link>
-                </Button>
-
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className={cn('h-8 w-8 rounded-full text-muted-foreground', isFavorite && 'text-red-500')}
-                  title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                  disabled={favoriteLoading}
-                  onClick={handleToggleFavorite}
-                >
-                  {favoriteLoading ? <Spinner size="sm" /> : <Heart className={cn('h-4 w-4', isFavorite && 'fill-current')} />}
-                </Button>
-
-                <Button
-                  type="button"
-                  variant={selected ? 'default' : 'ghost'}
-                  size="icon"
-                  className="h-8 w-8 rounded-full"
-                  aria-label={selected ? t('home.unselectItem') : t('home.selectItem')}
-                  title={selected ? t('home.unselectItem') : t('home.selectItem')}
-                  onClick={handleToggleSelected}
-                >
-                  {selected ? <Check className="h-4 w-4" /> : <Square className="h-4 w-4" />}
-                </Button>
+        return (
+          <article className={cn('px-1 py-2', selected && 'rounded-3xl bg-primary/5')} onContextMenuCapture={handleContextMenuCapture} onContextMenu={handleContextMenu}>
+            <div className="flex items-end gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sm font-semibold text-sky-700 dark:bg-sky-950/60 dark:text-sky-300">
+                {getAuthorInitial(author)}
               </div>
-            </div>
 
-            <button
-              type="button"
-              ref={previewRef}
-              className="block w-full overflow-hidden text-left transition hover:opacity-95"
-              onClick={handleOpenReader}
-            >
-              <ChannelPreviewMedia
-                aspectRatios={previewAspectRatios}
-                items={previewItems}
-                loading={previewLoading}
-                emptyLabel={title || author}
-                onMeasure={handleMeasurePreview}
-              />
-            </button>
-
-            <div className="space-y-3 px-4 py-3 sm:px-5">
-              {contentText ? (
-                <div>
-                  <div
-                    className={cn(
-                      'whitespace-pre-wrap break-words text-[15px] leading-6 text-slate-900',
-                      !contentExpanded && canToggleContent && 'line-clamp-5'
-                    )}
-                  >
-                    {contentText}
-                  </div>
-                  {canToggleContent ? (
-                    <button
-                      type="button"
-                      className="mt-2 text-sm font-medium text-sky-600 transition-colors hover:text-sky-500 hover:underline dark:text-sky-400 dark:hover:text-sky-300"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setContentExpanded((current) => !current);
-                      }}
-                    >
-                      {contentExpanded ? t('common.collapse') : t('common.expand')}
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-
-              {tags.length > 0 ? (
-                <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
-                  {tags.map((tag) => {
-                    const exactQuery = buildExactTagSearchQuery(tag.canonical);
-                    const href = exactQuery ? `/?q=${encodeURIComponent(exactQuery)}` : '/';
-                    return (
-                      <Link
-                        key={`${itemId}-${tag.canonical}`}
-                        href={href}
-                        prefetch={false}
-                        className="font-medium text-sky-600 transition-colors hover:text-sky-500 hover:underline dark:text-sky-400 dark:hover:text-sky-300"
+              <div className="min-w-0 flex-1">
+                <div
+                  className={cn(
+                    'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-sm',
+                    selected && 'ring-2 ring-primary/30'
+                  )}
+                >
+                  <div className="pointer-events-none absolute right-3 top-3 z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+                    <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/92 px-2 py-1 shadow-sm ring-1 ring-black/5 backdrop-blur">
+                      <Button
+                        asChild
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full text-muted-foreground"
+                        title={t('archive.details')}
                       >
-                        {tag.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              ) : null}
+                        <Link href={detailPath} prefetch={false} onClick={(event) => event.stopPropagation()}>
+                          <Eye className="h-4 w-4" />
+                        </Link>
+                      </Button>
 
-              <div className="flex justify-end">
-                <span className="text-xs text-slate-500">{contentMeta}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className={cn('h-8 w-8 rounded-full text-muted-foreground', nextIsFavorite && 'text-red-500')}
+                        title={nextIsFavorite ? t('common.unfavorite') : t('common.favorite')}
+                        disabled={favoriteLoading}
+                        onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                          event.stopPropagation();
+                          void toggleFavorite();
+                        }}
+                      >
+                        {favoriteLoading ? <Spinner size="sm" /> : <Heart className={cn('h-4 w-4', nextIsFavorite && 'fill-current')} />}
+                      </Button>
+
+                      <Button
+                        type="button"
+                        variant={selected ? 'default' : 'ghost'}
+                        size="icon"
+                        className="h-8 w-8 rounded-full"
+                        aria-label={selected ? t('home.unselectItem') : t('home.selectItem')}
+                        title={selected ? t('home.unselectItem') : t('home.selectItem')}
+                        onClick={(event: MouseEvent<HTMLButtonElement>) => {
+                          event.stopPropagation();
+                          toggleSelected(!selected);
+                        }}
+                      >
+                        {selected ? <Check className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    ref={previewRef}
+                    className="block w-full overflow-hidden text-left transition hover:opacity-95"
+                    onClick={() => {
+                      if (selectionMode) {
+                        toggleSelected(!selected);
+                        return;
+                      }
+                      navigateToReader();
+                    }}
+                  >
+                    <ChannelPreviewMedia
+                      aspectRatios={previewAspectRatios}
+                      items={previewItems}
+                      loading={previewLoading}
+                      emptyLabel={displayTitle || author}
+                      onMeasure={handleMeasurePreview}
+                    />
+                  </button>
+
+                  <div className="space-y-3 px-4 py-3 sm:px-5">
+                    {contentText ? (
+                      <div>
+                        <div
+                          className={cn(
+                            'whitespace-pre-wrap break-words text-[15px] leading-6 text-slate-900',
+                            !contentExpanded && canToggleContent && 'line-clamp-5'
+                          )}
+                        >
+                          {contentText}
+                        </div>
+                        {canToggleContent ? (
+                          <button
+                            type="button"
+                            className="mt-2 text-sm font-medium text-sky-600 transition-colors hover:text-sky-500 hover:underline dark:text-sky-400 dark:hover:text-sky-300"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setContentExpanded((current) => !current);
+                            }}
+                          >
+                            {contentExpanded ? t('common.collapse') : t('common.expand')}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {tags.length > 0 ? (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                        {tags.map((tag) => {
+                          const exactQuery = buildExactTagSearchQuery(tag.canonical);
+                          const href = exactQuery ? `/?q=${encodeURIComponent(exactQuery)}` : '/';
+                          return (
+                            <Link
+                              key={`${id}-${tag.canonical}`}
+                              href={href}
+                              prefetch={false}
+                              className="font-medium text-sky-600 transition-colors hover:text-sky-500 hover:underline dark:text-sky-400 dark:hover:text-sky-300"
+                            >
+                              {tag.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+
+                    <div className="flex justify-end">
+                      <span className="text-xs text-slate-500">{contentMeta}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
-    </article>
+          </article>
+        );
+      }}
+    </HomeMediaItemMenu>
   );
 }
 
@@ -662,40 +686,27 @@ function HomeArchiveChannelRow({
   onToggleSelect: (selected: boolean) => void;
 }) {
   const { t } = useLanguage();
-  const [isFavorite, setIsFavorite] = useState(Boolean(archive.isfavorite));
-
-  useEffect(() => {
-    setIsFavorite(Boolean(archive.isfavorite));
-  }, [archive.isfavorite]);
-
-  const handleToggleSelected = useCallback((nextSelected: boolean) => {
-    if (nextSelected && !selectionMode) onRequestEnterSelection();
-    onToggleSelect(nextSelected);
-  }, [onRequestEnterSelection, onToggleSelect, selectionMode]);
-
-  const handleToggleFavorite = useCallback(async () => {
-    const success = await FavoriteService.toggleFavorite(archive.arcid, isFavorite);
-    if (success) setIsFavorite((current) => !current);
-  }, [archive.arcid, isFavorite]);
-
   const contentMeta = `${t('archive.pages').replace('{count}', String(archive.pagecount))}${archive.progress > 0 && archive.pagecount > 0 ? ` · ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}` : ''}`;
+  const coverAssetId = getArchiveAssetId(archive, 'cover');
 
   return (
     <HomeMediaChannelCard
-      itemId={`archive:${archive.arcid}`}
+      id={archive.arcid}
+      type="archive"
       title={archive.title}
       description={archive.description}
-      author={extractAuthor(archive.tags, t('home.unknownArtist'))}
+      rawTags={archive.tags}
       detailPath={`/archive?id=${archive.arcid}`}
-      readerPath={`/reader?id=${archive.arcid}`}
+      readerTargetId={archive.arcid}
       previewArchiveId={archive.arcid}
       contentMeta={contentMeta}
-      tags={buildChannelTags(archive.tags)}
       selectionMode={selectionMode}
       selected={selected}
-      isFavorite={isFavorite}
-      onToggleSelected={handleToggleSelected}
-      onToggleFavorite={handleToggleFavorite}
+      isFavorite={Boolean(archive.isfavorite)}
+      isNew={archive.isnew}
+      thumbnailAssetId={coverAssetId}
+      onToggleSelected={onToggleSelect}
+      onRequestEnterSelection={onRequestEnterSelection}
     />
   );
 }
@@ -714,42 +725,29 @@ function HomeTankoubonChannelRow({
   onToggleSelect: (selected: boolean) => void;
 }) {
   const { t } = useLanguage();
-  const [isFavorite, setIsFavorite] = useState(Boolean(tankoubon.isfavorite));
-
-  useEffect(() => {
-    setIsFavorite(Boolean(tankoubon.isfavorite));
-  }, [tankoubon.isfavorite]);
-
-  const handleToggleSelected = useCallback((nextSelected: boolean) => {
-    if (nextSelected && !selectionMode) onRequestEnterSelection();
-    onToggleSelect(nextSelected);
-  }, [onRequestEnterSelection, onToggleSelect, selectionMode]);
-
-  const handleToggleFavorite = useCallback(async () => {
-    const success = await FavoriteService.toggleTankoubonFavorite(tankoubon.tankoubon_id, isFavorite);
-    if (success) setIsFavorite((current) => !current);
-  }, [isFavorite, tankoubon.tankoubon_id]);
-
   const firstArchiveId = typeof tankoubon.children?.[0] === 'string' ? tankoubon.children[0] : '';
   const pageCount = typeof tankoubon.pagecount === 'number' ? tankoubon.pagecount : 0;
   const archiveCount = typeof tankoubon.archive_count === 'number' ? tankoubon.archive_count : 0;
+  const coverAssetId = getCoverAssetId(tankoubon);
 
   return (
     <HomeMediaChannelCard
-      itemId={`tankoubon:${tankoubon.tankoubon_id}`}
+      id={tankoubon.tankoubon_id}
+      type="tankoubon"
       title={tankoubon.title}
       description={tankoubon.description}
-      author={extractAuthor(tankoubon.tags, t('tankoubon.collection'))}
+      rawTags={tankoubon.tags}
       detailPath={`/tankoubon?id=${tankoubon.tankoubon_id}`}
-      readerPath={firstArchiveId ? `/reader?id=${firstArchiveId}` : `/tankoubon?id=${tankoubon.tankoubon_id}`}
+      readerTargetId={firstArchiveId || undefined}
       previewArchiveId={firstArchiveId || undefined}
       contentMeta={`${archiveCount} ${t('tankoubon.archives')} · ${t('tankoubon.totalPages').replace('{count}', String(pageCount))}`}
-      tags={buildChannelTags(tankoubon.tags)}
       selectionMode={selectionMode}
       selected={selected}
-      isFavorite={isFavorite}
-      onToggleSelected={handleToggleSelected}
-      onToggleFavorite={handleToggleFavorite}
+      isFavorite={Boolean(tankoubon.isfavorite)}
+      isNew={Boolean(tankoubon.isnew)}
+      thumbnailAssetId={coverAssetId}
+      onToggleSelected={onToggleSelect}
+      onRequestEnterSelection={onRequestEnterSelection}
     />
   );
 }
