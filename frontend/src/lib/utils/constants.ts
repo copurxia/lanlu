@@ -34,7 +34,7 @@ export interface SortOption {
 
 export const DEFAULT_SEARCH_SORT_BY = 'created_at';
 
-export type HomeViewMode = 'category-rows' | 'masonry' | 'list';
+export type HomeViewMode = 'category-rows' | 'masonry' | 'list' | 'tweet';
 
 export const DEFAULT_HOME_VIEW_MODE: HomeViewMode = 'category-rows';
 export const HOME_VIEW_MODE_STORAGE_KEY = 'home_view_mode';
@@ -49,7 +49,7 @@ export function normalizeHomeViewMode(
   value?: string | null,
   fallback: HomeViewMode = DEFAULT_HOME_VIEW_MODE
 ): HomeViewMode {
-  if (value === 'category-rows' || value === 'masonry' || value === 'list') {
+  if (value === 'category-rows' || value === 'masonry' || value === 'list' || value === 'tweet') {
     return value;
   }
   return fallback;

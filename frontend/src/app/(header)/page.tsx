@@ -15,6 +15,7 @@ import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { HomeMediaList } from '@/components/home/HomeMediaList';
 import { HomeMediaMasonry } from '@/components/home/HomeMediaMasonry';
+import { HomeMediaTweet } from '@/components/home/HomeMediaTweet';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
@@ -32,6 +33,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/utils/logger';
+import { cn } from '@/lib/utils/utils';
 import {
   DEFAULT_HOME_VIEW_MODE,
   DEFAULT_SEARCH_SORT_BY,
@@ -256,6 +258,12 @@ function HomePageContent() {
   const urlPage = parseInt(searchParams?.get('page') || '0', 10); // 从URL读取页码
 
   const effectiveCategoryId = searchQuery ? 'all' : categoryId;
+  const centeredFeedClassName =
+    homeViewMode === 'tweet'
+      ? 'mx-auto w-full max-w-[42rem]'
+      : homeViewMode === 'list'
+        ? 'mx-auto w-full max-w-6xl'
+        : '';
   const fetchInput = useMemo(() => ({
     page: currentPage,
     sortBy,
@@ -1338,41 +1346,53 @@ function HomePageContent() {
 
               {archives.length > 0 ? (
                 <>
-                  {homeViewMode === 'masonry' ? (
-                    <HomeMediaMasonry
-                      items={archives}
-                      selectionMode={selectionMode}
-                      selectedArchiveIds={selectedArchiveIds}
-                      selectedTankoubonIds={selectedTankoubonIds}
-                      onRequestEnterSelection={enterSelectionMode}
-                      onToggleArchiveSelect={toggleArchiveSelect}
-                      onToggleTankoubonSelect={toggleTankoubonSelect}
-                    />
-                  ) : homeViewMode === 'list' ? (
-                    <HomeMediaList
-                      items={archives}
-                      selectionMode={selectionMode}
-                      selectedArchiveIds={selectedArchiveIds}
-                      selectedTankoubonIds={selectedTankoubonIds}
-                      onRequestEnterSelection={enterSelectionMode}
-                      onToggleArchiveSelect={toggleArchiveSelect}
-                      onToggleTankoubonSelect={toggleTankoubonSelect}
-                    />
-                  ) : (
-                    <ArchiveGrid
-                      archives={archives}
-                      variant="home"
-                      selectable
-                      selectionMode={selectionMode}
-                      selectedArchives={selectedArchiveIds}
-                      selectedTankoubons={selectedTankoubonIds}
-                      onToggleArchiveSelect={toggleArchiveSelect}
-                      onToggleTankoubonSelect={toggleTankoubonSelect}
-                      onRequestEnterSelection={enterSelectionMode}
-                    />
-                  )}
+                  <div className={centeredFeedClassName || undefined}>
+                    {homeViewMode === 'masonry' ? (
+                      <HomeMediaMasonry
+                        items={archives}
+                        selectionMode={selectionMode}
+                        selectedArchiveIds={selectedArchiveIds}
+                        selectedTankoubonIds={selectedTankoubonIds}
+                        onRequestEnterSelection={enterSelectionMode}
+                        onToggleArchiveSelect={toggleArchiveSelect}
+                        onToggleTankoubonSelect={toggleTankoubonSelect}
+                      />
+                    ) : homeViewMode === 'list' ? (
+                      <HomeMediaList
+                        items={archives}
+                        selectionMode={selectionMode}
+                        selectedArchiveIds={selectedArchiveIds}
+                        selectedTankoubonIds={selectedTankoubonIds}
+                        onRequestEnterSelection={enterSelectionMode}
+                        onToggleArchiveSelect={toggleArchiveSelect}
+                        onToggleTankoubonSelect={toggleTankoubonSelect}
+                      />
+                    ) : homeViewMode === 'tweet' ? (
+                      <HomeMediaTweet
+                        items={archives}
+                        selectionMode={selectionMode}
+                        selectedArchiveIds={selectedArchiveIds}
+                        selectedTankoubonIds={selectedTankoubonIds}
+                        onRequestEnterSelection={enterSelectionMode}
+                        onToggleArchiveSelect={toggleArchiveSelect}
+                        onToggleTankoubonSelect={toggleTankoubonSelect}
+                      />
+                    ) : (
+                      <ArchiveGrid
+                        archives={archives}
+                        variant="home"
+                        selectable
+                        selectionMode={selectionMode}
+                        selectedArchives={selectedArchiveIds}
+                        selectedTankoubons={selectedTankoubonIds}
+                        onToggleArchiveSelect={toggleArchiveSelect}
+                        onToggleTankoubonSelect={toggleTankoubonSelect}
+                        onRequestEnterSelection={enterSelectionMode}
+                      />
+                    )}
+                  </div>
 
-                  <div className="mt-4 flex items-center justify-between gap-3">
+                  <div className={cn('mt-4 flex items-center justify-between gap-3', centeredFeedClassName)}>
                     <div
                       className="text-xs sm:text-sm text-muted-foreground min-w-0 flex-1 truncate"
                       title={statsText}
@@ -1390,7 +1410,7 @@ function HomePageContent() {
                   </div>
 
                   {homeViewMode === 'masonry' && totalPages > 0 && currentPage + 1 < totalPages && (
-                    <div className="mt-6 flex flex-col items-center justify-center gap-3">
+                  <div className="mt-6 flex flex-col items-center justify-center gap-3">
                       <div ref={masonrySentinelRef} className="h-1 w-full" />
                       {(loading || autoLoadingMore) && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -1407,17 +1427,25 @@ function HomePageContent() {
                     {searchQuery ? t('home.noMatchingArchives') : t('home.noArchives')}
                   </p>
                 </div>
-              ) : homeViewMode === 'list' ? (
-                <div className="space-y-3">
+              ) : homeViewMode === 'list' || homeViewMode === 'tweet' ? (
+                <div className={cn('space-y-3', centeredFeedClassName)}>
                   {Array.from({ length: 4 }).map((_, idx) => (
-                    <div key={idx} className="rounded-lg border bg-card p-3 sm:p-4">
+                    <div
+                      key={idx}
+                      className={`rounded-lg border bg-card ${homeViewMode === 'tweet' ? 'p-4 sm:p-5' : 'p-3 sm:p-4'}`}
+                    >
                       <div className="flex gap-3 sm:gap-4">
-                        <Skeleton className="h-24 w-16 shrink-0 rounded-md sm:h-28 sm:w-20" />
+                        {homeViewMode === 'tweet' ? (
+                          <Skeleton className="h-11 w-11 shrink-0 rounded-full" />
+                        ) : (
+                          <Skeleton className="h-24 w-16 shrink-0 rounded-md sm:h-28 sm:w-20" />
+                        )}
                         <div className="min-w-0 flex-1 space-y-2">
                           <Skeleton className="h-5 w-2/3" />
                           <Skeleton className="h-4 w-1/3" />
                           <Skeleton className="h-4 w-full" />
                           <Skeleton className="h-4 w-5/6" />
+                          {homeViewMode === 'tweet' && <Skeleton className="mt-3 aspect-[16/10] w-full rounded-2xl" />}
                         </div>
                       </div>
                     </div>
