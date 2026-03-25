@@ -12,6 +12,11 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useMounted } from '@/hooks/common-hooks';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
+import {
+  computeChannelPreviewLayout,
+  DEFAULT_CHANNEL_ASPECT_RATIO,
+  type ChannelPreviewLayoutItem,
+} from '@/lib/utils/channel-preview-layout';
 import { buildExactTagSearchQuery, parseTags, stripNamespace } from '@/lib/utils/tag-utils';
 import { cn } from '@/lib/utils/utils';
 import type { Archive } from '@/types/archive';
@@ -43,9 +48,6 @@ type ChannelPreviewItem = {
   src: string;
   type: PageInfo['type'];
 };
-
-const DEFAULT_CHANNEL_ASPECT_RATIO = 1.2;
-const CHANNEL_MASONRY_ITEM_HEIGHT_CLASS = 'h-[132px] sm:h-[148px] xl:h-[160px]';
 
 type HomeMediaChannelCardProps = {
   itemId: string;
@@ -127,7 +129,7 @@ function ChannelPreviewTile({
   style?: React.CSSProperties;
 }) {
   return (
-    <div className={cn('relative flex shrink-0 items-center justify-center overflow-hidden bg-muted', className)} style={style}>
+    <div className={cn('flex h-full items-center justify-center overflow-hidden bg-muted', className)} style={style}>
       {item.type === 'video' ? (
         <>
           {!videoReady && !item.posterSrc ? (
@@ -138,7 +140,7 @@ function ChannelPreviewTile({
           <video
             src={item.src}
             poster={item.posterSrc || undefined}
-            className="block h-full w-auto max-w-none flex-grow"
+            className="block h-full w-auto max-w-none"
             muted
             loop
             playsInline
@@ -169,7 +171,7 @@ function ChannelPreviewTile({
         <MemoizedImage
           src={item.src}
           alt={item.alt}
-          className="block h-full w-auto max-w-none flex-grow"
+          className="block h-full w-auto max-w-none"
           decoding="async"
           loading="lazy"
           draggable={false}
@@ -200,22 +202,48 @@ function ChannelPreviewMedia({
   onMeasure: (id: string, aspectRatio: number) => void;
 }) {
   const mounted = useMounted();
+  const [hydrated, setHydrated] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
 
-  const normalizedItems = useMemo(() => items.map((item) => ({
-    ...item,
-    aspectRatio: Math.max(0.45, Math.min(aspectRatios[item.id] || DEFAULT_CHANNEL_ASPECT_RATIO, 2.6)),
-  })), [aspectRatios, items]);
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
 
-  const masonryItems = useMemo(() => normalizedItems.map((item) => {
-    const basis = Math.max(92, Math.round(148 * item.aspectRatio));
-    return {
-      ...item,
-      basis,
-      grow: Math.max(1, item.aspectRatio),
-      minWidth: Math.max(92, Math.min(220, Math.round(basis * 0.72))),
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const element = containerRef.current;
+    if (!element) return;
+
+    const updateWidth = () => {
+      setContainerWidth(element.clientWidth);
     };
-  }), [normalizedItems]);
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hydrated]);
+
+  const normalizedItems = useMemo<Array<ChannelPreviewItem & ChannelPreviewLayoutItem>>(() => items.map((item) => ({
+    ...item,
+    aspectRatio: aspectRatios[item.id] || DEFAULT_CHANNEL_ASPECT_RATIO,
+  })), [aspectRatios, items]);
+  const effectiveWidth = Math.max(containerWidth, 320);
+  const layout = useMemo(() => computeChannelPreviewLayout(
+    normalizedItems.map((item) => ({
+      ...item,
+    })),
+    effectiveWidth
+  ), [effectiveWidth, normalizedItems]);
 
   const handleVideoReady = useCallback((id: string) => {
     setVideoReadyMap((current) => {
@@ -227,49 +255,139 @@ function ChannelPreviewMedia({
     });
   }, []);
 
-  if (items.length === 0) {
-    return (
-      <div className="flex aspect-[16/10] items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
-        {loading ? <Spinner size="sm" /> : emptyLabel}
-      </div>
-    );
-  }
-
-  if (!mounted) {
-    return (
-      <div className="flex max-h-[460px] flex-wrap gap-px overflow-hidden bg-border">
-        {Array.from({ length: Math.max(1, Math.min(items.length, CHANNEL_PREVIEW_LIMIT)) }).map((_, index) => (
-          <div
-            key={`channel-preview-skeleton-${index}`}
-            className={cn('shrink-0 animate-pulse bg-muted', CHANNEL_MASONRY_ITEM_HEIGHT_CLASS)}
-            style={{
-              flexBasis: `${index % 3 === 1 ? 212 : 148}px`,
-              flexGrow: index % 3 === 1 ? 1.4 : 1,
-              minWidth: `${index % 3 === 1 ? 144 : 108}px`,
-            }}
-          />
-        ))}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex max-h-[460px] flex-wrap gap-px overflow-hidden bg-border">
-      {masonryItems.map((item) => (
-        <ChannelPreviewTile
-          key={item.id}
-          item={item}
-          className={CHANNEL_MASONRY_ITEM_HEIGHT_CLASS}
-          onMeasure={onMeasure}
-          onVideoReady={handleVideoReady}
-          videoReady={Boolean(videoReadyMap[item.id])}
+    <div ref={containerRef} className="w-full">
+      {items.length === 0 ? (
+        <div className="flex aspect-[16/10] w-full items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
+          {loading ? <Spinner size="sm" /> : emptyLabel}
+        </div>
+      ) : !mounted || !hydrated ? (
+        <div className="flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
+          {Array.from({ length: Math.max(1, Math.min(items.length, 3)) }).map((_, index) => (
+            <div
+              key={`channel-preview-skeleton-${index}`}
+              className="animate-pulse bg-muted"
+              style={{ height: `${index === 0 ? 180 : 120}px` }}
+            />
+          ))}
+        </div>
+      ) : layout.kind === 'single' ? (
+        <div
+          className="flex w-full items-center justify-center overflow-hidden bg-muted"
           style={{
-            flexBasis: `${item.basis}px`,
-            flexGrow: item.grow,
-            minWidth: `${item.minWidth}px`,
+            height: `${layout.heroHeight}px`,
           }}
-        />
-      ))}
+        >
+          <ChannelPreviewTile
+            item={layout.hero}
+            onMeasure={onMeasure}
+            onVideoReady={handleVideoReady}
+            videoReady={Boolean(videoReadyMap[layout.hero.id])}
+            style={{ width: '100%' }}
+          />
+        </div>
+      ) : layout.kind === 'rows' ? (
+        <div className="flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
+          {layout.rows.map((row, rowIndex) => (
+            <div
+              key={`row-${rowIndex}`}
+              className="flex gap-px"
+              style={{
+                height: `${row.height}px`,
+              }}
+            >
+              {row.items.map((item) => (
+                <ChannelPreviewTile
+                  key={item.id}
+                  item={item}
+                  className="shrink-0"
+                  onMeasure={onMeasure}
+                  onVideoReady={handleVideoReady}
+                  videoReady={Boolean(videoReadyMap[item.id])}
+                  style={{ width: `${item.width}px` }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      ) : layout.kind === 'hero-side' ? (
+        <div
+          className="grid max-h-[460px] w-full gap-px overflow-hidden bg-border"
+          style={{
+            gridTemplateColumns: `${layout.heroWidth}px ${Math.max(0, effectiveWidth - layout.heroWidth - 1)}px`,
+            height: `${layout.totalHeight}px`,
+          }}
+        >
+          <ChannelPreviewTile
+            item={layout.hero}
+            onMeasure={onMeasure}
+            onVideoReady={handleVideoReady}
+            videoReady={Boolean(videoReadyMap[layout.hero.id])}
+            style={{ width: `${layout.heroWidth}px` }}
+          />
+          <div className="flex flex-col gap-px overflow-hidden">
+            {layout.rows.map((row, rowIndex) => (
+              <div
+                key={`side-row-${rowIndex}`}
+                className="flex gap-px"
+                style={{
+                  height: `${row.height}px`,
+                }}
+              >
+                {row.items.map((item) => (
+                  <ChannelPreviewTile
+                    key={item.id}
+                    item={item}
+                    className="shrink-0"
+                    onMeasure={onMeasure}
+                    onVideoReady={handleVideoReady}
+                    videoReady={Boolean(videoReadyMap[item.id])}
+                    style={{ width: `${item.width}px` }}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
+          <div
+            className="flex"
+            style={{
+              height: `${layout.heroHeight}px`,
+            }}
+          >
+            <ChannelPreviewTile
+              item={layout.hero}
+              onMeasure={onMeasure}
+              onVideoReady={handleVideoReady}
+              videoReady={Boolean(videoReadyMap[layout.hero.id])}
+              style={{ width: '100%' }}
+            />
+          </div>
+          {layout.rows.map((row, rowIndex) => (
+            <div
+              key={`row-${rowIndex}`}
+              className="flex gap-px"
+              style={{
+                height: `${row.height}px`,
+              }}
+            >
+              {row.items.map((item) => (
+                <ChannelPreviewTile
+                  key={item.id}
+                  item={item}
+                  className="shrink-0"
+                  onMeasure={onMeasure}
+                  onVideoReady={handleVideoReady}
+                  videoReady={Boolean(videoReadyMap[item.id])}
+                  style={{ width: `${item.width}px` }}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -415,7 +533,7 @@ function HomeMediaChannelCard({
         <div className="min-w-0 flex-1">
           <div
             className={cn(
-              'group relative overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-sm',
+              'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-sm',
               selected && 'ring-2 ring-primary/30'
             )}
           >
