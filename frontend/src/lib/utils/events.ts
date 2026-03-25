@@ -41,4 +41,5 @@ export const AppEvents = {
   ARCHIVES_REFRESH: 'archives:refresh',
   SEARCH_RESET: 'search:reset',
   FILTER_OPEN: 'filter:open',
+  HOME_VIEW_MODE_CHANGE: 'home:view-mode-change',
 } as const;

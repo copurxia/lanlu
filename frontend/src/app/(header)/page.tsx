@@ -13,6 +13,8 @@ import { Dialog, DialogBody, DialogContent, DialogHeader, DialogTitle } from '@/
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { SearchSidebar } from '@/components/layout/SearchSidebar';
+import { HomeMediaList } from '@/components/home/HomeMediaList';
+import { HomeMediaMasonry } from '@/components/home/HomeMediaMasonry';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
@@ -31,13 +33,17 @@ import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/utils/logger';
 import {
+  DEFAULT_HOME_VIEW_MODE,
   DEFAULT_SEARCH_SORT_BY,
+  HOME_VIEW_MODE_STORAGE_KEY,
+  type HomeViewMode,
+  normalizeHomeViewMode,
   normalizeSearchSortBy,
 } from '@/lib/utils/constants';
 
 // In-memory cache so random recommendations don't change when navigating away and back.
 // Keyed by `${gridColumnCount}:${language}`.
-const randomArchivesCache = new Map<string, any[]>();
+const randomArchivesCache = new Map<string, Array<Archive | Tankoubon>>();
 
 function isAbortLikeError(err: any) {
   return (
@@ -190,13 +196,15 @@ function HomePageContent() {
   const categoryRowSize = Math.max(8, gridColumnCount * 2);
   const randomKey = `${categoryRowSize}:${language}`;
   const mainScrollRef = useRef<HTMLElement | null>(null);
+  const masonrySentinelRef = useRef<HTMLDivElement | null>(null);
   const lastPageRef = useRef<number | null>(null);
 
-  const [archives, setArchives] = useState<any[]>([]);
+  const [archives, setArchives] = useState<Array<Archive | Tankoubon>>([]);
   const cachedRandomArchives =
     typeof window !== 'undefined' ? randomArchivesCache.get(randomKey) : undefined;
-  const [randomArchives, setRandomArchives] = useState<any[]>(() => cachedRandomArchives ?? []);
+  const [randomArchives, setRandomArchives] = useState<Array<Archive | Tankoubon>>(() => cachedRandomArchives ?? []);
   const [loading, setLoading] = useState(true);
+  const [autoLoadingMore, setAutoLoadingMore] = useState(false);
   const [randomLoading, setRandomLoading] = useState(() => !cachedRandomArchives);
   const [currentPage, setCurrentPage] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
@@ -216,6 +224,10 @@ function HomePageContent() {
   const [categoryRows, setCategoryRows] = useState<Record<string, (Archive | Tankoubon)[]>>({});
   const [categoryRowsLoading, setCategoryRowsLoading] = useState(false);
   const [categoryRowsRefreshKey, setCategoryRowsRefreshKey] = useState(0);
+  const [homeViewMode, setHomeViewMode] = useState<HomeViewMode>(() => {
+    if (typeof window === 'undefined') return DEFAULT_HOME_VIEW_MODE;
+    return normalizeHomeViewMode(window.localStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
+  });
   const [isInitialized, setIsInitialized] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -265,11 +277,15 @@ function HomePageContent() {
 
   const debouncedFetchInput = useDebounce(fetchInput, 250);
 
-  const fetchArchives = useCallback(async (input: typeof fetchInput) => {
+  const fetchArchives = useCallback(async (
+    input: typeof fetchInput,
+    options?: { append?: boolean }
+  ) => {
     const requestId = (archivesRequestIdRef.current += 1);
     archivesAbortRef.current?.abort();
     const controller = new AbortController();
     archivesAbortRef.current = controller;
+    const append = options?.append === true;
 
     try {
       setLoading(true);
@@ -300,14 +316,32 @@ function HomePageContent() {
       // a major latency source on large libraries, so it was removed for performance.
 
       if (requestId !== archivesRequestIdRef.current) return;
-      setArchives(data);
+      setArchives((current) => {
+        if (!append) return data;
+
+        const merged = [...current];
+        for (const item of data) {
+          const alreadyExists = merged.some((existing) => (
+            isTankoubonItem(existing) && isTankoubonItem(item)
+              ? existing.tankoubon_id === item.tankoubon_id
+              : !isTankoubonItem(existing) && !isTankoubonItem(item)
+                ? existing.arcid === item.arcid
+                : false
+          ));
+          if (!alreadyExists) merged.push(item);
+        }
+        return merged;
+      });
       setTotalRecords(totalRecordsAdjusted);
       setTotalPages(Math.ceil(totalRecordsAdjusted / pageSize));
     } catch (error) {
       if (isAbortLikeError(error)) return;
       logger.apiError('fetch archives', error);
     } finally {
-      if (requestId === archivesRequestIdRef.current) setLoading(false);
+      if (requestId === archivesRequestIdRef.current) {
+        setLoading(false);
+        setAutoLoadingMore(false);
+      }
     }
   }, [pageSize]);
 
@@ -358,6 +392,28 @@ function HomePageContent() {
     setIsInitialized(true);
   }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly, urlPage]);
 
+  useEffect(() => {
+    const handleHomeViewModeChange = (nextMode?: HomeViewMode) => {
+      const normalized = normalizeHomeViewMode(nextMode);
+      setHomeViewMode(normalized);
+      setAutoLoadingMore(false);
+      setArchives([]);
+      setCurrentPage(0);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(HOME_VIEW_MODE_STORAGE_KEY, normalized);
+      }
+    };
+
+    appEvents.on(AppEvents.HOME_VIEW_MODE_CHANGE, handleHomeViewModeChange);
+    return () => appEvents.off(AppEvents.HOME_VIEW_MODE_CHANGE, handleHomeViewModeChange);
+  }, []);
+
+  const isSearchMode = Boolean(searchQuery);
+  const isHomeLanding = !isSearchMode && categoryId === 'all';
+  const showCategoryRowsView = isHomeLanding && homeViewMode === 'category-rows';
+  const showArchiveFeed = !showCategoryRowsView;
+  const isMasonryFeed = showArchiveFeed && homeViewMode === 'masonry';
+
   // 同步状态到URL（仅在初始化完成后执行）
   useEffect(() => {
     if (!isInitialized) return;
@@ -391,15 +447,17 @@ function HomePageContent() {
   useEffect(() => {
     // 只在客户端执行数据获取，避免静态生成时的API调用
     // 确保只在初始化完成后才获取数据，避免使用未同步的初始状态
-    if (typeof window !== 'undefined' && isInitialized && (searchQuery || categoryId !== 'all')) {
-      fetchArchives(debouncedFetchInput);
+    if (typeof window !== 'undefined' && isInitialized && showArchiveFeed) {
+      fetchArchives(debouncedFetchInput, {
+        append: homeViewMode === 'masonry' && debouncedFetchInput.page > 0,
+      });
     }
-  }, [categoryId, debouncedFetchInput, fetchArchives, isInitialized, searchQuery]);
+  }, [debouncedFetchInput, fetchArchives, homeViewMode, isInitialized, showArchiveFeed]);
 
   useEffect(() => {
     if (!isInitialized) return;
-    if (!searchQuery && categoryId === 'all') setLoading(false);
-  }, [categoryId, isInitialized, searchQuery]);
+    if (!showArchiveFeed) setLoading(false);
+  }, [isInitialized, showArchiveFeed]);
 
   useEffect(() => {
     if (!batchEditOpen) return;
@@ -422,10 +480,10 @@ function HomePageContent() {
     };
   }, [batchEditOpen]);
 
-  // Random recommendations are hidden during search, and they don't need to refresh on every filter/sort/page change.
+  // Random recommendations are only needed for the category-row home view.
   useEffect(() => {
     if (typeof window === 'undefined' || !isInitialized) return;
-    if (searchQuery) return;
+    if (!showCategoryRowsView) return;
     if (lastRandomKeyRef.current === randomKey) return;
     lastRandomKeyRef.current = randomKey;
     // Avoid refreshing when navigating away/back by restoring from cache if available.
@@ -437,26 +495,44 @@ function HomePageContent() {
     }
     setRandomArchives([]);
     fetchRandomArchives();
-  }, [fetchRandomArchives, isInitialized, randomKey, searchQuery]);
+  }, [fetchRandomArchives, isInitialized, randomKey, showCategoryRowsView]);
 
   // 监听上传完成事件，刷新首页数据
   useEffect(() => {
     const handleUploadCompleted = () => {
-      if (searchQuery || categoryId !== 'all') {
-        fetchArchives(fetchInputRef.current);
+      if (showArchiveFeed) {
+        if (homeViewMode === 'masonry') {
+          setAutoLoadingMore(false);
+          setArchives([]);
+          setCurrentPage(0);
+          if (fetchInputRef.current.page === 0) {
+            fetchArchives({ ...fetchInputRef.current, page: 0 }, { append: false });
+          }
+        } else {
+          fetchArchives(fetchInputRef.current, { append: false });
+        }
       } else {
         setCategoryRowsRefreshKey((prev) => prev + 1);
       }
-      if (!searchQuery) fetchRandomArchives({ force: true });
+      if (!searchQuery && homeViewMode === 'category-rows') fetchRandomArchives({ force: true });
     };
 
     const handleArchivesRefresh = () => {
-      if (searchQuery || categoryId !== 'all') {
-        fetchArchives(fetchInputRef.current);
+      if (showArchiveFeed) {
+        if (homeViewMode === 'masonry') {
+          setAutoLoadingMore(false);
+          setArchives([]);
+          setCurrentPage(0);
+          if (fetchInputRef.current.page === 0) {
+            fetchArchives({ ...fetchInputRef.current, page: 0 }, { append: false });
+          }
+        } else {
+          fetchArchives(fetchInputRef.current, { append: false });
+        }
       } else {
         setCategoryRowsRefreshKey((prev) => prev + 1);
       }
-      if (!searchQuery) fetchRandomArchives({ force: true });
+      if (!searchQuery && homeViewMode === 'category-rows') fetchRandomArchives({ force: true });
     };
 
     const handleSearchReset = () => {
@@ -482,7 +558,7 @@ function HomePageContent() {
       appEvents.off(AppEvents.ARCHIVES_REFRESH, handleArchivesRefresh);
       appEvents.off(AppEvents.SEARCH_RESET, handleSearchReset);
     };
-  }, [categoryId, fetchArchives, fetchRandomArchives, searchQuery]);
+  }, [fetchArchives, fetchRandomArchives, homeViewMode, searchQuery, showArchiveFeed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -547,10 +623,6 @@ function HomePageContent() {
     // 移动端：应用筛选后自动关闭对话框
     setFilterDialogOpen(false);
   };
-
-  const isSearchMode = Boolean(searchQuery);
-  const showCategoryRows = !isSearchMode && categoryId === 'all';
-  const showFilteredList = !showCategoryRows;
 
   const enabledCategories = useMemo(() => {
     return categories
@@ -900,7 +972,7 @@ function HomePageContent() {
   }, [canBatchDownload, selectedArchiveIds, showInfo, showSuccess, t]);
 
   useEffect(() => {
-    if (!showCategoryRows || enabledCategories.length === 0) {
+    if (!showCategoryRowsView || enabledCategories.length === 0) {
       setCategoryRowsLoading(false);
       return;
     }
@@ -961,7 +1033,7 @@ function HomePageContent() {
     groupByTanks,
     language,
     newonly,
-    showCategoryRows,
+    showCategoryRowsView,
     sortBy,
     sortOrder,
     untaggedonly,
@@ -990,12 +1062,18 @@ function HomePageContent() {
 
   useEffect(() => {
     clearSelection();
-  }, [clearSelection, currentPage, categoryId, searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks]);
+  }, [clearSelection, categoryId, searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, homeViewMode]);
+
+  useEffect(() => {
+    if (homeViewMode === 'masonry') return;
+    clearSelection();
+  }, [clearSelection, currentPage, homeViewMode]);
 
   // Homepage uses an independently scrollable <main>; reset its scroll position when the page changes.
   // This covers pagination clicks and history navigation (back/forward) that updates `page` via URL.
   useEffect(() => {
     if (!isInitialized) return;
+    if (homeViewMode === 'masonry') return;
     const prev = lastPageRef.current;
     lastPageRef.current = currentPage;
     if (prev === null || prev === currentPage) return;
@@ -1006,12 +1084,37 @@ function HomePageContent() {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     mainScrollRef.current?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
-  }, [currentPage, isInitialized]);
+  }, [currentPage, homeViewMode, isInitialized]);
 
   const statsText = t('home.archivesCount')
     .replace('{count}', String(totalRecords))
     .replace('{page}', String(currentPage + 1))
     .replace('{totalPages}', String(totalPages));
+
+  useEffect(() => {
+    if (!isMasonryFeed) return;
+    if (!masonrySentinelRef.current || !mainScrollRef.current) return;
+    if (loading || autoLoadingMore) return;
+    if (currentPage + 1 >= totalPages) return;
+
+    const sentinel = masonrySentinelRef.current;
+    const root = mainScrollRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setAutoLoadingMore(true);
+        setCurrentPage((page) => page + 1);
+      },
+      {
+        root,
+        rootMargin: '0px 0px 640px 0px',
+        threshold: 0,
+      }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [autoLoadingMore, currentPage, isMasonryFeed, loading, totalPages]);
 
   return (
     <div className="bg-background h-[calc(100dvh-var(--app-header-height,4rem))] overflow-hidden">
@@ -1036,7 +1139,7 @@ function HomePageContent() {
           {/* Slightly tighter vertical padding so section headers don't feel "pushed down" on both desktop and mobile. */}
           <div className="px-4 pt-4 pb-2">
           {/* 随机推荐 - 仅在分类分行首页展示 */}
-          {showCategoryRows && (
+          {showCategoryRowsView && (
           <section className="mb-8">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold">{t('home.randomRecommendations')}</h2>
@@ -1100,7 +1203,7 @@ function HomePageContent() {
           </Dialog>
 
           {/* 分类分行展示 */}
-          {showCategoryRows && (
+          {showCategoryRowsView && (
             <section className="mb-10 space-y-8">
               {categoriesLoading ? (
                 <div className="space-y-6">
@@ -1181,7 +1284,7 @@ function HomePageContent() {
           )}
 
           {/* 档案列表（搜索/筛选状态） */}
-          {showFilteredList && (
+          {showArchiveFeed && (
             <section>
               <div className="flex flex-col gap-3 mb-4">
                 {/* 标题栏 + 排序控件同一行（移动端/桌面端统一） */}
@@ -1235,17 +1338,39 @@ function HomePageContent() {
 
               {archives.length > 0 ? (
                 <>
-                  <ArchiveGrid
-                    archives={archives}
-                    variant="home"
-                    selectable
-                    selectionMode={selectionMode}
-                    selectedArchives={selectedArchiveIds}
-                    selectedTankoubons={selectedTankoubonIds}
-                    onToggleArchiveSelect={toggleArchiveSelect}
-                    onToggleTankoubonSelect={toggleTankoubonSelect}
-                    onRequestEnterSelection={enterSelectionMode}
-                  />
+                  {homeViewMode === 'masonry' ? (
+                    <HomeMediaMasonry
+                      items={archives}
+                      selectionMode={selectionMode}
+                      selectedArchiveIds={selectedArchiveIds}
+                      selectedTankoubonIds={selectedTankoubonIds}
+                      onRequestEnterSelection={enterSelectionMode}
+                      onToggleArchiveSelect={toggleArchiveSelect}
+                      onToggleTankoubonSelect={toggleTankoubonSelect}
+                    />
+                  ) : homeViewMode === 'list' ? (
+                    <HomeMediaList
+                      items={archives}
+                      selectionMode={selectionMode}
+                      selectedArchiveIds={selectedArchiveIds}
+                      selectedTankoubonIds={selectedTankoubonIds}
+                      onRequestEnterSelection={enterSelectionMode}
+                      onToggleArchiveSelect={toggleArchiveSelect}
+                      onToggleTankoubonSelect={toggleTankoubonSelect}
+                    />
+                  ) : (
+                    <ArchiveGrid
+                      archives={archives}
+                      variant="home"
+                      selectable
+                      selectionMode={selectionMode}
+                      selectedArchives={selectedArchiveIds}
+                      selectedTankoubons={selectedTankoubonIds}
+                      onToggleArchiveSelect={toggleArchiveSelect}
+                      onToggleTankoubonSelect={toggleTankoubonSelect}
+                      onRequestEnterSelection={enterSelectionMode}
+                    />
+                  )}
 
                   <div className="mt-4 flex items-center justify-between gap-3">
                     <div
@@ -1254,7 +1379,7 @@ function HomePageContent() {
                     >
                       {statsText}
                     </div>
-                    {totalPages > 1 && (
+                    {homeViewMode !== 'masonry' && totalPages > 1 && (
                       <Pagination
                         currentPage={currentPage}
                         totalPages={totalPages}
@@ -1263,6 +1388,18 @@ function HomePageContent() {
                       />
                     )}
                   </div>
+
+                  {homeViewMode === 'masonry' && totalPages > 0 && currentPage + 1 < totalPages && (
+                    <div className="mt-6 flex flex-col items-center justify-center gap-3">
+                      <div ref={masonrySentinelRef} className="h-1 w-full" />
+                      {(loading || autoLoadingMore) && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Spinner size="sm" />
+                          <span>{t('common.loading')}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : !loading ? (
                 <div className="text-center py-12">
@@ -1270,7 +1407,31 @@ function HomePageContent() {
                     {searchQuery ? t('home.noMatchingArchives') : t('home.noArchives')}
                   </p>
                 </div>
-              ) : null}
+              ) : homeViewMode === 'list' ? (
+                <div className="space-y-3">
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <div key={idx} className="rounded-lg border bg-card p-3 sm:p-4">
+                      <div className="flex gap-3 sm:gap-4">
+                        <Skeleton className="h-24 w-16 shrink-0 rounded-md sm:h-28 sm:w-20" />
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <Skeleton className="h-5 w-2/3" />
+                          <Skeleton className="h-4 w-1/3" />
+                          <Skeleton className="h-4 w-full" />
+                          <Skeleton className="h-4 w-5/6" />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6">
+                  {Array.from({ length: 10 }).map((_, idx) => (
+                    <div key={idx} className="mb-4 break-inside-avoid">
+                      <Skeleton className="aspect-[3/4] w-full rounded-lg" />
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
           )}
           </div>

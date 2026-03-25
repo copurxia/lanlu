@@ -8,6 +8,7 @@ import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { resolveArchiveAssetUrl } from '@/lib/utils/archive-assets';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
+import { HomeViewMenu } from '@/components/layout/HomeViewMenu';
 import { UserMenu } from '@/components/user/UserMenu';
 import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
@@ -337,6 +338,7 @@ export function Header() {
               })}
             </div>
             <UserMenu />
+            {pathname === '/' && <HomeViewMenu />}
             <LanguageButton />
             <ThemeToggle />
           </nav>
@@ -365,6 +367,7 @@ export function Header() {
             </Button>
             <UserMenu />
             <ThemeButton />
+            {pathname === '/' && <HomeViewMenu />}
             <LanguageButton />
           </div>
         </div>
@@ -415,6 +418,7 @@ export function Header() {
 
               <div className="flex items-center gap-2 pt-3 border-t border-border px-4 pb-4">
                 <ThemeButton />
+                {pathname === '/' && <HomeViewMenu />}
                 <LanguageButton />
               </div>
             </SheetContent>
