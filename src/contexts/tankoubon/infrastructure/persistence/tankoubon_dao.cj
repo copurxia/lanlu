@@ -5,6 +5,7 @@ import lanlu.shared.config.*
 import std.collection.*
 import stdx.log.*
 import std.time.*
+import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
 
@@ -743,109 +744,23 @@ public class TankoubonDao {
      * Update Tankoubon tags (unified metadata_tags).
      */
     public static func updateTankoubonTags(tankoubonId: String, tagsString: String): Bool {
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    var metadataId: Int64 = 0
-                    let getMetadataStmt = conn.prepareStatement("""
-                        SELECT id
-                        FROM metadata_objects
-                        WHERE entity_type = 'tankoubon' AND entity_id = ?
-                        LIMIT 1
-                    """)
-                    try {
-                        getMetadataStmt.set(0, tankoubonId)
-                        let rs = getMetadataStmt.query()
-                        try {
-                            if (rs.next()) {
-                                metadataId = rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally { rs.close() }
-                    } finally { getMetadataStmt.close() }
-
-                    if (metadataId <= 0) {
-                        let createMetadataStmt = conn.prepareStatement("""
-                            INSERT INTO metadata_objects (
-                                entity_type, entity_id, title, description, created_at, updated_at
-                            )
-                            VALUES ('tankoubon', ?, '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                            ON CONFLICT (entity_type, entity_id) DO UPDATE
-                            SET updated_at = CURRENT_TIMESTAMP
-                            RETURNING id
-                        """)
-                        try {
-                            createMetadataStmt.set(0, tankoubonId)
-                            let rs = createMetadataStmt.query()
-                            try {
-                                if (rs.next()) {
-                                    metadataId = rs.getOrNull<Int64>(0) ?? 0
-                                }
-                            } finally { rs.close() }
-                        } finally { createMetadataStmt.close() }
-                    }
-                    if (metadataId <= 0) { return false }
-
-                    // Remove existing relations.
-                    let del = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id = ?")
-                    try {
-                        del.set(0, metadataId)
-                        del.update()
-                    } finally { del.close() }
-
-                    let trimmed = tagsString.trimAscii()
-                    if (trimmed.size == 0) {
-                        let _ = touchTankoubonUpdatedAt(tankoubonId)
-                        return true
-                    }
-
-                    let parts = trimmed.split(",")
-                    for (p in parts) {
-                        let t = p.trimAscii()
-                        if (t.size == 0) { continue }
-                        let (namespace, name) = parseTagName(t)
-                        if (name.trimAscii().size == 0) { continue }
-
-                        // Upsert tag within the same connection to avoid extra pool usage.
-                        var tagId: Int64 = 0
-                        let tagStmt = conn.prepareStatement("""
-                            INSERT INTO tags (namespace, name)
-                            VALUES (?, ?)
-                            ON CONFLICT (namespace, name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-                            RETURNING id
-                        """)
-                        try {
-                            tagStmt.set(0, namespace)
-                            tagStmt.set(1, name)
-                            let rs = tagStmt.query()
-                            try {
-                                if (rs.next()) {
-                                    tagId = rs.getOrNull<Int64>(0) ?? 0
-                                }
-                            } finally { rs.close() }
-                        } finally { tagStmt.close() }
-                        if (tagId <= 0) { continue }
-                        let canonicalTag = if (namespace.trimAscii().size > 0) { "${namespace}:${name}" } else { name }
-                        if (canonicalTag.trimAscii().size == 0) { continue }
-                        let ins = conn.prepareStatement("""
-                            INSERT INTO metadata_tags (metadata_id, tag) VALUES (?, ?) ON CONFLICT DO NOTHING
-                        """)
-                        try {
-                            ins.set(0, metadataId)
-                            ins.set(1, canonicalTag)
-                            ins.update()
-                        } finally { ins.close() }
-                    }
-                    let _ = touchTankoubonUpdatedAt(tankoubonId)
-                    return true
-                } catch (e: Exception) {
-                    getLogger("tankoubon_dao").error("updateTankoubonTags failed", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
+        let normalizedId = tankoubonId.trimAscii()
+        if (normalizedId.size == 0) {
+            return false
         }
+        if (!ensureTankoubonMetadataRoot(normalizedId)) {
+            return false
+        }
+
+        let normalizedTags = TagDao.normalizeTags(tagsString.split(","))
+        let ok = MetadataDao.replaceMetadataTags("tankoubon", normalizedId, normalizedTags)
+        if (!ok) {
+            getLogger("tankoubon_dao").error("updateTankoubonTags failed", ("tankoubonId", normalizedId))
+            return false
+        }
+
+        let _ = touchTankoubonUpdatedAt(normalizedId)
+        return true
     }
 
     /**

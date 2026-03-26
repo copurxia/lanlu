@@ -5,6 +5,7 @@ import std.convert.*
 import std.database.sql.*
 import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
+import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 
@@ -408,6 +409,7 @@ public class MetadataDao {
         if (normalizedId.size == 0) {
             return false
         }
+        let normalizedTags = TagDao.normalizeTags(tags)
 
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
@@ -424,6 +426,14 @@ public class MetadataDao {
                         try { begin.update() } finally { begin.close() }
                     } catch (_: Exception) {}
 
+                    if (!TagDao.ensureTagDictionaryEntriesWithConnection(conn, normalizedTags)) {
+                        try {
+                            let rb = conn.prepareStatement("ROLLBACK")
+                            try { rb.update() } finally { rb.close() }
+                        } catch (_: Exception) {}
+                        return false
+                    }
+
                     let del = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id = ?")
                     try {
                         del.set(0, metadataId)
@@ -433,7 +443,7 @@ public class MetadataDao {
                     }
 
                     let seen = HashSet<String>()
-                    for (rawTag in tags) {
+                    for (rawTag in normalizedTags) {
                         let tag = rawTag.trimAscii()
                         if (tag.size == 0 || seen.contains(tag)) {
                             continue

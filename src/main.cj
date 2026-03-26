@@ -72,6 +72,7 @@ main(): Int64 {
     MigrationRegistry.register(V011_UnifiedMetadataStore())
     MigrationRegistry.register(V012_CanonicalMetadataCleanup())
     MigrationRegistry.register(V013_MetadataTimeSemanticsUnification())
+    MigrationRegistry.register(V014_BackfillTagDictionaryFromMetadataTags())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")

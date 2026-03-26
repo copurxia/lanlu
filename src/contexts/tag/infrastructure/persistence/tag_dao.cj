@@ -86,6 +86,8 @@ public class TagLiteData {
  * 标签数据访问对象
  */
 public class TagDao {
+    private static let logger = getLogger("tag_dao")
+
     // Cache for translation-text lookup used by ArchiveDao search expansion.
     // This avoids repeated DB scans of tags.translations on common terms.
     private static var translationSearchCache: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
@@ -101,6 +103,50 @@ public class TagDao {
             return (parts[0], parts[1])
         }
         return ("", fullName)
+    }
+
+    /**
+     * 规范化标签字符串为 canonical tag：
+     * - trim 前后空白
+     * - namespace:name 仅按首个冒号拆分
+     * - 去掉空 namespace / 空 name
+     */
+    public static func canonicalizeTag(fullName: String): String {
+        let trimmed = fullName.trimAscii()
+        if (trimmed.size == 0) {
+            return ""
+        }
+
+        let (rawNamespace, rawName) = parseTagName(trimmed)
+        let namespace = rawNamespace.trimAscii()
+        let name = rawName.trimAscii()
+        if (name.size == 0) {
+            return ""
+        }
+        if (namespace.size > 0) {
+            return "${namespace}:${name}"
+        }
+        return name
+    }
+
+    /**
+     * 规范化标签数组：
+     * - canonicalize
+     * - 去重
+     * - 保持首次出现顺序
+     */
+    public static func normalizeTags(tags: Array<String>): Array<String> {
+        let out = ArrayList<String>()
+        let seen = HashSet<String>()
+        for (rawTag in tags) {
+            let canonical = canonicalizeTag(rawTag)
+            if (canonical.size == 0 || seen.contains(canonical)) {
+                continue
+            }
+            seen.add(canonical)
+            out.add(canonical)
+        }
+        return out.toArray()
     }
 
     /**
@@ -158,6 +204,48 @@ public class TagDao {
         }
 
         0
+    }
+
+    /**
+     * 在指定连接中补齐 tags 字典记录，不修改 metadata_tags。
+     */
+    public static func ensureTagDictionaryEntriesWithConnection(conn: Connection, tags: Array<String>): Bool {
+        let normalizedTags = normalizeTags(tags)
+        try {
+            for (tag in normalizedTags) {
+                let (rawNamespace, rawName) = parseTagName(tag)
+                let namespace = rawNamespace.trimAscii()
+                let name = rawName.trimAscii()
+                if (name.size == 0) {
+                    continue
+                }
+                let tagId = getOrCreateTagInternal(conn, namespace, name)
+                if (tagId <= 0) {
+                    logger.error("Failed to ensure tag dictionary entry", ("tag", tag))
+                    return false
+                }
+            }
+            return true
+        } catch (e: Exception) {
+            logger.error("Failed to ensure tag dictionary entries", ("error", e.message))
+            return false
+        }
+    }
+
+    /**
+     * 补齐 tags 字典记录，不修改 metadata_tags。
+     */
+    public static func ensureTagDictionaryEntries(tags: Array<String>): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return false
+            case Some(conn) =>
+                try {
+                    return ensureTagDictionaryEntriesWithConnection(conn, tags)
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
     }
 
     /**
@@ -250,12 +338,15 @@ public class TagDao {
                     }
 
                     // 解析标签字符串
-                    let tags = parseTagsString(tagsString)
+                    let tags = normalizeTags(parseTagsString(tagsString).toArray())
+
+                    if (!ensureTagDictionaryEntriesWithConnection(conn, tags)) {
+                        return false
+                    }
 
                     // 为每个标签创建或获取标签ID，并建立关联
                     for (tag in tags) {
                         let (namespace, name) = parseTagName(tag)
-                        let _ = getOrCreateTagInternal(conn, namespace, name)
                         let normalizedTag = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
                         if (normalizedTag.trimAscii().size == 0) {
                             continue
@@ -299,11 +390,13 @@ public class TagDao {
     private static func parseTagsString(tagsString: String): ArrayList<String> {
         let tags = tagsString.split(",")
         var result: ArrayList<String> = ArrayList<String>()
+        let seen = HashSet<String>()
 
         for (tag in tags) {
-            let trimmed = tag.trimAscii()
-            if (trimmed.size > 0) {
-                result.add(trimmed)
+            let canonical = canonicalizeTag(tag)
+            if (canonical.size > 0 && !seen.contains(canonical)) {
+                seen.add(canonical)
+                result.add(canonical)
             }
         }
 
