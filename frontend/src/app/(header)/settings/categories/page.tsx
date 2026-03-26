@@ -40,7 +40,6 @@ export default function CategoriesSettingsPage() {
     name: '',
     scan_path: '',
     description: '',
-    icon: '',
     sort_order: 0,
     enabled: true,
     plugins: [],
@@ -163,7 +162,6 @@ export default function CategoriesSettingsPage() {
         name: '',
         scan_path: '',
         description: '',
-        icon: '',
         sort_order: 0,
         enabled: true,
       });
@@ -183,7 +181,6 @@ export default function CategoriesSettingsPage() {
       name: category.name,
       scan_path: category.scan_path,
       description: category.description,
-      icon: category.icon,
       sort_order: category.sort_order,
       enabled: category.enabled,
       plugins: category.plugins || [],
@@ -446,7 +443,6 @@ export default function CategoriesSettingsPage() {
                 {/* Reduced external metadata per fig3: keep name/description; hide scan_path + sort_order */}
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
-                    {category.icon ? <span className="text-xl">{category.icon}</span> : null}
                     <div className="text-lg font-semibold leading-tight truncate">{category.name}</div>
                     <Badge variant="outline" className="text-xs flex-shrink-0">
                       {category.archive_count} {t('settings.categoryArchives')}
@@ -505,7 +501,6 @@ export default function CategoriesSettingsPage() {
             name: '',
             scan_path: '',
             description: '',
-            icon: '',
             sort_order: 0,
             enabled: true,
             plugins: [],
@@ -550,18 +545,8 @@ export default function CategoriesSettingsPage() {
                 rows={2}
               />
             </div>
-            <div className="flex items-center gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="create-icon">{t('settings.categoryIcon')}</Label>
-                <Input
-                  id="create-icon"
-                  value={createForm.icon}
-                  onChange={(e) => setCreateForm({ ...createForm, icon: e.target.value })}
-                  placeholder={t('settings.categoryIconPlaceholder')}
-                  disabled={loading}
-                />
-              </div>
-              <div className="space-y-2">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <div className="space-y-2 min-w-0">
                 <Label htmlFor="create-sort-order">{t('settings.categorySortOrder')}</Label>
                 <Input
                   id="create-sort-order"
@@ -572,7 +557,7 @@ export default function CategoriesSettingsPage() {
                   disabled={loading}
                 />
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 sm:self-center">
                 <Switch
                   id="create-enabled"
                   checked={createForm.enabled}
@@ -705,28 +690,16 @@ export default function CategoriesSettingsPage() {
                 rows={2}
               />
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="edit-icon">{t('settings.categoryIcon')}</Label>
-                <Input
-                  id="edit-icon"
-                  value={editForm.icon || ''}
-                  onChange={(e) => setEditForm({ ...editForm, icon: e.target.value })}
-                  placeholder={t('settings.categoryIconPlaceholder')}
-                  disabled={loading}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-sort-order">{t('settings.categorySortOrder')}</Label>
-                <Input
-                  id="edit-sort-order"
-                  type="number"
-                  value={editForm.sort_order || 0}
-                  onChange={(e) => setEditForm({ ...editForm, sort_order: parseInt(e.target.value) || 0 })}
-                  placeholder="0"
-                  disabled={loading}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-sort-order">{t('settings.categorySortOrder')}</Label>
+              <Input
+                id="edit-sort-order"
+                type="number"
+                value={editForm.sort_order || 0}
+                onChange={(e) => setEditForm({ ...editForm, sort_order: parseInt(e.target.value) || 0 })}
+                placeholder="0"
+                disabled={loading}
+              />
             </div>
             {metadataPlugins.length > 0 && (
               <div className="space-y-2">
