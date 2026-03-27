@@ -114,6 +114,43 @@ public class ArchiveController {
         return 0
     }
 
+    private static func parsePositiveIntQuery(ctx: Ctx, name: String): Int32 {
+        let raw = (ctx.query(name) ?? "").trimAscii()
+        if (raw.size == 0) {
+            return 0
+        }
+        let parsed = try { Int32.parse(raw) } catch (_: Exception) { 0i32 }
+        return if (parsed > 0i32) { parsed } else { 0i32 }
+    }
+
+    private static func resolveArchiveFileType(archiveType: String, href: String): String {
+        if (archiveType == ArchiveTypes.EPUB) {
+            return "html"
+        }
+        if (ArchiveUtils.isVideoFile(href)) {
+            return "video"
+        }
+        if (ArchiveUtils.isAudioFile(href)) {
+            return "audio"
+        }
+        return "image"
+    }
+
+    private static func parseMediaTypesQuery(ctx: Ctx): HashSet<String> {
+        var mediaTypes = HashSet<String>()
+        let raw = (ctx.query("media_types") ?? "").trimAscii().toAsciiLower()
+        if (raw.size == 0) {
+            return mediaTypes
+        }
+        for (value in raw.split(",")) {
+            let normalized = value.trimAscii()
+            if (normalized == "image" || normalized == "video" || normalized == "audio" || normalized == "html") {
+                mediaTypes.add(normalized)
+            }
+        }
+        return mediaTypes
+    }
+
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
@@ -271,10 +308,21 @@ public class ArchiveController {
 
         // 获取查询参数
         let imagesOnlyParam = ctx.query("images_only")
+        let imagesOnlySpecified = match (imagesOnlyParam) {
+            case Some(_) => true
+            case None => false
+        }
         let imagesOnly = match (imagesOnlyParam) {
             case Some(i) => i == "true" || i == "1"
-            case None => true  // 默认只返回图片文件
+            case None => false
         }
+        let includeMetadataRaw = (ctx.query("include_metadata") ?? "").trimAscii().toAsciiLower()
+        let includeMetadata = includeMetadataRaw != "false" && includeMetadataRaw != "0"
+        let mediaTypes = parseMediaTypesQuery(ctx)
+        let limit = parsePositiveIntQuery(ctx, "limit")
+        let offsetRaw = (ctx.query("offset") ?? "").trimAscii()
+        let offsetParsed = try { Int32.parse(offsetRaw) } catch (_: Exception) { 0i32 }
+        let offset = if (offsetParsed > 0i32) { offsetParsed } else { 0i32 }
 
         // 检查归档是否存在
         let archive = ArchiveDao.getArchiveById(id)
@@ -427,10 +475,31 @@ public class ArchiveController {
             pageFiles.add(item)
         }
 
-        // 如果不需要只返回图片文件，获取所有文件
-        if (!imagesOnly) {
-            // 这里可以添加获取所有文件的逻辑
-            // 目前保持只返回媒体文件
+        var filteredPageFiles = ArrayList<ArchiveFilesPageItem>()
+        for (item in pageFiles) {
+            let fileType = resolveArchiveFileType(archive.archive_type, item.href)
+            if (mediaTypes.size > 0) {
+                if (!mediaTypes.contains(fileType)) {
+                    continue
+                }
+            } else if (imagesOnlySpecified && imagesOnly && fileType != "image") {
+                continue
+            }
+            filteredPageFiles.add(item)
+        }
+
+        var responsePageFiles = ArrayList<ArchiveFilesPageItem>()
+        let offsetInt = Int64(offset)
+        let endExclusive = if (limit > 0i32) { Int64(offset + limit) } else { Int64(filteredPageFiles.size) }
+        for (i in 0..filteredPageFiles.size) {
+            let idx = Int64(i)
+            if (idx < offsetInt) {
+                continue
+            }
+            if (idx >= endExclusive) {
+                break
+            }
+            responsePageFiles.add(filteredPageFiles[i])
         }
 
         // 获取用户的阅读进度（如果用户已登录）
@@ -451,7 +520,7 @@ public class ArchiveController {
         w.startObject()
         w.writeName("pages")
         w.startArray()
-        for (item in pageFiles) {
+        for (item in responsePageFiles) {
             let href = item.href
             let title = item.title
             let metadataTitle = item.title
@@ -459,25 +528,23 @@ public class ArchiveController {
             let metadataThumbAssetId = item.thumbAssetId
             let fileType = if (archive.archive_type == ArchiveTypes.EPUB) {
                 "html"
-            } else if (ArchiveUtils.isVideoFile(href)) {
-                "video"
-            } else if (ArchiveUtils.isAudioFile(href)) {
-                "audio"
             } else {
-                "image"
+                resolveArchiveFileType(archive.archive_type, href)
             }
 
             w.startObject()
             w.writeName("path").writeValue(href)
             w.writeName("type").writeValue(fileType)
             w.writeName("title").writeValue(title)
-            w.writeName("metadata")
-            w.startObject()
-            w.writeName("title").writeValue(metadataTitle)
-            w.writeName("description").writeValue(metadataDescription)
-            w.writeName("thumb_asset_id").writeValue(metadataThumbAssetId)
-            w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
-            w.endObject()
+            if (includeMetadata) {
+                w.writeName("metadata")
+                w.startObject()
+                w.writeName("title").writeValue(metadataTitle)
+                w.writeName("description").writeValue(metadataDescription)
+                w.writeName("thumb_asset_id").writeValue(metadataThumbAssetId)
+                w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
+                w.endObject()
+            }
             w.endObject()
         }
         w.endArray()

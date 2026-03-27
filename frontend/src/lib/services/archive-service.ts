@@ -1,5 +1,5 @@
 import { apiClient } from '../api';
-import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload } from '@/types/archive';
+import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload, ArchiveFilesParams } from '@/types/archive';
 import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
@@ -157,9 +157,19 @@ export class ArchiveService {
 
     const response = await apiClient.get('/api/search', { params: normalizedParams, signal: options?.signal });
     const data = Array.isArray(response.data?.data) ? this.normalizeMixedItems(response.data.data) : [];
+    const groups = Array.isArray(response.data?.groups)
+      ? response.data.groups.map((group: any) => ({
+          ...group,
+          category_id: String(group?.category_id || '').trim(),
+          data: Array.isArray(group?.data) ? this.normalizeMixedItems(group.data) : [],
+          recordsFiltered: Number(group?.recordsFiltered || 0),
+          recordsTotal: Number(group?.recordsTotal || 0),
+        }))
+      : undefined;
     return {
       ...response.data,
       data,
+      groups,
     };
   }
 
@@ -169,6 +179,7 @@ export class ArchiveService {
         count: params.count || 5,
         filter: params.filter,
         category: params.category,
+        category_id: params.category_id,
         newonly: params.newonly,
         untaggedonly: params.untaggedonly,
         groupby_tanks: params.groupby_tanks ?? true,
@@ -227,8 +238,8 @@ export class ArchiveService {
     this.invalidateMetadataCache(id);
   }
 
-  static async getFiles(id: string): Promise<{ pages: PageInfo[]; progress: number }> {
-    const response = await apiClient.get(`/api/archives/${id}/files`);
+  static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[]; progress: number }> {
+    const response = await apiClient.get(`/api/archives/${id}/files`, { params });
     const pages = (response.data.pages || []).map((rawPage: any): PageInfo => {
       const path = typeof rawPage?.path === 'string' && rawPage.path.trim()
         ? rawPage.path

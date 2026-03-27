@@ -992,35 +992,41 @@ function HomePageContent() {
     const loadCategoryRows = async () => {
       setCategoryRowsLoading(true);
       const rowData: Record<string, (Archive | Tankoubon)[]> = {};
+      const categoryIds = enabledCategories
+        .map((category) => String(category.id || '').trim())
+        .filter(Boolean);
 
       try {
-        await Promise.all(
-          enabledCategories.map(async (category) => {
-            try {
-              const params: any = {
-                page: 1,
-                pageSize: categoryRowSize,
-                sortby: sortBy,
-                order: sortOrder,
-                groupby_tanks: groupByTanks,
-                lang: language,
-                category_id: category.catid,
-              };
+        for (const categoryId of categoryIds) {
+          rowData[categoryId] = [];
+        }
 
-              if (newonly) params.newonly = true;
-              if (untaggedonly) params.untaggedonly = true;
-              if (favoriteonly) params.favoriteonly = true;
-              if (dateFrom) params.date_from = dateFrom;
-              if (dateTo) params.date_to = dateTo;
+        if (categoryIds.length > 0) {
+          const params: any = {
+            page: 1,
+            pageSize: categoryRowSize,
+            sortby: sortBy,
+            order: sortOrder,
+            groupby_tanks: groupByTanks,
+            lang: language,
+            category_ids: categoryIds.join(','),
+            aggregate_by: 'category',
+          };
 
-              const result = await ArchiveService.search(params);
-              rowData[category.catid] = result.data || [];
-            } catch (error) {
-              rowData[category.catid] = [];
-              logger.apiError(`fetch category row (${category.catid})`, error);
-            }
-          })
-        );
+          if (newonly) params.newonly = true;
+          if (untaggedonly) params.untaggedonly = true;
+          if (favoriteonly) params.favoriteonly = true;
+          if (dateFrom) params.date_from = dateFrom;
+          if (dateTo) params.date_to = dateTo;
+
+          const result = await ArchiveService.search(params);
+          for (const group of result.groups ?? []) {
+            if (!group.category_id) continue;
+            rowData[group.category_id] = group.data || [];
+          }
+        }
+      } catch (error) {
+        logger.apiError('fetch category rows aggregate', error);
       } finally {
         if (cancelled || requestId !== categoryRowsRequestIdRef.current) return;
         setCategoryRows(rowData);
@@ -1233,7 +1239,7 @@ function HomePageContent() {
                 </div>
               ) : enabledCategories.length > 0 ? (
                 enabledCategories.map((category) => {
-                  const rowItems = categoryRows[category.catid] || [];
+                  const rowItems = categoryRows[String(category.id)] || [];
                   const rowLoading = categoryRowsLoading && rowItems.length === 0;
 
                   return (

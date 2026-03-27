@@ -19,6 +19,16 @@ import type { Tankoubon } from '@/types/tankoubon';
 const TWEET_PREVIEW_LIMIT = 9;
 const TWEET_PREVIEW_SOURCE_SCAN_LIMIT = 24;
 const tweetPreviewCache = new Map<string, PageInfo[]>();
+const TWEET_PREVIEW_FILE_PARAMS = {
+  limit: TWEET_PREVIEW_SOURCE_SCAN_LIMIT,
+  offset: 0,
+  media_types: 'image,video',
+  include_metadata: true,
+} as const;
+
+function getTweetPreviewCacheKey(archiveId: string): string {
+  return `${archiveId}|${TWEET_PREVIEW_FILE_PARAMS.limit}|${TWEET_PREVIEW_FILE_PARAMS.offset}|${TWEET_PREVIEW_FILE_PARAMS.media_types}|${TWEET_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
+}
 
 type HomeMediaTweetProps = {
   items: Array<Archive | Tankoubon>;
@@ -232,7 +242,8 @@ function HomeMediaTweetCard({
   useEffect(() => {
     if (!shouldLoadPreview || !previewArchiveId) return;
 
-    const cached = tweetPreviewCache.get(previewArchiveId);
+    const cacheKey = getTweetPreviewCacheKey(previewArchiveId);
+    const cached = tweetPreviewCache.get(cacheKey);
     if (cached) {
       setPreviewPages(cached);
       return;
@@ -241,11 +252,11 @@ function HomeMediaTweetCard({
     let cancelled = false;
     setPreviewLoading(true);
 
-    void ArchiveService.getFiles(previewArchiveId)
+    void ArchiveService.getFiles(previewArchiveId, TWEET_PREVIEW_FILE_PARAMS)
       .then((result) => {
         if (cancelled) return;
         const nextPages = result.pages.slice(0, TWEET_PREVIEW_SOURCE_SCAN_LIMIT);
-        tweetPreviewCache.set(previewArchiveId, nextPages);
+        tweetPreviewCache.set(cacheKey, nextPages);
         setPreviewPages(nextPages);
       })
       .catch(() => {

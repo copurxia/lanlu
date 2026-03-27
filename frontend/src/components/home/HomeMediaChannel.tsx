@@ -25,6 +25,16 @@ import type { Tankoubon } from '@/types/tankoubon';
 const CHANNEL_PREVIEW_LIMIT = 9;
 const CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT = 24;
 const channelPreviewCache = new Map<string, PageInfo[]>();
+const CHANNEL_PREVIEW_FILE_PARAMS = {
+  limit: CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT,
+  offset: 0,
+  media_types: 'image,video',
+  include_metadata: true,
+} as const;
+
+function getChannelPreviewCacheKey(archiveId: string): string {
+  return `${archiveId}|${CHANNEL_PREVIEW_FILE_PARAMS.limit}|${CHANNEL_PREVIEW_FILE_PARAMS.offset}|${CHANNEL_PREVIEW_FILE_PARAMS.media_types}|${CHANNEL_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
+}
 
 type HomeMediaChannelProps = {
   items: Array<Archive | Tankoubon>;
@@ -457,7 +467,8 @@ function HomeMediaChannelCard({
   useEffect(() => {
     if (!shouldLoadPreview || !previewArchiveId) return;
 
-    const cached = channelPreviewCache.get(previewArchiveId);
+    const cacheKey = getChannelPreviewCacheKey(previewArchiveId);
+    const cached = channelPreviewCache.get(cacheKey);
     if (cached) {
       setPreviewPages(cached);
       return;
@@ -466,11 +477,11 @@ function HomeMediaChannelCard({
     let cancelled = false;
     setPreviewLoading(true);
 
-    void ArchiveService.getFiles(previewArchiveId)
+    void ArchiveService.getFiles(previewArchiveId, CHANNEL_PREVIEW_FILE_PARAMS)
       .then((result) => {
         if (cancelled) return;
         const nextPages = result.pages.slice(0, CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT);
-        channelPreviewCache.set(previewArchiveId, nextPages);
+        channelPreviewCache.set(cacheKey, nextPages);
         setPreviewPages(nextPages);
       })
       .catch(() => {

@@ -101,7 +101,15 @@ export interface Archive {
 
 export interface SearchResponse {
   data: Array<Archive | import('./tankoubon').Tankoubon>;
+  groups?: SearchCategoryGroup[];
   draw: number;
+  recordsFiltered: number;
+  recordsTotal: number;
+}
+
+export interface SearchCategoryGroup {
+  category_id: string;
+  data: Array<Archive | import('./tankoubon').Tankoubon>;
   recordsFiltered: number;
   recordsTotal: number;
 }
@@ -109,6 +117,8 @@ export interface SearchResponse {
 export interface SearchParams {
   filter?: string;
   category?: string;
+  category_id?: string;
+  category_ids?: string;
   tankoubon_id?: string;
   page?: number;
   pageSize?: number;
@@ -122,16 +132,26 @@ export interface SearchParams {
   date_to?: string;
   groupby_tanks?: boolean;
   lang?: string;
+  aggregate_by?: 'category';
 }
 
 export interface RandomParams {
   filter?: string;
   category?: string;
+  category_id?: string;
   count?: number;
   newonly?: boolean;
   untaggedonly?: boolean;
   groupby_tanks?: boolean;
   lang?: string;
+}
+
+export interface ArchiveFilesParams {
+  images_only?: boolean;
+  include_metadata?: boolean;
+  limit?: number;
+  offset?: number;
+  media_types?: string;
 }
 
 export interface ArchiveMetadata extends MetadataObject {

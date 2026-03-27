@@ -7,6 +7,7 @@ import lanlu.shared.utils.SearchFilter
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
 import std.collection.*
+import std.convert.*
 import stdx.log.*
 
 /**
@@ -119,6 +120,53 @@ public class ArchiveDao {
             return "updated_at"
         }
         return "created_at"
+    }
+
+    private static func parseCategoryFilterValues(category: String): ArrayList<String> {
+        var values = ArrayList<String>()
+        var seen = HashMap<String, Bool>()
+        for (rawValue in category.split(",")) {
+            let normalized = rawValue.trimAscii()
+            if (normalized.size == 0) {
+                continue
+            }
+            let parsed = try { Int64.parse(normalized) } catch (_: Exception) { 0i64 }
+            if (parsed <= 0i64) {
+                continue
+            }
+            let key = parsed.toString()
+            if (seen.contains(key)) {
+                continue
+            }
+            seen[key] = true
+            values.add(key)
+        }
+        return values
+    }
+
+    private static func appendCategoryFilter(whereConditions: ArrayList<String>, filterParams: ArrayList<String>, category: String) {
+        let categoryValues = parseCategoryFilterValues(category)
+        if (categoryValues.size > 0) {
+            if (categoryValues.size == 1) {
+                whereConditions.add("archive_metadata_search.category_id = ?")
+                filterParams.add(categoryValues[0])
+                return
+            }
+
+            var placeholders = ""
+            for (i in 0..categoryValues.size) {
+                if (i > 0) {
+                    placeholders += ", "
+                }
+                placeholders += "?"
+                filterParams.add(categoryValues[i])
+            }
+            whereConditions.add("archive_metadata_search.category_id IN (${placeholders})")
+            return
+        }
+
+        // 当没有指定分类时，只搜索启用的分类
+        whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archive_metadata_search.category_id AND c.enabled = true)")
     }
 
     /**
@@ -642,13 +690,7 @@ public class ArchiveDao {
                 }
 
                 // 分类过滤
-                if (category.size > 0) {
-                    whereConditions.add("archive_metadata_search.category_id = ?")
-                    filterParams.add(category)
-                } else {
-                    // 当没有指定分类时，只搜索启用的分类
-                    whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archive_metadata_search.category_id AND c.enabled = true)")
-                }
+                appendCategoryFilter(whereConditions, filterParams, category)
 
                 // tankoubon_id 过滤 - 只返回某个合集中的归档
                 if (tankoubonId.size > 0) {
@@ -1022,13 +1064,7 @@ public class ArchiveDao {
                         whereConditions.add("EXISTS (SELECT 1 FROM user_favorites uf JOIN archives a ON a.id = uf.archive_id WHERE a.arcid = archive_metadata_search.arcid AND uf.user_id = ${userId})")
                     }
 
-                    if (category.size > 0) {
-                        whereConditions.add("archive_metadata_search.category_id = ?")
-                        filterParams.add(category)
-                    } else {
-                        // 当没有指定分类时，只搜索启用的分类
-                        whereConditions.add("EXISTS (SELECT 1 FROM categories c WHERE c.id = archive_metadata_search.category_id AND c.enabled = true)")
-                    }
+                    appendCategoryFilter(whereConditions, filterParams, category)
 
                     if (tankoubonId.size > 0) {
                         whereConditions.add("EXISTS (SELECT 1 FROM tankoubons t JOIN tankoubon_archives ta ON ta.tankoubon_id = t.id WHERE t.tankoubon_id = ? AND ta.archive_id = archive_metadata_search.id)")
