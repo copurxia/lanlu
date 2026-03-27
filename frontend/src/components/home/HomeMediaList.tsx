@@ -1,6 +1,6 @@
 'use client';
 
-import type { MouseEvent, ReactNode } from 'react';
+import { memo, type MouseEvent, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { BookOpen, Check, Eye, Heart, Square } from 'lucide-react';
@@ -51,7 +51,7 @@ function isTankoubonItem(item: Archive | Tankoubon): item is Tankoubon {
   return 'tankoubon_id' in item;
 }
 
-function HomeMediaListItem({
+const HomeMediaListItem = memo(function HomeMediaListItem({
   description,
   detailPath,
   id,
@@ -233,20 +233,20 @@ function HomeMediaListItem({
       }}
     </HomeMediaItemMenu>
   );
-}
+});
 
-function HomeArchiveListRow({
+const HomeArchiveListRow = memo(function HomeArchiveListRow({
   archive,
   selectionMode,
   selected,
   onRequestEnterSelection,
-  onToggleSelect,
+  onToggleArchiveSelect,
 }: {
   archive: Archive;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
-  onToggleSelect: (selected: boolean) => void;
+  onToggleArchiveSelect: (id: string, selected: boolean) => void;
 }) {
   const { t } = useLanguage();
   const progressText = archive.progress > 0 && archive.pagecount > 0
@@ -275,24 +275,24 @@ function HomeArchiveListRow({
       selected={selected}
       isFavorite={Boolean(archive.isfavorite)}
       isNew={archive.isnew}
-      onToggleSelected={onToggleSelect}
+      onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
   );
-}
+});
 
-function HomeTankoubonListRow({
+const HomeTankoubonListRow = memo(function HomeTankoubonListRow({
   tankoubon,
   selectionMode,
   selected,
   onRequestEnterSelection,
-  onToggleSelect,
+  onToggleTankoubonSelect,
 }: {
   tankoubon: Tankoubon;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
-  onToggleSelect: (selected: boolean) => void;
+  onToggleTankoubonSelect: (id: string, selected: boolean) => void;
 }) {
   const { t } = useLanguage();
   const archiveCount = typeof tankoubon.archive_count === 'number' ? tankoubon.archive_count : 0;
@@ -331,13 +331,13 @@ function HomeTankoubonListRow({
       selected={selected}
       isFavorite={Boolean(tankoubon.isfavorite)}
       isNew={Boolean(tankoubon.isnew)}
-      onToggleSelected={onToggleSelect}
+      onToggleSelected={(nextSelected) => onToggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
   );
-}
+});
 
-export function HomeMediaList({
+export const HomeMediaList = memo(function HomeMediaList({
   items,
   selectionMode,
   selectedArchiveIds,
@@ -357,7 +357,7 @@ export function HomeMediaList({
               selectionMode={selectionMode}
               selected={selectedTankoubonIds.has(item.tankoubon_id)}
               onRequestEnterSelection={onRequestEnterSelection}
-              onToggleSelect={(selected) => onToggleTankoubonSelect(item.tankoubon_id, selected)}
+              onToggleTankoubonSelect={onToggleTankoubonSelect}
             />
           );
         }
@@ -369,10 +369,10 @@ export function HomeMediaList({
             selectionMode={selectionMode}
             selected={selectedArchiveIds.has(item.arcid)}
             onRequestEnterSelection={onRequestEnterSelection}
-            onToggleSelect={(selected) => onToggleArchiveSelect(item.arcid, selected)}
+            onToggleArchiveSelect={onToggleArchiveSelect}
           />
         );
       })}
     </div>
   );
-}
+});

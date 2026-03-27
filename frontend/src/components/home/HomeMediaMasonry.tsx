@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 import { TankoubonCard } from '@/components/tankoubon/TankoubonCard';
 import type { Archive } from '@/types/archive';
@@ -19,7 +20,68 @@ function isTankoubonItem(item: Archive | Tankoubon): item is Tankoubon {
   return 'tankoubon_id' in item;
 }
 
-export function HomeMediaMasonry({
+const HomeTankoubonMasonryCard = memo(function HomeTankoubonMasonryCard({
+  index,
+  onRequestEnterSelection,
+  onToggleTankoubonSelect,
+  selectionMode,
+  selected,
+  tankoubon,
+}: {
+  index: number;
+  onRequestEnterSelection: () => void;
+  onToggleTankoubonSelect: (id: string, selected: boolean) => void;
+  selectionMode: boolean;
+  selected: boolean;
+  tankoubon: Tankoubon;
+}) {
+  return (
+    <div className="mb-4 break-inside-avoid">
+      <TankoubonCard
+        tankoubon={tankoubon}
+        priority={index < 4}
+        selectable
+        selectionMode={selectionMode}
+        selected={selected}
+        onRequestEnterSelection={onRequestEnterSelection}
+        onToggleSelect={(nextSelected) => onToggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
+      />
+    </div>
+  );
+});
+
+const HomeArchiveMasonryCard = memo(function HomeArchiveMasonryCard({
+  archive,
+  index,
+  onRequestEnterSelection,
+  onToggleArchiveSelect,
+  selectionMode,
+  selected,
+}: {
+  archive: Archive;
+  index: number;
+  onRequestEnterSelection: () => void;
+  onToggleArchiveSelect: (id: string, selected: boolean) => void;
+  selectionMode: boolean;
+  selected: boolean;
+}) {
+  return (
+    <div className="mb-4 break-inside-avoid">
+      <ArchiveCard
+        archive={archive}
+        index={index}
+        priority={index < 4}
+        selectable
+        selectionMode={selectionMode}
+        selected={selected}
+        onRequestEnterSelection={onRequestEnterSelection}
+        onToggleSelect={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
+      />
+    </div>
+  );
+});
+
+export const HomeMediaMasonry = memo(function HomeMediaMasonry({
   items,
   selectionMode,
   selectedArchiveIds,
@@ -33,35 +95,30 @@ export function HomeMediaMasonry({
       {items.map((item, index) => {
         if (isTankoubonItem(item)) {
           return (
-            <div key={`tankoubon:${item.tankoubon_id}`} className="mb-4 break-inside-avoid">
-              <TankoubonCard
-                tankoubon={item}
-                priority={index < 4}
-                selectable
-                selectionMode={selectionMode}
-                selected={selectedTankoubonIds.has(item.tankoubon_id)}
-                onRequestEnterSelection={onRequestEnterSelection}
-                onToggleSelect={(selected) => onToggleTankoubonSelect(item.tankoubon_id, selected)}
-              />
-            </div>
+            <HomeTankoubonMasonryCard
+              key={`tankoubon:${item.tankoubon_id}`}
+              index={index}
+              onRequestEnterSelection={onRequestEnterSelection}
+              onToggleTankoubonSelect={onToggleTankoubonSelect}
+              selectionMode={selectionMode}
+              selected={selectedTankoubonIds.has(item.tankoubon_id)}
+              tankoubon={item}
+            />
           );
         }
 
         return (
-          <div key={`archive:${item.arcid}`} className="mb-4 break-inside-avoid">
-            <ArchiveCard
-              archive={item}
-              index={index}
-              priority={index < 4}
-              selectable
-              selectionMode={selectionMode}
-              selected={selectedArchiveIds.has(item.arcid)}
-              onRequestEnterSelection={onRequestEnterSelection}
-              onToggleSelect={(selected) => onToggleArchiveSelect(item.arcid, selected)}
-            />
-          </div>
+          <HomeArchiveMasonryCard
+            key={`archive:${item.arcid}`}
+            archive={item}
+            index={index}
+            onRequestEnterSelection={onRequestEnterSelection}
+            onToggleArchiveSelect={onToggleArchiveSelect}
+            selectionMode={selectionMode}
+            selected={selectedArchiveIds.has(item.arcid)}
+          />
         );
       })}
     </div>
   );
-}
+});

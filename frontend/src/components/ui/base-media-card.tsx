@@ -103,6 +103,581 @@ function parseRpcSelectRequest(message: string): RpcSelectRequest | null {
   }
 }
 
+type BaseMediaCardEditControllerProps = {
+  id: string
+  initialSummary: string
+  initialTags: string
+  initialTitle: string
+  onOpenChange: (open: boolean) => void
+  onSaved: (next: { summary: string; tags: string; title: string }) => void
+  thumbnailAssetId?: number
+  type: 'archive' | 'tankoubon'
+}
+
+function BaseMediaCardEditController({
+  id,
+  initialSummary,
+  initialTags,
+  initialTitle,
+  onOpenChange,
+  onSaved,
+  thumbnailAssetId,
+  type,
+}: BaseMediaCardEditControllerProps) {
+  const { t } = useLanguage()
+  const { error: showError } = useToast()
+  const [editSaving, setEditSaving] = React.useState(false)
+  const [editTitle, setEditTitle] = React.useState(initialTitle)
+  const [editSummary, setEditSummary] = React.useState(initialSummary)
+  const [editTags, setEditTags] = React.useState<string[]>(() => toTagList(initialTags))
+  const [editCover, setEditCover] = React.useState('')
+  const [editBackdrop, setEditBackdrop] = React.useState('')
+  const [editClearlogo, setEditClearlogo] = React.useState('')
+  const [editAssetCoverId, setEditAssetCoverId] = React.useState('')
+  const [editAssetBackdropId, setEditAssetBackdropId] = React.useState('')
+  const [editAssetClearlogoId, setEditAssetClearlogoId] = React.useState('')
+  const [coverUploading, setCoverUploading] = React.useState(false)
+  const [backdropUploading, setBackdropUploading] = React.useState(false)
+  const [clearlogoUploading, setClearlogoUploading] = React.useState(false)
+  const [metadataPlugins, setMetadataPlugins] = React.useState<Plugin[]>([])
+  const [selectedMetadataPlugin, setSelectedMetadataPlugin] = React.useState<string>('')
+  const [metadataPluginParam, setMetadataPluginParam] = React.useState<string>('')
+  const [isMetadataPluginRunning, setIsMetadataPluginRunning] = React.useState(false)
+  const [metadataPluginProgress, setMetadataPluginProgress] = React.useState<number | null>(null)
+  const [metadataPluginMessage, setMetadataPluginMessage] = React.useState('')
+  const [metadataArchivePatches, setMetadataArchivePatches] = React.useState<TankoubonMemberMetadataPatch[]>([])
+  const [metadataPreviewPages, setMetadataPreviewPages] = React.useState<MetadataPagePatch[]>([])
+  const [rpcSelectTaskId, setRpcSelectTaskId] = React.useState<number | null>(null)
+  const [rpcSelectRequest, setRpcSelectRequest] = React.useState<RpcSelectRequest | null>(null)
+  const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = React.useState<number | null>(null)
+  const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = React.useState<number | null>(null)
+  const resolvedRpcSelectRequestIdsRef = React.useRef<Set<string>>(new Set())
+
+  React.useEffect(() => {
+    let cancelled = false
+
+    ;(async () => {
+      try {
+        const metas = await PluginService.getMetadataPlugins()
+        if (cancelled) return
+        setMetadataPlugins(metas)
+        if (metas.length > 0) {
+          setSelectedMetadataPlugin((current) => current || metas[0].namespace)
+        }
+      } catch (error) {
+        logger.apiError('load metadata plugins (card)', error)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!rpcSelectRequest || rpcSelectRemainingSeconds == null) return
+    if (rpcSelectRemainingSeconds <= 0) {
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+      return
+    }
+
+    const timer = window.setTimeout(() => {
+      setRpcSelectRemainingSeconds((current) => {
+        if (current == null) return null
+        return Math.max(0, current - 1)
+      })
+    }, 1000)
+
+    return () => window.clearTimeout(timer)
+  }, [rpcSelectRemainingSeconds, rpcSelectRequest])
+
+  React.useEffect(() => {
+    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
+      ? String(Math.trunc(thumbnailAssetId))
+      : ''
+    setEditAssetCoverId(fallbackCoverId)
+    setEditAssetBackdropId('')
+    setEditAssetClearlogoId('')
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        if (type === 'archive') {
+          const meta = await ArchiveService.getMetadata(id)
+          if (cancelled) return
+          setEditAssetCoverId(String(getCoverAssetId(meta) || ''))
+          setEditAssetBackdropId(String(meta.assets?.backdrop || ''))
+          setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''))
+          return
+        }
+
+        const tank = await TankoubonService.getMetadata(id)
+        if (cancelled) return
+        setEditAssetCoverId(String(getCoverAssetId(tank) || ''))
+        setEditAssetBackdropId(String(tank.assets?.backdrop || ''))
+        setEditAssetClearlogoId(String(tank.assets?.clearlogo || ''))
+      } catch {
+        // Keep fallback values when detail request fails.
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [id, thumbnailAssetId, type])
+
+  const emitRefresh = React.useCallback(() => {
+    appEvents.emit(AppEvents.ARCHIVES_REFRESH)
+  }, [])
+
+  const submitRpcSelect = React.useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return
+    const requestId = rpcSelectRequest.request_id
+    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, requestId, rpcSelectSelectedIndex)
+    resolvedRpcSelectRequestIdsRef.current.add(requestId)
+    if (!ok) {
+      showError('提交选择失败，可能请求已过期')
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+      return
+    }
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
+  }, [rpcSelectRequest, rpcSelectSelectedIndex, rpcSelectTaskId, showError])
+
+  const abortRpcSelect = React.useCallback(async () => {
+    if (rpcSelectTaskId == null || !rpcSelectRequest) return
+    const requestId = rpcSelectRequest.request_id
+    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, requestId)
+    resolvedRpcSelectRequestIdsRef.current.add(requestId)
+    if (!ok) {
+      showError('放弃选择失败，可能请求已过期')
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+      return
+    }
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
+  }, [rpcSelectRequest, rpcSelectTaskId, showError])
+
+  const uploadMetadataAsset = React.useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
+    if (editSaving || isMetadataPluginRunning) return
+
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = 'image/*'
+    input.style.display = 'none'
+
+    const setUploading = (next: boolean) => {
+      if (slot === 'cover') {
+        setCoverUploading(next)
+        return
+      }
+      if (slot === 'backdrop') {
+        setBackdropUploading(next)
+        return
+      }
+      setClearlogoUploading(next)
+    }
+
+    input.onchange = async (event) => {
+      const e = event as unknown as React.ChangeEvent<HTMLInputElement>
+      const file = e.target.files?.[0]
+      if (!file) {
+        document.body.removeChild(input)
+        return
+      }
+
+      setUploading(true)
+      try {
+        const result = await ChunkedUploadService.uploadWithChunks(
+          file,
+          {
+            targetType: 'metadata_asset',
+            overwrite: true,
+            contentType: file.type || 'application/octet-stream',
+          },
+          {
+            onProgress: () => {},
+            onChunkComplete: () => {},
+            onError: () => {},
+          }
+        )
+        if (!result.success) {
+          throw new Error(result.error || t('archive.assetUploadFailed'))
+        }
+
+        const assetId = Number(result.data?.assetId ?? 0)
+        if (!Number.isFinite(assetId) || assetId <= 0) {
+          throw new Error(t('archive.assetUploadFailed'))
+        }
+        const normalizedAssetId = String(Math.trunc(assetId))
+
+        if (slot === 'cover') {
+          setEditAssetCoverId(normalizedAssetId)
+          setEditCover('')
+        } else if (slot === 'backdrop') {
+          setEditAssetBackdropId(normalizedAssetId)
+          setEditBackdrop('')
+        } else {
+          setEditAssetClearlogoId(normalizedAssetId)
+          setEditClearlogo('')
+        }
+      } catch (error: any) {
+        logger.operationFailed('upload metadata asset from card', error, { id, slot, type })
+        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'))
+      } finally {
+        setUploading(false)
+        document.body.removeChild(input)
+      }
+    }
+
+    document.body.appendChild(input)
+    input.click()
+  }, [editSaving, id, isMetadataPluginRunning, showError, t, type])
+
+  const runMetadataPlugin = React.useCallback(async () => {
+    if (!selectedMetadataPlugin) {
+      showError(t('archive.metadataPluginSelectRequired'))
+      return
+    }
+
+    setIsMetadataPluginRunning(true)
+    setMetadataPluginProgress(0)
+    setMetadataPluginMessage(t('archive.metadataPluginEnqueued'))
+    resolvedRpcSelectRequestIdsRef.current.clear()
+    setRpcSelectRequest(null)
+    setRpcSelectTaskId(null)
+    setRpcSelectSelectedIndex(null)
+    setRpcSelectRemainingSeconds(null)
+
+    try {
+      const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean)
+      const targetType = type === 'archive' ? 'archive' : 'tankoubon'
+      const rootAssets = buildMetadataAssetInputs(
+        {
+          cover: editCover || undefined,
+          backdrop: editBackdrop || undefined,
+          clearlogo: editClearlogo || undefined,
+        },
+        {
+          cover: /^\d+$/.test(editAssetCoverId.trim()) ? Number.parseInt(editAssetCoverId.trim(), 10) : undefined,
+          backdrop: /^\d+$/.test(editAssetBackdropId.trim()) ? Number.parseInt(editAssetBackdropId.trim(), 10) : undefined,
+          clearlogo: /^\d+$/.test(editAssetClearlogoId.trim()) ? Number.parseInt(editAssetClearlogoId.trim(), 10) : undefined,
+        },
+      ) || []
+      const finalTask = await ArchiveService.runMetadataPluginForTarget(
+        targetType,
+        id,
+        selectedMetadataPlugin,
+        metadataPluginParam,
+        {
+          onUpdate: (task) => {
+            setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0)
+            setMetadataPluginMessage(task.message || '')
+
+            const req = parseRpcSelectRequest(task.message || '')
+            if (req) {
+              if (resolvedRpcSelectRequestIdsRef.current.has(req.request_id)) return
+              setRpcSelectTaskId(task.id)
+              setRpcSelectRequest((current) => {
+                if (current?.request_id === req.request_id) return current
+                const defaultIndex = typeof req.default_index === 'number' ? req.default_index : 0
+                setRpcSelectSelectedIndex(defaultIndex >= 0 && defaultIndex < req.options.length ? defaultIndex : 0)
+                const timeout = typeof req.timeout_seconds === 'number' && req.timeout_seconds > 0 ? Math.floor(req.timeout_seconds) : 90
+                setRpcSelectRemainingSeconds(timeout)
+                return req
+              })
+            }
+          },
+        },
+        {
+          writeBack: false,
+          metadata: {
+            title: editTitle.trim() || initialTitle,
+            type: targetType === 'tankoubon' ? 1 : 0,
+            description: editSummary.trim(),
+            tags: metadataTags,
+            assets: rootAssets,
+            children: type === 'tankoubon'
+              ? metadataArchivePatches.map((item) => ({
+                  title: String(item.title || '').trim(),
+                  type: 0,
+                  description: String(item.summary || item.description || '').trim(),
+                  tags: Array.isArray(item.tags)
+                    ? item.tags
+                    : String(item.tags || '')
+                        .split(',')
+                        .map((tag) => tag.trim())
+                        .filter(Boolean),
+                  assets: buildMetadataAssetInputs(
+                    {
+                      cover: item.cover || undefined,
+                      backdrop: item.backdrop || undefined,
+                      clearlogo: item.clearlogo || undefined,
+                    },
+                  ),
+                  archive_id: item.archive_id,
+                  volume_no: item.volume_no,
+                  updated_at: item.updated_at,
+                  pages: item.pages,
+                }))
+              : [],
+          },
+        }
+      )
+
+      if (finalTask.status !== 'completed') {
+        const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
+        showError(err)
+        return
+      }
+
+      const previewResult = parseMetadataPluginPreviewResult(finalTask.result)
+      if (!previewResult.ok) {
+        if (!previewResult.parseFailed) {
+          const err = previewResult.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
+          showError(err)
+          return
+        }
+      } else {
+        const nextData = previewResult.data
+        if (nextData.title.trim()) setEditTitle(nextData.title.trim())
+        setEditSummary(nextData.summary)
+        setEditTags(nextData.tags)
+        applyAssetPreviewValue(nextData.cover, setEditCover, setEditAssetCoverId)
+        applyAssetPreviewValue(nextData.backdrop, setEditBackdrop, setEditAssetBackdropId)
+        applyAssetPreviewValue(nextData.clearlogo, setEditClearlogo, setEditAssetClearlogoId)
+        if (type === 'archive') {
+          setMetadataPreviewPages(nextData.pages)
+        }
+        if (type === 'tankoubon') {
+          setMetadataArchivePatches(
+            nextData.children
+              .map((item: unknown) => normalizeTankoubonMemberMetadataPatch(item))
+              .filter((item: TankoubonMemberMetadataPatch) => item.archive_id || item.volume_no)
+          )
+        }
+      }
+
+      setMetadataPluginMessage(t('archive.metadataPluginCompleted'))
+      setMetadataPluginProgress(100)
+    } catch (error: any) {
+      logger.operationFailed('run metadata plugin (card)', error, { id, type })
+      showError(error?.message || t('archive.metadataPluginFailed'))
+    } finally {
+      setIsMetadataPluginRunning(false)
+      setRpcSelectRequest(null)
+      setRpcSelectTaskId(null)
+      setRpcSelectSelectedIndex(null)
+      setRpcSelectRemainingSeconds(null)
+    }
+  }, [
+    editAssetBackdropId,
+    editAssetClearlogoId,
+    editAssetCoverId,
+    editBackdrop,
+    editClearlogo,
+    editCover,
+    editSummary,
+    editTags,
+    editTitle,
+    id,
+    initialTitle,
+    metadataArchivePatches,
+    metadataPluginParam,
+    selectedMetadataPlugin,
+    showError,
+    t,
+    type,
+  ])
+
+  const handleSaveEdit = React.useCallback(async () => {
+    if (editSaving) return
+
+    const nextTitle = editTitle.trim()
+    if (type === 'tankoubon' && !nextTitle) {
+      showError(t('tankoubon.nameRequired'))
+      return
+    }
+
+    setEditSaving(true)
+    try {
+      const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean)
+      const nextSummary = editSummary.trim()
+      const parseAssetId = (raw: string): number | undefined => {
+        const value = Number(raw.trim())
+        if (!Number.isFinite(value)) return undefined
+        const parsedId = Math.trunc(value)
+        return parsedId > 0 ? parsedId : undefined
+      }
+      const assetIds = {
+        cover: parseAssetId(editAssetCoverId),
+        backdrop: parseAssetId(editAssetBackdropId),
+        clearlogo: parseAssetId(editAssetClearlogoId),
+      }
+
+      if (type === 'archive') {
+        await ArchiveService.updateMetadata(id, {
+          title: nextTitle || initialTitle,
+          type: 0,
+          description: nextSummary,
+          tags: nextTags,
+          assets: buildMetadataAssetInputs(
+            {
+              cover: editCover || undefined,
+              backdrop: editBackdrop || undefined,
+              clearlogo: editClearlogo || undefined,
+            },
+            assetIds,
+          ),
+          pages: metadataPreviewPages.length > 0 ? metadataPreviewPages : undefined,
+          metadata_namespace: selectedMetadataPlugin || undefined,
+        })
+      } else {
+        await TankoubonService.updateMetadata(id, {
+          title: nextTitle,
+          type: 1,
+          description: nextSummary,
+          tags: nextTags,
+          assets: buildMetadataAssetInputs(
+            {
+              cover: editCover || undefined,
+              backdrop: editBackdrop || undefined,
+              clearlogo: editClearlogo || undefined,
+            },
+            assetIds,
+          ),
+          metadata_namespace: selectedMetadataPlugin || undefined,
+          children: metadataArchivePatches.map((item) => ({
+            title: String(item.title || '').trim(),
+            type: 0,
+            description: String(item.summary || item.description || '').trim(),
+            tags: Array.isArray(item.tags)
+              ? item.tags
+              : String(item.tags || '')
+                  .split(',')
+                  .map((tag) => tag.trim())
+                  .filter(Boolean),
+            assets: buildMetadataAssetInputs(
+              {
+                cover: item.cover || undefined,
+                backdrop: item.backdrop || undefined,
+                clearlogo: item.clearlogo || undefined,
+              },
+            ),
+            archive_id: typeof item.archive_id === 'string' ? item.archive_id : undefined,
+            volume_no: item.volume_no,
+            updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
+            pages: item.pages,
+          })),
+        })
+      }
+
+      onSaved({
+        title: nextTitle || initialTitle,
+        summary: nextSummary,
+        tags: nextTags.join(', '),
+      })
+      onOpenChange(false)
+      emitRefresh()
+    } catch (error) {
+      logger.operationFailed('save card edit', error, { id, type })
+      showError(type === 'archive' ? t('archive.updateFailed') : t('common.error'))
+    } finally {
+      setEditSaving(false)
+    }
+  }, [
+    editAssetBackdropId,
+    editAssetClearlogoId,
+    editAssetCoverId,
+    editBackdrop,
+    editClearlogo,
+    editCover,
+    editSaving,
+    editSummary,
+    editTags,
+    editTitle,
+    emitRefresh,
+    id,
+    initialTitle,
+    metadataArchivePatches,
+    metadataPreviewPages,
+    onOpenChange,
+    onSaved,
+    selectedMetadataPlugin,
+    showError,
+    t,
+    type,
+  ])
+
+  return (
+    <ArchiveMetadataEditDialog
+      open
+      onOpenChange={onOpenChange}
+      t={t}
+      titleLabel={type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
+      summaryLabel={type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
+      tagsLabel={type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
+      summaryPlaceholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
+      tagsPlaceholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
+      title={editTitle}
+      onTitleChange={setEditTitle}
+      summary={editSummary}
+      onSummaryChange={setEditSummary}
+      assetCoverId={editAssetCoverId}
+      onAssetCoverIdChange={setEditAssetCoverId}
+      assetBackdropId={editAssetBackdropId}
+      onAssetBackdropIdChange={setEditAssetBackdropId}
+      assetClearlogoId={editAssetClearlogoId}
+      onAssetClearlogoIdChange={setEditAssetClearlogoId}
+      assetCoverValue={editCover}
+      assetBackdropValue={editBackdrop}
+      assetClearlogoValue={editClearlogo}
+      onUploadAssetCover={() => uploadMetadataAsset('cover')}
+      onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
+      onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
+      uploadingAssetCover={coverUploading}
+      uploadingAssetBackdrop={backdropUploading}
+      uploadingAssetClearlogo={clearlogoUploading}
+      tags={editTags}
+      onTagsChange={setEditTags}
+      isSaving={editSaving}
+      saveDisabled={type === 'tankoubon' ? !editTitle.trim() : false}
+      onSave={handleSaveEdit}
+      showMetadataPlugin
+      metadataPlugins={metadataPlugins}
+      selectedMetadataPlugin={selectedMetadataPlugin}
+      onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
+      metadataPluginParam={metadataPluginParam}
+      onMetadataPluginParamChange={setMetadataPluginParam}
+      isMetadataPluginRunning={isMetadataPluginRunning}
+      metadataPluginProgress={metadataPluginProgress}
+      metadataPluginMessage={metadataPluginMessage}
+      onRunMetadataPlugin={runMetadataPlugin}
+      rpcSelect={{
+        request: rpcSelectRequest,
+        selectedIndex: rpcSelectSelectedIndex,
+        remainingSeconds: rpcSelectRemainingSeconds,
+        onSelectIndex: setRpcSelectSelectedIndex,
+        onAbort: abortRpcSelect,
+        onSubmit: submitRpcSelect,
+      }}
+    />
+  )
+}
+
 export function BaseMediaCard({
   id,
   title,
@@ -155,32 +730,6 @@ export function BaseMediaCard({
   const [displaySummary, setDisplaySummary] = React.useState(summary || '')
   const [displayTags, setDisplayTags] = React.useState(tags || '')
   const [editOpen, setEditOpen] = React.useState(false)
-  const [editSaving, setEditSaving] = React.useState(false)
-  const [editTitle, setEditTitle] = React.useState(title)
-  const [editSummary, setEditSummary] = React.useState(summary || '')
-  const [editTags, setEditTags] = React.useState<string[]>(toTagList(tags))
-  const [editCover, setEditCover] = React.useState('')
-  const [editBackdrop, setEditBackdrop] = React.useState('')
-  const [editClearlogo, setEditClearlogo] = React.useState('')
-  const [editAssetCoverId, setEditAssetCoverId] = React.useState('')
-  const [editAssetBackdropId, setEditAssetBackdropId] = React.useState('')
-  const [editAssetClearlogoId, setEditAssetClearlogoId] = React.useState('')
-  const [coverUploading, setCoverUploading] = React.useState(false)
-  const [backdropUploading, setBackdropUploading] = React.useState(false)
-  const [clearlogoUploading, setClearlogoUploading] = React.useState(false)
-  const [metadataPlugins, setMetadataPlugins] = React.useState<Plugin[]>([])
-  const [selectedMetadataPlugin, setSelectedMetadataPlugin] = React.useState<string>('')
-  const [metadataPluginParam, setMetadataPluginParam] = React.useState<string>('')
-  const [isMetadataPluginRunning, setIsMetadataPluginRunning] = React.useState(false)
-  const [metadataPluginProgress, setMetadataPluginProgress] = React.useState<number | null>(null)
-  const [metadataPluginMessage, setMetadataPluginMessage] = React.useState('')
-  const [metadataArchivePatches, setMetadataArchivePatches] = React.useState<TankoubonMemberMetadataPatch[]>([])
-  const [metadataPreviewPages, setMetadataPreviewPages] = React.useState<MetadataPagePatch[]>([])
-  const [rpcSelectTaskId, setRpcSelectTaskId] = React.useState<number | null>(null)
-  const [rpcSelectRequest, setRpcSelectRequest] = React.useState<RpcSelectRequest | null>(null)
-  const [rpcSelectSelectedIndex, setRpcSelectSelectedIndex] = React.useState<number | null>(null)
-  const [rpcSelectRemainingSeconds, setRpcSelectRemainingSeconds] = React.useState<number | null>(null)
-  const resolvedRpcSelectRequestIdsRef = React.useRef<Set<string>>(new Set())
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [menuPosition, setMenuPosition] = React.useState({ x: 0, y: 0 })
 
@@ -216,88 +765,6 @@ export function BaseMediaCard({
   React.useEffect(() => {
     onCoverAspectRatioChange?.(coverNaturalAspectRatio)
   }, [coverNaturalAspectRatio, onCoverAspectRatioChange])
-
-  React.useEffect(() => {
-    if (!editOpen || !isAuthenticated) return
-    let cancelled = false
-
-    ;(async () => {
-      try {
-        const metas = await PluginService.getMetadataPlugins()
-        if (cancelled) return
-        setMetadataPlugins(metas)
-        if (!selectedMetadataPlugin && metas.length > 0) {
-          setSelectedMetadataPlugin(metas[0].namespace)
-        }
-      } catch (error) {
-        logger.apiError('load metadata plugins (card)', error)
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [editOpen, isAuthenticated, selectedMetadataPlugin, type])
-
-  React.useEffect(() => {
-    if (!rpcSelectRequest || rpcSelectRemainingSeconds == null) return
-    if (rpcSelectRemainingSeconds <= 0) {
-      setRpcSelectRequest(null)
-      setRpcSelectTaskId(null)
-      setRpcSelectSelectedIndex(null)
-      setRpcSelectRemainingSeconds(null)
-      return
-    }
-
-    const timer = window.setTimeout(() => {
-      setRpcSelectRemainingSeconds((current) => {
-        if (current == null) return null
-        return Math.max(0, current - 1)
-      })
-    }, 1000)
-
-    return () => window.clearTimeout(timer)
-  }, [rpcSelectRemainingSeconds, rpcSelectRequest])
-
-  React.useEffect(() => {
-    if (!editOpen || !canEdit) return
-
-    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
-      ? String(Math.trunc(thumbnailAssetId))
-      : ''
-    setEditCover('')
-    setEditBackdrop('')
-    setEditClearlogo('')
-    setEditAssetCoverId(fallbackCoverId)
-    setEditAssetBackdropId('')
-    setEditAssetClearlogoId('')
-
-    let cancelled = false
-    ;(async () => {
-      try {
-        if (type === 'archive') {
-          const meta = await ArchiveService.getMetadata(id)
-          if (cancelled) return
-          setEditAssetCoverId(String(getCoverAssetId(meta) || ''))
-          setEditAssetBackdropId(String(meta.assets?.backdrop || ''))
-          setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''))
-          return
-        }
-
-        const tank = await TankoubonService.getMetadata(id)
-        if (cancelled) return
-        setEditAssetCoverId(String(getCoverAssetId(tank) || ''))
-        setEditAssetBackdropId(String(tank.assets?.backdrop || ''))
-        setEditAssetClearlogoId(String(tank.assets?.clearlogo || ''))
-      } catch {
-        // Keep fallback values when detail request fails.
-      }
-    })()
-
-    return () => {
-      cancelled = true
-    }
-  }, [canEdit, editOpen, id, thumbnailAssetId, type])
 
   const allTags = React.useMemo(() => parseTags(displayTags), [displayTags])
   const displayAllTags = React.useMemo(() => allTags.map(stripNamespace), [allTags])
@@ -410,424 +877,8 @@ export function BaseMediaCard({
       showError(t('library.loginRequired'))
       return
     }
-    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
-      ? String(Math.trunc(thumbnailAssetId))
-      : ''
-    setEditTitle(displayTitle)
-    setEditSummary(displaySummary)
-    setEditTags(toTagList(displayTags))
-    setEditCover('')
-    setEditBackdrop('')
-    setEditClearlogo('')
-    setEditAssetCoverId(fallbackCoverId)
-    setEditAssetBackdropId('')
-    setEditAssetClearlogoId('')
-    setMetadataArchivePatches([])
-    setMetadataPreviewPages([])
-    setMetadataPluginProgress(null)
-    setMetadataPluginMessage('')
-    resolvedRpcSelectRequestIdsRef.current.clear()
-    setRpcSelectRequest(null)
-    setRpcSelectTaskId(null)
-    setRpcSelectSelectedIndex(null)
-    setRpcSelectRemainingSeconds(null)
     setEditOpen(true)
-  }, [canEdit, displaySummary, displayTags, displayTitle, showError, t, thumbnailAssetId])
-
-  const submitRpcSelect = React.useCallback(async () => {
-    if (rpcSelectTaskId == null || !rpcSelectRequest || rpcSelectSelectedIndex == null) return
-    const requestId = rpcSelectRequest.request_id
-    const ok = await TaskPoolService.respondRpcSelect(rpcSelectTaskId, requestId, rpcSelectSelectedIndex)
-    resolvedRpcSelectRequestIdsRef.current.add(requestId)
-    if (!ok) {
-      showError('提交选择失败，可能请求已过期')
-      setRpcSelectRequest(null)
-      setRpcSelectTaskId(null)
-      setRpcSelectSelectedIndex(null)
-      setRpcSelectRemainingSeconds(null)
-      return
-    }
-    setRpcSelectRequest(null)
-    setRpcSelectTaskId(null)
-    setRpcSelectSelectedIndex(null)
-    setRpcSelectRemainingSeconds(null)
-  }, [rpcSelectRequest, rpcSelectSelectedIndex, rpcSelectTaskId, showError])
-
-  const abortRpcSelect = React.useCallback(async () => {
-    if (rpcSelectTaskId == null || !rpcSelectRequest) return
-    const requestId = rpcSelectRequest.request_id
-    const ok = await TaskPoolService.abortRpcSelect(rpcSelectTaskId, requestId)
-    resolvedRpcSelectRequestIdsRef.current.add(requestId)
-    if (!ok) {
-      showError('放弃选择失败，可能请求已过期')
-      setRpcSelectRequest(null)
-      setRpcSelectTaskId(null)
-      setRpcSelectSelectedIndex(null)
-      setRpcSelectRemainingSeconds(null)
-      return
-    }
-    setRpcSelectRequest(null)
-    setRpcSelectTaskId(null)
-    setRpcSelectSelectedIndex(null)
-    setRpcSelectRemainingSeconds(null)
-  }, [rpcSelectRequest, rpcSelectTaskId, showError])
-
-  const uploadMetadataAsset = React.useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
-    if (!canEdit || editSaving || isMetadataPluginRunning) return
-
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.style.display = 'none'
-
-    const setUploading = (next: boolean) => {
-      if (slot === 'cover') {
-        setCoverUploading(next)
-        return
-      }
-      if (slot === 'backdrop') {
-        setBackdropUploading(next)
-        return
-      }
-      setClearlogoUploading(next)
-    }
-
-    input.onchange = async (event) => {
-      const e = event as unknown as React.ChangeEvent<HTMLInputElement>
-      const file = e.target.files?.[0]
-      if (!file) {
-        document.body.removeChild(input)
-        return
-      }
-
-      setUploading(true)
-      try {
-        const result = await ChunkedUploadService.uploadWithChunks(
-          file,
-          {
-            targetType: 'metadata_asset',
-            overwrite: true,
-            contentType: file.type || 'application/octet-stream',
-          },
-          {
-            onProgress: () => {},
-            onChunkComplete: () => {},
-            onError: () => {},
-          }
-        )
-        if (!result.success) {
-          throw new Error(result.error || t('archive.assetUploadFailed'))
-        }
-
-        const assetId = Number(result.data?.assetId ?? 0)
-        if (!Number.isFinite(assetId) || assetId <= 0) {
-          throw new Error(t('archive.assetUploadFailed'))
-        }
-        const normalizedAssetId = String(Math.trunc(assetId))
-
-        if (slot === 'cover') {
-          setEditAssetCoverId(normalizedAssetId)
-          setEditCover('')
-        } else if (slot === 'backdrop') {
-          setEditAssetBackdropId(normalizedAssetId)
-          setEditBackdrop('')
-        } else {
-          setEditAssetClearlogoId(normalizedAssetId)
-          setEditClearlogo('')
-        }
-      } catch (error: any) {
-        logger.operationFailed('upload metadata asset from card', error, { id, slot, type })
-        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'))
-      } finally {
-        setUploading(false)
-        document.body.removeChild(input)
-      }
-    }
-
-    document.body.appendChild(input)
-    input.click()
-  }, [canEdit, editSaving, id, isMetadataPluginRunning, showError, t, type])
-
-  const runMetadataPlugin = React.useCallback(async () => {
-    if (!canEdit) {
-      showError(t('library.loginRequired'))
-      return
-    }
-    if (!selectedMetadataPlugin) {
-      showError(t('archive.metadataPluginSelectRequired'))
-      return
-    }
-
-    setIsMetadataPluginRunning(true)
-    setMetadataPluginProgress(0)
-    setMetadataPluginMessage(t('archive.metadataPluginEnqueued'))
-    resolvedRpcSelectRequestIdsRef.current.clear()
-    setRpcSelectRequest(null)
-    setRpcSelectTaskId(null)
-    setRpcSelectSelectedIndex(null)
-    setRpcSelectRemainingSeconds(null)
-
-    try {
-      const metadataTags = editTags.map((tag) => tag.trim()).filter(Boolean)
-      const targetType = type === 'archive' ? 'archive' : 'tankoubon'
-      const rootAssets = buildMetadataAssetInputs(
-        {
-          cover: editCover || undefined,
-          backdrop: editBackdrop || undefined,
-          clearlogo: editClearlogo || undefined,
-        },
-        {
-          cover: /^\d+$/.test(editAssetCoverId.trim()) ? Number.parseInt(editAssetCoverId.trim(), 10) : undefined,
-          backdrop: /^\d+$/.test(editAssetBackdropId.trim()) ? Number.parseInt(editAssetBackdropId.trim(), 10) : undefined,
-          clearlogo: /^\d+$/.test(editAssetClearlogoId.trim()) ? Number.parseInt(editAssetClearlogoId.trim(), 10) : undefined,
-        },
-      ) || []
-      const finalTask = await ArchiveService.runMetadataPluginForTarget(
-        targetType,
-        id,
-        selectedMetadataPlugin,
-        metadataPluginParam,
-        {
-          onUpdate: (task) => {
-            setMetadataPluginProgress(typeof task.progress === 'number' ? task.progress : 0)
-            setMetadataPluginMessage(task.message || '')
-
-            const req = parseRpcSelectRequest(task.message || '')
-            if (req) {
-              if (resolvedRpcSelectRequestIdsRef.current.has(req.request_id)) return
-              setRpcSelectTaskId(task.id)
-              setRpcSelectRequest((current) => {
-                if (current?.request_id === req.request_id) return current
-                const defaultIndex = typeof req.default_index === 'number' ? req.default_index : 0
-                setRpcSelectSelectedIndex(defaultIndex >= 0 && defaultIndex < req.options.length ? defaultIndex : 0)
-                const timeout = typeof req.timeout_seconds === 'number' && req.timeout_seconds > 0 ? Math.floor(req.timeout_seconds) : 90
-                setRpcSelectRemainingSeconds(timeout)
-                return req
-              })
-            }
-          },
-        },
-        {
-          writeBack: false,
-          metadata: {
-            title: editTitle.trim() || displayTitle,
-            type: targetType === 'tankoubon' ? 1 : 0,
-            description: editSummary.trim(),
-            tags: metadataTags,
-            assets: rootAssets,
-            children: type === 'tankoubon'
-              ? metadataArchivePatches.map((item) => ({
-                  title: String(item.title || '').trim(),
-                  type: 0,
-                  description: String(item.summary || item.description || '').trim(),
-                  tags: Array.isArray(item.tags)
-                    ? item.tags
-                    : String(item.tags || '')
-                        .split(',')
-                        .map((tag) => tag.trim())
-                        .filter(Boolean),
-                  assets: buildMetadataAssetInputs(
-                    {
-                      cover: item.cover || undefined,
-                      backdrop: item.backdrop || undefined,
-                      clearlogo: item.clearlogo || undefined,
-                    },
-                  ),
-                  archive_id: item.archive_id,
-                  volume_no: item.volume_no,
-                  updated_at: item.updated_at,
-                  pages: item.pages,
-                }))
-              : [],
-          },
-        }
-      )
-
-      if (finalTask.status !== 'completed') {
-        const err = finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
-        showError(err)
-        return
-      }
-
-      const previewResult = parseMetadataPluginPreviewResult(finalTask.result)
-      if (!previewResult.ok) {
-        if (!previewResult.parseFailed) {
-          const err = previewResult.error || finalTask.result || finalTask.message || t('archive.metadataPluginFailed')
-          showError(err)
-          return
-        }
-      } else {
-        const nextData = previewResult.data
-        if (nextData.title.trim()) setEditTitle(nextData.title.trim())
-        setEditSummary(nextData.summary)
-        setEditTags(nextData.tags)
-        applyAssetPreviewValue(nextData.cover, setEditCover, setEditAssetCoverId)
-        applyAssetPreviewValue(nextData.backdrop, setEditBackdrop, setEditAssetBackdropId)
-        applyAssetPreviewValue(nextData.clearlogo, setEditClearlogo, setEditAssetClearlogoId)
-        if (type === 'archive') {
-          setMetadataPreviewPages(nextData.pages)
-        }
-        if (type === 'tankoubon') {
-          setMetadataArchivePatches(
-            nextData.children
-              .map((item: unknown) => normalizeTankoubonMemberMetadataPatch(item))
-              .filter((item: TankoubonMemberMetadataPatch) => item.archive_id || item.volume_no)
-          )
-        }
-      }
-
-      setMetadataPluginMessage(t('archive.metadataPluginCompleted'))
-      setMetadataPluginProgress(100)
-    } catch (error: any) {
-      logger.operationFailed('run metadata plugin (card)', error, { id, type })
-      showError(error?.message || t('archive.metadataPluginFailed'))
-    } finally {
-      setIsMetadataPluginRunning(false)
-      setRpcSelectRequest(null)
-      setRpcSelectTaskId(null)
-      setRpcSelectSelectedIndex(null)
-      setRpcSelectRemainingSeconds(null)
-    }
-  }, [
-    canEdit,
-    displayTitle,
-    editAssetBackdropId,
-    editAssetClearlogoId,
-    editAssetCoverId,
-    editBackdrop,
-    editClearlogo,
-    editCover,
-    editSummary,
-    editTags,
-    editTitle,
-    id,
-    metadataArchivePatches,
-    metadataPluginParam,
-    selectedMetadataPlugin,
-    showError,
-    t,
-    type,
-  ])
-
-  const handleSaveEdit = React.useCallback(async () => {
-    if (editSaving) return
-    if (!canEdit) {
-      showError(t('library.loginRequired'))
-      return
-    }
-
-    const nextTitle = editTitle.trim()
-    if (type === 'tankoubon' && !nextTitle) {
-      showError(t('tankoubon.nameRequired'))
-      return
-    }
-
-    setEditSaving(true)
-    try {
-      const nextTags = editTags.map((tag) => tag.trim()).filter(Boolean)
-      const nextSummary = editSummary.trim()
-      const parseAssetId = (raw: string): number | undefined => {
-        const value = Number(raw.trim())
-        if (!Number.isFinite(value)) return undefined
-        const parsedId = Math.trunc(value)
-        return parsedId > 0 ? parsedId : undefined
-      }
-      const assetIds = {
-        cover: parseAssetId(editAssetCoverId),
-        backdrop: parseAssetId(editAssetBackdropId),
-        clearlogo: parseAssetId(editAssetClearlogoId),
-      }
-
-      if (type === 'archive') {
-        await ArchiveService.updateMetadata(id, {
-          title: nextTitle || displayTitle,
-          type: 0,
-          description: nextSummary,
-          tags: nextTags,
-          assets: buildMetadataAssetInputs(
-            {
-              cover: editCover || undefined,
-              backdrop: editBackdrop || undefined,
-              clearlogo: editClearlogo || undefined,
-            },
-            assetIds,
-          ),
-          pages: metadataPreviewPages.length > 0 ? metadataPreviewPages : undefined,
-          metadata_namespace: selectedMetadataPlugin || undefined,
-        })
-      } else {
-        await TankoubonService.updateMetadata(id, {
-          title: nextTitle,
-          type: 1,
-          description: nextSummary,
-          tags: nextTags,
-          assets: buildMetadataAssetInputs(
-            {
-              cover: editCover || undefined,
-              backdrop: editBackdrop || undefined,
-              clearlogo: editClearlogo || undefined,
-            },
-            assetIds,
-          ),
-          metadata_namespace: selectedMetadataPlugin || undefined,
-          children: metadataArchivePatches.map((item) => ({
-            title: String(item.title || '').trim(),
-            type: 0,
-            description: String(item.summary || item.description || '').trim(),
-            tags: Array.isArray(item.tags)
-              ? item.tags
-              : String(item.tags || '')
-                  .split(',')
-                  .map((tag) => tag.trim())
-                  .filter(Boolean),
-            assets: buildMetadataAssetInputs(
-              {
-                cover: item.cover || undefined,
-                backdrop: item.backdrop || undefined,
-                clearlogo: item.clearlogo || undefined,
-              },
-            ),
-            archive_id: typeof item.archive_id === 'string' ? item.archive_id : undefined,
-            volume_no: item.volume_no,
-            updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
-            pages: item.pages,
-          })),
-        })
-      }
-
-      if (nextTitle) setDisplayTitle(nextTitle)
-      setDisplaySummary(nextSummary)
-      setDisplayTags(nextTags.join(', '))
-      setEditOpen(false)
-      emitRefresh()
-    } catch (error) {
-      logger.operationFailed('save card edit', error, { id, type })
-      showError(type === 'archive' ? t('archive.updateFailed') : t('common.error'))
-    } finally {
-      setEditSaving(false)
-    }
-  }, [
-    canEdit,
-    displayTitle,
-    editAssetBackdropId,
-    editAssetClearlogoId,
-    editAssetCoverId,
-    editBackdrop,
-    editClearlogo,
-    editCover,
-    editSaving,
-    editSummary,
-    editTags,
-    editTitle,
-    emitRefresh,
-    id,
-    metadataArchivePatches,
-    metadataPreviewPages,
-    selectedMetadataPlugin,
-    showError,
-    t,
-    type,
-  ])
+  }, [canEdit, showError, t])
 
   const handleDelete = React.useCallback(async () => {
     if (!canDelete) {
@@ -866,7 +917,7 @@ export function BaseMediaCard({
 
   const readStatusLabel = isNew ? t('archive.markAsRead') : t('archive.markAsNew')
   const readStatusText = isNewStatusLoading ? t('common.loading') : readStatusLabel
-  const menuActionDisabled = deleting || editSaving
+  const menuActionDisabled = deleting
 
   return (
     <>
@@ -1143,58 +1194,22 @@ export function BaseMediaCard({
         </div>
       </div>
 
-      <ArchiveMetadataEditDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        t={t}
-        titleLabel={type === 'archive' ? t('archive.titleField') : t('tankoubon.name')}
-        summaryLabel={type === 'archive' ? t('archive.summary') : t('tankoubon.summary')}
-        tagsLabel={type === 'archive' ? t('archive.tags') : t('tankoubon.tags')}
-        summaryPlaceholder={type === 'archive' ? t('archive.summaryPlaceholder') : t('tankoubon.summaryPlaceholder')}
-        tagsPlaceholder={type === 'archive' ? t('archive.tagsPlaceholder') : t('tankoubon.tagsPlaceholder')}
-        title={editTitle}
-        onTitleChange={setEditTitle}
-        summary={editSummary}
-        onSummaryChange={setEditSummary}
-        assetCoverId={editAssetCoverId}
-        onAssetCoverIdChange={setEditAssetCoverId}
-        assetBackdropId={editAssetBackdropId}
-        onAssetBackdropIdChange={setEditAssetBackdropId}
-        assetClearlogoId={editAssetClearlogoId}
-        onAssetClearlogoIdChange={setEditAssetClearlogoId}
-        assetCoverValue={editCover}
-        assetBackdropValue={editBackdrop}
-        assetClearlogoValue={editClearlogo}
-        onUploadAssetCover={() => uploadMetadataAsset('cover')}
-        onUploadAssetBackdrop={() => uploadMetadataAsset('backdrop')}
-        onUploadAssetClearlogo={() => uploadMetadataAsset('clearlogo')}
-        uploadingAssetCover={coverUploading}
-        uploadingAssetBackdrop={backdropUploading}
-        uploadingAssetClearlogo={clearlogoUploading}
-        tags={editTags}
-        onTagsChange={setEditTags}
-        isSaving={editSaving}
-        saveDisabled={type === 'tankoubon' ? !editTitle.trim() : false}
-        onSave={handleSaveEdit}
-        showMetadataPlugin
-        metadataPlugins={metadataPlugins}
-        selectedMetadataPlugin={selectedMetadataPlugin}
-        onSelectedMetadataPluginChange={setSelectedMetadataPlugin}
-        metadataPluginParam={metadataPluginParam}
-        onMetadataPluginParamChange={setMetadataPluginParam}
-        isMetadataPluginRunning={isMetadataPluginRunning}
-        metadataPluginProgress={metadataPluginProgress}
-        metadataPluginMessage={metadataPluginMessage}
-        onRunMetadataPlugin={runMetadataPlugin}
-        rpcSelect={{
-          request: rpcSelectRequest,
-          selectedIndex: rpcSelectSelectedIndex,
-          remainingSeconds: rpcSelectRemainingSeconds,
-          onSelectIndex: setRpcSelectSelectedIndex,
-          onAbort: abortRpcSelect,
-          onSubmit: submitRpcSelect,
-        }}
-      />
+      {editOpen ? (
+        <BaseMediaCardEditController
+          id={id}
+          initialSummary={displaySummary}
+          initialTags={displayTags}
+          initialTitle={displayTitle}
+          onOpenChange={setEditOpen}
+          onSaved={({ summary, tags, title }) => {
+            setDisplayTitle(title)
+            setDisplaySummary(summary)
+            setDisplayTags(tags)
+          }}
+          thumbnailAssetId={thumbnailAssetId}
+          type={type}
+        />
+      ) : null}
     </>
   )
 }

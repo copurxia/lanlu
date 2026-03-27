@@ -29,7 +29,7 @@ interface ArchiveGridProps {
 export function ArchiveGrid({
   archives,
   variant = 'default',
-  preloadTankoubonDetails = true,  // 默认启用预加载
+  preloadTankoubonDetails = false,
   priorityCount = 0,  // 默认不优先加载，首页可传入首屏可见卡片数
   selectable = false,
   selectionMode = false,
@@ -52,8 +52,7 @@ export function ArchiveGrid({
     const tankoubonIds = archives
       .filter(isTankoubon)
       .map(t => t.tankoubon_id)
-      // Prevent overfetching when a page contains many collections.
-      .slice(0, 50);
+      .slice(0, 12);
 
     if (tankoubonIds.length > 0) {
       let cancelled = false;

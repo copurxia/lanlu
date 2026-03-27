@@ -1,7 +1,7 @@
 'use client';
 
 import type { MouseEvent } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Check, Eye, Heart, Square } from 'lucide-react';
@@ -106,7 +106,7 @@ function getPagePreviewSrc(page: PageInfo): string {
   return '';
 }
 
-function TweetPreviewTile({
+const TweetPreviewTile = memo(function TweetPreviewTile({
   item,
   className,
 }: {
@@ -126,9 +126,9 @@ function TweetPreviewTile({
       />
     </div>
   );
-}
+});
 
-function TweetPreviewMedia({
+const TweetPreviewMedia = memo(function TweetPreviewMedia({
   emptyLabel,
   items,
   loading,
@@ -194,7 +194,7 @@ function TweetPreviewMedia({
       </div>
     )
   );
-}
+});
 
 function HomeMediaTweetCard({
   description,
@@ -463,18 +463,18 @@ function HomeMediaTweetCard({
   );
 }
 
-function HomeArchiveTweetRow({
+const HomeArchiveTweetRow = memo(function HomeArchiveTweetRow({
   archive,
   selectionMode,
   selected,
   onRequestEnterSelection,
-  onToggleSelect,
+  onToggleArchiveSelect,
 }: {
   archive: Archive;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
-  onToggleSelect: (selected: boolean) => void;
+  onToggleArchiveSelect: (id: string, selected: boolean) => void;
 }) {
   const { t } = useLanguage();
   const contentMeta = `${t('archive.pages').replace('{count}', String(archive.pagecount))}${archive.progress > 0 && archive.pagecount > 0 ? ` · ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}` : ''}`;
@@ -496,24 +496,24 @@ function HomeArchiveTweetRow({
       isFavorite={Boolean(archive.isfavorite)}
       isNew={archive.isnew}
       thumbnailAssetId={coverAssetId}
-      onToggleSelected={onToggleSelect}
+      onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
   );
-}
+});
 
-function HomeTankoubonTweetRow({
+const HomeTankoubonTweetRow = memo(function HomeTankoubonTweetRow({
   tankoubon,
   selectionMode,
   selected,
   onRequestEnterSelection,
-  onToggleSelect,
+  onToggleTankoubonSelect,
 }: {
   tankoubon: Tankoubon;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
-  onToggleSelect: (selected: boolean) => void;
+  onToggleTankoubonSelect: (id: string, selected: boolean) => void;
 }) {
   const { t } = useLanguage();
   const firstArchiveId = typeof tankoubon.children?.[0] === 'string' ? tankoubon.children[0] : '';
@@ -536,13 +536,13 @@ function HomeTankoubonTweetRow({
       isFavorite={Boolean(tankoubon.isfavorite)}
       isNew={Boolean(tankoubon.isnew)}
       thumbnailAssetId={coverAssetId}
-      onToggleSelected={onToggleSelect}
+      onToggleSelected={(nextSelected) => onToggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
   );
-}
+});
 
-export function HomeMediaTweet({
+export const HomeMediaTweet = memo(function HomeMediaTweet({
   items,
   selectionMode,
   selectedArchiveIds,
@@ -562,7 +562,7 @@ export function HomeMediaTweet({
               selectionMode={selectionMode}
               selected={selectedTankoubonIds.has(item.tankoubon_id)}
               onRequestEnterSelection={onRequestEnterSelection}
-              onToggleSelect={(selected) => onToggleTankoubonSelect(item.tankoubon_id, selected)}
+              onToggleTankoubonSelect={onToggleTankoubonSelect}
             />
           );
         }
@@ -574,10 +574,10 @@ export function HomeMediaTweet({
             selectionMode={selectionMode}
             selected={selectedArchiveIds.has(item.arcid)}
             onRequestEnterSelection={onRequestEnterSelection}
-            onToggleSelect={(selected) => onToggleArchiveSelect(item.arcid, selected)}
+            onToggleArchiveSelect={onToggleArchiveSelect}
           />
         );
       })}
     </div>
   );
-}
+});

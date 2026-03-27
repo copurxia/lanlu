@@ -26,7 +26,7 @@ import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { Check, Download, Heart, Pencil, RotateCcw, Trash2, X, ChevronRight, RefreshCw } from 'lucide-react';
-import { useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
+import { memo, useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useDebounce, useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
 import { useToast } from '@/hooks/use-toast';
@@ -71,7 +71,86 @@ function getScrollableCardWidth(viewportWidth: number): number {
   return 192;
 }
 
-function HomeScrollableCardRow({
+const HomeScrollableTankoubonCard = memo(function HomeScrollableTankoubonCard({
+  itemKey,
+  index,
+  coverHeight,
+  selectionMode,
+  selected,
+  enterSelectionMode,
+  toggleTankoubonSelect,
+  tankoubon,
+  reportAspectRatio,
+}: {
+  itemKey: string;
+  index: number;
+  coverHeight?: number;
+  selectionMode: boolean;
+  selected: boolean;
+  enterSelectionMode: () => void;
+  toggleTankoubonSelect: (id: string, selected: boolean) => void;
+  tankoubon: Tankoubon;
+  reportAspectRatio: (key: string, aspectRatio: number) => void;
+}) {
+  return (
+    <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
+      <TankoubonCard
+        tankoubon={tankoubon}
+        priority={index < 2}
+        disableContentVisibility
+        coverHeight={coverHeight}
+        selectable
+        selectionMode={selectionMode}
+        selected={selected}
+        onRequestEnterSelection={enterSelectionMode}
+        onToggleSelect={(nextSelected) => toggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
+        onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
+      />
+    </div>
+  );
+});
+
+const HomeScrollableArchiveCard = memo(function HomeScrollableArchiveCard({
+  archive,
+  itemKey,
+  index,
+  coverHeight,
+  selectionMode,
+  selected,
+  enterSelectionMode,
+  toggleArchiveSelect,
+  reportAspectRatio,
+}: {
+  archive: Archive;
+  itemKey: string;
+  index: number;
+  coverHeight?: number;
+  selectionMode: boolean;
+  selected: boolean;
+  enterSelectionMode: () => void;
+  toggleArchiveSelect: (id: string, selected: boolean) => void;
+  reportAspectRatio: (key: string, aspectRatio: number) => void;
+}) {
+  return (
+    <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
+      <ArchiveCard
+        archive={archive}
+        index={index}
+        priority={index < 2}
+        disableContentVisibility
+        coverHeight={coverHeight}
+        selectable
+        selectionMode={selectionMode}
+        selected={selected}
+        onRequestEnterSelection={enterSelectionMode}
+        onToggleSelect={(nextSelected) => toggleArchiveSelect(archive.arcid, nextSelected)}
+        onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
+      />
+    </div>
+  );
+});
+
+const HomeScrollableCardRow = memo(function HomeScrollableCardRow({
   items,
   selectionMode,
   selectedArchiveIds,
@@ -149,44 +228,38 @@ function HomeScrollableCardRow({
       {items.map((item, index) => {
         const itemKey = isTankoubonItem(item) ? `tankoubon:${item.tankoubon_id}` : `archive:${item.arcid}`;
         return (
-          <div
-            key={itemKey}
-            className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0"
-          >
-            {isTankoubonItem(item) ? (
-              <TankoubonCard
-                tankoubon={item}
-                priority={index < 2}
-                disableContentVisibility
-                coverHeight={sharedCoverHeight}
-                selectable
-                selectionMode={selectionMode}
-                selected={selectedTankoubonIds.has(item.tankoubon_id)}
-                onRequestEnterSelection={enterSelectionMode}
-                onToggleSelect={(selected) => toggleTankoubonSelect(item.tankoubon_id, selected)}
-                onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
-              />
-            ) : (
-              <ArchiveCard
-                archive={item}
-                index={index}
-                priority={index < 2}
-                disableContentVisibility
-                coverHeight={sharedCoverHeight}
-                selectable
-                selectionMode={selectionMode}
-                selected={selectedArchiveIds.has(item.arcid)}
-                onRequestEnterSelection={enterSelectionMode}
-                onToggleSelect={(selected) => toggleArchiveSelect(item.arcid, selected)}
-                onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
-              />
-            )}
-          </div>
+          isTankoubonItem(item) ? (
+            <HomeScrollableTankoubonCard
+              key={itemKey}
+              itemKey={itemKey}
+              index={index}
+              coverHeight={sharedCoverHeight}
+              selectionMode={selectionMode}
+              selected={selectedTankoubonIds.has(item.tankoubon_id)}
+              enterSelectionMode={enterSelectionMode}
+              toggleTankoubonSelect={toggleTankoubonSelect}
+              tankoubon={item}
+              reportAspectRatio={reportAspectRatio}
+            />
+          ) : (
+            <HomeScrollableArchiveCard
+              key={itemKey}
+              archive={item}
+              itemKey={itemKey}
+              index={index}
+              coverHeight={sharedCoverHeight}
+              selectionMode={selectionMode}
+              selected={selectedArchiveIds.has(item.arcid)}
+              enterSelectionMode={enterSelectionMode}
+              toggleArchiveSelect={toggleArchiveSelect}
+              reportAspectRatio={reportAspectRatio}
+            />
+          )
         );
       })}
     </div>
   );
-}
+});
 
 function HomePageContent() {
   const { t, language } = useLanguage();

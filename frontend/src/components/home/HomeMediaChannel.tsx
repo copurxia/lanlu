@@ -1,7 +1,7 @@
 'use client';
 
 import type { MouseEvent } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, Eye, Film, Heart, Square } from 'lucide-react';
 import { HomeMediaItemMenu } from '@/components/home/HomeMediaItemMenu';
@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useMounted } from '@/hooks/common-hooks';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import {
@@ -25,6 +24,7 @@ import type { Tankoubon } from '@/types/tankoubon';
 const CHANNEL_PREVIEW_LIMIT = 9;
 const CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT = 24;
 const channelPreviewCache = new Map<string, PageInfo[]>();
+const channelPreviewAspectRatioCache = new Map<string, number>();
 const CHANNEL_PREVIEW_FILE_PARAMS = {
   limit: CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT,
   offset: 0,
@@ -34,6 +34,10 @@ const CHANNEL_PREVIEW_FILE_PARAMS = {
 
 function getChannelPreviewCacheKey(archiveId: string): string {
   return `${archiveId}|${CHANNEL_PREVIEW_FILE_PARAMS.limit}|${CHANNEL_PREVIEW_FILE_PARAMS.offset}|${CHANNEL_PREVIEW_FILE_PARAMS.media_types}|${CHANNEL_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
+}
+
+function getChannelPreviewAspectRatioCacheKey(archiveId: string, pageKey: string): string {
+  return `${archiveId}|${pageKey}`;
 }
 
 type HomeMediaChannelProps = {
@@ -53,7 +57,9 @@ type ChannelTag = {
 
 type ChannelPreviewItem = {
   alt: string;
+  aspectRatio: number;
   id: string;
+  measurementKey: string;
   posterSrc?: string;
   src: string;
   type: PageInfo['type'];
@@ -69,6 +75,7 @@ type HomeMediaChannelCardProps = {
   readerTargetId?: string;
   previewArchiveId?: string;
   contentMeta: string;
+  contentWidth: number;
   selectionMode: boolean;
   selected: boolean;
   thumbnailAssetId?: number;
@@ -125,7 +132,7 @@ function getPagePreviewMedia(page: PageInfo): { posterSrc?: string; src: string 
   return null;
 }
 
-function ChannelPreviewTile({
+const ChannelPreviewTile = memo(function ChannelPreviewTile({
   item,
   onMeasure,
   onVideoReady,
@@ -134,7 +141,7 @@ function ChannelPreviewTile({
   style,
 }: {
   item: ChannelPreviewItem;
-  onMeasure: (id: string, aspectRatio: number) => void;
+  onMeasure: (cacheKey: string, aspectRatio: number) => void;
   onVideoReady: (id: string) => void;
   videoReady: boolean;
   className?: string;
@@ -156,26 +163,16 @@ function ChannelPreviewTile({
             muted
             loop
             playsInline
-            preload={item.posterSrc ? 'metadata' : 'auto'}
+            preload="metadata"
             onLoadedMetadata={(event) => {
               const video = event.currentTarget;
               const naturalWidth = video.videoWidth;
               const naturalHeight = video.videoHeight;
               if (!naturalWidth || !naturalHeight) return;
-              onMeasure(item.id, naturalWidth / naturalHeight);
+              onMeasure(item.measurementKey, naturalWidth / naturalHeight);
             }}
-            onLoadedData={(event) => {
-              const video = event.currentTarget;
+            onLoadedData={() => {
               onVideoReady(item.id);
-              if (item.posterSrc || video.dataset.previewBootstrapped === '1') return;
-              video.dataset.previewBootstrapped = '1';
-              void video.play()
-                .then(() => {
-                  window.setTimeout(() => {
-                    video.pause();
-                  }, 80);
-                })
-                .catch(() => {});
             }}
           />
         </>
@@ -192,64 +189,37 @@ function ChannelPreviewTile({
             const naturalWidth = image.naturalWidth || image.width;
             const naturalHeight = image.naturalHeight || image.height;
             if (!naturalWidth || !naturalHeight) return;
-            onMeasure(item.id, naturalWidth / naturalHeight);
+            onMeasure(item.measurementKey, naturalWidth / naturalHeight);
           }}
         />
       )}
     </div>
   );
-}
+});
 
-function ChannelPreviewMedia({
-  aspectRatios,
+const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
+  contentWidth,
   emptyLabel,
   items,
   loading,
   onMeasure,
 }: {
-  aspectRatios: Record<string, number>;
+  contentWidth: number;
   emptyLabel: string;
   items: ChannelPreviewItem[];
   loading: boolean;
-  onMeasure: (id: string, aspectRatio: number) => void;
+  onMeasure: (cacheKey: string, aspectRatio: number) => void;
 }) {
-  const mounted = useMounted();
-  const [hydrated, setHydrated] = useState(false);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [containerWidth, setContainerWidth] = useState(0);
   const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    setHydrated(true);
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-
-    const element = containerRef.current;
-    if (!element) return;
-
-    const updateWidth = () => {
-      setContainerWidth(element.clientWidth);
-    };
-
-    updateWidth();
-
-    if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateWidth);
-      return () => window.removeEventListener('resize', updateWidth);
-    }
-
-    const observer = new ResizeObserver(updateWidth);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [hydrated]);
+    setVideoReadyMap({});
+  }, [items]);
 
   const normalizedItems = useMemo<Array<ChannelPreviewItem & ChannelPreviewLayoutItem>>(() => items.map((item) => ({
     ...item,
-    aspectRatio: aspectRatios[item.id] || DEFAULT_CHANNEL_ASPECT_RATIO,
-  })), [aspectRatios, items]);
-  const effectiveWidth = Math.max(containerWidth, 320);
+  })), [items]);
+  const effectiveWidth = Math.max(contentWidth, 320);
   const layout = useMemo(() => computeChannelPreviewLayout(
     normalizedItems.map((item) => ({
       ...item,
@@ -268,20 +238,10 @@ function ChannelPreviewMedia({
   }, []);
 
   return (
-    <div ref={containerRef} className="w-full">
+    <div className="w-full">
       {items.length === 0 ? (
         <div className="flex aspect-[16/10] w-full items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
           {loading ? <Spinner size="sm" /> : emptyLabel}
-        </div>
-      ) : !mounted || !hydrated ? (
-        <div className="flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
-          {Array.from({ length: Math.max(1, Math.min(items.length, 3)) }).map((_, index) => (
-            <div
-              key={`channel-preview-skeleton-${index}`}
-              className="animate-pulse bg-muted"
-              style={{ height: `${index === 0 ? 180 : 120}px` }}
-            />
-          ))}
         </div>
       ) : layout.kind === 'single' ? (
         <div
@@ -402,7 +362,7 @@ function ChannelPreviewMedia({
       )}
     </div>
   );
-}
+});
 
 function HomeMediaChannelCard({
   description,
@@ -414,6 +374,7 @@ function HomeMediaChannelCard({
   readerTargetId,
   previewArchiveId,
   contentMeta,
+  contentWidth,
   selectionMode,
   selected,
   thumbnailAssetId,
@@ -426,24 +387,19 @@ function HomeMediaChannelCard({
   const [shouldLoadPreview, setShouldLoadPreview] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewPages, setPreviewPages] = useState<PageInfo[]>([]);
-  const [previewAspectRatios, setPreviewAspectRatios] = useState<Record<string, number>>({});
+  const [, setPreviewLayoutVersion] = useState(0);
   const [contentExpanded, setContentExpanded] = useState(false);
   const previewRef = useRef<HTMLButtonElement | null>(null);
 
-  const handleMeasurePreview = useCallback((id: string, aspectRatio: number) => {
+  const handleMeasurePreview = useCallback((cacheKey: string, aspectRatio: number) => {
     const normalized = Number.isFinite(aspectRatio) && aspectRatio > 0
       ? aspectRatio
       : DEFAULT_CHANNEL_ASPECT_RATIO;
 
-    setPreviewAspectRatios((current) => {
-      if (Math.abs((current[id] || DEFAULT_CHANNEL_ASPECT_RATIO) - normalized) < 0.01) {
-        return current;
-      }
-      return {
-        ...current,
-        [id]: normalized,
-      };
-    });
+    const current = channelPreviewAspectRatioCache.get(cacheKey) ?? DEFAULT_CHANNEL_ASPECT_RATIO;
+    if (Math.abs(current - normalized) < 0.01) return;
+    channelPreviewAspectRatioCache.set(cacheKey, normalized);
+    setPreviewLayoutVersion((value) => value + 1);
   }, []);
 
   useEffect(() => {
@@ -532,10 +488,14 @@ function HomeMediaChannelCard({
         const previewItems = previewPages
           .flatMap((page, index) => {
             const media = getPagePreviewMedia(page);
-            if (!media) return [];
+            if (!media || !previewArchiveId) return [];
+            const pageKey = page.path || String(index);
+            const measurementKey = getChannelPreviewAspectRatioCacheKey(previewArchiveId, pageKey);
             return [{
               alt: page.title || `${displayTitle || author} ${index + 1}`,
+              aspectRatio: channelPreviewAspectRatioCache.get(measurementKey) || DEFAULT_CHANNEL_ASPECT_RATIO,
               id: `${id}-${page.path || index}`,
+              measurementKey,
               ...(media.posterSrc ? { posterSrc: media.posterSrc } : {}),
               src: media.src,
               type: page.type,
@@ -616,7 +576,7 @@ function HomeMediaChannelCard({
                     }}
                   >
                     <ChannelPreviewMedia
-                      aspectRatios={previewAspectRatios}
+                      contentWidth={contentWidth}
                       items={previewItems}
                       loading={previewLoading}
                       emptyLabel={displayTitle || author}
@@ -683,18 +643,20 @@ function HomeMediaChannelCard({
   );
 }
 
-function HomeArchiveChannelRow({
+const HomeArchiveChannelRow = memo(function HomeArchiveChannelRow({
   archive,
+  contentWidth,
   selectionMode,
   selected,
   onRequestEnterSelection,
-  onToggleSelect,
+  onToggleArchiveSelect,
 }: {
   archive: Archive;
+  contentWidth: number;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
-  onToggleSelect: (selected: boolean) => void;
+  onToggleArchiveSelect: (id: string, selected: boolean) => void;
 }) {
   const { t } = useLanguage();
   const contentMeta = `${t('archive.pages').replace('{count}', String(archive.pagecount))}${archive.progress > 0 && archive.pagecount > 0 ? ` · ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}` : ''}`;
@@ -711,29 +673,32 @@ function HomeArchiveChannelRow({
       readerTargetId={archive.arcid}
       previewArchiveId={archive.arcid}
       contentMeta={contentMeta}
+      contentWidth={contentWidth}
       selectionMode={selectionMode}
       selected={selected}
       isFavorite={Boolean(archive.isfavorite)}
       isNew={archive.isnew}
       thumbnailAssetId={coverAssetId}
-      onToggleSelected={onToggleSelect}
+      onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
   );
-}
+});
 
-function HomeTankoubonChannelRow({
+const HomeTankoubonChannelRow = memo(function HomeTankoubonChannelRow({
   tankoubon,
+  contentWidth,
   selectionMode,
   selected,
   onRequestEnterSelection,
-  onToggleSelect,
+  onToggleTankoubonSelect,
 }: {
   tankoubon: Tankoubon;
+  contentWidth: number;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
-  onToggleSelect: (selected: boolean) => void;
+  onToggleTankoubonSelect: (id: string, selected: boolean) => void;
 }) {
   const { t } = useLanguage();
   const firstArchiveId = typeof tankoubon.children?.[0] === 'string' ? tankoubon.children[0] : '';
@@ -752,18 +717,19 @@ function HomeTankoubonChannelRow({
       readerTargetId={firstArchiveId || undefined}
       previewArchiveId={firstArchiveId || undefined}
       contentMeta={`${archiveCount} ${t('tankoubon.archives')} · ${t('tankoubon.totalPages').replace('{count}', String(pageCount))}`}
+      contentWidth={contentWidth}
       selectionMode={selectionMode}
       selected={selected}
       isFavorite={Boolean(tankoubon.isfavorite)}
       isNew={Boolean(tankoubon.isnew)}
       thumbnailAssetId={coverAssetId}
-      onToggleSelected={onToggleSelect}
+      onToggleSelected={(nextSelected) => onToggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
   );
-}
+});
 
-export function HomeMediaChannel({
+export const HomeMediaChannel = memo(function HomeMediaChannel({
   items,
   selectionMode,
   selectedArchiveIds,
@@ -772,18 +738,42 @@ export function HomeMediaChannel({
   onToggleArchiveSelect,
   onToggleTankoubonSelect,
 }: HomeMediaChannelProps) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [contentWidth, setContentWidth] = useState(0);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    const updateWidth = () => {
+      setContentWidth(element.clientWidth);
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      return () => window.removeEventListener('resize', updateWidth);
+    }
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className="space-y-4">
+    <div ref={containerRef} className="space-y-4">
       {items.map((item) => {
         if (isTankoubonItem(item)) {
           return (
             <HomeTankoubonChannelRow
               key={`tankoubon:${item.tankoubon_id}`}
               tankoubon={item}
+              contentWidth={contentWidth}
               selectionMode={selectionMode}
               selected={selectedTankoubonIds.has(item.tankoubon_id)}
               onRequestEnterSelection={onRequestEnterSelection}
-              onToggleSelect={(selected) => onToggleTankoubonSelect(item.tankoubon_id, selected)}
+              onToggleTankoubonSelect={onToggleTankoubonSelect}
             />
           );
         }
@@ -792,13 +782,14 @@ export function HomeMediaChannel({
           <HomeArchiveChannelRow
             key={`archive:${item.arcid}`}
             archive={item}
+            contentWidth={contentWidth}
             selectionMode={selectionMode}
             selected={selectedArchiveIds.has(item.arcid)}
             onRequestEnterSelection={onRequestEnterSelection}
-            onToggleSelect={(selected) => onToggleArchiveSelect(item.arcid, selected)}
+            onToggleArchiveSelect={onToggleArchiveSelect}
           />
         );
       })}
     </div>
   );
-}
+});
