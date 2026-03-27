@@ -22,12 +22,11 @@ const tweetPreviewCache = new Map<string, PageInfo[]>();
 const TWEET_PREVIEW_FILE_PARAMS = {
   limit: TWEET_PREVIEW_SOURCE_SCAN_LIMIT,
   offset: 0,
-  media_types: 'image,video',
   include_metadata: true,
 } as const;
 
 function getTweetPreviewCacheKey(archiveId: string): string {
-  return `${archiveId}|${TWEET_PREVIEW_FILE_PARAMS.limit}|${TWEET_PREVIEW_FILE_PARAMS.offset}|${TWEET_PREVIEW_FILE_PARAMS.media_types}|${TWEET_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
+  return `${archiveId}|${TWEET_PREVIEW_FILE_PARAMS.limit}|${TWEET_PREVIEW_FILE_PARAMS.offset}|${TWEET_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
 }
 
 type HomeMediaTweetProps = {

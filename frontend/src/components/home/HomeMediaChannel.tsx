@@ -28,12 +28,11 @@ const channelPreviewAspectRatioCache = new Map<string, number>();
 const CHANNEL_PREVIEW_FILE_PARAMS = {
   limit: CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT,
   offset: 0,
-  media_types: 'image,video',
   include_metadata: true,
 } as const;
 
 function getChannelPreviewCacheKey(archiveId: string): string {
-  return `${archiveId}|${CHANNEL_PREVIEW_FILE_PARAMS.limit}|${CHANNEL_PREVIEW_FILE_PARAMS.offset}|${CHANNEL_PREVIEW_FILE_PARAMS.media_types}|${CHANNEL_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
+  return `${archiveId}|${CHANNEL_PREVIEW_FILE_PARAMS.limit}|${CHANNEL_PREVIEW_FILE_PARAMS.offset}|${CHANNEL_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
 }
 
 function getChannelPreviewAspectRatioCacheKey(archiveId: string, pageKey: string): string {
@@ -127,6 +126,12 @@ function getPagePreviewMedia(page: PageInfo): { posterSrc?: string; src: string 
     return {
       posterSrc: posterSrc || undefined,
       src: posterSrc || page.url.trim(),
+    };
+  }
+  if (posterSrc) {
+    return {
+      posterSrc,
+      src: posterSrc,
     };
   }
   return null;
@@ -498,7 +503,7 @@ function HomeMediaChannelCard({
               measurementKey,
               ...(media.posterSrc ? { posterSrc: media.posterSrc } : {}),
               src: media.src,
-              type: page.type,
+              type: (page.type === 'video' ? 'video' : 'image') as ChannelPreviewItem['type'],
             }];
           })
           .slice(0, CHANNEL_PREVIEW_LIMIT);

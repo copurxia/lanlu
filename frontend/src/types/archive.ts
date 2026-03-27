@@ -151,7 +151,6 @@ export interface ArchiveFilesParams {
   include_metadata?: boolean;
   limit?: number;
   offset?: number;
-  media_types?: string;
 }
 
 export interface ArchiveMetadata extends MetadataObject {

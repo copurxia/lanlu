@@ -136,21 +136,6 @@ public class ArchiveController {
         return "image"
     }
 
-    private static func parseMediaTypesQuery(ctx: Ctx): HashSet<String> {
-        var mediaTypes = HashSet<String>()
-        let raw = (ctx.query("media_types") ?? "").trimAscii().toAsciiLower()
-        if (raw.size == 0) {
-            return mediaTypes
-        }
-        for (value in raw.split(",")) {
-            let normalized = value.trimAscii()
-            if (normalized == "image" || normalized == "video" || normalized == "audio" || normalized == "html") {
-                mediaTypes.add(normalized)
-            }
-        }
-        return mediaTypes
-    }
-
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
@@ -318,7 +303,6 @@ public class ArchiveController {
         }
         let includeMetadataRaw = (ctx.query("include_metadata") ?? "").trimAscii().toAsciiLower()
         let includeMetadata = includeMetadataRaw != "false" && includeMetadataRaw != "0"
-        let mediaTypes = parseMediaTypesQuery(ctx)
         let limit = parsePositiveIntQuery(ctx, "limit")
         let offsetRaw = (ctx.query("offset") ?? "").trimAscii()
         let offsetParsed = try { Int32.parse(offsetRaw) } catch (_: Exception) { 0i32 }
@@ -478,11 +462,7 @@ public class ArchiveController {
         var filteredPageFiles = ArrayList<ArchiveFilesPageItem>()
         for (item in pageFiles) {
             let fileType = resolveArchiveFileType(archive.archive_type, item.href)
-            if (mediaTypes.size > 0) {
-                if (!mediaTypes.contains(fileType)) {
-                    continue
-                }
-            } else if (imagesOnlySpecified && imagesOnly && fileType != "image") {
+            if (imagesOnlySpecified && imagesOnly && fileType != "image") {
                 continue
             }
             filteredPageFiles.add(item)
