@@ -14,6 +14,13 @@ type ReaderVirtualEndPage = {
 
 type ReaderWebtoonPage = PageInfo | ReaderVirtualEndPage;
 
+type ReaderWebtoonZoomState = {
+  pageIndex: number;
+  scale: number;
+  originX: number;
+  originY: number;
+};
+
 export function ReaderWebtoonModeView({
   enabled,
   webtoonContainerRef,
@@ -36,9 +43,7 @@ export function ReaderWebtoonModeView({
   totalHeight,
   imagesLoading,
   loadedImages,
-  scale,
-  translateX,
-  translateY,
+  webtoonZoom,
   htmlContents,
   webtoonPageElementRefs,
   imageRefs,
@@ -74,9 +79,7 @@ export function ReaderWebtoonModeView({
   totalHeight: number;
   imagesLoading: Set<number>;
   loadedImages: Set<number>;
-  scale: number;
-  translateX: number;
-  translateY: number;
+  webtoonZoom: ReaderWebtoonZoomState | null;
   htmlContents: Record<number, string>;
   webtoonPageElementRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
@@ -92,10 +95,6 @@ export function ReaderWebtoonModeView({
   t: (key: string) => string;
 }) {
   if (!enabled) return null;
-
-  const shouldTransform = scale !== 1 || translateX !== 0 || translateY !== 0;
-  const transform = shouldTransform ? `scale(${scale}) translate(${translateX}px, ${translateY}px)` : undefined;
-  const transformTransition = shouldTransform ? 'transform 0.1s ease-out' : undefined;
 
   const estimatedTotalHeight = totalHeight || pages.length * (containerHeight || window.innerHeight * 0.7);
   const topSpacerHeight = prefixHeights[visibleRange.start] || 0;
@@ -139,6 +138,7 @@ export function ReaderWebtoonModeView({
             const actualIndex = i;
             const page = pages[actualIndex];
             const imageHeight = imageHeights[actualIndex] || containerHeight || window.innerHeight * 0.7;
+            const isZoomedImage = webtoonZoom?.pageIndex === actualIndex;
 
             if (page) {
               if (page.type === 'virtual-end') {
@@ -170,7 +170,10 @@ export function ReaderWebtoonModeView({
               }
 
               elements.push(
-                <div key={actualIndex} className="relative w-full">
+                <div
+                  key={actualIndex}
+                  className={`relative w-full ${isZoomedImage ? 'z-20' : ''}`}
+                >
                   {imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) && (
                     <div
                       className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
@@ -262,11 +265,16 @@ export function ReaderWebtoonModeView({
 	                          decoding="async"
 	                          loading="lazy"
 	                          className="absolute inset-0 object-contain select-none w-full h-full"
+                            data-reader-page-index={actualIndex}
 	                          style={{
 	                            opacity: 1,
-	                            transform,
-	                            transition: transformTransition,
-	                            cursor: scale > 1 ? 'grab' : 'default',
+	                            transform: isZoomedImage ? `scale(${webtoonZoom.scale})` : undefined,
+                              transformOrigin: isZoomedImage
+                                ? `${webtoonZoom.originX}% ${webtoonZoom.originY}%`
+                                : '50% 50%',
+	                            transition: 'transform 0.18s ease-out',
+	                            cursor: isZoomedImage ? 'zoom-out' : 'zoom-in',
+                              willChange: isZoomedImage ? 'transform' : undefined,
 	                          }}
 	                          onLoad={(e) => {
 	                            const img = e.currentTarget;

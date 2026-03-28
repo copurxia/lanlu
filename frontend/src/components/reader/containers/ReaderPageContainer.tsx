@@ -117,6 +117,15 @@ function measureElementContentWidth(el: HTMLElement | null): number {
   return Math.max(0, Math.round(el.clientWidth - paddingLeft - paddingRight));
 }
 
+type WebtoonZoomState = {
+  pageIndex: number;
+  scale: number;
+  originX: number;
+  originY: number;
+};
+
+const WEBTOON_DOUBLE_TAP_SCALE = 1.8;
+
 function ReaderContent() {
   type EndPageNextArchive = {
     id: string;
@@ -170,6 +179,7 @@ function ReaderContent() {
   const [nextArchiveByArchiveId, setNextArchiveByArchiveId] = useState<Record<string, EndPageNextArchive | null>>({});
   const [webtoonContentElement, setWebtoonContentElement] = useState<HTMLDivElement | null>(null);
   const [webtoonContentWidth, setWebtoonContentWidth] = useState(0);
+  const [webtoonZoom, setWebtoonZoom] = useState<WebtoonZoomState | null>(null);
   const archiveNavLockRef = useRef(0);
   const chapterJumpCountdownRef = useRef<{
     seconds: number;
@@ -525,6 +535,20 @@ function ReaderContent() {
     }
     return { start, end };
   }, [currentRealPage, readingMode, streamPages, webtoonVirtualization.visibleRange]);
+
+  useEffect(() => {
+    if (readingMode !== 'webtoon') {
+      setWebtoonZoom((prev) => (prev == null ? prev : null));
+      return;
+    }
+
+    setWebtoonZoom((prev) => {
+      if (!prev) return prev;
+      const { start, end } = webtoonVirtualization.visibleRange;
+      if (prev.pageIndex >= start && prev.pageIndex <= end) return prev;
+      return null;
+    });
+  }, [readingMode, webtoonVirtualization.visibleRange]);
 
   // Stable reference: avoid re-running effects on every render (can cause update loops).
   const priorityIndices = useMemo(() => {
@@ -1600,6 +1624,28 @@ function ReaderContent() {
     }
     
     e.preventDefault();
+
+    if (readingMode === 'webtoon') {
+      const currentTarget = e.currentTarget as HTMLElement;
+      const rawPageIndex = currentTarget.dataset.readerPageIndex;
+      const pageIndex = rawPageIndex ? Number.parseInt(rawPageIndex, 10) : Number.NaN;
+      if (!Number.isFinite(pageIndex)) return;
+
+      const rect = currentTarget.getBoundingClientRect();
+      const originX = Math.max(0, Math.min(100, ((e.clientX - rect.left) / Math.max(1, rect.width)) * 100));
+      const originY = Math.max(0, Math.min(100, ((e.clientY - rect.top) / Math.max(1, rect.height)) * 100));
+
+      setWebtoonZoom((prev) => {
+        if (prev?.pageIndex === pageIndex) return null;
+        return {
+          pageIndex,
+          scale: WEBTOON_DOUBLE_TAP_SCALE,
+          originX,
+          originY,
+        };
+      });
+      return;
+    }
     
     // 使用React内置的双击事件，不需要手动检测
     if (scale === 1) {
@@ -1651,6 +1697,7 @@ function ReaderContent() {
     translateY,
     resetTransform,
     doublePageMode,
+    readingMode,
     readerAreaRef,
   ]);
 
@@ -2144,9 +2191,7 @@ function ReaderContent() {
 	          totalHeight={webtoonVirtualization.totalHeight}
 	          imagesLoading={imageLoading.imagesLoading}
 	          loadedImages={imageLoading.loadedImages}
-	          scale={scale}
-	          translateX={translateX}
-	          translateY={translateY}
+            webtoonZoom={webtoonZoom}
 	          htmlContents={htmlContents}
           webtoonPageElementRefs={webtoonPageElementRefs}
           imageRefs={imageRefs}
