@@ -148,7 +148,7 @@ public class UploadProcessTaskRunner {
             let scanProgress = if (finalizeMode) { 90i32 } else { 50i32 }
             TaskModel.updateTaskProgress(taskId, scanProgress, "创建档案扫描任务")
 
-            // 创建 scan_archive 子任务（优先级 20，高于定时扫描）
+            // 上传后续扫描优先于新的上传占位任务，但仍走现有全局优先级调度。
             let scanOut = ByteBuffer()
             let scanW = JsonWriter(scanOut)
             scanW.startObject()
@@ -163,7 +163,7 @@ public class UploadProcessTaskRunner {
                 "扫描上传档案",
                 "scan_archive",
                 scanParams,
-                20, // 上传任务优先级为 20
+                5,
                 groupId,
                 "upload"
             )

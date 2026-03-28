@@ -36,14 +36,24 @@ public class ArchiveConfig {
     public var archiveType: String
     public var tags: String
     public var categoryId: String
+    public var folderScanKey: String
 
-    public init(archivePath: String, cachePath: String, thumbnailPath: String, archiveType: String, tags: String, categoryId: String) {
+    public init(
+        archivePath: String,
+        cachePath: String,
+        thumbnailPath: String,
+        archiveType: String,
+        tags: String,
+        categoryId: String,
+        folderScanKey!: String = ""
+    ) {
         this.archivePath = archivePath
         this.cachePath = cachePath
         this.thumbnailPath = thumbnailPath
         this.archiveType = archiveType
         this.tags = tags
         this.categoryId = categoryId
+        this.folderScanKey = folderScanKey
     }
 }
 

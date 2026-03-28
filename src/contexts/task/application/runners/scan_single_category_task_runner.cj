@@ -5,6 +5,7 @@ import stdx.log.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
@@ -16,6 +17,7 @@ import lanlu.infrastructure.archivehandler.*
  */
 public class ScanSingleCategoryTaskRunner {
     private static let notifyBatchSize: Int32 = 50
+    private static let folderScanCacheTtlSeconds: Int64 = 3600
 
     private static func summaryJsonString(created: Int64, total: Int64): String {
         let out = ByteBuffer()
@@ -77,7 +79,7 @@ public class ScanSingleCategoryTaskRunner {
             // 使用流式遍历，发现即提交
             var total: Int64 = 0
             var created: Int64 = 0
-            let scanContext = ScanContext(groupId, triggerSource, childPriority, categoryInternalId, scanPath, context.notifyTaskAvailable)
+            let scanContext = ScanContext(groupId, triggerSource, childPriority, categoryInternalId, scanPath, context.notifyTaskAvailable, context.kvStore)
             let (scannedTotal, createdCount) = scanDirectoryRecursive(scanPath, scanContext)
             total = scannedTotal
             created = createdCount
@@ -95,6 +97,8 @@ public class ScanSingleCategoryTaskRunner {
                 let coverTaskId = submitCategoryCoverTask(catidParam, categoryName, triggerSource, context.notifyTaskAvailable)
                 if (coverTaskId > 0) {
                     TaskIO.appendLog(taskId, "Submitted generate_category_cover task: ${coverTaskId}")
+                } else if (coverTaskId < 0) {
+                    TaskIO.appendLog(taskId, "Skipped generate_category_cover because an active task already exists")
                 } else {
                     TaskIO.appendLog(taskId, "WARN: failed to submit generate_category_cover task")
                 }
@@ -126,18 +130,15 @@ public class ScanSingleCategoryTaskRunner {
 
         let entries = DirectoryScanner.listDirectory(dirPath)
 
-        // Auto-create/sync Tankoubon for qualifying directories (2+ archives, no non-archive subdirs).
-        // This also performs deletion cleanup (remove items missing from filesystem).
-        try {
-            let relDir = ArchiveUtils.calculateRelativeDirPath(dirPath, ctx.basePath)
-            TankoubonAutocreateService.ensureAndSync(ctx.categoryId, relDir, dirPath)
-        } catch (_: Exception) {}
-
         // Optimization: if FolderHandler recognizes the current directory as a folder archive,
         // enqueue it directly and stop descending. Special directories stay centralized there.
         if (dirPath != ctx.basePath && FolderHandler.canHandleDirectoryEntries(dirPath, entries)) {
             total = Int64(entries.size)
-            if (enqueueScanArchiveTask(dirPath, ctx)) {
+            let folderEntries = FolderHandler().listEntries(dirPath)
+            let mediaCount = FolderHandler.countMediaEntries(folderEntries)
+            let coverEntry = FolderHandler.selectFirstCoverEntry(folderEntries)
+            let folderScanKey = cacheFolderArchiveScan(dirPath, folderEntries, mediaCount, coverEntry, ctx)
+            if (enqueueScanArchiveTask(dirPath, ctx, folderScanKey: folderScanKey, coverEntry: coverEntry)) {
                 created = 1
             }
             return (total, created)
@@ -174,7 +175,38 @@ public class ScanSingleCategoryTaskRunner {
         return (total, created)
     }
 
-    private static func enqueueScanArchiveTask(filePath: String, ctx: ScanContext): Bool {
+    private static func cacheFolderArchiveScan(filePath: String, entries: Array<String>, mediaCount: Int32, coverEntry: String, ctx: ScanContext): String {
+        let relativePath = ArchiveUtils.calculateRelativePath(filePath, ctx.basePath)
+        let fileName = ArchiveUtils.getFullFileName(filePath)
+        let cacheKey = "folder_scan:${ctx.categoryId}:${relativePath}:${fileName}"
+
+        try {
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("archive_path").writeValue(filePath)
+            w.writeName("relative_path").writeValue(relativePath)
+            w.writeName("filename").writeValue(fileName)
+            w.writeName("media_count").writeValue(mediaCount)
+            w.writeName("cover_entry").writeValue(coverEntry)
+            w.writeName("entries")
+            w.startArray()
+            for (entry in entries) {
+                w.writeValue(entry)
+            }
+            w.endArray()
+            w.endObject()
+            w.flush()
+            let payload = String.fromUtf8(readToEnd(out))
+            if (ctx.kvStore.set(ctx.groupId, cacheKey, payload, folderScanCacheTtlSeconds)) {
+                return cacheKey
+            }
+        } catch (_: Exception) {}
+
+        return ""
+    }
+
+    private static func enqueueScanArchiveTask(filePath: String, ctx: ScanContext, folderScanKey!: String = "", coverEntry!: String = ""): Bool {
         // 首先检查是否有处理器能处理该文件，如果没有则直接跳过
         let factory = ArchiveHandlerFactory.getInstance()
         let handlerOpt = factory.getHandlerByPath(filePath)
@@ -199,7 +231,7 @@ public class ScanSingleCategoryTaskRunner {
                 } else {
                     // 档案存在但缺少缩略图，直接提交缩略图生成任务
                     getLogger("scan_single_category").debug("Archive exists but no thumbnail, submitting thumbnail task: ${filePath}")
-                    return submitThumbnailTaskDirectly(filePath, archive.id, archiveType, ctx)
+                    return submitThumbnailTaskDirectly(filePath, archive.id, archiveType, ctx, coverEntry)
                 }
             case None =>
                 // 档案不存在，创建 scan_archive 任务进行完整处理
@@ -212,6 +244,9 @@ public class ScanSingleCategoryTaskRunner {
         w.writeName("archive_path").writeValue(filePath)
         w.writeName("category_id").writeValue(ctx.categoryId)
         w.writeName("archive_type").writeValue(archiveType)
+        if (folderScanKey.size > 0) {
+            w.writeName("folder_scan_key").writeValue(folderScanKey)
+        }
         w.endObject()
         w.flush()
         let params = String.fromUtf8(readToEnd(out))
@@ -276,7 +311,7 @@ public class ScanSingleCategoryTaskRunner {
     /**
      * 直接提交缩略图生成任务（用于已存在但缺少缩略图的档案）
      */
-    private static func submitThumbnailTaskDirectly(filePath: String, archiveId: String, archiveType: String, ctx: ScanContext): Bool {
+    private static func submitThumbnailTaskDirectly(filePath: String, archiveId: String, archiveType: String, ctx: ScanContext, coverEntry: String): Bool {
         try {
             let out = ByteBuffer()
             let w = JsonWriter(out)
@@ -284,6 +319,9 @@ public class ScanSingleCategoryTaskRunner {
             w.writeName("archive_path").writeValue(filePath)
             w.writeName("archive_id").writeValue(archiveId)
             w.writeName("type").writeValue(archiveType)
+            if (coverEntry.size > 0) {
+                w.writeName("cover_entry").writeValue(coverEntry)
+            }
             w.endObject()
             w.flush()
             let parameters = String.fromUtf8(readToEnd(out))
@@ -312,6 +350,10 @@ public class ScanSingleCategoryTaskRunner {
 
     private static func submitCategoryCoverTask(catid: String, categoryName: String, triggerSource: String, notifier: TaskNotifier): Int64 {
         if (catid.trimAscii().size == 0) { return 0 }
+        let groupId = "category_cover:${catid}"
+        if (TaskDao.existsActiveTaskByTypeAndGroupId("generate_category_cover", groupId)) {
+            return -1
+        }
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -325,7 +367,7 @@ public class ScanSingleCategoryTaskRunner {
             "generate_category_cover",
             params,
             40i32,
-            "category_cover:${catid}",
+            groupId,
             triggerSource
         )
         if (task.id > 0) {
@@ -346,14 +388,16 @@ class ScanContext {
     public let categoryId: Int64
     public let basePath: String
     public let notifier: TaskNotifier
+    public let kvStore: TaskKVStore
     public var enqueuedSinceNotify: Int32 = 0
 
-    public init(groupId: String, triggerSource: String, priority: Int32, categoryId: Int64, basePath: String, notifier: TaskNotifier) {
+    public init(groupId: String, triggerSource: String, priority: Int32, categoryId: Int64, basePath: String, notifier: TaskNotifier, kvStore: TaskKVStore) {
         this.groupId = groupId
         this.triggerSource = triggerSource
         this.priority = priority
         this.categoryId = categoryId
         this.basePath = basePath
         this.notifier = notifier
+        this.kvStore = kvStore
     }
 }

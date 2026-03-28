@@ -198,6 +198,66 @@ public class FolderHandler <: ArchiveHandler {
         return hasMedia || hasPrimaryStructureDir
     }
 
+    public static func countMediaEntries(entries: Array<String>): Int32 {
+        var count: Int32 = 0
+        for (entry in entries) {
+            if (isMediaEntry(entry)) {
+                count++
+            }
+        }
+        return count
+    }
+
+    public static func selectFirstCoverEntry(entries: Array<String>): String {
+        let topLevelImageEntries = ArrayList<String>()
+        let subDirImageEntries = ArrayList<String>()
+
+        for (entry in entries) {
+            if (isImageEntry(entry)) {
+                if (entry.contains("/")) {
+                    subDirImageEntries.add(entry)
+                } else {
+                    topLevelImageEntries.add(entry)
+                }
+            }
+        }
+
+        if (!topLevelImageEntries.isEmpty()) {
+            NaturalSort.sortStrings(topLevelImageEntries)
+            return topLevelImageEntries[0]
+        }
+
+        if (!subDirImageEntries.isEmpty()) {
+            NaturalSort.sortStrings(subDirImageEntries)
+            return subDirImageEntries[0]
+        }
+
+        let topLevelVideoEntries = ArrayList<String>()
+        let subDirVideoEntries = ArrayList<String>()
+
+        for (entry in entries) {
+            if (isVideoEntry(entry)) {
+                if (entry.contains("/")) {
+                    subDirVideoEntries.add(entry)
+                } else {
+                    topLevelVideoEntries.add(entry)
+                }
+            }
+        }
+
+        if (!topLevelVideoEntries.isEmpty()) {
+            NaturalSort.sortStrings(topLevelVideoEntries)
+            return topLevelVideoEntries[0]
+        }
+
+        if (!subDirVideoEntries.isEmpty()) {
+            NaturalSort.sortStrings(subDirVideoEntries)
+            return subDirVideoEntries[0]
+        }
+
+        return ""
+    }
+
     public func listEntries(archivePath: String): Array<String> {
         return listEntriesRecursive(archivePath, "")
     }
@@ -285,87 +345,17 @@ public class FolderHandler <: ArchiveHandler {
 
     public func getMediaCount(archivePath: String): Int32 {
         let entries = listEntries(archivePath)
-        var count: Int32 = 0
-        for (entry in entries) {
-            if (isMediaFile(entry)) {
-                count++
-            }
-        }
-        return count
+        return FolderHandler.countMediaEntries(entries)
     }
 
     public func getFirstCoverEntry(archivePath: String): (String, String) {
         let entries = listEntries(archivePath)
-
-        // 优先当前目录中的图片文件（不包含路径分隔符）
-        let topLevelImageEntries = ArrayList<String>()
-        let subDirImageEntries = ArrayList<String>()
-        
-        for (entry in entries) {
-            let fullPath = DirectoryScanner.joinPath(archivePath, entry)
-            if (!DirectoryScanner.fileExists(fullPath)) {
-                continue
-            }
-            if (isImageFile(entry)) {
-                if (entry.contains("/")) {
-                    subDirImageEntries.add(entry)
-                } else {
-                    topLevelImageEntries.add(entry)
-                }
-            }
+        let firstEntry = FolderHandler.selectFirstCoverEntry(entries)
+        if (firstEntry.size == 0) {
+            return ("", "")
         }
-        
-        // 优先顶层图片
-        if (!topLevelImageEntries.isEmpty()) {
-            NaturalSort.sortStrings(topLevelImageEntries)
-            let firstEntry = topLevelImageEntries[0]
-            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
-            return (firstEntry, fullPath)
-        }
-        
-        // 其次子目录中的图片
-        if (!subDirImageEntries.isEmpty()) {
-            NaturalSort.sortStrings(subDirImageEntries)
-            let firstEntry = subDirImageEntries[0]
-            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
-            return (firstEntry, fullPath)
-        }
-
-        // 图片不存在时，回退到视频文件
-        let topLevelVideoEntries = ArrayList<String>()
-        let subDirVideoEntries = ArrayList<String>()
-        
-        for (entry in entries) {
-            let fullPath = DirectoryScanner.joinPath(archivePath, entry)
-            if (!DirectoryScanner.fileExists(fullPath)) {
-                continue
-            }
-            if (isVideoFile(entry)) {
-                if (entry.contains("/")) {
-                    subDirVideoEntries.add(entry)
-                } else {
-                    topLevelVideoEntries.add(entry)
-                }
-            }
-        }
-        
-        // 优先顶层视频
-        if (!topLevelVideoEntries.isEmpty()) {
-            NaturalSort.sortStrings(topLevelVideoEntries)
-            let firstEntry = topLevelVideoEntries[0]
-            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
-            return (firstEntry, fullPath)
-        }
-        
-        // 最后子目录中的视频
-        if (!subDirVideoEntries.isEmpty()) {
-            NaturalSort.sortStrings(subDirVideoEntries)
-            let firstEntry = subDirVideoEntries[0]
-            let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
-            return (firstEntry, fullPath)
-        }
-        
-        return ("", "")
+        let fullPath = DirectoryScanner.joinPath(archivePath, firstEntry)
+        return (firstEntry, fullPath)
     }
 
     public func canHandle(filePath: String): Bool {
@@ -462,5 +452,51 @@ public class FolderHandler <: ArchiveHandler {
      */
     private func isMediaFile(filename: String): Bool {
         return isImageFile(filename) || isVideoFile(filename) || isAudioFile(filename)
+    }
+
+    private static func isImageEntry(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let extension = parts[parts.size - 1]
+        for (ext in ALLOWED_IMAGE_EXTENSIONS) {
+            if (extension == ext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isVideoEntry(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let extension = parts[parts.size - 1]
+        for (ext in ALLOWED_VIDEO_EXTENSIONS) {
+            if (extension == ext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isAudioEntry(filename: String): Bool {
+        let parts = filename.split(".")
+        if (parts.size <= 1) {
+            return false
+        }
+        let extension = parts[parts.size - 1]
+        for (ext in ALLOWED_AUDIO_EXTENSIONS) {
+            if (extension == ext) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isMediaEntry(filename: String): Bool {
+        return isImageEntry(filename) || isVideoEntry(filename) || isAudioEntry(filename)
     }
 }

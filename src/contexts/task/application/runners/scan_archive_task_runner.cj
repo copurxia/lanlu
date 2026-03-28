@@ -7,6 +7,7 @@ import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
@@ -38,7 +39,8 @@ public class ScanArchiveTaskRunner {
             TaskIO.appendLog(taskId, "Starting archive processing for: ${config.archivePath}")
             TaskModel.updateTaskProgress(taskId, 10, "Processing ${config.archivePath}")
 
-            let result = processArchiveInternal(config.archivePath, config, context.notifyTaskAvailable)
+            let groupId = TaskDao.getTaskDataById(taskId).groupId
+            let result = processArchiveInternal(config.archivePath, config, groupId, context.kvStore, context.notifyTaskAvailable)
             TaskIO.appendLog(taskId, "processArchiveInternal returned: success=${result.success}, archiveId=${result.archiveId}, error=${result.error}")
 
             if (!result.success) {
@@ -80,9 +82,10 @@ public class ScanArchiveTaskRunner {
         var archiveType = "archive"
         var tags = ""
         var categoryId: String = ""
+        var folderScanKey = ""
 
         if (trimmed.size == 0) {
-            return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId)
+            return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId, folderScanKey: folderScanKey)
         }
 
         try {
@@ -105,6 +108,7 @@ public class ScanArchiveTaskRunner {
                             }
                         case "tags" => tags = r.readValue<String>().trimAscii()
                         case "category_id" => categoryId = r.readValue<String>().trimAscii()
+                        case "folder_scan_key" => folderScanKey = r.readValue<String>().trimAscii()
                         case _ => r.skip()
                     }
                 }
@@ -112,7 +116,7 @@ public class ScanArchiveTaskRunner {
             }
         } catch (_: Exception) {}
 
-        return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId)
+        return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId, folderScanKey: folderScanKey)
     }
 
     private static func resolveCategory(categoryIdOrCatid: String): (Int64, String, Array<String>) {
@@ -149,7 +153,43 @@ public class ScanArchiveTaskRunner {
         return factory.getHandlerByPath(filePath)
     }
 
-    private static func processArchiveInternal(filePath: String, config: ArchiveConfig, notifier: TaskNotifier): ProcessResultData {
+    private static func loadFolderScanSummary(kvStore: TaskKVStore, groupId: String, cacheKey: String): (Bool, Int32, String) {
+        let normalizedKey = cacheKey.trimAscii()
+        let normalizedGroupId = groupId.trimAscii()
+        if (normalizedKey.size == 0 || normalizedGroupId.size == 0) {
+            return (false, 0, "")
+        }
+
+        match (kvStore.get(normalizedGroupId, normalizedKey)) {
+            case Some(payload) =>
+                try {
+                    var mediaCount: Int32 = 0
+                    var coverEntry = ""
+                    var buf = ByteBuffer()
+                    unsafe { buf.write(payload.rawData()) }
+                    let r = JsonReader(buf)
+                    if (r.peek() != Some(BeginObject)) {
+                        return (false, 0, "")
+                    }
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let k = r.readName()
+                        match (k) {
+                            case "media_count" => mediaCount = r.readValue<Int32>()
+                            case "cover_entry" => coverEntry = r.readValue<String>().trimAscii()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    return (true, mediaCount, coverEntry)
+                } catch (_: Exception) {
+                    return (false, 0, "")
+                }
+            case None => return (false, 0, "")
+        }
+    }
+
+    private static func processArchiveInternal(filePath: String, config: ArchiveConfig, groupId: String, kvStore: TaskKVStore, notifier: TaskNotifier): ProcessResultData {
         try {
             // 首先检查是否有 handler 能处理该路径
             let handlerOpt = resolveHandler(filePath, config.archiveType)
@@ -174,6 +214,15 @@ public class ScanArchiveTaskRunner {
             let fileName = ArchiveUtils.getFullFileName(filePath)
             let existingArchive = ArchiveDao.getByCategoryPathAndFilename(categoryInternalId, relativePath, fileName)
             let dirFullPath = if (relativePath.size > 0) { FileUtils.joinPath(archiveBasePath, relativePath) } else { archiveBasePath }
+            var hasFolderScanSummary = false
+            var cachedMediaCount: Int32 = 0
+            var cachedCoverEntry = ""
+            if (archiveType == "folder") {
+                let (okFolderSummary, mediaCount, coverEntry) = loadFolderScanSummary(kvStore, groupId, config.folderScanKey)
+                hasFolderScanSummary = okFolderSummary
+                cachedMediaCount = mediaCount
+                cachedCoverEntry = coverEntry
+            }
 
             match (existingArchive) {
                 case Some(archive) =>
@@ -187,7 +236,7 @@ public class ScanArchiveTaskRunner {
                         logger.debug("Thumbnail hash is empty, submitting thumbnail generation task for existing archive: ${archive.id}")
 
                         // 提交缩略图生成任务（异步）
-                        let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, notifier)
+                        let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, cachedCoverEntry, notifier)
                         if (!taskSubmitted) {
                             logger.error("Failed to submit thumbnail generation task for archive: ${archive.id}")
                         }
@@ -206,8 +255,12 @@ public class ScanArchiveTaskRunner {
             }
 
             // 使用 Handler 获取媒体文件数量
-            let pageCount = handler.getMediaCount(filePath)
-            logger.debug("Archive ${filePath} (type: ${archiveType}) contains ${pageCount} media files")
+            let pageCount = if (hasFolderScanSummary) { cachedMediaCount } else { handler.getMediaCount(filePath) }
+            logger.debug("Archive media count resolved", [
+                ("path", filePath),
+                ("archive_type", archiveType),
+                ("page_count", pageCount.toString())
+            ])
 
             // 如果没有媒体文件，跳过入库和封面生成
             if (pageCount == 0) {
@@ -224,16 +277,19 @@ public class ScanArchiveTaskRunner {
             if (config.tags.size > 0) {
                 let tagOk = TagDao.updateArchiveTags(dbResult.archiveId, config.tags)
                 if (!tagOk) {
-                    logger.error("Failed to update tags for archive", ("archive_id", dbResult.archiveId))
+                    logger.error("Failed to update tags for archive", [("archive_id", dbResult.archiveId)])
                 } else {
-                    logger.debug("Successfully updated tags for archive", ("archive_id", dbResult.archiveId), ("tags", config.tags))
+                    logger.debug("Successfully updated tags for archive", [
+                        ("archive_id", dbResult.archiveId),
+                        ("tags", config.tags)
+                    ])
                 }
             }
 
             // 提交缩略图生成任务（异步）
-            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, notifier)
+            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, cachedCoverEntry, notifier)
             if (!taskSubmitted) {
-                logger.error("Failed to submit thumbnail generation task for archive: ${dbResult.archiveId}")
+                logger.error("Failed to submit thumbnail generation task for archive", [("archive_id", dbResult.archiveId)])
             }
 
             // Auto-create/sync Tankoubon for this directory.
@@ -301,7 +357,7 @@ public class ScanArchiveTaskRunner {
     /**
      * 提交缩略图生成任务到任务池
      */
-    private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String, notifier: TaskNotifier): Bool {
+    private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String, coverEntry: String, notifier: TaskNotifier): Bool {
         try {
             let out = ByteBuffer()
             let w = JsonWriter(out)
@@ -309,6 +365,9 @@ public class ScanArchiveTaskRunner {
             w.writeName("archive_path").writeValue(archivePath)
             w.writeName("archive_id").writeValue(archiveId)
             w.writeName("type").writeValue(archiveType)
+            if (coverEntry.size > 0) {
+                w.writeName("cover_entry").writeValue(coverEntry)
+            }
             w.endObject()
             w.flush()
             let parameters = String.fromUtf8(readToEnd(out))

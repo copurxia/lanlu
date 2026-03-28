@@ -128,7 +128,7 @@ public class AssetUploadProcessTaskRunner {
             resolveConsumeTaskName(targetType),
             consumeTaskType,
             consumeParams,
-            20,
+            5,
             groupId,
             "asset_upload"
         )

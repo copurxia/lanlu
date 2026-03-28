@@ -134,7 +134,7 @@ public class ArchiveAssetConsumeTaskRunner {
             "扫描上传档案",
             "scan_archive",
             scanParams,
-            20,
+            5,
             groupId,
             "asset_upload"
         )

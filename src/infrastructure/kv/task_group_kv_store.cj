@@ -4,6 +4,7 @@ import std.sync.*
 import std.collection.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.TaskGroupKVDao
+import lanlu.contexts.task.infrastructure.persistence.TaskDao
 
 /**
  * Task 组 KV 存储（DB-backed）
@@ -55,7 +56,9 @@ public class TaskGroupKVStore <: TaskKVStore {
                 if (count <= 1) {
                     groupRefCounts.remove(groupId)
                     storeMutex.unlock()
-                    TaskGroupKVDao.deleteGroup(groupId)
+                    if (!TaskDao.existsNonTerminalTasksByGroupId(groupId)) {
+                        TaskGroupKVDao.deleteGroup(groupId)
+                    }
                     return
                 } else {
                     groupRefCounts[groupId] = count - 1

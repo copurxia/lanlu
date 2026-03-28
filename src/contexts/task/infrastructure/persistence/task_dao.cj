@@ -1209,6 +1209,86 @@ public class TaskDao {
     }
 
     /**
+     * 查询指定 group_id 是否仍有未进入终态的任务。
+     */
+    public static func existsNonTerminalTasksByGroupId(groupId: String): Bool {
+        if (groupId.trimAscii().size == 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT 1
+                        FROM tasks
+                        WHERE group_id = ?
+                          AND status NOT IN ('completed', 'failed', 'stopped')
+                        LIMIT 1
+                    """)
+                    try {
+                        stmt.set(0, groupId)
+                        let rs = stmt.query()
+                        try {
+                            return rs.next()
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
+     * 查询指定类型与 group_id 是否已存在活动任务。
+     */
+    public static func existsActiveTaskByTypeAndGroupId(taskType: String, groupId: String): Bool {
+        if (taskType.trimAscii().size == 0 || groupId.trimAscii().size == 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT 1
+                        FROM tasks
+                        WHERE task_type = ?
+                          AND group_id = ?
+                          AND status IN ('pending', 'running')
+                        LIMIT 1
+                    """)
+                    try {
+                        stmt.set(0, taskType)
+                        stmt.set(1, groupId)
+                        let rs = stmt.query()
+                        try {
+                            return rs.next()
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
      * 批量更新任务状态（用于批量取消）
      */
     public static func updateTaskStatusByGroupId(groupId: String, status: String, message: String): Int64 {

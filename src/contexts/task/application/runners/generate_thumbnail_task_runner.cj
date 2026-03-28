@@ -27,17 +27,17 @@ public class GenerateThumbnailTaskRunner {
         let logger = getLogger("generate_thumbnail_task")
         TaskIO.appendLog(taskId, "generate_thumbnail task started")
 
-        let (archiveId, archivePath, archiveType) = parseParameters(parameters)
+        let (archiveId, archivePath, archiveType, coverEntry) = parseParameters(parameters)
         if (archiveId.size == 0 || archivePath.size == 0) {
             fail(taskId, "archive_id and archive_path are required")
             return
         }
-        TaskIO.appendLog(taskId, "Parameters: archive_id=${archiveId}, type=${archiveType}, archive_path=${archivePath}")
-        logger.debug("Parameters parsed", ("archive_id", archiveId), ("type", archiveType), ("archive_path", archivePath))
+        TaskIO.appendLog(taskId, "Parameters: archive_id=${archiveId}, type=${archiveType}, archive_path=${archivePath}, cover_entry=${coverEntry}")
+        logger.debug("Parameters parsed", ("archive_id", archiveId), ("type", archiveType), ("archive_path", archivePath), ("cover_entry", coverEntry))
 
         TaskModel.updateTaskProgress(taskId, 10, "Generating thumbnail for ${archiveId} (type: ${archiveType})")
 
-        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType, cachePath, assetPath)
+        let result = generateThumbnail(taskId, archivePath, archiveId, archiveType, coverEntry, cachePath, assetPath)
         if (!result.success) {
             logger.error("generate_thumbnail failed", ("archive_id", archiveId), ("error", result.error))
             fail(taskId, result.error)
@@ -61,7 +61,7 @@ public class GenerateThumbnailTaskRunner {
     /**
      * 生成缩略图
      */
-    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String, cachePath: String, assetPath: String): ProcessResultData {
+    private static func generateThumbnail(taskId: Int64, archivePath: String, archiveId: String, archiveType: String, coverEntryHint: String, cachePath: String, assetPath: String): ProcessResultData {
         let logger = getLogger("generate_thumbnail")
         TaskIO.appendLog(taskId, "Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
         logger.debug("Starting thumbnail generation for archive: ${archivePath} (type: ${archiveType})")
@@ -105,7 +105,12 @@ public class GenerateThumbnailTaskRunner {
         // This prevents long stalls on large archives (e.g. 40MB+ PNG cover pages).
         TaskIO.appendLog(taskId, "Extracting cover media using streaming reader (type: ${archiveType})...")
 
-        let (coverEntryName, _) = handler.getFirstCoverEntry(actualArchivePath)
+        let coverEntryName = if (coverEntryHint.trimAscii().size > 0) {
+            coverEntryHint.trimAscii()
+        } else {
+            let (entry, _) = handler.getFirstCoverEntry(actualArchivePath)
+            entry
+        }
         if (coverEntryName.size == 0) {
             let errorMsg = "No cover media found in ${archiveType} archive"
             TaskIO.appendLog(taskId, "ERROR: ${errorMsg}")
@@ -325,14 +330,15 @@ public class GenerateThumbnailTaskRunner {
         return parts[parts.size - 1].toAsciiLower()
     }
 
-    private static func parseParameters(parameters: String): (String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String) {
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return ("", "", "")
+            return ("", "", "", "")
         }
         var archiveId = ""
         var archivePath = ""
         var archiveType = "archive"  // 默认压缩包
+        var coverEntry = ""
         try {
             var buf = ByteBuffer()
             unsafe { buf.write(trimmed.rawData()) }
@@ -350,13 +356,14 @@ public class GenerateThumbnailTaskRunner {
                             if (archiveType != "archive" && archiveType != "folder" && archiveType != "pdf" && archiveType != "epub") {
                                 archiveType = "archive"
                             }
+                        case "cover_entry" => coverEntry = r.readValue<String>().trimAscii()
                         case _ => r.skip()
                     }
                 }
                 r.endObject()
             }
         } catch (_: Exception) {}
-        return (archiveId, archivePath, archiveType)
+        return (archiveId, archivePath, archiveType, coverEntry)
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

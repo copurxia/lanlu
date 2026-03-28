@@ -195,34 +195,45 @@ public class TaskPoolService {
 
     private func runWorker(task: TaskData, workerId: Int32): Unit {
         let logger = getLogger("taskpool")
+        let groupId = task.groupId.trimAscii()
+        let kvStore = TaskGroupKVStore.getInstance()
+        if (groupId.size > 0) {
+            kvStore.acquireGroup(groupId)
+        }
         logger.debug("TaskPool worker executing", ("worker", workerId.toString()), ("task_id", task.id.toString()), ("task_type", task.taskType))
         try {
-            executeTask(task, workerId)
-        } catch (e: Exception) {
-            // Safety net: never leave the task stuck in "running" due to an unhandled exception.
-            TaskIO.appendLog(task.id, "ERROR: task runner crashed: ${e.message}")
-            TaskModel.failTask(task.id, "Task runner crashed: ${e.message}")
+            try {
+                executeTask(task, workerId)
+            } catch (e: Exception) {
+                // Safety net: never leave the task stuck in "running" due to an unhandled exception.
+                TaskIO.appendLog(task.id, "ERROR: task runner crashed: ${e.message}")
+                TaskModel.failTask(task.id, "Task runner crashed: ${e.message}")
+            }
+
+            // 只有任务进入终态时，才触发依赖任务。
+            // upload 任务会在此 worker 内等待到 completed/failed/stopped，避免过早释放并发槽位。
+            let latestTask = TaskDao.getTaskDataById(task.id)
+            if (isTerminalStatus(latestTask.status)) {
+                let completedTaskId = task.id
+                spawn { triggerDependentTasks(completedTaskId) }
+            } else {
+                logger.debug(
+                    "Skip triggering dependents because task is not terminal",
+                    ("task_id", task.id.toString()),
+                    ("status", latestTask.status),
+                    ("task_type", latestTask.taskType)
+                )
+            }
+        } finally {
+            if (groupId.size > 0) {
+                kvStore.releaseGroup(groupId)
+            }
+
+            // 释放 slot 并尝试领取下一个 pending（使用原子操作）
+            currentWorkers.fetchSub(1)
+
+            dispatch()
         }
-
-        // 只有任务进入终态时，才触发依赖任务。
-        // upload 任务会在此 worker 内等待到 completed/failed/stopped，避免过早释放并发槽位。
-        let latestTask = TaskDao.getTaskDataById(task.id)
-        if (isTerminalStatus(latestTask.status)) {
-            let completedTaskId = task.id
-            spawn { triggerDependentTasks(completedTaskId) }
-        } else {
-            logger.debug(
-                "Skip triggering dependents because task is not terminal",
-                ("task_id", task.id.toString()),
-                ("status", latestTask.status),
-                ("task_type", latestTask.taskType)
-            )
-        }
-
-        // 释放 slot 并尝试领取下一个 pending（使用原子操作）
-        currentWorkers.fetchSub(1)
-
-        dispatch()
     }
 
     /**
