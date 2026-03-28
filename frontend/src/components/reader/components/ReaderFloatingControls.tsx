@@ -481,7 +481,12 @@ export function ReaderFloatingControls({
                       step={lane.step ?? 1}
                       className="w-28 sm:w-52 h-2"
                     />
-                    <span className="text-sm whitespace-nowrap font-medium text-foreground min-w-[84px] text-right">
+                    <span
+                      className={cn(
+                        'text-sm whitespace-nowrap font-medium text-foreground text-right tabular-nums',
+                        lane.kind === 'book' ? 'min-w-[44px]' : 'min-w-[84px]'
+                      )}
+                    >
                       {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
                     </span>
 
