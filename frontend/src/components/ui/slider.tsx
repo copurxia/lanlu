@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { progressFillClassName, progressSurfaceClassName } from "@/components/ui/progress-theme"
 import { cn } from "@/lib/utils/utils"
 
 interface SliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> {
@@ -26,9 +27,15 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
 
     return (
       <div className={cn("relative flex w-full touch-none select-none items-center", className)}>
-        <div className={cn("relative h-2 w-full grow overflow-hidden rounded-full bg-secondary", trackClassName)}>
+        <div
+          className={cn(
+            "relative h-2 w-full grow overflow-hidden rounded-full",
+            progressSurfaceClassName,
+            trackClassName
+          )}
+        >
           <div 
-            className={cn("absolute h-full bg-primary", rangeClassName)}
+            className={cn("absolute h-full", progressFillClassName, rangeClassName)}
             style={{ width: `${((value[0] - min) / (max - min)) * 100}%` }}
           />
         </div>

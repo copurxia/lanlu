@@ -68,8 +68,6 @@ function MobileBookControls({
         min={0}
         step={1}
         className="min-w-0 flex-1 h-2"
-        trackClassName="bg-secondary"
-        rangeClassName="bg-primary"
       />
       <span className="min-w-[44px] text-right text-sm font-medium tabular-nums text-foreground/95">
         {currentPage + 1}/{totalPages}
@@ -105,8 +103,6 @@ function MobileMediaControls({
           min={lane.min ?? 0}
           step={lane.step ?? 1}
           className="min-w-0 flex-1 h-2"
-          trackClassName="bg-secondary"
-          rangeClassName="bg-primary"
         />
         <span className="min-w-[72px] text-right text-xs font-medium tabular-nums text-foreground/95">
           {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
@@ -374,8 +370,6 @@ export function ReaderFloatingControls({
                     min={resolvedActiveLane.min ?? 0}
                     step={resolvedActiveLane.step ?? 1}
                     className="h-2"
-                    trackClassName="bg-secondary/70 border border-border/60"
-                    rangeClassName="bg-primary/75"
                   />
                 </div>
 
@@ -398,8 +392,6 @@ export function ReaderFloatingControls({
                     min={0}
                     step={0.01}
                     className="h-2"
-                    trackClassName="bg-secondary/70 border border-border/60"
-                    rangeClassName="bg-primary/75"
                   />
                 </div>
               </div>
@@ -488,8 +480,6 @@ export function ReaderFloatingControls({
                       min={lane.min ?? 0}
                       step={lane.step ?? 1}
                       className="w-28 sm:w-52 h-2"
-                      trackClassName="bg-white/35 border border-white/55 dark:bg-secondary/70 dark:border-[hsl(var(--border)/0.6)]"
-                      rangeClassName="bg-black/90 dark:bg-primary/85"
                     />
                     <span className="text-sm whitespace-nowrap font-medium text-foreground min-w-[84px] text-right">
                       {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
@@ -513,8 +503,6 @@ export function ReaderFloatingControls({
                           min={0}
                           step={0.01}
                           className="w-16 sm:w-24 h-2"
-                          trackClassName="bg-white/35 border border-white/55 dark:bg-secondary/70 dark:border-[hsl(var(--border)/0.6)]"
-                          rangeClassName="bg-black/90 dark:bg-primary/85"
                         />
                       </>
                     ) : null}

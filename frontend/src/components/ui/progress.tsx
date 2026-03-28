@@ -2,6 +2,7 @@
 
 import * as React from "react"
 
+import { progressFillClassName, progressSurfaceClassName } from "@/components/ui/progress-theme"
 import { cn } from "@/lib/utils/utils"
 
 interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
@@ -13,13 +14,17 @@ const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
     <div
       ref={ref}
       className={cn(
-        "relative h-2 w-full overflow-hidden rounded-full bg-secondary",
+        "relative h-2 w-full overflow-hidden rounded-full",
+        progressSurfaceClassName,
         className
       )}
       {...props}
     >
       <div
-        className="h-full bg-primary transition-all duration-300 ease-in-out"
+        className={cn(
+          "h-full transition-all duration-300 ease-in-out",
+          progressFillClassName
+        )}
         style={{ width: `${value || 0}%` }}
       />
     </div>
