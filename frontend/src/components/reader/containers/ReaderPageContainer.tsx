@@ -109,6 +109,14 @@ function getPageHeaderTitle(page?: { title?: string; metadata?: { title?: string
   return '';
 }
 
+function measureElementContentWidth(el: HTMLElement | null): number {
+  if (!el) return 0;
+  const styles = window.getComputedStyle(el);
+  const paddingLeft = Number.parseFloat(styles.paddingLeft || '0');
+  const paddingRight = Number.parseFloat(styles.paddingRight || '0');
+  return Math.max(0, Math.round(el.clientWidth - paddingLeft - paddingRight));
+}
+
 function ReaderContent() {
   type EndPageNextArchive = {
     id: string;
@@ -160,6 +168,8 @@ function ReaderContent() {
   const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
   const [prevArchiveId, setPrevArchiveId] = useState<string | null>(null);
   const [nextArchiveByArchiveId, setNextArchiveByArchiveId] = useState<Record<string, EndPageNextArchive | null>>({});
+  const [webtoonContentElement, setWebtoonContentElement] = useState<HTMLDivElement | null>(null);
+  const [webtoonContentWidth, setWebtoonContentWidth] = useState(0);
   const archiveNavLockRef = useRef(0);
   const chapterJumpCountdownRef = useRef<{
     seconds: number;
@@ -167,19 +177,46 @@ function ReaderContent() {
     toastId: string | number | null;
   }>({ seconds: 0, timerId: null, toastId: null });
 
-  // 提取设备检测和宽度计算的通用函数
-  const getDeviceInfo = useCallback(() => {
-    const containerWidth = window.innerWidth >= 1024
+  const getImageHeight = useCallback((naturalWidth: number, naturalHeight: number) => {
+    const fallbackWidth = window.innerWidth >= 1024
       ? Math.min(800, window.innerWidth * 0.8)
       : Math.min(window.innerWidth * 0.95, window.innerWidth);
-    return { containerWidth };
-  }, []);
-
-  const getImageHeight = useCallback((naturalWidth: number, naturalHeight: number) => {
-    const { containerWidth } = getDeviceInfo();
+    const containerWidth = webtoonContentWidth > 0 ? webtoonContentWidth : fallbackWidth;
     const aspectRatio = naturalHeight / naturalWidth;
     return containerWidth * aspectRatio;
-  }, [getDeviceInfo]);
+  }, [webtoonContentWidth]);
+
+  const handleWebtoonContentContainerRef = useCallback((el: HTMLDivElement | null) => {
+    setWebtoonContentElement(el);
+    setWebtoonContentWidth((prev) => {
+      const next = measureElementContentWidth(el);
+      return prev === next ? prev : next;
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!webtoonContentElement) return;
+
+    const updateWidth = () => {
+      const next = measureElementContentWidth(webtoonContentElement);
+      setWebtoonContentWidth((prev) => (prev === next ? prev : next));
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', updateWidth);
+      return () => {
+        window.removeEventListener('resize', updateWidth);
+      };
+    }
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(webtoonContentElement);
+    return () => {
+      observer.disconnect();
+    };
+  }, [webtoonContentElement]);
 
   const handleBack = useCallback(() => {
     const lastPath = getStoredPath('last');
@@ -446,7 +483,7 @@ function ReaderContent() {
     currentPage,
     setCurrentPage,
     resetKey: sourceArchiveId,
-    getDeviceInfo,
+    contentWidth: webtoonContentWidth,
     getImageHeight,
     webtoonPageElementRefs,
     imageRefs,
@@ -2088,6 +2125,7 @@ function ReaderContent() {
 	        <ReaderWebtoonModeView
 	          enabled={readingMode === 'webtoon'}
 	          webtoonContainerRef={webtoonContainerRef}
+            contentContainerRef={handleWebtoonContentContainerRef}
 	          sidebarOpen={sidebar.sidebarOpen}
 	          onScroll={handleWebtoonScroll}
 	          pages={streamPages}

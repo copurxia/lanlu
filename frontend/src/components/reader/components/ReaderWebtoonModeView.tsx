@@ -17,6 +17,7 @@ type ReaderWebtoonPage = PageInfo | ReaderVirtualEndPage;
 export function ReaderWebtoonModeView({
   enabled,
   webtoonContainerRef,
+  contentContainerRef,
   sidebarOpen,
   onScroll,
   pages,
@@ -54,6 +55,7 @@ export function ReaderWebtoonModeView({
 }: {
   enabled: boolean;
   webtoonContainerRef: React.RefObject<HTMLDivElement | null>;
+  contentContainerRef?: React.RefCallback<HTMLDivElement>;
   sidebarOpen: boolean;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   pages: ReaderWebtoonPage[];
@@ -109,12 +111,14 @@ export function ReaderWebtoonModeView({
       onScroll={onScroll}
     >
       <div
+        ref={contentContainerRef}
         className="flex flex-col items-center mx-auto relative"
         style={{
           height: `${estimatedTotalHeight}px`,
           maxWidth: window.innerWidth >= 1024 ? '800px' : '1200px',
           width: '100%',
           padding: window.innerWidth >= 1024 ? '0 1rem' : '0',
+          boxSizing: 'border-box',
         }}
       >
         {visibleRange.start > 0 && (

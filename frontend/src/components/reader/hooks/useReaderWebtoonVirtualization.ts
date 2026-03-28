@@ -20,7 +20,7 @@ export function useReaderWebtoonVirtualization({
   currentPage,
   setCurrentPage,
   resetKey,
-  getDeviceInfo,
+  contentWidth,
   getImageHeight,
   webtoonPageElementRefs,
   imageRefs,
@@ -31,7 +31,7 @@ export function useReaderWebtoonVirtualization({
   currentPage: number;
   setCurrentPage: React.Dispatch<React.SetStateAction<number>>;
   resetKey?: string | null;
-  getDeviceInfo: () => { containerWidth: number };
+  contentWidth: number;
   getImageHeight: (naturalWidth: number, naturalHeight: number) => number;
   webtoonPageElementRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
   imageRefs: React.MutableRefObject<(HTMLImageElement | null)[]>;
@@ -187,8 +187,12 @@ export function useReaderWebtoonVirtualization({
       return;
     }
 
-    const { containerWidth } = getDeviceInfo();
-    const defaultHeight = Math.min(window.innerHeight * 0.7, containerWidth * 1.5);
+    const fallbackWidth =
+      window.innerWidth >= 1024
+        ? Math.min(800, window.innerWidth * 0.8)
+        : Math.min(window.innerWidth * 0.95, window.innerWidth);
+    const effectiveWidth = contentWidth > 0 ? contentWidth : fallbackWidth;
+    const defaultHeight = Math.min(window.innerHeight * 0.7, effectiveWidth * 1.5);
 
     // Keep measured heights for existing pages and only append defaults for newly appended pages.
     // Full reset here would make the scroll-anchor jump backward when seamless pages are appended.
@@ -215,27 +219,30 @@ export function useReaderWebtoonVirtualization({
       if (prev.start === start && prev.end === end) return prev;
       return { start, end };
     });
-  }, [effectiveLength, getDeviceInfo]);
+  }, [contentWidth, effectiveLength]);
 
   useEffect(() => {
     if (readingMode !== 'webtoon') return;
 
-    imageRefs.current.forEach((img, index) => {
-      const page = pages[index];
-      if (!page || page.type !== 'image') return;
-      if (!img || !img.complete || img.naturalHeight <= 0) return;
+    setImageHeights((prev) => {
+      let changed = false;
+      const next = [...prev];
 
-      const measuredHeight = getImageHeight(img.naturalWidth, img.naturalHeight);
-      setImageHeights((prev) => {
-        const current = prev[index];
-        // Avoid noisy re-renders; only update when it actually changes.
-        if (current && Math.abs(current - measuredHeight) <= 2) return prev;
-        const next = [...prev];
+      imageRefs.current.forEach((img, index) => {
+        const page = pages[index];
+        if (!page || page.type !== 'image') return;
+        if (!img || !img.complete || img.naturalHeight <= 0) return;
+
+        const measuredHeight = getImageHeight(img.naturalWidth, img.naturalHeight);
+        const current = next[index];
+        if (current && Math.abs(current - measuredHeight) <= 2) return;
         next[index] = measuredHeight;
-        return next;
+        changed = true;
       });
+
+      return changed ? next : prev;
     });
-  }, [readingMode, imageHeights, getImageHeight, imageRefs, pages]);
+  }, [readingMode, contentWidth, getImageHeight, imageRefs, pages]);
 
   return {
     visibleRange,
