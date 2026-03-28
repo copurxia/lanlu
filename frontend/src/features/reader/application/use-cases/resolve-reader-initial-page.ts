@@ -3,7 +3,6 @@ import { supportsSplitCoverProgressAdjustment } from '@/features/reader/domain/r
 
 export type ResolveReaderInitialPageInput = {
   pageParam?: string | null;
-  progress?: number;
   pagesLength: number;
   doublePageMode: boolean;
   splitCoverMode: boolean;
@@ -38,7 +37,6 @@ function adjustRestoredPageForSplitCover(
 
 export function resolveReaderInitialPage({
   pageParam,
-  progress,
   pagesLength,
   doublePageMode,
   splitCoverMode,
@@ -62,8 +60,6 @@ export function resolveReaderInitialPage({
         pendingWebtoonScrollEdge = 'bottom';
       }
     }
-  } else if (typeof progress === 'number' && progress > 0 && progress < pagesLength) {
-    initialPage = progress - 1;
   }
 
   initialPage = adjustRestoredPageForSplitCover(

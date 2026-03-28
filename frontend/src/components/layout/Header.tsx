@@ -21,6 +21,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { Logo } from '@/components/brand/Logo';
 import { appEvents, AppEvents } from '@/lib/utils/events';
+import { buildReaderPath } from '@/lib/utils/reader';
 
 function HeaderPageClearlogo({
   pathname,
@@ -157,7 +158,7 @@ export function Header() {
       if (randomArchives.length > 0) {
         const randomItem = randomArchives[0];
         if ('arcid' in randomItem) {
-          router.push(`/reader?id=${randomItem.arcid}`);
+          router.push(buildReaderPath(randomItem.arcid, randomItem.progress));
         }
       }
     } catch (error) {

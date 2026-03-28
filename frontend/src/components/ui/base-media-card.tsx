@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast'
 import { useConfirmContext } from '@/contexts/ConfirmProvider'
 import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
+import { buildReaderPath } from '@/lib/utils/reader'
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils'
 import { getCoverAssetId } from '@/lib/utils/archive-assets'
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata'
@@ -788,7 +789,9 @@ export function BaseMediaCard({
   const animationDelay = shouldEntranceAnimate ? Math.min(index * 50, 500) : 0
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
   const readerTargetId = type === 'archive' ? id : thumbnailId
-  const readerPath = readerTargetId ? `/reader?id=${readerTargetId}` : detailPath
+  const readerPath = readerTargetId
+    ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined)
+    : detailPath
   const progressPercent = pagecount > 0 ? Math.round((progress / pagecount) * 100) : 0
 
   const handleImageLoad = React.useCallback((event: React.SyntheticEvent<HTMLImageElement>) => {

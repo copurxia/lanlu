@@ -56,6 +56,7 @@ type HomeMediaTweetCardProps = {
   id: string;
   isFavorite: boolean;
   isNew?: boolean;
+  progress?: number;
   rawTags: string;
   readerTargetId?: string;
   previewArchiveId?: string;
@@ -201,6 +202,7 @@ function HomeMediaTweetCard({
   id,
   isFavorite,
   isNew = false,
+  progress,
   rawTags,
   readerTargetId,
   previewArchiveId,
@@ -281,6 +283,7 @@ function HomeMediaTweetCard({
       readerTargetId={readerTargetId}
       isFavorite={isFavorite}
       isNew={isNew}
+      progress={progress}
       selectable
       selectionMode={selectionMode}
       selected={selected}
@@ -494,6 +497,7 @@ const HomeArchiveTweetRow = memo(function HomeArchiveTweetRow({
       selected={selected}
       isFavorite={Boolean(archive.isfavorite)}
       isNew={archive.isnew}
+      progress={archive.progress}
       thumbnailAssetId={coverAssetId}
       onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}

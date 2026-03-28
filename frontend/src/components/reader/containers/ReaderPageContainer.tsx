@@ -133,6 +133,7 @@ function ReaderContent() {
   const currentPageRef = useRef(0);
   const pendingUrlPageIndexRef = useRef<number | null>(null);
   const pendingUrlPageRawRef = useRef<number | null>(null);
+  const pendingUrlStateApplyRef = useRef<{ archiveId: string; pageIndex: number } | null>(null);
   const appliedVirtualFromUrlForIdRef = useRef<string | null>(null);
   const handledUrlPositionRef = useRef<string | null>(null);
   const urlSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1110,6 +1111,10 @@ function ReaderContent() {
       return;
     }
 
+    pendingUrlStateApplyRef.current = {
+      archiveId: urlArchiveId,
+      pageIndex: desiredIndex,
+    };
     setCurrentPage(desiredIndex);
     setScale(1);
     setTranslateX(0);
@@ -1136,11 +1141,23 @@ function ReaderContent() {
     virtualPageIndex,
   ]);
 
+  useEffect(() => {
+    const pending = pendingUrlStateApplyRef.current;
+    if (!pending) return;
+
+    const currentArchiveId = (seamlessEnabled ? activeArchiveId : sourceArchiveId) ?? sourceArchiveId ?? '';
+    if (currentArchiveId != pending.archiveId) return;
+    if (currentPage !== pending.pageIndex) return;
+
+    pendingUrlStateApplyRef.current = null;
+  }, [activeArchiveId, currentPage, seamlessEnabled, sourceArchiveId]);
+
   // Sync state -> URL `page` for all modes (including virtual page). Debounced to avoid rapid-flip flicker.
   useEffect(() => {
     if (!sourceArchiveId) return;
     if (totalPages <= 0) return;
     if (currentPage < 0 || currentPage >= totalPages) return;
+    if (pendingUrlStateApplyRef.current) return;
 
     const targetArchiveId = seamlessEnabled ? activeArchiveId : sourceArchiveId;
     if (!targetArchiveId) return;

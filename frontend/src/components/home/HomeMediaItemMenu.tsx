@@ -33,6 +33,7 @@ import { appEvents, AppEvents } from '@/lib/utils/events';
 import { getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { logger } from '@/lib/utils/logger';
+import { buildReaderPath } from '@/lib/utils/reader';
 
 type HomeMediaItemType = 'archive' | 'tankoubon';
 
@@ -56,6 +57,7 @@ type Props = {
   id: string;
   isFavorite?: boolean;
   isNew?: boolean;
+  progress?: number;
   readerTargetId?: string;
   selectable?: boolean;
   selected?: boolean;
@@ -81,6 +83,7 @@ export function HomeMediaItemMenu({
   id,
   isFavorite: initialFavorite = false,
   isNew: initialIsNew = false,
+  progress,
   readerTargetId,
   selectable = false,
   selected = false,
@@ -127,7 +130,9 @@ export function HomeMediaItemMenu({
   const canEdit = isAuthenticated;
   const canDelete = type === 'archive' ? isAdmin : isAuthenticated;
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`;
-  const readerPath = readerTargetId ? `/reader?id=${readerTargetId}` : detailPath;
+  const readerPath = readerTargetId
+    ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined)
+    : detailPath;
   const menuActionDisabled = deleting || editSaving;
 
   useEffect(() => {

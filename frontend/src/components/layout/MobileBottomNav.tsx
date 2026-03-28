@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { cn } from '@/lib/utils/utils';
+import { buildReaderPath } from '@/lib/utils/reader';
 
 export function MobileBottomNav() {
   const { t } = useLanguage();
@@ -25,7 +26,7 @@ export function MobileBottomNav() {
       if (randomArchives.length > 0) {
         const randomItem = randomArchives[0];
         if ('arcid' in randomItem) {
-          router.push(`/reader?id=${randomItem.arcid}`);
+          router.push(buildReaderPath(randomItem.arcid, randomItem.progress));
         }
       }
     } catch (error) {

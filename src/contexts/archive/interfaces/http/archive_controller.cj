@@ -482,18 +482,6 @@ public class ArchiveController {
             responsePageFiles.add(filteredPageFiles[i])
         }
 
-        // 获取用户的阅读进度（如果用户已登录）
-        var progress: Int32 = 0i32
-        match (AuthMiddleware.optionalUser(ctx)) {
-            case Some(userId) =>
-                let archiveIdInt = ArchiveModel.getArchiveIdByArcid(id)
-                if (archiveIdInt > 0) {
-                    let userProgress = UserArchiveStatusDao.getProgress(userId, archiveIdInt)
-                    progress = userProgress
-                }
-            case None => ()  // 用户未登录，使用默认进度
-        }
-
         // 构建响应JSON（JsonWriter）
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -528,7 +516,6 @@ public class ArchiveController {
             w.endObject()
         }
         w.endArray()
-        w.writeName("progress").writeValue(progress)
         w.endObject()
         w.flush()
         ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))

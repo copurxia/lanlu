@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { AddToTankoubonDialog } from '@/components/tankoubon/AddToTankoubonDialog';
 import type { ArchiveMetadata } from '@/types/archive';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { buildReaderPath } from '@/lib/utils/reader';
 
 type Props = {
   metadata: ArchiveMetadata;
@@ -83,7 +84,7 @@ export function ArchiveMobileActions({
     <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
       <div className="mx-auto max-w-7xl px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-center gap-2">
-          <Link href={`/reader?id=${metadata.arcid}`} className="flex-1">
+          <Link href={buildReaderPath(metadata.arcid, metadata.progress)} className="flex-1">
             <Button className="w-full">
               <BookOpen className="w-4 h-4 mr-2" />
               {t('archive.startReading')}

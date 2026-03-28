@@ -23,6 +23,7 @@ import { useMounted } from '@/hooks/common-hooks';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
+import { buildReaderPath } from '@/lib/utils/reader';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
@@ -827,7 +828,7 @@ export function ArchiveDetailContent() {
                         </Button>
                       ) : null}
 
-                      <Link href={`/reader?id=${metadata.arcid}`}>
+                      <Link href={buildReaderPath(metadata.arcid, metadata.progress)}>
                         <Button size="sm" variant="default" className="h-9">
                           <BookOpen className="w-4 h-4 mr-2" />
                           {t('archive.startReading')}

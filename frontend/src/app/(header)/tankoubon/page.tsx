@@ -45,6 +45,7 @@ import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
 import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
+import { buildReaderPath } from '@/lib/utils/reader';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
 import type { TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
@@ -119,7 +120,7 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
   };
 
   const handleNavigateToReader = () => {
-    router.push(`/reader?id=${archive.arcid}`);
+    router.push(buildReaderPath(archive.arcid, archive.progress));
   };
 
   return (

@@ -238,7 +238,7 @@ export class ArchiveService {
     this.invalidateMetadataCache(id);
   }
 
-  static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[]; progress: number }> {
+  static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[] }> {
     const response = await apiClient.get(`/api/archives/${id}/files`, { params });
     const pages = (response.data.pages || []).map((rawPage: any): PageInfo => {
       const path = typeof rawPage?.path === 'string' && rawPage.path.trim()
@@ -279,7 +279,6 @@ export class ArchiveService {
     });
     return {
       pages,
-      progress: response.data.progress || 0
     };
   }
 

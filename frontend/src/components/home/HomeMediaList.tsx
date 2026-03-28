@@ -38,6 +38,7 @@ type HomeMediaListItemProps = {
   type: 'archive' | 'tankoubon';
   isFavorite: boolean;
   isNew?: boolean;
+  progress?: number;
   renderBadges?: (state: { isNew: boolean }) => ReactNode;
   readerTargetId?: string;
   selectable: boolean;
@@ -64,6 +65,7 @@ const HomeMediaListItem = memo(function HomeMediaListItem({
   type,
   isFavorite,
   isNew = false,
+  progress,
   renderBadges,
   readerTargetId,
   selectable,
@@ -84,6 +86,7 @@ const HomeMediaListItem = memo(function HomeMediaListItem({
       readerTargetId={readerTargetId}
       isFavorite={isFavorite}
       isNew={isNew}
+      progress={progress}
       selectable={selectable}
       selectionMode={selectionMode}
       selected={selected}
@@ -275,6 +278,7 @@ const HomeArchiveListRow = memo(function HomeArchiveListRow({
       selected={selected}
       isFavorite={Boolean(archive.isfavorite)}
       isNew={archive.isnew}
+      progress={archive.progress}
       onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />

@@ -122,13 +122,11 @@ export function useReaderSourceSession({
         const rawInitialPageCandidate = (() => {
           const urlPage = Number.parseInt(initialPageParam || '', 10);
           if (!Number.isNaN(urlPage) && urlPage > 0) return urlPage - 1;
-          if (data.progress > 0) return data.progress - 1;
           return 0;
         })();
 
         const initialPageResolution = resolveReaderInitialPage({
           pageParam: initialPageParam,
-          progress: data.progress,
           pagesLength: initialPages.length,
           doublePageMode: doublePageModeFromStorage,
           splitCoverMode: splitCoverModeFromStorage,
