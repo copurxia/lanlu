@@ -10,8 +10,11 @@ import rocksdb_ffi.RocksDb
 public interface LocalKVStore {
     func isAvailable(): Bool
     func get(namespace: String, key: String): Option<String>
+    func multiGet(namespace: String, keys: Array<String>): Array<Option<String>>
     func put(namespace: String, key: String, value: String): Bool
     func delete(namespace: String, key: String): Bool
+    func deleteMany(namespace: String, keys: Array<String>): Bool
+    func deleteRange(namespace: String, startKey: String, endKey: String): Bool
     func scan(namespace: String, keyPrefix: String): Array<(String, String)>
 }
 
@@ -34,6 +37,19 @@ public class RocksDbLocalKVStore <: LocalKVStore {
         return valueOpt
     }
 
+    public func multiGet(namespace: String, keys: Array<String>): Array<Option<String>> {
+        if (keys.size == 0) {
+            return []
+        }
+
+        let fullKeys = Array<String>(keys.size, { i => composeKey(namespace, keys[i]) })
+        let (ok, values, _) = db.multiGet(fullKeys)
+        if (!ok) {
+            return Array<Option<String>>(keys.size, { _ => None })
+        }
+        return values
+    }
+
     public func put(namespace: String, key: String, value: String): Bool {
         let (ok, _) = db.put(composeKey(namespace, key), value)
         return ok
@@ -41,6 +57,21 @@ public class RocksDbLocalKVStore <: LocalKVStore {
 
     public func delete(namespace: String, key: String): Bool {
         let (ok, _) = db.delete(composeKey(namespace, key))
+        return ok
+    }
+
+    public func deleteMany(namespace: String, keys: Array<String>): Bool {
+        if (keys.size == 0) {
+            return true
+        }
+
+        let fullKeys = Array<String>(keys.size, { i => composeKey(namespace, keys[i]) })
+        let (ok, _) = db.deleteMany(fullKeys)
+        return ok
+    }
+
+    public func deleteRange(namespace: String, startKey: String, endKey: String): Bool {
+        let (ok, _) = db.deleteRange(composeKey(namespace, startKey), composeKey(namespace, endKey))
         return ok
     }
 

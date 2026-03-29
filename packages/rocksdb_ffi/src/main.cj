@@ -147,6 +147,80 @@ public class RocksDb {
         return (true, Some(String.fromUtf8(out)), "")
     }
 
+    public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
+        if (closed) {
+            return (false, [], "rocksdb is closed")
+        }
+        if (keys.size == 0) {
+            return (true, [], "")
+        }
+
+        let keyPtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
+        let keyLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
+        let valuePtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
+        let valueLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
+        let errs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
+
+        for (i in 0..keys.size) {
+            let rawKey = unsafe { LibC.mallocCString(keys[i]) }
+            keyPtrs[i] = rawKey
+            keyLens[i] = UIntNative(keys[i].toArray().size)
+        }
+
+        let keyPtrHandle = unsafe { acquireArrayRawData(keyPtrs) }
+        let keyLenHandle = unsafe { acquireArrayRawData(keyLens) }
+        let valuePtrHandle = unsafe { acquireArrayRawData(valuePtrs) }
+        let valueLenHandle = unsafe { acquireArrayRawData(valueLens) }
+        let errHandle = unsafe { acquireArrayRawData(errs) }
+        try {
+            unsafe {
+                rocksdb_multi_get(
+                    db,
+                    readOptions,
+                    UIntNative(keys.size),
+                    keyPtrHandle.pointer,
+                    keyLenHandle.pointer,
+                    valuePtrHandle.pointer,
+                    valueLenHandle.pointer,
+                    errHandle.pointer
+                )
+            }
+
+            let results = ArrayList<Option<String>>()
+            for (i in 0..keys.size) {
+                if (!errs[i].isNull()) {
+                    let error = unsafe { errs[i].toString() }
+                    return (false, [], error)
+                }
+
+                if (valuePtrs[i].isNull()) {
+                    results.add(None)
+                } else {
+                    let value = readCStringBytes(valuePtrs[i], valueLens[i])
+                    results.add(Some(value))
+                }
+            }
+            return (true, results.toArray(), "")
+        } finally {
+            unsafe { releaseArrayRawData(errHandle) }
+            unsafe { releaseArrayRawData(valueLenHandle) }
+            unsafe { releaseArrayRawData(valuePtrHandle) }
+            unsafe { releaseArrayRawData(keyLenHandle) }
+            unsafe { releaseArrayRawData(keyPtrHandle) }
+            for (i in 0..keyPtrs.size) {
+                if (!keyPtrs[i].isNull()) {
+                    unsafe { LibC.free(keyPtrs[i]) }
+                }
+                if (!valuePtrs[i].isNull()) {
+                    unsafe { LibC.free(valuePtrs[i]) }
+                }
+                if (!errs[i].isNull()) {
+                    unsafe { LibC.free(errs[i]) }
+                }
+            }
+        }
+    }
+
     public func put(key: String, value: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb is closed")
@@ -160,6 +234,39 @@ public class RocksDb {
             var errPtr = CPointer<UInt8>()
             try {
                 rocksdb_put(
+                    db,
+                    writeOptions,
+                    CString(keyHandle.pointer),
+                    UIntNative(keyBytes.size),
+                    CString(valueHandle.pointer),
+                    UIntNative(valueBytes.size),
+                    inout errPtr
+                )
+            } finally {
+                releaseArrayRawData(valueHandle)
+                releaseArrayRawData(keyHandle)
+            }
+
+            if (!errPtr.isNull()) {
+                return (false, takeOwnedCString(errPtr))
+            }
+        }
+        return (true, "")
+    }
+
+    public func merge(key: String, value: String): (Bool, String) {
+        if (closed) {
+            return (false, "rocksdb is closed")
+        }
+
+        unsafe {
+            let keyBytes = key.toArray()
+            let keyHandle = acquireArrayRawData(keyBytes)
+            let valueBytes = value.toArray()
+            let valueHandle = acquireArrayRawData(valueBytes)
+            var errPtr = CPointer<UInt8>()
+            try {
+                rocksdb_merge(
                     db,
                     writeOptions,
                     CString(keyHandle.pointer),
@@ -208,53 +315,231 @@ public class RocksDb {
         return (true, "")
     }
 
+    public func deleteRange(startKey: String, endKey: String): (Bool, String) {
+        return writeBatch([], [], [(startKey, endKey)], [])
+    }
+
+    public func deleteMany(keys: Array<String>): (Bool, String) {
+        return writeBatch([], keys, [], [])
+    }
+
+    public func writeBatch(
+        puts: Array<(String, String)>,
+        deletes: Array<String>,
+        deleteRanges: Array<(String, String)>,
+        merges: Array<(String, String)>
+    ): (Bool, String) {
+        if (closed) {
+            return (false, "rocksdb is closed")
+        }
+        if (puts.size == 0 && deletes.size == 0 && deleteRanges.size == 0 && merges.size == 0) {
+            return (true, "")
+        }
+
+        let batch = unsafe { rocksdb_writebatch_create() }
+        if (batch.isNull()) {
+            return (false, "rocksdb_writebatch_create failed")
+        }
+
+        try {
+            for ((key, value) in puts) {
+                unsafe {
+                    let keyBytes = key.toArray()
+                    let keyHandle = acquireArrayRawData(keyBytes)
+                    let valueBytes = value.toArray()
+                    let valueHandle = acquireArrayRawData(valueBytes)
+                    try {
+                        rocksdb_writebatch_put(
+                            batch,
+                            CString(keyHandle.pointer),
+                            UIntNative(keyBytes.size),
+                            CString(valueHandle.pointer),
+                            UIntNative(valueBytes.size)
+                        )
+                    } finally {
+                        releaseArrayRawData(valueHandle)
+                        releaseArrayRawData(keyHandle)
+                    }
+                }
+            }
+
+            for ((key, value) in merges) {
+                unsafe {
+                    let keyBytes = key.toArray()
+                    let keyHandle = acquireArrayRawData(keyBytes)
+                    let valueBytes = value.toArray()
+                    let valueHandle = acquireArrayRawData(valueBytes)
+                    try {
+                        rocksdb_writebatch_merge(
+                            batch,
+                            CString(keyHandle.pointer),
+                            UIntNative(keyBytes.size),
+                            CString(valueHandle.pointer),
+                            UIntNative(valueBytes.size)
+                        )
+                    } finally {
+                        releaseArrayRawData(valueHandle)
+                        releaseArrayRawData(keyHandle)
+                    }
+                }
+            }
+
+            for (key in deletes) {
+                unsafe {
+                    let keyBytes = key.toArray()
+                    let keyHandle = acquireArrayRawData(keyBytes)
+                    try {
+                        rocksdb_writebatch_delete(
+                            batch,
+                            CString(keyHandle.pointer),
+                            UIntNative(keyBytes.size)
+                        )
+                    } finally {
+                        releaseArrayRawData(keyHandle)
+                    }
+                }
+            }
+
+            for ((startKey, endKey) in deleteRanges) {
+                unsafe {
+                    let startBytes = startKey.toArray()
+                    let startHandle = acquireArrayRawData(startBytes)
+                    let endBytes = endKey.toArray()
+                    let endHandle = acquireArrayRawData(endBytes)
+                    try {
+                        rocksdb_writebatch_delete_range(
+                            batch,
+                            CString(startHandle.pointer),
+                            UIntNative(startBytes.size),
+                            CString(endHandle.pointer),
+                            UIntNative(endBytes.size)
+                        )
+                    } finally {
+                        releaseArrayRawData(endHandle)
+                        releaseArrayRawData(startHandle)
+                    }
+                }
+            }
+
+            var errPtr = CPointer<UInt8>()
+            unsafe { rocksdb_write(db, writeOptions, batch, inout errPtr) }
+            if (!errPtr.isNull()) {
+                return (false, takeOwnedCString(errPtr))
+            }
+            return (true, "")
+        } finally {
+            unsafe { rocksdb_writebatch_destroy(batch) }
+        }
+    }
+
     public func scanByPrefix(prefix: String): (Bool, Array<(String, String)>, String) {
         if (closed) {
             return (false, [], "rocksdb is closed")
         }
 
-        let iter = unsafe { rocksdb_create_iterator(db, readOptions) }
-        if (iter.isNull()) {
-            return (false, [], "rocksdb_create_iterator failed")
-        }
-
         let prefixBytes = prefix.toArray()
         let prefixLen = prefixBytes.size
-        let results = ArrayList<(String, String)>()
-
-        unsafe {
-            let prefixHandle = acquireArrayRawData(prefixBytes)
-            try {
-                rocksdb_iter_seek(
-                    iter,
-                    CString(prefixHandle.pointer),
-                    UIntNative(prefixLen)
-                )
-            } finally {
-                releaseArrayRawData(prefixHandle)
-            }
+        let upperBoundOpt = nextPrefixUpperBound(prefix)
+        let scanOptions = unsafe { rocksdb_readoptions_create() }
+        if (scanOptions.isNull()) {
+            return (false, [], "rocksdb_readoptions_create failed")
         }
 
+        let results = ArrayList<(String, String)>()
+        let prefixHandle = unsafe { acquireArrayRawData(prefixBytes) }
         try {
-            while (unsafe { rocksdb_iter_valid(iter) } != 0u8) {
-                let key = readIteratorBytes(iter, true)
-                if (!key.startsWith(prefix)) {
-                    break
-                }
-                let value = readIteratorBytes(iter, false)
-                results.add((key, value))
-                unsafe { rocksdb_iter_next(iter) }
+            unsafe {
+                rocksdb_readoptions_set_prefix_same_as_start(scanOptions, 1u8)
+                rocksdb_readoptions_set_total_order_seek(scanOptions, 0u8)
             }
 
-            var errPtr = CPointer<UInt8>()
-            unsafe { rocksdb_iter_get_error(iter, inout errPtr) }
-            if (!errPtr.isNull()) {
-                return (false, [], takeOwnedCString(errPtr))
+            match (upperBoundOpt) {
+                case Some(upperBound) =>
+                    let upperBoundBytes = upperBound.toArray()
+                    let upperBoundHandle = unsafe { acquireArrayRawData(upperBoundBytes) }
+                    try {
+                        unsafe {
+                            rocksdb_readoptions_set_iterate_upper_bound(
+                                scanOptions,
+                                CString(upperBoundHandle.pointer),
+                                UIntNative(upperBoundBytes.size)
+                            )
+                        }
+                        let iter = unsafe { rocksdb_create_iterator(db, scanOptions) }
+                        if (iter.isNull()) {
+                            return (false, [], "rocksdb_create_iterator failed")
+                        }
+                        try {
+                            unsafe {
+                                rocksdb_iter_seek(
+                                    iter,
+                                    CString(prefixHandle.pointer),
+                                    UIntNative(prefixLen)
+                                )
+                            }
+
+                            while (unsafe { rocksdb_iter_valid(iter) } != 0u8) {
+                                let key = readIteratorBytes(iter, true)
+                                if (!key.startsWith(prefix)) {
+                                    break
+                                }
+                                let value = readIteratorBytes(iter, false)
+                                results.add((key, value))
+                                unsafe { rocksdb_iter_next(iter) }
+                            }
+
+                            var errPtr = CPointer<UInt8>()
+                            unsafe { rocksdb_iter_get_error(iter, inout errPtr) }
+                            if (!errPtr.isNull()) {
+                                return (false, [], takeOwnedCString(errPtr))
+                            }
+                        } finally {
+                            unsafe { rocksdb_iter_destroy(iter) }
+                        }
+                    } finally {
+                        unsafe { releaseArrayRawData(upperBoundHandle) }
+                    }
+                case None => ()
+            }
+
+            if (upperBoundOpt.isNone()) {
+                let iter = unsafe { rocksdb_create_iterator(db, scanOptions) }
+                if (iter.isNull()) {
+                    return (false, [], "rocksdb_create_iterator failed")
+                }
+                try {
+                    unsafe {
+                        rocksdb_iter_seek(
+                            iter,
+                            CString(prefixHandle.pointer),
+                            UIntNative(prefixLen)
+                        )
+                    }
+
+                    while (unsafe { rocksdb_iter_valid(iter) } != 0u8) {
+                        let key = readIteratorBytes(iter, true)
+                        if (!key.startsWith(prefix)) {
+                            break
+                        }
+                        let value = readIteratorBytes(iter, false)
+                        results.add((key, value))
+                        unsafe { rocksdb_iter_next(iter) }
+                    }
+
+                    var errPtr = CPointer<UInt8>()
+                    unsafe { rocksdb_iter_get_error(iter, inout errPtr) }
+                    if (!errPtr.isNull()) {
+                        return (false, [], takeOwnedCString(errPtr))
+                    }
+                } finally {
+                    unsafe { rocksdb_iter_destroy(iter) }
+                }
             }
 
             return (true, results.toArray(), "")
         } finally {
-            unsafe { rocksdb_iter_destroy(iter) }
+            unsafe { releaseArrayRawData(prefixHandle) }
+            unsafe { rocksdb_readoptions_destroy(scanOptions) }
         }
     }
 
@@ -276,6 +561,13 @@ public class RocksDb {
         return text
     }
 
+    private static func readCStringBytes(ptr: CString, length: UIntNative): String {
+        if (ptr.isNull() || length == 0) {
+            return ""
+        }
+        return unsafe { ptr.toString() }
+    }
+
     private static func readIteratorBytes(iter: CPointer<rocksdb_iterator_t>, readKey: Bool): String {
         var length: UIntNative = 0
         let ptr = if (readKey) {
@@ -288,5 +580,29 @@ public class RocksDb {
         }
         let out = Array<UInt8>(Int64(length), { i => unsafe { (ptr + i).read() } })
         return String.fromUtf8(out)
+    }
+
+    private static func nextPrefixUpperBound(prefix: String): Option<String> {
+        let bytes = prefix.toArray()
+        if (bytes.size == 0) {
+            return None
+        }
+
+        var pos = bytes.size - 1
+        while (pos >= 0) {
+            if (bytes[pos] < 255u8) {
+                let upperBoundPos = pos
+                let out = Array<UInt8>(Int64(upperBoundPos + 1), { i =>
+                    if (i == upperBoundPos) {
+                        bytes[i] + 1u8
+                    } else {
+                        bytes[i]
+                    }
+                })
+                return Some(String.fromUtf8(out))
+            }
+            pos -= 1
+        }
+        return None
     }
 }

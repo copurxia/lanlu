@@ -195,9 +195,10 @@ public class TaskGroupKVStore <: TaskKVStore {
         let groupMutex = getOperationMutex(normalizedGroupId)
         groupMutex.lock()
         try {
-            let entries = scanGroupEntriesNormalized(normalizedGroupId)
-            for ((storageKey, _) in entries) {
-                let _ = deleteNormalizedKey(storageKey)
+            let prefix = buildGroupPrefix(normalizedGroupId)
+            let deleted = deleteGroupEntriesNormalized(normalizedGroupId, prefix)
+            if (!deleted) {
+                logger.warn("task kv group delete failed", ("group_id", normalizedGroupId))
             }
         } finally {
             groupMutex.unlock()
@@ -379,6 +380,26 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
     }
 
+    private func deleteGroupEntriesNormalized(groupId: String, groupPrefix: String): Bool {
+        let storeOpt = LocalKVService.getStore()
+        match (storeOpt) {
+            case Some(store) =>
+                match (nextPrefixUpperBound(groupPrefix)) {
+                    case Some(endKey) => return store.deleteRange(namespace, groupPrefix, endKey)
+                    case None =>
+                        let entries = store.scan(namespace, groupPrefix)
+                        if (entries.size == 0) {
+                            return true
+                        }
+                        let keys = Array<String>(entries.size, { i => entries[i][0] })
+                        return store.deleteMany(namespace, keys)
+                }
+            case None =>
+                logger.warn("task kv unavailable because LocalKVService is not ready")
+                return false
+        }
+    }
+
     private static func normalizeGroupId(groupId: String): String {
         return groupId.trimAscii()
     }
@@ -393,6 +414,30 @@ public class TaskGroupKVStore <: TaskKVStore {
 
     private static func buildStorageKey(groupId: String, key: String): String {
         return "${groupId}:${key}"
+    }
+
+    private static func nextPrefixUpperBound(prefix: String): Option<String> {
+        let bytes = prefix.toArray()
+        if (bytes.size == 0) {
+            return None
+        }
+
+        var pos = bytes.size - 1
+        while (pos >= 0) {
+            if (bytes[pos] < 255u8) {
+                let upperBoundPos = pos
+                let out = Array<UInt8>(Int64(upperBoundPos + 1), { i =>
+                    if (i == upperBoundPos) {
+                        bytes[i] + 1u8
+                    } else {
+                        bytes[i]
+                    }
+                })
+                return Some(String.fromUtf8(out))
+            }
+            pos -= 1
+        }
+        return None
     }
 
     private func getOperationMutex(groupId: String): Mutex {

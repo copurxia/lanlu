@@ -43,6 +43,13 @@ public struct rocksdb_writeoptions_t {
 }
 
 @C
+public struct rocksdb_writebatch_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
 public struct rocksdb_iterator_t {
     init() {
         throw Exception("type should not be inited")
@@ -88,6 +95,9 @@ foreign func rocksdb_close(db: CPointer<rocksdb_t>): Unit
 
 foreign func rocksdb_readoptions_create(): CPointer<rocksdb_readoptions_t>
 foreign func rocksdb_readoptions_destroy(options: CPointer<rocksdb_readoptions_t>): Unit
+foreign func rocksdb_readoptions_set_iterate_upper_bound(options: CPointer<rocksdb_readoptions_t>, key: CString, keylen: UIntNative): Unit
+foreign func rocksdb_readoptions_set_prefix_same_as_start(options: CPointer<rocksdb_readoptions_t>, value: UInt8): Unit
+foreign func rocksdb_readoptions_set_total_order_seek(options: CPointer<rocksdb_readoptions_t>, value: UInt8): Unit
 foreign func rocksdb_writeoptions_create(): CPointer<rocksdb_writeoptions_t>
 foreign func rocksdb_writeoptions_destroy(options: CPointer<rocksdb_writeoptions_t>): Unit
 foreign func rocksdb_writeoptions_set_sync(options: CPointer<rocksdb_writeoptions_t>, value: UInt8): Unit
@@ -120,6 +130,17 @@ foreign func rocksdb_get(
     errptr: CPointer<CPointer<UInt8>>
 ): CPointer<UInt8>
 
+foreign func rocksdb_multi_get(
+    db: CPointer<rocksdb_t>,
+    options: CPointer<rocksdb_readoptions_t>,
+    numKeys: UIntNative,
+    keysList: CPointer<CString>,
+    keyListSizes: CPointer<UIntNative>,
+    valuesList: CPointer<CString>,
+    valueListSizes: CPointer<UIntNative>,
+    errs: CPointer<CString>
+): Unit
+
 foreign func rocksdb_put(
     db: CPointer<rocksdb_t>,
     options: CPointer<rocksdb_writeoptions_t>,
@@ -136,6 +157,36 @@ foreign func rocksdb_delete(
     key: CString,
     keylen: UIntNative,
     errptr: CPointer<CPointer<UInt8>>
+): Unit
+
+foreign func rocksdb_merge(
+    db: CPointer<rocksdb_t>,
+    options: CPointer<rocksdb_writeoptions_t>,
+    key: CString,
+    keylen: UIntNative,
+    value: CString,
+    vallen: UIntNative,
+    errptr: CPointer<CPointer<UInt8>>
+): Unit
+
+foreign func rocksdb_write(
+    db: CPointer<rocksdb_t>,
+    options: CPointer<rocksdb_writeoptions_t>,
+    batch: CPointer<rocksdb_writebatch_t>,
+    errptr: CPointer<CPointer<UInt8>>
+): Unit
+
+foreign func rocksdb_writebatch_create(): CPointer<rocksdb_writebatch_t>
+foreign func rocksdb_writebatch_destroy(batch: CPointer<rocksdb_writebatch_t>): Unit
+foreign func rocksdb_writebatch_put(batch: CPointer<rocksdb_writebatch_t>, key: CString, klen: UIntNative, value: CString, vlen: UIntNative): Unit
+foreign func rocksdb_writebatch_merge(batch: CPointer<rocksdb_writebatch_t>, key: CString, klen: UIntNative, value: CString, vlen: UIntNative): Unit
+foreign func rocksdb_writebatch_delete(batch: CPointer<rocksdb_writebatch_t>, key: CString, klen: UIntNative): Unit
+foreign func rocksdb_writebatch_delete_range(
+    batch: CPointer<rocksdb_writebatch_t>,
+    startKey: CString,
+    startKeyLen: UIntNative,
+    endKey: CString,
+    endKeyLen: UIntNative
 ): Unit
 
 foreign func rocksdb_free(ptr: CPointer<Unit>): Unit
