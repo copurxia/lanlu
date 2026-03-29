@@ -7,9 +7,9 @@ import stdx.encoding.json.stream.*
 import std.convert.*
 import std.fs.*
 import lanlu.contexts.task.domain.*
-import lanlu.shared.utils.*
 import lanlu.contexts.category.infrastructure.persistence.*
-import lanlu.contexts.task.infrastructure.persistence.TaskGroupKVDao
+import lanlu.infrastructure.kv.*
+import lanlu.shared.utils.*
 
 /**
  * upload_process 任务执行器：对已落盘的archive文件进行入库/缩略图处理
@@ -238,7 +238,7 @@ public class UploadProcessTaskRunner {
     }
 
     private static func cleanupUploadKV(taskId: Int64): Unit {
-        TaskGroupKVDao.deleteGroup("upload:${taskId.toString()}")
+        TaskKVService.getStore().deleteGroup("upload:${taskId.toString()}")
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

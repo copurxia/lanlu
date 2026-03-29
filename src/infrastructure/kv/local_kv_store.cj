@@ -1,5 +1,6 @@
 package lanlu.infrastructure.kv
 
+import std.collection.*
 import std.sync.*
 import std.fs.*
 import lanlu.contexts.system.application.SystemSettingsService
@@ -11,6 +12,7 @@ public interface LocalKVStore {
     func get(namespace: String, key: String): Option<String>
     func put(namespace: String, key: String, value: String): Bool
     func delete(namespace: String, key: String): Bool
+    func scan(namespace: String, keyPrefix: String): Array<(String, String)>
 }
 
 public class RocksDbLocalKVStore <: LocalKVStore {
@@ -40,6 +42,23 @@ public class RocksDbLocalKVStore <: LocalKVStore {
     public func delete(namespace: String, key: String): Bool {
         let (ok, _) = db.delete(composeKey(namespace, key))
         return ok
+    }
+
+    public func scan(namespace: String, keyPrefix: String): Array<(String, String)> {
+        let namespacePrefix = "${namespace}:"
+        let fullPrefix = composeKey(namespace, keyPrefix)
+        let (ok, pairs, _) = db.scanByPrefix(fullPrefix)
+        if (!ok) {
+            return []
+        }
+
+        let entries = ArrayList<(String, String)>()
+        for ((key, value) in pairs) {
+            if (key.startsWith(namespacePrefix) && key.size >= namespacePrefix.size) {
+                entries.add((key[namespacePrefix.size..key.size], value))
+            }
+        }
+        return entries.toArray()
     }
 
     private func composeKey(namespace: String, key: String): String {

@@ -35,6 +35,13 @@ public struct rocksdb_writeoptions_t {
     }
 }
 
+@C
+public struct rocksdb_iterator_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
 public const ROCKSDB_NO_COMPRESSION: Int32 = 0
 
 foreign func rocksdb_options_create(): CPointer<rocksdb_options_t>
@@ -71,6 +78,25 @@ foreign func rocksdb_readoptions_destroy(options: CPointer<rocksdb_readoptions_t
 foreign func rocksdb_writeoptions_create(): CPointer<rocksdb_writeoptions_t>
 foreign func rocksdb_writeoptions_destroy(options: CPointer<rocksdb_writeoptions_t>): Unit
 foreign func rocksdb_writeoptions_set_sync(options: CPointer<rocksdb_writeoptions_t>, value: UInt8): Unit
+
+foreign func rocksdb_create_iterator(
+    db: CPointer<rocksdb_t>,
+    options: CPointer<rocksdb_readoptions_t>
+): CPointer<rocksdb_iterator_t>
+
+foreign func rocksdb_iter_destroy(iter: CPointer<rocksdb_iterator_t>): Unit
+foreign func rocksdb_iter_valid(iter: CPointer<rocksdb_iterator_t>): UInt8
+foreign func rocksdb_iter_seek(iter: CPointer<rocksdb_iterator_t>, key: CString, klen: UIntNative): Unit
+foreign func rocksdb_iter_next(iter: CPointer<rocksdb_iterator_t>): Unit
+foreign func rocksdb_iter_key(
+    iter: CPointer<rocksdb_iterator_t>,
+    klen: CPointer<UIntNative>
+): CPointer<UInt8>
+foreign func rocksdb_iter_value(
+    iter: CPointer<rocksdb_iterator_t>,
+    vlen: CPointer<UIntNative>
+): CPointer<UInt8>
+foreign func rocksdb_iter_get_error(iter: CPointer<rocksdb_iterator_t>, errptr: CPointer<CPointer<UInt8>>): Unit
 
 foreign func rocksdb_get(
     db: CPointer<rocksdb_t>,

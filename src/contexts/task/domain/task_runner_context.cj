@@ -35,6 +35,9 @@ public interface TaskKVStore {
     func set(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool
     func get(groupId: String, key: String): Option<String>
     func delete(groupId: String, key: String): Bool
+    func deleteGroup(groupId: String): Unit
+    func insertIfAbsent(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool
+    func increment(groupId: String, key: String, delta: Int64, ttlSeconds: Int64): Int64
     func hasGroup(groupId: String): Bool
     func getKeys(groupId: String): Array<String>
 }

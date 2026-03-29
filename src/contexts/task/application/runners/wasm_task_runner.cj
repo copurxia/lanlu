@@ -12,6 +12,7 @@ import lanlu.contexts.plugin.application.MetadataPatchService
 import lanlu.contexts.plugin.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
+import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
 
 public class WasmTaskParametersReq <: JsonDeserializable<WasmTaskParametersReq> {
@@ -981,8 +982,9 @@ public class WasmTaskRunner {
     }
 
     private static func handleLoginDependency(taskId: Int64, loginNamespace: String, groupId: String): TaskWaitResult {
+        let kvStore = TaskKVService.getStore()
         if (groupId.size > 0) {
-            match (TaskGroupKVDao.get(groupId, "login_cookies_${loginNamespace}")) {
+            match (kvStore.get(groupId, "login_cookies_${loginNamespace}")) {
                 case Some(cached) =>
                     let trimmedCached = cached.trimAscii()
                     if (trimmedCached.size > 0) {
@@ -1012,7 +1014,7 @@ public class WasmTaskRunner {
         }
 
         if (groupId.size > 0) {
-            let _ = TaskGroupKVDao.upsert(groupId, "login_cookies_${loginNamespace}", cookiesJson, 3600)
+            let _ = kvStore.set(groupId, "login_cookies_${loginNamespace}", cookiesJson, 3600)
         }
         return TaskWaitResult(true, "", result.output, cookiesJson)
     }

@@ -75,6 +75,7 @@ main(): Int64 {
     MigrationRegistry.register(V013_MetadataTimeSemanticsUnification())
     MigrationRegistry.register(V014_BackfillTagDictionaryFromMetadataTags())
     MigrationRegistry.register(V015_RecommendationTracking())
+    MigrationRegistry.register(V016_DropTaskGroupKv())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
@@ -133,7 +134,8 @@ main(): Int64 {
     if (localKvInitialized) {
         logger.info("Local KV initialized successfully")
     } else {
-        logger.warn("Local KV unavailable; archive index cache will fall back to direct reads")
+        logger.error("Local KV unavailable; RocksDB is required for archive index and task KV")
+        return 1
     }
 
     let (wamrReady, wamrError) = WasmHostBridge.warmup()

@@ -1,5 +1,7 @@
 package rocksdb_ffi
 
+import std.collection.*
+
 public class RocksDb {
     private let db: CPointer<rocksdb_t>
     private let readOptions: CPointer<rocksdb_readoptions_t>
@@ -188,6 +190,56 @@ public class RocksDb {
         return (true, "")
     }
 
+    public func scanByPrefix(prefix: String): (Bool, Array<(String, String)>, String) {
+        if (closed) {
+            return (false, [], "rocksdb is closed")
+        }
+
+        let iter = unsafe { rocksdb_create_iterator(db, readOptions) }
+        if (iter.isNull()) {
+            return (false, [], "rocksdb_create_iterator failed")
+        }
+
+        let prefixBytes = prefix.toArray()
+        let prefixLen = prefixBytes.size
+        let results = ArrayList<(String, String)>()
+
+        unsafe {
+            let prefixHandle = acquireArrayRawData(prefixBytes)
+            try {
+                rocksdb_iter_seek(
+                    iter,
+                    CString(prefixHandle.pointer),
+                    UIntNative(prefixLen)
+                )
+            } finally {
+                releaseArrayRawData(prefixHandle)
+            }
+        }
+
+        try {
+            while (unsafe { rocksdb_iter_valid(iter) } != 0u8) {
+                let key = readIteratorBytes(iter, true)
+                if (!key.startsWith(prefix)) {
+                    break
+                }
+                let value = readIteratorBytes(iter, false)
+                results.add((key, value))
+                unsafe { rocksdb_iter_next(iter) }
+            }
+
+            var errPtr = CPointer<UInt8>()
+            unsafe { rocksdb_iter_get_error(iter, inout errPtr) }
+            if (!errPtr.isNull()) {
+                return (false, [], takeOwnedCString(errPtr))
+            }
+
+            return (true, results.toArray(), "")
+        } finally {
+            unsafe { rocksdb_iter_destroy(iter) }
+        }
+    }
+
     public func close(): Unit {
         if (closed) {
             return
@@ -204,5 +256,19 @@ public class RocksDb {
         let text = unsafe { CString(raw).toString() }
         unsafe { rocksdb_free(CPointer<Unit>(raw)) }
         return text
+    }
+
+    private static func readIteratorBytes(iter: CPointer<rocksdb_iterator_t>, readKey: Bool): String {
+        var length: UIntNative = 0
+        let ptr = if (readKey) {
+            unsafe { rocksdb_iter_key(iter, inout length) }
+        } else {
+            unsafe { rocksdb_iter_value(iter, inout length) }
+        }
+        if (ptr.isNull() || length == 0) {
+            return ""
+        }
+        let out = Array<UInt8>(Int64(length), { i => unsafe { (ptr + i).read() } })
+        return String.fromUtf8(out)
     }
 }

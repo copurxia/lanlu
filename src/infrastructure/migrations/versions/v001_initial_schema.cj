@@ -70,16 +70,13 @@ public class V001_InitialSchema <: Migration {
         // 16. scheduled_tasks 表
         if (!createScheduledTasksTable(conn)) { return false }
 
-        // 17. task_group_kv 表（任务组 KV 持久化）
-        if (!createTaskGroupKvTable(conn)) { return false }
-
-        // 18. assets 表（通用资源表）
+        // 17. assets 表（通用资源表）
         if (!createAssetsTable(conn)) { return false }
 
-        // 19. system_settings 表
+        // 18. system_settings 表
         if (!createSystemSettingsTable(conn)) { return false }
 
-        // 20. archives_with_tags 视图
+        // 19. archives_with_tags 视图
         if (!createArchivesWithTagsView(conn)) { return false }
 
         return true
@@ -700,35 +697,6 @@ public class V001_InitialSchema <: Migration {
         """)) {
             return false
         }
-        return true
-    }
-
-    private func createTaskGroupKvTable(conn: Connection): Bool {
-        if (MigrationHelpers.tableExists(conn, "task_group_kv")) {
-            logger.debug("task_group_kv table already exists, checking columns")
-            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "group_id", "VARCHAR(255) NOT NULL")
-            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "k", "VARCHAR(255) NOT NULL")
-            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "v", "TEXT NOT NULL")
-            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "created_at", "BIGINT NOT NULL DEFAULT 0")
-            MigrationHelpers.addColumnIfNotExists(conn, "task_group_kv", "ttl_seconds", "BIGINT NOT NULL DEFAULT 0")
-            MigrationHelpers.createIndexIfNotExists(conn, "idx_task_group_kv_group_id", "task_group_kv", "group_id")
-            return true
-        }
-
-        logger.debug("Creating task_group_kv table")
-        if (!MigrationHelpers.execUpdate(conn, """
-            CREATE TABLE task_group_kv (
-                group_id VARCHAR(255) NOT NULL,
-                k VARCHAR(255) NOT NULL,
-                v TEXT NOT NULL,
-                created_at BIGINT NOT NULL,
-                ttl_seconds BIGINT NOT NULL DEFAULT 0,
-                PRIMARY KEY (group_id, k)
-            )
-        """)) {
-            return false
-        }
-        MigrationHelpers.createIndexIfNotExists(conn, "idx_task_group_kv_group_id", "task_group_kv", "group_id")
         return true
     }
 

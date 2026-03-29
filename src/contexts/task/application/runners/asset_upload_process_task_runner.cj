@@ -7,9 +7,9 @@ import stdx.encoding.json.stream.*
 import std.convert.*
 import std.fs.*
 import lanlu.contexts.task.domain.*
-import lanlu.shared.utils.*
 import lanlu.contexts.asset.infrastructure.persistence.*
-import lanlu.contexts.task.infrastructure.persistence.TaskGroupKVDao
+import lanlu.infrastructure.kv.*
+import lanlu.shared.utils.*
 
 /**
  * asset_upload_process：将分片临时文件落为 staging asset，并分发给业务消费 runner。
@@ -284,7 +284,7 @@ public class AssetUploadProcessTaskRunner {
     }
 
     private static func cleanupUploadKV(taskId: Int64): Unit {
-        TaskGroupKVDao.deleteGroup("asset_upload:${taskId.toString()}")
+        TaskKVService.getStore().deleteGroup("asset_upload:${taskId.toString()}")
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

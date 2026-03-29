@@ -197,7 +197,7 @@ public class TaskPoolService {
     private func runWorker(task: TaskData, workerId: Int32): Unit {
         let logger = getLogger("taskpool")
         let groupId = task.groupId.trimAscii()
-        let kvStore = TaskGroupKVStore.getInstance()
+        let kvStore = TaskKVService.getStore()
         if (groupId.size > 0) {
             kvStore.acquireGroup(groupId)
         }
@@ -415,7 +415,7 @@ public class TaskPoolService {
             pluginPath: SystemSettingsService.getPath("PLUGIN_PATH")
         )
         let notifier: TaskNotifier = { => this.notifyTaskAvailable() }
-        let kvStore = TaskGroupKVStore.getInstance()
+        let kvStore = TaskKVService.getStore()
         return TaskRunnerContext(paths, notifier, kvStore)
     }
 }

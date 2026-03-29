@@ -11,12 +11,12 @@ import stdx.encoding.json.stream.*
 import stdx.log.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
-import lanlu.contexts.task.infrastructure.persistence.TaskGroupKVDao
 import lanlu.contexts.task.application.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.contexts.plugin.infrastructure.persistence.*
+import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
 import lanlu.shared.views.*
 
@@ -42,6 +42,10 @@ public class AssetUploadController {
     private static let UPLOAD_IDLE_TIMEOUT_SECONDS: Int32 = 600
     private static let UPLOAD_KV_TTL_SECONDS: Int64 = 86400
     private static let MAX_UPLOAD_CHUNK_SIZE: Int64 = 10 * 1024 * 1024
+
+    private static func getTaskKVStore(): TaskKVStore {
+        return TaskKVService.getStore()
+    }
 
     /**
      * POST /api/assets/upload/init
@@ -145,11 +149,12 @@ public class AssetUploadController {
             }
 
             let kvGroupId = "asset_upload:${task.id}"
-            TaskGroupKVDao.deleteGroup(kvGroupId)
-            let _ = TaskGroupKVDao.upsert(kvGroupId, "filesize", fileSize.toString(), UPLOAD_KV_TTL_SECONDS)
-            let _ = TaskGroupKVDao.upsert(kvGroupId, "chunk_size", chunkSize.toString(), UPLOAD_KV_TTL_SECONDS)
-            let _ = TaskGroupKVDao.upsert(kvGroupId, "total_chunks", totalChunks.toString(), UPLOAD_KV_TTL_SECONDS)
-            let _ = TaskGroupKVDao.upsert(kvGroupId, "uploaded_count", "0", UPLOAD_KV_TTL_SECONDS)
+            let kvStore = getTaskKVStore()
+            kvStore.deleteGroup(kvGroupId)
+            let _ = kvStore.set(kvGroupId, "filesize", fileSize.toString(), UPLOAD_KV_TTL_SECONDS)
+            let _ = kvStore.set(kvGroupId, "chunk_size", chunkSize.toString(), UPLOAD_KV_TTL_SECONDS)
+            let _ = kvStore.set(kvGroupId, "total_chunks", totalChunks.toString(), UPLOAD_KV_TTL_SECONDS)
+            let _ = kvStore.set(kvGroupId, "uploaded_count", "0", UPLOAD_KV_TTL_SECONDS)
 
             ResponseView.successJson(ctx, "{\"taskId\":\"${task.id}\"}", "ok")
         } catch (e: Exception) {
@@ -208,18 +213,19 @@ public class AssetUploadController {
             }
 
             let kvGroupId = "asset_upload:${taskIdStr}"
+            let kvStore = getTaskKVStore()
             var fileSize: Int64 = 0
             var chunkSize: Int64 = 0
             var totalChunks: Int64 = 0
-            match (TaskGroupKVDao.get(kvGroupId, "filesize")) {
+            match (kvStore.get(kvGroupId, "filesize")) {
                 case Some(v) => try { fileSize = Int64.parse(v) } catch (_: Exception) { fileSize = 0 }
                 case None => fileSize = 0
             }
-            match (TaskGroupKVDao.get(kvGroupId, "chunk_size")) {
+            match (kvStore.get(kvGroupId, "chunk_size")) {
                 case Some(v) => try { chunkSize = Int64.parse(v) } catch (_: Exception) { chunkSize = 0 }
                 case None => chunkSize = 0
             }
-            match (TaskGroupKVDao.get(kvGroupId, "total_chunks")) {
+            match (kvStore.get(kvGroupId, "total_chunks")) {
                 case Some(v) => try { totalChunks = Int64.parse(v) } catch (_: Exception) { totalChunks = 0 }
                 case None => totalChunks = 0
             }
@@ -246,7 +252,7 @@ public class AssetUploadController {
             }
 
             var uploadedCount: Int64 = 0
-            match (TaskGroupKVDao.get(kvGroupId, "uploaded_count")) {
+            match (kvStore.get(kvGroupId, "uploaded_count")) {
                 case Some(v) =>
                     try { uploadedCount = Int64.parse(v) } catch (_: Exception) { uploadedCount = 0 }
                 case None => uploadedCount = 0
@@ -347,12 +353,12 @@ public class AssetUploadController {
 
             let chunkKey = "chunk_${chunkIndexStr}"
             var uploadedChunkCount: Int64 = 0
-            let inserted = TaskGroupKVDao.insertIfAbsent(kvGroupId, chunkKey, "1", UPLOAD_KV_TTL_SECONDS)
+            let inserted = kvStore.insertIfAbsent(kvGroupId, chunkKey, "1", UPLOAD_KV_TTL_SECONDS)
             if (inserted) {
-                uploadedChunkCount = TaskGroupKVDao.increment(kvGroupId, "uploaded_count", 1, UPLOAD_KV_TTL_SECONDS)
+                uploadedChunkCount = kvStore.increment(kvGroupId, "uploaded_count", 1, UPLOAD_KV_TTL_SECONDS)
             }
             if (uploadedChunkCount <= 0) {
-                match (TaskGroupKVDao.get(kvGroupId, "uploaded_count")) {
+                match (kvStore.get(kvGroupId, "uploaded_count")) {
                     case Some(v) =>
                         try { uploadedChunkCount = Int64.parse(v) } catch (_: Exception) { uploadedChunkCount = 0 }
                     case None => uploadedChunkCount = 0
@@ -365,7 +371,7 @@ public class AssetUploadController {
             TaskModel.updateTaskProgress(taskIdInt, Int32(uploadedProgress), "已上传 ${uploadedChunkCount.toString()}/${totalChunks.toString()} 个分片")
 
             if (uploadedChunkCount >= totalChunks && task.taskType == "asset_upload") {
-                let handoff = TaskGroupKVDao.insertIfAbsent(kvGroupId, "handoff", "1", UPLOAD_KV_TTL_SECONDS)
+                let handoff = kvStore.insertIfAbsent(kvGroupId, "handoff", "1", UPLOAD_KV_TTL_SECONDS)
                 if (!handoff) {
                     ResponseView.successJson(ctx, "{}", "Chunk uploaded successfully")
                     return
@@ -441,7 +447,7 @@ public class AssetUploadController {
                 cleanupUploadDir(uploadDir)
             }
 
-            TaskGroupKVDao.deleteGroup("asset_upload:${taskIdStr}")
+            getTaskKVStore().deleteGroup("asset_upload:${taskIdStr}")
             ResponseView.successJson(ctx, "{}", "ok")
         } catch (e: Exception) {
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
