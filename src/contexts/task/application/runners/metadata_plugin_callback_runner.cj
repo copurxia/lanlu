@@ -26,21 +26,21 @@ public class MetadataPluginCallbackRunner {
         TaskModel.updateTaskProgress(taskId, 10, "开始处理元数据回调")
 
         // 解析参数
-        let (targetType, targetId, namespace, denoTaskId, param, metadataJson, fallbackNamespaces) = parseParameters(parameters)
-        if (targetId.size == 0 || denoTaskId <= 0) {
-            fail(taskId, "Invalid callback parameters: missing targetId or denoTaskId")
+        let (targetType, targetId, namespace, wasmTaskId, param, metadataJson, fallbackNamespaces) = parseParameters(parameters)
+        if (targetId.size == 0 || wasmTaskId <= 0) {
+            fail(taskId, "Invalid callback parameters: missing targetId or wasmTaskId")
             return
         }
 
-        let resolvedNamespace = resolvePluginNamespace(namespace, denoTaskId)
+        let resolvedNamespace = resolvePluginNamespace(namespace, wasmTaskId)
         if (namespace.trimAscii().size == 0 && resolvedNamespace.size > 0) {
             TaskIO.appendLog(taskId, "resolved callback namespace from plugin task: ${resolvedNamespace}")
         }
-        TaskIO.appendLog(taskId, "callback params: targetType=${targetType}, targetId=${targetId}, namespace=${resolvedNamespace}, denoTaskId=${denoTaskId}")
+        TaskIO.appendLog(taskId, "callback params: targetType=${targetType}, targetId=${targetId}, namespace=${resolvedNamespace}, wasmTaskId=${wasmTaskId}")
 
         // 读取插件运行任务输出
         TaskModel.updateTaskProgress(taskId, 30, "读取插件输出")
-        let output = TaskIO.readOutput(denoTaskId)
+        let output = TaskIO.readOutput(wasmTaskId)
         if (output.size == 0) {
             failAndMaybeEnqueueFallback(taskId, "Plugin task output is empty", targetType, targetId, param, metadataJson, fallbackNamespaces, context.notifyTaskAvailable)
             return
@@ -153,17 +153,17 @@ public class MetadataPluginCallbackRunner {
         TaskIO.writeOutput(taskId, resultJson)
     }
 
-    private static func resolvePluginNamespace(namespace: String, denoTaskId: Int64): String {
+    private static func resolvePluginNamespace(namespace: String, wasmTaskId: Int64): String {
         let direct = namespace.trimAscii()
         if (direct.size > 0) {
             return direct
         }
-        if (denoTaskId <= 0) {
+        if (wasmTaskId <= 0) {
             return ""
         }
 
-        let denoTask = TaskDao.getTaskDataById(denoTaskId)
-        return denoTask.pluginNamespace.trimAscii()
+        let wasmTask = TaskDao.getTaskDataById(wasmTaskId)
+        return wasmTask.pluginNamespace.trimAscii()
     }
 
     private static func applyArchivePatchesForTankoubon(tankoubonId: String, patches: Array<ArchiveMetadataPatch>, taskId: Int64, pluginNamespace: String, archivesProvided: Bool, notifier: TaskNotifier): (Int64, Int64) {
@@ -381,7 +381,7 @@ public class MetadataPluginCallbackRunner {
         var targetType = ""
         var targetId = ""
         var namespace = ""
-        var denoTaskId: Int64 = 0
+        var wasmTaskId: Int64 = 0
         var param = ""
         var metadataJson = ""
         var fallbackNamespaces = ArrayList<String>()
@@ -418,7 +418,7 @@ public class MetadataPluginCallbackRunner {
                         case "targetType" => targetType = r.readValue<String>().trimAscii()
                         case "targetId" => targetId = r.readValue<String>().trimAscii()
                         case "namespace" => namespace = r.readValue<String>().trimAscii()
-                        case "denoTaskId" => denoTaskId = readInt64Flexible()
+                        case "wasmTaskId" => wasmTaskId = readInt64Flexible()
                         case "param" => param = readRawJson().trimAscii()
                         case "metadata" => metadataJson = normalizeMetadataJson(readRawJson())
                         case "target_type" => targetType = r.readValue<String>().trimAscii()
@@ -446,7 +446,7 @@ public class MetadataPluginCallbackRunner {
         } catch (_: Exception) {}
 
         if (targetType.size == 0) { targetType = "archive" }
-        return (targetType, targetId, namespace, denoTaskId, param, metadataJson, fallbackNamespaces.toArray())
+        return (targetType, targetId, namespace, wasmTaskId, param, metadataJson, fallbackNamespaces.toArray())
     }
 
     private static func writeParamField(w: JsonWriter, param: String): Unit {

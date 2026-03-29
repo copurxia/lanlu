@@ -151,7 +151,7 @@ public class MetadataPluginTaskRunner {
 
         // 立即完成原任务（不再等待）
         TaskModel.updateTaskProgress(taskId, 100, "任务已提交")
-        let resultJson = "{\"success\":1,\"plugin_task_id\":${pluginTask.id},\"wasm_task_id\":${pluginTask.id},\"deno_task_id\":${pluginTask.id},\"callback_task_id\":${callbackTask.id},\"target_type\":\"${effectiveType}\",\"target_id\":\"${targetId}\",\"task_type\":\"${pluginTaskType}\"}"
+        let resultJson = "{\"success\":1,\"plugin_task_id\":${pluginTask.id},\"wasm_task_id\":${pluginTask.id},\"callback_task_id\":${callbackTask.id},\"target_type\":\"${effectiveType}\",\"target_id\":\"${targetId}\",\"task_type\":\"${pluginTaskType}\"}"
         TaskModel.completeTask(taskId, "metadata_plugin task submitted")
         TaskIO.writeOutput(taskId, resultJson)
     }
@@ -159,7 +159,7 @@ public class MetadataPluginTaskRunner {
     /**
      * 构建回调任务参数
      */
-    private static func buildCallbackParams(targetType: String, targetId: String, namespace: String, denoTaskId: Int64, param: String, metadataJson: String, fallbackNamespaces: Array<String>): String {
+    private static func buildCallbackParams(targetType: String, targetId: String, namespace: String, wasmTaskId: Int64, param: String, metadataJson: String, fallbackNamespaces: Array<String>): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -178,7 +178,7 @@ public class MetadataPluginTaskRunner {
             }
             w.endArray()
         }
-        w.writeName("denoTaskId").writeValue(denoTaskId)
+        w.writeName("wasmTaskId").writeValue(wasmTaskId)
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))

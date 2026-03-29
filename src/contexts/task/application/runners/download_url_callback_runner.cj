@@ -263,12 +263,6 @@ public class DownloadUrlCallbackRunner {
                         match (k) {
                             case "downloadTaskId" => downloadTaskId = readInt64Flexible()
                             case "pluginTaskId" => pluginTaskId = readInt64Flexible()
-                            case "denoTaskId" =>
-                                if (pluginTaskId <= 0) {
-                                    pluginTaskId = readInt64Flexible()
-                                } else {
-                                    r.skip()
-                                }
                             case "categoryId" => categoryId = readInt64Flexible()
                             case "pluginNamespace" => pluginNamespace = r.readValue<String>().trimAscii()
                             case _ => r.skip()
