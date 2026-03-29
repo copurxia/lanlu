@@ -3,6 +3,9 @@ package rocksdb_ffi
 import std.collection.*
 
 public class RocksDb {
+    private static let writeBufferSizeBytes: UIntNative = 4 * 1024 * 1024
+    private static let dbWriteBufferSizeBytes: UIntNative = 16 * 1024 * 1024
+    private static let blockCacheSizeBytes: UIntNative = 64 * 1024 * 1024
     private let db: CPointer<rocksdb_t>
     private let readOptions: CPointer<rocksdb_readoptions_t>
     private let writeOptions: CPointer<rocksdb_writeoptions_t>
@@ -18,7 +21,7 @@ public class RocksDb {
         this.writeOptions = writeOptions
     }
 
-    public static func openLowMemory(path: String): (Bool, Option<RocksDb>, String) {
+    public static func openBalanced(path: String): (Bool, Option<RocksDb>, String) {
         let options = unsafe { rocksdb_options_create() }
         if (options.isNull()) {
             return (false, None, "rocksdb_options_create failed")
@@ -30,29 +33,39 @@ public class RocksDb {
             return (false, None, "rocksdb_block_based_options_create failed")
         }
 
+        let blockCache = unsafe { rocksdb_cache_create_lru(blockCacheSizeBytes) }
+        if (blockCache.isNull()) {
+            unsafe {
+                rocksdb_block_based_options_destroy(tableOptions)
+                rocksdb_options_destroy(options)
+            }
+            return (false, None, "rocksdb_cache_create_lru failed")
+        }
+
         unsafe {
             rocksdb_options_set_create_if_missing(options, 1u8)
             rocksdb_options_set_paranoid_checks(options, 0u8)
             rocksdb_options_set_compression(options, ROCKSDB_NO_COMPRESSION)
-            rocksdb_options_set_write_buffer_size(options, 64 * 1024)
-            rocksdb_options_set_db_write_buffer_size(options, 128 * 1024)
-            rocksdb_options_set_max_write_buffer_number(options, 2)
+            rocksdb_options_set_write_buffer_size(options, writeBufferSizeBytes)
+            rocksdb_options_set_db_write_buffer_size(options, dbWriteBufferSizeBytes)
+            rocksdb_options_set_max_write_buffer_number(options, 4)
             rocksdb_options_set_min_write_buffer_number_to_merge(options, 1)
-            rocksdb_options_set_max_write_buffer_number_to_maintain(options, 0)
-            rocksdb_options_set_max_open_files(options, 32)
-            rocksdb_options_set_max_background_jobs(options, 1)
-            rocksdb_options_set_keep_log_file_num(options, 1)
+            rocksdb_options_set_max_write_buffer_number_to_maintain(options, 1)
+            rocksdb_options_set_max_open_files(options, 256)
+            rocksdb_options_set_max_background_jobs(options, 2)
+            rocksdb_options_set_keep_log_file_num(options, 2)
             rocksdb_options_set_use_fsync(options, 0u8)
             rocksdb_options_set_allow_mmap_reads(options, 1u8)
             rocksdb_options_set_bytes_per_sync(options, 0u64)
 
-            // This RocksDB instance is used as an on-disk index store.
-            // Prefer OS page cache and small memtables over RocksDB-managed caches.
-            rocksdb_block_based_options_set_no_block_cache(tableOptions, 1u8)
-            rocksdb_block_based_options_set_cache_index_and_filter_blocks(tableOptions, 0u8)
-            rocksdb_block_based_options_set_cache_index_and_filter_blocks_with_high_priority(tableOptions, 0u8)
-            rocksdb_block_based_options_set_pin_l0_filter_and_index_blocks_in_cache(tableOptions, 0u8)
-            rocksdb_block_based_options_set_pin_top_level_index_and_filter(tableOptions, 0u8)
+            // Use a moderate RocksDB-managed cache and larger memtables so mixed
+            // point reads / prefix scans do not thrash on small workloads.
+            rocksdb_block_based_options_set_no_block_cache(tableOptions, 0u8)
+            rocksdb_block_based_options_set_block_cache(tableOptions, blockCache)
+            rocksdb_block_based_options_set_cache_index_and_filter_blocks(tableOptions, 1u8)
+            rocksdb_block_based_options_set_cache_index_and_filter_blocks_with_high_priority(tableOptions, 1u8)
+            rocksdb_block_based_options_set_pin_l0_filter_and_index_blocks_in_cache(tableOptions, 1u8)
+            rocksdb_block_based_options_set_pin_top_level_index_and_filter(tableOptions, 1u8)
             rocksdb_options_set_block_based_table_factory(options, tableOptions)
         }
 
@@ -62,6 +75,7 @@ public class RocksDb {
         unsafe {
             LibC.free(pathC)
             rocksdb_block_based_options_destroy(tableOptions)
+            rocksdb_cache_destroy(blockCache)
             rocksdb_options_destroy(options)
         }
 
@@ -91,6 +105,10 @@ public class RocksDb {
 
         unsafe { rocksdb_writeoptions_set_sync(writeOptions, 0u8) }
         return (true, Some(RocksDb(db, readOptions, writeOptions)), "")
+    }
+
+    public static func openLowMemory(path: String): (Bool, Option<RocksDb>, String) {
+        return openBalanced(path)
     }
 
     public func get(key: String): (Bool, Option<String>, String) {

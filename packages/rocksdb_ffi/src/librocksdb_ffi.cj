@@ -22,6 +22,13 @@ public struct rocksdb_block_based_table_options_t {
 }
 
 @C
+public struct rocksdb_cache_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
 public struct rocksdb_readoptions_t {
     init() {
         throw Exception("type should not be inited")
@@ -64,11 +71,17 @@ foreign func rocksdb_options_set_compression(options: CPointer<rocksdb_options_t
 foreign func rocksdb_block_based_options_create(): CPointer<rocksdb_block_based_table_options_t>
 foreign func rocksdb_block_based_options_destroy(options: CPointer<rocksdb_block_based_table_options_t>): Unit
 foreign func rocksdb_block_based_options_set_no_block_cache(options: CPointer<rocksdb_block_based_table_options_t>, value: UInt8): Unit
+foreign func rocksdb_block_based_options_set_block_cache(
+    options: CPointer<rocksdb_block_based_table_options_t>,
+    cache: CPointer<rocksdb_cache_t>
+): Unit
 foreign func rocksdb_block_based_options_set_cache_index_and_filter_blocks(options: CPointer<rocksdb_block_based_table_options_t>, value: UInt8): Unit
 foreign func rocksdb_block_based_options_set_cache_index_and_filter_blocks_with_high_priority(options: CPointer<rocksdb_block_based_table_options_t>, value: UInt8): Unit
 foreign func rocksdb_block_based_options_set_pin_l0_filter_and_index_blocks_in_cache(options: CPointer<rocksdb_block_based_table_options_t>, value: UInt8): Unit
 foreign func rocksdb_block_based_options_set_pin_top_level_index_and_filter(options: CPointer<rocksdb_block_based_table_options_t>, value: UInt8): Unit
 foreign func rocksdb_options_set_block_based_table_factory(options: CPointer<rocksdb_options_t>, tableOptions: CPointer<rocksdb_block_based_table_options_t>): Unit
+foreign func rocksdb_cache_create_lru(capacity: UIntNative): CPointer<rocksdb_cache_t>
+foreign func rocksdb_cache_destroy(cache: CPointer<rocksdb_cache_t>): Unit
 
 foreign func rocksdb_open(options: CPointer<rocksdb_options_t>, name: CString, errptr: CPointer<CPointer<UInt8>>): CPointer<rocksdb_t>
 foreign func rocksdb_close(db: CPointer<rocksdb_t>): Unit

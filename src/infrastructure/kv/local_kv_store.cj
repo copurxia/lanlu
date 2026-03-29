@@ -96,7 +96,7 @@ public class LocalKVService {
         }
         FileUtils.ensureDirectoryExists(Path(dbPath))
 
-        let (ok, dbOpt, err) = RocksDb.openLowMemory(dbPath)
+        let (ok, dbOpt, err) = RocksDb.openBalanced(dbPath)
         if (!ok) {
             logger.warn("Failed to initialize RocksDB local KV; falling back to no-cache mode", ("path", dbPath), ("error", err))
             store = Option<LocalKVStore>.None
