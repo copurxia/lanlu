@@ -1,7 +1,7 @@
 'use client';
 
 import type { MouseEvent } from 'react';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Check, Eye, Film, Heart, Square } from 'lucide-react';
 import { FeedPreviewPlaceholder } from '@/components/home/HomeFeedLoading';
@@ -25,6 +25,8 @@ import type { Tankoubon } from '@/types/tankoubon';
 
 const CHANNEL_PREVIEW_LIMIT = 9;
 const CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT = 24;
+const CHANNEL_PREVIEW_BATCH_INTERVAL_MS = 180;
+const CHANNEL_PREVIEW_INTERSECTION_MARGIN = '0px 0px';
 const channelPreviewAspectRatioCache = new Map<string, number>();
 const CHANNEL_PREVIEW_FILE_PARAMS = {
   limit: CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT,
@@ -87,7 +89,6 @@ type HomeMediaChannelCardProps = {
   thumbnailAssetId?: number;
   title: string;
   type: 'archive' | 'tankoubon';
-  previewPriority?: boolean;
   onToggleSelected: (selected: boolean) => void;
   onRequestEnterSelection: () => void;
 };
@@ -225,6 +226,7 @@ const ChannelPreviewTile = memo(function ChannelPreviewTile({
             alt={item.alt}
             className="block h-full w-auto max-w-none"
             decoding="async"
+            fetchPriority="low"
             loading="lazy"
             draggable={false}
             onLoad={(event) => {
@@ -252,6 +254,7 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   items,
   loading,
   onMeasure,
+  placeholderVisible,
   ready,
 }: {
   contentWidth: number;
@@ -259,6 +262,7 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   items: ChannelPreviewItem[];
   loading: boolean;
   onMeasure: (cacheKey: string, aspectRatio: number) => void;
+  placeholderVisible: boolean;
   ready: boolean;
 }) {
   const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
@@ -283,7 +287,7 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
     });
   }, []);
 
-  if (!ready && loading) {
+  if (placeholderVisible) {
     return <FeedPreviewPlaceholder className="aspect-[16/10] w-full rounded-none" label={emptyLabel} />;
   }
 
@@ -431,13 +435,13 @@ function HomeMediaChannelCard({
   thumbnailAssetId,
   title,
   type,
-  previewPriority = false,
   onToggleSelected,
   onRequestEnterSelection,
 }: HomeMediaChannelCardProps) {
   const { t } = useLanguage();
   const [previewLayoutVersion, setPreviewLayoutVersion] = useState(0);
   const [contentExpanded, setContentExpanded] = useState(false);
+  const [revealedPreviewCount, setRevealedPreviewCount] = useState(0);
   const layoutFlushFrameRef = useRef<number | null>(null);
   const {
     items: previewSources,
@@ -446,11 +450,13 @@ function HomeMediaChannelCard({
     targetRef: previewRef,
   } = useArchivePreviewFeed<ChannelPreviewSource, HTMLButtonElement>({
     archiveId: previewArchiveId,
-    eager: previewPriority,
+    eager: false,
     enabled: Boolean(previewArchiveId),
     loaderKey: 'channel-preview',
     loadItems: loadChannelPreviewSources,
+    rootMargin: CHANNEL_PREVIEW_INTERSECTION_MARGIN,
   });
+  const previewSourceIdsKey = useMemo(() => previewSources.map((item) => item.id).join('|'), [previewSources]);
 
   const handleMeasurePreview = useCallback((cacheKey: string, aspectRatio: number) => {
     const normalized = Number.isFinite(aspectRatio) && aspectRatio > 0
@@ -473,6 +479,39 @@ function HomeMediaChannelCard({
       window.cancelAnimationFrame(layoutFlushFrameRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    setRevealedPreviewCount(0);
+  }, [previewArchiveId, previewSourceIdsKey]);
+
+  useEffect(() => {
+    if (!previewReady || previewSources.length === 0) return;
+
+    let cancelled = false;
+    let timeoutId: number | null = null;
+    let nextCount = 0;
+
+    const revealNext = () => {
+      if (cancelled) return;
+
+      nextCount = Math.min(previewSources.length, nextCount + 1);
+      startTransition(() => {
+        setRevealedPreviewCount(nextCount);
+      });
+
+      if (nextCount >= previewSources.length) return;
+      timeoutId = window.setTimeout(revealNext, CHANNEL_PREVIEW_BATCH_INTERVAL_MS);
+    };
+
+    timeoutId = window.setTimeout(revealNext, 0);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [previewReady, previewSourceIdsKey, previewSources.length]);
 
   return (
     <HomeMediaItemMenu
@@ -522,6 +561,8 @@ function HomeMediaChannelCard({
               };
             })
           : [];
+        const visiblePreviewItems = previewItems.slice(0, revealedPreviewCount);
+        const showPreviewPlaceholder = Boolean(previewArchiveId) && (!previewReady || (previewItems.length > 0 && revealedPreviewCount === 0));
 
         void previewLayoutVersion;
 
@@ -607,11 +648,12 @@ function HomeMediaChannelCard({
                   >
                     <ChannelPreviewMedia
                       contentWidth={contentWidth}
-                      items={previewItems}
+                      items={visiblePreviewItems}
                       loading={previewLoading}
                       emptyLabel={displayTitle || author}
                       onMeasure={handleMeasurePreview}
-                      ready={previewReady}
+                      placeholderVisible={showPreviewPlaceholder}
+                      ready={previewReady && visiblePreviewItems.length > 0}
                     />
                   </button>
 
@@ -681,7 +723,6 @@ const HomeArchiveChannelRow = memo(function HomeArchiveChannelRow({
   selected,
   onRequestEnterSelection,
   onToggleArchiveSelect,
-  previewPriority,
 }: {
   archive: Archive;
   contentWidth: number;
@@ -689,7 +730,6 @@ const HomeArchiveChannelRow = memo(function HomeArchiveChannelRow({
   selected: boolean;
   onRequestEnterSelection: () => void;
   onToggleArchiveSelect: (id: string, selected: boolean) => void;
-  previewPriority: boolean;
 }) {
   const { t } = useLanguage();
   const contentMeta = `${t('archive.pages').replace('{count}', String(archive.pagecount))}${archive.progress > 0 && archive.pagecount > 0 ? ` · ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}` : ''}`;
@@ -713,7 +753,6 @@ const HomeArchiveChannelRow = memo(function HomeArchiveChannelRow({
       isNew={archive.isnew}
       progress={archive.progress}
       thumbnailAssetId={coverAssetId}
-      previewPriority={previewPriority}
       onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
@@ -727,7 +766,6 @@ const HomeTankoubonChannelRow = memo(function HomeTankoubonChannelRow({
   selected,
   onRequestEnterSelection,
   onToggleTankoubonSelect,
-  previewPriority,
 }: {
   tankoubon: Tankoubon;
   contentWidth: number;
@@ -735,7 +773,6 @@ const HomeTankoubonChannelRow = memo(function HomeTankoubonChannelRow({
   selected: boolean;
   onRequestEnterSelection: () => void;
   onToggleTankoubonSelect: (id: string, selected: boolean) => void;
-  previewPriority: boolean;
 }) {
   const { t } = useLanguage();
   const firstArchiveId = typeof tankoubon.children?.[0] === 'string' ? tankoubon.children[0] : '';
@@ -760,7 +797,6 @@ const HomeTankoubonChannelRow = memo(function HomeTankoubonChannelRow({
       isFavorite={Boolean(tankoubon.isfavorite)}
       isNew={Boolean(tankoubon.isnew)}
       thumbnailAssetId={coverAssetId}
-      previewPriority={previewPriority}
       onToggleSelected={(nextSelected) => onToggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
@@ -828,7 +864,6 @@ export const HomeMediaChannel = memo(function HomeMediaChannel({
               key={`tankoubon:${item.tankoubon_id}`}
               tankoubon={item}
               contentWidth={contentWidth}
-              previewPriority={index < 2}
               selectionMode={selectionMode}
               selected={selectedTankoubonIds.has(item.tankoubon_id)}
               onRequestEnterSelection={onRequestEnterSelection}
@@ -842,7 +877,6 @@ export const HomeMediaChannel = memo(function HomeMediaChannel({
               key={`archive:${item.arcid}`}
               archive={item}
               contentWidth={contentWidth}
-              previewPriority={index < 2}
               selectionMode={selectionMode}
               selected={selectedArchiveIds.has(item.arcid)}
               onRequestEnterSelection={onRequestEnterSelection}
