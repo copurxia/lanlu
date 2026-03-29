@@ -74,11 +74,14 @@ public class TaskGroupKVStore <: TaskKVStore {
     private static let namespace = "task_group_kv"
     private static var instance: Option<TaskGroupKVStore> = None
     private static let instanceMutex: Mutex = Mutex()
+    private static let operationLockCount: Int64 = 64
 
-    private let stateMutex: Mutex = Mutex()
+    private let refCountMutex: Mutex = Mutex()
+    private let operationLocks: Array<Mutex>
     private var groupRefCounts: HashMap<String, Int32>
 
     private init() {
+        operationLocks = Array<Mutex>(operationLockCount, { i => if (i >= 0) { Mutex() } else { Mutex() } })
         groupRefCounts = HashMap<String, Int32>()
     }
 
@@ -102,12 +105,12 @@ public class TaskGroupKVStore <: TaskKVStore {
             return
         }
 
-        stateMutex.lock()
+        refCountMutex.lock()
         match (groupRefCounts.get(normalizedGroupId)) {
             case Some(count) => groupRefCounts[normalizedGroupId] = count + 1
             case None => groupRefCounts[normalizedGroupId] = 1
         }
-        stateMutex.unlock()
+        refCountMutex.unlock()
     }
 
     public func releaseGroup(groupId: String): Unit {
@@ -117,7 +120,7 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
 
         var shouldDeleteGroup = false
-        stateMutex.lock()
+        refCountMutex.lock()
         match (groupRefCounts.get(normalizedGroupId)) {
             case Some(count) =>
                 if (count <= 1) {
@@ -128,7 +131,7 @@ public class TaskGroupKVStore <: TaskKVStore {
                 }
             case None => ()
         }
-        stateMutex.unlock()
+        refCountMutex.unlock()
 
         if (shouldDeleteGroup && !TaskDao.existsNonTerminalTasksByGroupId(normalizedGroupId)) {
             deleteGroup(normalizedGroupId)
@@ -142,11 +145,12 @@ public class TaskGroupKVStore <: TaskKVStore {
             return false
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             return putRecordNormalized(normalizedGroupId, normalizedKey, value, ttlSeconds)
         } finally {
-            stateMutex.unlock()
+            groupMutex.unlock()
         }
     }
 
@@ -157,11 +161,12 @@ public class TaskGroupKVStore <: TaskKVStore {
             return None
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             return getValueNormalized(normalizedGroupId, normalizedKey)
         } finally {
-            stateMutex.unlock()
+            groupMutex.unlock()
         }
     }
 
@@ -172,11 +177,12 @@ public class TaskGroupKVStore <: TaskKVStore {
             return false
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             return deleteNormalizedKey(buildStorageKey(normalizedGroupId, normalizedKey))
         } finally {
-            stateMutex.unlock()
+            groupMutex.unlock()
         }
     }
 
@@ -186,15 +192,22 @@ public class TaskGroupKVStore <: TaskKVStore {
             return
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             let entries = scanGroupEntriesNormalized(normalizedGroupId)
             for ((storageKey, _) in entries) {
                 let _ = deleteNormalizedKey(storageKey)
             }
+        } finally {
+            groupMutex.unlock()
+        }
+
+        refCountMutex.lock()
+        try {
             groupRefCounts.remove(normalizedGroupId)
         } finally {
-            stateMutex.unlock()
+            refCountMutex.unlock()
         }
     }
 
@@ -205,14 +218,15 @@ public class TaskGroupKVStore <: TaskKVStore {
             return false
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             match (getRecordNormalized(normalizedGroupId, normalizedKey)) {
                 case Some(_) => return false
                 case None => return putRecordNormalized(normalizedGroupId, normalizedKey, value, ttlSeconds)
             }
         } finally {
-            stateMutex.unlock()
+            groupMutex.unlock()
         }
     }
 
@@ -223,7 +237,8 @@ public class TaskGroupKVStore <: TaskKVStore {
             return -1
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             var currentValue: Int64 = 0
             match (getRecordNormalized(normalizedGroupId, normalizedKey)) {
@@ -242,7 +257,7 @@ public class TaskGroupKVStore <: TaskKVStore {
             }
             return nextValue
         } finally {
-            stateMutex.unlock()
+            groupMutex.unlock()
         }
     }
 
@@ -252,11 +267,11 @@ public class TaskGroupKVStore <: TaskKVStore {
             return false
         }
 
-        stateMutex.lock()
+        refCountMutex.lock()
         try {
             return groupRefCounts.contains(normalizedGroupId)
         } finally {
-            stateMutex.unlock()
+            refCountMutex.unlock()
         }
     }
 
@@ -266,7 +281,8 @@ public class TaskGroupKVStore <: TaskKVStore {
             return []
         }
 
-        stateMutex.lock()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
         try {
             let prefix = buildGroupPrefix(normalizedGroupId)
             let entries = scanGroupEntriesNormalized(normalizedGroupId)
@@ -291,7 +307,7 @@ public class TaskGroupKVStore <: TaskKVStore {
             }
             return keys.toArray()
         } finally {
-            stateMutex.unlock()
+            groupMutex.unlock()
         }
     }
 
@@ -377,6 +393,21 @@ public class TaskGroupKVStore <: TaskKVStore {
 
     private static func buildStorageKey(groupId: String, key: String): String {
         return "${groupId}:${key}"
+    }
+
+    private func getOperationMutex(groupId: String): Mutex {
+        let lockIndex = getOperationLockIndex(groupId)
+        return operationLocks[lockIndex]
+    }
+
+    private func getOperationLockIndex(groupId: String): Int64 {
+        let hash = groupId.hashCode()
+        let positiveHash = if (hash < 0) {
+            -hash
+        } else {
+            hash
+        }
+        return positiveHash % operationLocks.size
     }
 
     private static func nowSeconds(): Int64 {
