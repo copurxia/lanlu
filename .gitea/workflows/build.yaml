@@ -36,7 +36,7 @@ jobs:
               xmake \
               pkg-config \
               libarchive-dev libavif-dev \
-              libvips-dev libheif-dev
+              libvips-dev libheif-dev librocksdb-dev
           fi
 
       - name: Verify xmake
