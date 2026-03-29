@@ -5,7 +5,7 @@ import stdx.encoding.json.stream.*
 /**
  * Standard API response envelope.
  *
- * Note: keep it minimal and stream-friendly; controllers can embed raw JSON via lrr4cj.utils.JsonRaw.
+ * Note: keep it minimal and stream-friendly; controllers can embed raw JSON via lanlu.utils.JsonRaw.
  */
 public class ApiResponse<T> <: JsonSerializable where T <: JsonSerializable {
     public let code: Int32

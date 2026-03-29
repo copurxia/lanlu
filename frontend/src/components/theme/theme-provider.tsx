@@ -25,7 +25,7 @@ const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
 export function ThemeProvider({
   children,
   defaultTheme = 'system',
-  storageKey = 'lrr4cj-ui-theme',
+  storageKey = 'lanlu-ui-theme',
   ...props
 }: ThemeProviderProps) {
   // 添加mounted状态以避免水合错误

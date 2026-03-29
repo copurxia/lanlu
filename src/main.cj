@@ -40,7 +40,7 @@ main(): Int64 {
 
     // 测试日志输出
     logger.debug("=== LOGGING SYSTEM TEST ===")
-    logger.info("Starting LRR4CJ server", ("version", appVersion))
+    logger.info("Starting LANLU server", ("version", appVersion))
     logger.info("Application starting... step 1: logging initialized")
     logger.debug("This is a debug message")
     logger.warn("This is a warning message")

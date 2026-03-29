@@ -1,4 +1,4 @@
-// Task types for the LRR4CJ application
+// Task types for the LANLU application
 
 export interface Task {
   id: number;
