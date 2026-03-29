@@ -7,7 +7,7 @@
   compile-option = ""
   override-compile-option = ""
   # vips_ffi uses libvips for general-purpose decode/resize/crop/encode.
-  link-option = "-larchive -lavif -lvips -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s"
+  link-option = "-larchive -lavif -lvips -lrocksdb -lgio-2.0 -lgobject-2.0 -lglib-2.0 -lgcc_s"
 
 [dependencies]
   ignite = { git = "https://gitcode.com/copur/ignite-cangjie.git", branch = "main"}
@@ -18,6 +18,7 @@
   cjcron = { path = "packages/cjcron" }
   epub = { path = "packages/epub" }
   archive_ffi = { path = "packages/archive_ffi" }
+  rocksdb_ffi = { path = "packages/rocksdb_ffi" }
   avif_ffi = { path = "packages/avif_ffi" }
   vips_ffi = { path = "packages/vips_ffi" }
   wasmedge_ffi = { git = "https://gitcode.com/copur/wasmedge_ffi.git", branch = "main" }

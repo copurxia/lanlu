@@ -115,6 +115,8 @@ public class SystemSettingsService {
         settings.add(createSetting("ASSET_PATH", "./data/assets", "path", "storage", "资源文件目录路径"))
         settings.add(createSetting("CACHE_PATH", "./data/cache", "path", "storage", "缓存目录路径"))
         settings.add(createSetting("PLUGIN_PATH", "./data/plugins", "path", "storage", "插件目录路径"))
+        settings.add(createSetting("ROCKSDB_ENABLED", "true", "boolean", "storage", "启用 RocksDB 本地索引存储"))
+        settings.add(createSetting("ROCKSDB_PATH", "./data/cache/rocksdb", "path", "storage", "RocksDB 本地索引目录路径"))
 
         // 性能设置 - 默认值
         settings.add(createSetting("MAX_CONCURRENT_JOBS", "8", "integer", "performance", "最大并发任务数"))
@@ -183,6 +185,8 @@ public class SystemSettingsService {
         translations["归档文件目录路径"] = "Archive Directory Path"
         translations["资源文件目录路径"] = "Asset Directory Path"
         translations["缓存目录路径"] = "Cache Directory Path"
+        translations["启用 RocksDB 本地索引存储"] = "Enable RocksDB Local Index Store"
+        translations["RocksDB 本地索引目录路径"] = "RocksDB Local Index Directory Path"
         translations["扫描定时任务表达式"] = "Scan Cron Expression"
         translations["缩略图定时任务表达式"] = "Thumbnail Cron Expression"
         translations["启用自动扫描"] = "Enable Auto Scan"

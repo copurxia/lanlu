@@ -825,8 +825,8 @@ public class ArchiveController {
             // 对于文件访问，需要解析软链接到实际路径
             let actualPath = FileUtils.resolvePath(fullArchivePath)
 
-            // 使用 Handler 获取流式读取器
             let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
+            // 使用 Handler 获取流式读取器
             let (exitCode, readerOpt, errorMsg) = handler.getEntryReader(actualPath, path)
 
             if (exitCode == 0) {

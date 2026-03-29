@@ -44,8 +44,9 @@ public class ArchiveHandlerFactory {
      * 注册新的处理器
      */
     public func registerHandler(handler: ArchiveHandler): Unit {
-        handlers.add(handler)
-        typeMap[handler.getType()] = handler
+        let effectiveHandler = IndexedArchiveHandler(handler)
+        handlers.add(effectiveHandler)
+        typeMap[effectiveHandler.getType()] = effectiveHandler
     }
 
     /**

@@ -10,6 +10,7 @@ import lanlu.contexts.plugin.domain.*
 import lanlu.infrastructure.migrations.*
 import lanlu.infrastructure.migrations.versions.*
 import lanlu.infrastructure.migrations.extensions.*
+import lanlu.infrastructure.kv.*
 import std.convert.*
 import ignite.*
 import cjdotenv.load
@@ -127,6 +128,13 @@ main(): Int64 {
         logger.warn("WASM runtime setting is ignored; host runtime is now fixed to wasmedge", ("configured", configuredWasmRuntime))
     }
     let effectiveWasmRuntime = "wasmedge"
+
+    let localKvInitialized = LocalKVService.initializeFromSettings()
+    if (localKvInitialized) {
+        logger.info("Local KV initialized successfully")
+    } else {
+        logger.warn("Local KV unavailable; archive index cache will fall back to direct reads")
+    }
 
     let (wamrReady, wamrError) = WasmHostBridge.warmup()
     if (wamrReady) {

@@ -14,7 +14,7 @@ RUN set -eux; \
     build-essential clang ninja-build cmake binutils \
     pkg-config \
     libarchive-dev libavif-dev \
-    libvips-dev libheif-dev; \
+    libvips-dev libheif-dev librocksdb-dev; \
   rm -rf /var/lib/apt/lists/*
 
 # Install Node.js 20 from official tarball (avoid apt pulling tzdata/python chain in minimal containers).
