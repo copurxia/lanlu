@@ -14,8 +14,6 @@ import lanlu.shared.utils.*
  * TaskPool控制器 - 提供任务管理API
  */
 public class TaskPoolController {
-    // SSE 推送频率：平衡实时性与数据库读取压力。
-    private static let taskStreamTickMillis: Int64 = 800
     private static let taskStreamPingMillis: Int64 = 15000
     // 第一阶段性能优化：将单次日志读取上限下调到 4KB。
     private static let taskStreamLogMaxBytes: Int64 = 4 * 1024
@@ -148,10 +146,11 @@ public class TaskPoolController {
 
         // 使用 ignite 内置 SSE（自动设置 headers）
         let sse = ctx.sse()
+        let eventHub = TaskEventHub.getInstance()
         var eventId = 1i64
         var lastPayload = ""
         var lastLogTail = ""
-        var elapsedSincePing = 0i64
+        var revision = eventHub.currentRevision(taskId)
 
         while (true) {
             let task = loadTaskForStreaming(taskId)
@@ -162,6 +161,11 @@ public class TaskPoolController {
 
             // v2 stream payload: send bounded tail + delta to reduce client-side update cost.
             let logTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+            let stableRevision = eventHub.currentRevision(taskId)
+            if (stableRevision != revision) {
+                revision = stableRevision
+                continue
+            }
             let logDelta = computeLogDelta(lastLogTail, logTail)
             let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1)
             if (eventId == 1 || payload != lastPayload) {
@@ -177,14 +181,12 @@ public class TaskPoolController {
                 return
             }
 
-            if (elapsedSincePing >= taskStreamPingMillis) {
+            let waitResult = eventHub.awaitNext(taskId, revision, taskStreamPingMillis)
+            revision = waitResult.revision
+            if (!waitResult.changed) {
                 sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
                 eventId += 1
-                elapsedSincePing = 0
             }
-
-            sleep(Duration.millisecond * taskStreamTickMillis)
-            elapsedSincePing += taskStreamTickMillis
         }
     }
 

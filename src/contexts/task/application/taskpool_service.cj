@@ -61,6 +61,7 @@ public class TaskPoolService {
     private let workerSeq: AtomicInt32 = AtomicInt32(0)
     // upload task 空闲超时时间：10分钟内无分片上报则失败
     private static let UPLOAD_IDLE_TIMEOUT_SECONDS: Int32 = 600
+    private static let UPLOAD_WAIT_HEARTBEAT_MILLIS: Int64 = 15000
 
     private init() {
         loadMaxWorkersConfig()
@@ -359,7 +360,9 @@ public class TaskPoolService {
 
     private func waitUploadTaskFinalization(taskId: Int64, placeholderTaskType: String): Unit {
         let logger = getLogger("taskpool")
+        let eventHub = TaskEventHub.getInstance()
         var ticks: Int64 = 0
+        var revision = eventHub.currentRevision(taskId)
 
         while (isServiceRunning()) {
             let task = TaskDao.getTaskDataById(taskId)
@@ -380,8 +383,18 @@ public class TaskPoolService {
                 return
             }
 
-            ticks += 1
-            if (ticks % 30 == 0) {
+            let stableRevision = eventHub.currentRevision(taskId)
+            if (stableRevision != revision) {
+                revision = stableRevision
+                continue
+            }
+
+            let waitResult = eventHub.awaitNext(taskId, revision, UPLOAD_WAIT_HEARTBEAT_MILLIS)
+            revision = waitResult.revision
+            if (!waitResult.changed) {
+                ticks += 1
+            }
+            if (ticks > 0 && ticks % 30 == 0) {
                 logger.debug(
                     "${placeholderTaskType} task still running",
                     ("task_id", taskId.toString()),
@@ -389,8 +402,6 @@ public class TaskPoolService {
                     ("progress", task.progress.toString())
                 )
             }
-
-            sleep(Duration.second)
         }
     }
 

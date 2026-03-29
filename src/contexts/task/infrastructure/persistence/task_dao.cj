@@ -274,9 +274,12 @@ public class TaskDao {
                         stmt.set(2, progress)
                         stmt.set(3, id)
 
-                        stmt.update()
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            TaskEventHub.getInstance().publishTaskChanged(id)
+                        }
                         getLogger("task_dao").debug("更新任务状态", ("id", id), ("status", status))
-                        return true
+                        return result.rowCount > 0
                     } finally {
                         try {
                             stmt.close()
@@ -356,10 +359,24 @@ public class TaskDao {
                           AND status = 'running'
                           AND timeout_at IS NOT NULL
                           AND timeout_at <= CURRENT_TIMESTAMP
+                        RETURNING id
                     """)
                     try {
-                        let updateResult = stmt.update()
-                        let rowCount = updateResult.rowCount
+                        let rs = stmt.query()
+                        let timedOutIds = ArrayList<Int64>()
+                        try {
+                            while (rs.next()) {
+                                timedOutIds.add(rs.getOrNull<Int64>(0) ?? 0)
+                            }
+                        } finally {
+                            try { rs.close() } catch (_: Exception) {}
+                        }
+                        let rowCount = Int64(timedOutIds.size)
+                        for (taskId in timedOutIds) {
+                            if (taskId > 0) {
+                                TaskEventHub.getInstance().publishTaskChanged(taskId)
+                            }
+                        }
                         if (rowCount > 0) {
                             logger.warn("超时上传任务已标记失败", ("count", rowCount.toString()))
                         }
@@ -432,9 +449,12 @@ public class TaskDao {
                         }
                         stmt.set(14, data.id)
 
-                        stmt.update()
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            TaskEventHub.getInstance().publishTaskChanged(data.id)
+                        }
                         getLogger("task_dao").debug("更新任务", ("id", data.id))
-                        return true
+                        return result.rowCount > 0
                     } finally {
                         try {
                             stmt.close()
@@ -826,8 +846,11 @@ public class TaskDao {
                     pstmt.set(0, parameters)
                     pstmt.set(1, id)
 
-                    pstmt.update()
+                    let result = pstmt.update()
                     logger.debug("更新任务参数", ("id", id.toString()), ("parameters", parameters))
+                    if (result.rowCount > 0) {
+                        TaskEventHub.getInstance().publishTaskChanged(id)
+                    }
 
                     try {
                         pstmt.close()
@@ -835,7 +858,7 @@ public class TaskDao {
                         logger.warn("关闭PreparedStatement失败: ${closeError.message}")
                     }
 
-                    return true
+                    return result.rowCount > 0
 
                 } catch (e: Exception) {
                     logger.error("更新任务参数失败", ("id", id.toString()), ("error", e.message))
@@ -868,13 +891,16 @@ public class TaskDao {
                     pstmt.set(0, taskType)
                     pstmt.set(1, id)
 
-                    let _ = pstmt.update()
+                    let result = pstmt.update()
+                    if (result.rowCount > 0) {
+                        TaskEventHub.getInstance().publishTaskChanged(id)
+                    }
                     try {
                         pstmt.close()
                     } catch (closeError: Exception) {
                         logger.warn("关闭PreparedStatement失败: ${closeError.message}")
                     }
-                    return true
+                    return result.rowCount > 0
                 } catch (e: Exception) {
                     logger.error("更新任务类型失败", ("id", id.toString()), ("error", e.message))
                     return false
@@ -905,13 +931,16 @@ public class TaskDao {
                     let pstmt = conn.prepareStatement(sql)
                     pstmt.set(0, pluginNamespace)
                     pstmt.set(1, id)
-                    let _ = pstmt.update()
+                    let result = pstmt.update()
+                    if (result.rowCount > 0) {
+                        TaskEventHub.getInstance().publishTaskChanged(id)
+                    }
                     try {
                         pstmt.close()
                     } catch (closeError: Exception) {
                         logger.warn("关闭PreparedStatement失败: ${closeError.message}")
                     }
-                    return true
+                    return result.rowCount > 0
                 } catch (e: Exception) {
                     logger.error("更新任务插件命名空间失败", ("id", id.toString()), ("error", e.message))
                     return false
@@ -947,11 +976,25 @@ public class TaskDao {
                             progress = 0,
                             completed_at = CURRENT_TIMESTAMP
                         WHERE status NOT IN ('completed', 'failed', 'stopped')
+                        RETURNING id
                     """
                     let stmt = conn.prepareStatement(updateSql)
                     try {
-                        let updateResult = stmt.update()
-                        let rowCount = updateResult.rowCount
+                        let rs = stmt.query()
+                        let recoveredIds = ArrayList<Int64>()
+                        try {
+                            while (rs.next()) {
+                                recoveredIds.add(rs.getOrNull<Int64>(0) ?? 0)
+                            }
+                        } finally {
+                            try { rs.close() } catch (_: Exception) {}
+                        }
+                        let rowCount = Int64(recoveredIds.size)
+                        for (taskId in recoveredIds) {
+                            if (taskId > 0) {
+                                TaskEventHub.getInstance().publishTaskChanged(taskId)
+                            }
+                        }
                         logger.debug("恢复孤儿任务完成", [("count", rowCount.toString())])
                         return rowCount
                     } finally {
@@ -1470,6 +1513,11 @@ public class TaskDao {
                             data.completedAt = rs.getOrNull<String>(15) ?? ""
                             result.add(data)
                         }
+                        for (task in result) {
+                            if (task.id > 0) {
+                                TaskEventHub.getInstance().publishTaskChanged(task.id)
+                            }
+                        }
                     } finally {
                         try {
                             rs.close()
@@ -1650,6 +1698,7 @@ public class TaskDao {
                         let result = stmt.update()
                         if (result.rowCount > 0) {
                             logger.debug("激活等待任务", ("id", taskId.toString()))
+                            TaskEventHub.getInstance().publishTaskChanged(taskId)
                             return true
                         }
                         return false
@@ -1687,6 +1736,7 @@ public class TaskDao {
                         let result = stmt.update()
                         if (result.rowCount > 0) {
                             logger.debug("等待任务标记失败", ("id", taskId.toString()))
+                            TaskEventHub.getInstance().publishTaskChanged(taskId)
                             return true
                         }
                         return false

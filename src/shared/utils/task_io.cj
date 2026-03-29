@@ -32,6 +32,7 @@ public class TaskIO {
             unsafe { file.write((line + "\n").rawData()) }
             file.flush()
             file.close()
+            TaskEventHub.getInstance().publishLogAppended(taskId)
         } catch (_: Exception) {
             // 忽略IO异常，避免影响任务主流程
         }
@@ -44,6 +45,7 @@ public class TaskIO {
             unsafe { file.write(content.rawData()) }
             file.flush()
             file.close()
+            TaskEventHub.getInstance().publishOutputWritten(taskId)
         } catch (_: Exception) {
             // 忽略IO异常，避免影响任务主流程
         }
