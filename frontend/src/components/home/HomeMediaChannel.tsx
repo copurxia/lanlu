@@ -262,21 +262,16 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   ready: boolean;
 }) {
   const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
+  const itemIdsKey = useMemo(() => items.map((item) => item.id).join('|'), [items]);
 
   useEffect(() => {
     setVideoReadyMap({});
-  }, [items]);
+  }, [itemIdsKey]);
 
-  const normalizedItems = useMemo<Array<ChannelPreviewItem & ChannelPreviewLayoutItem>>(() => items.map((item) => ({
-    ...item,
-  })), [items]);
   const effectiveWidth = Math.max(contentWidth, 320);
-  const layout = useMemo(() => computeChannelPreviewLayout(
-    normalizedItems.map((item) => ({
-      ...item,
-    })),
-    effectiveWidth
-  ), [effectiveWidth, normalizedItems]);
+  const layout = useMemo<ReturnType<typeof computeChannelPreviewLayout<ChannelPreviewItem & ChannelPreviewLayoutItem>>>(() => (
+    computeChannelPreviewLayout(items, effectiveWidth)
+  ), [effectiveWidth, items]);
 
   const handleVideoReady = useCallback((id: string) => {
     setVideoReadyMap((current) => {
@@ -441,8 +436,9 @@ function HomeMediaChannelCard({
   onRequestEnterSelection,
 }: HomeMediaChannelCardProps) {
   const { t } = useLanguage();
-  const [, setPreviewLayoutVersion] = useState(0);
+  const [previewLayoutVersion, setPreviewLayoutVersion] = useState(0);
   const [contentExpanded, setContentExpanded] = useState(false);
+  const layoutFlushFrameRef = useRef<number | null>(null);
   const {
     items: previewSources,
     loading: previewLoading,
@@ -464,7 +460,18 @@ function HomeMediaChannelCard({
     const current = channelPreviewAspectRatioCache.get(cacheKey) ?? DEFAULT_CHANNEL_ASPECT_RATIO;
     if (Math.abs(current - normalized) < 0.01) return;
     channelPreviewAspectRatioCache.set(cacheKey, normalized);
-    setPreviewLayoutVersion((value) => value + 1);
+    if (layoutFlushFrameRef.current != null) return;
+    layoutFlushFrameRef.current = window.requestAnimationFrame(() => {
+      layoutFlushFrameRef.current = null;
+      setPreviewLayoutVersion((value) => value + 1);
+    });
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (layoutFlushFrameRef.current == null) return;
+      window.cancelAnimationFrame(layoutFlushFrameRef.current);
+    };
   }, []);
 
   return (
@@ -515,6 +522,8 @@ function HomeMediaChannelCard({
               };
             })
           : [];
+
+        void previewLayoutVersion;
 
         return (
           <article
@@ -769,25 +778,45 @@ export const HomeMediaChannel = memo(function HomeMediaChannel({
 }: HomeMediaChannelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [contentWidth, setContentWidth] = useState(0);
+  const resizeFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     const element = containerRef.current;
     if (!element) return;
 
     const updateWidth = () => {
-      setContentWidth(element.clientWidth);
+      const nextWidth = element.clientWidth;
+      setContentWidth((current) => (current === nextWidth ? current : nextWidth));
     };
 
     updateWidth();
 
+    const scheduleWidthUpdate = () => {
+      if (resizeFrameRef.current != null) return;
+      resizeFrameRef.current = window.requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        updateWidth();
+      });
+    };
+
     if (typeof ResizeObserver === 'undefined') {
-      window.addEventListener('resize', updateWidth);
-      return () => window.removeEventListener('resize', updateWidth);
+      window.addEventListener('resize', scheduleWidthUpdate);
+      return () => {
+        window.removeEventListener('resize', scheduleWidthUpdate);
+        if (resizeFrameRef.current != null) {
+          window.cancelAnimationFrame(resizeFrameRef.current);
+        }
+      };
     }
 
-    const observer = new ResizeObserver(updateWidth);
+    const observer = new ResizeObserver(scheduleWidthUpdate);
     observer.observe(element);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeFrameRef.current != null) {
+        window.cancelAnimationFrame(resizeFrameRef.current);
+      }
+    };
   }, []);
 
   return (
