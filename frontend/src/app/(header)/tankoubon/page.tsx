@@ -36,6 +36,7 @@ import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
+import { RecommendationService } from '@/lib/services/recommendation-service';
 import { TagService } from '@/lib/services/tag-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useGridRowCoverHeights } from '@/hooks/use-grid-row-cover-heights';
@@ -47,9 +48,11 @@ import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from 
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { buildReaderPath } from '@/lib/utils/reader';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
+import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
 import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
-import type { TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
+import type { Tankoubon, TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
+import type { RecommendationItemType } from '@/types/recommendation';
 import Image from 'next/image';
 
 type ArchiveViewMode = 'grid' | 'list';
@@ -237,6 +240,8 @@ function TankoubonDetailContent() {
   const [archives, setArchives] = useState<Archive[]>([]);
   const [loading, setLoading] = useState(true);
   const [archivesLoading, setArchivesLoading] = useState(false);
+  const [relatedTankoubons, setRelatedTankoubons] = useState<Tankoubon[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
@@ -452,6 +457,60 @@ function TankoubonDetailContent() {
       fetchArchives();
     }
   }, [tankoubon, fetchArchives]);
+
+  useEffect(() => {
+    if (!tankoubonId) {
+      setRelatedTankoubons([]);
+      setRelatedLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRelatedLoading(true);
+
+    void RecommendationService.getTankoubonRelated(tankoubonId, { count: 12, lang: language })
+      .then((items) => {
+        if (!cancelled) {
+          setRelatedTankoubons(items);
+        }
+      })
+      .catch((error) => {
+        logger.apiError('fetch tankoubon related recommendations', error);
+        if (!cancelled) {
+          setRelatedTankoubons([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRelatedLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [language, tankoubonId]);
+
+  const trackRelatedInteraction = useCallback(async (
+    interactionType: 'click' | 'open_reader' | 'favorite',
+    itemType: RecommendationItemType,
+    itemId: string
+  ) => {
+    if (!tankoubonId) return;
+
+    try {
+      await RecommendationService.recordInteraction({
+        scene: 'tankoubon_related',
+        seed_entity_type: 'tankoubon',
+        seed_entity_id: tankoubonId,
+        item_type: itemType,
+        item_id: itemId,
+        interaction_type: interactionType,
+      });
+    } catch (error) {
+      logger.apiError(`track tankoubon related ${interactionType}`, error);
+    }
+  }, [tankoubonId]);
 
   // Helper function to display translated tag
   const displayTag = useCallback((tag: string): string => {
@@ -1372,6 +1431,39 @@ function TankoubonDetailContent() {
             })}
           </div>
         )}
+
+        {(relatedLoading || relatedTankoubons.length > 0) ? (
+          <section className="mt-8 rounded-2xl border bg-card/70 p-4 backdrop-blur dark:bg-card/70 sm:p-5">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold">{t('tankoubon.relatedTitle')}</h2>
+              <p className="text-sm text-muted-foreground">{t('tankoubon.relatedDescription')}</p>
+            </div>
+
+            {relatedLoading ? (
+              <div className="flex min-h-32 items-center justify-center">
+                <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+              </div>
+            ) : relatedTankoubons.length > 0 && tankoubon ? (
+              <RecommendationCardRow
+                items={relatedTankoubons}
+                scene="tankoubon_related"
+                seedEntityType="tankoubon"
+                seedEntityId={tankoubon.tankoubon_id}
+                onOpenReader={(itemType, itemId) => {
+                  void trackRelatedInteraction('open_reader', itemType, itemId);
+                }}
+                onOpenDetails={(itemType, itemId) => {
+                  void trackRelatedInteraction('click', itemType, itemId);
+                }}
+                onFavorite={(itemType, itemId) => {
+                  void trackRelatedInteraction('favorite', itemType, itemId);
+                }}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">{t('tankoubon.noRelated')}</p>
+            )}
+          </section>
+        ) : null}
 
         <ConfirmDialog
           open={removeDialogOpen}

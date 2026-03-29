@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { BookOpen, Home, Settings, Shuffle } from 'lucide-react';
 import { useCallback, useState } from 'react';
-import { ArchiveService } from '@/lib/services/archive-service';
+import { RecommendationService } from '@/lib/services/recommendation-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { cn } from '@/lib/utils/utils';
 import { buildReaderPath } from '@/lib/utils/reader';
@@ -22,11 +22,29 @@ export function MobileBottomNav() {
   const handleRandomRead = useCallback(async () => {
     try {
       setRandomLoading(true);
-      const randomArchives = await ArchiveService.getRandom({ count: 1, groupby_tanks: false });
-      if (randomArchives.length > 0) {
-        const randomItem = randomArchives[0];
-        if ('arcid' in randomItem) {
-          router.push(buildReaderPath(randomItem.arcid, randomItem.progress));
+      const recommendations = await RecommendationService.getDiscover({ count: 8 });
+      const archiveTarget = recommendations.find((item) => 'arcid' in item);
+      if (archiveTarget && 'arcid' in archiveTarget) {
+        await RecommendationService.recordInteraction({
+          scene: 'discover',
+          item_type: 'archive',
+          item_id: archiveTarget.arcid,
+          interaction_type: 'open_reader',
+        });
+        router.push(buildReaderPath(archiveTarget.arcid, archiveTarget.progress));
+        return;
+      }
+      const tankTarget = recommendations.find((item) => 'tankoubon_id' in item && item.children?.[0]);
+      if (tankTarget && 'tankoubon_id' in tankTarget) {
+        const firstArchiveId = tankTarget.children?.[0];
+        if (firstArchiveId) {
+          await RecommendationService.recordInteraction({
+            scene: 'discover',
+            item_type: 'tankoubon',
+            item_id: tankTarget.tankoubon_id,
+            interaction_type: 'open_reader',
+          });
+          router.push(buildReaderPath(firstArchiveId));
         }
       }
     } catch (error) {

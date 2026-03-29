@@ -15,6 +15,9 @@ public func registerApiRoutes(router: App) {
     // 注册搜索相关路由
     SearchRoutes.configure(router)
 
+    // 注册推荐相关路由
+    RecommendationRoutes.configure(router)
+
     // 注册分类相关路由
     registerCategoryRoutes(router)
 

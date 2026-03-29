@@ -2,6 +2,7 @@ import { Archive } from '@/types/archive';
 import { BaseMediaCard } from '@/components/ui/base-media-card';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
+import type { RecommendationItemType, RecommendationScene } from '@/types/recommendation';
 
 interface ArchiveCardProps {
   archive: Archive;
@@ -15,6 +16,14 @@ interface ArchiveCardProps {
   onToggleSelect?: (selected: boolean) => void;
   onRequestEnterSelection?: () => void;
   onCoverAspectRatioChange?: (aspectRatio: number) => void;
+  recommendationContext?: {
+    scene: RecommendationScene;
+    seedEntityType?: RecommendationItemType;
+    seedEntityId?: string;
+  };
+  onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
 }
 
 export function ArchiveCard({
@@ -29,6 +38,10 @@ export function ArchiveCard({
   onToggleSelect,
   onRequestEnterSelection,
   onCoverAspectRatioChange,
+  recommendationContext,
+  onRecommendationOpenReader,
+  onRecommendationOpenDetails,
+  onRecommendationFavorite,
 }: ArchiveCardProps) {
   const coverAssetId = getArchiveAssetId(archive, 'cover');
 
@@ -60,6 +73,10 @@ export function ArchiveCard({
       onToggleSelect={onToggleSelect}
       onRequestEnterSelection={onRequestEnterSelection}
       onCoverAspectRatioChange={onCoverAspectRatioChange}
+      recommendationContext={recommendationContext}
+      onRecommendationOpenReader={onRecommendationOpenReader}
+      onRecommendationOpenDetails={onRecommendationOpenDetails}
+      onRecommendationFavorite={onRecommendationFavorite}
     />
   );
 }

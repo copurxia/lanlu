@@ -20,10 +20,5 @@ public class SearchRoutes {
         search.get("", { ctx =>
             SearchController.searchArchives(ctx)
         })
-
-        // 随机获取归档
-        search.get("/random", { ctx =>
-            SearchController.getRandomArchives(ctx)
-        })
     }
 }

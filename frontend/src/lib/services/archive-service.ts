@@ -1,5 +1,5 @@
 import { apiClient } from '../api';
-import { Archive, SearchResponse, SearchParams, RandomParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload, ArchiveFilesParams } from '@/types/archive';
+import { Archive, SearchResponse, SearchParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload, ArchiveFilesParams } from '@/types/archive';
 import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
@@ -171,23 +171,6 @@ export class ArchiveService {
       data,
       groups,
     };
-  }
-
-  static async getRandom(params: RandomParams = {}): Promise<Array<Archive | Tankoubon>> {
-    const response = await apiClient.get('/api/search/random', {
-      params: {
-        count: params.count || 5,
-        filter: params.filter,
-        category: params.category,
-        category_id: params.category_id,
-        newonly: params.newonly,
-        untaggedonly: params.untaggedonly,
-        groupby_tanks: params.groupby_tanks ?? true,
-        lang: params.lang
-      }
-    });
-    const data = Array.isArray(response.data?.data) ? this.normalizeMixedItems(response.data.data) : [];
-    return data;
   }
 
   static async getMetadata(id: string, lang?: string, options?: { includePages?: boolean }): Promise<ArchiveMetadata> {

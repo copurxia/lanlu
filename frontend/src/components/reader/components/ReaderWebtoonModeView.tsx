@@ -35,6 +35,8 @@ export function ReaderWebtoonModeView({
   nextTitle,
   nextCoverAssetId,
   nextMode = 'chapter',
+  onOpenNextDetails,
+  onOpenNextReader,
   cachedPages,
   visibleRange,
   imageHeights,
@@ -70,7 +72,9 @@ export function ReaderWebtoonModeView({
   nextId: string | null;
   nextTitle: string | null;
   nextCoverAssetId?: number;
-  nextMode?: 'chapter' | 'random';
+  nextMode?: 'chapter' | 'related';
+  onOpenNextDetails?: () => void;
+  onOpenNextReader?: () => void;
   cachedPages: string[];
   visibleRange: { start: number; end: number };
   imageHeights: number[];
@@ -161,6 +165,8 @@ export function ReaderWebtoonModeView({
                       nextTitle={nextTitle}
                       nextCoverAssetId={nextCoverAssetId}
                       nextMode={nextMode}
+                      onOpenNextDetails={onOpenNextDetails}
+                      onOpenNextReader={onOpenNextReader}
                       t={t}
                     />
                   </div>

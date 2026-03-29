@@ -380,7 +380,7 @@ public class ArchiveDao {
                     }
 
                     let stmt = conn.prepareStatement(
-                        "SELECT arcid, id, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id FROM archive_metadata_search WHERE arcid IN (${inClause})")
+                        "SELECT arcid, id, title, filename, summary, thumbhash, cover_asset_id, created_at, updated_at, release_at, relative_path, file_size, pagecount, archive_type, category_id, tags FROM archive_metadata_search WHERE arcid IN (${inClause})")
                     try {
                         for (i in 0..deduped.size) {
                             stmt.set(i, deduped[i])
@@ -404,6 +404,7 @@ public class ArchiveDao {
                                 archive.pagecount = rs.getOrNull<Int32>(12) ?? 0
                                 archive.archive_type = rs.getOrNull<String>(13) ?? "archive"
                                 archive.category_id = rs.getOrNull<Int64>(14) ?? 0
+                                archive.tags = rs.getOrNull<String>(15) ?? ""
                                 if (archive.id.trimAscii().size > 0) {
                                     result[archive.id] = archive
                                 }

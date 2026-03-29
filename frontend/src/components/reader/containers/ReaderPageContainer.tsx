@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'rea
 import type React from 'react';
 import dynamic from 'next/dynamic';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { RecommendationService } from '@/lib/services/recommendation-service';
 import type { Archive } from '@/types/archive';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -131,7 +132,7 @@ function ReaderContent() {
     id: string;
     title: string;
     coverAssetId?: number;
-    source: 'tankoubon' | 'random';
+    source: 'tankoubon' | 'archive_related';
   };
 
   const router = useRouter();
@@ -478,7 +479,37 @@ function ReaderContent() {
 
   const hasTankoubonContext = Boolean(tankoubonContext);
   const nextArchive = nextArchiveLookupId ? (nextArchiveByArchiveId[nextArchiveLookupId] ?? null) : null;
-  const endPageIsRandomNext = nextArchive?.source === 'random';
+  const endPageIsRelatedNext = nextArchive?.source === 'archive_related';
+
+  const handleOpenRelatedNextDetails = useCallback(() => {
+    if (!sourceArchiveId || !nextArchive || nextArchive.source !== 'archive_related') return;
+
+    void RecommendationService.recordInteraction({
+      scene: 'archive_related',
+      seed_entity_type: 'archive',
+      seed_entity_id: sourceArchiveId,
+      item_type: 'archive',
+      item_id: nextArchive.id,
+      interaction_type: 'click',
+    }).catch((error) => {
+      logger.apiError('track archive related detail click from reader', error);
+    });
+  }, [nextArchive, sourceArchiveId]);
+
+  const handleOpenRelatedNextReader = useCallback(() => {
+    if (!sourceArchiveId || !nextArchive || nextArchive.source !== 'archive_related') return;
+
+    void RecommendationService.recordInteraction({
+      scene: 'archive_related',
+      seed_entity_type: 'archive',
+      seed_entity_id: sourceArchiveId,
+      item_type: 'archive',
+      item_id: nextArchive.id,
+      interaction_type: 'open_reader',
+    }).catch((error) => {
+      logger.apiError('track archive related open_reader from reader', error);
+    });
+  }, [nextArchive, sourceArchiveId]);
 
   useEffect(() => {
     if (isCollectionEndPage && !wasCollectionEndPageRef.current) {
@@ -632,31 +663,30 @@ function ReaderContent() {
         logger.apiError('fetch tankoubons for archive', err);
       }
 
-      let randomCandidate: Archive | null = null;
-      for (let attempt = 0; attempt < 5 && !randomCandidate; attempt += 1) {
+      let relatedCandidate: Archive | null = null;
+      for (let attempt = 0; attempt < 3 && !relatedCandidate; attempt += 1) {
         try {
-          const randomItems = await ArchiveService.getRandom({
+          const relatedItems = await RecommendationService.getArchiveRelated(archiveId, {
             count: 8,
-            groupby_tanks: false,
             lang: language,
           });
-          randomCandidate = randomItems.find(
-            (item): item is Archive => 'arcid' in item && !isExcluded(item.arcid)
+          relatedCandidate = relatedItems.find(
+            (item) => !isExcluded(item.arcid)
           ) || null;
-        } catch (randomErr) {
-          logger.apiError('fetch random archive for reader', randomErr);
+        } catch (relatedErr) {
+          logger.apiError('fetch archive related recommendation for reader', relatedErr);
         }
       }
 
-      if (!randomCandidate) return null;
-      const randomTitle = (randomCandidate.title && randomCandidate.title.trim())
-        ? randomCandidate.title
-        : randomCandidate.filename || randomCandidate.arcid;
+      if (!relatedCandidate) return null;
+      const relatedTitle = (relatedCandidate.title && relatedCandidate.title.trim())
+        ? relatedCandidate.title
+        : relatedCandidate.filename || relatedCandidate.arcid;
       return {
-        id: randomCandidate.arcid,
-        title: randomTitle,
-        coverAssetId: getArchiveAssetId(randomCandidate, 'cover'),
-        source: 'random',
+        id: relatedCandidate.arcid,
+        title: relatedTitle,
+        coverAssetId: getArchiveAssetId(relatedCandidate, 'cover'),
+        source: 'archive_related',
       };
     },
     [language]
@@ -704,7 +734,7 @@ function ReaderContent() {
 
   // Resolve end-page navigation targets:
   // - In a tankoubon, use previous/next chapter.
-  // - For a standalone archive, show a random next manga.
+  // - For a standalone archive, reuse archive-related recommendations.
   useEffect(() => {
     if (!sourceArchiveId) {
       setTankoubonContext(null);
@@ -723,14 +753,14 @@ function ReaderContent() {
           setTankoubonContext(null);
           setPrevArchiveId(null);
 
-          const randomNext = await resolveNextArchiveCandidateCached(
+          const relatedNext = await resolveNextArchiveCandidateCached(
             sourceArchiveId,
             new Set([sourceArchiveId])
           );
           if (cancelled) return;
           setResolvedNextArchive(
             sourceArchiveId,
-            randomNext && randomNext.source === 'random' ? randomNext : null
+            relatedNext && relatedNext.source === 'archive_related' ? relatedNext : null
           );
           return;
         }
@@ -2151,7 +2181,9 @@ function ReaderContent() {
             nextId={nextArchive?.id ?? null}
             nextTitle={nextArchive?.title ?? null}
             nextCoverAssetId={nextArchive?.coverAssetId}
-            nextMode={endPageIsRandomNext ? 'random' : 'chapter'}
+            nextMode={endPageIsRelatedNext ? 'related' : 'chapter'}
+            onOpenNextDetails={handleOpenRelatedNextDetails}
+            onOpenNextReader={handleOpenRelatedNextReader}
             t={t}
           />
 
@@ -2182,7 +2214,9 @@ function ReaderContent() {
 	          nextId={nextArchive?.id ?? null}
 	          nextTitle={nextArchive?.title ?? null}
 	          nextCoverAssetId={nextArchive?.coverAssetId}
-	          nextMode={endPageIsRandomNext ? 'random' : 'chapter'}
+	          nextMode={endPageIsRelatedNext ? 'related' : 'chapter'}
+	          onOpenNextDetails={handleOpenRelatedNextDetails}
+	          onOpenNextReader={handleOpenRelatedNextReader}
 	          cachedPages={imageLoading.cachedPages}
 	          visibleRange={webtoonVirtualization.visibleRange}
 	          imageHeights={webtoonVirtualization.imageHeights}

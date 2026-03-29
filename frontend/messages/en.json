@@ -192,7 +192,10 @@
     "metadataPluginRun": "Run",
     "metadataPluginRunning": "Running...",
     "collectionsTitle": "Collections",
+    "relatedTitle": "Related Recommendations",
+    "relatedDescription": "Based on the current archive's tags, category, and reading affinity",
     "noCollections": "This archive is not in any collection",
+    "noRelated": "No related recommendations",
     "noOtherArchivesInCollection": "No other archives in this collection",
     "metadataPluginSelectRequired": "Please select a metadata plugin",
     "metadataPluginEnqueued": "Enqueued, waiting to run",
@@ -278,6 +281,7 @@
     "prevPage": "Previous Page",
     "nextPage": "Next Page",
     "nextChapterLabel": "Next",
+    "relatedNextLabel": "Related",
     "randomNextLabel": "Random",
     "missingId": "Missing archive ID parameter",
     "fetchError": "Failed to fetch archive pages",
@@ -285,6 +289,7 @@
   "backToArchive": "Back to Details",
   "finishedReading": "Finished {title}",
   "nextChapter": "Next: {title}",
+  "relatedNext": "Related: {title}",
   "randomNext": "Random pick: {title}",
   "noNextChapter": "Finished {title}",
   "readingMode": "Reading Mode",
@@ -1035,7 +1040,10 @@
     "listView": "List",
     "gridView": "Grid",
     "switchToListView": "Switch to list view",
-    "switchToGridView": "Switch to grid view"
+    "switchToGridView": "Switch to grid view",
+    "relatedTitle": "Related Recommendations",
+    "relatedDescription": "Based on the current collection's tags, category, and reading affinity",
+    "noRelated": "No related recommendations"
   },
   "dashboard": {
     "title": "Dashboard",

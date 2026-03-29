@@ -135,17 +135,6 @@ export interface SearchParams {
   aggregate_by?: 'category';
 }
 
-export interface RandomParams {
-  filter?: string;
-  category?: string;
-  category_id?: string;
-  count?: number;
-  newonly?: boolean;
-  untaggedonly?: boolean;
-  groupby_tanks?: boolean;
-  lang?: string;
-}
-
 export interface ArchiveFilesParams {
   images_only?: boolean;
   include_metadata?: boolean;

@@ -21,8 +21,10 @@ import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService } from '@/lib/services/plugin-service';
+import { RecommendationService } from '@/lib/services/recommendation-service';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import { Archive } from '@/types/archive';
+import type { RecommendationItemType } from '@/types/recommendation';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { Check, Download, Heart, Pencil, RotateCcw, Trash2, X, ChevronRight, RefreshCw } from 'lucide-react';
@@ -81,6 +83,8 @@ const HomeScrollableTankoubonCard = memo(function HomeScrollableTankoubonCard({
   toggleTankoubonSelect,
   tankoubon,
   reportAspectRatio,
+  onRecommendationOpenReader,
+  onRecommendationFavorite,
 }: {
   itemKey: string;
   index: number;
@@ -91,6 +95,8 @@ const HomeScrollableTankoubonCard = memo(function HomeScrollableTankoubonCard({
   toggleTankoubonSelect: (id: string, selected: boolean) => void;
   tankoubon: Tankoubon;
   reportAspectRatio: (key: string, aspectRatio: number) => void;
+  onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
 }) {
   return (
     <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
@@ -105,6 +111,9 @@ const HomeScrollableTankoubonCard = memo(function HomeScrollableTankoubonCard({
         onRequestEnterSelection={enterSelectionMode}
         onToggleSelect={(nextSelected) => toggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
         onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
+        recommendationContext={{ scene: 'discover' }}
+        onRecommendationOpenReader={onRecommendationOpenReader}
+        onRecommendationFavorite={onRecommendationFavorite}
       />
     </div>
   );
@@ -120,6 +129,8 @@ const HomeScrollableArchiveCard = memo(function HomeScrollableArchiveCard({
   enterSelectionMode,
   toggleArchiveSelect,
   reportAspectRatio,
+  onRecommendationOpenReader,
+  onRecommendationFavorite,
 }: {
   archive: Archive;
   itemKey: string;
@@ -130,6 +141,8 @@ const HomeScrollableArchiveCard = memo(function HomeScrollableArchiveCard({
   enterSelectionMode: () => void;
   toggleArchiveSelect: (id: string, selected: boolean) => void;
   reportAspectRatio: (key: string, aspectRatio: number) => void;
+  onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
 }) {
   return (
     <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
@@ -145,6 +158,9 @@ const HomeScrollableArchiveCard = memo(function HomeScrollableArchiveCard({
         onRequestEnterSelection={enterSelectionMode}
         onToggleSelect={(nextSelected) => toggleArchiveSelect(archive.arcid, nextSelected)}
         onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(itemKey, aspectRatio)}
+        recommendationContext={{ scene: 'discover' }}
+        onRecommendationOpenReader={onRecommendationOpenReader}
+        onRecommendationFavorite={onRecommendationFavorite}
       />
     </div>
   );
@@ -158,6 +174,8 @@ const HomeScrollableCardRow = memo(function HomeScrollableCardRow({
   enterSelectionMode,
   toggleArchiveSelect,
   toggleTankoubonSelect,
+  onRecommendationOpenReader,
+  onRecommendationFavorite,
 }: {
   items: (Archive | Tankoubon)[];
   selectionMode: boolean;
@@ -166,6 +184,8 @@ const HomeScrollableCardRow = memo(function HomeScrollableCardRow({
   enterSelectionMode: () => void;
   toggleArchiveSelect: (id: string, selected: boolean) => void;
   toggleTankoubonSelect: (id: string, selected: boolean) => void;
+  onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
 }) {
   const { width } = useWindowSize();
   const itemKeys = useMemo(() => items.map((item) => (
@@ -240,6 +260,8 @@ const HomeScrollableCardRow = memo(function HomeScrollableCardRow({
               toggleTankoubonSelect={toggleTankoubonSelect}
               tankoubon={item}
               reportAspectRatio={reportAspectRatio}
+              onRecommendationOpenReader={onRecommendationOpenReader}
+              onRecommendationFavorite={onRecommendationFavorite}
             />
           ) : (
             <HomeScrollableArchiveCard
@@ -253,6 +275,8 @@ const HomeScrollableCardRow = memo(function HomeScrollableCardRow({
               enterSelectionMode={enterSelectionMode}
               toggleArchiveSelect={toggleArchiveSelect}
               reportAspectRatio={reportAspectRatio}
+              onRecommendationOpenReader={onRecommendationOpenReader}
+              onRecommendationFavorite={onRecommendationFavorite}
             />
           )
         );
@@ -439,7 +463,7 @@ function HomePageContent() {
 
     try {
       setRandomLoading(true);
-      const archives = await ArchiveService.getRandom({ count: categoryRowSize, lang: language });
+      const archives = await RecommendationService.getDiscover({ count: categoryRowSize, lang: language });
       setRandomArchives(archives);
       if (typeof window !== 'undefined') randomArchivesCache.set(randomKey, archives);
     } catch (error) {
@@ -450,6 +474,32 @@ function HomePageContent() {
       setRandomLoading(false);
     }
   }, [categoryRowSize, language, randomKey]);
+
+  const trackDiscoverOpenReader = useCallback(async (itemType: RecommendationItemType, itemId: string) => {
+    try {
+      await RecommendationService.recordInteraction({
+        scene: 'discover',
+        item_type: itemType,
+        item_id: itemId,
+        interaction_type: 'open_reader',
+      });
+    } catch (error) {
+      logger.apiError('track discover open_reader', error);
+    }
+  }, []);
+
+  const trackDiscoverFavorite = useCallback(async (itemType: RecommendationItemType, itemId: string) => {
+    try {
+      await RecommendationService.recordInteraction({
+        scene: 'discover',
+        item_type: itemType,
+        item_id: itemId,
+        interaction_type: 'favorite',
+      });
+    } catch (error) {
+      logger.apiError('track discover favorite', error);
+    }
+  }, []);
 
   // Cancel in-flight list request on unmount.
   useEffect(() => {
@@ -1254,6 +1304,8 @@ function HomePageContent() {
                 enterSelectionMode={enterSelectionMode}
                 toggleArchiveSelect={toggleArchiveSelect}
                 toggleTankoubonSelect={toggleTankoubonSelect}
+                onRecommendationOpenReader={trackDiscoverOpenReader}
+                onRecommendationFavorite={trackDiscoverFavorite}
               />
             ) : !randomLoading ? (
               <div className="text-center py-12">

@@ -3,7 +3,6 @@
 import * as React from "react"
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
-import Link from 'next/link'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -29,6 +28,7 @@ import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/
 import type { MetadataPagePatch } from '@/types/archive'
 import type { TankoubonMemberMetadataPatch } from '@/types/tankoubon'
 import type { Plugin } from '@/lib/services/plugin-service'
+import type { RecommendationItemType, RecommendationScene } from '@/types/recommendation'
 
 const DEFAULT_COVER_ASPECT_RATIO = 3 / 4
 const coverAspectRatioCache = new Map<string, number>()
@@ -81,6 +81,14 @@ export interface BaseMediaCardProps {
   onToggleSelect?: (selected: boolean) => void
   onRequestEnterSelection?: () => void
   onCoverAspectRatioChange?: (aspectRatio: number) => void
+  recommendationContext?: {
+    scene: RecommendationScene
+    seedEntityType?: RecommendationItemType
+    seedEntityId?: string
+  }
+  onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void
+  onRecommendationOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void
+  onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void
 }
 
 function toTagList(raw?: string): string[] {
@@ -708,6 +716,10 @@ export function BaseMediaCard({
   onToggleSelect,
   onRequestEnterSelection,
   onCoverAspectRatioChange,
+  recommendationContext,
+  onRecommendationOpenReader,
+  onRecommendationOpenDetails,
+  onRecommendationFavorite,
 }: BaseMediaCardProps) {
   const imageSrc = thumbnailUrl && thumbnailUrl.trim().length > 0
     ? thumbnailUrl
@@ -813,8 +825,14 @@ export function BaseMediaCard({
   }, [])
 
   const navigateToReader = React.useCallback(() => {
+    onRecommendationOpenReader?.(type, id)
     router.push(readerPath)
-  }, [readerPath, router])
+  }, [id, onRecommendationOpenReader, readerPath, router, type])
+
+  const navigateToDetails = React.useCallback(() => {
+    onRecommendationOpenDetails?.(type, id)
+    router.push(detailPath)
+  }, [detailPath, id, onRecommendationOpenDetails, router, type])
 
   const toggleSelected = React.useCallback((nextSelected?: boolean) => {
     if (!selectable || !onToggleSelect) return
@@ -829,14 +847,18 @@ export function BaseMediaCard({
     try {
       const success = await onFavoriteToggle(id, isFavorite)
       if (success) {
-        setIsFavorite(!isFavorite)
+        const nextFavorite = !isFavorite
+        setIsFavorite(nextFavorite)
+        if (nextFavorite) {
+          onRecommendationFavorite?.(type, id)
+        }
       }
     } catch (error) {
       logger.operationFailed('toggle favorite', error, { id, type })
     } finally {
       setFavoriteLoading(false)
     }
-  }, [favoriteLoading, id, isFavorite, onFavoriteToggle, type])
+  }, [favoriteLoading, id, isFavorite, onFavoriteToggle, onRecommendationFavorite, type])
 
   const handleFavoriteClick = async (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -1115,17 +1137,14 @@ export function BaseMediaCard({
               onClick={(e) => e.stopPropagation()}
             >
               <Button
-                asChild
                 size="icon"
                 variant="secondary"
                 className="h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25"
                 aria-label={detailsLabel || t('archive.details')}
                 title={detailsLabel || t('archive.details')}
+                onClick={navigateToDetails}
               >
-                {/* Avoid prefetching N distinct URLs like `/archive?id=...` for large grids. */}
-                <Link href={detailPath} prefetch={false}>
-                  <Eye className="h-4 w-4" />
-                </Link>
+                <Eye className="h-4 w-4" />
               </Button>
               <Button
                 type="button"

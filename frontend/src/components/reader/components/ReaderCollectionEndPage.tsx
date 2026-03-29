@@ -15,6 +15,8 @@ export function ReaderCollectionEndPage({
   nextTitle,
   nextCoverAssetId,
   nextMode = 'chapter',
+  onOpenNextDetails,
+  onOpenNextReader,
   t,
 }: {
   enabled: boolean;
@@ -25,7 +27,9 @@ export function ReaderCollectionEndPage({
   nextId: string | null;
   nextTitle: string | null;
   nextCoverAssetId?: number;
-  nextMode?: 'chapter' | 'random';
+  nextMode?: 'chapter' | 'related';
+  onOpenNextDetails?: () => void;
+  onOpenNextReader?: () => void;
   t: (key: string) => string;
 }) {
   if (!enabled) return null;
@@ -34,11 +38,11 @@ export function ReaderCollectionEndPage({
   const nextCoverUrl = ArchiveService.getAssetUrl(nextCoverAssetId);
   const finishedHeading = finishedTitle || '';
   const nextHeading = nextTitle
-    ? (nextMode === 'random'
-        ? t('reader.randomNext').replace('{title}', nextTitle)
+    ? (nextMode === 'related'
+        ? t('reader.relatedNext').replace('{title}', nextTitle)
         : t('reader.nextChapter').replace('{title}', nextTitle))
     : t('reader.noNextChapter').replace('{title}', finishedTitle || '');
-  const nextLabel = nextMode === 'random' ? t('reader.randomNextLabel') : t('reader.nextChapterLabel');
+  const nextLabel = nextMode === 'related' ? t('reader.relatedNextLabel') : t('reader.nextChapterLabel');
 
   return (
     <div
@@ -106,6 +110,7 @@ export function ReaderCollectionEndPage({
                   href={nextId ? `/archive?id=${nextId}` : '#'}
                   prefetch={false}
                   className={nextId ? 'block mt-2' : 'block mt-2 pointer-events-none opacity-60'}
+                  onClick={nextId ? onOpenNextDetails : undefined}
                 >
                   <div className="relative aspect-[3/4] rounded-lg bg-muted overflow-hidden">
                     {nextCoverUrl ? (
@@ -128,14 +133,14 @@ export function ReaderCollectionEndPage({
                 <div className="mt-3 flex gap-2">
                   {nextId ? (
                     <Button asChild variant="outline" size="sm" className="flex-1">
-                      <Link href={`/archive?id=${nextId}`} prefetch={false}>
+                      <Link href={`/archive?id=${nextId}`} prefetch={false} onClick={onOpenNextDetails}>
                         {t('common.details')}
                       </Link>
                     </Button>
                   ) : null}
                   {nextId ? (
                     <Button asChild size="sm" className="flex-1">
-                      <Link href={`/reader?id=${nextId}&page=1`} prefetch={false}>
+                      <Link href={`/reader?id=${nextId}&page=1`} prefetch={false} onClick={onOpenNextReader}>
                         {t('common.read')}
                       </Link>
                     </Button>

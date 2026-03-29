@@ -5,6 +5,7 @@ import { BookOpen } from 'lucide-react';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { getCoverAssetId } from '@/lib/utils/archive-assets';
+import type { RecommendationItemType, RecommendationScene } from '@/types/recommendation';
 
 interface TankoubonCardProps {
   tankoubon: Tankoubon;
@@ -17,6 +18,14 @@ interface TankoubonCardProps {
   onToggleSelect?: (selected: boolean) => void;
   onRequestEnterSelection?: () => void;
   onCoverAspectRatioChange?: (aspectRatio: number) => void;
+  recommendationContext?: {
+    scene: RecommendationScene;
+    seedEntityType?: RecommendationItemType;
+    seedEntityId?: string;
+  };
+  onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
+  onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
 }
 
 export function TankoubonCard({
@@ -30,6 +39,10 @@ export function TankoubonCard({
   onToggleSelect,
   onRequestEnterSelection,
   onCoverAspectRatioChange,
+  recommendationContext,
+  onRecommendationOpenReader,
+  onRecommendationOpenDetails,
+  onRecommendationFavorite,
 }: TankoubonCardProps) {
   const { t } = useLanguage();
   const firstArchiveId = tankoubon.children?.[0];
@@ -75,6 +88,10 @@ export function TankoubonCard({
       onToggleSelect={onToggleSelect}
       onRequestEnterSelection={onRequestEnterSelection}
       onCoverAspectRatioChange={onCoverAspectRatioChange}
+      recommendationContext={recommendationContext}
+      onRecommendationOpenReader={onRecommendationOpenReader}
+      onRecommendationOpenDetails={onRecommendationOpenDetails}
+      onRecommendationFavorite={onRecommendationFavorite}
     />
   );
 }

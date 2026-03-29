@@ -10,6 +10,7 @@ import { ChunkedUploadService } from '@/lib/services/chunked-upload-service';
 import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { FavoriteService } from '@/lib/services/favorite-service';
+import { RecommendationService } from '@/lib/services/recommendation-service';
 import { TagService } from '@/lib/services/tag-service';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -32,6 +33,9 @@ import { ArchiveMobileActions } from './components/ArchiveMobileActions';
 import { useArchiveTankoubons } from './hooks/useArchiveTankoubons';
 import type { RpcSelectRequest } from '@/components/archive/ArchiveMetadataEditDialog';
 import { ArchiveSearchTagBadge } from '@/components/archive/ArchiveSearchTagBadge';
+import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
+import type { Archive } from '@/types/archive';
+import type { RecommendationItemType } from '@/types/recommendation';
 import { BookOpen, Download, Edit, Heart, RotateCcw, CheckCircle, Trash2, FolderPlus } from 'lucide-react';
 
 const AddToTankoubonDialog = dynamic(
@@ -79,6 +83,8 @@ export function ArchiveDetailContent() {
   });
 
   const [showPreview, setShowPreview] = useState(false);
+  const [relatedArchives, setRelatedArchives] = useState<Archive[]>([]);
+  const [relatedLoading, setRelatedLoading] = useState(false);
   const [metadataPluginPreviewPages, setMetadataPluginPreviewPages] = useState<MetadataPagePatchInput[]>([]);
   const [previewRefreshToken, setPreviewRefreshToken] = useState(0);
   const { previewLoading, previewError, displayPages } =
@@ -184,6 +190,60 @@ export function ArchiveDetailContent() {
       setFavoriteLoading(false);
     }
   }, [favoriteLoading, id, isFavorite, setIsFavorite]);
+
+  useEffect(() => {
+    if (!metadata?.arcid) {
+      setRelatedArchives([]);
+      setRelatedLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setRelatedLoading(true);
+
+    void RecommendationService.getArchiveRelated(metadata.arcid, { count: 12, lang: language })
+      .then((items) => {
+        if (!cancelled) {
+          setRelatedArchives(items);
+        }
+      })
+      .catch((err) => {
+        logger.apiError('fetch archive related recommendations', err);
+        if (!cancelled) {
+          setRelatedArchives([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setRelatedLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [language, metadata?.arcid]);
+
+  const trackRelatedInteraction = useCallback(async (
+    interactionType: 'click' | 'open_reader' | 'favorite',
+    itemType: RecommendationItemType,
+    itemId: string
+  ) => {
+    if (!metadata?.arcid) return;
+
+    try {
+      await RecommendationService.recordInteraction({
+        scene: 'archive_related',
+        seed_entity_type: 'archive',
+        seed_entity_id: metadata.arcid,
+        item_type: itemType,
+        item_id: itemId,
+        interaction_type: interactionType,
+      });
+    } catch (err) {
+      logger.apiError(`track archive related ${interactionType}`, err);
+    }
+  }, [metadata?.arcid]);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -911,6 +971,39 @@ export function ArchiveDetailContent() {
               previewArchivesByTankoubonId={tankoubonPreviewArchives}
               loading={tankoubonsLoading}
             />
+          ) : null}
+
+          {(relatedLoading || relatedArchives.length > 0) ? (
+            <section className="rounded-2xl border bg-card/70 p-4 backdrop-blur dark:bg-card/70 sm:p-5">
+              <div className="mb-4">
+                <h2 className="text-lg font-semibold">{t('archive.relatedTitle')}</h2>
+                <p className="text-sm text-muted-foreground">{t('archive.relatedDescription')}</p>
+              </div>
+
+              {relatedLoading ? (
+                <div className="flex min-h-32 items-center justify-center">
+                  <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+                </div>
+              ) : relatedArchives.length > 0 ? (
+                <RecommendationCardRow
+                  items={relatedArchives}
+                  scene="archive_related"
+                  seedEntityType="archive"
+                  seedEntityId={metadata.arcid}
+                  onOpenReader={(itemType, itemId) => {
+                    void trackRelatedInteraction('open_reader', itemType, itemId);
+                  }}
+                  onOpenDetails={(itemType, itemId) => {
+                    void trackRelatedInteraction('click', itemType, itemId);
+                  }}
+                  onFavorite={(itemType, itemId) => {
+                    void trackRelatedInteraction('favorite', itemType, itemId);
+                  }}
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">{t('archive.noRelated')}</p>
+              )}
+            </section>
           ) : null}
 
           <ArchiveBasicInfoCard metadata={metadata} t={t} />

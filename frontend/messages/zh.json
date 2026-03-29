@@ -195,7 +195,10 @@
     "metadataPluginRun": "执行",
     "metadataPluginRunning": "执行中...",
     "collectionsTitle": "所属合集",
+    "relatedTitle": "相关推荐",
+    "relatedDescription": "基于当前档案的标签、分类与阅读偏好",
     "noCollections": "该档案未加入任何合集",
+    "noRelated": "暂无相关推荐",
     "noOtherArchivesInCollection": "此合集中暂无其他档案",
     "metadataPluginSelectRequired": "请选择一个元数据插件",
     "metadataPluginEnqueued": "已入队，等待执行",
@@ -282,6 +285,7 @@
     "prevPage": "上一页",
     "nextPage": "下一页",
     "nextChapterLabel": "下一话",
+    "relatedNextLabel": "相关推荐",
     "randomNextLabel": "随机漫画",
     "missingId": "缺少归档ID参数",
     "fetchError": "获取归档页面失败",
@@ -289,6 +293,7 @@
   "backToArchive": "返回详情页",
   "finishedReading": "已读完{title}",
   "nextChapter": "下一话{title}",
+  "relatedNext": "相关推荐：{title}",
   "randomNext": "随机推荐：{title}",
   "noNextChapter": "已读完{title}",
   "readingMode": "阅读模式",
@@ -1039,7 +1044,10 @@
     "listView": "列表",
     "gridView": "网格",
     "switchToListView": "切换为列表视图",
-    "switchToGridView": "切换为网格视图"
+    "switchToGridView": "切换为网格视图",
+    "relatedTitle": "相关推荐",
+    "relatedDescription": "基于当前合集的标签、分类与阅读偏好",
+    "noRelated": "暂无相关推荐"
   },
   "dashboard": {
     "title": "仪表板",
