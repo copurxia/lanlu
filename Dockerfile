@@ -15,6 +15,7 @@ RUN set -eux; \
       libavif16 \
       libheif1 \
       libssl3 \
+      librocksdb8.9 \
       libvips \
       tzdata \
       unzip; \
