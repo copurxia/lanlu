@@ -13,7 +13,7 @@ export type WordCloudItem = {
 type LayoutWord = {
   id: string;
   text: string;
-  weight: number;
+  count: number;
   size: number;
   x: number;
   y: number;
@@ -143,7 +143,7 @@ export function WordCloud({ items, onWordClick, className, ariaLabel, maxWords =
           prepared.map((w) => ({
             id: w.id,
             text: w.text,
-            weight: w.weight,
+            count: w.weight,
             size: scale(w.weight),
             x: 0,
             y: 0,
@@ -194,7 +194,7 @@ export function WordCloud({ items, onWordClick, className, ariaLabel, maxWords =
                 dominantBaseline="central"
                 role={onWordClick ? 'button' : undefined}
                 tabIndex={onWordClick ? 0 : -1}
-                aria-label={`${w.text} (${w.weight})`}
+                aria-label={`${w.text} (${w.count})`}
                 style={{
                   fontFamily: 'system-ui',
                   fontSize: w.size,
@@ -218,7 +218,7 @@ export function WordCloud({ items, onWordClick, className, ariaLabel, maxWords =
                   }
                 }}
               >
-                <title>{`${w.text} (${w.weight})`}</title>
+                <title>{`${w.text} (${w.count})`}</title>
                 {w.text}
               </text>
             );
