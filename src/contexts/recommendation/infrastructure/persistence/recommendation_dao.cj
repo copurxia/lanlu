@@ -168,6 +168,43 @@ public class RecommendationDao {
         return result
     }
 
+    public static func clearImpressions(userId: Int64, sessionKey: String, scene: String): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case None => return false
+            case Some(conn) =>
+                try {
+                    var sql = "DELETE FROM recommendation_impressions WHERE scene = ?"
+                    let normalizedSession = sessionKey.trimAscii()
+                    if (userId > 0) {
+                        sql += " AND user_id = ?"
+                    } else if (normalizedSession.size > 0) {
+                        sql += " AND session_key = ?"
+                    } else {
+                        return false
+                    }
+                    let stmt = conn.prepareStatement(sql)
+                    try {
+                        stmt.set(0, scene)
+                        if (userId > 0) {
+                            stmt.set(1, userId)
+                        } else {
+                            stmt.set(1, normalizedSession)
+                        }
+                        let result = stmt.update()
+                        return result.rowCount >= 0
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.error("清理推荐曝光失败", ("scene", scene), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+        }
+    }
+
     public static func getRecentUserTagWeights(userId: Int64, limit: Int32): RecommendationUserTagWeights {
         let result = RecommendationUserTagWeights()
         if (userId <= 0 || limit <= 0) {

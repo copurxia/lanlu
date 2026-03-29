@@ -27,6 +27,8 @@ private class RecommendationScoredItem {
 }
 
 public class RecommendationService {
+    private static let DISCOVER_RECENT_LOOKBACK_HOURS: Int32 = 24
+
     private static func normalizeNamespace(tag: String): String {
         let idxOpt = tag.indexOf(":")
         match (idxOpt) {
@@ -178,7 +180,20 @@ public class RecommendationService {
 
     private static func selectDiverseTop(items: ArrayList<RecommendationScoredItem>, count: Int32, scene: String): Array<RecommendationScoredItem> {
         let selected = ArrayList<RecommendationScoredItem>()
+        fillDiverseTop(items, selected, count, scene)
+        return selected.toArray()
+    }
+
+    private static func fillDiverseTop(
+        items: ArrayList<RecommendationScoredItem>,
+        selected: ArrayList<RecommendationScoredItem>,
+        count: Int32,
+        scene: String
+    ): Unit {
         let selectedKeys = HashSet<String>()
+        for (item in selected) {
+            selectedKeys.add("${item.itemType}:${item.itemId}")
+        }
         while (Int32(selected.size) < count) {
             var bestIndex = -1
             var bestScore = -999999.0
@@ -201,60 +216,22 @@ public class RecommendationService {
             selected.add(chosen)
             selectedKeys.add("${chosen.itemType}:${chosen.itemId}")
         }
-        return selected.toArray()
     }
 
-    private static func buildResultItems(selected: Array<RecommendationScoredItem>, seedEntityType: String, seedEntityId: String): Array<RecommendationResultItem> {
-        let out = ArrayList<RecommendationResultItem>()
-        for (selectedItem in selected) {
-            let item = RecommendationResultItem()
-            item.itemType = selectedItem.itemType
-            item.itemId = selectedItem.itemId
-            item.score = selectedItem.score
-            item.seedEntityType = seedEntityType
-            item.seedEntityId = seedEntityId
-            out.add(item)
-        }
-        return out.toArray()
-    }
-
-    public static func getDiscoverRecommendations(userId: Int64, sessionKey: String, categoryId: Int64, count: Int32): Array<RecommendationResultItem> {
-        let safeCount = if (count > 0) { count } else { 12i32 }
-        let recentArchiveIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "discover", "archive", 72i32)
-        let recentTankIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "discover", "tankoubon", 72i32)
-        let userTagWeights = RecommendationDao.getRecentUserTagWeights(userId, 24i32)
-
-        let candidatesById = HashMap<String, RecommendationArchiveCandidateRow>()
-        for (candidate in RecommendationDao.getDiscoverRandomArchiveCandidates(categoryId, userId, safeCount * 14i32)) {
-            if (candidate.arcid.size > 0) {
-                candidatesById[candidate.arcid] = candidate
-            }
-        }
-        if (userTagWeights.orderedTags.size > 0) {
-            for (candidate in RecommendationDao.getDiscoverArchiveCandidatesByTags(categoryId, userTagWeights.orderedTags, safeCount * 10i32)) {
-                if (candidate.arcid.size == 0) { continue }
-                match (candidatesById.get(candidate.arcid)) {
-                    case Some(existing) =>
-                        if (candidate.overlapCount > existing.overlapCount) {
-                            candidatesById[candidate.arcid] = candidate
-                        }
-                    case None =>
-                        candidatesById[candidate.arcid] = candidate
-                }
-            }
-        }
-
-        let candidateIds = ArrayList<String>()
-        for ((arcid, _candidate) in candidatesById) {
-            if (!recentArchiveIds.contains(arcid)) {
-                candidateIds.add(arcid)
-            }
-        }
-
-        let tankMap = RecommendationDao.getArchiveToPrimaryTankoubonMap(candidateIds.toArray())
+    private static func buildDiscoverRankedItems(
+        candidatesById: HashMap<String, RecommendationArchiveCandidateRow>,
+        tankMap: HashMap<String, String>,
+        userTagWeights: RecommendationUserTagWeights,
+        recentArchiveIds: HashSet<String>,
+        recentTankIds: HashSet<String>,
+        categoryId: Int64,
+    ): ArrayList<RecommendationScoredItem> {
         let grouped = HashMap<String, RecommendationScoredItem>()
         for ((arcid, candidate) in candidatesById) {
-            if (recentArchiveIds.contains(arcid)) { continue }
+            if (recentArchiveIds.contains(arcid)) {
+                continue
+            }
+
             let affinity = userAffinityScore(candidate.tags, userTagWeights)
             let categoryBoost = if (categoryId > 0 && candidate.categoryId == categoryId) { 1.0 } else if (categoryId > 0) { 0.15 } else { 0.45 }
             let score =
@@ -299,7 +276,79 @@ public class RecommendationService {
             ranked.add(item)
         }
         sortScoredItems(ranked)
-        return buildResultItems(selectDiverseTop(ranked, safeCount, "discover"), "", "")
+        return ranked
+    }
+
+    private static func buildResultItems(selected: Array<RecommendationScoredItem>, seedEntityType: String, seedEntityId: String): Array<RecommendationResultItem> {
+        let out = ArrayList<RecommendationResultItem>()
+        for (selectedItem in selected) {
+            let item = RecommendationResultItem()
+            item.itemType = selectedItem.itemType
+            item.itemId = selectedItem.itemId
+            item.score = selectedItem.score
+            item.seedEntityType = seedEntityType
+            item.seedEntityId = seedEntityId
+            out.add(item)
+        }
+        return out.toArray()
+    }
+
+    public static func getDiscoverRecommendations(userId: Int64, sessionKey: String, categoryId: Int64, count: Int32): Array<RecommendationResultItem> {
+        let safeCount = if (count > 0) { count } else { 12i32 }
+        var recentArchiveIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "discover", "archive", DISCOVER_RECENT_LOOKBACK_HOURS)
+        var recentTankIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "discover", "tankoubon", DISCOVER_RECENT_LOOKBACK_HOURS)
+        let userTagWeights = RecommendationDao.getRecentUserTagWeights(userId, 24i32)
+
+        let candidatesById = HashMap<String, RecommendationArchiveCandidateRow>()
+        for (candidate in RecommendationDao.getDiscoverRandomArchiveCandidates(categoryId, userId, safeCount * 14i32)) {
+            if (candidate.arcid.size > 0) {
+                candidatesById[candidate.arcid] = candidate
+            }
+        }
+        if (userTagWeights.orderedTags.size > 0) {
+            for (candidate in RecommendationDao.getDiscoverArchiveCandidatesByTags(categoryId, userTagWeights.orderedTags, safeCount * 10i32)) {
+                if (candidate.arcid.size == 0) { continue }
+                match (candidatesById.get(candidate.arcid)) {
+                    case Some(existing) =>
+                        if (candidate.overlapCount > existing.overlapCount) {
+                            candidatesById[candidate.arcid] = candidate
+                        }
+                    case None =>
+                        candidatesById[candidate.arcid] = candidate
+                }
+            }
+        }
+
+        let candidateIds = ArrayList<String>()
+        for ((arcid, _candidate) in candidatesById) {
+            candidateIds.add(arcid)
+        }
+
+        let tankMap = RecommendationDao.getArchiveToPrimaryTankoubonMap(candidateIds.toArray())
+        var freshRanked = buildDiscoverRankedItems(
+            candidatesById,
+            tankMap,
+            userTagWeights,
+            recentArchiveIds,
+            recentTankIds,
+            categoryId
+        )
+
+        if (freshRanked.size == 0 && (recentArchiveIds.size > 0 || recentTankIds.size > 0)) {
+            let _ = RecommendationDao.clearImpressions(userId, sessionKey, "discover")
+            recentArchiveIds = HashSet<String>()
+            recentTankIds = HashSet<String>()
+            freshRanked = buildDiscoverRankedItems(
+                candidatesById,
+                tankMap,
+                userTagWeights,
+                recentArchiveIds,
+                recentTankIds,
+                categoryId
+            )
+        }
+
+        return buildResultItems(selectDiverseTop(freshRanked, safeCount, "discover"), "", "")
     }
 
     public static func getArchiveRelatedRecommendations(userId: Int64, sessionKey: String, archiveId: String, count: Int32): Array<RecommendationResultItem> {
