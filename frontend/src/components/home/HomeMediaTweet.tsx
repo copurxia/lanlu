@@ -1,11 +1,13 @@
 'use client';
 
 import type { MouseEvent } from 'react';
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Check, Eye, Heart, Square } from 'lucide-react';
+import { FeedPreviewPlaceholder } from '@/components/home/HomeFeedLoading';
 import { HomeMediaItemMenu } from '@/components/home/HomeMediaItemMenu';
+import { useArchivePreviewFeed } from '@/components/home/useArchivePreviewFeed';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -18,16 +20,11 @@ import type { Tankoubon } from '@/types/tankoubon';
 
 const TWEET_PREVIEW_LIMIT = 9;
 const TWEET_PREVIEW_SOURCE_SCAN_LIMIT = 24;
-const tweetPreviewCache = new Map<string, PageInfo[]>();
 const TWEET_PREVIEW_FILE_PARAMS = {
   limit: TWEET_PREVIEW_SOURCE_SCAN_LIMIT,
   offset: 0,
   include_metadata: true,
 } as const;
-
-function getTweetPreviewCacheKey(archiveId: string): string {
-  return `${archiveId}|${TWEET_PREVIEW_FILE_PARAMS.limit}|${TWEET_PREVIEW_FILE_PARAMS.offset}|${TWEET_PREVIEW_FILE_PARAMS.include_metadata ? 'meta' : 'bare'}`;
-}
 
 type HomeMediaTweetProps = {
   items: Array<Archive | Tankoubon>;
@@ -50,6 +47,12 @@ type TweetPreviewItem = {
   src: string;
 };
 
+type TweetPreviewSource = {
+  id: string;
+  label: string;
+  src: string;
+};
+
 type HomeMediaTweetCardProps = {
   description: string;
   detailPath: string;
@@ -66,6 +69,7 @@ type HomeMediaTweetCardProps = {
   thumbnailAssetId?: number;
   title: string;
   type: 'archive' | 'tankoubon';
+  previewPriority?: boolean;
   onToggleSelected: (selected: boolean) => void;
   onRequestEnterSelection: () => void;
 };
@@ -106,6 +110,22 @@ function getPagePreviewSrc(page: PageInfo): string {
   return '';
 }
 
+async function loadTweetPreviewSources(archiveId: string): Promise<TweetPreviewSource[]> {
+  const result = await ArchiveService.getFiles(archiveId, TWEET_PREVIEW_FILE_PARAMS);
+  return result.pages
+    .map((page, index) => {
+      const src = getPagePreviewSrc(page);
+      if (!src) return null;
+      return {
+        id: `${archiveId}:${page.path || index}`,
+        label: page.title || '',
+        src,
+      };
+    })
+    .filter((item): item is TweetPreviewSource => item !== null)
+    .slice(0, TWEET_PREVIEW_LIMIT);
+}
+
 const TweetPreviewTile = memo(function TweetPreviewTile({
   item,
   className,
@@ -132,11 +152,17 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
   emptyLabel,
   items,
   loading,
+  ready,
 }: {
   emptyLabel: string;
   items: TweetPreviewItem[];
   loading: boolean;
+  ready: boolean;
 }) {
+  if (!ready && loading) {
+    return <FeedPreviewPlaceholder className="aspect-[16/10] w-full rounded-none" label={emptyLabel} />;
+  }
+
   if (items.length === 0) {
     return (
       <div className="flex aspect-[16/10] items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
@@ -147,7 +173,7 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   if (items.length === 1) {
     return (
-      <div className="aspect-[16/10] bg-border">
+      <div className="feed-media-fade aspect-[16/10] bg-border">
         <TweetPreviewTile item={items[0]} />
       </div>
     );
@@ -155,7 +181,7 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   if (items.length === 2) {
     return (
-      <div className="grid aspect-[16/10] grid-cols-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-[16/10] grid-cols-2 gap-px bg-border">
         {items.map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
@@ -165,7 +191,7 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   if (items.length === 3) {
     return (
-      <div className="grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-px bg-border">
         <TweetPreviewTile item={items[0]} className="row-span-2" />
         <TweetPreviewTile item={items[1]} />
         <TweetPreviewTile item={items[2]} />
@@ -175,19 +201,19 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   return (
     items.length === 4 ? (
-      <div className="grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-px bg-border">
         {items.map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
       </div>
     ) : items.length <= 6 ? (
-      <div className="grid aspect-[3/2] grid-cols-3 grid-rows-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-[3/2] grid-cols-3 grid-rows-2 gap-px bg-border">
         {items.map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
       </div>
     ) : (
-      <div className="grid aspect-square grid-cols-3 grid-rows-3 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-square grid-cols-3 grid-rows-3 gap-px bg-border">
         {items.slice(0, TWEET_PREVIEW_LIMIT).map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
@@ -212,65 +238,24 @@ function HomeMediaTweetCard({
   thumbnailAssetId,
   title,
   type,
+  previewPriority = false,
   onToggleSelected,
   onRequestEnterSelection,
 }: HomeMediaTweetCardProps) {
   const { t } = useLanguage();
-  const [shouldLoadPreview, setShouldLoadPreview] = useState(false);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewPages, setPreviewPages] = useState<PageInfo[]>([]);
   const [contentExpanded, setContentExpanded] = useState(false);
-  const previewRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (!previewRef.current || shouldLoadPreview) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return;
-        setShouldLoadPreview(true);
-      },
-      {
-        rootMargin: '240px 0px',
-        threshold: 0.01,
-      }
-    );
-
-    observer.observe(previewRef.current);
-    return () => observer.disconnect();
-  }, [shouldLoadPreview]);
-
-  useEffect(() => {
-    if (!shouldLoadPreview || !previewArchiveId) return;
-
-    const cacheKey = getTweetPreviewCacheKey(previewArchiveId);
-    const cached = tweetPreviewCache.get(cacheKey);
-    if (cached) {
-      setPreviewPages(cached);
-      return;
-    }
-
-    let cancelled = false;
-    setPreviewLoading(true);
-
-    void ArchiveService.getFiles(previewArchiveId, TWEET_PREVIEW_FILE_PARAMS)
-      .then((result) => {
-        if (cancelled) return;
-        const nextPages = result.pages.slice(0, TWEET_PREVIEW_SOURCE_SCAN_LIMIT);
-        tweetPreviewCache.set(cacheKey, nextPages);
-        setPreviewPages(nextPages);
-      })
-      .catch(() => {
-        if (!cancelled) setPreviewPages([]);
-      })
-      .finally(() => {
-        if (!cancelled) setPreviewLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [previewArchiveId, shouldLoadPreview]);
+  const {
+    items: previewSources,
+    loading: previewLoading,
+    ready: previewReady,
+    targetRef: previewRef,
+  } = useArchivePreviewFeed<TweetPreviewSource, HTMLButtonElement>({
+    archiveId: previewArchiveId,
+    eager: previewPriority,
+    enabled: Boolean(previewArchiveId),
+    loaderKey: 'tweet-preview',
+    loadItems: loadTweetPreviewSources,
+  });
 
   return (
     <HomeMediaItemMenu
@@ -306,25 +291,22 @@ function HomeMediaTweetCard({
         const tags = buildTweetTags(displayTags);
         const contentText = [displayTitle.trim(), displayDescription.trim()].filter(Boolean).join('\n\n');
         const canToggleContent = contentText.length > 180 || contentText.includes('\n');
-        const previewItems = previewPages
-          .map((page, index) => {
-            const src = getPagePreviewSrc(page);
-            if (!src) return null;
-            return {
-              alt: page.title || `${displayTitle || author} ${index + 1}`,
-              id: `${id}-${page.path || index}`,
-              src,
-            };
-          })
-          .filter((item): item is TweetPreviewItem => item !== null)
-          .slice(0, TWEET_PREVIEW_LIMIT);
+        const previewItems: TweetPreviewItem[] = previewSources.map((item, index) => ({
+          alt: item.label || `${displayTitle || author} ${index + 1}`,
+          id: item.id,
+          src: item.src,
+        }));
 
         return (
           <article
             className={cn(
-              'rounded-2xl border bg-card px-4 py-4 shadow-sm transition-colors hover:bg-card/95 sm:px-5',
+              'feed-card-enter rounded-2xl border bg-card px-4 py-4 shadow-sm transition-colors hover:bg-card/95 sm:px-5',
               selected && 'border-primary ring-1 ring-primary/30'
             )}
+            style={{
+              contentVisibility: 'auto',
+              containIntrinsicSize: '340px 620px',
+            }}
             onContextMenuCapture={handleContextMenuCapture}
             onContextMenu={handleContextMenu}
           >
@@ -444,6 +426,7 @@ function HomeMediaTweetCard({
                   <TweetPreviewMedia
                     items={previewItems}
                     loading={previewLoading}
+                    ready={previewReady}
                     emptyLabel={displayTitle || author}
                   />
                   <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -471,12 +454,14 @@ const HomeArchiveTweetRow = memo(function HomeArchiveTweetRow({
   selected,
   onRequestEnterSelection,
   onToggleArchiveSelect,
+  previewPriority,
 }: {
   archive: Archive;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
   onToggleArchiveSelect: (id: string, selected: boolean) => void;
+  previewPriority: boolean;
 }) {
   const { t } = useLanguage();
   const contentMeta = `${t('archive.pages').replace('{count}', String(archive.pagecount))}${archive.progress > 0 && archive.pagecount > 0 ? ` · ${Math.round((archive.progress / archive.pagecount) * 100)}% ${t('common.read')}` : ''}`;
@@ -499,6 +484,7 @@ const HomeArchiveTweetRow = memo(function HomeArchiveTweetRow({
       isNew={archive.isnew}
       progress={archive.progress}
       thumbnailAssetId={coverAssetId}
+      previewPriority={previewPriority}
       onToggleSelected={(nextSelected) => onToggleArchiveSelect(archive.arcid, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
@@ -511,12 +497,14 @@ const HomeTankoubonTweetRow = memo(function HomeTankoubonTweetRow({
   selected,
   onRequestEnterSelection,
   onToggleTankoubonSelect,
+  previewPriority,
 }: {
   tankoubon: Tankoubon;
   selectionMode: boolean;
   selected: boolean;
   onRequestEnterSelection: () => void;
   onToggleTankoubonSelect: (id: string, selected: boolean) => void;
+  previewPriority: boolean;
 }) {
   const { t } = useLanguage();
   const firstArchiveId = typeof tankoubon.children?.[0] === 'string' ? tankoubon.children[0] : '';
@@ -539,6 +527,7 @@ const HomeTankoubonTweetRow = memo(function HomeTankoubonTweetRow({
       isFavorite={Boolean(tankoubon.isfavorite)}
       isNew={Boolean(tankoubon.isnew)}
       thumbnailAssetId={coverAssetId}
+      previewPriority={previewPriority}
       onToggleSelected={(nextSelected) => onToggleTankoubonSelect(tankoubon.tankoubon_id, nextSelected)}
       onRequestEnterSelection={onRequestEnterSelection}
     />
@@ -556,12 +545,13 @@ export const HomeMediaTweet = memo(function HomeMediaTweet({
 }: HomeMediaTweetProps) {
   return (
     <div className="space-y-4">
-      {items.map((item) => {
+      {items.map((item, index) => {
         if (isTankoubonItem(item)) {
           return (
             <HomeTankoubonTweetRow
               key={`tankoubon:${item.tankoubon_id}`}
               tankoubon={item}
+              previewPriority={index < 2}
               selectionMode={selectionMode}
               selected={selectedTankoubonIds.has(item.tankoubon_id)}
               onRequestEnterSelection={onRequestEnterSelection}
@@ -571,12 +561,13 @@ export const HomeMediaTweet = memo(function HomeMediaTweet({
         }
 
         return (
-          <HomeArchiveTweetRow
-            key={`archive:${item.arcid}`}
-            archive={item}
-            selectionMode={selectionMode}
-            selected={selectedArchiveIds.has(item.arcid)}
-            onRequestEnterSelection={onRequestEnterSelection}
+            <HomeArchiveTweetRow
+              key={`archive:${item.arcid}`}
+              archive={item}
+              previewPriority={index < 2}
+              selectionMode={selectionMode}
+              selected={selectedArchiveIds.has(item.arcid)}
+              onRequestEnterSelection={onRequestEnterSelection}
             onToggleArchiveSelect={onToggleArchiveSelect}
           />
         );

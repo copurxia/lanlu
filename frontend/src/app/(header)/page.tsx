@@ -16,6 +16,7 @@ import { SearchSidebar } from '@/components/layout/SearchSidebar';
 import { HomeMediaList } from '@/components/home/HomeMediaList';
 import { HomeMediaMasonry } from '@/components/home/HomeMediaMasonry';
 import { HomeMediaChannel } from '@/components/home/HomeMediaChannel';
+import { ChannelFeedSkeleton, TweetFeedSkeleton } from '@/components/home/HomeFeedLoading';
 import { HomeMediaTweet } from '@/components/home/HomeMediaTweet';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
@@ -28,7 +29,7 @@ import type { RecommendationItemType } from '@/types/recommendation';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { Check, Download, Heart, Pencil, RotateCcw, Trash2, X, ChevronRight, RefreshCw } from 'lucide-react';
-import { memo, useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
+import { memo, startTransition, useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useDebounce, useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
 import { useToast } from '@/hooks/use-toast';
@@ -518,11 +519,11 @@ function HomePageContent() {
     setDateTo(urlDateTo);
     setGroupByTanks(urlGroupByTanks);
     setCategoryId(urlQuery ? 'all' : urlCategoryId);
-    setCurrentPage(urlPage); // 从URL恢复页码
+    setCurrentPage(homeViewMode === 'list' ? urlPage : 0); // 连续流模式始终从第一页开始构建
 
     // 标记为已初始化，避免在初始化期间同步URL
     setIsInitialized(true);
-  }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly, urlPage]);
+  }, [homeViewMode, urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly, urlPage]);
 
   useEffect(() => {
     const handleHomeViewModeChange = (nextMode?: HomeViewMode) => {
@@ -544,7 +545,10 @@ function HomePageContent() {
   const isHomeLanding = !isSearchMode && categoryId === 'all';
   const showCategoryRowsView = isHomeLanding && homeViewMode === 'category-rows';
   const showArchiveFeed = !showCategoryRowsView;
-  const isMasonryFeed = showArchiveFeed && homeViewMode === 'masonry';
+  const isContinuousFeed = showArchiveFeed && (
+    homeViewMode === 'masonry' || homeViewMode === 'tweet' || homeViewMode === 'channel'
+  );
+  const hasMoreFeedPages = totalPages > 0 && currentPage + 1 < totalPages;
 
   // 同步状态到URL（仅在初始化完成后执行）
   useEffect(() => {
@@ -562,7 +566,7 @@ function HomePageContent() {
     if (!searchQuery && categoryId && categoryId !== 'all') params.set('category_id', categoryId);
     // Always reflect this in the URL so it's shareable/reproducible.
     params.set('groupby_tanks', groupByTanks ? 'true' : 'false');
-    if (currentPage > 0) params.set('page', currentPage.toString()); // 只在非第一页时添加页码参数
+    if (!isContinuousFeed && currentPage > 0) params.set('page', currentPage.toString()); // 只在非第一页时添加页码参数
 
     const queryString = params.toString();
     const newUrl = queryString ? `/?${queryString}` : '/';
@@ -574,17 +578,17 @@ function HomePageContent() {
       return;
     }
     router.replace(newUrl);
-  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly]);
+  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isContinuousFeed, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly]);
 
   useEffect(() => {
     // 只在客户端执行数据获取，避免静态生成时的API调用
     // 确保只在初始化完成后才获取数据，避免使用未同步的初始状态
     if (typeof window !== 'undefined' && isInitialized && showArchiveFeed) {
       fetchArchives(debouncedFetchInput, {
-        append: homeViewMode === 'masonry' && debouncedFetchInput.page > 0,
+        append: isContinuousFeed && debouncedFetchInput.page > 0,
       });
     }
-  }, [debouncedFetchInput, fetchArchives, homeViewMode, isInitialized, showArchiveFeed]);
+  }, [debouncedFetchInput, fetchArchives, isContinuousFeed, isInitialized, showArchiveFeed]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -633,7 +637,7 @@ function HomePageContent() {
   useEffect(() => {
     const handleUploadCompleted = () => {
       if (showArchiveFeed) {
-        if (homeViewMode === 'masonry') {
+        if (isContinuousFeed) {
           setAutoLoadingMore(false);
           setArchives([]);
           setCurrentPage(0);
@@ -651,7 +655,7 @@ function HomePageContent() {
 
     const handleArchivesRefresh = () => {
       if (showArchiveFeed) {
-        if (homeViewMode === 'masonry') {
+        if (isContinuousFeed) {
           setAutoLoadingMore(false);
           setArchives([]);
           setCurrentPage(0);
@@ -690,7 +694,7 @@ function HomePageContent() {
       appEvents.off(AppEvents.ARCHIVES_REFRESH, handleArchivesRefresh);
       appEvents.off(AppEvents.SEARCH_RESET, handleSearchReset);
     };
-  }, [fetchArchives, fetchRandomArchives, homeViewMode, searchQuery, showArchiveFeed]);
+  }, [fetchArchives, fetchRandomArchives, isContinuousFeed, homeViewMode, searchQuery, showArchiveFeed]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1203,15 +1207,15 @@ function HomePageContent() {
   }, [clearSelection, categoryId, searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, homeViewMode]);
 
   useEffect(() => {
-    if (homeViewMode === 'masonry') return;
+    if (isContinuousFeed) return;
     clearSelection();
-  }, [clearSelection, currentPage, homeViewMode]);
+  }, [clearSelection, currentPage, isContinuousFeed]);
 
   // Homepage uses an independently scrollable <main>; reset its scroll position when the page changes.
   // This covers pagination clicks and history navigation (back/forward) that updates `page` via URL.
   useEffect(() => {
     if (!isInitialized) return;
-    if (homeViewMode === 'masonry') return;
+    if (isContinuousFeed) return;
     const prev = lastPageRef.current;
     lastPageRef.current = currentPage;
     if (prev === null || prev === currentPage) return;
@@ -1222,7 +1226,7 @@ function HomePageContent() {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     mainScrollRef.current?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
-  }, [currentPage, homeViewMode, isInitialized]);
+  }, [currentPage, isContinuousFeed, isInitialized]);
 
   const statsText = t('home.archivesCount')
     .replace('{count}', String(totalRecords))
@@ -1230,10 +1234,10 @@ function HomePageContent() {
     .replace('{totalPages}', String(totalPages));
 
   useEffect(() => {
-    if (!isMasonryFeed) return;
+    if (!isContinuousFeed) return;
     if (!masonrySentinelRef.current || !mainScrollRef.current) return;
     if (loading || autoLoadingMore) return;
-    if (currentPage + 1 >= totalPages) return;
+    if (!hasMoreFeedPages) return;
 
     const sentinel = masonrySentinelRef.current;
     const root = mainScrollRef.current;
@@ -1241,7 +1245,9 @@ function HomePageContent() {
       (entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
         setAutoLoadingMore(true);
-        setCurrentPage((page) => page + 1);
+        startTransition(() => {
+          setCurrentPage((page) => page + 1);
+        });
       },
       {
         root,
@@ -1252,7 +1258,7 @@ function HomePageContent() {
 
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [autoLoadingMore, currentPage, isMasonryFeed, loading, totalPages]);
+  }, [autoLoadingMore, currentPage, hasMoreFeedPages, isContinuousFeed, loading]);
 
   return (
     <div className="bg-background h-[calc(100dvh-var(--app-header-height,4rem))] overflow-hidden">
@@ -1541,7 +1547,7 @@ function HomePageContent() {
                     >
                       {statsText}
                     </div>
-                    {homeViewMode !== 'masonry' && totalPages > 1 && (
+                    {homeViewMode === 'list' && totalPages > 1 && (
                       <Pagination
                         currentPage={currentPage}
                         totalPages={totalPages}
@@ -1551,10 +1557,14 @@ function HomePageContent() {
                     )}
                   </div>
 
-                  {homeViewMode === 'masonry' && totalPages > 0 && currentPage + 1 < totalPages && (
-                  <div className="mt-6 flex flex-col items-center justify-center gap-3">
+                  {isContinuousFeed && hasMoreFeedPages && (
+                  <div className={cn('mt-6 flex flex-col items-center justify-center gap-3', centeredFeedClassName)}>
                       <div ref={masonrySentinelRef} className="h-1 w-full" />
-                      {(loading || autoLoadingMore) && (
+                      {homeViewMode === 'tweet' && (loading || autoLoadingMore) ? (
+                        <TweetFeedSkeleton count={2} append />
+                      ) : homeViewMode === 'channel' && (loading || autoLoadingMore) ? (
+                        <ChannelFeedSkeleton count={2} append />
+                      ) : (loading || autoLoadingMore) && (
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
                           <Spinner size="sm" />
                           <span>{t('common.loading')}</span>
@@ -1569,25 +1579,25 @@ function HomePageContent() {
                     {searchQuery ? t('home.noMatchingArchives') : t('home.noArchives')}
                   </p>
                 </div>
-              ) : homeViewMode === 'list' || homeViewMode === 'tweet' || homeViewMode === 'channel' ? (
+              ) : homeViewMode === 'tweet' ? (
+                <div className={centeredFeedClassName || undefined}>
+                  <TweetFeedSkeleton />
+                </div>
+              ) : homeViewMode === 'channel' ? (
+                <div className={centeredFeedClassName || undefined}>
+                  <ChannelFeedSkeleton />
+                </div>
+              ) : homeViewMode === 'list' ? (
                 <div className={cn('space-y-3', centeredFeedClassName)}>
                   {Array.from({ length: 4 }).map((_, idx) => (
-                    <div
-                      key={idx}
-                      className={`rounded-lg border bg-card ${homeViewMode === 'tweet' || homeViewMode === 'channel' ? 'p-4 sm:p-5' : 'p-3 sm:p-4'}`}
-                    >
+                    <div key={idx} className="rounded-lg border bg-card p-3 sm:p-4">
                       <div className="flex gap-3 sm:gap-4">
-                        {homeViewMode === 'tweet' || homeViewMode === 'channel' ? (
-                          <Skeleton className="h-11 w-11 shrink-0 rounded-full" />
-                        ) : (
-                          <Skeleton className="h-24 w-16 shrink-0 rounded-md sm:h-28 sm:w-20" />
-                        )}
+                        <Skeleton className="h-24 w-16 shrink-0 rounded-md sm:h-28 sm:w-20" />
                         <div className="min-w-0 flex-1 space-y-2">
                           <Skeleton className="h-5 w-2/3" />
                           <Skeleton className="h-4 w-1/3" />
                           <Skeleton className="h-4 w-full" />
                           <Skeleton className="h-4 w-5/6" />
-                          {(homeViewMode === 'tweet' || homeViewMode === 'channel') && <Skeleton className="mt-3 aspect-[16/10] w-full rounded-2xl" />}
                         </div>
                       </div>
                     </div>
