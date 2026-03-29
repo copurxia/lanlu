@@ -9,12 +9,12 @@ import lanlu.contexts.task.domain.*
 import lanlu.shared.utils.*
 
 /**
- * 清理缓存任务：清理 ./data/cache 目录下长时间未访问的缓存文件
- * 根据文件的 lastModificationTime 判断是否为"过期"缓存，清理长时间未读写的文件
+ * 清理缓存任务：清理缓存根目录下的过期缓存单元
+ * 根目录散文件按文件清理，一级子目录按目录整体清理
  */
 public class ClearCacheTaskRunner {
 
-    public static func run(taskId: Int64, parameters: String, _: TaskRunnerContext): Unit {
+    public static func run(taskId: Int64, parameters: String, context: TaskRunnerContext): Unit {
         let logger = getLogger("clear_cache_task")
         TaskIO.appendLog(taskId, "clear_cache task started")
 
@@ -22,8 +22,9 @@ public class ClearCacheTaskRunner {
             // 解析参数
             let (maxAgeDays, dryRun) = parseParameters(parameters)
             let maxAgeSeconds = maxAgeDays * 24 * 60 * 60
+            let cacheRoot = resolveCacheRoot(context)
 
-            TaskIO.appendLog(taskId, "Starting cache cleanup with maxAgeDays=${maxAgeDays}, dryRun=${dryRun}")
+            TaskIO.appendLog(taskId, "Starting cache cleanup with maxAgeDays=${maxAgeDays}, dryRun=${dryRun}, cacheRoot=${cacheRoot}")
 
             // 更新进度：开始扫描
             TaskModel.updateTaskProgress(taskId, 10, "Starting cache cleanup")
@@ -34,10 +35,10 @@ public class ClearCacheTaskRunner {
             var totalSkippedCount: Int64 = 0
             var errors = ArrayList<String>()
 
-            // 清理整个 cache 目录
-            TaskIO.appendLog(taskId, "Cleaning cache directory...")
+            // 清理 cache 根目录下的缓存单元
+            TaskIO.appendLog(taskId, "Cleaning cache units under ${cacheRoot}...")
             TaskModel.updateTaskProgress(taskId, 30, "Cleaning cache")
-            let cacheResult = cleanDirectory("data/cache", maxAgeSeconds, dryRun)
+            let cacheResult = cleanDirectory(cacheRoot, maxAgeSeconds, dryRun, taskId)
             totalDeletedCount += cacheResult.deletedCount
             totalDeletedSize += cacheResult.deletedSize
             totalSkippedCount += cacheResult.skippedCount
@@ -67,6 +68,14 @@ public class ClearCacheTaskRunner {
             TaskIO.appendLog(taskId, "Stack trace: ${e.toString()}")
             TaskRunnerUtils.fail(taskId, errorMsg)
         }
+    }
+
+    private static func resolveCacheRoot(context: TaskRunnerContext): String {
+        let cachePath = context.paths.cachePath.trimAscii()
+        if (cachePath.size > 0) {
+            return cachePath
+        }
+        return "data/cache"
     }
 
     /**
@@ -168,9 +177,11 @@ public class ClearCacheTaskRunner {
     }
 
     /**
-     * 清理指定目录下的过期文件（递归）
+     * 清理缓存根目录下的过期缓存单元：
+     * - 根目录散文件按文件清理
+     * - 一级子目录按目录整体清理
      */
-    private static func cleanDirectory(dirPath: String, maxAgeSeconds: Int64, dryRun: Bool): CleanResult {
+    private static func cleanDirectory(dirPath: String, maxAgeSeconds: Int64, dryRun: Bool, taskId: Int64): CleanResult {
         var result = CleanResult()
 
         if (!TaskRunnerUtils.directoryExists(dirPath)) {
@@ -179,30 +190,6 @@ public class ClearCacheTaskRunner {
 
         try {
             let currentTime = DateTime.now().toUnixTimeStamp().toSeconds()
-
-            // 递归清理过期文件
-            cleanFilesRecursive(dirPath, currentTime, maxAgeSeconds, dryRun, result)
-
-            // 清理空目录（但保留根目录）
-            removeEmptyDirectories(dirPath, dirPath, result)
-        } catch (e: Exception) {
-            result.errors.add("Error accessing directory ${dirPath}: ${e.message}")
-        }
-
-        return result
-    }
-
-    /**
-     * 递归清理过期文件
-     */
-    private static func cleanFilesRecursive(
-        dirPath: String,
-        currentTime: Int64,
-        maxAgeSeconds: Int64,
-        dryRun: Bool,
-        result: CleanResult
-    ): Unit {
-        try {
             let entries = TaskRunnerUtils.listDirectory(dirPath)
 
             for (entry in entries) {
@@ -210,71 +197,78 @@ public class ClearCacheTaskRunner {
 
                 try {
                     let fileInfo = FileInfo(Path(fullPath))
-
                     if (fileInfo.isDirectory()) {
-                        // 递归处理子目录
-                        cleanFilesRecursive(fullPath, currentTime, maxAgeSeconds, dryRun, result)
+                        cleanDirectoryUnit(fullPath, currentTime, maxAgeSeconds, dryRun, result, taskId)
                     } else {
-                        // 检查文件是否过期
-                        let lastModified = getLastModifiedTime(fullPath)
-                        let ageSeconds = currentTime - lastModified
-
-                        if (ageSeconds > maxAgeSeconds) {
-                            let size = fileInfo.size
-
-                            if (dryRun) {
-                                result.skippedCount += 1
-                            } else {
-                                if (TaskRunnerUtils.removeFile(fullPath)) {
-                                    result.deletedCount += 1
-                                    result.deletedSize += size
-                                } else {
-                                    result.errors.add("Failed to remove file: ${fullPath}")
-                                }
-                            }
-                        }
+                        cleanFileUnit(fullPath, fileInfo.size, currentTime, maxAgeSeconds, dryRun, result, taskId)
                     }
                 } catch (e: Exception) {
                     result.errors.add("Error processing ${fullPath}: ${e.message}")
                 }
             }
         } catch (e: Exception) {
-            result.errors.add("Error listing directory ${dirPath}: ${e.message}")
+            result.errors.add("Error accessing directory ${dirPath}: ${e.message}")
+        }
+
+        return result
+    }
+
+    private static func cleanFileUnit(
+        filePath: String,
+        fileSize: Int64,
+        currentTime: Int64,
+        maxAgeSeconds: Int64,
+        dryRun: Bool,
+        result: CleanResult,
+        taskId: Int64
+    ): Unit {
+        let ageSeconds = currentTime - getLastModifiedTime(filePath)
+        if (ageSeconds <= maxAgeSeconds) {
+            return
+        }
+
+        if (dryRun) {
+            result.skippedCount += 1
+            TaskIO.appendLog(taskId, "Would remove cache file: ${filePath}")
+            return
+        }
+
+        if (TaskRunnerUtils.removeFile(filePath)) {
+            result.deletedCount += 1
+            result.deletedSize += fileSize
+            TaskIO.appendLog(taskId, "Removed cache file: ${filePath}")
+        } else {
+            result.errors.add("Failed to remove file: ${filePath}")
         }
     }
 
-    /**
-     * 递归删除空目录（从叶子向上）
-     */
-    private static func removeEmptyDirectories(dirPath: String, rootPath: String, result: CleanResult): Bool {
-        try {
-            let entries = TaskRunnerUtils.listDirectory(dirPath)
-
-            // 先递归处理子目录
-            for (entry in entries) {
-                let fullPath = TaskRunnerUtils.joinPath(dirPath, entry)
-                let fileInfo = FileInfo(Path(fullPath))
-
-                if (fileInfo.isDirectory()) {
-                    removeEmptyDirectories(fullPath, rootPath, result)
-                }
-            }
-
-            // 重新检查当前目录是否为空
-            let currentEntries = TaskRunnerUtils.listDirectory(dirPath)
-            if (currentEntries.size == 0 && dirPath != rootPath) {
-                // 目录为空且不是根目录，删除它
-                try {
-                    remove(Path(dirPath))
-                    return true
-                } catch (_: Exception) {
-                    result.errors.add("Failed to remove empty directory: ${dirPath}")
-                }
-            }
-        } catch (e: Exception) {
-            result.errors.add("Error checking directory ${dirPath}: ${e.message}")
+    private static func cleanDirectoryUnit(
+        dirPath: String,
+        currentTime: Int64,
+        maxAgeSeconds: Int64,
+        dryRun: Bool,
+        result: CleanResult,
+        taskId: Int64
+    ): Unit {
+        let ageSeconds = currentTime - getLastModifiedTime(dirPath)
+        if (ageSeconds <= maxAgeSeconds) {
+            return
         }
-        return false
+
+        let dirSize = calculateDirectorySize(dirPath)
+        if (dryRun) {
+            result.skippedCount += 1
+            TaskIO.appendLog(taskId, "Would remove cache directory: ${dirPath}")
+            return
+        }
+
+        if (FileUtils.removeFileOrDirectory(dirPath)) {
+            result.deletedCount += 1
+            result.deletedSize += dirSize
+            TaskIO.appendLog(taskId, "Removed cache directory: ${dirPath}")
+        } else {
+            result.errors.add("Failed to remove directory: ${dirPath}")
+        }
     }
 
     /**
