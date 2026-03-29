@@ -100,6 +100,8 @@ public class RocksDbLocalKVStore <: LocalKVStore {
 public class LocalKVService {
     private static let logger = getLogger("local_kv_service")
     private static let mutex = Mutex()
+    private static let defaultKvMemoryMb: Int32 = 16
+    private static let minKvMemoryMb: Int32 = 4
     private static var initialized = false
     private static var store: Option<LocalKVStore> = Option<LocalKVStore>.None
 
@@ -113,30 +115,32 @@ public class LocalKVService {
 
         initialized = true
 
-        let enabled = SystemSettingsService.getBoolean("ROCKSDB_ENABLED")
-        if (!enabled) {
-            logger.info("RocksDB local KV disabled by settings")
-            store = Option<LocalKVStore>.None
-            mutex.unlock()
-            return false
-        }
-
-        var dbPath = SystemSettingsService.getPath("ROCKSDB_PATH").trimAscii()
-        if (dbPath.size == 0) {
-            dbPath = FileUtils.joinPath(SystemSettingsService.getPath("CACHE_PATH"), "rocksdb")
-        }
+        let dbPath = FileUtils.joinPath(SystemSettingsService.getPath("CACHE_PATH"), "rocksdb")
         FileUtils.ensureDirectoryExists(Path(dbPath))
 
-        let (ok, dbOpt, err) = RocksDb.openBalanced(dbPath)
+        var kvMemoryMb = SystemSettingsService.getInt("ROCKSDB_KV_MEMORY_MB")
+        if (kvMemoryMb <= 0) {
+            kvMemoryMb = defaultKvMemoryMb
+        }
+        if (kvMemoryMb < minKvMemoryMb) {
+            kvMemoryMb = minKvMemoryMb
+        }
+
+        let (ok, dbOpt, err) = RocksDb.openBalanced(dbPath, kvMemoryMb)
         if (!ok) {
-            logger.warn("Failed to initialize RocksDB local KV; falling back to no-cache mode", ("path", dbPath), ("error", err))
+            logger.warn(
+                "Failed to initialize RocksDB local KV; falling back to no-cache mode",
+                ("path", dbPath),
+                ("kv_memory_mb", kvMemoryMb.toString()),
+                ("error", err)
+            )
             store = Option<LocalKVStore>.None
             mutex.unlock()
             return false
         }
 
         store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(dbOpt.getOrThrow()))
-        logger.info("Initialized RocksDB local KV", ("path", dbPath))
+        logger.info("Initialized RocksDB local KV", ("path", dbPath), ("kv_memory_mb", kvMemoryMb.toString()))
         mutex.unlock()
         return true
     }

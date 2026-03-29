@@ -3,8 +3,9 @@ package rocksdb_ffi
 import std.collection.*
 
 public class RocksDb {
-    private static let writeBufferSizeBytes: UIntNative = 4 * 1024 * 1024
-    private static let dbWriteBufferSizeBytes: UIntNative = 16 * 1024 * 1024
+    private static let defaultKvMemoryMb: Int32 = 16
+    private static let minKvMemoryMb: Int32 = 4
+    private static let dbWriteBufferMultiplier: UIntNative = 4
     private static let blockCacheSizeBytes: UIntNative = 64 * 1024 * 1024
     private let db: CPointer<rocksdb_t>
     private let readOptions: CPointer<rocksdb_readoptions_t>
@@ -21,7 +22,10 @@ public class RocksDb {
         this.writeOptions = writeOptions
     }
 
-    public static func openBalanced(path: String): (Bool, Option<RocksDb>, String) {
+    public static func openBalanced(path: String, kvMemoryMb: Int32): (Bool, Option<RocksDb>, String) {
+        let normalizedKvMemoryMb = normalizeKvMemoryMb(kvMemoryMb)
+        let writeBufferSizeBytes = mbToBytes(normalizedKvMemoryMb)
+        let dbWriteBufferSizeBytes = writeBufferSizeBytes * dbWriteBufferMultiplier
         let options = unsafe { rocksdb_options_create() }
         if (options.isNull()) {
             return (false, None, "rocksdb_options_create failed")
@@ -58,8 +62,8 @@ public class RocksDb {
             rocksdb_options_set_allow_mmap_reads(options, 1u8)
             rocksdb_options_set_bytes_per_sync(options, 0u64)
 
-            // Use a moderate RocksDB-managed cache and larger memtables so mixed
-            // point reads / prefix scans do not thrash on small workloads.
+            // Keep block cache fixed and let the memtable size be configured
+            // from system settings.
             rocksdb_block_based_options_set_no_block_cache(tableOptions, 0u8)
             rocksdb_block_based_options_set_block_cache(tableOptions, blockCache)
             rocksdb_block_based_options_set_cache_index_and_filter_blocks(tableOptions, 1u8)
@@ -108,7 +112,21 @@ public class RocksDb {
     }
 
     public static func openLowMemory(path: String): (Bool, Option<RocksDb>, String) {
-        return openBalanced(path)
+        return openBalanced(path, defaultKvMemoryMb)
+    }
+
+    private static func normalizeKvMemoryMb(kvMemoryMb: Int32): Int32 {
+        if (kvMemoryMb <= 0) {
+            return defaultKvMemoryMb
+        }
+        if (kvMemoryMb < minKvMemoryMb) {
+            return minKvMemoryMb
+        }
+        return kvMemoryMb
+    }
+
+    private static func mbToBytes(memoryMb: Int32): UIntNative {
+        return UIntNative(memoryMb) * UIntNative(1024) * UIntNative(1024)
     }
 
     public func get(key: String): (Bool, Option<String>, String) {
