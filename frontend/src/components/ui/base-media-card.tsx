@@ -45,6 +45,10 @@ function getCachedCoverAspectRatio(src: string): number {
   return coverAspectRatioCache.get(src) ?? DEFAULT_COVER_ASPECT_RATIO
 }
 
+function hasCachedCoverAspectRatio(src: string): boolean {
+  return Boolean(src) && coverAspectRatioCache.has(src)
+}
+
 export interface BaseMediaCardProps {
   // 基础信息
   id: string
@@ -745,6 +749,7 @@ export function BaseMediaCard({
   const [editOpen, setEditOpen] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [menuPosition, setMenuPosition] = React.useState({ x: 0, y: 0 })
+  const hasMeasuredCoverAspectRatioRef = React.useRef(false)
 
   const isAdmin = user?.isAdmin === true
   const canEdit = isAuthenticated
@@ -772,12 +777,15 @@ export function BaseMediaCard({
 
   React.useEffect(() => {
     setImageError(false)
+    hasMeasuredCoverAspectRatioRef.current = false
     setCoverNaturalAspectRatio(getCachedCoverAspectRatio(imageSrc))
   }, [imageSrc])
 
   React.useEffect(() => {
-    onCoverAspectRatioChange?.(coverNaturalAspectRatio)
-  }, [coverNaturalAspectRatio, onCoverAspectRatioChange])
+    if (!onCoverAspectRatioChange || !hasImage || imageError) return
+    if (!hasMeasuredCoverAspectRatioRef.current && !hasCachedCoverAspectRatio(imageSrc)) return
+    onCoverAspectRatioChange(coverNaturalAspectRatio)
+  }, [coverNaturalAspectRatio, hasImage, imageError, imageSrc, onCoverAspectRatioChange])
 
   const allTags = React.useMemo(() => parseTags(displayTags), [displayTags])
   const displayAllTags = React.useMemo(() => allTags.map(stripNamespace), [allTags])
@@ -813,6 +821,7 @@ export function BaseMediaCard({
     if (imageSrc) {
       coverAspectRatioCache.set(imageSrc, nextAspectRatio)
     }
+    hasMeasuredCoverAspectRatioRef.current = true
 
     setCoverNaturalAspectRatio((current) => {
       if (Math.abs(current - nextAspectRatio) < 0.001) return current

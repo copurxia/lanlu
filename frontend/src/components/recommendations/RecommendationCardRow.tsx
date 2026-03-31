@@ -1,8 +1,9 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useMemo } from 'react';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
 import { TankoubonCard } from '@/components/tankoubon/TankoubonCard';
+import { useScrollableCardCoverHeight } from '@/hooks/use-scrollable-card-cover-height';
 import type { Archive } from '@/types/archive';
 import type { RecommendationItem, RecommendationItemType, RecommendationScene } from '@/types/recommendation';
 import type { Tankoubon } from '@/types/tankoubon';
@@ -30,6 +31,8 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
   onOpenReader,
   onOpenDetails,
   onFavorite,
+  coverHeight,
+  reportAspectRatio,
 }: {
   archive: Archive;
   index: number;
@@ -39,6 +42,8 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
   onOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
   onOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
   onFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
+  coverHeight?: number;
+  reportAspectRatio: (key: string, aspectRatio: number) => void;
 }) {
   return (
     <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
@@ -47,6 +52,8 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
         index={index}
         priority={index < 2}
         disableContentVisibility
+        coverHeight={coverHeight}
+        onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(`archive:${archive.arcid}`, aspectRatio)}
         recommendationContext={{
           scene,
           seedEntityType,
@@ -69,6 +76,8 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
   onOpenReader,
   onOpenDetails,
   onFavorite,
+  coverHeight,
+  reportAspectRatio,
 }: {
   tankoubon: Tankoubon;
   index: number;
@@ -78,6 +87,8 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
   onOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
   onOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
   onFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
+  coverHeight?: number;
+  reportAspectRatio: (key: string, aspectRatio: number) => void;
 }) {
   return (
     <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
@@ -85,6 +96,8 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
         tankoubon={tankoubon}
         priority={index < 2}
         disableContentVisibility
+        coverHeight={coverHeight}
+        onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(`tankoubon:${tankoubon.tankoubon_id}`, aspectRatio)}
         recommendationContext={{
           scene,
           seedEntityType,
@@ -107,6 +120,11 @@ export const RecommendationCardRow = memo(function RecommendationCardRow({
   onOpenDetails,
   onFavorite,
 }: RecommendationCardRowProps) {
+  const itemKeys = useMemo(() => items.map((item) => (
+    isTankoubonItem(item) ? `tankoubon:${item.tankoubon_id}` : `archive:${item.arcid}`
+  )), [items]);
+  const { reportAspectRatio, sharedCoverHeight } = useScrollableCardCoverHeight(itemKeys);
+
   return (
     <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
       {items.map((item, index) =>
@@ -115,6 +133,8 @@ export const RecommendationCardRow = memo(function RecommendationCardRow({
             key={`tankoubon:${item.tankoubon_id}`}
             index={index}
             tankoubon={item}
+            coverHeight={sharedCoverHeight}
+            reportAspectRatio={reportAspectRatio}
             scene={scene}
             seedEntityType={seedEntityType}
             seedEntityId={seedEntityId}
@@ -127,6 +147,8 @@ export const RecommendationCardRow = memo(function RecommendationCardRow({
             key={`archive:${item.arcid}`}
             archive={item}
             index={index}
+            coverHeight={sharedCoverHeight}
+            reportAspectRatio={reportAspectRatio}
             scene={scene}
             seedEntityType={seedEntityType}
             seedEntityId={seedEntityId}

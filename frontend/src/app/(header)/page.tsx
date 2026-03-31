@@ -31,7 +31,8 @@ import { appEvents, AppEvents } from '@/lib/utils/events';
 import { Check, Download, Heart, Pencil, RotateCcw, Trash2, X, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, startTransition, useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useDebounce, useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
+import { useDebounce, useGridColumnCount } from '@/hooks/common-hooks';
+import { useScrollableCardCoverHeight } from '@/hooks/use-scrollable-card-cover-height';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import Link from 'next/link';
@@ -62,16 +63,6 @@ function isAbortLikeError(err: any) {
 
 function isTankoubonItem(item: any): item is Tankoubon {
   return item && 'tankoubon_id' in item;
-}
-
-const DEFAULT_CARD_COVER_ASPECT_RATIO = 3 / 4;
-
-function getScrollableCardWidth(viewportWidth: number): number {
-  if (viewportWidth < 640) return 128;
-  if (viewportWidth < 768) return 144;
-  if (viewportWidth < 1024) return 160;
-  if (viewportWidth < 1280) return 176;
-  return 192;
 }
 
 const HomeScrollableTankoubonCard = memo(function HomeScrollableTankoubonCard({
@@ -188,61 +179,10 @@ const HomeScrollableCardRow = memo(function HomeScrollableCardRow({
   onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
   onRecommendationFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
 }) {
-  const { width } = useWindowSize();
   const itemKeys = useMemo(() => items.map((item) => (
     isTankoubonItem(item) ? `tankoubon:${item.tankoubon_id}` : `archive:${item.arcid}`
   )), [items]);
-  const [aspectRatios, setAspectRatios] = useState<Record<string, number>>({});
-
-  useEffect(() => {
-    setAspectRatios((current) => {
-      const next: Record<string, number> = {};
-      for (const key of itemKeys) {
-        if (current[key] != null) {
-          next[key] = current[key];
-        }
-      }
-      const currentKeys = Object.keys(current);
-      if (currentKeys.length !== Object.keys(next).length) {
-        return next;
-      }
-      for (const key of currentKeys) {
-        if (!(key in next)) {
-          return next;
-        }
-      }
-      return current;
-    });
-  }, [itemKeys]);
-
-  const reportAspectRatio = useCallback((key: string, aspectRatio: number) => {
-    const normalized = Number.isFinite(aspectRatio) && aspectRatio > 0
-      ? aspectRatio
-      : DEFAULT_CARD_COVER_ASPECT_RATIO;
-
-    setAspectRatios((current) => {
-      if (Math.abs((current[key] ?? DEFAULT_CARD_COVER_ASPECT_RATIO) - normalized) < 0.001) {
-        return current;
-      }
-      return {
-        ...current,
-        [key]: normalized,
-      };
-    });
-  }, []);
-
-  const sharedCoverHeight = useMemo(() => {
-    if (items.length === 0) return undefined;
-    const itemWidth = getScrollableCardWidth(width);
-    let maxHeight = 0;
-
-    for (const key of itemKeys) {
-      const aspectRatio = aspectRatios[key] ?? DEFAULT_CARD_COVER_ASPECT_RATIO;
-      maxHeight = Math.max(maxHeight, itemWidth / aspectRatio);
-    }
-
-    return Math.round(maxHeight);
-  }, [aspectRatios, itemKeys, items.length, width]);
+  const { reportAspectRatio, sharedCoverHeight } = useScrollableCardCoverHeight(itemKeys);
 
   return (
     <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
