@@ -845,9 +845,12 @@
       "task": "任务设置",
       "performance": "性能设置",
       "server": "服务器设置",
+      "ssl": "SSL 设置",
       "loadError": "加载设置失败",
       "saveSuccess": "设置保存成功",
       "saveError": "保存设置失败",
+      "sslNotice": "启用 SSL/TLS 后，服务会通过 ALPN 自动支持 HTTP/2，无需额外开关。",
+      "sslRestartHint": "SSL 设置保存后需要重启服务才会生效。",
       "longHint": "单位：毫秒",
       "pathPlaceholder": "输入目录路径，例如：/path/to/directory"
     },

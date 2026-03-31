@@ -841,9 +841,12 @@
       "task": "Task Settings",
       "performance": "Performance Settings",
       "server": "Server Settings",
+      "ssl": "SSL Settings",
       "loadError": "Failed to load settings",
       "saveSuccess": "Settings saved successfully",
       "saveError": "Failed to save settings",
+      "sslNotice": "When SSL/TLS is enabled, the server will automatically support HTTP/2 via ALPN with no separate toggle.",
+      "sslRestartHint": "SSL settings take effect after the service is restarted.",
       "longHint": "Unit: milliseconds",
       "pathPlaceholder": "Enter directory path, e.g.: /path/to/directory"
     },

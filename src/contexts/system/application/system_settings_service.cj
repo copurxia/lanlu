@@ -128,6 +128,11 @@ public class SystemSettingsService {
         settings.add(createSetting("SERVER_NAME", "兰鹿", "string", "server", "服务器名称"))
         settings.add(createSetting("SERVER_MOTD", "兰鹿轻盈，自在如风", "string", "server", "服务器欢迎消息"))
 
+        // SSL/TLS 设置 - 默认值
+        settings.add(createSetting("SSL_ENABLED", "false", "boolean", "ssl", "启用 SSL/TLS"))
+        settings.add(createSetting("SSL_CERT_FILE", "./data/cert/fullchain.pem", "path", "ssl", "SSL 证书链文件路径"))
+        settings.add(createSetting("SSL_KEY_FILE", "./data/cert/privkey.pem", "path", "ssl", "SSL 私钥文件路径"))
+
         // 定时任务/启动任务设置 - 归类到 cron 分类（不在系统设置页面显示，由定时任务管理页面管理）
         settings.add(createSetting("ENABLE_INITIAL_SCAN", "false", "boolean", "cron", "启用初始扫描"))
         settings.add(createSetting("ENABLE_INITIAL_DB_CHECK", "true", "boolean", "cron", "启用初始数据库检查"))
@@ -201,6 +206,9 @@ public class SystemSettingsService {
         translations["插件目录路径"] = "Plugin Directory Path"
         translations["服务器名称"] = "Server Name"
         translations["服务器欢迎消息"] = "Server Welcome Message"
+        translations["启用 SSL/TLS"] = "Enable SSL/TLS"
+        translations["SSL 证书链文件路径"] = "SSL Certificate Chain File Path"
+        translations["SSL 私钥文件路径"] = "SSL Private Key File Path"
 
         return translations.get(zhDescription) ?? "System Setting"
     }
@@ -375,6 +383,6 @@ public class SystemSettingsService {
      * 获取所有分类（仅返回系统设置页面显示的分类，不包含 cron）
      */
     public static func getCategories(): Array<String> {
-        return ["storage", "performance", "server"]
+        return ["storage", "performance", "server", "ssl"]
     }
 }

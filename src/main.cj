@@ -170,6 +170,33 @@ main(): Int64 {
 
     // 创建 app 实例并配置路由
     logger.debug("Application starting... step 14: creating web server")
+    let sslEnabled = SystemSettingsService.getBoolean("SSL_ENABLED")
+    let sslCertFile = SystemSettingsService.getPath("SSL_CERT_FILE")
+    let sslKeyFile = SystemSettingsService.getPath("SSL_KEY_FILE")
+
+    if (sslEnabled) {
+        if (sslCertFile.trimAscii().size == 0 || sslKeyFile.trimAscii().size == 0) {
+            logger.error("SSL is enabled but certificate settings are incomplete",
+                ("cert_file", sslCertFile),
+                ("key_file", sslKeyFile))
+            return 1
+        }
+        if (!exists(sslCertFile)) {
+            logger.error("SSL certificate chain file does not exist", ("path", sslCertFile))
+            return 1
+        }
+        if (!exists(sslKeyFile)) {
+            logger.error("SSL private key file does not exist", ("path", sslKeyFile))
+            return 1
+        }
+        logger.info("SSL/TLS enabled from system settings",
+            ("cert_file", sslCertFile),
+            ("key_file", sslKeyFile),
+            ("http2", "alpn-auto"))
+    } else {
+        logger.info("SSL/TLS disabled in system settings")
+    }
+
     // 10MB 分片上传需预留 multipart 包装开销，因此请求体上限略高于 10MB
     let app = App(config: Config(
         appName: "lanlu",
@@ -177,6 +204,8 @@ main(): Int64 {
         serverHeader: "Lanlu",
         bodyLimit: 12 * 1024 * 1024,
         enableSwagger: true,
+        tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
+        tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
         ))
 
     // 注册所有路由
@@ -184,7 +213,11 @@ main(): Int64 {
     Routes.register(app)
     logger.info("Application starting... step 16: routes registered")
 
-    logger.info("Starting HTTP server")
+    if (sslEnabled) {
+        logger.info("Starting HTTPS server", ("http2", "enabled-via-alpn"), ("host", host), ("port", portStr))
+    } else {
+        logger.info("Starting HTTP server", ("host", host), ("port", portStr))
+    }
     // 启动服务器
     logger.debug("Application starting... step 17: starting HTTP server")
     app.listen(host, port)

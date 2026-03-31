@@ -53,6 +53,7 @@ export default function SystemSettingsPage() {
     { id: 'storage', name: t('settings.system.storage'), icon: '📁' },
     { id: 'performance', name: t('settings.system.performance'), icon: '⚡' },
     { id: 'server', name: t('settings.system.server'), icon: '🖥️' },
+    { id: 'ssl', name: t('settings.system.ssl'), icon: '🔒' },
   ];
 
   // 使用 useRef 稳定函数引用，避免 useEffect 无限循环
@@ -286,7 +287,10 @@ export default function SystemSettingsPage() {
 
       {/* 设置选项卡 */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid grid-cols-3 w-full mb-4">
+        <TabsList
+          className="grid w-full mb-4"
+          style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))` }}
+        >
           {categories.map((category) => (
             <TabsTrigger key={category.id} value={category.id}>
               <span className="mr-2">{category.icon}</span>
@@ -299,6 +303,13 @@ export default function SystemSettingsPage() {
           <TabsContent key={category.id} value={category.id} className="mt-6">
             <Card>
               <CardContent className="p-6 space-y-6">
+                {category.id === 'ssl' && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
+                    <p>{t('settings.system.sslNotice')}</p>
+                    <p className="mt-2">{t('settings.system.sslRestartHint')}</p>
+                  </div>
+                )}
+
                 {settings[category.id]?.map((setting) => (
                   <div key={setting.key}>
                     {renderSettingInput(setting)}
