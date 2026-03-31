@@ -355,33 +355,43 @@ public class RecommendationService {
         let seed = ArchiveDao.getArchiveMetadataById(archiveId)
         if (seed.id.size == 0) { return Array<RecommendationResultItem>() }
         let safeCount = if (count > 0) { count } else { 12i32 }
-        let recentArchiveIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "archive_related", "archive", 72i32)
+        var recentArchiveIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "archive_related", "archive", 72i32)
         let userTagWeights = RecommendationDao.getRecentUserTagWeights(userId, 24i32)
 
-        let ranked = ArrayList<RecommendationScoredItem>()
-        for (candidate in RecommendationDao.getArchiveRelatedCandidates(archiveId, safeCount * 16i32)) {
-            if (candidate.arcid.size == 0 || candidate.arcid == archiveId) { continue }
-            if (recentArchiveIds.contains(candidate.arcid)) { continue }
+        func buildArchiveRelatedRankedItems(recentIds: HashSet<String>): ArrayList<RecommendationScoredItem> {
+            let ranked = ArrayList<RecommendationScoredItem>()
+            for (candidate in RecommendationDao.getArchiveRelatedCandidates(archiveId, safeCount * 16i32)) {
+                if (candidate.arcid.size == 0 || candidate.arcid == archiveId) { continue }
+                if (recentIds.contains(candidate.arcid)) { continue }
 
-            let tagSim = weightedJaccard(seed.tags, candidate.tags)
-            let affinity = userAffinityScore(candidate.tags, userTagWeights)
-            let categoryScore = if (candidate.categoryId > 0 && candidate.categoryId == seed.category_id) { 1.0 } else { 0.0 }
-            let structureScore = pageSimilarity(seed.pagecount, candidate.pagecount)
-            let quality = qualityScore(candidate.title, candidate.summary, candidate.tags, candidate.coverAssetId)
+                let tagSim = weightedJaccard(seed.tags, candidate.tags)
+                let affinity = userAffinityScore(candidate.tags, userTagWeights)
+                let categoryScore = if (candidate.categoryId > 0 && candidate.categoryId == seed.category_id) { 1.0 } else { 0.0 }
+                let structureScore = pageSimilarity(seed.pagecount, candidate.pagecount)
+                let quality = qualityScore(candidate.title, candidate.summary, candidate.tags, candidate.coverAssetId)
 
-            let scored = RecommendationScoredItem()
-            scored.itemType = "archive"
-            scored.itemId = candidate.arcid
-            scored.categoryId = candidate.categoryId
-            scored.tags = candidate.tags
-            scored.score =
-                0.48 * tagSim +
-                0.17 * overlapBoost(candidate.overlapCount) +
-                0.15 * categoryScore +
-                0.10 * structureScore +
-                0.05 * affinity +
-                0.05 * quality
-            ranked.add(scored)
+                let scored = RecommendationScoredItem()
+                scored.itemType = "archive"
+                scored.itemId = candidate.arcid
+                scored.categoryId = candidate.categoryId
+                scored.tags = candidate.tags
+                scored.score =
+                    0.48 * tagSim +
+                    0.17 * overlapBoost(candidate.overlapCount) +
+                    0.15 * categoryScore +
+                    0.10 * structureScore +
+                    0.05 * affinity +
+                    0.05 * quality
+                ranked.add(scored)
+            }
+            return ranked
+        }
+
+        var ranked = buildArchiveRelatedRankedItems(recentArchiveIds)
+        if (ranked.size == 0 && recentArchiveIds.size > 0) {
+            let _ = RecommendationDao.clearImpressions(userId, sessionKey, "archive_related")
+            recentArchiveIds = HashSet<String>()
+            ranked = buildArchiveRelatedRankedItems(recentArchiveIds)
         }
 
         sortScoredItems(ranked)
@@ -393,33 +403,42 @@ public class RecommendationService {
             case None => return Array<RecommendationResultItem>()
             case Some(seed) =>
                 let safeCount = if (count > 0) { count } else { 12i32 }
-                let recentTankIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "tankoubon_related", "tankoubon", 72i32)
+                var recentTankIds = RecommendationDao.getRecentImpressionIds(userId, sessionKey, "tankoubon_related", "tankoubon", 72i32)
                 let userTagWeights = RecommendationDao.getRecentUserTagWeights(userId, 24i32)
-                let ranked = ArrayList<RecommendationScoredItem>()
+                func buildTankoubonRelatedRankedItems(recentIds: HashSet<String>): ArrayList<RecommendationScoredItem> {
+                    let ranked = ArrayList<RecommendationScoredItem>()
+                    for (candidate in RecommendationDao.getTankoubonRelatedCandidates(tankoubonId, safeCount * 16i32)) {
+                        if (candidate.tankoubonId.size == 0 || candidate.tankoubonId == tankoubonId) { continue }
+                        if (recentIds.contains(candidate.tankoubonId)) { continue }
 
-                for (candidate in RecommendationDao.getTankoubonRelatedCandidates(tankoubonId, safeCount * 16i32)) {
-                    if (candidate.tankoubonId.size == 0 || candidate.tankoubonId == tankoubonId) { continue }
-                    if (recentTankIds.contains(candidate.tankoubonId)) { continue }
+                        let tagSim = weightedJaccard(seed.tags, candidate.tags)
+                        let affinity = userAffinityScore(candidate.tags, userTagWeights)
+                        let pageScore = pageSimilarity(seed.pagecount, candidate.pagecount)
+                        let categoryScore = if (candidate.categoryId > 0) { 0.45 } else { 0.0 }
+                        let quality = qualityScore(candidate.title, candidate.summary, candidate.tags, candidate.coverAssetId)
 
-                    let tagSim = weightedJaccard(seed.tags, candidate.tags)
-                    let affinity = userAffinityScore(candidate.tags, userTagWeights)
-                    let pageScore = pageSimilarity(seed.pagecount, candidate.pagecount)
-                    let categoryScore = if (candidate.categoryId > 0) { 0.45 } else { 0.0 }
-                    let quality = qualityScore(candidate.title, candidate.summary, candidate.tags, candidate.coverAssetId)
+                        let scored = RecommendationScoredItem()
+                        scored.itemType = "tankoubon"
+                        scored.itemId = candidate.tankoubonId
+                        scored.categoryId = candidate.categoryId
+                        scored.tags = candidate.tags
+                        scored.score =
+                            0.50 * tagSim +
+                            0.18 * overlapBoost(candidate.overlapCount) +
+                            0.12 * pageScore +
+                            0.10 * categoryScore +
+                            0.05 * affinity +
+                            0.05 * quality
+                        ranked.add(scored)
+                    }
+                    return ranked
+                }
 
-                    let scored = RecommendationScoredItem()
-                    scored.itemType = "tankoubon"
-                    scored.itemId = candidate.tankoubonId
-                    scored.categoryId = candidate.categoryId
-                    scored.tags = candidate.tags
-                    scored.score =
-                        0.50 * tagSim +
-                        0.18 * overlapBoost(candidate.overlapCount) +
-                        0.12 * pageScore +
-                        0.10 * categoryScore +
-                        0.05 * affinity +
-                        0.05 * quality
-                    ranked.add(scored)
+                var ranked = buildTankoubonRelatedRankedItems(recentTankIds)
+                if (ranked.size == 0 && recentTankIds.size > 0) {
+                    let _ = RecommendationDao.clearImpressions(userId, sessionKey, "tankoubon_related")
+                    recentTankIds = HashSet<String>()
+                    ranked = buildTankoubonRelatedRankedItems(recentTankIds)
                 }
 
                 sortScoredItems(ranked)
