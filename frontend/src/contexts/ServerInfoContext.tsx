@@ -17,15 +17,15 @@ const DEFAULT_SERVER_NAME = 'Lanlu';
 const ServerInfoContext = createContext<ServerInfoContextType | undefined>(undefined);
 
 export function ServerInfoProvider({ children }: { children: ReactNode }) {
-  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(() => ArchiveService.getCachedServerInfo());
+  const [loading, setLoading] = useState(() => ArchiveService.getCachedServerInfo() == null);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchServerInfo = useCallback(async () => {
+  const fetchServerInfo = useCallback(async (options?: { force?: boolean }) => {
     try {
       setLoading(true);
       setError(null);
-      const info = await ArchiveService.getServerInfo();
+      const info = await ArchiveService.getServerInfo(options);
       setServerInfo(info);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch server info');
@@ -55,7 +55,7 @@ export function ServerInfoProvider({ children }: { children: ReactNode }) {
         serverName,
         loading,
         error,
-        refresh: fetchServerInfo,
+        refresh: () => fetchServerInfo({ force: true }),
       }}
     >
       {children}

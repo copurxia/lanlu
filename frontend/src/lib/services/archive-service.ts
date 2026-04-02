@@ -82,6 +82,10 @@ export class ArchiveService {
   private static readonly METADATA_CACHE_TTL_MS = 30_000;
   private static readonly metadataCache = new Map<string, { expiresAt: number; data: ArchiveMetadata }>();
   private static readonly metadataInflight = new Map<string, Promise<ArchiveMetadata>>();
+  private static readonly SERVER_INFO_CACHE_TTL_MS = 5 * 60_000;
+  private static readonly SERVER_INFO_CACHE_KEY = 'lanlu:server-info-cache:v1';
+  private static serverInfoCache: { expiresAt: number; data: ServerInfo } | null = null;
+  private static serverInfoInflight: Promise<ServerInfo> | null = null;
 
   private static buildMetadataCacheKey(id: string, lang?: string, options?: { includePages?: boolean }): string {
     return `${id}|${lang || ''}|${options?.includePages ? 'pages' : 'meta'}`;
@@ -321,9 +325,78 @@ export class ArchiveService {
     return url;
   }
 
-  static async getServerInfo(): Promise<ServerInfo> {
-    const response = await apiClient.get('/api/info');
-    return response.data;
+  private static readServerInfoStorage(): { expiresAt: number; data: ServerInfo } | null {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(this.SERVER_INFO_CACHE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { expiresAt?: number; data?: ServerInfo };
+      if (!parsed || typeof parsed.expiresAt !== 'number' || !parsed.data) return null;
+      return {
+        expiresAt: parsed.expiresAt,
+        data: parsed.data,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private static writeServerInfoStorage(entry: { expiresAt: number; data: ServerInfo } | null): void {
+    if (typeof window === 'undefined') return;
+    try {
+      if (!entry) {
+        window.localStorage.removeItem(this.SERVER_INFO_CACHE_KEY);
+        return;
+      }
+      window.localStorage.setItem(this.SERVER_INFO_CACHE_KEY, JSON.stringify(entry));
+    } catch {
+      // ignore storage write failures
+    }
+  }
+
+  static getCachedServerInfo(): ServerInfo | null {
+    const now = Date.now();
+    if (this.serverInfoCache && this.serverInfoCache.expiresAt > now) {
+      return this.serverInfoCache.data;
+    }
+
+    const stored = this.readServerInfoStorage();
+    if (stored && stored.expiresAt > now) {
+      this.serverInfoCache = stored;
+      return stored.data;
+    }
+
+    return null;
+  }
+
+  static async getServerInfo(options?: { force?: boolean }): Promise<ServerInfo> {
+    const now = Date.now();
+    if (!options?.force) {
+      const cached = this.getCachedServerInfo();
+      if (cached) {
+        return cached;
+      }
+    }
+
+    if (!options?.force && this.serverInfoInflight) {
+      return this.serverInfoInflight;
+    }
+
+    const request = (async () => {
+      const response = await apiClient.get('/api/info');
+      const entry = {
+        data: response.data as ServerInfo,
+        expiresAt: Date.now() + this.SERVER_INFO_CACHE_TTL_MS,
+      };
+      this.serverInfoCache = entry;
+      this.writeServerInfoStorage(entry);
+      return entry.data;
+    })().finally(() => {
+      this.serverInfoInflight = null;
+    });
+
+    this.serverInfoInflight = request;
+    return request;
   }
 
   /**
