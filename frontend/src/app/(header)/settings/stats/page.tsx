@@ -1,21 +1,30 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { BarChart3 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { TagService } from '@/lib/services/tag-service';
 import { logger } from '@/lib/utils/logger';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
-import { WordCloud } from '@/components/charts/WordCloud';
 import { SettingsPageWrapper } from '@/components/settings/SettingsPageWrapper';
 
 type CloudItem = { tag: string; display: string; count: number };
+
+const WordCloud = dynamic(
+  () => import('@/components/charts/WordCloud').then((m) => m.WordCloud),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="h-[320px] w-full rounded-xl" />,
+  }
+);
 
 export default function ServerInfoSettingsPage() {
   const { t, language } = useLanguage();

@@ -25,6 +25,7 @@ const nextConfig = {
       '@radix-ui/react-slot',
       '@radix-ui/react-toast',
       'date-fns',
+      'd3-cloud',
       'recharts',
       'react-day-picker',
     ],
