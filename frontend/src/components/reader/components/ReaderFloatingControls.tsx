@@ -84,7 +84,7 @@ function MobileMediaControls({
   onOpenDetails: () => void;
 }) {
   return (
-    <div className="flex min-w-0 items-center gap-1.5">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
       <Button
         variant="ghost"
         size="sm"
@@ -274,40 +274,46 @@ export function ReaderFloatingControls({
               {resolvedActiveLane ? (
                 <div className={mobileFloatingPanelClass}>
                   <div aria-hidden className="pointer-events-none absolute inset-px rounded-full bg-[hsl(var(--background)/0.12)]" />
-                  <div className="relative z-10 flex items-center gap-2">
-                    <div className="flex shrink-0 items-center gap-1">
-                      {resolvedLanes.map((lane) => {
-                        const Icon = lane.icon;
-                        const isActive = resolvedActiveLane.id === lane.id;
-                        return (
+                  <div className="relative z-10 flex items-center gap-1">
+                    {resolvedLanes.map((lane) => {
+                      const Icon = lane.icon;
+                      const isExpanded = resolvedActiveLane.id === lane.id;
+                      return (
+                        <div key={lane.id} className={cn("flex items-center gap-1 min-w-0", isExpanded && "flex-1")}>
                           <Button
-                            key={lane.id}
                             variant="ghost"
                             size="sm"
                             onClick={() => onToggleLane(lane.id)}
                             className={cn(
                               mobileLaneToggleButtonClass,
-                              isActive && activeLaneToggleButtonClass
+                              isExpanded && activeLaneToggleButtonClass
                             )}
                             title={lane.label}
                           >
                             <Icon className="h-4 w-4" />
                           </Button>
-                        );
-                      })}
-                    </div>
 
-                    <div className="min-w-0 flex-1">
-                      {isMediaLane(resolvedActiveLane) ? (
-                        <MobileMediaControls lane={resolvedActiveLane} onOpenDetails={() => setMediaSheetOpen(true)} />
-                      ) : (
-                        <MobileBookControls
-                          currentPage={currentPage}
-                          totalPages={totalPages}
-                          onChangePage={onChangePage}
-                        />
-                      )}
-                    </div>
+                          <div
+                            className={`
+                              flex min-w-0 flex-1 items-center gap-2 overflow-hidden
+                              transition-all duration-250 ease-out origin-left
+                              ${isExpanded ? 'max-w-[84vw] opacity-100 scale-100' : 'max-w-0 opacity-0 scale-95'}
+                            `}
+                          >
+                            {isExpanded &&
+                              (isMediaLane(lane) ? (
+                                <MobileMediaControls lane={lane} onOpenDetails={() => setMediaSheetOpen(true)} />
+                              ) : (
+                                <MobileBookControls
+                                  currentPage={currentPage}
+                                  totalPages={totalPages}
+                                  onChangePage={onChangePage}
+                                />
+                              ))}
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}
