@@ -79,21 +79,24 @@ public class FrontendController {
             return
         }
 
-        let fileInfo = FileInfo(filePath)
+        let (resolvedPath, logicalPath, isBrotli, varyAcceptEncoding) = resolveStaticAssetVariant(ctx, filePath)
+        let fileInfo = FileInfo(resolvedPath)
         let fileSize = fileInfo.size
         let lastModified = fileInfo.lastModificationTime
 
-        let bytes = File.readFrom(Path(filePath))
-        let contentType = getContentType(filePath)
+        let bytes = File.readFrom(Path(resolvedPath))
+        let contentType = getContentType(logicalPath)
 
-        let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
+        let etag = CacheUtils.generateETag("${resolvedPath}:${fileSize}:${lastModified}:${if (isBrotli) { "br" } else { "identity" }}")
 
         if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
-            sendNotModifiedByPolicy(ctx, filePath, etag)
+            applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, false)
+            sendNotModifiedByPolicy(ctx, logicalPath, etag)
             return
         }
 
-        applyCacheHeadersByPolicy(ctx, filePath, etag)
+        applyCacheHeadersByPolicy(ctx, logicalPath, etag)
+        applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, true)
         ctx.setHeader("Content-Type", contentType)
         ctx.send(bytes)
     }
@@ -160,6 +163,84 @@ public class FrontendController {
             return "application/vnd.ms-fontobject"
         } else {
             return defaultType
+        }
+    }
+
+    /**
+     * 为 `_next/static` 下的 JS/CSS 选择可用的预压缩变体。
+     * 返回值依次为：
+     * - 实际读取路径
+     * - 逻辑资源路径（用于 Content-Type / 缓存策略）
+     * - 是否返回 Brotli 变体
+     * - 是否需要设置 Vary: Accept-Encoding
+     */
+    private static func resolveStaticAssetVariant(ctx: Ctx, filePath: String): (String, String, Bool, Bool) {
+        if (!isBrotliNegotiableAsset(filePath)) {
+            return (filePath, filePath, false, false)
+        }
+
+        let brotliPath = "${filePath}.br"
+        if (clientAcceptsBrotli(ctx) && exists(brotliPath)) {
+            return (brotliPath, filePath, true, true)
+        }
+
+        return (filePath, filePath, false, true)
+    }
+
+    private static func isBrotliNegotiableAsset(filePath: String): Bool {
+        let normalized = filePath.trimAscii().toAsciiLower()
+        if (!normalized.contains("/_next/static/")) {
+            return false
+        }
+        return normalized.endsWith(".js") || normalized.endsWith(".css")
+    }
+
+    private static func clientAcceptsBrotli(ctx: Ctx): Bool {
+        let acceptEncoding = (ctx.header("Accept-Encoding") ?? "").trimAscii().toAsciiLower()
+        if (acceptEncoding.size == 0) {
+            return false
+        }
+
+        let parts = acceptEncoding.split(",")
+        for (part in parts) {
+            let token = part.trimAscii()
+            if (token == "br" || token == "*") {
+                return true
+            }
+            if ((token.startsWith("br;") || token.startsWith("*;")) && !isZeroQualityEncodingToken(token)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func isZeroQualityEncodingToken(token: String): Bool {
+        let params = token.trimAscii().replace(" ", "").split(";")
+        for (param in params) {
+            if (!param.startsWith("q=")) {
+                continue
+            }
+            let value = param[2..param.size]
+            return value == "0" || value == "0.0" || value == "0.00" || value == "0.000" || value == "0.0000"
+        }
+        return false
+    }
+
+    private static func applyVariantHeaders(
+        ctx: Ctx,
+        isBrotli: Bool,
+        varyAcceptEncoding: Bool,
+        fileSize: Int64,
+        includeContentLength: Bool
+    ): Unit {
+        if (varyAcceptEncoding) {
+            ctx.setHeader("Vary", "Accept-Encoding")
+        }
+        if (isBrotli) {
+            ctx.setHeader("Content-Encoding", "br")
+        }
+        if (includeContentLength) {
+            ctx.setHeader("Content-Length", "${fileSize}")
         }
     }
 
@@ -279,19 +360,22 @@ public class FrontendController {
             return
         }
 
-        let fileInfo = FileInfo(filePath)
+        let (resolvedPath, logicalPath, isBrotli, varyAcceptEncoding) = resolveStaticAssetVariant(ctx, filePath)
+        let fileInfo = FileInfo(resolvedPath)
         let fileSize = fileInfo.size
         let lastModified = fileInfo.lastModificationTime
-        let contentType = getContentType(filePath)
+        let contentType = getContentType(logicalPath)
 
-        let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${lastModified}")
+        let etag = CacheUtils.generateETag("${resolvedPath}:${fileSize}:${lastModified}:${if (isBrotli) { "br" } else { "identity" }}")
 
         if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
-            sendNotModifiedByPolicy(ctx, filePath, etag)
+            applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, false)
+            sendNotModifiedByPolicy(ctx, logicalPath, etag)
             return
         }
 
-        applyCacheHeadersByPolicy(ctx, filePath, etag)
+        applyCacheHeadersByPolicy(ctx, logicalPath, etag)
+        applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, true)
         ctx.setHeader("Content-Type", contentType)
         ctx.status(200)
     }
