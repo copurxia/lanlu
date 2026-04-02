@@ -646,7 +646,7 @@ function ReaderContent() {
           if (nextId && !isExcluded(nextId)) {
             try {
               const meta = await ArchiveService.getMetadata(nextId, language);
-              const nextTitle = (meta.title && meta.title.trim()) ? meta.title : meta.filename || nextId;
+              const nextTitle = (meta.title && meta.title.trim()) ? meta.title : meta.filename || '';
               return {
                 id: nextId,
                 title: nextTitle,
@@ -655,7 +655,7 @@ function ReaderContent() {
               };
             } catch (metaErr) {
               logger.apiError('fetch next archive metadata', metaErr);
-              return { id: nextId, title: nextId, source: 'tankoubon' };
+              return { id: nextId, title: '', source: 'tankoubon' };
             }
           }
         }
@@ -788,7 +788,7 @@ function ReaderContent() {
         try {
           const meta = await ArchiveService.getMetadata(nextId, language);
           if (cancelled) return;
-          const nextTitle = (meta.title && meta.title.trim()) ? meta.title : meta.filename || nextId;
+          const nextTitle = (meta.title && meta.title.trim()) ? meta.title : meta.filename || '';
           setResolvedNextArchive(sourceArchiveId, {
             id: nextId,
             title: nextTitle,
@@ -798,7 +798,7 @@ function ReaderContent() {
         } catch (metaErr) {
           logger.apiError('fetch next archive metadata', metaErr);
           if (cancelled) return;
-          setResolvedNextArchive(sourceArchiveId, { id: nextId, title: nextId, source: 'tankoubon' });
+          setResolvedNextArchive(sourceArchiveId, { id: nextId, title: '', source: 'tankoubon' });
         }
       } catch (err) {
         logger.apiError('fetch tankoubons for archive', err);
@@ -884,7 +884,7 @@ function ReaderContent() {
           archiveId: target.id,
           start,
           count: appendedPages.length,
-          title: target.title || target.id,
+          title: '',
           coverAssetId: target.coverAssetId,
         },
       ]);
@@ -2031,7 +2031,7 @@ function ReaderContent() {
       }
     }
 
-    return activeSegment?.title || archive.archiveTitle;
+    return archive.archiveTitle || activeSegment?.title || '';
   }, [
     activeSegment?.title,
     archive.archiveTitle,

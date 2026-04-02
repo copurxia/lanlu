@@ -107,7 +107,7 @@ export function useReaderSourceSession({
             archiveId: sourceArchiveId,
             start: 0,
             count: initialPages.length,
-            title: sourceArchiveId,
+            title: '',
           },
         ]);
 

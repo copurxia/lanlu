@@ -28,6 +28,7 @@ export function useReaderArchiveMetadata({
 
     let cancelled = false;
     setArchiveMetadata(null);
+    setArchiveTitle('');
 
     (async () => {
       try {
@@ -42,6 +43,7 @@ export function useReaderArchiveMetadata({
         logger.apiError('fetch archive metadata', metaErr);
         if (cancelled) return;
         setArchiveMetadata(null);
+        setArchiveTitle('');
       }
     })();
 

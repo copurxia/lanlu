@@ -35,7 +35,7 @@ export function buildReaderStream({
               archiveId: sourceArchiveId,
               start: 0,
               count: pages.length,
-              title: sourceArchiveId,
+              title: "",
             },
           ]
         : [];
