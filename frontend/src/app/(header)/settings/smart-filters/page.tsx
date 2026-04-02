@@ -354,7 +354,7 @@ export default function SmartFiltersPage() {
                 {/* Mobile layout (multi-line details to avoid information loss). */}
                 <div className="flex flex-col gap-3 sm:hidden">
                   <div className="flex w-full items-center gap-3 min-w-0">
-                    <div className="flex items-center text-muted-foreground flex-shrink-0">
+                    <div className="flex items-center text-muted-foreground shrink-0">
                       <GripVertical className="h-5 w-5" />
                     </div>
 
@@ -365,7 +365,7 @@ export default function SmartFiltersPage() {
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2 flex-shrink-0">
+                    <div className="flex items-center gap-2 shrink-0">
                       {index === 0 && filters.length > 1 && (
                         <Button
                           variant="ghost"
@@ -396,7 +396,7 @@ export default function SmartFiltersPage() {
                     </div>
                   </div>
 
-                  <div className="w-full text-xs text-muted-foreground leading-relaxed break-words">
+                  <div className="w-full text-xs text-muted-foreground leading-relaxed wrap-break-word">
                     <div className="flex flex-wrap gap-x-2 gap-y-1">
                       {filter.query && <span>Q: {filter.query}</span>}
                       {filter.newonly && <span className="text-blue-500">{t('search.newOnly')}</span>}

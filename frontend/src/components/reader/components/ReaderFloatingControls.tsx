@@ -34,7 +34,7 @@ const desktopIconButtonClass =
 const mobileActionButtonClass =
   'rounded-full h-11 w-11 p-0 text-foreground/80 hover:bg-white/20 hover:text-foreground active:scale-95';
 const laneToggleButtonClass =
-  'rounded-full h-9 w-9 p-0 border border-white/[0.28] bg-white/[0.06] text-foreground/70 transition-all duration-150 ease-out hover:bg-white/[0.20] hover:border-white/[0.55] hover:text-foreground dark:border-[hsl(var(--border)/0.7)] dark:bg-[hsl(var(--background)/0.24)] dark:hover:bg-[hsl(var(--background)/0.36)] dark:hover:border-[hsl(var(--border)/0.85)]';
+  'rounded-full h-9 w-9 p-0 border border-white/[0.28] bg-white/6 text-foreground/70 transition-all duration-150 ease-out hover:bg-white/20 hover:border-white/[0.55] hover:text-foreground dark:border-[hsl(var(--border)/0.7)] dark:bg-[hsl(var(--background)/0.24)] dark:hover:bg-[hsl(var(--background)/0.36)] dark:hover:border-[hsl(var(--border)/0.85)]';
 const mobileLaneToggleButtonClass =
   'rounded-full h-9 w-9 p-0 border border-[hsl(var(--border)/0.7)] bg-[hsl(var(--background)/0.24)] text-foreground/70 transition-all duration-150 ease-out hover:bg-[hsl(var(--background)/0.36)] hover:border-[hsl(var(--border)/0.85)] hover:text-foreground';
 const mobileMediaButtonClass =
@@ -42,7 +42,7 @@ const mobileMediaButtonClass =
 const mobileFloatingPanelClass =
   'relative overflow-hidden rounded-full px-2.5 py-2 bg-[hsl(var(--background)/0.55)] backdrop-blur-xl border border-[hsl(var(--border)/0.8)] shadow-lg';
 const activeLaneToggleButtonClass =
-  'bg-[hsl(var(--background)/0.55)] text-foreground border-[hsl(var(--border)/0.85)] shadow-sm';
+  'bg-[hsl(var(--background)/0.55)] text-foreground border-[hsl(var(--border)/0.85)] shadow-xs';
 
 function isMediaLane(
   lane: ReaderProgressLane | null | undefined
@@ -273,7 +273,7 @@ export function ReaderFloatingControls({
 
               {resolvedActiveLane ? (
                 <div className={mobileFloatingPanelClass}>
-                  <div aria-hidden className="pointer-events-none absolute inset-[1px] rounded-full bg-[hsl(var(--background)/0.12)]" />
+                  <div aria-hidden className="pointer-events-none absolute inset-px rounded-full bg-[hsl(var(--background)/0.12)]" />
                   <div className="relative z-10 flex items-center gap-2">
                     <div className="flex shrink-0 items-center gap-1">
                       {resolvedLanes.map((lane) => {
@@ -427,7 +427,7 @@ export function ReaderFloatingControls({
                     className={cn(
                       laneToggleButtonClass,
                       isExpanded &&
-                        'bg-white/[0.45] text-foreground border border-white/[0.70] shadow-[0_6px_18px_rgba(255,255,255,0.18)] dark:bg-[hsl(var(--background)/0.55)] dark:border-[hsl(var(--border)/0.85)] dark:shadow-sm'
+                        'bg-white/45 text-foreground border border-white/70 shadow-[0_6px_18px_rgba(255,255,255,0.18)] dark:bg-[hsl(var(--background)/0.55)] dark:border-[hsl(var(--border)/0.85)] dark:shadow-xs'
                     )}
                     title={lane.label}
                   >

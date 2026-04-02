@@ -87,15 +87,15 @@ export function MetadataAssetsEditor({
               }}
             />
           )}
-          <div className="absolute inset-0 bg-gradient-to-r from-black/35 via-black/10 to-black/30" />
-          <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-background/95 via-background/65 to-transparent" />
+          <div className="absolute inset-0 bg-linear-to-r from-black/35 via-black/10 to-black/30" />
+          <div className="absolute inset-x-0 bottom-0 h-28 bg-linear-to-t from-background/95 via-background/65 to-transparent" />
           <Button
             type="button"
             variant="outline"
             size="icon"
             onClick={onUploadBackdrop}
             disabled={disabled || uploadingBackdrop || !onUploadBackdrop}
-            className="absolute right-3 top-3 z-20 h-8 w-8 rounded-full border-white/20 bg-background/85 p-0 shadow-sm backdrop-blur-sm opacity-0 pointer-events-none transition-opacity group-hover/backdrop:opacity-100 group-hover/backdrop:pointer-events-auto group-focus-within/backdrop:opacity-100 group-focus-within/backdrop:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
+            className="absolute right-3 top-3 z-20 h-8 w-8 rounded-full border-white/20 bg-background/85 p-0 shadow-xs backdrop-blur-xs opacity-0 pointer-events-none transition-opacity group-hover/backdrop:opacity-100 group-hover/backdrop:pointer-events-auto group-focus-within/backdrop:opacity-100 group-focus-within/backdrop:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
             title={t('archive.assetUploadBackdrop')}
           >
             <ImagePlus className="h-4 w-4" />
@@ -122,7 +122,7 @@ export function MetadataAssetsEditor({
             size="icon"
             onClick={onUploadCover}
             disabled={disabled || uploadingCover || !onUploadCover}
-            className="absolute right-1.5 top-1.5 z-20 h-8 w-8 rounded-full border-white/20 bg-background/85 p-0 shadow-sm backdrop-blur-sm opacity-0 pointer-events-none transition-opacity group-hover/cover:opacity-100 group-hover/cover:pointer-events-auto group-focus-within/cover:opacity-100 group-focus-within/cover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
+            className="absolute right-1.5 top-1.5 z-20 h-8 w-8 rounded-full border-white/20 bg-background/85 p-0 shadow-xs backdrop-blur-xs opacity-0 pointer-events-none transition-opacity group-hover/cover:opacity-100 group-hover/cover:pointer-events-auto group-focus-within/cover:opacity-100 group-focus-within/cover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
             title={t('archive.assetUploadCover')}
           >
             <ImageIcon className="h-4 w-4" />
@@ -139,7 +139,7 @@ export function MetadataAssetsEditor({
               className="max-h-16 sm:max-h-20 max-w-full object-contain"
             />
           ) : (
-            <span className="max-w-full truncate text-sm sm:text-base font-semibold text-white/90 drop-shadow-sm">{clearlogoPlaceholder}</span>
+            <span className="max-w-full truncate text-sm sm:text-base font-semibold text-white/90 drop-shadow-xs">{clearlogoPlaceholder}</span>
           )}
           <Button
             type="button"
@@ -147,7 +147,7 @@ export function MetadataAssetsEditor({
             size="icon"
             onClick={onUploadClearlogo}
             disabled={disabled || uploadingClearlogo || !onUploadClearlogo}
-            className="absolute right-2 top-2 z-20 h-8 w-8 rounded-full border-white/20 bg-background/85 p-0 shadow-sm backdrop-blur-sm opacity-0 pointer-events-none transition-opacity group-hover/clearlogo:opacity-100 group-hover/clearlogo:pointer-events-auto group-focus-within/clearlogo:opacity-100 group-focus-within/clearlogo:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
+            className="absolute right-2 top-2 z-20 h-8 w-8 rounded-full border-white/20 bg-background/85 p-0 shadow-xs backdrop-blur-xs opacity-0 pointer-events-none transition-opacity group-hover/clearlogo:opacity-100 group-hover/clearlogo:pointer-events-auto group-focus-within/clearlogo:opacity-100 group-focus-within/clearlogo:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto [@media(hover:none)]:opacity-100 [@media(hover:none)]:pointer-events-auto"
             title={t('archive.assetUploadClearlogo')}
           >
             <ImageIcon className="h-4 w-4" />

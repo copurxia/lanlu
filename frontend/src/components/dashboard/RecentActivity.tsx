@@ -61,7 +61,7 @@ function RecentActivitySection({ title, icon, archives, loading = false, emptyMe
                   href={`/archive?id=${archive.arcid}`}
                   className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent transition-colors"
                 >
-                  <div className="relative w-12 h-16 flex-shrink-0 rounded overflow-hidden bg-muted">
+                  <div className="relative w-12 h-16 shrink-0 rounded overflow-hidden bg-muted">
                     {coverAssetId ? (
                       <Image
                         src={`/api/assets/${coverAssetId}`}
@@ -77,7 +77,7 @@ function RecentActivitySection({ title, icon, archives, loading = false, emptyMe
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium leading-tight break-words">{archive.title}</p>
+                    <p className="text-sm font-medium leading-tight wrap-break-word">{archive.title}</p>
                     <p className="text-xs text-muted-foreground">
                       {archive.pagecount} 页
                       {archive.progress > 0 && ` · 已读 ${archive.progress} 页`}

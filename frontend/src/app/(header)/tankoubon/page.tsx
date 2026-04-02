@@ -128,7 +128,7 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
 
   return (
     <div
-      className="relative rounded-lg border bg-card p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-sm"
+      className="relative rounded-lg border bg-card p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-xs"
       role="button"
       tabIndex={0}
       onClick={handleNavigateToReader}
@@ -1105,13 +1105,13 @@ function TankoubonDetailContent() {
       {backdropUrl ? (
         <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
           <Image src={backdropUrl} alt="" fill className="object-cover opacity-30" unoptimized />
-          <div className="absolute inset-0 bg-gradient-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
+          <div className="absolute inset-0 bg-linear-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
         </div>
       ) : null}
       <main className="relative z-10 container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
         {/* Header / hero */}
         <div className="relative mb-8">
-          <div className="relative rounded-2xl border bg-card/70 backdrop-blur dark:bg-card/70">
+          <div className="relative rounded-2xl border bg-card/70 backdrop-blur-sm dark:bg-card/70">
             <div className="p-4 md:p-5">
               {/* Mobile: keep hero clean; actions live in a bottom sheet. */}
               <div className="sm:hidden absolute right-4 top-4">
@@ -1151,7 +1151,7 @@ function TankoubonDetailContent() {
                       <BookOpen className="w-3 h-3 mr-1" />
                       {t('tankoubon.collection')}
                     </Badge>
-                    <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight break-words">
+                    <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight wrap-break-word">
                       {tankoubon.title}
                     </h1>
                   </div>
@@ -1363,7 +1363,7 @@ function TankoubonDetailContent() {
             <Spinner />
           </div>
         ) : archives.length === 0 ? (
-          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur dark:bg-card/70">
+          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur-sm dark:bg-card/70">
             <p className="text-muted-foreground mb-4">{t('tankoubon.noArchives')}</p>
             <Button onClick={() => setAddArchiveDialogOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
@@ -1371,7 +1371,7 @@ function TankoubonDetailContent() {
             </Button>
           </div>
         ) : filteredArchives.length === 0 ? (
-          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur dark:bg-card/70">
+          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur-sm dark:bg-card/70">
             <p className="text-muted-foreground mb-1">{t('tankoubon.noMatchingArchives')}</p>
             <Button variant="ghost" onClick={() => setArchiveFilter('')}>
               {t('common.reset')}
@@ -1398,7 +1398,7 @@ function TankoubonDetailContent() {
                       type="button"
                       variant="secondary"
                       size="icon"
-                      className="absolute right-2 top-2 h-8 w-8 rounded-full opacity-0 shadow-sm transition-opacity group-hover:opacity-100 focus:opacity-100"
+                      className="absolute right-2 top-2 h-8 w-8 rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus:opacity-100"
                       title={t('tankoubon.removeArchive')}
                       disabled={isRemoving}
                       onClick={() => {
@@ -1433,7 +1433,7 @@ function TankoubonDetailContent() {
         )}
 
         {(relatedLoading || relatedTankoubons.length > 0) ? (
-          <section className="mt-8 rounded-2xl border bg-card/70 p-4 backdrop-blur dark:bg-card/70 sm:p-5">
+          <section className="mt-8 rounded-2xl border bg-card/70 p-4 backdrop-blur-sm dark:bg-card/70 sm:p-5">
             <div className="mb-4">
               <h2 className="text-lg font-semibold">{t('tankoubon.relatedTitle')}</h2>
               <p className="text-sm text-muted-foreground">{t('tankoubon.relatedDescription')}</p>

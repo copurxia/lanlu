@@ -12,9 +12,9 @@ function FeedMediaPlaceholder({
 }) {
   return (
     <div className={cn('feed-shimmer relative overflow-hidden bg-muted/80', className)}>
-      <div className="absolute inset-0 bg-gradient-to-br from-background/10 via-transparent to-foreground/5" />
+      <div className="absolute inset-0 bg-linear-to-br from-background/10 via-transparent to-foreground/5" />
       {label ? (
-        <div className="absolute inset-x-4 bottom-4 rounded-full bg-background/75 px-3 py-1 text-xs text-muted-foreground shadow-sm backdrop-blur">
+        <div className="absolute inset-x-4 bottom-4 rounded-full bg-background/75 px-3 py-1 text-xs text-muted-foreground shadow-xs backdrop-blur-sm">
           {label}
         </div>
       ) : null}
@@ -42,7 +42,7 @@ export function TweetFeedSkeleton({
       {Array.from({ length: count }).map((_, index) => (
         <div
           key={`tweet-skeleton-${index}`}
-          className="feed-card-enter rounded-2xl border bg-card px-4 py-4 shadow-sm sm:px-5"
+          className="feed-card-enter rounded-2xl border bg-card px-4 py-4 shadow-xs sm:px-5"
         >
           <div className="flex items-start gap-3">
             <Skeleton className="feed-shimmer h-11 w-11 shrink-0 rounded-full" />
@@ -68,7 +68,7 @@ export function TweetFeedSkeleton({
                 <Skeleton className="feed-shimmer h-6 w-20 rounded-full" />
                 <Skeleton className="feed-shimmer h-6 w-14 rounded-full" />
               </div>
-              <FeedMediaPlaceholder className="aspect-[16/10] w-full rounded-2xl" />
+              <FeedMediaPlaceholder className="aspect-16/10 w-full rounded-2xl" />
             </div>
           </div>
         </div>
@@ -90,8 +90,8 @@ export function ChannelFeedSkeleton({
         <div key={`channel-skeleton-${index}`} className="feed-card-enter px-1 py-2">
           <div className="flex items-end gap-3">
             <Skeleton className="feed-shimmer h-10 w-10 shrink-0 rounded-full" />
-            <div className="min-w-0 flex-1 overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white shadow-sm">
-              <FeedMediaPlaceholder className="aspect-[16/10] w-full" />
+            <div className="min-w-0 flex-1 overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white shadow-xs">
+              <FeedMediaPlaceholder className="aspect-16/10 w-full" />
               <div className="space-y-3 px-4 py-3 sm:px-5">
                 <div className="space-y-2">
                   <FeedLoadingLine className="w-full" />

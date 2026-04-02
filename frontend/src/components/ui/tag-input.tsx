@@ -134,7 +134,7 @@ export function TagInput({
   const dropdownContent = autocomplete.showSuggestions && autocomplete.suggestions.length > 0 && (
     <div
       ref={suggestionsRef}
-      className="fixed z-[9999] max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
+      className="fixed z-9999 max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
       style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
     >
       {autocomplete.suggestions.map((suggestion, index) => (
@@ -192,7 +192,7 @@ export function TagInput({
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); removeTag(tag) }}
-                className="rounded-sm outline-none ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                className="rounded-sm outline-hidden ring-offset-background focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 <X className="h-3 w-3 text-muted-foreground hover:text-foreground" />
               </button>

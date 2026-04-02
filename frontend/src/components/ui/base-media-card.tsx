@@ -1093,7 +1093,7 @@ export function BaseMediaCard({
               </div>
             )}
             {selectionMode && !selected && (
-              <div className="absolute inset-0 z-[1] bg-black/45 pointer-events-none" />
+              <div className="absolute inset-0 z-1 bg-black/45 pointer-events-none" />
             )}
 
             {/* Badges */}
@@ -1110,9 +1110,9 @@ export function BaseMediaCard({
                 <button
                   type="button"
                   className={[
-                    "inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur-sm transition-colors",
+                    "inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur-xs transition-colors",
                     selected
-                      ? "bg-primary text-primary-foreground border-primary/60 shadow-sm"
+                      ? "bg-primary text-primary-foreground border-primary/60 shadow-xs"
                       : "bg-black/50 text-white border-white/40 hover:bg-black/65",
                   ].join(" ")}
                   onClick={(e) => {
@@ -1148,7 +1148,7 @@ export function BaseMediaCard({
               <Button
                 size="icon"
                 variant="secondary"
-                className="h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25"
+                className="h-8 w-8 bg-white/15 text-white backdrop-blur-xs hover:bg-white/25"
                 aria-label={detailsLabel || t('archive.details')}
                 title={detailsLabel || t('archive.details')}
                 onClick={navigateToDetails}
@@ -1160,7 +1160,7 @@ export function BaseMediaCard({
                 size="icon"
                 variant="secondary"
                 className={[
-                  "h-8 w-8 bg-white/15 text-white backdrop-blur-sm hover:bg-white/25",
+                  "h-8 w-8 bg-white/15 text-white backdrop-blur-xs hover:bg-white/25",
                   isFavorite ? "text-red-400" : "",
                 ].filter(Boolean).join(" ")}
                 aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
@@ -1175,7 +1175,7 @@ export function BaseMediaCard({
             {/* Hover overlay (also acts as a scrim behind floating actions when there are no tags/summary) */}
             <div
               className={[
-                "pointer-events-none absolute inset-0 z-10 flex items-end bg-gradient-to-t from-black/70 via-black/30 to-transparent transition-opacity",
+                "pointer-events-none absolute inset-0 z-10 flex items-end bg-linear-to-t from-black/70 via-black/30 to-transparent transition-opacity",
                 // Default hidden on all viewports; show on hover/focus behind floating actions / tag chips.
                 "opacity-0 group-hover:opacity-100",
               ].join(" ")}
@@ -1191,12 +1191,12 @@ export function BaseMediaCard({
                       ].join(" ")}
                     >
                       {hoverTags.map((tag) => (
-                        <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
+                        <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-xs">
                           {stripNamespace(tag)}
                         </span>
                       ))}
                       {allTags.length > hoverTags.length && (
-                        <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-sm">
+                        <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-xs">
                           +{allTags.length - hoverTags.length}
                         </span>
                       )}

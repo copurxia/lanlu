@@ -676,7 +676,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
           <TabsList className="flex w-full justify-start overflow-x-auto">
             <TabsTrigger value="all" className="flex items-center gap-2 flex-none px-2 sm:px-3">
               <span className="whitespace-nowrap">{t('settings.taskManagement.all')}</span>
-              <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-[1.25rem] h-5 flex items-center justify-center">
+              <Badge variant="secondary" className="text-xs px-1.5 py-0.5 min-w-5 h-5 flex items-center justify-center">
                 {totalAll ?? total}
               </Badge>
             </TabsTrigger>

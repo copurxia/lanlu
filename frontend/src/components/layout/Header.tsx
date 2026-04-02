@@ -286,7 +286,7 @@ export function Header() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 flex-shrink-0"
+                className="h-10 w-10 shrink-0"
                 onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
                 aria-label={t('common.filter')}
                 title={t('common.filter')}
@@ -306,7 +306,7 @@ export function Header() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-10 w-10 flex-shrink-0"
+                className="h-10 w-10 shrink-0"
                 onClick={() => appEvents.emit(AppEvents.FILTER_OPEN)}
                 aria-label={t('common.filter')}
                 title={t('common.filter')}

@@ -145,8 +145,8 @@ export function ReaderSettingsSheet({
         side={isNarrowScreen ? 'bottom' : 'right'}
         className={
           isNarrowScreen
-            ? 'flex flex-col max-h-[85vh] rounded-t-xl border-x-0 !px-4 !pt-3 !pb-[calc(env(safe-area-inset-bottom)+1rem)]'
-            : 'flex flex-col max-w-sm !p-5 sm:!p-6'
+            ? 'flex flex-col max-h-[85vh] rounded-t-xl border-x-0 px-4! pt-3! pb-[calc(env(safe-area-inset-bottom)+1rem)]!'
+            : 'flex flex-col max-w-sm p-5! sm:p-6!'
         }
       >
         {isNarrowScreen && <div className="mx-auto mb-1 h-1.5 w-12 rounded-full bg-muted" />}
@@ -230,7 +230,7 @@ export function ReaderSettingsSheet({
                   title={setting.tooltip}
                   className={`
                     flex items-center w-full gap-3 rounded-xl border px-3.5 py-3 text-left text-sm font-medium
-                    transition-colors duration-150 hover:shadow-sm
+                    transition-colors duration-150 hover:shadow-xs
                     ${borderClass}
                     ${disabledClass}
                   `}

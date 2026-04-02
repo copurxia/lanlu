@@ -26,10 +26,10 @@ export function ReaderTopBar({
   return (
     <div
       className={`
-        bg-background/95 backdrop-blur-sm border-b
+        bg-background/95 backdrop-blur-xs border-b
         transition-all duration-250 ease-out
         will-change-transform will-change-opacity
-        ${showToolbar ? 'h-auto translate-y-0 opacity-100' : '!h-0 -translate-y-4 opacity-0 overflow-hidden'}
+        ${showToolbar ? 'h-auto translate-y-0 opacity-100' : 'h-0! -translate-y-4 opacity-0 overflow-hidden'}
       `}
     >
       <div

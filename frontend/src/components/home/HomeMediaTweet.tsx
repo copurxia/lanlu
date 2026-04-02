@@ -160,12 +160,12 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
   ready: boolean;
 }) {
   if (!ready && loading) {
-    return <FeedPreviewPlaceholder className="aspect-[16/10] w-full rounded-none" label={emptyLabel} />;
+    return <FeedPreviewPlaceholder className="aspect-16/10 w-full rounded-none" label={emptyLabel} />;
   }
 
   if (items.length === 0) {
     return (
-      <div className="flex aspect-[16/10] items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
+      <div className="flex aspect-16/10 items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
         {loading ? <Spinner size="sm" /> : emptyLabel}
       </div>
     );
@@ -173,7 +173,7 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   if (items.length === 1) {
     return (
-      <div className="feed-media-fade aspect-[16/10] bg-border">
+      <div className="feed-media-fade aspect-16/10 bg-border">
         <TweetPreviewTile item={items[0]} />
       </div>
     );
@@ -181,7 +181,7 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   if (items.length === 2) {
     return (
-      <div className="feed-media-fade grid aspect-[16/10] grid-cols-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-16/10 grid-cols-2 gap-px bg-border">
         {items.map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
@@ -191,7 +191,7 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   if (items.length === 3) {
     return (
-      <div className="feed-media-fade grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-16/10 grid-cols-2 grid-rows-2 gap-px bg-border">
         <TweetPreviewTile item={items[0]} className="row-span-2" />
         <TweetPreviewTile item={items[1]} />
         <TweetPreviewTile item={items[2]} />
@@ -201,13 +201,13 @@ const TweetPreviewMedia = memo(function TweetPreviewMedia({
 
   return (
     items.length === 4 ? (
-      <div className="feed-media-fade grid aspect-[16/10] grid-cols-2 grid-rows-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-16/10 grid-cols-2 grid-rows-2 gap-px bg-border">
         {items.map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
       </div>
     ) : items.length <= 6 ? (
-      <div className="feed-media-fade grid aspect-[3/2] grid-cols-3 grid-rows-2 gap-px bg-border">
+      <div className="feed-media-fade grid aspect-3/2 grid-cols-3 grid-rows-2 gap-px bg-border">
         {items.map((item) => (
           <TweetPreviewTile key={item.id} item={item} />
         ))}
@@ -300,7 +300,7 @@ function HomeMediaTweetCard({
         return (
           <article
             className={cn(
-              'feed-card-enter rounded-2xl border bg-card px-4 py-4 shadow-sm transition-colors hover:bg-card/95 sm:px-5',
+              'feed-card-enter rounded-2xl border bg-card px-4 py-4 shadow-xs transition-colors hover:bg-card/95 sm:px-5',
               selected && 'border-primary ring-1 ring-primary/30'
             )}
             style={{
@@ -371,7 +371,7 @@ function HomeMediaTweetCard({
                   <div className="mt-3">
                     <div
                       className={cn(
-                        'whitespace-pre-wrap break-words text-[15px] leading-6 text-foreground',
+                        'whitespace-pre-wrap wrap-break-word text-[15px] leading-6 text-foreground',
                         !contentExpanded && canToggleContent && 'line-clamp-5'
                       )}
                     >

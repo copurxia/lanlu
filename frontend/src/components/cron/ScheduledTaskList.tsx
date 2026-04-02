@@ -168,7 +168,7 @@ export function ScheduledTaskList({ onEdit, onRefresh }: ScheduledTaskListProps)
                       <span className="text-muted-foreground">{t('settings.cronManagement.lastRunAt')}: </span>
                       {task.lastRunAt ? (
                         <>
-                          <span className="text-xs break-words">{formatDateTime(task.lastRunAt)}</span>
+                          <span className="text-xs wrap-break-word">{formatDateTime(task.lastRunAt)}</span>
                           {task.lastRunSuccess ? (
                             <CheckCircle className="w-3 h-3 text-green-500" />
                           ) : (

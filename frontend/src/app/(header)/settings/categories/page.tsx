@@ -417,7 +417,7 @@ export default function CategoriesSettingsPage() {
           {categories.map((category) => (
             <Card key={category.catid} className="overflow-hidden hover:shadow-md transition-shadow">
               {/* Cover */}
-              <div className="relative aspect-[3/1]">
+              <div className="relative aspect-3/1">
                 {(() => {
                   const bgId = category.cover_asset_id;
                   return (
@@ -428,7 +428,7 @@ export default function CategoriesSettingsPage() {
                           style={{ backgroundImage: `url(/api/assets/${bgId})` }}
                         />
                       ) : (
-                        <div className="absolute inset-0 bg-gradient-to-br from-muted/40 via-muted/20 to-background" />
+                        <div className="absolute inset-0 bg-linear-to-br from-muted/40 via-muted/20 to-background" />
                       )}
                       {/* Only add a veil for the placeholder; generated covers are already composed for readability. */}
                       {!bgId ? <div className="absolute inset-0 bg-background/50" /> : null}
@@ -444,7 +444,7 @@ export default function CategoriesSettingsPage() {
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="text-lg font-semibold leading-tight truncate">{category.name}</div>
-                    <Badge variant="outline" className="text-xs flex-shrink-0">
+                    <Badge variant="outline" className="text-xs shrink-0">
                       {category.archive_count} {t('settings.categoryArchives')}
                     </Badge>
                   </div>

@@ -1,6 +1,263 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+
+@custom-variant dark (&:is(.dark, .dark *));
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+  @media (width >= --theme(--breakpoint-3xl)) {
+    max-width: none;
+  }
+  @media (width >= 1400px) {
+    max-width: 1400px;
+  }
+}
+
+@theme {
+  --breakpoint-3xl: 1920px;
+  --breakpoint-4xl: 2560px;
+  --breakpoint-5xl: 3200px;
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --spacing-modal-xs: 20rem;
+  --spacing-modal-sm: var(--modal-size-sm);
+  --spacing-modal-md: var(--modal-size-md);
+  --spacing-modal-lg: var(--modal-size-lg);
+  --spacing-modal-xl: var(--modal-size-xl);
+
+  --z-index-modal-overlay: var(--z-modal-overlay);
+  --z-index-modal-content: var(--z-modal-content);
+  --z-index-toast: var(--z-toast);
+  --z-index-tooltip: var(--z-tooltip);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-fade-in: fade-in 0.5s ease-out;
+  --animate-slide-in-from-bottom: slide-in-from-bottom 0.5s ease-out;
+  --animate-shake: shake 0.3s ease-in-out;
+  --animate-archive-card-in: archive-card-in 520ms cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  --animate-sheet-overlay-in: sheet-overlay-in 220ms ease-out both;
+  --animate-sheet-overlay-out: sheet-overlay-out 180ms ease-in both;
+  --animate-sheet-left-in: sheet-left-in 320ms cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  --animate-sheet-left-out: sheet-left-out 160ms cubic-bezier(0.4, 0, 1, 1) both;
+  --animate-sheet-right-in: sheet-right-in 360ms cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  --animate-sheet-right-out: sheet-right-out 220ms cubic-bezier(0.4, 0, 1, 1)
+    both;
+  --animate-sheet-top-in: sheet-top-in 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-sheet-top-out: sheet-top-out 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  --animate-sheet-bottom-in: sheet-bottom-in 320ms cubic-bezier(0.16, 1, 0.3, 1)
+    both;
+  --animate-sheet-bottom-out: sheet-bottom-out 200ms cubic-bezier(0.4, 0, 1, 1)
+    both;
+
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes accordion-up {
+    from {
+      height: var(--radix-accordion-content-height);
+    }
+  }
+  @keyframes fade-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-in-from-bottom {
+    0% {
+      transform: translateY(1rem);
+      opacity: 0;
+    }
+    100% {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+  @keyframes shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    25% {
+      transform: translateX(-5px);
+    }
+    75% {
+      transform: translateX(5px);
+    }
+  }
+  @keyframes archive-card-in {
+    0% {
+      transform: translate3d(0, 14px, 0) scale(0.96) rotate(-0.25deg);
+      opacity: 0;
+    }
+    55% {
+      transform: translate3d(0, -2px, 0) scale(1.02) rotate(0.15deg);
+      opacity: 1;
+    }
+    80% {
+      transform: translate3d(0, 1px, 0) scale(0.995) rotate(-0.05deg);
+    }
+    100% {
+      transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-overlay-in {
+    0% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-overlay-out {
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes sheet-left-in {
+    0% {
+      transform: translate3d(-100%, 0, 0);
+      opacity: 0;
+    }
+    100% {
+      transform: translate3d(0, 0, 0);
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-left-out {
+    0% {
+      transform: translate3d(0, 0, 0);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(-100%, 0, 0);
+      opacity: 0;
+    }
+  }
+  @keyframes sheet-right-in {
+    0% {
+      transform: translate3d(18px, 0, 0) scale(0.985);
+      opacity: 0;
+    }
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-right-out {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(18px, 0, 0) scale(0.985);
+      opacity: 0;
+    }
+  }
+  @keyframes sheet-top-in {
+    0% {
+      transform: translate3d(0, -14px, 0) scale(0.99);
+      opacity: 0;
+    }
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-top-out {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(0, -14px, 0) scale(0.99);
+      opacity: 0;
+    }
+  }
+  @keyframes sheet-bottom-in {
+    0% {
+      transform: translate3d(0, 14px, 0) scale(0.99);
+      opacity: 0;
+    }
+    100% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes sheet-bottom-out {
+    0% {
+      transform: translate3d(0, 0, 0) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate3d(0, 14px, 0) scale(0.99);
+      opacity: 0;
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
 
 @layer base {
   :root {

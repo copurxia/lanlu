@@ -61,13 +61,13 @@ export function HomeBatchActionBar({
           visible ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-4 pointer-events-none",
         ].join(" ")}
       >
-        <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full px-3 py-2 shadow-lg flex items-center gap-2">
+        <div className="bg-background/95 backdrop-blur-xs border border-border rounded-full px-3 py-2 shadow-lg flex items-center gap-2">
           <span className="text-xs sm:text-sm whitespace-nowrap font-medium text-foreground px-1">
             {t('common.selected')}: {selectedTotal}
           </span>
         </div>
 
-        <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full p-1 shadow-lg flex items-center gap-1">
+        <div className="bg-background/95 backdrop-blur-xs border border-border rounded-full p-1 shadow-lg flex items-center gap-1">
           <Button
             variant="ghost"
             size="sm"
@@ -127,7 +127,7 @@ export function HomeBatchActionBar({
           </Button>
         </div>
 
-        <div className="bg-background/95 backdrop-blur-sm border border-border rounded-full p-1 shadow-lg">
+        <div className="bg-background/95 backdrop-blur-xs border border-border rounded-full p-1 shadow-lg">
           <Button
             variant="ghost"
             size="sm"

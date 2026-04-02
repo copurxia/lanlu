@@ -22,7 +22,6 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
-    "autoprefixer": "^10.4.24",
     "axios": "^1.13.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -45,6 +44,7 @@
     "last 2 Edge versions"
   ],
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.2",
     "@types/d3-cloud": "^1.2.9",
     "@types/node": "^20.19.33",
     "@types/react": "^19.2.13",
@@ -52,7 +52,7 @@
     "eslint": "^9.39.2",
     "eslint-config-next": "16.1.0",
     "postcss": "^8.5.6",
-    "tailwindcss": "^3.4.19",
+    "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3"
   }
 }

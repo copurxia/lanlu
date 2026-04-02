@@ -493,9 +493,9 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                         {/* File Header */}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2 flex-1 min-w-0">
-                            <FileText className="h-5 w-5 text-primary flex-shrink-0" />
+                            <FileText className="h-5 w-5 text-primary shrink-0" />
                             <span className="font-medium truncate">{uploadFile.file.name}</span>
-                            <span className="text-sm text-gray-500 flex-shrink-0">
+                            <span className="text-sm text-gray-500 shrink-0">
                               ({(uploadFile.file.size / 1024 / 1024).toFixed(2)} MB)
                             </span>
                           </div>
@@ -625,7 +625,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                         {/* Task Header */}
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2 flex-1 min-w-0">
-                            <Download className="h-5 w-5 text-primary flex-shrink-0" />
+                            <Download className="h-5 w-5 text-primary shrink-0" />
                             <span className="font-medium truncate">{task.url}</span>
                           </div>
                           <div className="flex items-center space-x-2">

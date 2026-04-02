@@ -238,7 +238,7 @@ const ChannelPreviewTile = memo(function ChannelPreviewTile({
             }}
           />
           {item.mediaKind === 'video-poster' ? (
-            <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 p-2 text-white shadow-sm backdrop-blur-sm">
+            <div className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/55 p-2 text-white shadow-xs backdrop-blur-xs">
               <Film className="h-4 w-4" />
             </div>
           ) : null}
@@ -288,13 +288,13 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   }, []);
 
   if (placeholderVisible) {
-    return <FeedPreviewPlaceholder className="aspect-[16/10] w-full rounded-none" label={emptyLabel} />;
+    return <FeedPreviewPlaceholder className="aspect-16/10 w-full rounded-none" label={emptyLabel} />;
   }
 
   return (
     <div className="feed-media-fade w-full">
       {items.length === 0 ? (
-        <div className="flex aspect-[16/10] w-full items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
+        <div className="flex aspect-16/10 w-full items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
           {loading ? <Spinner size="sm" /> : emptyLabel}
         </div>
       ) : layout.kind === 'single' ? (
@@ -584,12 +584,12 @@ function HomeMediaChannelCard({
               <div className="min-w-0 flex-1">
                 <div
                   className={cn(
-                    'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-sm',
+                    'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-xs',
                     selected && 'ring-2 ring-primary/30'
                   )}
                 >
                   <div className="pointer-events-none absolute right-3 top-3 z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-                    <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/92 px-2 py-1 shadow-sm ring-1 ring-black/5 backdrop-blur">
+                    <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/92 px-2 py-1 shadow-xs ring-1 ring-black/5 backdrop-blur-sm">
                       <Button
                         asChild
                         variant="ghost"
@@ -662,7 +662,7 @@ function HomeMediaChannelCard({
                       <div>
                         <div
                           className={cn(
-                            'whitespace-pre-wrap break-words text-[15px] leading-6 text-slate-900',
+                            'whitespace-pre-wrap wrap-break-word text-[15px] leading-6 text-slate-900',
                             !contentExpanded && canToggleContent && 'line-clamp-5'
                           )}
                         >

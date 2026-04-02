@@ -97,7 +97,7 @@ function SearchBarContent(
         <Button
           type="submit"
           size="icon"
-          className={compact ? 'flex-shrink-0 h-8 w-8' : 'flex-shrink-0 h-10 w-10'}
+          className={compact ? 'shrink-0 h-8 w-8' : 'shrink-0 h-10 w-10'}
         >
           <Search className="w-4 h-4" />
         </Button>
@@ -114,7 +114,7 @@ export const SearchBar = React.forwardRef<SearchBarHandle, SearchBarProps>((prop
       <form className="w-full">
         <div className="flex gap-2 items-center w-full">
           <div className="flex-1 min-w-0 h-[32px] rounded-md border border-input bg-background px-2 py-1 text-sm" />
-          <Button type="button" size="icon" disabled className="flex-shrink-0 h-[32px] w-[32px]">
+          <Button type="button" size="icon" disabled className="shrink-0 h-[32px] w-[32px]">
             <Search className="w-4 h-4" />
           </Button>
         </div>

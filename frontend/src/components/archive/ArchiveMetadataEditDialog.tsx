@@ -291,7 +291,7 @@ export function ArchiveMetadataEditDialog({
                           />
                         ) : null}
                         <div className="min-w-0 flex-1 text-left">
-                          <div className="font-medium whitespace-normal break-words">{opt.label || `候选 ${opt.index + 1}`}</div>
+                          <div className="font-medium whitespace-normal wrap-break-word">{opt.label || `候选 ${opt.index + 1}`}</div>
                           {opt.description ? (
                             <div className="text-xs text-muted-foreground whitespace-normal">{opt.description}</div>
                           ) : null}

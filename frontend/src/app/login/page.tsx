@@ -113,7 +113,7 @@ function LoginForm() {
     <div className="min-h-screen grid lg:grid-cols-2">
       {/* Left Side: Visual/Branding (Hidden on mobile) */}
       <div className="hidden lg:flex flex-col justify-between p-12 bg-muted relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-primary/20 via-background to-background z-0" />
+        <div className="absolute inset-0 bg-linear-to-br from-primary/20 via-background to-background z-0" />
         <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1578632738908-4521c726eebf?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-10 grayscale z-[-1]" />
         
         <div className="relative z-10 flex items-center gap-2 text-2xl font-bold tracking-tight">
@@ -160,7 +160,7 @@ function LoginForm() {
           </div>
 
           {/* Mobile: avoid the "card" backdrop (looks like an extra wrapper in dark mode). */}
-          <Card className="border-none shadow-none bg-transparent lg:bg-card lg:border lg:shadow-sm">
+          <Card className="border-none shadow-none bg-transparent lg:bg-card lg:border lg:shadow-xs">
             <CardContent className="pt-6 px-0 lg:px-6">
               <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
                 <TabsList className="grid w-full grid-cols-2 mb-8">

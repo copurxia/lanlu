@@ -617,7 +617,7 @@ export function ReaderSidebar({
             draggable={false}
           />
         ) : (
-          <span className="flex-shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">
+          <span className="shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">
             {index + 1}
           </span>
         )}
@@ -654,7 +654,7 @@ export function ReaderSidebar({
         key={index}
         data-sidebar-item-index={index}
         onClick={() => onSelectPage(index)}
-        className={`group absolute overflow-hidden rounded-lg bg-muted shadow-sm hover:ring-2 hover:ring-primary transition-all duration-200 ${
+        className={`group absolute overflow-hidden rounded-lg bg-muted shadow-xs hover:ring-2 hover:ring-primary transition-all duration-200 ${
           isCurrentPage ? 'ring-2 ring-primary' : ''
         }`}
         style={{
@@ -666,7 +666,7 @@ export function ReaderSidebar({
       >
         {isCurrentPage ? <div className="pointer-events-none absolute inset-0 z-10 bg-primary/10" /> : null}
 
-        <div className="pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur-sm">
+        <div className="pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[11px] font-medium text-white shadow-xs backdrop-blur-xs">
           <span>{index + 1}</span>
           {page.type === 'video' ? <Film className="h-3 w-3" /> : null}
           {page.type === 'audio' ? <Music className="h-3 w-3" /> : null}
@@ -708,7 +708,7 @@ export function ReaderSidebar({
           )}
         </div>
 
-        <div className="flex min-h-[34px] items-center justify-center border-t border-black/5 bg-background/84 px-2 py-1 text-center backdrop-blur-sm">
+        <div className="flex min-h-[34px] items-center justify-center border-t border-black/5 bg-background/84 px-2 py-1 text-center backdrop-blur-xs">
           <span className={`block max-w-full text-[11px] leading-snug tracking-tight ${hasCustomTitle ? 'line-clamp-2 font-normal text-foreground/80' : 'truncate text-[10px] text-muted-foreground/80'}`}>
             {captionText}
           </span>
@@ -721,7 +721,7 @@ export function ReaderSidebar({
 
   const sidebarHeader = (
     <div className="px-3 pt-2 pb-2">
-      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/55 px-2 py-1.5 backdrop-blur-md shadow-sm shadow-black/10">
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/55 px-2 py-1.5 backdrop-blur-md shadow-xs shadow-black/10">
         <div className="min-w-0 text-xs text-muted-foreground font-medium truncate">
           {t('reader.sidebarItemsCount').replace('{count}', String(allPages.length))}
         </div>
@@ -734,7 +734,7 @@ export function ReaderSidebar({
             aria-pressed={activeTab === 'thumbnails'}
             className={`h-9 w-9 sm:h-7 sm:w-7 rounded-md transition-colors flex items-center justify-center touch-manipulation ${
               activeTab === 'thumbnails'
-                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-sm shadow-primary/20'
+                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
                 : 'text-muted-foreground/80 hover:text-foreground hover:bg-background/35'
             }`}
           >
@@ -748,7 +748,7 @@ export function ReaderSidebar({
             aria-pressed={activeTab === 'list'}
             className={`h-9 w-9 sm:h-7 sm:w-7 rounded-md transition-colors flex items-center justify-center touch-manipulation ${
               activeTab === 'list'
-                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-sm shadow-primary/20'
+                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
                 : 'text-muted-foreground/80 hover:text-foreground hover:bg-background/35'
             }`}
           >
@@ -762,7 +762,7 @@ export function ReaderSidebar({
             aria-pressed={activeTab === 'tree'}
             className={`h-9 w-9 sm:h-7 sm:w-7 rounded-md transition-colors flex items-center justify-center touch-manipulation ${
               activeTab === 'tree'
-                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-sm shadow-primary/20'
+                ? 'bg-primary/20 text-primary ring-1 ring-primary/55 shadow-xs shadow-primary/20'
                 : 'text-muted-foreground/80 hover:text-foreground hover:bg-background/35'
             }`}
           >
@@ -806,7 +806,7 @@ export function ReaderSidebar({
                     currentPage === index ? 'bg-accent text-accent-foreground' : ''
                   }`}
                 >
-                  <span className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
+                  <span className="shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
                     {index + 1}
                   </span>
                   <span className="flex-1 truncate text-sm group-hover:text-primary transition-colors">
@@ -861,7 +861,7 @@ export function ReaderSidebar({
 
   return (
     <div
-      className="absolute left-0 top-0 bottom-0 hidden md:flex w-[280px] lg:w-[320px] bg-background/95 backdrop-blur-sm border-r border-border z-40 flex-col"
+      className="absolute left-0 top-0 bottom-0 hidden md:flex w-[280px] lg:w-[320px] bg-background/95 backdrop-blur-xs border-r border-border z-40 flex-col"
       onWheel={(e) => e.stopPropagation()}
     >
       {sidebarHeader}

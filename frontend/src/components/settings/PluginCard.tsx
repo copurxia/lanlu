@@ -44,7 +44,7 @@ export function PluginCard({
           <div className="flex-1 min-w-0">
             <CardTitle className="text-lg font-semibold truncate flex items-center space-x-2">
               {plugin.icon ? (
-                <div className="relative w-5 h-5 flex-shrink-0">
+                <div className="relative w-5 h-5 shrink-0">
                   <Image
                     src={plugin.icon}
                     alt={plugin.name}
@@ -58,7 +58,7 @@ export function PluginCard({
                         const parent = imgElement.closest('.relative');
                         if (parent && !parent.querySelector('.fallback-icon')) {
                           const fallback = document.createElement('div');
-                          fallback.className = 'fallback-icon w-5 h-5 text-primary flex-shrink-0';
+                          fallback.className = 'fallback-icon w-5 h-5 text-primary shrink-0';
                           fallback.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path></svg>';
                           parent.insertBefore(fallback, imgElement);
                         }
@@ -67,7 +67,7 @@ export function PluginCard({
                   />
                 </div>
               ) : (
-                <Package className="w-5 h-5 text-primary flex-shrink-0" />
+                <Package className="w-5 h-5 text-primary shrink-0" />
               )}
               <span className="truncate">{plugin.name}</span>
             </CardTitle>

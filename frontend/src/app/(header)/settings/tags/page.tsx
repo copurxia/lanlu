@@ -546,12 +546,12 @@ export default function TagsSettingsPage() {
                 />
               ) : null}
               {tag.backgroundAssetId ? (
-                <div className="absolute inset-0 bg-gradient-to-r from-background/95 via-background/85 to-background/70" />
+                <div className="absolute inset-0 bg-linear-to-r from-background/95 via-background/85 to-background/70" />
               ) : null}
 
               <div className="relative p-3 flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3 min-w-0">
-                  <div className="flex items-start gap-2 flex-shrink-0">
+                  <div className="flex items-start gap-2 shrink-0">
                     <div
                       className="h-10 w-10 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center"
                       aria-label={t('settings.tagChangeIcon')}
@@ -577,7 +577,7 @@ export default function TagsSettingsPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-2 flex-shrink-0">
+                <div className="flex gap-2 shrink-0">
                   <Button
                     variant="outline"
                     size="sm"
@@ -601,7 +601,7 @@ export default function TagsSettingsPage() {
                 </div>
               </div>
 
-              <div className="relative px-3 pb-3 text-xs text-muted-foreground space-y-1 break-words">
+              <div className="relative px-3 pb-3 text-xs text-muted-foreground space-y-1 wrap-break-word">
                 {tag.translations.zh?.text && <div>中文: {tag.translations.zh.text}</div>}
                 {tag.translations.en?.text && <div>English: {tag.translations.en.text}</div>}
                 {tag.links && <div>Links: {tag.links}</div>}
@@ -836,7 +836,7 @@ function TagDialog({
                   }}
                 >
                   {/* Improve legibility on busy backgrounds */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-background/20 to-transparent" />
+                  <div className="absolute inset-0 bg-linear-to-t from-background/80 via-background/20 to-transparent" />
 
                   <Button
                     type="button"
@@ -851,7 +851,7 @@ function TagDialog({
                   </Button>
 
                   <div className="absolute -bottom-6 left-3">
-                    <div className="h-12 w-12 rounded-md border-2 border-background bg-muted/30 overflow-hidden shadow flex items-center justify-center">
+                    <div className="h-12 w-12 rounded-md border-2 border-background bg-muted/30 overflow-hidden shadow-sm flex items-center justify-center">
                       {editingTag.iconAssetId ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -881,7 +881,7 @@ function TagDialog({
                     size="sm"
                     onClick={onUploadIcon}
                     disabled={loading || iconUploading}
-                    className="flex items-center gap-2 flex-shrink-0"
+                    className="flex items-center gap-2 shrink-0"
                   >
                     <ImageIcon className="w-4 h-4" />
                     {t('settings.tagChangeIcon')}

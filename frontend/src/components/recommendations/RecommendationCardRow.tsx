@@ -46,7 +46,7 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
   reportAspectRatio: (key: string, aspectRatio: number) => void;
 }) {
   return (
-    <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
+    <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0">
       <ArchiveCard
         archive={archive}
         index={index}
@@ -91,7 +91,7 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
   reportAspectRatio: (key: string, aspectRatio: number) => void;
 }) {
   return (
-    <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0">
+    <div className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0">
       <TankoubonCard
         tankoubon={tankoubon}
         priority={index < 2}

@@ -256,7 +256,7 @@ export function MasonryThumbnailGrid({
       <>
         {isCurrentPage ? <div className="pointer-events-none absolute inset-0 z-10 bg-primary/10" /> : null}
 
-        <div className="pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur-sm">
+        <div className="pointer-events-none absolute right-2 top-2 z-20 inline-flex items-center gap-1 rounded-full bg-black/65 px-2 py-1 text-[11px] font-medium text-white shadow-xs backdrop-blur-xs">
           <span>{index + 1}</span>
           {page.type === 'video' ? <Film className="h-3 w-3" /> : null}
           {page.type === 'audio' ? <Music className="h-3 w-3" /> : null}
@@ -323,7 +323,7 @@ export function MasonryThumbnailGrid({
           )}
         </div>
 
-        <div className="flex min-h-[34px] items-center justify-center border-t border-black/5 bg-background/84 px-2 py-1 text-center backdrop-blur-sm">
+        <div className="flex min-h-[34px] items-center justify-center border-t border-black/5 bg-background/84 px-2 py-1 text-center backdrop-blur-xs">
           <span className={`block max-w-full text-[11px] leading-snug tracking-tight ${hasCustomTitle ? 'line-clamp-2 font-normal text-foreground/80' : 'truncate text-[10px] text-muted-foreground/80'}`}>
             {captionText}
           </span>
@@ -331,7 +331,7 @@ export function MasonryThumbnailGrid({
       </>
     );
 
-    const baseClassName = `group absolute overflow-hidden rounded-lg bg-muted shadow-sm hover:ring-2 hover:ring-primary transition-all duration-200 ${
+    const baseClassName = `group absolute overflow-hidden rounded-lg bg-muted shadow-xs hover:ring-2 hover:ring-primary transition-all duration-200 ${
       isCurrentPage ? 'ring-2 ring-primary' : ''
     }`;
 

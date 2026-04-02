@@ -81,7 +81,7 @@ export function ArchiveMobileActions({
   if (isEditing) return null;
 
   return (
-    <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+    <div className="sm:hidden fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 backdrop-blur-sm supports-backdrop-filter:bg-background/70">
       <div className="mx-auto max-w-7xl px-4 py-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
         <div className="flex items-center gap-2">
           <Link href={buildReaderPath(metadata.arcid, metadata.progress)} className="flex-1">

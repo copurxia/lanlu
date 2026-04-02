@@ -148,7 +148,7 @@ export const SearchInput = React.forwardRef<SearchInputHandle, SearchInputProps>
   const dropdownContent = mounted && autocomplete.showSuggestions && autocomplete.suggestions.length > 0 && (
     <div
       ref={suggestionsRef}
-      className="fixed z-[9999] max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
+      className="fixed z-9999 max-h-60 overflow-auto rounded-md border border-input bg-popover shadow-lg"
       style={{ top: dropdownPosition.top, left: dropdownPosition.left, width: dropdownPosition.width }}
     >
       {autocomplete.suggestions.map((suggestion, index) => (

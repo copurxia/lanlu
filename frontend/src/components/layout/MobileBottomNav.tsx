@@ -56,7 +56,7 @@ export function MobileBottomNav() {
 
   return (
     <nav
-      className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-background/95 backdrop-blur-sm supports-backdrop-filter:bg-background/80"
       style={{
         paddingTop: '0.125rem',
         // Keep iOS safe-area support while reducing overall bar height.

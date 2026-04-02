@@ -29,7 +29,7 @@ export function ArchivePreviewCard({
   pages,
 }: Props) {
   return (
-    <Card className="bg-card/70 backdrop-blur dark:bg-card/70">
+    <Card className="bg-card/70 backdrop-blur-sm dark:bg-card/70">
       {/* When collapsed, default CardHeader padding makes the row feel a bit low; tighten it. */}
       <CardHeader className={cn(showPreview ? 'pb-4' : 'py-4')}>
         <div className="flex items-center justify-between">
@@ -75,7 +75,7 @@ export function ArchivePreviewCard({
                       href={`/reader?id=${metadata.arcid}&page=${index + 1}`}
                       className="flex items-center gap-3 p-3 rounded-lg hover:bg-muted transition-colors group"
                     >
-                      <span className="flex-shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
+                      <span className="shrink-0 w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-medium">
                         {index + 1}
                       </span>
                       <span className="flex-1 truncate text-sm group-hover:text-primary transition-colors">

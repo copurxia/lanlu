@@ -100,7 +100,7 @@ export function UserMenu() {
             <DialogHeader className="px-4 py-3 border-b relative">
               <button
                 type="button"
-                className="absolute right-2 top-2 inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="absolute right-2 top-2 inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t("common.close")}
                 onClick={() => setMobileMenuOpen(false)}
               >

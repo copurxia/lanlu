@@ -128,7 +128,7 @@ function HomePageContent() {
   const effectiveCategoryId = searchQuery ? 'all' : categoryId;
   const centeredFeedClassName =
     homeViewMode === 'tweet' || homeViewMode === 'channel'
-      ? 'mx-auto w-full max-w-[42rem]'
+      ? 'mx-auto w-full max-w-2xl'
       : homeViewMode === 'list'
         ? 'mx-auto w-full max-w-6xl'
         : '';
@@ -593,7 +593,7 @@ function HomePageContent() {
   return (
     <div className="bg-background h-[calc(100dvh-var(--app-header-height,4rem))] overflow-hidden">
       <div className="flex h-full min-h-0">
-        <aside className="hidden lg:block flex-shrink-0 border-r border-border w-72 min-h-0 pt-4">
+        <aside className="hidden lg:block shrink-0 border-r border-border w-72 min-h-0 pt-4">
           <AppSidebarNav
             mode="home"
             categories={categories}
@@ -668,8 +668,8 @@ function HomePageContent() {
                       <Skeleton className="h-6 w-32" />
                       <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
                         {Array.from({ length: 6 }).map((_, i) => (
-                          <div key={i} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0 space-y-2">
-                            <Skeleton className="aspect-[3/4] w-full" />
+                          <div key={i} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
+                            <Skeleton className="aspect-3/4 w-full" />
                             <Skeleton className="h-4 w-full" />
                             <Skeleton className="h-4 w-2/3" />
                           </div>
@@ -700,8 +700,8 @@ function HomePageContent() {
                       {rowLoading ? (
                         <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
                           {Array.from({ length: Math.min(6, categoryRowSize) }).map((_, idx) => (
-                            <div key={idx} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 flex-shrink-0 space-y-2">
-                              <Skeleton className="aspect-[3/4] w-full" />
+                            <div key={idx} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
+                              <Skeleton className="aspect-3/4 w-full" />
                               <Skeleton className="h-4 w-full" />
                               <Skeleton className="h-4 w-2/3" />
                             </div>
@@ -847,7 +847,7 @@ function HomePageContent() {
                 <div className="columns-2 gap-4 sm:columns-3 lg:columns-4 xl:columns-5 2xl:columns-6">
                   {Array.from({ length: 10 }).map((_, idx) => (
                     <div key={idx} className="mb-4 break-inside-avoid">
-                      <Skeleton className="aspect-[3/4] w-full rounded-lg" />
+                      <Skeleton className="aspect-3/4 w-full rounded-lg" />
                     </div>
                   ))}
                 </div>

@@ -112,7 +112,7 @@ const HomeMediaListItem = memo(function HomeMediaListItem({
         return (
           <div
             className={cn(
-              'relative rounded-lg border bg-card p-3 transition-shadow hover:shadow-sm sm:p-4',
+              'relative rounded-lg border bg-card p-3 transition-shadow hover:shadow-xs sm:p-4',
               selectionMode && !selected && 'bg-card/70',
               selected && 'border-primary ring-1 ring-primary/30'
             )}

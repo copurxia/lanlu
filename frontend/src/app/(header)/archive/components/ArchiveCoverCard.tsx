@@ -19,7 +19,7 @@ export function ArchiveCoverCard({ title, coverAssetId, noCoverLabel }: Props) {
   return (
     <Card>
       <CardContent className="p-4 lg:p-6">
-        <div className="aspect-[3/4] bg-muted relative max-w-[280px] sm:max-w-[360px] lg:max-w-none mx-auto lg:mx-0 group">
+        <div className="aspect-3/4 bg-muted relative max-w-[280px] sm:max-w-[360px] lg:max-w-none mx-auto lg:mx-0 group">
           <div className="relative w-full h-full">
             {!coverError && coverSrc.length > 0 && (
               <Image
@@ -53,7 +53,7 @@ export function ArchiveCoverCard({ title, coverAssetId, noCoverLabel }: Props) {
 
         {imageModalOpen && !coverError && coverSrc.length > 0 && (
           <div
-            className="fixed inset-0 bg-black bg-opacity-75 z-[9999] flex items-center justify-center p-4"
+            className="fixed inset-0 bg-black bg-opacity-75 z-9999 flex items-center justify-center p-4"
             onClick={() => setImageModalOpen(false)}
           >
             <div className="relative max-w-4xl max-h-full">

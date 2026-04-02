@@ -61,7 +61,7 @@ export function ReaderCollectionEndPage({
 
             <div className="mt-5 grid grid-cols-2 gap-4 sm:gap-6 items-start">
               <div className="flex flex-col">
-                <div className="min-h-[3.25rem]">
+                <div className="min-h-13">
                   <div className="text-xs text-muted-foreground">{t('common.details')}</div>
                   <div className="mt-1 text-sm font-medium leading-snug line-clamp-2">{finishedHeading}</div>
                 </div>
@@ -71,7 +71,7 @@ export function ReaderCollectionEndPage({
                   prefetch={false}
                   className={finishedId ? 'block mt-2' : 'block mt-2 pointer-events-none opacity-60'}
                 >
-                  <div className="relative aspect-[3/4] rounded-lg bg-muted overflow-hidden">
+                  <div className="relative aspect-3/4 rounded-lg bg-muted overflow-hidden">
                     {finishedCoverUrl ? (
                       <Image
                         src={finishedCoverUrl}
@@ -101,7 +101,7 @@ export function ReaderCollectionEndPage({
               </div>
 
               <div className="flex flex-col">
-                <div className="min-h-[3.25rem]">
+                <div className="min-h-13">
                   <div className="text-xs text-muted-foreground">{nextLabel}</div>
                   <div className="mt-1 text-sm font-medium leading-snug line-clamp-2">{nextHeading}</div>
                 </div>
@@ -112,7 +112,7 @@ export function ReaderCollectionEndPage({
                   className={nextId ? 'block mt-2' : 'block mt-2 pointer-events-none opacity-60'}
                   onClick={nextId ? onOpenNextDetails : undefined}
                 >
-                  <div className="relative aspect-[3/4] rounded-lg bg-muted overflow-hidden">
+                  <div className="relative aspect-3/4 rounded-lg bg-muted overflow-hidden">
                     {nextCoverUrl ? (
                       <Image
                         src={nextCoverUrl}

@@ -703,7 +703,7 @@ export function ArchiveDetailContent() {
       {backdropUrl ? (
         <div className="pointer-events-none fixed inset-0 z-0" aria-hidden="true">
           <Image src={backdropUrl} alt="" fill className="scale-105 object-cover opacity-30 blur-[2px]" unoptimized />
-          <div className="absolute inset-0 bg-gradient-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
+          <div className="absolute inset-0 bg-linear-to-b from-background/35 via-background/55 to-background/95 dark:from-background/65 dark:via-background/80 dark:to-background" />
         </div>
       ) : null}
       {/* Reserve space for the fixed mobile action bar (includes safe-area inset). */}
@@ -711,7 +711,7 @@ export function ArchiveDetailContent() {
         <div className="space-y-6">
           {/* Header / hero (unified with Tankoubon page) */}
           <div className="relative">
-            <div className="relative rounded-2xl border bg-card/70 backdrop-blur dark:bg-card/70">
+            <div className="relative rounded-2xl border bg-card/70 backdrop-blur-sm dark:bg-card/70">
               <div className="p-4 md:p-5">
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">
@@ -738,7 +738,7 @@ export function ArchiveDetailContent() {
                           <BookOpen className="w-3 h-3 mr-1" />
                           {t('archive.archiveLabel')}
                         </Badge>
-                        <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight break-words">
+                        <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight wrap-break-word">
                           {metadata.title}
                         </h1>
                       </div>
@@ -974,7 +974,7 @@ export function ArchiveDetailContent() {
           ) : null}
 
           {(relatedLoading || relatedArchives.length > 0) ? (
-            <section className="rounded-2xl border bg-card/70 p-4 backdrop-blur dark:bg-card/70 sm:p-5">
+            <section className="rounded-2xl border bg-card/70 p-4 backdrop-blur-sm dark:bg-card/70 sm:p-5">
               <div className="mb-4">
                 <h2 className="text-lg font-semibold">{t('archive.relatedTitle')}</h2>
                 <p className="text-sm text-muted-foreground">{t('archive.relatedDescription')}</p>

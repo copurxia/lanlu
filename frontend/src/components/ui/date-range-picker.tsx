@@ -123,7 +123,7 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
       {hasValue ? (
         <button
           type="button"
-          className="absolute right-9 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="absolute right-9 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={t('common.reset')}
           title={t('common.reset')}
           onClick={(e) => {
@@ -164,7 +164,7 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
                   onSelect={(next) => setDraftRange(next)}
                   numberOfMonths={1}
                   initialFocus
-                  className="rounded-lg border shadow-sm"
+                  className="rounded-lg border shadow-xs"
                 />
 
                 <div className="flex gap-2">
@@ -209,7 +209,7 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
         {hasValue ? (
           <button
             type="button"
-            className="absolute right-9 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="absolute right-9 top-1/2 -translate-y-1/2 inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             aria-label={t('common.reset')}
             title={t('common.reset')}
             onClick={(e) => {
@@ -244,7 +244,7 @@ export function DateRangePicker({ value, onChange, placeholder, className }: Dat
           }}
           numberOfMonths={2}
           initialFocus
-          className="rounded-lg border shadow-sm"
+          className="rounded-lg border shadow-xs"
         />
       </PopoverContent>
     </Popover>

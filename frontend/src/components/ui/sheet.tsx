@@ -55,7 +55,7 @@ const SheetContent = React.forwardRef<
     >
       {children}
       {showCloseButton ? (
-        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
+        <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
           <Cross2Icon className="h-4 w-4" />
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
@@ -71,7 +71,7 @@ const SheetOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SheetPrimitive.Overlay
     className={cn(
-      "fixed inset-0 z-50 bg-white/55 dark:bg-black/55 backdrop-blur data-[state=open]:animate-sheet-overlay-in data-[state=closed]:animate-sheet-overlay-out motion-reduce:animate-none",
+      "fixed inset-0 z-50 bg-white/55 dark:bg-black/55 backdrop-blur-sm data-[state=open]:animate-sheet-overlay-in data-[state=closed]:animate-sheet-overlay-out motion-reduce:animate-none",
       className
     )}
     {...props}

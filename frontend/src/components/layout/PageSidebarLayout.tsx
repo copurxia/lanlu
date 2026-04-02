@@ -24,7 +24,7 @@ export function PageSidebarLayout({
       <div className="flex h-full min-h-0">
         <aside
           className={cn(
-            'hidden lg:block flex-shrink-0 border-r border-border w-72 min-h-0 pt-4',
+            'hidden lg:block shrink-0 border-r border-border w-72 min-h-0 pt-4',
             sidebarClassName
           )}
         >

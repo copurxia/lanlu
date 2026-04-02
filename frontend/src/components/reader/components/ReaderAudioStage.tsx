@@ -338,9 +338,9 @@ export function ReaderAudioStage({
           draggable={false}
         />
       ) : null}
-      <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-black/28 to-black/36" />
+      <div className="absolute inset-0 bg-linear-to-b from-black/20 via-black/28 to-black/36" />
       <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-28 overflow-hidden sm:h-32 ${
+        className={`pointer-events-none absolute inset-x-0 bottom-0 z-1 h-28 overflow-hidden sm:h-32 ${
           isPlaying ? 'reader-audio-wave-stage-active' : 'reader-audio-wave-stage-idle'
         }`}
         style={waveStageStyle}
@@ -393,7 +393,7 @@ export function ReaderAudioStage({
             </div>
 
             <div className="w-full text-center xl:text-left">
-              <div className="line-clamp-2 break-words text-xl font-semibold tracking-tight text-white sm:text-3xl">{safeTitle}</div>
+              <div className="line-clamp-2 wrap-break-word text-xl font-semibold tracking-tight text-white sm:text-3xl">{safeTitle}</div>
               {safeDescription ? <div className="mt-2 line-clamp-3 whitespace-pre-line text-sm text-white/80 sm:text-base">{safeDescription}</div> : null}
             </div>
           </div>
@@ -415,7 +415,7 @@ export function ReaderAudioStage({
                         ref={(el) => {
                           timedLineRefs.current[index] = el;
                         }}
-                        className={`select-none break-words text-center transition-all duration-300 ${
+                        className={`select-none wrap-break-word text-center transition-all duration-300 ${
                           isActive ? 'scale-[1.03] text-white text-[1.05rem] sm:text-xl font-semibold' : 'text-white/58 text-sm sm:text-base'
                         }`}
                       >
@@ -428,7 +428,7 @@ export function ReaderAudioStage({
               {!lyricsLoading && !lyricsError && hasLyrics && !hasTimedLyrics ? (
                 <div className="space-y-2 pb-8 pt-2">
                   {plainLyrics.map((line, index) => (
-                    <div key={`${index}-${line}`} className="break-words text-center text-sm text-white/78 sm:text-base">
+                    <div key={`${index}-${line}`} className="wrap-break-word text-center text-sm text-white/78 sm:text-base">
                       {line}
                     </div>
                   ))}

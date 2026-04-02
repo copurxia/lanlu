@@ -57,7 +57,7 @@ function Pill({
 
 function KVGrid({ items }: { items: KV[] }) {
   return (
-    <div className="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-[11px] leading-snug">
+    <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-[11px] leading-snug">
       {items.map((kv, idx) => (
         <div key={`${kv.key}-${idx}`} className="contents">
           <div className="text-muted-foreground">{kv.key}</div>
