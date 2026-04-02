@@ -797,7 +797,7 @@ function HomePageContent() {
                     <div className="text-xs sm:text-sm text-muted-foreground min-w-0 flex-1 truncate" title={statsText}>
                       {statsText}
                     </div>
-                    {homeViewMode === 'list' && totalPages > 1 && (
+                    {showArchiveFeed && !isContinuousFeed && totalPages > 1 && (
                       <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} className="justify-end py-0" />
                     )}
                   </div>
