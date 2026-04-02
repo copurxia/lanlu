@@ -386,13 +386,12 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
   const streamEventCountRef = useRef(0);
   const streamFlushCountRef = useRef(0);
 
-  const [currentPage, setCurrentPage] = useState(() => normalizePageIndex(searchParams.get('page')));
   const [pageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const [total, setTotal] = useState(0);
   const [totalAll, setTotalAll] = useState<number | null>(null);
-
-  const [activeFilter, setActiveFilter] = useState<AllowedFilter>(() => normalizeFilter(searchParams.get('tab')));
+  const currentPage = useMemo(() => normalizePageIndex(searchParams.get('page')), [searchParams]);
+  const activeFilter = useMemo(() => normalizeFilter(searchParams.get('tab')), [searchParams]);
 
   const updateUrl = useCallback(
     (nextFilter: AllowedFilter, nextPageIndex: number) => {
@@ -409,16 +408,9 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
     [pathname, router, searchParams]
   );
 
-  useEffect(() => {
-    const urlFilter = normalizeFilter(searchParams.get('tab'));
-    const urlPageIndex = normalizePageIndex(searchParams.get('page'));
-
-    if (urlFilter !== activeFilter) setActiveFilter(urlFilter);
-    if (urlPageIndex !== currentPage) setCurrentPage(urlPageIndex);
-  }, [activeFilter, currentPage, searchParams]);
-
   const fetchTasks = useCallback(
     async (
+      filter: AllowedFilter,
       page: number,
       opts: {
         mode?: 'initial' | 'update' | 'manual' | 'auto';
@@ -436,7 +428,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
         const result: TaskPageResult = await TaskPoolService.getTasks(
           page + 1,
           pageSize,
-          activeFilter !== 'all' ? activeFilter : undefined
+          filter !== 'all' ? filter : undefined
         );
 
         if (fetchId !== latestFetchIdRef.current) return;
@@ -461,23 +453,23 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
         setUpdating(false);
       }
     },
-    [activeFilter, pageSize]
+    [pageSize]
   );
 
   useEffect(() => {
-    fetchTasks(currentPage, { mode: hasLoadedOnceRef.current ? 'update' : 'initial' });
-  }, [currentPage, activeFilter, fetchTasks]);
+    fetchTasks(activeFilter, currentPage, { mode: hasLoadedOnceRef.current ? 'update' : 'initial' });
+  }, [activeFilter, currentPage, fetchTasks]);
 
   useEffect(() => {
     if (!hasLoadedOnceRef.current) return;
     if (typeof refreshToken !== 'number') return;
     if (refreshToken <= 0) return;
-    fetchTasks(currentPage, { mode: 'manual' });
-  }, [currentPage, fetchTasks, refreshToken]);
+    fetchTasks(activeFilter, currentPage, { mode: 'manual' });
+  }, [activeFilter, currentPage, fetchTasks, refreshToken]);
 
   const handleRefresh = useCallback(async () => {
-    await fetchTasks(currentPage, { mode: 'manual' });
-  }, [currentPage, fetchTasks]);
+    await fetchTasks(activeFilter, currentPage, { mode: 'manual' });
+  }, [activeFilter, currentPage, fetchTasks]);
 
   const handleCancelTask = useCallback(
     async (taskId: number) => {
@@ -524,15 +516,14 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
 
   const handleFilterChange = (value: string) => {
     const nextFilter = normalizeFilter(value);
+    if (nextFilter === activeFilter && currentPage === 0) return;
     setUpdating(true);
-    setActiveFilter(nextFilter);
-    setCurrentPage(0);
     updateUrl(nextFilter, 0);
   };
 
   const handlePageChange = (page: number) => {
+    if (page === currentPage) return;
     setUpdating(true);
-    setCurrentPage(page);
     updateUrl(activeFilter, page);
   };
 
@@ -563,7 +554,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
     const scheduleRefresh = () => {
       if (streamRefreshScheduledRef.current) return;
       streamRefreshScheduledRef.current = true;
-      void fetchTasks(currentPage, { mode: 'auto' }).finally(() => {
+      void fetchTasks(activeFilter, currentPage, { mode: 'auto' }).finally(() => {
         streamRefreshScheduledRef.current = false;
       });
     };
@@ -652,7 +643,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
 
       taskStreamUnsubsRef.current.set(task.id, unsubscribe);
     }
-  }, [tasks, currentPage, loading, refreshing, updating, fetchTasks]);
+  }, [activeFilter, currentPage, tasks, loading, refreshing, updating, fetchTasks]);
 
   if (loading && tasks.length === 0) {
     return (
