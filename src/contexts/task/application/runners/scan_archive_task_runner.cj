@@ -233,16 +233,23 @@ public class ScanArchiveTaskRunner {
                     }
 
                     if (archive.thumbhash.size == 0) {
-                        logger.debug("Thumbnail hash is empty, submitting thumbnail generation task for existing archive: ${archive.id}")
+                        if (shouldSubmitThumbnailTask(archiveType, cachedCoverEntry, existingCoverAssetId: archive.cover_asset_id)) {
+                            logger.debug("Thumbnail hash is empty, submitting thumbnail generation task for existing archive: ${archive.id}")
 
-                        // 提交缩略图生成任务（异步）
-                        let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, cachedCoverEntry, notifier)
-                        if (!taskSubmitted) {
-                            logger.error("Failed to submit thumbnail generation task for archive: ${archive.id}")
+                            // 提交缩略图生成任务（异步）
+                            let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, cachedCoverEntry, notifier)
+                            if (!taskSubmitted) {
+                                logger.error("Failed to submit thumbnail generation task for archive: ${archive.id}")
+                            }
+
+                            // 直接返回成功，不等待缩略图生成完成
+                            try { let _ = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                            return ProcessResultData(true, archive.id, "")
                         }
 
-                        // 直接返回成功，不等待缩略图生成完成
-                        try { let _ = TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath) } catch (_: Exception) {}
+                        logger.debug("Thumbnail hash is empty but local cover is not ready yet, deferring to metadata plugins",
+                            ("archive_id", archive.id), ("archive_type", archiveType))
+                        submitArchiveMetadataTasks(archive.id, categoryInternalId, relativePath, dirFullPath, pluginNamespaces, notifier)
                         return ProcessResultData(true, archive.id, "")
                     } else {
                         // Archive存在且已生成thumbhash - 跳过所有处理，直接返回成功
@@ -286,38 +293,18 @@ public class ScanArchiveTaskRunner {
                 }
             }
 
-            // 提交缩略图生成任务（异步）
-            let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, cachedCoverEntry, notifier)
-            if (!taskSubmitted) {
-                logger.error("Failed to submit thumbnail generation task for archive", [("archive_id", dbResult.archiveId)])
-            }
-
-            // Auto-create/sync Tankoubon for this directory.
-            let autoTankoubonId = try {
-                TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath)
-            } catch (_: Exception) {
-                ""
-            }
-
-            if (autoTankoubonId.size > 0) {
-                // For auto-created collections, scrape metadata once for the whole Tankoubon,
-                // instead of running archive-level scraping on every member.
-                if (TankoubonAutocreateService.hasAllCandidatesIndexed(categoryInternalId, relativePath, dirFullPath)) {
-                    submitTankoubonMetadataPluginTasks(autoTankoubonId, pluginNamespaces, notifier)
-                    // Some plugins (e.g. NFO sidecar) emit per-page patches that only apply at archive scope.
-                    // Keep collection-level scrape, but also run these archive-scoped plugins for this member.
-                    let archiveScopedPlugins = extractArchiveScopedMetadataPlugins(pluginNamespaces)
-                    if (archiveScopedPlugins.size > 0) {
-                        submitMetadataPluginTasks(dbResult.archiveId, archiveScopedPlugins, notifier)
-                    }
-                } else {
-                    logger.debug("Auto Tankoubon not fully indexed yet, postpone metadata scraping",
-                        ("tankoubon_id", autoTankoubonId), ("relative_path", relativePath))
+            if (shouldSubmitThumbnailTask(archiveType, cachedCoverEntry)) {
+                // 提交缩略图生成任务（异步）
+                let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, cachedCoverEntry, notifier)
+                if (!taskSubmitted) {
+                    logger.error("Failed to submit thumbnail generation task for archive", [("archive_id", dbResult.archiveId)])
                 }
             } else {
-                // Non-collection archive path: keep original archive-level metadata behavior.
-                submitMetadataPluginTasks(dbResult.archiveId, pluginNamespaces, notifier)
+                logger.debug("Skip thumbnail generation until metadata plugin provides cover",
+                    ("archive_id", dbResult.archiveId), ("archive_type", archiveType))
             }
+
+            submitArchiveMetadataTasks(dbResult.archiveId, categoryInternalId, relativePath, dirFullPath, pluginNamespaces, notifier)
 
             // 页面元数据改为插件驱动（metadata_plugin_callback 写回 pages），扫描阶段不再自动提交 page_metadata。
 
@@ -351,6 +338,45 @@ public class ScanArchiveTaskRunner {
             let error = "Exception adding archive to database: ${e.message}"
             logger.error(error)
             return ProcessResultData(false, "", error)
+        }
+    }
+
+    private static func shouldSubmitThumbnailTask(archiveType: String, coverEntry: String, existingCoverAssetId!: Int64 = 0): Bool {
+        if (archiveType.trimAscii() != "folder") {
+            return true
+        }
+        if (coverEntry.trimAscii().size > 0) {
+            return true
+        }
+        return existingCoverAssetId > 0
+    }
+
+    private static func submitArchiveMetadataTasks(archiveId: String, categoryInternalId: Int64, relativePath: String, dirFullPath: String, pluginNamespaces: Array<String>, notifier: TaskNotifier): Unit {
+        // Auto-create/sync Tankoubon for this directory.
+        let autoTankoubonId = try {
+            TankoubonAutocreateService.ensureAndSync(categoryInternalId, relativePath, dirFullPath)
+        } catch (_: Exception) {
+            ""
+        }
+
+        if (autoTankoubonId.size > 0) {
+            // For auto-created collections, scrape metadata once for the whole Tankoubon,
+            // instead of running archive-level scraping on every member.
+            if (TankoubonAutocreateService.hasAllCandidatesIndexed(categoryInternalId, relativePath, dirFullPath)) {
+                submitTankoubonMetadataPluginTasks(autoTankoubonId, pluginNamespaces, notifier)
+                // Some plugins (e.g. NFO sidecar) emit per-page patches that only apply at archive scope.
+                // Keep collection-level scrape, but also run these archive-scoped plugins for this member.
+                let archiveScopedPlugins = extractArchiveScopedMetadataPlugins(pluginNamespaces)
+                if (archiveScopedPlugins.size > 0) {
+                    submitMetadataPluginTasks(archiveId, archiveScopedPlugins, notifier)
+                }
+            } else {
+                logger.debug("Auto Tankoubon not fully indexed yet, postpone metadata scraping",
+                    ("tankoubon_id", autoTankoubonId), ("relative_path", relativePath))
+            }
+        } else {
+            // Non-collection archive path: keep original archive-level metadata behavior.
+            submitMetadataPluginTasks(archiveId, pluginNamespaces, notifier)
         }
     }
 

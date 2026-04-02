@@ -115,6 +115,13 @@ public class MetadataPatchService {
         return asset.thumbhash.trimAscii()
     }
 
+    private static func syncArchiveThumbhashFromCoverAsset(taskId: Int64, archiveId: String, coverAssetId: Int64): Unit {
+        let nextThumbhash = if (coverAssetId > 0) { getAssetThumbhash(coverAssetId) } else { "" }
+        if (!ArchiveDao.updateThumbHash(archiveId, nextThumbhash)) {
+            logWarn(taskId, "failed to sync archive thumbhash from cover asset archive=${archiveId}")
+        }
+    }
+
     private static func resolveArchiveThumbnailHash(archive: ArchiveData, assets: Array<MetadataAssetData>): String {
         let coverAssetId = findMetadataAssetId(assets, "cover")
         if (coverAssetId > 0) {
@@ -981,6 +988,9 @@ public class MetadataPatchService {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
             }
             if (cleared) {
+                if (key == "cover") {
+                    syncArchiveThumbhashFromCoverAsset(taskId, archiveId, 0)
+                }
                 let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
             }
             return
@@ -992,6 +1002,9 @@ public class MetadataPatchService {
             if (updated) {
                 if (oldAssetId > 0 && oldAssetId != directAssetId) {
                     PluginTaskService.deleteCoverAsset(oldAssetId)
+                }
+                if (key == "cover") {
+                    syncArchiveThumbhashFromCoverAsset(taskId, archiveId, directAssetId)
                 }
                 let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
             } else {
@@ -1018,7 +1031,7 @@ public class MetadataPatchService {
             "${archiveId}_${key}.avif"
         }
 
-        let (okInstall, newAssetId, _, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
+        let (okInstall, newAssetId, newThumbhash, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
             value,
             pluginNamespace,
             assetKind,
@@ -1033,6 +1046,12 @@ public class MetadataPatchService {
         if (updated) {
             if (oldAssetId > 0 && oldAssetId != newAssetId) {
                 PluginTaskService.deleteCoverAsset(oldAssetId)
+            }
+            if (key == "cover") {
+                let nextThumbhash = if (newThumbhash.trimAscii().size > 0) { newThumbhash.trimAscii() } else { getAssetThumbhash(newAssetId) }
+                if (!ArchiveDao.updateThumbHash(archiveId, nextThumbhash)) {
+                    logWarn(taskId, "failed to sync archive cover thumbhash archive=${archiveId}")
+                }
             }
             let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
         } else {

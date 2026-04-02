@@ -228,11 +228,12 @@ public class ScanSingleCategoryTaskRunner {
                     // 已有缩略图，完全跳过
                     getLogger("scan_single_category").debug("Archive already exists with thumbnail, skipping: ${filePath}")
                     return false
-                } else {
+                } else if (shouldSubmitThumbnailTask(archiveType, coverEntry, archive.cover_asset_id)) {
                     // 档案存在但缺少缩略图，直接提交缩略图生成任务
                     getLogger("scan_single_category").debug("Archive exists but no thumbnail, submitting thumbnail task: ${filePath}")
                     return submitThumbnailTaskDirectly(filePath, archive.id, archiveType, ctx, coverEntry)
                 }
+                getLogger("scan_single_category").debug("Archive exists but local cover is not ready, creating scan_archive task: ${filePath}")
             case None =>
                 // 档案不存在，创建 scan_archive 任务进行完整处理
                 getLogger("scan_single_category").debug("Archive not found, creating scan_archive task: ${filePath}")
@@ -311,6 +312,16 @@ public class ScanSingleCategoryTaskRunner {
     /**
      * 直接提交缩略图生成任务（用于已存在但缺少缩略图的档案）
      */
+    private static func shouldSubmitThumbnailTask(archiveType: String, coverEntry: String, existingCoverAssetId: Int64): Bool {
+        if (archiveType.trimAscii() != "folder") {
+            return true
+        }
+        if (coverEntry.trimAscii().size > 0) {
+            return true
+        }
+        return existingCoverAssetId > 0
+    }
+
     private static func submitThumbnailTaskDirectly(filePath: String, archiveId: String, archiveType: String, ctx: ScanContext, coverEntry: String): Bool {
         try {
             let out = ByteBuffer()
