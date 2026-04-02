@@ -131,35 +131,38 @@ public class FrontendController {
      */
     private static func getContentType(filePath: String): String {
         let defaultType = "application/octet-stream"
+        let normalizedPath = filePath.trimAscii().toAsciiLower()
 
         // 简单的文件扩展名检查
-        if (filePath.endsWith(".html")) {
+        if (normalizedPath.endsWith(".html")) {
             return "text/html; charset=utf-8"
-        } else if (filePath.endsWith(".txt")) {
+        } else if (normalizedPath.endsWith(".txt")) {
             return "text/plain; charset=utf-8"
-        } else if (filePath.endsWith(".css")) {
+        } else if (normalizedPath.endsWith(".css")) {
             return "text/css; charset=utf-8"
-        } else if (filePath.endsWith(".js")) {
+        } else if (normalizedPath.endsWith(".js")) {
             return "application/javascript; charset=utf-8"
-        } else if (filePath.endsWith(".json")) {
+        } else if (normalizedPath.endsWith(".json")) {
             return "application/json; charset=utf-8"
-        } else if (filePath.endsWith(".png")) {
+        } else if (normalizedPath.endsWith(".webmanifest")) {
+            return "application/manifest+json; charset=utf-8"
+        } else if (normalizedPath.endsWith(".png")) {
             return "image/png"
-        } else if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
+        } else if (normalizedPath.endsWith(".jpg") || normalizedPath.endsWith(".jpeg")) {
             return "image/jpeg"
-        } else if (filePath.endsWith(".gif")) {
+        } else if (normalizedPath.endsWith(".gif")) {
             return "image/gif"
-        } else if (filePath.endsWith(".svg")) {
+        } else if (normalizedPath.endsWith(".svg")) {
             return "image/svg+xml"
-        } else if (filePath.endsWith(".ico")) {
+        } else if (normalizedPath.endsWith(".ico")) {
             return "image/x-icon"
-        } else if (filePath.endsWith(".woff")) {
+        } else if (normalizedPath.endsWith(".woff")) {
             return "font/woff"
-        } else if (filePath.endsWith(".woff2")) {
+        } else if (normalizedPath.endsWith(".woff2")) {
             return "font/woff2"
-        } else if (filePath.endsWith(".ttf")) {
+        } else if (normalizedPath.endsWith(".ttf")) {
             return "font/ttf"
-        } else if (filePath.endsWith(".eot")) {
+        } else if (normalizedPath.endsWith(".eot")) {
             return "application/vnd.ms-fontobject"
         } else {
             return defaultType
@@ -167,7 +170,7 @@ public class FrontendController {
     }
 
     /**
-     * 为 `_next/static` 下的 JS/CSS 选择可用的预压缩变体。
+     * 为静态导出中的文本资源选择可用的预压缩 Brotli 变体。
      * 返回值依次为：
      * - 实际读取路径
      * - 逻辑资源路径（用于 Content-Type / 缓存策略）
@@ -175,7 +178,7 @@ public class FrontendController {
      * - 是否需要设置 Vary: Accept-Encoding
      */
     private static func resolveStaticAssetVariant(ctx: Ctx, filePath: String): (String, String, Bool, Bool) {
-        if (!isBrotliNegotiableAsset(filePath)) {
+        if (!isBrotliNegotiableTextAsset(filePath)) {
             return (filePath, filePath, false, false)
         }
 
@@ -187,12 +190,15 @@ public class FrontendController {
         return (filePath, filePath, false, true)
     }
 
-    private static func isBrotliNegotiableAsset(filePath: String): Bool {
+    private static func isBrotliNegotiableTextAsset(filePath: String): Bool {
         let normalized = filePath.trimAscii().toAsciiLower()
-        if (!normalized.contains("/_next/static/")) {
-            return false
-        }
-        return normalized.endsWith(".js") || normalized.endsWith(".css")
+        return normalized.endsWith(".html") ||
+            normalized.endsWith(".txt") ||
+            normalized.endsWith(".json") ||
+            normalized.endsWith(".css") ||
+            normalized.endsWith(".js") ||
+            normalized.endsWith(".svg") ||
+            normalized.endsWith(".webmanifest")
     }
 
     private static func clientAcceptsBrotli(ctx: Ctx): Bool {

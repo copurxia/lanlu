@@ -6,8 +6,15 @@ import { constants as zlibConstants } from 'node:zlib'
 
 const compress = promisify(brotliCompress)
 const outputDir = path.resolve(process.cwd(), 'out')
-const staticDir = path.join(outputDir, '_next', 'static')
-const chunkDir = path.join(staticDir, 'chunks')
+const COMPRESSIBLE_EXTENSIONS = new Set([
+  '.html',
+  '.txt',
+  '.json',
+  '.css',
+  '.js',
+  '.svg',
+  '.webmanifest',
+])
 
 async function walk(dir) {
   const entries = await fs.readdir(dir, { withFileTypes: true })
@@ -29,8 +36,15 @@ async function walk(dir) {
 
 function shouldCompress(filePath) {
   if (filePath.endsWith('.br')) return false
-  if (filePath.endsWith('.css')) return true
-  return filePath.endsWith('.js') && filePath.startsWith(chunkDir + path.sep)
+
+  const lowerPath = filePath.toLowerCase()
+  for (const extension of COMPRESSIBLE_EXTENSIONS) {
+    if (lowerPath.endsWith(extension)) {
+      return true
+    }
+  }
+
+  return false
 }
 
 async function compressFile(filePath) {
@@ -47,12 +61,12 @@ async function compressFile(filePath) {
 }
 
 async function main() {
-  const staticStat = await fs.stat(staticDir).catch(() => null)
-  if (!staticStat?.isDirectory()) {
-    throw new Error(`Next export output not found: ${staticDir}`)
+  const outputStat = await fs.stat(outputDir).catch(() => null)
+  if (!outputStat?.isDirectory()) {
+    throw new Error(`Next export output not found: ${outputDir}`)
   }
 
-  const files = (await walk(staticDir)).filter(shouldCompress)
+  const files = (await walk(outputDir)).filter(shouldCompress)
   let totalOriginal = 0
   let totalCompressed = 0
 
