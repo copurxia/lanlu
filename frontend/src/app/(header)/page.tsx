@@ -61,6 +61,14 @@ function resolveHomeViewSurface(mode: HomeViewMode, isHomeLanding: boolean): Hom
   return 'archive-feed-paged';
 }
 
+function getStoredHomeViewMode(): HomeViewMode {
+  if (typeof window === 'undefined') {
+    return DEFAULT_HOME_VIEW_MODE;
+  }
+
+  return normalizeHomeViewMode(window.localStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
+}
+
 function HomePageContent() {
   const { t, language } = useLanguage();
   const searchParams = useSearchParams();
@@ -91,10 +99,7 @@ function HomePageContent() {
   const urlPage = parseInt(searchParams?.get('page') || '0', 10);
 
   // --- Filter state ---
-  const [homeViewMode, setHomeViewMode] = useState<HomeViewMode>(() => {
-    if (typeof window === 'undefined') return DEFAULT_HOME_VIEW_MODE;
-    return normalizeHomeViewMode(window.localStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
-  });
+  const [homeViewMode, setHomeViewMode] = useState<HomeViewMode>(DEFAULT_HOME_VIEW_MODE);
   const [isInitialized, setIsInitialized] = useState(false);
   const [filterDialogOpen, setFilterDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -304,6 +309,10 @@ function HomePageContent() {
     setCategoryId(urlQuery ? 'all' : urlCategoryId);
     setIsInitialized(true);
   }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly]);
+
+  useEffect(() => {
+    setHomeViewMode(getStoredHomeViewMode());
+  }, []);
 
   useEffect(() => {
     if (!isInitialized) return;

@@ -25,22 +25,21 @@ const VIEW_OPTIONS: ViewOption[] = [
   { value: 'channel', labelKey: 'home.channelView' },
 ];
 
-function getViewIcon(mode: HomeViewMode) {
-  if (mode === 'masonry') return LayoutGrid;
-  if (mode === 'list') return List;
-  if (mode === 'tweet') return MessageSquareText;
-  if (mode === 'channel') return MessageCircle;
-  return Rows3;
+function getStoredHomeViewMode(): HomeViewMode {
+  if (typeof window === 'undefined') {
+    return DEFAULT_HOME_VIEW_MODE;
+  }
+
+  return normalizeHomeViewMode(window.localStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
 }
 
 export function HomeViewMenu() {
   const { t } = useLanguage();
-  const [viewMode, setViewMode] = useState<HomeViewMode>(() => {
-    if (typeof window === 'undefined') return DEFAULT_HOME_VIEW_MODE;
-    return normalizeHomeViewMode(window.localStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
-  });
+  const [viewMode, setViewMode] = useState<HomeViewMode>(DEFAULT_HOME_VIEW_MODE);
 
   useEffect(() => {
+    setViewMode(getStoredHomeViewMode());
+
     const handleViewModeChange = (nextMode?: HomeViewMode) => {
       setViewMode(normalizeHomeViewMode(nextMode));
     };
@@ -77,8 +76,6 @@ export function HomeViewMenu() {
     applyModeChange(nextMode);
   }, [applyModeChange, nextMode]);
 
-  const TriggerIcon = getViewIcon(viewMode);
-
   return (
     <Button
       variant="ghost"
@@ -88,7 +85,17 @@ export function HomeViewMenu() {
       aria-label={`${t('home.switchView')} · ${currentLabel} -> ${nextLabel}`}
       onClick={handleCycleView}
     >
-      <TriggerIcon className="h-4 w-4" />
+      {viewMode === 'masonry' ? (
+        <LayoutGrid className="h-4 w-4" />
+      ) : viewMode === 'list' ? (
+        <List className="h-4 w-4" />
+      ) : viewMode === 'tweet' ? (
+        <MessageSquareText className="h-4 w-4" />
+      ) : viewMode === 'channel' ? (
+        <MessageCircle className="h-4 w-4" />
+      ) : (
+        <Rows3 className="h-4 w-4" />
+      )}
       <span className="sr-only">{`${t('home.switchView')} · ${currentLabel} -> ${nextLabel}`}</span>
     </Button>
   );
