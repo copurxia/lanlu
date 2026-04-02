@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 import { LayoutGrid, Package, ListTodo, KeyRound, Users, Tag, Filter, Server, Clock, FolderOpen, BarChart3 } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -42,7 +43,16 @@ interface SettingsNavProps {
 export function SettingsNav({ onNavigate }: SettingsNavProps) {
   const pathname = usePathname() ?? '';
   const { t } = useLanguage();
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, userStatus, ensureMe } = useAuth();
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    if (userStatus === 'token-only') {
+      void ensureMe().catch(() => {});
+    }
+  }, [ensureMe, isAuthenticated, userStatus]);
 
   // Check if current user is admin
   const isAdmin = isAuthenticated && user?.isAdmin === true;

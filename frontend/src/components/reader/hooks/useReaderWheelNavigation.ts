@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type React from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/ui/feedback';
 import type { PageInfo } from '@/lib/services/archive-service';
 import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset, stepHtmlSpread } from '@/components/reader/utils/html-spread';
 

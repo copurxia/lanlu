@@ -22,65 +22,59 @@ const initialState: ThemeProviderState = {
 
 const ThemeProviderContext = createContext<ThemeProviderState>(initialState);
 
+function applyTheme(theme: Theme) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const root = window.document.documentElement;
+  root.classList.remove('light', 'dark');
+  root.style.colorScheme = 'light dark';
+
+  if (theme === 'system') {
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    root.classList.add(systemTheme);
+    return;
+  }
+
+  root.classList.add(theme);
+}
+
 export function ThemeProvider({
   children,
   defaultTheme = 'system',
   storageKey = 'lanlu-ui-theme',
   ...props
 }: ThemeProviderProps) {
-  // 添加mounted状态以避免水合错误
-  const [mounted, setMounted] = useState(false);
   const [theme, setThemeState] = useState<Theme>(defaultTheme);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // 只有在挂载后才从localStorage读取主题
-  useEffect(() => {
-    if (!mounted) return;
-
-    const savedTheme = localStorage.getItem(storageKey) as Theme;
-    if (savedTheme) {
-      setThemeState(savedTheme);
-    }
-  }, [mounted, storageKey]);
-
-  useEffect(() => {
-    if (!mounted) return;
-
-    const root = window.document.documentElement;
-
-    root.classList.remove('light', 'dark');
-
-    // 声明支持 light 和 dark 两种颜色方案
-    root.style.colorScheme = 'light dark';
-
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches
-        ? 'dark'
-        : 'light';
-
-      root.classList.add(systemTheme);
+    if (typeof window === 'undefined') {
       return;
     }
 
-    root.classList.add(theme);
-  }, [theme, mounted]);
+    const savedTheme = localStorage.getItem(storageKey) as Theme | null;
+    if (savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system') {
+      setThemeState(savedTheme);
+      return;
+    }
+
+    applyTheme(defaultTheme);
+  }, [defaultTheme, storageKey]);
+
+  useEffect(() => {
+    applyTheme(theme);
+  }, [theme]);
 
   const value = {
-    theme: mounted ? theme : defaultTheme,
+    theme,
     setTheme: (theme: Theme) => {
-      if (!mounted) return;
-      localStorage.setItem(storageKey, theme);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(storageKey, theme);
+      }
       setThemeState(theme);
     },
   };
-
-  // 避免水合不匹配：在组件未挂载前不渲染任何内容
-  if (!mounted) {
-    return <>{children}</>;
-  }
 
   return (
     <ThemeProviderContext.Provider {...props} value={value}>

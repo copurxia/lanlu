@@ -1,83 +1,100 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import type { AuthUser } from '@/types/auth';
 import { AuthService } from '@/lib/services/auth-service';
 import { setAuthTokenCookie } from '@/lib/api';
+
+type AuthUserStatus = 'anonymous' | 'token-only' | 'loading' | 'resolved' | 'error';
 
 interface AuthContextType {
   token: string | null;
   user: AuthUser | null;
   isAuthenticated: boolean;
+  userStatus: AuthUserStatus;
   login: (token: string, user?: AuthUser | null) => void;
   logout: () => void;
   refreshMe: () => Promise<void>;
+  ensureMe: () => Promise<AuthUser | null>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  // 添加mounted状态以避免水合错误
-  const [mounted, setMounted] = useState(false);
-  // 使用函数初始化状态，避免在 effect 中调用 setState
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [userStatus, setUserStatus] = useState<AuthUserStatus>('anonymous');
+  const meRequestRef = useRef<Promise<AuthUser | null> | null>(null);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // 只在挂载后从localStorage读取token
-  useEffect(() => {
-    if (!mounted) return;
-
-    if (typeof window !== 'undefined') {
-      const savedToken = localStorage.getItem('auth_token');
-      setToken(savedToken);
-      setAuthTokenCookie(savedToken);
-    }
-  }, [mounted]);
-
-  // 当token变化时，更新用户状态
-  useEffect(() => {
-    if (!mounted) return;
-
-    if (!token) {
-      // token不存在时，用户状态应为null
-      // 使用微任务来避免同步调用setState
-      Promise.resolve().then(() => setUser(null));
+    if (typeof window === 'undefined') {
       return;
     }
 
-    // 只有在 token 存在时才拉取用户信息，但不在这里验证 token 有效性
-    // token 有效性由具体的 API 请求失败时处理
-    void (async () => {
+    const savedToken = localStorage.getItem('auth_token');
+    setToken(savedToken);
+    setUser(null);
+    setUserStatus(savedToken ? 'token-only' : 'anonymous');
+    setAuthTokenCookie(savedToken);
+  }, []);
+
+  const clearAuthState = useCallback(() => {
+    meRequestRef.current = null;
+    setToken(null);
+    setUser(null);
+    setUserStatus('anonymous');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('auth_token');
+    }
+    setAuthTokenCookie(null);
+  }, []);
+
+  const fetchMe = useCallback(async (force: boolean): Promise<AuthUser | null> => {
+    if (!token) {
+      setUser(null);
+      setUserStatus('anonymous');
+      return null;
+    }
+
+    if (!force && user) {
+      return user;
+    }
+
+    if (meRequestRef.current) {
+      return meRequestRef.current;
+    }
+
+    setUserStatus('loading');
+    const request = (async () => {
       try {
         const me = await AuthService.me();
         setUser(me.data.user);
+        setUserStatus('resolved');
+        return me.data.user;
       } catch (e: any) {
-        // 只有在 /api/auth/me 明确返回 401 时才认为 token 无效
-        // 其他错误可能是网络问题，不应该清空 token
         if (e?.response?.status === 401 || e?.status === 401) {
-          setToken(null);
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('auth_token');
-            setAuthTokenCookie(null);
-          }
+          clearAuthState();
+          return null;
         }
+        setUserStatus('error');
+        throw e;
+      } finally {
+        meRequestRef.current = null;
       }
     })();
-  }, [token, mounted]);
+
+    meRequestRef.current = request;
+    return request;
+  }, [clearAuthState, token, user]);
 
   // 监听 API 401 错误事件
   useEffect(() => {
-    if (!mounted || typeof window === 'undefined') {
+    if (typeof window === 'undefined') {
       return;
     }
 
     const handleUnauthorized = () => {
-      setToken(null);
-      setUser(null);
+      clearAuthState();
       // 重定向到登录页，保留当前路径用于登录后跳转
       const currentPath = window.location.pathname;
       const redirectParam = currentPath === '/' ? '' : `?redirect=${encodeURIComponent(currentPath)}`;
@@ -88,50 +105,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       window.removeEventListener('auth:unauthorized', handleUnauthorized);
     };
-  }, [mounted]);
+  }, [clearAuthState]);
 
   const login = (newToken: string, newUser?: AuthUser | null) => {
-    if (!mounted) return;
+    meRequestRef.current = null;
     setToken(newToken);
     if (newUser) {
       setUser(newUser);
+      setUserStatus('resolved');
+    } else {
+      setUser(null);
+      setUserStatus('token-only');
     }
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', newToken);
       setAuthTokenCookie(newToken);
-      // 不再自动刷新页面，由路由跳转处理
     }
   };
 
   const logout = () => {
-    if (!mounted) return;
-    setToken(null);
-    setUser(null);
+    clearAuthState();
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token');
-      setAuthTokenCookie(null);
-      // 退出登录后跳转到登录页
       window.location.href = '/login';
     }
   };
 
-  const refreshMe = async () => {
-    if (!mounted) return;
-    if (!token) {
-      setUser(null);
-      return;
-    }
-    const me = await AuthService.me();
-    setUser(me.data.user);
-  };
+  const refreshMe = useCallback(async () => {
+    await fetchMe(true);
+  }, [fetchMe]);
+
+  const ensureMe = useCallback(async () => {
+    return fetchMe(false);
+  }, [fetchMe]);
 
   const value = {
     token,
     user,
     isAuthenticated: !!token,
+    userStatus,
     login,
     logout,
     refreshMe,
+    ensureMe,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -148,9 +163,11 @@ export function useAuth() {
       token: null,
       user: null,
       isAuthenticated: false,
+      userStatus: 'anonymous' as const,
       login: () => {},
       logout: () => {},
-      refreshMe: async () => {}
+      refreshMe: async () => {},
+      ensureMe: async () => null,
     };
   }
 

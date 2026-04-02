@@ -21,50 +21,34 @@ const messages = {
 const LanguageContext = createContext<LanguageContextType | undefined>(undefined);
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
-  // 添加mounted状态以避免水合错误
-  const [mounted, setMounted] = useState(false);
-  // 使用函数初始化状态，避免在 effect 中调用 setState
   const [language, setLanguage] = useState<Language>('zh');
 
   useEffect(() => {
-    setMounted(true);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const savedLanguage = localStorage.getItem('language') as Language;
+    if (savedLanguage === 'zh' || savedLanguage === 'en') {
+      setLanguage((current) => (current === savedLanguage ? current : savedLanguage));
+      return;
+    }
+
+    const browserLanguage = navigator.language.toLowerCase();
+    if (browserLanguage.startsWith('en')) {
+      setLanguage('en');
+    }
   }, []);
 
-  // 只在挂载后从localStorage读取语言设置
   useEffect(() => {
-    if (!mounted) return;
-
-    if (typeof window !== 'undefined') {
-      // 从 localStorage 读取保存的语言设置
-      const savedLanguage = localStorage.getItem('language') as Language;
-      if (savedLanguage && (savedLanguage === 'zh' || savedLanguage === 'en')) {
-        setLanguage(savedLanguage);
-        return;
-      }
-      // 尝试从浏览器语言检测
-      const browserLanguage = navigator.language.toLowerCase();
-      if (browserLanguage.startsWith('en')) {
-        setLanguage('en');
-        return;
-      }
+    if (typeof window === 'undefined') {
+      return;
     }
-    setLanguage('zh');
-  }, [mounted]);
 
-  useEffect(() => {
-    // 只在客户端执行
-    if (!mounted) return;
-    if (typeof window !== 'undefined') {
-      // 保存语言设置到 localStorage
-      localStorage.setItem('language', language);
-      // 更新 HTML lang 属性
-      document.documentElement.lang = language;
-
-      // 派发自定义事件，通知其他组件语言已改变
-      const event = new CustomEvent('languagechange', { detail: language });
-      window.dispatchEvent(event);
-    }
-  }, [language, mounted]);
+    localStorage.setItem('language', language);
+    document.documentElement.lang = language;
+    window.dispatchEvent(new CustomEvent('languagechange', { detail: language }));
+  }, [language]);
 
   const t = (key: string, params?: Record<string, any>): string => {
     const keys = key.split('.');

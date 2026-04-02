@@ -3,8 +3,6 @@ import './globals.css';
 import { ThemeProvider } from '@/components/theme/theme-provider';
 import { LanguageProvider } from '@/contexts/LanguageContext';
 import { AuthProvider } from '@/contexts/AuthContext';
-import { ConfirmProvider } from '@/contexts/ConfirmProvider';
-import { Toaster } from 'sonner';
 import { RouteHistoryTracker } from '@/components/navigation/RouteHistoryTracker';
 
 export const metadata: Metadata = {
@@ -41,13 +39,10 @@ export default function RootLayout({
       <body className="font-sans">
         <LanguageProvider>
           <AuthProvider>
-            <ConfirmProvider>
-              <ThemeProvider defaultTheme="system">
-                <RouteHistoryTracker />
-                {children}
-                <Toaster position="top-center" richColors />
-              </ThemeProvider>
-            </ConfirmProvider>
+            <ThemeProvider defaultTheme="system">
+              <RouteHistoryTracker />
+              {children}
+            </ThemeProvider>
           </AuthProvider>
         </LanguageProvider>
       </body>

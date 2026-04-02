@@ -19,7 +19,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAppBack } from '@/hooks/use-app-back';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { Logo } from '@/components/brand/Logo';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { buildReaderPath } from '@/lib/utils/reader';
@@ -95,7 +94,6 @@ function HeaderPageClearlogo({
 
 export function Header() {
   const { t, language } = useLanguage();
-  const { serverName, serverInfo } = useServerInfo();
   const headerRef = useRef<HTMLElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
@@ -109,6 +107,7 @@ export function Header() {
   const isSettingsPage = pathname?.startsWith('/settings');
   const isLibraryPage = pathname?.startsWith('/library');
   const showBackButton = pathname !== '/' && !isSettingsPage && !isLibraryPage;
+  const serverName = 'Lanlu';
 
   useEffect(() => {
     setMounted(true);
@@ -245,11 +244,6 @@ export function Header() {
                 {serverName}
               </span>
             </button>
-            {serverInfo?.motd && (
-              <span className="text-sm text-muted-foreground hidden md:inline-block max-w-[250px] truncate" title={serverInfo.motd}>
-                · {serverInfo.motd}
-              </span>
-            )}
             <Suspense fallback={null}>
               <HeaderPageClearlogo pathname={pathname} language={language} />
             </Suspense>

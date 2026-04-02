@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -36,7 +36,16 @@ export function SettingsPageWrapper({
   emptyIcon
 }: SettingsPageWrapperProps) {
   const { t } = useLanguage();
-  const { isAuthenticated, user } = useAuth();
+  const { isAuthenticated, user, userStatus, ensureMe } = useAuth();
+
+  useEffect(() => {
+    if (!requireAdmin || !isAuthenticated) {
+      return;
+    }
+    if (userStatus === 'token-only') {
+      void ensureMe().catch(() => {});
+    }
+  }, [ensureMe, isAuthenticated, requireAdmin, userStatus]);
 
   // 未登录且需要认证
   if (requireAuth && !isAuthenticated) {
@@ -53,6 +62,27 @@ export function SettingsPageWrapper({
           <CardContent className="pt-6 space-y-4">
             <div className="text-center text-muted-foreground">
               {t('common.unauthorized')}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (requireAdmin && (userStatus === 'token-only' || userStatus === 'loading')) {
+    return (
+      <div className="space-y-6">
+        <div className="space-y-1">
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            {icon}
+            {title}
+          </h2>
+          {description && <p className="text-sm text-muted-foreground">{description}</p>}
+        </div>
+        <Card>
+          <CardContent className="pt-6">
+            <div className="flex items-center justify-center h-64">
+              <RefreshCw className="w-8 h-8 animate-spin text-muted-foreground" />
             </div>
           </CardContent>
         </Card>

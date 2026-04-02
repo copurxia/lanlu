@@ -65,7 +65,7 @@ import {
 import Link from 'next/link';
 import { TankoubonService } from '@/lib/services/tankoubon-service';
 import type { Tankoubon } from '@/types/tankoubon';
-import { toast } from 'sonner';
+import { toast } from '@/lib/ui/feedback';
 import { getStoredPath } from '@/lib/utils/navigation';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { logger } from '@/lib/utils/logger';

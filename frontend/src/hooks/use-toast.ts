@@ -1,4 +1,4 @@
-import { toast } from 'sonner';
+import { toast } from '@/lib/ui/feedback';
 
 export const useToast = () => {
   const success = (message: string, options?: any) => {
