@@ -9,22 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MetadataAssetsEditor } from '@/components/archive/MetadataAssetsEditor';
 import type { Plugin } from '@/lib/services/plugin-service';
-
-export type RpcSelectOption = {
-  index: number;
-  label: string;
-  description?: string;
-  cover?: string;
-};
-
-export type RpcSelectRequest = {
-  request_id: string;
-  title: string;
-  message?: string;
-  default_index?: number;
-  timeout_seconds?: number;
-  options: RpcSelectOption[];
-};
+export type { RpcSelectOption, RpcSelectRequest } from '@/types/metadata-plugin';
+import type { RpcSelectRequest } from '@/types/metadata-plugin';
 
 type RpcSelectState = {
   request: RpcSelectRequest | null;
