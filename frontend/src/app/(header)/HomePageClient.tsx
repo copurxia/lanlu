@@ -129,6 +129,8 @@ const MobileBottomNav = dynamic(
   { loading: () => null }
 );
 
+const CATEGORY_ROWS_PLACEHOLDER_COUNT = 3;
+
 function HomePageContent() {
   const { t, language } = useLanguage();
   const searchParams = useSearchParams();
@@ -185,9 +187,9 @@ function HomePageContent() {
   const [totalPages, setTotalPages] = useState(0);
   const [totalRecords, setTotalRecords] = useState(0);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [categoriesLoading, setCategoriesLoading] = useState(false);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [categoryRows, setCategoryRows] = useState<Record<string, (Archive | Tankoubon)[]>>({});
-  const [categoryRowsLoading, setCategoryRowsLoading] = useState(false);
+  const [categoryRowsLoading, setCategoryRowsLoading] = useState(true);
   const [categoryRowsRefreshKey, setCategoryRowsRefreshKey] = useState(0);
 
   // --- Selection (extracted hook) ---
@@ -586,8 +588,12 @@ function HomePageContent() {
 
   // Category rows
   useEffect(() => {
-    if (!showCategoryRowsView || enabledCategories.length === 0) {
+    if (!showCategoryRowsView) {
       setCategoryRowsLoading(false);
+      return;
+    }
+    if (enabledCategories.length === 0) {
+      if (!categoriesLoading) setCategoryRowsLoading(false);
       return;
     }
     const requestId = (categoryRowsRequestIdRef.current += 1);
@@ -669,6 +675,8 @@ function HomePageContent() {
     .replace('{count}', String(totalRecords))
     .replace('{page}', String(currentPage + 1))
     .replace('{totalPages}', String(totalPages));
+  const categoryRowSkeletonCount = Math.min(6, categoryRowSize);
+  const categoryRowsPlaceholderMinHeight = `${CATEGORY_ROWS_PLACEHOLDER_COUNT * 360}px`;
 
   // Infinite scroll observer
   useEffect(() => {
@@ -773,14 +781,17 @@ function HomePageContent() {
 
           {/* Category rows view */}
           {showCategoryRowsView && (
-            <section className="mb-10 space-y-8">
-              {categoriesLoading ? (
+            <section
+              className="mb-10 space-y-8"
+              style={categoriesLoading || categoryRowsLoading ? { minHeight: categoryRowsPlaceholderMinHeight } : undefined}
+            >
+              {categoriesLoading || (categoryRowsLoading && enabledCategories.length === 0) ? (
                 <div className="space-y-6">
-                  {[0, 1].map((idx) => (
+                  {Array.from({ length: CATEGORY_ROWS_PLACEHOLDER_COUNT }).map((_, idx) => (
                     <div key={idx} className="space-y-3">
                       <Skeleton className="h-6 w-32" />
                       <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
-                        {Array.from({ length: 6 }).map((_, i) => (
+                        {Array.from({ length: categoryRowSkeletonCount }).map((_, i) => (
                           <div key={i} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
                             <Skeleton className="aspect-3/4 w-full" />
                             <Skeleton className="h-4 w-full" />
@@ -812,7 +823,7 @@ function HomePageContent() {
                       </div>
                       {rowLoading ? (
                         <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
-                          {Array.from({ length: Math.min(6, categoryRowSize) }).map((_, idx) => (
+                          {Array.from({ length: categoryRowSkeletonCount }).map((_, idx) => (
                             <div key={idx} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
                               <Skeleton className="aspect-3/4 w-full" />
                               <Skeleton className="h-4 w-full" />
