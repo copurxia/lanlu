@@ -53,6 +53,14 @@ function isAbortLikeError(err: any) {
   );
 }
 
+type HomeViewSurface = 'archive-feed-continuous' | 'archive-feed-paged' | 'home-category-rows';
+
+function resolveHomeViewSurface(mode: HomeViewMode, isHomeLanding: boolean): HomeViewSurface {
+  if (mode === 'category-rows' && isHomeLanding) return 'home-category-rows';
+  if (mode === 'masonry' || mode === 'tweet' || mode === 'channel') return 'archive-feed-continuous';
+  return 'archive-feed-paged';
+}
+
 function HomePageContent() {
   const { t, language } = useLanguage();
   const searchParams = useSearchParams();
@@ -154,12 +162,26 @@ function HomePageContent() {
 
   const isSearchMode = Boolean(searchQuery);
   const isHomeLanding = !isSearchMode && categoryId === 'all';
+  const homeViewSurface = resolveHomeViewSurface(homeViewMode, isHomeLanding);
   const showCategoryRowsView = isHomeLanding && homeViewMode === 'category-rows';
   const showArchiveFeed = !showCategoryRowsView;
-  const isContinuousFeed = showArchiveFeed && (
-    homeViewMode === 'masonry' || homeViewMode === 'tweet' || homeViewMode === 'channel'
-  );
+  const isContinuousFeed = homeViewSurface === 'archive-feed-continuous';
   const hasMoreFeedPages = totalPages > 0 && currentPage + 1 < totalPages;
+  const homeViewSurfaceRef = useRef<HomeViewSurface>(homeViewSurface);
+  const isHomeLandingRef = useRef(isHomeLanding);
+  const urlPageRef = useRef(urlPage);
+
+  useEffect(() => {
+    homeViewSurfaceRef.current = homeViewSurface;
+  }, [homeViewSurface]);
+
+  useEffect(() => {
+    isHomeLandingRef.current = isHomeLanding;
+  }, [isHomeLanding]);
+
+  useEffect(() => {
+    urlPageRef.current = urlPage;
+  }, [urlPage]);
 
   // --- Data fetching ---
   const fetchArchives = useCallback(async (
@@ -280,18 +302,38 @@ function HomePageContent() {
     setDateTo(urlDateTo);
     setGroupByTanks(urlGroupByTanks);
     setCategoryId(urlQuery ? 'all' : urlCategoryId);
-    setCurrentPage(homeViewMode === 'list' ? urlPage : 0);
     setIsInitialized(true);
-  }, [homeViewMode, urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly, urlPage]);
+  }, [urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly]);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+    if (homeViewMode !== 'list') return;
+    setCurrentPage(urlPage);
+  }, [homeViewMode, isInitialized, urlPage]);
 
   // Home view mode change listener
   useEffect(() => {
     const handleHomeViewModeChange = (nextMode?: HomeViewMode) => {
       const normalized = normalizeHomeViewMode(nextMode);
+      const previousSurface = homeViewSurfaceRef.current;
+      const nextSurface = resolveHomeViewSurface(normalized, isHomeLandingRef.current);
+
       setHomeViewMode(normalized);
       setAutoLoadingMore(false);
-      setArchives([]);
-      setCurrentPage(0);
+
+      if (previousSurface !== nextSurface) {
+        if (nextSurface === 'home-category-rows') {
+          archivesAbortRef.current?.abort();
+          setArchives([]);
+          setCurrentPage(0);
+          setLoading(false);
+        } else {
+          setLoading(true);
+          setArchives([]);
+          setCurrentPage(nextSurface === 'archive-feed-paged' && normalized === 'list' ? urlPageRef.current : 0);
+        }
+      }
+
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(HOME_VIEW_MODE_STORAGE_KEY, normalized);
       }
