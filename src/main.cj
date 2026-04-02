@@ -104,6 +104,14 @@ main(): Int64 {
         return 1
     }
 
+    let localKvInitialized = LocalKVService.initializeFromSettings()
+    if (localKvInitialized) {
+        logger.info("Local KV initialized successfully")
+    } else {
+        logger.error("Local KV unavailable; RocksDB is required for archive index and task KV")
+        return 1
+    }
+
     // 初始化用户认证（检查并创建默认管理员）
     logger.info("Application starting... step 9a: initializing auth")
     let authInitialized = UserModel.initialize()
@@ -129,14 +137,6 @@ main(): Int64 {
         logger.warn("WASM runtime setting is ignored; host runtime is now fixed to wasmedge", ("configured", configuredWasmRuntime))
     }
     let effectiveWasmRuntime = "wasmedge"
-
-    let localKvInitialized = LocalKVService.initializeFromSettings()
-    if (localKvInitialized) {
-        logger.info("Local KV initialized successfully")
-    } else {
-        logger.error("Local KV unavailable; RocksDB is required for archive index and task KV")
-        return 1
-    }
 
     let (wamrReady, wamrError) = WasmHostBridge.warmup()
     if (wamrReady) {

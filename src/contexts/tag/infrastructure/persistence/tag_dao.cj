@@ -3,11 +3,11 @@ package lanlu.contexts.tag.infrastructure.persistence
 import std.database.sql.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import lanlu.infrastructure.kv.*
 import std.collection.*
 import stdx.log.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
-import std.sync.*
 
 /**
  * 标签翻译数据结构
@@ -87,12 +87,8 @@ public class TagLiteData {
  */
 public class TagDao {
     private static let logger = getLogger("tag_dao")
-
-    // Cache for translation-text lookup used by ArchiveDao search expansion.
-    // This avoids repeated DB scans of tags.translations on common terms.
-    private static var translationSearchCache: HashMap<String, ArrayList<String>> = HashMap<String, ArrayList<String>>()
-    private static var translationSearchCacheMutex: Mutex = Mutex()
-    private static let translationSearchCacheMaxSize: Int64 = 1024i64
+    private static let translationSearchCacheNamespace = "tag_translation_search"
+    private static let translationSearchCacheTtlSeconds: Int64 = 6 * 60 * 60
 
     /**
      * 解析 namespace:name 格式的标签
@@ -851,7 +847,11 @@ public class TagDao {
                         let rs = stmt.query()
                         try {
                             if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
+                                let id = rs.getOrNull<Int64>(0) ?? 0
+                                if (id > 0) {
+                                    invalidateTranslationSearchCache()
+                                }
+                                return id
                             }
                         } finally {
                             rs.close()
@@ -888,6 +888,7 @@ public class TagDao {
                         stmt.set(1, links)
                         stmt.set(2, id)
                         stmt.update()
+                        invalidateTranslationSearchCache()
                         return true
                     } finally {
                         stmt.close()
@@ -916,6 +917,7 @@ public class TagDao {
                     try {
                         stmt.set(0, id)
                         stmt.update()
+                        invalidateTranslationSearchCache()
                         return true
                     } finally {
                         stmt.close()
@@ -1152,6 +1154,7 @@ public class TagDao {
                         stmt.set(4, translationsJson)
                         stmt.set(5, links)
                         stmt.update()
+                        invalidateTranslationSearchCache()
                         return true
                     } finally {
                         stmt.close()
@@ -1308,67 +1311,33 @@ public class TagDao {
      * @return 匹配的标签全名列表（namespace:name 格式）
      */
     public static func findTagsByTranslation(searchTerm: String): ArrayList<String> {
-        var result: ArrayList<String> = ArrayList<String>()
-
-        if (searchTerm.size == 0) {
+        let normalizedSearchTerm = normalizeTranslationSearchTerm(searchTerm)
+        let result = ArrayList<String>()
+        if (normalizedSearchTerm.size == 0) {
             return result
         }
 
-        // Fast path: serve from cache to avoid repeated translations::text scans.
-        translationSearchCacheMutex.lock()
-        match (translationSearchCache.get(searchTerm)) {
-            case Some(cached) =>
-                translationSearchCacheMutex.unlock()
-                return cached
+        let cacheVersion = PersistentCacheService.getNamespaceVersion(translationSearchCacheNamespace)
+        let cacheKey = buildTranslationSearchCacheKey(cacheVersion, normalizedSearchTerm)
+        match (readTranslationSearchCache(cacheKey)) {
+            case Some(cached) => return cached
             case None => ()
         }
-        translationSearchCacheMutex.unlock()
 
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
-                
                 try {
-                    // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索。
-                    // Add a LIMIT to cap worst-case work and response size (caller expands matches into OR tags LIKE ...).
-                    let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ? LIMIT 200"
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        let pattern = "%" + searchTerm + "%"
-                        stmt.set(0, pattern)
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let namespace = rs.getOrNull<String>(0) ?? ""
-                                let name = rs.getOrNull<String>(1) ?? ""
-                                let fullName = if (namespace.size > 0) {
-                                    "${namespace}:${name}"
-                                } else {
-                                    name
-                                }
-                                result.add(fullName)
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
+                    let queried = queryTagsByTranslationWithConn(conn, normalizedSearchTerm)
+                    writeTranslationSearchCache(cacheKey, queried)
+                    return queried
                 } catch (e: Exception) {
-                    getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", searchTerm))
+                    getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", normalizedSearchTerm))
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
-
-        // Store into cache (best-effort). If cache grows too much, drop it.
-        translationSearchCacheMutex.lock()
-        if (translationSearchCache.size >= translationSearchCacheMaxSize) {
-            translationSearchCache = HashMap<String, ArrayList<String>>()
-        }
-        translationSearchCache[searchTerm] = result
-        translationSearchCacheMutex.unlock()
 
         return result
     }
@@ -1378,26 +1347,74 @@ public class TagDao {
      * 用于在持有连接的情况下调用，避免连接池耗尽
      */
     public static func findTagsByTranslationWithConn(conn: Connection, searchTerm: String): ArrayList<String> {
-        var result: ArrayList<String> = ArrayList<String>()
-
-        if (searchTerm.size == 0) {
+        let normalizedSearchTerm = normalizeTranslationSearchTerm(searchTerm)
+        let result = ArrayList<String>()
+        if (normalizedSearchTerm.size == 0) {
             return result
         }
 
-        translationSearchCacheMutex.lock()
-        match (translationSearchCache.get(searchTerm)) {
-            case Some(cached) =>
-                translationSearchCacheMutex.unlock()
-                return cached
+        let cacheVersion = PersistentCacheService.getNamespaceVersion(translationSearchCacheNamespace)
+        let cacheKey = buildTranslationSearchCacheKey(cacheVersion, normalizedSearchTerm)
+        match (readTranslationSearchCache(cacheKey)) {
+            case Some(cached) => return cached
             case None => ()
         }
-        translationSearchCacheMutex.unlock()
 
+        let queried = queryTagsByTranslationWithConn(conn, normalizedSearchTerm)
+        writeTranslationSearchCache(cacheKey, queried)
+        return queried
+    }
+
+    public static func bumpTranslationSearchCacheVersion(): Int64 {
+        return PersistentCacheService.bumpNamespaceVersion(translationSearchCacheNamespace)
+    }
+
+    private static func invalidateTranslationSearchCache(): Unit {
+        let nextVersion = bumpTranslationSearchCacheVersion()
+        logger.debug("tag translation search cache version bumped", ("version", nextVersion.toString()))
+    }
+
+    private static func normalizeTranslationSearchTerm(searchTerm: String): String {
+        return searchTerm.trimAscii().toAsciiLower()
+    }
+
+    private static func buildTranslationSearchCacheKey(version: Int64, normalizedSearchTerm: String): String {
+        return "v${version.toString()}:${normalizedSearchTerm}"
+    }
+
+    private static func readTranslationSearchCache(cacheKey: String): Option<ArrayList<String>> {
+        match (PersistentCacheService.get(translationSearchCacheNamespace, cacheKey)) {
+            case Some(payload) =>
+                match (decodeCachedTranslationSearchResult(payload)) {
+                    case Some(cached) => return Some(cached)
+                    case None =>
+                        let _ = PersistentCacheService.delete(translationSearchCacheNamespace, cacheKey)
+                        logger.warn("tag translation search cache payload decode failed; evicted key", ("key", cacheKey))
+                        return None
+                }
+            case None => return None
+        }
+    }
+
+    private static func writeTranslationSearchCache(cacheKey: String, result: ArrayList<String>): Unit {
+        let payload = encodeCachedTranslationSearchResult(result.toArray())
+        let _ = PersistentCacheService.set(
+            translationSearchCacheNamespace,
+            cacheKey,
+            payload,
+            translationSearchCacheTtlSeconds
+        )
+    }
+
+    private static func queryTagsByTranslationWithConn(conn: Connection, normalizedSearchTerm: String): ArrayList<String> {
+        let result = ArrayList<String>()
         try {
+            // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索。
+            // Add a LIMIT to cap worst-case work and response size (caller expands matches into OR tags LIKE ...).
             let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ? LIMIT 200"
             let stmt = conn.prepareStatement(sql)
             try {
-                let pattern = "%" + searchTerm + "%"
+                let pattern = "%" + normalizedSearchTerm + "%"
                 stmt.set(0, pattern)
                 let rs = stmt.query()
                 try {
@@ -1418,17 +1435,47 @@ public class TagDao {
                 stmt.close()
             }
         } catch (e: Exception) {
-            getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", searchTerm))
+            getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", normalizedSearchTerm))
         }
-
-        translationSearchCacheMutex.lock()
-        if (translationSearchCache.size >= translationSearchCacheMaxSize) {
-            translationSearchCache = HashMap<String, ArrayList<String>>()
-        }
-        translationSearchCache[searchTerm] = result
-        translationSearchCacheMutex.unlock()
-
         return result
+    }
+
+    private static func encodeCachedTranslationSearchResult(tags: Array<String>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
+        for (tag in tags) {
+            w.writeValue(tag)
+        }
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func decodeCachedTranslationSearchResult(payload: String): Option<ArrayList<String>> {
+        let trimmed = payload.trimAscii()
+        if (trimmed.size == 0) {
+            return None
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let reader = JsonReader(buf)
+            if (reader.peek() != Some(BeginArray)) {
+                return None
+            }
+
+            let result = ArrayList<String>()
+            reader.startArray()
+            while (reader.peek() != EndArray) {
+                result.add(reader.readValue<String>())
+            }
+            reader.endArray()
+            return Some(result)
+        } catch (_: Exception) {
+            return None
+        }
     }
 
     // ============ JSON 序列化/反序列化辅助方法 ============
@@ -1841,6 +1888,7 @@ public class TagDao {
                         try { commit.update() } finally { commit.close() }
                     } catch (_: Exception) {}
 
+                    invalidateTranslationSearchCache()
                     return true
                 } catch (e: Exception) {
                     try {

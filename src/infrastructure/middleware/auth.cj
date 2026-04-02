@@ -3,10 +3,10 @@ package lanlu.infrastructure.middleware
 import ignite.*
 import stdx.net.http.HttpStatusCode
 import std.time.DateTime
-import std.collection.*
-import std.sync.*
+import std.convert.*
 import lanlu.shared.views.*
 import lanlu.shared.config.*
+import lanlu.infrastructure.kv.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.shared.utils.*
 
@@ -16,8 +16,7 @@ import lanlu.shared.utils.*
 public class AuthMiddleware {
     // Throttle token last_used_at updates to reduce write load.
     private static let tokenTouchThrottleSeconds: Int64 = 300  // 5 minutes
-    private static var tokenTouchCache: HashMap<Int64, Int64> = HashMap<Int64, Int64>()
-    private static let tokenTouchMutex: Mutex = Mutex()
+    private static let tokenTouchThrottleNamespace = "auth_token_touch_throttle"
 
     /**
      * 从请求中解析 Bearer token
@@ -210,24 +209,35 @@ public class AuthMiddleware {
         if (row.id > 0 && row.userId > 0) {
             // 轻量触达，记录 last_used（节流）
             let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
-            var shouldTouch = false
-            tokenTouchMutex.lock()
-            match (tokenTouchCache.get(row.id)) {
-                case Some(last) =>
-                    if (nowSec - last >= tokenTouchThrottleSeconds) {
-                        tokenTouchCache[row.id] = nowSec
-                        shouldTouch = true
-                    }
-                case None =>
-                    tokenTouchCache[row.id] = nowSec
-                    shouldTouch = true
-            }
-            tokenTouchMutex.unlock()
-            if (shouldTouch) {
+            if (shouldTouchToken(row.id, nowSec)) {
                 UserTokenDao.touch(row.id)
             }
             return Some(row.userId)
         }
         return None
+    }
+
+    private static func shouldTouchToken(tokenId: Int64, nowSec: Int64): Bool {
+        let cacheKey = "token:${tokenId.toString()}"
+        match (PersistentCacheService.get(tokenTouchThrottleNamespace, cacheKey)) {
+            case Some(lastValue) =>
+                try {
+                    let last = Int64.parse(lastValue)
+                    if (nowSec - last < tokenTouchThrottleSeconds) {
+                        return false
+                    }
+                } catch (_: Exception) {
+                    ()
+                }
+            case None => ()
+        }
+
+        let _ = PersistentCacheService.set(
+            tokenTouchThrottleNamespace,
+            cacheKey,
+            nowSec.toString(),
+            tokenTouchThrottleSeconds
+        )
+        return true
     }
 }

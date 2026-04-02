@@ -4,6 +4,7 @@ import std.fs.*
 import stdx.encoding.json.stream.*
 import stdx.log.*
 import lanlu.shared.config.*
+import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
 import lanlu.shared.utils.*
 
@@ -186,6 +187,9 @@ public class TagI18nImportTaskRunner {
 
                     try { stmt.close() } catch (_: Exception) {}
                     try { conn.close() } catch (_: Exception) {}
+
+                    let cacheVersion = TagDao.bumpTranslationSearchCacheVersion()
+                    TaskIO.appendLog(taskId, "tag translation search cache version=${cacheVersion.toString()}")
 
                     let result = "{\"success\":1,\"imported\":${imported.toString()},\"received\":${received.toString()}}"
                     TaskIO.writeOutput(taskId, result)

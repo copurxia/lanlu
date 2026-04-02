@@ -220,6 +220,47 @@ public class SystemSettingsDao {
     }
 
     /**
+     * 启动阶段直接读取设置值。
+     * - 不依赖 SystemSettingsService
+     * - system_settings 表不存在时静默回退
+     */
+    public static func getBootstrapValue(key: String): Option<String> {
+        let logger = getLogger("system_settings_dao")
+        let connOpt = DatabaseConfig.createConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT value
+                        FROM system_settings
+                        WHERE key = ?
+                        LIMIT 1
+                    """)
+                    stmt.set(0, key)
+                    let rs = stmt.query()
+                    try {
+                        if (rs.next()) {
+                            let value = rs.getOrNull<String>(0) ?? ""
+                            return Some(value)
+                        }
+                        return None
+                    } finally {
+                        rs.close()
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    logger.debug("启动阶段读取系统设置失败，回退到默认值", ("key", key), ("error", e.message))
+                    return None
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (_: Exception) {}
+                }
+            case None => return None
+        }
+    }
+
+    /**
      * 根据分类获取设置
      */
     public static func getSettingsByCategory(category: String): Array<SystemSettingData> {

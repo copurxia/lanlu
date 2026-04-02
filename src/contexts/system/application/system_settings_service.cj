@@ -1,19 +1,17 @@
 package lanlu.contexts.system.application
 
 import std.collection.*
-import std.sync.*
 import stdx.log.*
 import std.convert.*
 import lanlu.contexts.system.infrastructure.persistence.*
+import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
 
 /**
  * 系统设置服务
  */
 public class SystemSettingsService {
-    private static var cache: HashMap<String, SystemSettingData> = HashMap<String, SystemSettingData>()
-    private static var cacheMutex: Mutex = Mutex()
-    private static var cacheInitialized: Bool = false
+    private static let cacheNamespace = "system_settings_cache"
 
     /**
      * 初始化设置（写入默认设置）
@@ -115,7 +113,7 @@ public class SystemSettingsService {
         settings.add(createSetting("ASSET_PATH", "./data/assets", "path", "storage", "资源文件目录路径"))
         settings.add(createSetting("CACHE_PATH", "./data/cache", "path", "storage", "缓存目录路径"))
         settings.add(createSetting("PLUGIN_PATH", "./data/plugins", "path", "storage", "插件目录路径"))
-        settings.add(createSetting("ROCKSDB_KV_MEMORY_MB", "16", "integer", "storage", "KV内存占用(MB)"))
+        settings.add(createSetting("ROCKSDB_KV_MEMORY_MB", "64", "integer", "storage", "KV内存占用(MB)"))
 
         // 性能设置 - 默认值
         settings.add(createSetting("MAX_CONCURRENT_JOBS", "8", "integer", "performance", "最大并发任务数"))
@@ -217,42 +215,37 @@ public class SystemSettingsService {
      * 重新加载缓存
      */
     public static func reloadCache(): Unit {
-        cacheMutex.lock()
-
-        cache.clear()
-        let settings = SystemSettingsDao.getAllSettings()
-        for (setting in settings) {
-            cache[setting.key] = setting
+        let deleted = PersistentCacheService.deleteByPrefix(cacheNamespace, "")
+        if (deleted) {
+            getLogger("system_settings_service").debug("系统设置缓存已清空")
+        } else {
+            getLogger("system_settings_service").warn("系统设置缓存清空失败，后续读取将退回数据库")
         }
-        cacheInitialized = true
-        cacheMutex.unlock()
-        getLogger("system_settings_service").debug("系统设置缓存已更新", ("count", settings.size.toString()))
     }
 
     /**
      * 获取字符串值（优先从缓存）
      */
     public static func getString(key: String): String {
-        // 优先从缓存获取
-        cacheMutex.lock()
-        if (cache.contains(key)) {
-            let value = cache[key].value
-            cacheMutex.unlock()
-            return value
+        let normalizedKey = key.trimAscii()
+        if (normalizedKey.size == 0) {
+            return ""
         }
-        cacheMutex.unlock()
+
+        match (PersistentCacheService.get(cacheNamespace, normalizedKey)) {
+            case Some(value) => return value
+            case None => ()
+        }
 
         // 缓存未命中，从数据库查询
-        let settingOpt = SystemSettingsDao.getSetting(key)
+        let settingOpt = SystemSettingsDao.getSetting(normalizedKey)
         match (settingOpt) {
             case Option<SystemSettingData>.Some(setting) =>
-                cacheMutex.lock()
-                cache[key] = setting
-                cacheMutex.unlock()
+                let _ = PersistentCacheService.set(cacheNamespace, normalizedKey, setting.value, 0)
                 return setting.value
             case Option<SystemSettingData>.None =>
                 // 配置不存在，返回空字符串
-                getLogger("system_settings_service").warn("设置未在数据库中找到", ("key", key))
+                getLogger("system_settings_service").warn("设置未在数据库中找到", ("key", normalizedKey))
                 return ""
         }
     }
@@ -300,22 +293,26 @@ public class SystemSettingsService {
      * 更新设置
      */
     public static func updateSetting(key: String, value: String): Bool {
-        let settingOpt = SystemSettingsDao.getSetting(key)
+        let normalizedKey = key.trimAscii()
+        if (normalizedKey.size == 0) {
+            return false
+        }
+
+        let settingOpt = SystemSettingsDao.getSetting(normalizedKey)
         match (settingOpt) {
             case Option<SystemSettingData>.Some(setting) =>
                 setting.value = value
                 let success = SystemSettingsDao.upsertSetting(setting)
                 if (success) {
-                    cacheMutex.lock()
-                    cache[key] = setting
-                    cacheMutex.unlock()
-                    getLogger("system_settings_service").info("更新设置成功", ("key", key), ("value", value))
+                    let _ = PersistentCacheService.set(cacheNamespace, normalizedKey, setting.value, 0)
+                    getLogger("system_settings_service").info("更新设置成功", ("key", normalizedKey), ("value", value))
+                    logRestartRequiredIfNeeded(normalizedKey)
                 }
                 return success
             case Option<SystemSettingData>.None =>
-                getLogger("system_settings_service").warn("设置不存在，将创建新设置", ("key", key))
+                getLogger("system_settings_service").warn("设置不存在，将创建新设置", ("key", normalizedKey))
                 let newSetting = SystemSettingData()
-                newSetting.key = key
+                newSetting.key = normalizedKey
                 newSetting.value = value
                 newSetting.valueType = "string"
                 newSetting.category = "general"
@@ -323,9 +320,8 @@ public class SystemSettingsService {
                 newSetting.isEncrypted = false
                 let success = SystemSettingsDao.upsertSetting(newSetting)
                 if (success) {
-                    cacheMutex.lock()
-                    cache[key] = newSetting
-                    cacheMutex.unlock()
+                    let _ = PersistentCacheService.set(cacheNamespace, normalizedKey, newSetting.value, 0)
+                    logRestartRequiredIfNeeded(normalizedKey)
                 }
                 return success
         }
@@ -336,15 +332,19 @@ public class SystemSettingsService {
      */
     public static func updateSettings(settings: HashMap<String, String>): Bool {
         var settingsArray = ArrayList<SystemSettingData>()
-        cacheMutex.lock()
         for ((key, value) in settings) {
-            if (cache.contains(key)) {
-                let setting = cache[key]
-                setting.value = value
-                settingsArray.add(setting)
+            let normalizedKey = key.trimAscii()
+            if (normalizedKey.size == 0) {
+                continue
+            }
+
+            match (SystemSettingsDao.getSetting(normalizedKey)) {
+                case Some(setting) =>
+                    setting.value = value
+                    settingsArray.add(setting)
+                case None => ()
             }
         }
-        cacheMutex.unlock()
 
         if (settingsArray.size == 0) {
             getLogger("system_settings_service").warn("无有效设置需要更新")
@@ -353,13 +353,9 @@ public class SystemSettingsService {
 
         let success = SystemSettingsDao.upsertSettings(settingsArray.toArray())
         if (success) {
-            // 更新缓存
-            for ((key, value) in settings) {
-                if (cache.contains(key)) {
-                    let setting = cache[key]
-                    setting.value = value
-                    cache[key] = setting
-                }
+            for (setting in settingsArray) {
+                let _ = PersistentCacheService.set(cacheNamespace, setting.key, setting.value, 0)
+                logRestartRequiredIfNeeded(setting.key)
             }
         }
         return success
@@ -384,5 +380,14 @@ public class SystemSettingsService {
      */
     public static func getCategories(): Array<String> {
         return ["storage", "performance", "server", "ssl"]
+    }
+
+    private static func logRestartRequiredIfNeeded(key: String): Unit {
+        if (key == "CACHE_PATH" || key == "ROCKSDB_KV_MEMORY_MB") {
+            getLogger("system_settings_service").warn(
+                "设置已更新，但 RocksDB 启动配置需要在进程重启后生效",
+                ("key", key)
+            )
+        }
     }
 }

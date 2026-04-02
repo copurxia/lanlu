@@ -3,9 +3,21 @@ package lanlu.infrastructure.kv
 import std.collection.*
 import std.sync.*
 import std.fs.*
-import lanlu.contexts.system.application.SystemSettingsService
+import std.convert.*
+import std.env.getVariable
+import lanlu.contexts.system.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import rocksdb_ffi.RocksDb
+
+private class LocalKvBootstrapConfig {
+    public var cachePath: String
+    public var kvMemoryMb: Int32
+
+    public init(cachePath: String, kvMemoryMb: Int32) {
+        this.cachePath = cachePath
+        this.kvMemoryMb = kvMemoryMb
+    }
+}
 
 public interface LocalKVStore {
     func isAvailable(): Bool
@@ -100,7 +112,8 @@ public class RocksDbLocalKVStore <: LocalKVStore {
 public class LocalKVService {
     private static let logger = getLogger("local_kv_service")
     private static let mutex = Mutex()
-    private static let defaultKvMemoryMb: Int32 = 16
+    private static let defaultCachePath = "./data/cache"
+    private static let defaultKvMemoryMb: Int32 = 64
     private static let minKvMemoryMb: Int32 = 4
     private static var initialized = false
     private static var store: Option<LocalKVStore> = Option<LocalKVStore>.None
@@ -114,24 +127,16 @@ public class LocalKVService {
         }
 
         initialized = true
-
-        let dbPath = FileUtils.joinPath(SystemSettingsService.getPath("CACHE_PATH"), "rocksdb")
+        let bootstrapConfig = resolveBootstrapConfig()
+        let dbPath = FileUtils.joinPath(bootstrapConfig.cachePath, "rocksdb")
         FileUtils.ensureDirectoryExists(Path(dbPath))
 
-        var kvMemoryMb = SystemSettingsService.getInt("ROCKSDB_KV_MEMORY_MB")
-        if (kvMemoryMb <= 0) {
-            kvMemoryMb = defaultKvMemoryMb
-        }
-        if (kvMemoryMb < minKvMemoryMb) {
-            kvMemoryMb = minKvMemoryMb
-        }
-
-        let (ok, dbOpt, err) = RocksDb.openBalanced(dbPath, kvMemoryMb)
+        let (ok, dbOpt, err) = RocksDb.openBalanced(dbPath, bootstrapConfig.kvMemoryMb)
         if (!ok) {
             logger.warn(
                 "Failed to initialize RocksDB local KV; falling back to no-cache mode",
                 ("path", dbPath),
-                ("kv_memory_mb", kvMemoryMb.toString()),
+                ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()),
                 ("error", err)
             )
             store = Option<LocalKVStore>.None
@@ -140,7 +145,7 @@ public class LocalKVService {
         }
 
         store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(dbOpt.getOrThrow()))
-        logger.info("Initialized RocksDB local KV", ("path", dbPath), ("kv_memory_mb", kvMemoryMb.toString()))
+        logger.info("Initialized RocksDB local KV", ("path", dbPath), ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()))
         mutex.unlock()
         return true
     }
@@ -150,5 +155,61 @@ public class LocalKVService {
         let res = store
         mutex.unlock()
         return res
+    }
+
+    private static func resolveBootstrapConfig(): LocalKvBootstrapConfig {
+        let fallbackCachePath = normalizeCachePath(getVariable("CACHE_PATH") ?? defaultCachePath)
+        let cachePath = resolveBootstrapCachePath(fallbackCachePath)
+        let envMemoryMb = parseInt32OrDefault(getVariable("ROCKSDB_KV_MEMORY_MB") ?? "", defaultKvMemoryMb)
+        let kvMemoryMb = clampKvMemoryMb(resolveBootstrapKvMemoryMb(envMemoryMb))
+        return LocalKvBootstrapConfig(cachePath, kvMemoryMb)
+    }
+
+    private static func resolveBootstrapCachePath(fallback: String): String {
+        match (SystemSettingsDao.getBootstrapValue("CACHE_PATH")) {
+            case Some(value) =>
+                let normalized = normalizeCachePath(value)
+                if (normalized.size > 0) {
+                    return normalized
+                }
+            case None => ()
+        }
+        return normalizeCachePath(fallback)
+    }
+
+    private static func resolveBootstrapKvMemoryMb(fallback: Int32): Int32 {
+        match (SystemSettingsDao.getBootstrapValue("ROCKSDB_KV_MEMORY_MB")) {
+            case Some(value) => return parseInt32OrDefault(value, fallback)
+            case None => return fallback
+        }
+    }
+
+    private static func normalizeCachePath(path: String): String {
+        let trimmed = path.trimAscii()
+        return if (trimmed.size > 0) { trimmed } else { defaultCachePath }
+    }
+
+    private static func clampKvMemoryMb(value: Int32): Int32 {
+        var out = value
+        if (out <= 0) {
+            out = defaultKvMemoryMb
+        }
+        if (out < minKvMemoryMb) {
+            out = minKvMemoryMb
+        }
+        return out
+    }
+
+    private static func parseInt32OrDefault(value: String, fallback: Int32): Int32 {
+        let trimmed = value.trimAscii()
+        if (trimmed.size == 0) {
+            return fallback
+        }
+
+        try {
+            return Int32.parse(trimmed)
+        } catch (_: Exception) {
+            return fallback
+        }
     }
 }
