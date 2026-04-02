@@ -18,8 +18,12 @@ import { appEvents, AppEvents } from '@/lib/utils/events';
 import { ChevronRight, RefreshCw } from 'lucide-react';
 import { startTransition, useState, useEffect, useCallback, Suspense, useRef, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useDebounce, useGridColumnCount } from '@/hooks/common-hooks';
+import { useDebounce, useGridColumnCount, useWindowSize } from '@/hooks/common-hooks';
 import { useHomeSelection } from '@/hooks/use-home-selection';
+import {
+  DEFAULT_SCROLLABLE_CARD_COVER_ASPECT_RATIO,
+  getScrollableCardWidth,
+} from '@/hooks/use-scrollable-card-cover-height';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { logger } from '@/lib/utils/logger';
@@ -130,12 +134,17 @@ const MobileBottomNav = dynamic(
 );
 
 const CATEGORY_ROWS_PLACEHOLDER_COUNT = 3;
+const CARD_TEXT_PLACEHOLDER_HEIGHT = 52;
+const CATEGORY_ROW_HEADER_HEIGHT = 40;
+const RANDOM_SECTION_HEADER_HEIGHT = 56;
+const ROW_SECTION_GAP_HEIGHT = 24;
 
 function HomePageContent() {
   const { t, language } = useLanguage();
   const searchParams = useSearchParams();
   const router = useRouter();
   const gridColumnCount = useGridColumnCount();
+  const { width: viewportWidth } = useWindowSize();
   const pageSize = 20;
   const categoryRowSize = Math.max(8, gridColumnCount * 2);
   const randomKey = `${categoryRowSize}:${language}`;
@@ -676,7 +685,12 @@ function HomePageContent() {
     .replace('{page}', String(currentPage + 1))
     .replace('{totalPages}', String(totalPages));
   const categoryRowSkeletonCount = Math.min(6, categoryRowSize);
-  const categoryRowsPlaceholderMinHeight = `${CATEGORY_ROWS_PLACEHOLDER_COUNT * 360}px`;
+  const skeletonCardWidth = getScrollableCardWidth(viewportWidth || 1280);
+  const skeletonCoverHeight = Math.round(skeletonCardWidth / DEFAULT_SCROLLABLE_CARD_COVER_ASPECT_RATIO);
+  const skeletonRowHeight = skeletonCoverHeight + CARD_TEXT_PLACEHOLDER_HEIGHT;
+  const categoryRowPlaceholderMinHeight = `${CATEGORY_ROW_HEADER_HEIGHT + skeletonRowHeight}px`;
+  const categoryRowsPlaceholderMinHeight = `${CATEGORY_ROWS_PLACEHOLDER_COUNT * (CATEGORY_ROW_HEADER_HEIGHT + skeletonRowHeight + ROW_SECTION_GAP_HEIGHT)}px`;
+  const randomRecommendationsPlaceholderMinHeight = `${RANDOM_SECTION_HEADER_HEIGHT + skeletonRowHeight}px`;
 
   // Infinite scroll observer
   useEffect(() => {
@@ -729,7 +743,10 @@ function HomePageContent() {
 
           {/* Random recommendations */}
           {showCategoryRowsView && (
-          <section className="mb-8">
+          <section
+            className="mb-8"
+            style={randomLoading && randomArchives.length === 0 ? { minHeight: randomRecommendationsPlaceholderMinHeight } : undefined}
+          >
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-2xl font-semibold">{t('home.randomRecommendations')}</h2>
               <div className="flex items-center gap-2">
@@ -752,6 +769,19 @@ function HomePageContent() {
                 onRecommendationOpenReader={trackDiscoverOpenReader}
                 onRecommendationFavorite={trackDiscoverFavorite}
               />
+            ) : randomLoading ? (
+              <div
+                className="flex items-start gap-4 overflow-x-auto pb-2 pr-2"
+                style={{ minHeight: `${skeletonRowHeight}px` }}
+              >
+                {Array.from({ length: categoryRowSkeletonCount }).map((_, idx) => (
+                  <div key={idx} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
+                    <Skeleton className="aspect-3/4 w-full" />
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-2/3" />
+                  </div>
+                ))}
+              </div>
             ) : !randomLoading ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground">{t('home.noRecommendations')}</p>
@@ -788,9 +818,12 @@ function HomePageContent() {
               {categoriesLoading || (categoryRowsLoading && enabledCategories.length === 0) ? (
                 <div className="space-y-6">
                   {Array.from({ length: CATEGORY_ROWS_PLACEHOLDER_COUNT }).map((_, idx) => (
-                    <div key={idx} className="space-y-3">
+                    <div key={idx} className="space-y-3" style={{ minHeight: categoryRowPlaceholderMinHeight }}>
                       <Skeleton className="h-6 w-32" />
-                      <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
+                      <div
+                        className="flex items-start gap-4 overflow-x-auto pb-2 pr-2"
+                        style={{ minHeight: `${skeletonRowHeight}px` }}
+                      >
                         {Array.from({ length: categoryRowSkeletonCount }).map((_, i) => (
                           <div key={i} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
                             <Skeleton className="aspect-3/4 w-full" />
@@ -807,7 +840,11 @@ function HomePageContent() {
                   const rowItems = categoryRows[String(category.id)] || [];
                   const rowLoading = categoryRowsLoading && rowItems.length === 0;
                   return (
-                    <div key={category.catid} className="space-y-3">
+                    <div
+                      key={category.catid}
+                      className="space-y-3"
+                      style={rowLoading ? { minHeight: categoryRowPlaceholderMinHeight } : undefined}
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <Link href={buildCategoryUrl(category.catid)} className="flex items-center gap-2 text-lg font-semibold hover:text-foreground">
                           {category.icon ? <span className="text-lg">{category.icon}</span> : null}
@@ -822,7 +859,10 @@ function HomePageContent() {
                         </Button>
                       </div>
                       {rowLoading ? (
-                        <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
+                        <div
+                          className="flex items-start gap-4 overflow-x-auto pb-2 pr-2"
+                          style={{ minHeight: `${skeletonRowHeight}px` }}
+                        >
                           {Array.from({ length: categoryRowSkeletonCount }).map((_, idx) => (
                             <div key={idx} className="w-32 sm:w-36 md:w-40 lg:w-44 xl:w-48 shrink-0 space-y-2">
                               <Skeleton className="aspect-3/4 w-full" />
