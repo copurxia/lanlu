@@ -1,5 +1,6 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import { Suspense, useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { SearchBar, type SearchBarHandle } from '@/components/search/SearchBar';
@@ -9,9 +10,6 @@ import { RecommendationService } from '@/lib/services/recommendation-service';
 import { resolveArchiveAssetUrl } from '@/lib/utils/archive-assets';
 import { ThemeToggle, ThemeButton } from '@/components/theme/theme-toggle';
 import { LanguageButton } from '@/components/language/LanguageButton';
-import { HomeViewMenu } from '@/components/layout/HomeViewMenu';
-import { UserMenu } from '@/components/user/UserMenu';
-import { AppSidebarNav } from '@/components/layout/AppSidebarNav';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { Menu, Home, Shuffle, Settings, ArrowLeft, LogIn, Filter, Search } from 'lucide-react';
 import Link from 'next/link';
@@ -22,6 +20,29 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Logo } from '@/components/brand/Logo';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { buildReaderPath } from '@/lib/utils/reader';
+
+const UserMenu = dynamic(
+  () => import('@/components/user/UserMenu').then((m) => m.UserMenu),
+  { loading: () => <div className="h-10 w-10 shrink-0 rounded-full" /> }
+);
+
+const HomeViewMenu = dynamic(
+  () => import('@/components/layout/HomeViewMenu').then((m) => m.HomeViewMenu),
+  { loading: () => <div className="h-9 w-9 shrink-0 rounded-md" /> }
+);
+
+const AppSidebarNav = dynamic(
+  () => import('@/components/layout/AppSidebarNav').then((m) => m.AppSidebarNav),
+  {
+    loading: () => (
+      <div className="space-y-3 px-4 py-4">
+        {Array.from({ length: 8 }).map((_, idx) => (
+          <div key={idx} className="h-9 rounded-lg bg-muted/60" />
+        ))}
+      </div>
+    ),
+  }
+);
 
 function HeaderPageClearlogo({
   pathname,

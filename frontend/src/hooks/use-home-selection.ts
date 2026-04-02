@@ -3,11 +3,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { appEvents, AppEvents } from '@/lib/utils/events';
-import { ArchiveService } from '@/lib/services/archive-service';
-import { FavoriteService } from '@/lib/services/favorite-service';
-import { PluginService } from '@/lib/services/plugin-service';
-import { TankoubonService } from '@/lib/services/tankoubon-service';
-import { BatchEditDialog, type BatchEditPayload } from '@/components/archive/BatchEditDialog';
+import type { BatchEditPayload } from '@/components/archive/BatchEditDialog';
 import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 
@@ -19,6 +15,22 @@ export interface UseHomeSelectionVisibleItems {
   archives: Array<Archive | Tankoubon>;
   randomArchives: Array<Archive | Tankoubon>;
   categoryRows: Record<string, (Archive | Tankoubon)[]>;
+}
+
+async function loadArchiveService() {
+  return (await import('@/lib/services/archive-service')).ArchiveService;
+}
+
+async function loadTankoubonService() {
+  return (await import('@/lib/services/tankoubon-service')).TankoubonService;
+}
+
+async function loadFavoriteService() {
+  return (await import('@/lib/services/favorite-service')).FavoriteService;
+}
+
+async function loadPluginService() {
+  return (await import('@/lib/services/plugin-service')).PluginService;
 }
 
 export function useHomeSelection(
@@ -123,6 +135,7 @@ export function useHomeSelection(
   // We'll keep it as a callback that the page calls in a useEffect.
   const loadMetadataPlugins = useCallback(async () => {
     try {
+      const PluginService = await loadPluginService();
       const plugins = await PluginService.getMetadataPlugins();
       setMetadataPlugins(
         plugins
@@ -199,6 +212,11 @@ export function useHomeSelection(
 
     setBatchEditApplying(true);
     try {
+      const [ArchiveService, TankoubonService] = await Promise.all([
+        loadArchiveService(),
+        loadTankoubonService(),
+      ]);
+
       const archiveJobs: Array<() => Promise<void>> = applyToArchives
         ? Array.from(selectedArchiveIds).map((id) => async () => {
             if (payload.updateTitle || payload.updateSummary || payload.updateTags) {
@@ -318,6 +336,10 @@ export function useHomeSelection(
     });
     if (!ok) return;
 
+    const [ArchiveService, TankoubonService] = await Promise.all([
+      loadArchiveService(),
+      loadTankoubonService(),
+    ]);
     const jobs: Array<() => Promise<void>> = [
       ...Array.from(selectedArchiveIds).map((id) => () => ArchiveService.deleteArchive(id)),
       ...Array.from(selectedTankoubonIds).map((id) => () => TankoubonService.deleteTankoubon(id)),
@@ -339,6 +361,7 @@ export function useHomeSelection(
   const handleBatchFavorite = useCallback(async () => {
     if (!hasAnySelected || batchActionRunning) return;
     const shouldFavorite = nextFavoriteState;
+    const FavoriteService = await loadFavoriteService();
     const jobs: Array<() => Promise<void>> = [
       ...Array.from(selectedArchiveIds).map((id) => async () => {
         const ok = shouldFavorite
@@ -368,6 +391,7 @@ export function useHomeSelection(
     if (!canBatchDownload || batchActionRunning) return;
     const toRead = allSelectedArchiveIsNew;
     const title = toRead ? t('archive.markAsRead') : t('archive.markAsNew');
+    const ArchiveService = await loadArchiveService();
     const jobs: Array<() => Promise<void>> = Array.from(selectedArchiveIds).map((id) => {
       return () => (toRead ? ArchiveService.clearIsNew(id) : ArchiveService.setIsNew(id));
     });
@@ -381,11 +405,12 @@ export function useHomeSelection(
     t,
   ]);
 
-  const handleBatchDownload = useCallback(() => {
+  const handleBatchDownload = useCallback(async () => {
     if (!canBatchDownload) {
       showInfo(t('home.batchDownloadOnlyArchive'));
       return;
     }
+    const ArchiveService = await loadArchiveService();
     Array.from(selectedArchiveIds).forEach((id) => {
       window.open(ArchiveService.getDownloadUrl(id), '_blank');
     });
