@@ -1,6 +1,7 @@
 'use client';
 
 import dynamic from 'next/dynamic';
+import { HomeScrollableCardRow } from '@/components/home/HomeScrollableCardRow';
 import { Pagination } from '@/components/ui/pagination';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Spinner } from '@/components/ui/spinner';
@@ -95,23 +96,6 @@ const SearchSidebar = dynamic(
   () => import('@/components/layout/SearchSidebar').then((m) => m.SearchSidebar),
   {
     loading: () => <div className="space-y-4 p-4"><Skeleton className="h-10 w-full" /><Skeleton className="h-10 w-full" /><Skeleton className="h-24 w-full" /></div>,
-  }
-);
-
-const HomeScrollableCardRow = dynamic(
-  () => import('@/components/home/HomeScrollableCardRow').then((m) => m.HomeScrollableCardRow),
-  {
-    loading: () => (
-      <div className="flex items-start gap-4 overflow-x-auto pb-2 pr-2">
-        {Array.from({ length: 6 }).map((_, idx) => (
-          <div key={idx} className="w-32 shrink-0 space-y-2 sm:w-36 md:w-40 lg:w-44 xl:w-48">
-            <Skeleton className="aspect-3/4 w-full" />
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-2/3" />
-          </div>
-        ))}
-      </div>
-    ),
   }
 );
 
