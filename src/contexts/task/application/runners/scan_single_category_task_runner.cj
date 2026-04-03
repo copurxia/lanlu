@@ -324,6 +324,11 @@ public class ScanSingleCategoryTaskRunner {
 
     private static func submitThumbnailTaskDirectly(filePath: String, archiveId: String, archiveType: String, ctx: ScanContext, coverEntry: String): Bool {
         try {
+            let activeKey = "generate_thumbnail:archive:${archiveId}"
+            if (TaskDao.existsActiveTaskByActiveKey(activeKey)) {
+                getLogger("scan_single_category").debug("Skipped generate_thumbnail because an active task already exists", ("archive_id", archiveId))
+                return true
+            }
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -342,7 +347,8 @@ public class ScanSingleCategoryTaskRunner {
                 parameters,
                 10i32,
                 archiveId,
-                "scan_single_category"
+                "scan_single_category",
+                activeKey: activeKey
             )
 
             if (task.id > 0) {

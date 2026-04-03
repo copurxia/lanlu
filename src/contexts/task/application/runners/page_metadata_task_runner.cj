@@ -156,9 +156,6 @@ public class PageMetadataTaskRunner {
             items.add(pageData)
             processedCount += 1
 
-            if (i % 10 == 0) {
-                context.notifyTaskAvailable()
-            }
         }
 
         let saveOk = MetadataDao.upsertPageMetadataBatch(archiveId, items.toArray(), sourceNamespace: "page_metadata")

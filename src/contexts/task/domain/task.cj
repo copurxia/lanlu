@@ -30,12 +30,16 @@ public class Task {
     public var timeoutAt: String
     public var triggerSource: String
     public var waitForTaskId: Int64  // 条件驱动：等待指定任务完成后才能执行
+    public var phase: String
+    public var waitingReason: String
+    public var activeKey: String
 
     public init(id: Int64, name: String, status: String, progress: Int32, message: String,
                 taskType!: String = "", pluginNamespace!: String = "", parameters!: String = "",
                 result!: String = "", createdAt!: String = "", startedAt!: String = "",
                 completedAt!: String = "", priority!: Int32 = 50, groupId!: String = "",
-                timeoutAt!: String = "", triggerSource!: String = "", waitForTaskId!: Int64 = 0) {
+                timeoutAt!: String = "", triggerSource!: String = "", waitForTaskId!: Int64 = 0,
+                phase!: String = "", waitingReason!: String = "", activeKey!: String = "") {
         this.id = id
         this.name = name
         this.status = status
@@ -53,6 +57,9 @@ public class Task {
         this.timeoutAt = timeoutAt
         this.triggerSource = triggerSource
         this.waitForTaskId = waitForTaskId
+        this.phase = phase
+        this.waitingReason = waitingReason
+        this.activeKey = activeKey
     }
 
     /**
@@ -87,6 +94,9 @@ public class Task {
         w.writeName("groupId").writeValue(groupId)
         w.writeName("timeoutAt").writeValue(timeoutAt)
         w.writeName("triggerSource").writeValue(triggerSource)
+        w.writeName("phase").writeValue(phase)
+        w.writeName("waitingReason").writeValue(waitingReason)
+        w.writeName("activeKey").writeValue(activeKey)
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
@@ -244,7 +254,7 @@ public class TaskModel {
      * 创建带参数的任务
      */
     public static func createTaskWithOptions(name: String, taskType: String, parameters: String, priority: Int32,
-                                             groupId: String, triggerSource: String): Task {
+                                             groupId: String, triggerSource: String, activeKey!: String = ""): Task {
         let logger = getLogger("task_model")
         let currentTime = getCurrentTimeString()
 
@@ -254,7 +264,8 @@ public class TaskModel {
             0, name, "pending", 0, "任务已创建",
             taskType: taskType, pluginNamespace: "", parameters: parameters,
             result: "", createdAt: currentTime, startedAt: "", completedAt: "",
-            priority: priority, groupId: groupId, timeoutAt: timeoutAt, triggerSource: triggerSource
+            priority: priority, groupId: groupId, timeoutAt: timeoutAt, triggerSource: triggerSource,
+            phase: "queued", activeKey: activeKey
         )
 
         let data = convertToTaskData(task)
@@ -364,11 +375,25 @@ public class TaskModel {
      */
     public static func updateTaskProgress(id: Int64, progress: Int32, message: String): Bool {
         let logger = getLogger("task_model")
-        let success = TaskDao.updateTaskStatus(id, "running", message, progress)
+        let success = TaskDao.updateTaskProgressPreserveStatus(id, progress, message)
         if (success) {
             logger.debug("更新任务进度", [("id", id.toString()), ("progress", progress.toString())])
         } else {
             logger.error("更新任务进度失败", ("id", id.toString()), ("progress", progress.toString()))
+        }
+        return success
+    }
+
+    /**
+     * 将任务显式标记为等待态。
+     */
+    public static func markTaskWaiting(id: Int64, message: String, progress!: Int32 = 0, waitingReason!: String = "", phase!: String = "waiting"): Bool {
+        let logger = getLogger("task_model")
+        let success = TaskDao.updateTaskWaitingState(id, message, progress, phase, waitingReason)
+        if (success) {
+            logger.debug("标记任务等待成功", ("id", id.toString()))
+        } else {
+            logger.error("标记任务等待失败", ("id", id.toString()))
         }
         return success
     }
@@ -433,7 +458,8 @@ public class TaskModel {
             parameters: data.parameters, result: data.result,
             createdAt: data.createdAt, startedAt: data.startedAt, completedAt: data.completedAt,
             priority: data.priority, groupId: data.groupId, timeoutAt: data.timeoutAt,
-            triggerSource: data.triggerSource, waitForTaskId: data.waitForTaskId
+            triggerSource: data.triggerSource, waitForTaskId: data.waitForTaskId,
+            phase: data.phase, waitingReason: data.waitingReason, activeKey: data.activeKey
         )
     }
 
@@ -459,6 +485,9 @@ public class TaskModel {
         data.timeoutAt = task.timeoutAt
         data.triggerSource = task.triggerSource
         data.waitForTaskId = task.waitForTaskId
+        data.phase = task.phase
+        data.waitingReason = task.waitingReason
+        data.activeKey = task.activeKey
         return data
     }
 
@@ -472,7 +501,8 @@ public class TaskModel {
         parameters: String,
         waitForTaskId: Int64,
         groupId: String,
-        triggerSource: String
+        triggerSource: String,
+        activeKey!: String = ""
     ): Task {
         let logger = getLogger("task_model")
         let currentTime = getCurrentTimeString()
@@ -486,6 +516,7 @@ public class TaskModel {
         data.priority = 50
         data.groupId = groupId
         data.triggerSource = triggerSource
+        data.activeKey = activeKey
 
         let success = TaskDao.createWaitingTaskData(data, waitForTaskId)
         if (success) {
@@ -494,7 +525,8 @@ public class TaskModel {
                 data.id, name, "waiting", 0, "等待依赖任务完成",
                 taskType: taskType, parameters: parameters,
                 createdAt: currentTime, priority: 50, groupId: groupId,
-                triggerSource: triggerSource, waitForTaskId: waitForTaskId
+                triggerSource: triggerSource, waitForTaskId: waitForTaskId,
+                phase: "awaiting_dependency", waitingReason: "task_dependency", activeKey: activeKey
             )
         } else {
             logger.error("创建等待任务失败", ("name", name))

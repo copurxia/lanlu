@@ -1,5 +1,6 @@
 package lanlu.contexts.task.application
 
+import std.collection.*
 import std.sync.*
 import std.convert.*
 import stdx.log.*
@@ -59,6 +60,11 @@ public class TaskPoolService {
     // 使用原子操作管理 worker 计数，减少锁竞争
     private let currentWorkers: AtomicInt32 = AtomicInt32(0)
     private let workerSeq: AtomicInt32 = AtomicInt32(0)
+    private let dispatchMutex: Mutex = Mutex()
+    private var dispatchRunning: Bool = false
+    private var dispatchRequested: Bool = false
+    private let activeWorkersMutex: Mutex = Mutex()
+    private var activeWorkers: HashMap<Int64, Int32> = HashMap<Int64, Int32>()
     // upload task 空闲超时时间：10分钟内无分片上报则失败
     private static let UPLOAD_IDLE_TIMEOUT_SECONDS: Int32 = 600
     private static let UPLOAD_WAIT_HEARTBEAT_MILLIS: Int64 = 15000
@@ -111,7 +117,7 @@ public class TaskPoolService {
 
         // 启动时仅尝试领取已有 pending（不做轮询）
         // 后续的调度由事件驱动：任务入队时 notify，Worker 完成时 dispatch
-        dispatch()
+        requestDispatch()
         return true
     }
 
@@ -126,7 +132,7 @@ public class TaskPoolService {
      * 有新任务入队时调用：尽可能填满并发 worker
      */
     public func notifyTaskAvailable(): Unit {
-        dispatch()
+        requestDispatch()
     }
 
     /**
@@ -134,7 +140,7 @@ public class TaskPoolService {
      * 这是事件驱动的兜底机制，防止 notify 失效时任务卡住
      */
     public func safetyTick(): Unit {
-        dispatch()
+        requestDispatch()
     }
 
     /**
@@ -163,33 +169,76 @@ public class TaskPoolService {
      * 调度：批量领取 pending 任务并 spawn worker 执行
      * 使用原子操作实现无锁调度，一次 DB 查询领取多个任务
      */
-    private func dispatch(): Unit {
+    public func requestDispatch(): Unit {
         if (!isServiceRunning()) {
             return
         }
 
-        // 计算可用 slot 数量
-        let current = currentWorkers.load()
-        let available = maxWorkers - current
-        if (available <= 0) {
+        dispatchMutex.lock()
+        dispatchRequested = true
+        if (dispatchRunning) {
+            dispatchMutex.unlock()
+            return
+        }
+        dispatchRunning = true
+        dispatchMutex.unlock()
+
+        dispatchLoop()
+    }
+
+    private func dispatchLoop(): Unit {
+        let logger = getLogger("taskpool")
+        if (!isServiceRunning()) {
+            dispatchMutex.lock()
+            dispatchRunning = false
+            dispatchRequested = false
+            dispatchMutex.unlock()
             return
         }
 
-        // 批量领取任务（一次 DB 往返）
-        let tasks = TaskDao.claimPendingTasks(available)
-        if (tasks.size == 0) {
-            return
-        }
+        while (true) {
+            dispatchMutex.lock()
+            let shouldDrain = dispatchRequested
+            dispatchRequested = false
+            dispatchMutex.unlock()
 
-        // 为每个任务 spawn worker
-        for (task in tasks) {
-            // 原子增加 worker 计数
-            currentWorkers.fetchAdd(1)
-            let workerId = workerSeq.fetchAdd(1)
-            let taskData = task
-            let id = workerId
-            spawn {
-                runWorker(taskData, id)
+            if (!shouldDrain) {
+                dispatchMutex.lock()
+                dispatchRunning = false
+                dispatchMutex.unlock()
+                return
+            }
+
+            while (isServiceRunning()) {
+                reconcileOrphanedRunningTasks()
+                let current = currentWorkers.load()
+                let available = maxWorkers - current
+                if (available <= 0) {
+                    break
+                }
+
+                let tasks = TaskDao.claimPendingTasks(available)
+                if (tasks.size == 0) {
+                    break
+                }
+
+                logger.debug(
+                    "TaskPool dispatch claimed tasks",
+                    ("current_workers", current.toString()),
+                    ("available_slots", available.toString()),
+                    ("claimed_count", tasks.size.toString())
+                )
+
+                for (task in tasks) {
+                    currentWorkers.fetchAdd(1)
+                    let workerId = workerSeq.fetchAdd(1)
+                    let taskData = task
+                    let id = workerId
+                    registerActiveWorker(taskData.id, id)
+                    spawn {
+                        runWorker(taskData, id)
+                    }
+                }
             }
         }
     }
@@ -207,7 +256,7 @@ public class TaskPoolService {
                 executeTask(task, workerId)
             } catch (e: Exception) {
                 // Safety net: never leave the task stuck in "running" due to an unhandled exception.
-                TaskIO.appendLog(task.id, "ERROR: task runner crashed: ${e.message}")
+            TaskIO.appendLog(task.id, "ERROR: task runner crashed: ${e.message}")
                 TaskModel.failTask(task.id, "Task runner crashed: ${e.message}")
             }
 
@@ -226,6 +275,7 @@ public class TaskPoolService {
                 )
             }
         } finally {
+            unregisterActiveWorker(task.id)
             if (groupId.size > 0) {
                 kvStore.releaseGroup(groupId)
             }
@@ -233,7 +283,57 @@ public class TaskPoolService {
             // 释放 slot 并尝试领取下一个 pending（使用原子操作）
             currentWorkers.fetchSub(1)
 
-            dispatch()
+            requestDispatch()
+        }
+    }
+
+    private func registerActiveWorker(taskId: Int64, workerId: Int32): Unit {
+        if (taskId <= 0) {
+            return
+        }
+        activeWorkersMutex.lock()
+        activeWorkers[taskId] = workerId
+        activeWorkersMutex.unlock()
+    }
+
+    private func unregisterActiveWorker(taskId: Int64): Unit {
+        if (taskId <= 0) {
+            return
+        }
+        activeWorkersMutex.lock()
+        let _ = activeWorkers.remove(taskId)
+        activeWorkersMutex.unlock()
+    }
+
+    private func isTaskActivelyTracked(taskId: Int64): Bool {
+        if (taskId <= 0) {
+            return false
+        }
+        activeWorkersMutex.lock()
+        let exists = activeWorkers.contains(taskId)
+        activeWorkersMutex.unlock()
+        return exists
+    }
+
+    private func reconcileOrphanedRunningTasks(): Unit {
+        let logger = getLogger("taskpool")
+        let runningTasks = TaskDao.getTasksWithPaginationByStatus(0, 512, "running")
+        for (task in runningTasks) {
+            if (task.id <= 0 || isTaskActivelyTracked(task.id)) {
+                continue
+            }
+
+            logger.error(
+                "Detected orphaned running task",
+                ("task_id", task.id.toString()),
+                ("task_type", task.taskType),
+                ("phase", task.phase),
+                ("started_at", task.startedAt)
+            )
+            TaskIO.appendLog(task.id, "ERROR: task worker lost; marking task failed")
+            if (TaskModel.failTask(task.id, "Task worker lost")) {
+                triggerDependentTasks(task.id)
+            }
         }
     }
 
@@ -279,6 +379,7 @@ public class TaskPoolService {
     private func executeTask(task: TaskData, workerIndex: Int32): Unit {
         let logger = getLogger("taskpool")
         TaskIO.appendLog(task.id, "[worker ${workerIndex}] start task ${task.id} type=${task.taskType}")
+        TaskEventHub.getInstance().publishTaskStarted(task.id)
 
         // 创建 TaskRunnerContext
         let context = createTaskRunnerContext()
@@ -415,7 +516,8 @@ public class TaskPoolService {
             pluginPath: SystemSettingsService.getPath("PLUGIN_PATH")
         )
         let notifier: TaskNotifier = { => this.notifyTaskAvailable() }
+        let requestDispatch: TaskNotifier = { => this.requestDispatch() }
         let kvStore = TaskKVService.getStore()
-        return TaskRunnerContext(paths, notifier, kvStore)
+        return TaskRunnerContext(paths, notifier, requestDispatch, kvStore)
     }
 }

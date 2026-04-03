@@ -5,6 +5,7 @@ import { buildQueryParams, parseApiPayload } from '@/lib/utils/api-utils';
 export type TaskStreamPayload = {
   task: Task;
   event?: string;
+  eventType?: string;
   log?: string;
   logTail?: string;
   logDelta?: string;
@@ -88,6 +89,9 @@ export class TaskPoolService {
       status: task.status,
       progress: task.progress,
       message: task.message,
+      phase: task.phase || undefined,
+      waitingReason: task.waiting_reason || task.waitingReason || undefined,
+      activeKey: task.active_key || task.activeKey || undefined,
       taskType: task.task_type || task.taskType,
       pluginNamespace: task.plugin_namespace || task.pluginNamespace || '',
       parameters: this.parseTaskParameters(task.parameters),
@@ -232,6 +236,7 @@ export class TaskPoolService {
           status: 'running',
           progress: 0,
           message: '',
+          phase: 'executing',
           taskType: '',
           pluginNamespace: '',
           parameters: {},
@@ -358,6 +363,8 @@ export class TaskPoolService {
         return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200';
       case 'running':
         return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200';
+      case 'waiting':
+        return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200';
       case 'completed':
         return 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200';
       case 'failed':
@@ -461,6 +468,8 @@ export class TaskPoolService {
           return t('settings.taskManagement.pending');
         case 'running':
           return t('settings.taskManagement.running');
+        case 'waiting':
+          return '等待中';
         case 'completed':
           return t('settings.taskManagement.completed');
         case 'failed':
@@ -476,6 +485,8 @@ export class TaskPoolService {
           return '待执行';
         case 'running':
           return '执行中';
+        case 'waiting':
+          return '等待中';
         case 'completed':
           return '已完成';
         case 'failed':
@@ -635,7 +646,10 @@ export class TaskPoolService {
             : undefined;
       const version = typeof (parsed as any).v === 'number' ? (parsed as any).v : undefined;
 
-      return { task, log, logTail, logDelta, logBytes, mode, version };
+      const eventType =
+        typeof (parsed as any).event_type === 'string' ? (parsed as any).event_type : undefined;
+
+      return { task, eventType, log, logTail, logDelta, logBytes, mode, version };
     } catch {
       return null;
     }

@@ -11,6 +11,7 @@ private class TaskEventTopic {
     public let cond: Condition
     public var revision: Int64
     public var lastTouchedMillis: Int64
+    public var lastEventType: String
 
     public init() {
         mutex = Mutex()
@@ -19,16 +20,19 @@ private class TaskEventTopic {
         mutex.unlock()
         revision = 0
         lastTouchedMillis = TaskEventHub.nowMillis()
+        lastEventType = "init"
     }
 }
 
 public class TaskEventSnapshot {
     public let revision: Int64
     public let changed: Bool
+    public let eventType: String
 
-    public init(revision: Int64, changed: Bool) {
+    public init(revision: Int64, changed: Bool, eventType!: String = "heartbeat") {
         this.revision = revision
         this.changed = changed
+        this.eventType = eventType
     }
 }
 
@@ -77,7 +81,7 @@ public class TaskEventHub {
         try {
             topic.lastTouchedMillis = TaskEventHub.nowMillis()
             if (topic.revision != lastRevision) {
-                return TaskEventSnapshot(topic.revision, true)
+                return TaskEventSnapshot(topic.revision, true, eventType: topic.lastEventType)
             }
 
             let waitMillis = if (timeoutMillis <= 0) { 1 } else { timeoutMillis }
@@ -86,30 +90,47 @@ public class TaskEventHub {
                 timeout: Duration.millisecond * waitMillis
             )
             topic.lastTouchedMillis = TaskEventHub.nowMillis()
-            return TaskEventSnapshot(topic.revision, topic.revision != lastRevision)
+            return TaskEventSnapshot(topic.revision, topic.revision != lastRevision, eventType: topic.lastEventType)
         } finally {
             topic.mutex.unlock()
         }
     }
 
     public func publishTaskChanged(taskId: Int64): Unit {
-        publish(taskId)
+        publish(taskId, "task_changed")
     }
 
     public func publishLogAppended(taskId: Int64): Unit {
-        publish(taskId)
+        publish(taskId, "log_appended")
     }
 
     public func publishOutputWritten(taskId: Int64): Unit {
-        publish(taskId)
+        publish(taskId, "output_written")
     }
 
-    private func publish(taskId: Int64): Unit {
+    public func publishTaskStarted(taskId: Int64): Unit {
+        publish(taskId, "task_started")
+    }
+
+    public func publishTaskProgress(taskId: Int64): Unit {
+        publish(taskId, "task_progress")
+    }
+
+    public func publishTaskWaiting(taskId: Int64): Unit {
+        publish(taskId, "task_waiting")
+    }
+
+    public func publishWaitingActivated(taskId: Int64): Unit {
+        publish(taskId, "waiting_activated")
+    }
+
+    private func publish(taskId: Int64, eventType: String): Unit {
         let topic = getOrCreateTopic(taskId)
         topic.mutex.lock()
         try {
             topic.revision += 1
             topic.lastTouchedMillis = TaskEventHub.nowMillis()
+            topic.lastEventType = eventType
             topic.cond.notifyAll()
         } finally {
             topic.mutex.unlock()

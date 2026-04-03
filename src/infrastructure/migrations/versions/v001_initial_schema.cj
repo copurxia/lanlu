@@ -598,6 +598,9 @@ public class V001_InitialSchema <: Migration {
             MigrationHelpers.addColumnIfNotExists(conn, "tasks", "timeout_at", "TIMESTAMP")
             MigrationHelpers.addColumnIfNotExists(conn, "tasks", "trigger_source", "VARCHAR(50)")
             MigrationHelpers.addColumnIfNotExists(conn, "tasks", "wait_for_task_id", "BIGINT DEFAULT NULL")
+            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "phase", "VARCHAR(80)")
+            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "waiting_reason", "VARCHAR(80)")
+            MigrationHelpers.addColumnIfNotExists(conn, "tasks", "active_key", "VARCHAR(255)")
             createTasksIndexes(conn)
             return true
         }
@@ -619,6 +622,9 @@ public class V001_InitialSchema <: Migration {
                 timeout_at TIMESTAMP,
                 trigger_source VARCHAR(50),
                 wait_for_task_id BIGINT DEFAULT NULL,
+                phase VARCHAR(80),
+                waiting_reason VARCHAR(80),
+                active_key VARCHAR(255),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 started_at TIMESTAMP,
                 completed_at TIMESTAMP
@@ -651,6 +657,12 @@ public class V001_InitialSchema <: Migration {
             "idx_tasks_group_created_at",
             "tasks",
             "group_id, created_at"
+        )
+        MigrationHelpers.createIndexIfNotExists(
+            conn,
+            "idx_tasks_active_key_status",
+            "tasks",
+            "active_key, status"
         )
     }
 

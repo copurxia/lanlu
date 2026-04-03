@@ -48,15 +48,18 @@ public interface TaskKVStore {
 public class TaskRunnerContext {
     public let paths: TaskRunnerPaths
     public let notifyTaskAvailable: TaskNotifier
+    public let requestDispatch: TaskNotifier
     public let kvStore: TaskKVStore
 
     public init(
         paths: TaskRunnerPaths,
         notifyTaskAvailable: TaskNotifier,
+        requestDispatch: TaskNotifier,
         kvStore: TaskKVStore
     ) {
         this.paths = paths
         this.notifyTaskAvailable = notifyTaskAvailable
+        this.requestDispatch = requestDispatch
         this.kvStore = kvStore
     }
 }

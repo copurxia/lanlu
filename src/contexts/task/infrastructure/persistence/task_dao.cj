@@ -27,6 +27,9 @@ public class TaskData {
     public var timeoutAt: String = ""
     public var triggerSource: String = ""
     public var waitForTaskId: Int64 = 0  // 条件驱动：等待指定任务完成后才能执行
+    public var phase: String = ""
+    public var waitingReason: String = ""
+    public var activeKey: String = ""
 
     public init() {}
 }
@@ -36,6 +39,18 @@ public class TaskData {
  * 负责处理所有与任务相关的数据库操作
  */
 public class TaskDao {
+    private static func defaultPhaseForStatus(status: String): String {
+        match (status) {
+            case "pending" => return "queued"
+            case "running" => return "executing"
+            case "waiting" => return "waiting"
+            case "completed" => return "completed"
+            case "failed" => return "failed"
+            case "stopped" => return "stopped"
+            case _ => return ""
+        }
+    }
+
     // 注意：表创建已由迁移系统处理，createTable() 方法已移除
 
     /**
@@ -47,9 +62,12 @@ public class TaskDao {
             case Some(conn) =>
                 
                 try {
+                    if (data.phase.size == 0) {
+                        data.phase = defaultPhaseForStatus(data.status)
+                    }
                     let stmt = conn.prepareStatement("""
-                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
                     """)
                     try {
                         stmt.set(0, data.name)
@@ -85,6 +103,21 @@ public class TaskDao {
                             stmt.set(13, data.completedAt)
                         } else {
                             stmt.setNull(13)
+                        }
+                        if (data.phase.size > 0) {
+                            stmt.set(14, data.phase)
+                        } else {
+                            stmt.setNull(14)
+                        }
+                        if (data.waitingReason.size > 0) {
+                            stmt.set(15, data.waitingReason)
+                        } else {
+                            stmt.setNull(15)
+                        }
+                        if (data.activeKey.size > 0) {
+                            stmt.set(16, data.activeKey)
+                        } else {
+                            stmt.setNull(16)
                         }
 
                         let rs = stmt.query()
@@ -143,9 +176,10 @@ public class TaskDao {
             case Some(conn) =>
                 
                 try {
+                    let phase = defaultPhaseForStatus(status)
                     let stmt = conn.prepareStatement("""
-                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at)
-                        VALUES (?, ?, ?, ?, ?, '', ?, '', ?, NULL, NULL, ?, NULL, NULL) RETURNING id
+                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, started_at, completed_at, phase, waiting_reason, active_key)
+                        VALUES (?, ?, ?, ?, ?, '', ?, '', ?, NULL, NULL, ?, NULL, NULL, ?, NULL, NULL) RETURNING id
                     """)
                     try {
                         stmt.set(0, name)
@@ -156,6 +190,7 @@ public class TaskDao {
                         stmt.set(5, parameters)
                         stmt.set(6, priority)
                         stmt.set(7, triggerSource)
+                        stmt.set(8, phase)
 
                         let rs = stmt.query()
                         try {
@@ -195,7 +230,7 @@ public class TaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
                                priority, group_id, timeout_at, trigger_source,
-                               created_at, started_at, completed_at
+                               created_at, started_at, completed_at, phase, waiting_reason, active_key
                         FROM tasks WHERE id = ?
                     """)
                     try {
@@ -221,6 +256,9 @@ public class TaskDao {
                                 data.createdAt = rs.getOrNull<String>(13) ?? ""
                                 data.startedAt = rs.getOrNull<String>(14) ?? ""
                                 data.completedAt = rs.getOrNull<String>(15) ?? ""
+                                data.phase = rs.getOrNull<String>(16) ?? ""
+                                data.waitingReason = rs.getOrNull<String>(17) ?? ""
+                                data.activeKey = rs.getOrNull<String>(18) ?? ""
                                 return data
                             } else {
                                 return TaskData()
@@ -264,15 +302,19 @@ public class TaskDao {
             case Some(conn) =>
                 
                 try {
+                    let phase = defaultPhaseForStatus(status)
                     let stmt = conn.prepareStatement("""
-                        UPDATE tasks SET status = ?, message = ?, progress = ?
+                        UPDATE tasks SET status = ?, message = ?, progress = ?, phase = ?,
+                            waiting_reason = CASE WHEN ? = 'waiting' THEN waiting_reason ELSE NULL END
                         WHERE id = ?
                     """)
                     try {
                         stmt.set(0, status)
                         stmt.set(1, message)
                         stmt.set(2, progress)
-                        stmt.set(3, id)
+                        stmt.set(3, phase)
+                        stmt.set(4, status)
+                        stmt.set(5, id)
 
                         let result = stmt.update()
                         if (result.rowCount > 0) {
@@ -296,6 +338,101 @@ public class TaskDao {
                     } catch (closeError: Exception) {
                         getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
                     }
+                }
+            case None =>
+                getLogger("task_dao").error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 更新任务进度与消息，但保留当前主状态。
+     */
+    public static func updateTaskProgressPreserveStatus(id: Int64, progress: Int32, message: String): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks
+                        SET message = ?, progress = ?
+                        WHERE id = ?
+                    """)
+                    try {
+                        stmt.set(0, message)
+                        stmt.set(1, progress)
+                        stmt.set(2, id)
+
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            let eventHub = TaskEventHub.getInstance()
+                            eventHub.publishTaskChanged(id)
+                            eventHub.publishTaskProgress(id)
+                        }
+                        getLogger("task_dao").debug("更新任务进度(保留状态)", [("id", id.toString()), ("progress", progress.toString())])
+                        return result.rowCount > 0
+                    } finally {
+                        try {
+                            stmt.close()
+                        } catch (closeError: Exception) {
+                            getLogger("task_dao").warn("关闭PreparedStatement失败: ${closeError.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    getLogger("task_dao").error("更新任务进度失败", ("id", id), ("error", e.message))
+                    return false
+                } finally {
+                    try {
+                        conn.close()
+                    } catch (closeError: Exception) {
+                        getLogger("task_dao").warn("关闭Connection失败: ${closeError.message}")
+                    }
+                }
+            case None =>
+                getLogger("task_dao").error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 更新 waiting 相关元数据。
+     */
+    public static func updateTaskWaitingState(id: Int64, message: String, progress: Int32, phase: String, waitingReason: String): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks
+                        SET status = 'waiting',
+                            message = ?,
+                            progress = ?,
+                            phase = ?,
+                            waiting_reason = ?
+                        WHERE id = ?
+                    """)
+                    try {
+                        stmt.set(0, message)
+                        stmt.set(1, progress)
+                        stmt.set(2, phase)
+                        stmt.set(3, waitingReason)
+                        stmt.set(4, id)
+
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            let eventHub = TaskEventHub.getInstance()
+                            eventHub.publishTaskChanged(id)
+                            eventHub.publishTaskWaiting(id)
+                        }
+                        return result.rowCount > 0
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    getLogger("task_dao").error("更新等待任务状态失败", ("id", id), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
                 getLogger("task_dao").error("无法创建数据库连接")
@@ -405,11 +542,15 @@ public class TaskDao {
             case Some(conn) =>
                 
                 try {
+                    if (data.phase.size == 0) {
+                        data.phase = defaultPhaseForStatus(data.status)
+                    }
                     let stmt = conn.prepareStatement("""
                         UPDATE tasks SET
                             name = ?, task_type = ?, status = ?, progress = ?, message = ?,
                             plugin_namespace = ?, parameters = ?, result = ?, priority = ?, group_id = ?,
-                            timeout_at = ?, trigger_source = ?, started_at = ?, completed_at = ?
+                            timeout_at = ?, trigger_source = ?, started_at = ?, completed_at = ?,
+                            phase = ?, waiting_reason = ?, active_key = ?
                         WHERE id = ?
                     """)
                     try {
@@ -447,7 +588,22 @@ public class TaskDao {
                         } else {
                             stmt.setNull(13)
                         }
-                        stmt.set(14, data.id)
+                        if (data.phase.size > 0) {
+                            stmt.set(14, data.phase)
+                        } else {
+                            stmt.setNull(14)
+                        }
+                        if (data.waitingReason.size > 0) {
+                            stmt.set(15, data.waitingReason)
+                        } else {
+                            stmt.setNull(15)
+                        }
+                        if (data.activeKey.size > 0) {
+                            stmt.set(16, data.activeKey)
+                        } else {
+                            stmt.setNull(16)
+                        }
+                        stmt.set(17, data.id)
 
                         let result = stmt.update()
                         if (result.rowCount > 0) {
@@ -665,7 +821,7 @@ public class TaskDao {
                 
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at, phase, waiting_reason, active_key
                         FROM tasks
                         ORDER BY id DESC
                         LIMIT ? OFFSET ?
@@ -696,6 +852,9 @@ public class TaskDao {
                             data.createdAt = rs.getOrNull<String>(13) ?? ""
                             data.startedAt = rs.getOrNull<String>(14) ?? ""
                             data.completedAt = rs.getOrNull<String>(15) ?? ""
+                            data.phase = rs.getOrNull<String>(16) ?? ""
+                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
+                            data.activeKey = rs.getOrNull<String>(18) ?? ""
 
                             taskList.add(data)
                         }
@@ -754,7 +913,7 @@ public class TaskDao {
                 
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at
+                        SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, created_at, started_at, completed_at, phase, waiting_reason, active_key
                         FROM tasks
                         WHERE status = ?
                         ORDER BY id DESC
@@ -786,6 +945,9 @@ public class TaskDao {
                                 data.createdAt = rs.getOrNull<String>(13) ?? ""
                                 data.startedAt = rs.getOrNull<String>(14) ?? ""
                                 data.completedAt = rs.getOrNull<String>(15) ?? ""
+                                data.phase = rs.getOrNull<String>(16) ?? ""
+                                data.waitingReason = rs.getOrNull<String>(17) ?? ""
+                                data.activeKey = rs.getOrNull<String>(18) ?? ""
 
                                 taskList.add(data)
                             }
@@ -1092,7 +1254,7 @@ public class TaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
                                priority, group_id, timeout_at, trigger_source,
-                               created_at, started_at, completed_at
+                               created_at, started_at, completed_at, phase, waiting_reason, active_key
                         FROM tasks
                         WHERE trigger_source = ?
                         ORDER BY created_at DESC
@@ -1123,6 +1285,9 @@ public class TaskDao {
                                 data.createdAt = rs.getOrNull<String>(13) ?? ""
                                 data.startedAt = rs.getOrNull<String>(14) ?? ""
                                 data.completedAt = rs.getOrNull<String>(15) ?? ""
+                                data.phase = rs.getOrNull<String>(16) ?? ""
+                                data.waitingReason = rs.getOrNull<String>(17) ?? ""
+                                data.activeKey = rs.getOrNull<String>(18) ?? ""
 
                                 taskList.add(data)
                             }
@@ -1179,7 +1344,7 @@ public class TaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
                                priority, group_id, timeout_at, trigger_source,
-                               created_at, started_at, completed_at
+                               created_at, started_at, completed_at, phase, waiting_reason, active_key
                         FROM tasks
                         WHERE group_id = ?
                         ORDER BY created_at ASC
@@ -1208,6 +1373,9 @@ public class TaskDao {
                                 data.createdAt = rs.getOrNull<String>(13) ?? ""
                                 data.startedAt = rs.getOrNull<String>(14) ?? ""
                                 data.completedAt = rs.getOrNull<String>(15) ?? ""
+                                data.phase = rs.getOrNull<String>(16) ?? ""
+                                data.waitingReason = rs.getOrNull<String>(17) ?? ""
+                                data.activeKey = rs.getOrNull<String>(18) ?? ""
 
                                 taskList.add(data)
                             }
@@ -1307,12 +1475,52 @@ public class TaskDao {
                         FROM tasks
                         WHERE task_type = ?
                           AND group_id = ?
-                          AND status IN ('pending', 'running')
+                          AND status IN ('pending', 'running', 'waiting')
                         LIMIT 1
                     """)
                     try {
                         stmt.set(0, taskType)
                         stmt.set(1, groupId)
+                        let rs = stmt.query()
+                        try {
+                            return rs.next()
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    /**
+     * 查询指定 active_key 是否已存在活动任务。
+     */
+    public static func existsActiveTaskByActiveKey(activeKey: String): Bool {
+        let normalized = activeKey.trimAscii()
+        if (normalized.size == 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT 1
+                        FROM tasks
+                        WHERE active_key = ?
+                          AND status IN ('pending', 'running', 'waiting')
+                        LIMIT 1
+                    """)
+                    try {
+                        stmt.set(0, normalized)
                         let rs = stmt.query()
                         try {
                             return rs.next()
@@ -1476,7 +1684,9 @@ public class TaskDao {
                         SET status = 'running',
                             message = '任务已启动',
                             progress = 0,
-                            started_at = CURRENT_TIMESTAMP
+                            started_at = CURRENT_TIMESTAMP,
+                            phase = 'executing',
+                            waiting_reason = NULL
                         WHERE id IN (
                             SELECT id FROM tasks
                             WHERE status = 'pending'
@@ -1487,7 +1697,7 @@ public class TaskDao {
                         RETURNING id, name, task_type, status, progress, message,
                                   plugin_namespace, parameters, result,
                                   priority, group_id, timeout_at, trigger_source,
-                                  created_at, started_at, completed_at
+                                  created_at, started_at, completed_at, phase, waiting_reason, active_key
                     """)
                     stmt.set(0, Int64(limit))
 
@@ -1511,6 +1721,9 @@ public class TaskDao {
                             data.createdAt = rs.getOrNull<String>(13) ?? ""
                             data.startedAt = rs.getOrNull<String>(14) ?? ""
                             data.completedAt = rs.getOrNull<String>(15) ?? ""
+                            data.phase = rs.getOrNull<String>(16) ?? ""
+                            data.waitingReason = rs.getOrNull<String>(17) ?? ""
+                            data.activeKey = rs.getOrNull<String>(18) ?? ""
                             result.add(data)
                         }
                         for (task in result) {
@@ -1553,9 +1766,11 @@ public class TaskDao {
         match (connOpt) {
             case Some(conn) =>
                 try {
+                    data.phase = "awaiting_dependency"
+                    data.waitingReason = "task_dependency"
                     let stmt = conn.prepareStatement("""
-                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, wait_for_task_id, started_at, completed_at)
-                        VALUES (?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL) RETURNING id
+                        INSERT INTO tasks (name, task_type, status, progress, message, plugin_namespace, parameters, result, priority, group_id, timeout_at, trigger_source, wait_for_task_id, started_at, completed_at, phase, waiting_reason, active_key)
+                        VALUES (?, ?, 'waiting', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?) RETURNING id
                     """)
                     try {
                         stmt.set(0, data.name)
@@ -1582,6 +1797,13 @@ public class TaskDao {
                             stmt.setNull(10)
                         }
                         stmt.set(11, waitForTaskId)
+                        stmt.set(12, data.phase)
+                        stmt.set(13, data.waitingReason)
+                        if (data.activeKey.size > 0) {
+                            stmt.set(14, data.activeKey)
+                        } else {
+                            stmt.setNull(14)
+                        }
 
                         let rs = stmt.query()
                         try {
@@ -1623,7 +1845,7 @@ public class TaskDao {
                     let stmt = conn.prepareStatement("""
                         SELECT id, name, task_type, status, progress, message, plugin_namespace, parameters, result,
                                priority, group_id, timeout_at, trigger_source, wait_for_task_id,
-                               created_at, started_at, completed_at
+                               created_at, started_at, completed_at, phase, waiting_reason, active_key
                         FROM tasks
                         WHERE wait_for_task_id = ? AND status = 'waiting'
                     """)
@@ -1651,6 +1873,9 @@ public class TaskDao {
                                 data.createdAt = rs.getOrNull<String>(14) ?? ""
                                 data.startedAt = rs.getOrNull<String>(15) ?? ""
                                 data.completedAt = rs.getOrNull<String>(16) ?? ""
+                                data.phase = rs.getOrNull<String>(17) ?? ""
+                                data.waitingReason = rs.getOrNull<String>(18) ?? ""
+                                data.activeKey = rs.getOrNull<String>(19) ?? ""
                                 taskList.add(data)
                             }
                             let size = taskList.size
@@ -1690,7 +1915,7 @@ public class TaskDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        UPDATE tasks SET status = 'pending', message = '依赖任务已完成，等待执行'
+                        UPDATE tasks SET status = 'pending', message = '依赖任务已完成，等待执行', phase = 'queued', waiting_reason = NULL
                         WHERE id = ? AND status = 'waiting'
                     """)
                     try {
@@ -1698,7 +1923,9 @@ public class TaskDao {
                         let result = stmt.update()
                         if (result.rowCount > 0) {
                             logger.debug("激活等待任务", ("id", taskId.toString()))
-                            TaskEventHub.getInstance().publishTaskChanged(taskId)
+                            let eventHub = TaskEventHub.getInstance()
+                            eventHub.publishTaskChanged(taskId)
+                            eventHub.publishWaitingActivated(taskId)
                             return true
                         }
                         return false

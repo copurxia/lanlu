@@ -38,12 +38,14 @@ public class ScanAllCategoriesTaskRunner {
             var created = 0
             var errors = ArrayList<String>()
             let groupId = "scan_all_categories:${taskId}"
+            var dispatchRequested = false
 
             // 为每个分类创建 scan_single_category 任务
             for (cat in categories) {
-                let taskIdStr = enqueueSingleCategoryScan(cat, groupId, context.notifyTaskAvailable)
+                let taskIdStr = enqueueSingleCategoryScan(cat, groupId)
                 if (taskIdStr > 0) {
                     created++
+                    dispatchRequested = true
                     TaskIO.appendLog(taskId, "Created scan_single_category task for category: ${cat.name} (task_id: ${taskIdStr})")
                 } else {
                     let error = "Failed to create task for category: ${cat.name}"
@@ -62,6 +64,9 @@ public class ScanAllCategoriesTaskRunner {
             w.endObject()
             w.flush()
             let summary = String.fromUtf8(readToEnd(out))
+            if (dispatchRequested) {
+                context.requestDispatch()
+            }
             TaskIO.appendLog(taskId, "Task creation completed: created=${created}, total=${categories.size}, errors=${errors.size}")
             TaskModel.updateTaskProgress(taskId, 100, "Created ${created} scan_single_category tasks")
             TaskModel.completeTask(taskId, summary)
@@ -75,7 +80,7 @@ public class ScanAllCategoriesTaskRunner {
         }
     }
 
-    private static func enqueueSingleCategoryScan(category: CategoryData, groupId: String, notifier: TaskNotifier): Int64 {
+    private static func enqueueSingleCategoryScan(category: CategoryData, groupId: String): Int64 {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
@@ -92,11 +97,7 @@ public class ScanAllCategoriesTaskRunner {
             groupId,
             triggerSource
         )
-        if (childTask.id > 0) {
-            notifier()
-            return childTask.id
-        }
-        return 0
+        return childTask.id
     }
 
 }

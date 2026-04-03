@@ -48,7 +48,7 @@ public class TaskPoolController {
         let hasStatusFilter = status.size > 0 && status != "all"
         if (hasStatusFilter) {
             // Only allow known statuses to avoid unexpected DB usage/typos.
-            if (status != "pending" && status != "running" && status != "completed" && status != "failed" && status != "stopped") {
+            if (status != "pending" && status != "running" && status != "waiting" && status != "completed" && status != "failed" && status != "stopped") {
                 ctx.status(400)
                 ctx.json("{\"error\":\"Invalid status\"}")
                 return
@@ -167,7 +167,7 @@ public class TaskPoolController {
                 continue
             }
             let logDelta = computeLogDelta(lastLogTail, logTail)
-            let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1)
+            let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1, if (eventId == 1) { "snapshot" } else { "task_changed" })
             if (eventId == 1 || payload != lastPayload) {
                 let eventName = if (eventId == 1) { "snapshot" } else { "task" }
                 sse.sendEvent(payload, event: eventName, id: "${eventId}")
@@ -186,6 +186,21 @@ public class TaskPoolController {
             if (!waitResult.changed) {
                 sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
                 eventId += 1
+            } else {
+                let updatedTask = loadTaskForStreaming(taskId)
+                if (updatedTask.id == 0) {
+                    sse.sendEvent("{\"error\":\"Task not found\"}", event: "error", id: "${eventId}")
+                    return
+                }
+                let updatedLogTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+                let updatedLogDelta = computeLogDelta(lastLogTail, updatedLogTail)
+                let eventPayload = buildTaskStreamData(updatedTask, updatedLogTail, updatedLogDelta, false, waitResult.eventType)
+                if (eventPayload != lastPayload) {
+                    sse.sendEvent(eventPayload, event: "task", id: "${eventId}")
+                    lastPayload = eventPayload
+                    lastLogTail = updatedLogTail
+                    eventId += 1
+                }
             }
         }
     }
@@ -211,7 +226,7 @@ public class TaskPoolController {
         }
 
         // 只能取消 pending 或 running 状态的任务
-        if (task.status != "pending" && task.status != "running") {
+        if (task.status != "pending" && task.status != "running" && task.status != "waiting") {
             ctx.status(400)
             ctx.json("{\"error\":\"Task cannot be cancelled (status: ${task.status})\"}")
             return
@@ -422,8 +437,8 @@ public class TaskPoolController {
         // 使用 message 作为消息，如果为空则使用默认消息
         let effectiveMessage = if (message.size > 0) { message } else { "上传中" }
 
-        // 更新任务进度（保持任务状态为 running）
-        let success = TaskDao.updateTaskStatus(taskId, "running", effectiveMessage, progress)
+        // 更新任务进度但不改变主状态，避免把 waiting/pending 任务提前写成 running。
+        let success = TaskDao.updateTaskProgressPreserveStatus(taskId, progress, effectiveMessage)
         if (success) {
             let out = ByteBuffer()
             let w = JsonWriter(out)
@@ -467,6 +482,14 @@ public class TaskPoolController {
         w.writeName("created_at").writeValue(task.createdAt)
         w.writeName("started_at").writeValue(task.startedAt)
         w.writeName("completed_at").writeValue(task.completedAt)
+        if (task.activeKey.size > 0) {
+            w.writeName("active_key").writeValue(task.activeKey)
+        }
+        w.writeName("phase").writeValue(computeTaskPhase(task))
+        let waitingReason = computeWaitingReason(task)
+        if (waitingReason.size > 0) {
+            w.writeName("waiting_reason").writeValue(waitingReason)
+        }
         w.endObject()
     }
 
@@ -483,11 +506,12 @@ public class TaskPoolController {
         return task
     }
 
-    private static func buildTaskStreamData(task: TaskData, logTail: String, logDelta: String, isSnapshot: Bool): String {
+    private static func buildTaskStreamData(task: TaskData, logTail: String, logDelta: String, isSnapshot: Bool, eventType: String): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
         w.writeName("v").writeValue(2)
+        w.writeName("event_type").writeValue(eventType)
         w.writeName("task")
         writeTaskStreamTaskJson(w, task)
         w.writeName("stream")
@@ -537,11 +561,84 @@ public class TaskPoolController {
         w.writeName("created_at").writeValue(task.createdAt)
         w.writeName("started_at").writeValue(task.startedAt)
         w.writeName("completed_at").writeValue(task.completedAt)
+        if (task.activeKey.size > 0) {
+            w.writeName("active_key").writeValue(task.activeKey)
+        }
+        w.writeName("phase").writeValue(computeTaskPhase(task))
+        let waitingReason = computeWaitingReason(task)
+        if (waitingReason.size > 0) {
+            w.writeName("waiting_reason").writeValue(waitingReason)
+        }
         w.endObject()
     }
 
     private static func isTerminalStatus(status: String): Bool {
         return status == "completed" || status == "failed" || status == "stopped"
+    }
+
+    private static func computeTaskPhase(task: TaskData): String {
+        if (task.phase.trimAscii().size > 0) {
+            return task.phase
+        }
+        if (task.status == "waiting") {
+            let waitingReason = computeWaitingReason(task)
+            if (waitingReason == "rpc_select") {
+                return "awaiting_selection"
+            }
+            if (waitingReason == "task_dependency") {
+                return "awaiting_dependency"
+            }
+            return "waiting"
+        }
+
+        if (task.taskType == "upload" || task.taskType == "asset_upload") {
+            if (task.status == "pending" && task.progress >= 70) {
+                return "queued_for_processing"
+            }
+            if (!isTerminalStatus(task.status)) {
+                return "uploading"
+            }
+        }
+
+        if (task.taskType == "upload_process" || task.taskType == "asset_upload_process") {
+            return if (isTerminalStatus(task.status)) { "processed" } else { "processing_upload" }
+        }
+
+        if (task.taskType == "wasm_task") {
+            return if (isTerminalStatus(task.status)) { "plugin_finished" } else { "executing_plugin" }
+        }
+
+        if (task.taskType == "download_url" || task.taskType == "metadata_plugin") {
+            return if (isTerminalStatus(task.status)) { "submitted" } else { "dispatching_plugin" }
+        }
+
+        if (task.status == "pending") {
+            return "queued"
+        }
+        if (task.status == "running") {
+            return "executing"
+        }
+        return task.status
+    }
+
+    private static func computeWaitingReason(task: TaskData): String {
+        if (task.waitingReason.trimAscii().size > 0) {
+            return task.waitingReason
+        }
+        if (task.status != "waiting") {
+            return ""
+        }
+
+        if (task.message.contains("人工选择") || task.message.contains("选择结果") || task.message.contains("rpc")) {
+            return "rpc_select"
+        }
+        if (task.taskType.contains("callback")) {
+            return "task_dependency"
+        }
+        if (task.message.contains("依赖")) {
+            return "task_dependency"
+        }
+        return "external_signal"
     }
 
 }

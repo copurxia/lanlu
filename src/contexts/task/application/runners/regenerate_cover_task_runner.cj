@@ -34,6 +34,7 @@ public class RegenerateCoverTaskRunner {
             var skipped: Int64 = 0
             var deletedAssets: Int64 = 0
             var candidates: Int64 = 0
+            var dispatchRequested = false
 
             TaskModel.updateTaskProgress(taskId, 5, "Dispatching thumbnail jobs (mode=${mode})")
 
@@ -126,7 +127,7 @@ public class RegenerateCoverTaskRunner {
 
                     if (child.id > 0) {
                         submitted += 1
-                        context.notifyTaskAvailable()
+                        dispatchRequested = true
                     } else {
                         TaskIO.appendLog(taskId, "WARN: failed to enqueue generate_thumbnail for archive=${archiveId}")
                         skipped += 1
@@ -149,6 +150,9 @@ public class RegenerateCoverTaskRunner {
             resultW.endObject()
             resultW.flush()
             let resultJson = String.fromUtf8(readToEnd(resultOut))
+            if (dispatchRequested) {
+                context.requestDispatch()
+            }
             TaskModel.updateTaskProgress(taskId, 100, "Dispatched ${submitted} thumbnail tasks")
             TaskModel.completeTask(taskId, resultJson)
             TaskIO.writeOutput(taskId, resultJson)

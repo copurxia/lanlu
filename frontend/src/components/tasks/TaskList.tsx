@@ -25,7 +25,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useToast } from '@/hooks/use-toast';
 
-const ALLOWED_FILTERS = ['all', 'pending', 'running', 'completed', 'failed'] as const;
+const ALLOWED_FILTERS = ['all', 'pending', 'running', 'waiting', 'completed', 'failed'] as const;
 type AllowedFilter = (typeof ALLOWED_FILTERS)[number];
 
 const STREAM_FLUSH_INTERVAL_MS = 300;
@@ -63,6 +63,8 @@ function getStatusIcon(status: string) {
       return <Clock className="w-4 h-4" />;
     case 'running':
       return <RefreshCw className="w-4 h-4 animate-spin" />;
+    case 'waiting':
+      return <PauseCircle className="w-4 h-4" />;
     case 'completed':
       return <CheckCircle className="w-4 h-4" />;
     case 'failed':
@@ -152,6 +154,7 @@ const TaskCard = memo(function TaskCard({ task, t, onCancelTask, onRetryTask }: 
     switch (task.status.toLowerCase()) {
       case 'pending':
       case 'running':
+      case 'waiting':
         return (
           <Button
             size="sm"
@@ -193,6 +196,11 @@ const TaskCard = memo(function TaskCard({ task, t, onCancelTask, onRetryTask }: 
                 <span>{TaskPoolService.getStatusLabel(task.status, t)}</span>
               </div>
             </Badge>
+            {task.phase && (
+              <Badge variant="outline" className="whitespace-nowrap">
+                {task.phase}
+              </Badge>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             <Badge variant="outline" className="font-mono text-xs whitespace-nowrap">
@@ -232,6 +240,11 @@ const TaskCard = memo(function TaskCard({ task, t, onCancelTask, onRetryTask }: 
         {!!task.message && (
           <div className="text-sm text-muted-foreground">
             <strong>{t('settings.taskManagement.latestLog')}:</strong> {logModel.lastLine}
+            {task.waitingReason && (
+              <div className="mt-1 text-xs">
+                Waiting: {task.waitingReason}
+              </div>
+            )}
             <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-28 overflow-y-auto whitespace-pre-wrap">
               {logExpanded ? logModel.full : logModel.preview}
             </div>
@@ -542,7 +555,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
   useEffect(() => {
     if (!hasLoadedOnceRef.current || loading || refreshing || updating) return;
 
-    const activeTasks = tasks.filter((task) => task?.status === 'running' || task?.status === 'pending');
+    const activeTasks = tasks.filter((task) => task?.status === 'running' || task?.status === 'pending' || task?.status === 'waiting');
     const activeTaskIds = new Set(activeTasks.map((task) => task.id));
 
     taskStreamUnsubsRef.current.forEach((unsubscribe, taskId) => {
@@ -678,6 +691,10 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
             <TabsTrigger value="running" className="flex items-center gap-2 flex-none px-2 sm:px-3">
               <RefreshCw className="w-4 h-4 shrink-0" />
               <span className="whitespace-nowrap">{t('settings.taskManagement.running')}</span>
+            </TabsTrigger>
+            <TabsTrigger value="waiting" className="flex items-center gap-2 flex-none px-2 sm:px-3">
+              <PauseCircle className="w-4 h-4 shrink-0" />
+              <span className="whitespace-nowrap">等待中</span>
             </TabsTrigger>
             <TabsTrigger value="completed" className="flex items-center gap-2 flex-none px-2 sm:px-3">
               <CheckCircle className="w-4 h-4 shrink-0" />

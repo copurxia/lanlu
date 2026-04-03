@@ -385,6 +385,11 @@ public class ScanArchiveTaskRunner {
      */
     private static func submitThumbnailTask(archivePath: String, archiveId: String, archiveType: String, coverEntry: String, notifier: TaskNotifier): Bool {
         try {
+            let activeKey = "generate_thumbnail:archive:${archiveId}"
+            if (TaskDao.existsActiveTaskByActiveKey(activeKey)) {
+                logger.debug("Skip thumbnail task because an active task already exists", ("archive_id", archiveId), ("active_key", activeKey))
+                return true
+            }
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -403,7 +408,8 @@ public class ScanArchiveTaskRunner {
                 parameters,
                 10i32,
                 archiveId,
-                "scan_archive"
+                "scan_archive",
+                activeKey: activeKey
             )
 
             if (task.id > 0) {
@@ -497,6 +503,13 @@ public class ScanArchiveTaskRunner {
 
     private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, fallbackNamespaces: Array<String>, notifier: TaskNotifier): Bool {
         try {
+            let normalizedTargetType = targetType.trimAscii().toAsciiLower()
+            let activeKey = "metadata_plugin:${normalizedTargetType}:${targetId}:${namespace.trimAscii().toAsciiLower()}"
+            if (TaskDao.existsActiveTaskByActiveKey(activeKey)) {
+                logger.debug("Skip metadata plugin task because an active task already exists",
+                    ("target_type", normalizedTargetType), ("target_id", targetId), ("namespace", namespace), ("active_key", activeKey))
+                return true
+            }
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -520,7 +533,8 @@ public class ScanArchiveTaskRunner {
                 parameters,
                 15i32,
                 targetId,
-                "scan_archive"
+                "scan_archive",
+                activeKey: activeKey
             )
 
             if (task.id > 0) {

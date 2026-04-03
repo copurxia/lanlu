@@ -3,9 +3,12 @@
 export interface Task {
   id: number;
   name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'stopped';
+  status: 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'stopped';
   progress: number;
   message: string;
+  phase?: string;
+  waitingReason?: string;
+  activeKey?: string;
   taskType: string;
   pluginNamespace: string;
   parameters: Record<string, any>;

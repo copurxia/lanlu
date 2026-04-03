@@ -10,6 +10,7 @@ import stdx.encoding.json.stream.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
 
 /**
@@ -33,6 +34,7 @@ public class BackfillMetadataTaskRunner {
             var skipped: Int64 = 0
             var candidates: Int64 = 0
             var processedTanks = HashSet<String>()
+            var dispatchRequested = false
 
             TaskModel.updateTaskProgress(taskId, 5, "Dispatching metadata jobs")
 
@@ -86,6 +88,7 @@ public class BackfillMetadataTaskRunner {
 
                         if (submitMetadataPluginChainTaskForTarget("tankoubon", autoTankId, namespaces, taskId, context)) {
                             submitted += 1
+                            dispatchRequested = true
                             processedTanks.add(autoTankId)
                         } else {
                             TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin chain task for tankoubon=${autoTankId}")
@@ -96,6 +99,7 @@ public class BackfillMetadataTaskRunner {
 
                     if (submitMetadataPluginChainTaskForTarget("archive", archiveId, namespaces, taskId, context)) {
                         submitted += 1
+                        dispatchRequested = true
                     } else {
                         TaskIO.appendLog(taskId, "WARN: failed to enqueue metadata_plugin chain task for archive=${archiveId}")
                         skipped += 1
@@ -106,6 +110,9 @@ public class BackfillMetadataTaskRunner {
             }
 
             let resultJson = "{\"success\":1,\"candidates\":${candidates},\"submitted\":${submitted},\"skipped\":${skipped}}"
+            if (dispatchRequested) {
+                context.requestDispatch()
+            }
             TaskModel.updateTaskProgress(taskId, 100, "Dispatched ${submitted} metadata tasks")
             TaskModel.completeTask(taskId, resultJson)
             TaskIO.writeOutput(taskId, resultJson)
@@ -210,6 +217,11 @@ public class BackfillMetadataTaskRunner {
 
     private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, fallbackNamespaces: Array<String>, taskId: Int64, context: TaskRunnerContext): Bool {
         try {
+            let normalizedTargetType = targetType.trimAscii().toAsciiLower()
+            let activeKey = "metadata_plugin:${normalizedTargetType}:${targetId}:${namespace.trimAscii().toAsciiLower()}"
+            if (TaskDao.existsActiveTaskByActiveKey(activeKey)) {
+                return true
+            }
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -233,13 +245,11 @@ public class BackfillMetadataTaskRunner {
                 params,
                 15i32,
                 targetId,
-                "backfill_metadata:${taskId}"
+                "backfill_metadata:${taskId}",
+                activeKey: activeKey
             )
 
-            if (child.id > 0) {
-                context.notifyTaskAvailable()
-                return true
-            }
+            if (child.id > 0) { return true }
         } catch (_: Exception) {}
         return false
     }

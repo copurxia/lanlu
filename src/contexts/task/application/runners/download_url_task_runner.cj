@@ -126,7 +126,13 @@ public class DownloadUrlTaskRunner {
             TaskIO.appendLog(taskId, "callback_task created: ${callbackTask.id}, waiting for plugin task: ${pluginTask.id} (${runnerTaskType})")
 
             // 将当前任务置为 waiting：后续由 callback 负责将本任务标记为 completed/failed 并写回输出
-            TaskDao.updateTaskStatus(taskId, "waiting", "等待下载插件执行", 20)
+            TaskModel.markTaskWaiting(
+                taskId,
+                "等待下载插件执行",
+                progress: 20,
+                waitingReason: "task_dependency",
+                phase: "awaiting_dependency"
+            )
             let submittedJson = "{\"success\":1,\"plugin_task_id\":${pluginTask.id},\"task_type\":\"${runnerTaskType}\",\"callback_task_id\":${callbackTask.id}}"
             TaskIO.writeOutput(taskId, submittedJson)
         } catch (e: Exception) {
