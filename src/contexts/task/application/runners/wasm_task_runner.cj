@@ -104,6 +104,7 @@ public class WasmTaskRunner {
                 fail(taskId, "Plugin is not a wasm plugin: ${pluginNamespace}")
                 return
             }
+            let runtimePermissions = resolveRuntimePermissions(plugin)
 
             TaskDao.updateTaskPluginNamespace(taskId, plugin.namespace)
             var loginCookiesJson = ""
@@ -118,13 +119,13 @@ public class WasmTaskRunner {
             }
             match (pluginType.trimAscii()) {
                 case "Metadata" =>
-                    executeMetadata(taskId, plugin, targetType, targetId, oneshotParam, extraParams, metadataJson, loginCookiesJson, interactivePreviewEnabled)
+                    executeMetadata(taskId, plugin, runtimePermissions, targetType, targetId, oneshotParam, extraParams, metadataJson, loginCookiesJson, interactivePreviewEnabled)
                 case "Login" =>
-                    executeLogin(taskId, plugin, interactivePreviewEnabled)
+                    executeLogin(taskId, plugin, runtimePermissions, interactivePreviewEnabled)
                 case "Download" =>
-                    executeDownload(taskId, plugin, url, extraParams, loginCookiesJson, interactivePreviewEnabled)
+                    executeDownload(taskId, plugin, runtimePermissions, url, extraParams, loginCookiesJson, interactivePreviewEnabled)
                 case "Script" =>
-                    executeScript(taskId, plugin, oneshotParam, extraParams, loginCookiesJson, interactivePreviewEnabled)
+                    executeScript(taskId, plugin, runtimePermissions, oneshotParam, extraParams, loginCookiesJson, interactivePreviewEnabled)
                 case _ =>
                     fail(taskId, "Unsupported wasm plugin type: ${pluginType}")
             }
@@ -136,6 +137,7 @@ public class WasmTaskRunner {
     private static func executeMetadata(
         taskId: Int64,
         plugin: PluginTaskData,
+        runtimePermissions: String,
         targetType: String,
         targetId: String,
         oneshotParam: String,
@@ -177,7 +179,7 @@ public class WasmTaskRunner {
             inputJson,
             effectiveType,
             effectiveId,
-            plugin.permissions,
+            runtimePermissions,
             interactivePreviewEnabled
         )
         if (!result.success) {
@@ -199,6 +201,7 @@ public class WasmTaskRunner {
     private static func executeLogin(
         taskId: Int64,
         plugin: PluginTaskData,
+        runtimePermissions: String,
         interactivePreviewEnabled: Bool
     ): Unit {
         TaskModel.updateTaskProgress(taskId, 20, "准备WASM登录插件输入")
@@ -212,7 +215,7 @@ public class WasmTaskRunner {
             plugin.namespace,
             wasmPath,
             inputJson,
-            plugin.permissions,
+            runtimePermissions,
             interactivePreviewEnabled,
             enableWasi: true
         )
@@ -229,6 +232,7 @@ public class WasmTaskRunner {
     private static func executeDownload(
         taskId: Int64,
         plugin: PluginTaskData,
+        runtimePermissions: String,
         url: String,
         extraParams: String,
         loginCookiesJson: String,
@@ -255,7 +259,7 @@ public class WasmTaskRunner {
             plugin.namespace,
             wasmPath,
             inputJson,
-            plugin.permissions,
+            runtimePermissions,
             interactivePreviewEnabled,
             enableWasi: true,
             wasiGuestPath: "/plugin",
@@ -274,6 +278,7 @@ public class WasmTaskRunner {
     private static func executeScript(
         taskId: Int64,
         plugin: PluginTaskData,
+        runtimePermissions: String,
         oneshotParam: String,
         extraParams: String,
         loginCookiesJson: String,
@@ -291,7 +296,7 @@ public class WasmTaskRunner {
             plugin.namespace,
             wasmPath,
             inputJson,
-            plugin.permissions,
+            runtimePermissions,
             interactivePreviewEnabled,
             enableWasi: true
         )
@@ -372,6 +377,68 @@ public class WasmTaskRunner {
             return "tankoubon"
         }
         return "archive"
+    }
+
+    private static func resolveRuntimePermissions(plugin: PluginTaskData): String {
+        let fallback = plugin.permissions.trimAscii()
+        let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
+        let (okInfo, _, infoJson, _) = WasmPluginInfoRunner.runPluginInfo(wasmPath)
+        if (!okInfo) {
+            return fallback
+        }
+
+        let parsed = parsePermissionsFromPluginInfoJson(infoJson)
+        return if (parsed.size > 0) { parsed } else { fallback }
+    }
+
+    private static func parsePermissionsFromPluginInfoJson(infoJson: String): String {
+        let trimmed = infoJson.trimAscii()
+        if (trimmed.size == 0) {
+            return ""
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+
+            func readCommaSeparated(): String {
+                match (r.peek()) {
+                    case Some(BeginArray) =>
+                        let out = ArrayList<String>()
+                        r.startArray()
+                        while (r.peek() != EndArray) {
+                            let value = r.readValue<String>().trimAscii()
+                            if (value.size > 0) {
+                                out.add(value)
+                            }
+                        }
+                        r.endArray()
+                        return String.join(out.toArray(), delimiter: ",")
+                    case Some(_) =>
+                        return r.readValue<String>().trimAscii()
+                    case None =>
+                        return ""
+                }
+            }
+
+            if (r.peek() != Some(BeginObject)) {
+                return ""
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let key = r.readName()
+                if (key == "permissions") {
+                    let parsed = readCommaSeparated()
+                    r.endObject()
+                    return parsed
+                }
+                r.skip()
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return ""
     }
 
     private static func sanitizeAssetOwnerId(rawOwnerId: String, taskId: Int64): String {
