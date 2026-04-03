@@ -3,6 +3,7 @@ package lanlu.contexts.task.application
 import std.collection.*
 import std.sync.*
 import std.convert.*
+import std.time.*
 import stdx.log.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.infrastructure.kv.*
@@ -65,9 +66,13 @@ public class TaskPoolService {
     private var dispatchRequested: Bool = false
     private let activeWorkersMutex: Mutex = Mutex()
     private var activeWorkers: HashMap<Int64, Int32> = HashMap<Int64, Int32>()
+    private let orphanReconcileMutex: Mutex = Mutex()
+    private var lastOrphanReconcileAtMs: Int64 = 0
     // upload task 空闲超时时间：10分钟内无分片上报则失败
     private static let UPLOAD_IDLE_TIMEOUT_SECONDS: Int32 = 600
     private static let UPLOAD_WAIT_HEARTBEAT_MILLIS: Int64 = 15000
+    private static let ORPHAN_RECONCILE_INTERVAL_MILLIS: Int64 = 60000
+    private static let ORPHAN_MIN_RUNNING_AGE_MILLIS: Int64 = 120000
 
     private init() {
         loadMaxWorkersConfig()
@@ -317,23 +322,82 @@ public class TaskPoolService {
 
     private func reconcileOrphanedRunningTasks(): Unit {
         let logger = getLogger("taskpool")
+        if (!shouldRunOrphanReconcile()) {
+            return
+        }
         let runningTasks = TaskDao.getTasksWithPaginationByStatus(0, 512, "running")
+        let now = DateTime.now()
         for (task in runningTasks) {
             if (task.id <= 0 || isTaskActivelyTracked(task.id)) {
+                continue
+            }
+            if (!isTaskOldEnoughForOrphanCheck(task, now)) {
+                continue
+            }
+            if (TaskIO.readOutput(task.id, maxBytes: 256).trimAscii().size > 0) {
+                logger.warn(
+                    "Skip orphan recovery because task already has output",
+                    ("task_id", task.id.toString()),
+                    ("task_type", task.taskType),
+                    ("phase", task.phase)
+                )
+                continue
+            }
+
+            let latestTask = TaskDao.getTaskDataById(task.id)
+            if (latestTask.id == 0 || latestTask.status != "running" || isTaskActivelyTracked(latestTask.id)) {
+                continue
+            }
+            if (!isTaskOldEnoughForOrphanCheck(latestTask, now)) {
+                continue
+            }
+            if (TaskIO.readOutput(latestTask.id, maxBytes: 256).trimAscii().size > 0) {
+                logger.warn(
+                    "Skip orphan recovery after recheck because task already has output",
+                    ("task_id", latestTask.id.toString()),
+                    ("task_type", latestTask.taskType),
+                    ("phase", latestTask.phase)
+                )
                 continue
             }
 
             logger.error(
                 "Detected orphaned running task",
-                ("task_id", task.id.toString()),
-                ("task_type", task.taskType),
-                ("phase", task.phase),
-                ("started_at", task.startedAt)
+                ("task_id", latestTask.id.toString()),
+                ("task_type", latestTask.taskType),
+                ("phase", latestTask.phase),
+                ("started_at", latestTask.startedAt)
             )
-            TaskIO.appendLog(task.id, "ERROR: task worker lost; marking task failed")
-            if (TaskModel.failTask(task.id, "Task worker lost")) {
-                triggerDependentTasks(task.id)
+            TaskIO.appendLog(latestTask.id, "ERROR: task worker lost; marking task failed")
+            if (TaskModel.failTask(latestTask.id, "Task worker lost")) {
+                triggerDependentTasks(latestTask.id)
             }
+        }
+    }
+
+    private func shouldRunOrphanReconcile(): Bool {
+        let nowMs = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        orphanReconcileMutex.lock()
+        if ((nowMs - lastOrphanReconcileAtMs) < TaskPoolService.ORPHAN_RECONCILE_INTERVAL_MILLIS) {
+            orphanReconcileMutex.unlock()
+            return false
+        }
+        lastOrphanReconcileAtMs = nowMs
+        orphanReconcileMutex.unlock()
+        return true
+    }
+
+    private func isTaskOldEnoughForOrphanCheck(task: TaskData, now: DateTime): Bool {
+        let baseline = if (task.startedAt.trimAscii().size > 0) { task.startedAt } else { task.createdAt }
+        if (baseline.trimAscii().size == 0) {
+            return false
+        }
+        match (DateTime.tryParse(baseline)) {
+            case Some(started) =>
+                let ageMs = (now - started).toMilliseconds()
+                return ageMs >= TaskPoolService.ORPHAN_MIN_RUNNING_AGE_MILLIS
+            case None =>
+                return false
         }
     }
 

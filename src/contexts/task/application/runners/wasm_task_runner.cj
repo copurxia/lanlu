@@ -164,7 +164,7 @@ public class WasmTaskRunner {
         TaskModel.updateTaskProgress(taskId, 20, "准备WASM插件输入")
         let baseParams = buildPluginParametersJson(plugin)
         let mergedParams = mergeParamsJson(baseParams, extraParams)
-        let contextParams = "{\"__target_type\":\"${effectiveType}\",\"__target_id\":\"${effectiveId}\"}"
+        let contextParams = "{\"__target_type\":\"${effectiveType}\",\"__target_id\":\"${effectiveId}\",\"__task_id\":\"${taskId.toString()}\"}"
         let finalParams = mergeParamsJson(mergedParams, contextParams)
         let inputJson = buildMetadataInputJson("Metadata", effectiveType, effectiveId, metadataInputJson, oneshotParam, finalParams, loginCookiesJson)
 

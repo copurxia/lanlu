@@ -14,6 +14,9 @@ import lanlu.shared.utils.*
  * - cleanup old assets
  */
 public class PluginCoverUtils {
+    private static let runtimeFileWaitAttempts: Int64 = 10
+    private static let runtimeFileWaitIntervalMs: Int64 = 120
+
     private static func normalizeRelPath(input: String): String {
         var s = input.trimAscii().replace("\\", "/")
         while (s.startsWith("/")) { s = s[1..s.size] }
@@ -52,6 +55,44 @@ public class PluginCoverUtils {
         return "plugins/${ns}/cache/${rel}"
     }
 
+    private static func waitForPluginRuntimeFile(absPath: String): Bool {
+        let target = Path(absPath)
+        var lastObservedSize: Int64 = -1
+        var stablePositiveChecks: Int64 = 0
+        var attempt: Int64 = 0
+        while (attempt <= runtimeFileWaitAttempts) {
+            if (exists(target)) {
+                let currentSize = try {
+                    Int64(FileInfo(target).size)
+                } catch (_: Exception) {
+                    0
+                }
+                if (currentSize > 0) {
+                    if (currentSize == lastObservedSize) {
+                        stablePositiveChecks += 1
+                    } else {
+                        stablePositiveChecks = 0
+                    }
+                    lastObservedSize = currentSize
+                    if (stablePositiveChecks > 0 || attempt >= runtimeFileWaitAttempts) {
+                        return true
+                    }
+                }
+            }
+
+            if (attempt >= runtimeFileWaitAttempts) {
+                if (exists(target)) {
+                    return true
+                }
+                break
+            }
+
+            attempt += 1
+            sleep(Duration.millisecond * runtimeFileWaitIntervalMs)
+        }
+        return false
+    }
+
     private static func resolvePluginRuntimePath(rawPath: String, pluginNamespace: String): (String, String) {
         let rel = normalizePluginCoverRelativePath(rawPath, pluginNamespace)
         if (rel.size == 0) {
@@ -77,7 +118,7 @@ public class PluginCoverUtils {
         if (!(cleanAbs == cleanRoot || cleanAbs.startsWith("${cleanRoot}/"))) {
             return ("", "plugin path is outside plugin runtime root")
         }
-        if (!exists(Path(cleanAbs))) {
+        if (!waitForPluginRuntimeFile(cleanAbs)) {
             return ("", "plugin file not found")
         }
 
