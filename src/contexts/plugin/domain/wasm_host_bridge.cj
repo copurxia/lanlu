@@ -41,6 +41,7 @@ public class WasmExecutionResult {
 class WasmExecutionState {
     public var executionId: Int64 = 0
     public var taskId: Int64 = 0
+    public var parentTaskId: Int64 = 0
     public var pluginNamespace: String = ""
     public var interactiveSelectEnabled: Bool = false
     public var responseBytes: Array<UInt8> = Array<UInt8>()
@@ -90,25 +91,25 @@ class WasmRpcSelectRequest {
 
 @C
 func lanluWasmHostLogNative(executionId: Int64, memoryCtx: CPointer<Unit>, level: Int32, ptr: Int32, len: Int32): Int32 {
-    let taskId = WasmHostBridge.resolveTaskId(executionId)
+    let (taskId, parentTaskId) = WasmHostBridge.resolveTaskIds(executionId)
     let message = WasmHostBridge.readGuestUtf8(memoryCtx, ptr, len)
     if (taskId > 0 && message.trimAscii().size > 0) {
-        TaskIO.appendLog(taskId, "[wasm:${level.toString()}] ${message}")
+        WasmHostBridge.appendExecutionLog(taskId, parentTaskId, "[wasm:${level.toString()}] ${message}")
     }
     return 0
 }
 
 @C
 func lanluWasmHostProgressNative(executionId: Int64, memoryCtx: CPointer<Unit>, percent: Int32, ptr: Int32, len: Int32): Int32 {
-    let taskId = WasmHostBridge.resolveTaskId(executionId)
+    let (taskId, parentTaskId) = WasmHostBridge.resolveTaskIds(executionId)
     let message = WasmHostBridge.readGuestUtf8(memoryCtx, ptr, len)
     if (taskId > 0) {
         var bounded = percent
         if (bounded < 0) { bounded = 0 }
         if (bounded > 100) { bounded = 100 }
         let progressMessage = if (message.trimAscii().size > 0) { message } else { "WASM plugin running" }
-        TaskModel.updateTaskProgress(taskId, bounded, progressMessage)
-        TaskIO.appendLog(taskId, "[PROGRESS] ${bounded}% - ${progressMessage}")
+        WasmHostBridge.updateExecutionProgress(taskId, parentTaskId, bounded, progressMessage)
+        WasmHostBridge.appendExecutionLog(taskId, parentTaskId, "[PROGRESS] ${bounded}% - ${progressMessage}")
     }
     return 0
 }
@@ -189,6 +190,7 @@ public class WasmHostBridge {
 
     public static func runMetadataPlugin(
         taskId: Int64,
+        parentTaskId: Int64,
         pluginNamespace: String,
         wasmPath: String,
         inputJson: String,
@@ -211,7 +213,7 @@ public class WasmHostBridge {
             return WasmExecutionResult(false, "", e.message)
         }
 
-        let executionId = createExecutionState(taskId, pluginNamespace, permissions, interactiveSelectEnabled)
+        let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, permissions, interactiveSelectEnabled)
         var instance: Option<WasmEdgePluginInstance> = None
         var inputAddr: Int32 = 0
 
@@ -238,14 +240,14 @@ public class WasmHostBridge {
                 let resultPtr = created.executeI32_2("lanlu_plugin_run", inputAddr, Int32(inputBytes.size))
                 let resultLen = created.executeI32_0("lanlu_plugin_result_len")
                 if (taskId > 0) {
-                    TaskIO.appendLog(taskId, "wasm run return: ptr=${resultPtr.toString()} len=${resultLen.toString()}")
+                    appendExecutionLog(taskId, parentTaskId, "wasm run return: ptr=${resultPtr.toString()} len=${resultLen.toString()}")
                 }
 
                 if (resultPtr == 0 || resultLen <= 0) {
                     let errPtr = created.executeI32_0("lanlu_plugin_last_error")
                     let errLen = created.executeI32_0("lanlu_plugin_last_error_len")
                     if (taskId > 0) {
-                        TaskIO.appendLog(taskId, "wasm run error buffer: ptr=${errPtr.toString()} len=${errLen.toString()}")
+                        appendExecutionLog(taskId, parentTaskId, "wasm run error buffer: ptr=${errPtr.toString()} len=${errLen.toString()}")
                     }
                     let err = if (errPtr > 0 && errLen > 0) {
                         decodeUtf8(created.readMemory(UInt32(errPtr), UInt32(errLen)))
@@ -277,6 +279,7 @@ public class WasmHostBridge {
 
     public static func runGenericPlugin(
         taskId: Int64,
+        parentTaskId: Int64,
         pluginNamespace: String,
         wasmPath: String,
         inputJson: String,
@@ -300,7 +303,7 @@ public class WasmHostBridge {
             return WasmExecutionResult(false, "", e.message)
         }
 
-        let executionId = createExecutionState(taskId, pluginNamespace, permissions, interactiveSelectEnabled)
+        let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, permissions, interactiveSelectEnabled)
         var instance: Option<WasmEdgePluginInstance> = None
         var inputAddr: Int32 = 0
 
@@ -335,14 +338,14 @@ public class WasmHostBridge {
                 let resultPtr = created.executeI32_2("lanlu_plugin_run", inputAddr, Int32(inputBytes.size))
                 let resultLen = created.executeI32_0("lanlu_plugin_result_len")
                 if (taskId > 0) {
-                    TaskIO.appendLog(taskId, "wasm run return: ptr=${resultPtr.toString()} len=${resultLen.toString()}")
+                    appendExecutionLog(taskId, parentTaskId, "wasm run return: ptr=${resultPtr.toString()} len=${resultLen.toString()}")
                 }
 
                 if (resultPtr == 0 || resultLen <= 0) {
                     let errPtr = created.executeI32_0("lanlu_plugin_last_error")
                     let errLen = created.executeI32_0("lanlu_plugin_last_error_len")
                     if (taskId > 0) {
-                        TaskIO.appendLog(taskId, "wasm run error buffer: ptr=${errPtr.toString()} len=${errLen.toString()}")
+                        appendExecutionLog(taskId, parentTaskId, "wasm run error buffer: ptr=${errPtr.toString()} len=${errLen.toString()}")
                     }
                     let err = if (errPtr > 0 && errLen > 0) {
                         decodeUtf8(created.readMemory(UInt32(errPtr), UInt32(errLen)))
@@ -386,7 +389,7 @@ public class WasmHostBridge {
             return (false, "", e.message)
         }
 
-        let executionId = createExecutionState(0, "", "", false)
+        let executionId = createExecutionState(0, 0, "", "", false)
         var instance: Option<WasmEdgePluginInstance> = None
 
         try {
@@ -422,19 +425,38 @@ public class WasmHostBridge {
         return maybeMaterializeAdjacentRef(rawValue, pluginNamespace, targetType, targetId, executionId)
     }
 
-    public static func resolveTaskId(executionId: Int64): Int64 {
+    public static func resolveTaskIds(executionId: Int64): (Int64, Int64) {
         if (executionId <= 0) {
-            return 0
+            return (0, 0)
         }
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
                 let taskId = state.taskId
+                let parentTaskId = state.parentTaskId
                 stateMutex.unlock()
-                return taskId
+                return (taskId, parentTaskId)
             case None =>
                 stateMutex.unlock()
-                return 0
+                return (0, 0)
+        }
+    }
+
+    public static func appendExecutionLog(taskId: Int64, parentTaskId: Int64, line: String): Unit {
+        if (taskId > 0) {
+            TaskIO.appendLog(taskId, line)
+        }
+        if (parentTaskId > 0 && parentTaskId != taskId) {
+            TaskIO.appendLog(parentTaskId, line)
+        }
+    }
+
+    public static func updateExecutionProgress(taskId: Int64, parentTaskId: Int64, progress: Int32, message: String): Unit {
+        if (taskId > 0) {
+            TaskModel.updateTaskProgress(taskId, progress, message)
+        }
+        if (parentTaskId > 0 && parentTaskId != taskId) {
+            TaskModel.updateTaskProgress(parentTaskId, progress, message)
         }
     }
 
@@ -514,7 +536,7 @@ public class WasmHostBridge {
             return result
         }
 
-        let (pluginNamespace, taskId, interactiveSelectEnabled) = getExecutionContext(executionId)
+        let (pluginNamespace, taskId, _, interactiveSelectEnabled) = getExecutionContext(executionId)
         let (method, paramsRaw) = parseHostRequest(trimmed)
         if (method.size == 0) {
             let elapsed = nowMillis() - startedAt
@@ -791,13 +813,14 @@ public class WasmHostBridge {
         hostMethodRegistryInitialized = true
     }
 
-    private static func createExecutionState(taskId: Int64, pluginNamespace: String, permissions: String, interactiveSelectEnabled: Bool): Int64 {
+    private static func createExecutionState(taskId: Int64, parentTaskId: Int64, pluginNamespace: String, permissions: String, interactiveSelectEnabled: Bool): Int64 {
         stateMutex.lock()
         executionSeq += 1
         let executionId = executionSeq
         var state = WasmExecutionState()
         state.executionId = executionId
         state.taskId = taskId
+        state.parentTaskId = parentTaskId
         state.pluginNamespace = pluginNamespace.trimAscii()
         state.interactiveSelectEnabled = interactiveSelectEnabled
         state.permissions = parsePermissionMap(permissions)
@@ -823,18 +846,19 @@ public class WasmHostBridge {
         }
     }
 
-    private static func getExecutionContext(executionId: Int64): (String, Int64, Bool) {
+    private static func getExecutionContext(executionId: Int64): (String, Int64, Int64, Bool) {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
                 let namespace = state.pluginNamespace
                 let taskId = state.taskId
+                let parentTaskId = state.parentTaskId
                 let interactive = state.interactiveSelectEnabled
                 stateMutex.unlock()
-                return (namespace, taskId, interactive)
+                return (namespace, taskId, parentTaskId, interactive)
             case None =>
                 stateMutex.unlock()
-                return ("", 0, false)
+                return ("", 0, 0, false)
         }
     }
 
@@ -1453,7 +1477,8 @@ public class WasmHostBridge {
         }
 
         if (taskId > 0) {
-            TaskIO.appendLog(taskId, "WASM host_call unsupported: ${method} namespace=${pluginNamespace}")
+            let (_, parentTaskId) = resolveTaskIds(executionId)
+            appendExecutionLog(taskId, parentTaskId, "WASM host_call unsupported: ${method} namespace=${pluginNamespace}")
         }
         return (false, "{}", "unknown method: ${method}")
     }
@@ -1586,7 +1611,7 @@ public class WasmHostBridge {
     private static func handleUiSelect(ctx: WasmHostCallContext): (Bool, String, String) {
         let (allowed, err) = ensureHostCapability(ctx.executionId, ["ui.select"], "ui.select")
         if (!allowed) { return (false, "{}", err) }
-        return handleUiSelectCall(ctx.taskId, ctx.effectiveParams, ctx.interactiveSelectEnabled)
+        return handleUiSelectCall(ctx.executionId, ctx.taskId, ctx.effectiveParams, ctx.interactiveSelectEnabled)
     }
 
     private static func ensureHostCapability(executionId: Int64, candidates: Array<String>, requiredLabel: String): (Bool, String) {
@@ -2191,7 +2216,7 @@ public class WasmHostBridge {
         }
     }
 
-    private static func handleUiSelectCall(taskId: Int64, effectiveParams: String, interactiveSelectEnabled: Bool): (Bool, String, String) {
+    private static func handleUiSelectCall(executionId: Int64, taskId: Int64, effectiveParams: String, interactiveSelectEnabled: Bool): (Bool, String, String) {
         var title = "请选择候选项"
         var message = ""
         var defaultIndex = 0i32
@@ -2288,7 +2313,8 @@ public class WasmHostBridge {
         rpcSelectMutex.unlock()
 
         let currentProgress = TaskDao.getTaskDataById(taskId).progress
-        TaskModel.updateTaskProgress(taskId, currentProgress, buildRpcSelectMessage(request))
+        let (_, parentTaskId) = resolveTaskIds(executionId)
+        updateExecutionProgress(taskId, parentTaskId, currentProgress, buildRpcSelectMessage(request))
 
         let deadline = DateTime.now().toUnixTimeStamp().toSeconds() + Int64(timeoutSeconds)
         while (true) {
@@ -2315,7 +2341,7 @@ public class WasmHostBridge {
                     w.writeName("index").writeValue(selected)
                     w.endObject()
                     w.flush()
-                    TaskModel.updateTaskProgress(taskId, currentProgress, "已接收人工选择结果")
+                    updateExecutionProgress(taskId, parentTaskId, currentProgress, "已接收人工选择结果")
                     return (true, String.fromUtf8(readToEnd(out)), "")
                 }
                 if (selected == -1) {
@@ -2834,8 +2860,9 @@ public class WasmHostBridge {
             case None => 0
         }
         let avgElapsed = if (count > 0) { totalElapsed / count } else { 0 }
-        TaskIO.appendLog(
+        appendExecutionLog(
             state.taskId,
+            state.parentTaskId,
             "[wasm-host-metric] ${method} count=${count.toString()} total_ms=${totalElapsed.toString()} avg_ms=${avgElapsed.toString()}"
         )
     }

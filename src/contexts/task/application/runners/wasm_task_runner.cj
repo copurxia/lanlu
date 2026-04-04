@@ -83,10 +83,10 @@ public class WasmTaskParametersReq <: JsonDeserializable<WasmTaskParametersReq> 
 
 public class WasmTaskRunner {
     public static func run(taskId: Int64, parameters: String): Unit {
-        TaskIO.appendLog(taskId, "wasm_task started")
-        TaskModel.updateTaskProgress(taskId, 1, "WASM任务开始")
+        let (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadataJson) = parseParameters(parameters)
+        appendMirroredLog(taskId, parentTaskId, "wasm_task started")
+        updateMirroredProgress(taskId, parentTaskId, 1, "WASM任务开始")
 
-        let (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, extraParams, metadataJson) = parseParameters(parameters)
         let taskData = TaskDao.getTaskDataById(taskId)
         let interactivePreviewEnabled = taskData.triggerSource.trimAscii() == "metadata_plugin_preview"
         if (pluginNamespace.size == 0 || pluginType.size == 0) {
@@ -119,13 +119,13 @@ public class WasmTaskRunner {
             }
             match (pluginType.trimAscii()) {
                 case "Metadata" =>
-                    executeMetadata(taskId, plugin, runtimePermissions, targetType, targetId, oneshotParam, extraParams, metadataJson, loginCookiesJson, interactivePreviewEnabled)
+                    executeMetadata(taskId, parentTaskId, plugin, runtimePermissions, targetType, targetId, oneshotParam, extraParams, metadataJson, loginCookiesJson, interactivePreviewEnabled)
                 case "Login" =>
-                    executeLogin(taskId, plugin, runtimePermissions, interactivePreviewEnabled)
+                    executeLogin(taskId, parentTaskId, plugin, runtimePermissions, interactivePreviewEnabled)
                 case "Download" =>
-                    executeDownload(taskId, plugin, runtimePermissions, url, extraParams, loginCookiesJson, interactivePreviewEnabled)
+                    executeDownload(taskId, parentTaskId, plugin, runtimePermissions, url, extraParams, loginCookiesJson, interactivePreviewEnabled)
                 case "Script" =>
-                    executeScript(taskId, plugin, runtimePermissions, oneshotParam, extraParams, loginCookiesJson, interactivePreviewEnabled)
+                    executeScript(taskId, parentTaskId, plugin, runtimePermissions, oneshotParam, extraParams, loginCookiesJson, interactivePreviewEnabled)
                 case _ =>
                     fail(taskId, "Unsupported wasm plugin type: ${pluginType}")
             }
@@ -134,8 +134,23 @@ public class WasmTaskRunner {
         }
     }
 
+    private static func appendMirroredLog(taskId: Int64, parentTaskId: Int64, line: String): Unit {
+        TaskIO.appendLog(taskId, line)
+        if (parentTaskId > 0 && parentTaskId != taskId) {
+            TaskIO.appendLog(parentTaskId, line)
+        }
+    }
+
+    private static func updateMirroredProgress(taskId: Int64, parentTaskId: Int64, progress: Int32, message: String): Unit {
+        TaskModel.updateTaskProgress(taskId, progress, message)
+        if (parentTaskId > 0 && parentTaskId != taskId) {
+            TaskModel.updateTaskProgress(parentTaskId, progress, message)
+        }
+    }
+
     private static func executeMetadata(
         taskId: Int64,
+        parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
         targetType: String,
@@ -163,17 +178,18 @@ public class WasmTaskRunner {
             metadataInputJson = builtMetadata
         }
 
-        TaskModel.updateTaskProgress(taskId, 20, "准备WASM插件输入")
+        updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM插件输入")
         let baseParams = buildPluginParametersJson(plugin)
         let mergedParams = mergeParamsJson(baseParams, extraParams)
         let contextParams = "{\"__target_type\":\"${effectiveType}\",\"__target_id\":\"${effectiveId}\",\"__task_id\":\"${taskId.toString()}\"}"
         let finalParams = mergeParamsJson(mergedParams, contextParams)
         let inputJson = buildMetadataInputJson("Metadata", effectiveType, effectiveId, metadataInputJson, oneshotParam, finalParams, loginCookiesJson)
 
-        TaskModel.updateTaskProgress(taskId, 40, "执行WASM插件")
+        updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
         let result = WasmHostBridge.runMetadataPlugin(
             taskId,
+            parentTaskId,
             plugin.namespace,
             wasmPath,
             inputJson,
@@ -193,25 +209,27 @@ public class WasmTaskRunner {
             result.output
         }
 
-        TaskModel.updateTaskProgress(taskId, 100, "WASM任务完成")
+        updateMirroredProgress(taskId, parentTaskId, 100, "WASM任务完成")
         TaskModel.completeTask(taskId, "wasm_task completed")
         TaskIO.writeOutput(taskId, normalizedOutput)
     }
 
     private static func executeLogin(
         taskId: Int64,
+        parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
         interactivePreviewEnabled: Bool
     ): Unit {
-        TaskModel.updateTaskProgress(taskId, 20, "准备WASM登录插件输入")
+        updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM登录插件输入")
         let paramsJson = buildPluginParametersJson(plugin)
         let inputJson = buildLoginInputJson(paramsJson)
 
-        TaskModel.updateTaskProgress(taskId, 40, "执行WASM登录插件")
+        updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM登录插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
         let result = WasmHostBridge.runGenericPlugin(
             taskId,
+            parentTaskId,
             plugin.namespace,
             wasmPath,
             inputJson,
@@ -224,13 +242,14 @@ public class WasmTaskRunner {
             return
         }
 
-        TaskModel.updateTaskProgress(taskId, 100, "WASM登录任务完成")
+        updateMirroredProgress(taskId, parentTaskId, 100, "WASM登录任务完成")
         TaskModel.completeTask(taskId, "wasm_task completed")
         TaskIO.writeOutput(taskId, result.output)
     }
 
     private static func executeDownload(
         taskId: Int64,
+        parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
         url: String,
@@ -244,7 +263,7 @@ public class WasmTaskRunner {
             return
         }
 
-        TaskModel.updateTaskProgress(taskId, 20, "准备WASM下载插件输入")
+        updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM下载插件输入")
         let baseParams = buildPluginParametersJson(plugin)
         let finalParams = mergeParamsJson(baseParams, extraParams)
         let pluginRuntimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), plugin.namespace)
@@ -252,10 +271,11 @@ public class WasmTaskRunner {
         let pluginGuestDir = "/plugin"
         let inputJson = buildDownloadInputJson("Download", trimmedUrl, pluginGuestDir, finalParams, loginCookiesJson)
 
-        TaskModel.updateTaskProgress(taskId, 40, "执行WASM下载插件")
+        updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM下载插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
         let result = WasmHostBridge.runGenericPlugin(
             taskId,
+            parentTaskId,
             plugin.namespace,
             wasmPath,
             inputJson,
@@ -270,13 +290,14 @@ public class WasmTaskRunner {
             return
         }
 
-        TaskModel.updateTaskProgress(taskId, 100, "WASM下载任务完成")
+        updateMirroredProgress(taskId, parentTaskId, 100, "WASM下载任务完成")
         TaskModel.completeTask(taskId, "wasm_task completed")
         TaskIO.writeOutput(taskId, result.output)
     }
 
     private static func executeScript(
         taskId: Int64,
+        parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
         oneshotParam: String,
@@ -284,15 +305,16 @@ public class WasmTaskRunner {
         loginCookiesJson: String,
         interactivePreviewEnabled: Bool
     ): Unit {
-        TaskModel.updateTaskProgress(taskId, 20, "准备WASM脚本插件输入")
+        updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM脚本插件输入")
         let baseParams = buildPluginParametersJson(plugin)
         let finalParams = mergeParamsJson(baseParams, extraParams)
         let inputJson = buildScriptInputJson("Script", oneshotParam, finalParams, loginCookiesJson)
 
-        TaskModel.updateTaskProgress(taskId, 40, "执行WASM脚本插件")
+        updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM脚本插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
         let result = WasmHostBridge.runGenericPlugin(
             taskId,
+            parentTaskId,
             plugin.namespace,
             wasmPath,
             inputJson,
@@ -305,12 +327,12 @@ public class WasmTaskRunner {
             return
         }
 
-        TaskModel.updateTaskProgress(taskId, 100, "WASM脚本任务完成")
+        updateMirroredProgress(taskId, parentTaskId, 100, "WASM脚本任务完成")
         TaskModel.completeTask(taskId, "wasm_task completed")
         TaskIO.writeOutput(taskId, result.output)
     }
 
-    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, String, String) {
+    private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, Int64, String, String) {
         var pluginNamespace = ""
         var pluginType = ""
         var groupId = ""
@@ -318,12 +340,13 @@ public class WasmTaskRunner {
         var targetId = ""
         var oneshotParam = ""
         var url = ""
+        var parentTaskId: Int64 = 0
         var extraParams = ""
         var metadata = ""
 
         let trimmed = parameters.trimAscii()
         if (trimmed.size == 0) {
-            return (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, extraParams, metadata)
+            return (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadata)
         }
 
         try {
@@ -335,12 +358,13 @@ public class WasmTaskRunner {
             targetId = req.targetId
             oneshotParam = req.oneshotParam
             url = req.url
+            parentTaskId = req.parentTaskId
             extraParams = req.extraParams
             metadata = req.metadata
         } catch (_: Exception) {}
 
         if (targetType.size == 0) { targetType = "archive" }
-        return (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, extraParams, metadata)
+        return (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadata)
     }
 
     private static func isWasmPlugin(plugin: PluginTaskData): Bool {
@@ -1092,6 +1116,7 @@ public class WasmTaskRunner {
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
         let result = WasmHostBridge.runGenericPlugin(
             taskId,
+            0,
             plugin.namespace,
             wasmPath,
             inputJson,
