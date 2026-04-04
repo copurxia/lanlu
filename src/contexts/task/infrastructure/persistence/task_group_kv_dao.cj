@@ -16,6 +16,28 @@ public class TaskGroupKVDao {
         return DateTime.now().toUnixTimeStamp().toSeconds()
     }
 
+    private static func readNumericValue(conn: Connection, groupId: String, key: String): Int64 {
+        let stmt = conn.prepareStatement("SELECT v FROM task_group_kv WHERE group_id=? AND k=?")
+        try {
+            stmt.set(0, groupId)
+            stmt.set(1, key)
+            let rs = stmt.query()
+            try {
+                if (rs.next()) {
+                    let valueStr = rs.getOrNull<String>(0) ?? ""
+                    return Int64.parse(valueStr)
+                }
+            } finally {
+                rs.close()
+            }
+        } catch (_: Exception) {
+            return -1
+        } finally {
+            stmt.close()
+        }
+        return -1
+    }
+
     private static func getAnyConnection(): Option<Connection> {
         // Prefer pooled connections; fall back to direct connections if pool isn't ready yet.
         let pooled = DatabaseConfig.getPooledConnection()
@@ -61,24 +83,41 @@ public class TaskGroupKVDao {
                     cleanupExpiredGroup(groupId)
 
                     let stmt = conn.prepareStatement("""
+                        UPDATE task_group_kv
+                        SET v = ?,
+                            created_at = ?,
+                            ttl_seconds = ?
+                        WHERE group_id = ? AND k = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
                         INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT (group_id, k)
-                        DO UPDATE SET
-                          v = EXCLUDED.v,
-                          created_at = EXCLUDED.created_at,
-                          ttl_seconds = EXCLUDED.ttl_seconds
+                        SELECT ?, ?, ?, ?, ?
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM task_group_kv WHERE group_id = ? AND k = ?
+                        )
                     """)
                     try {
-                        stmt.set(0, groupId)
-                        stmt.set(1, key)
-                        stmt.set(2, value)
-                        stmt.set(3, nowSeconds())
-                        stmt.set(4, ttlSeconds)
-                        stmt.update()
+                        let currentSeconds = nowSeconds()
+                        stmt.set(0, value)
+                        stmt.set(1, currentSeconds)
+                        stmt.set(2, ttlSeconds)
+                        stmt.set(3, groupId)
+                        stmt.set(4, key)
+                        let updated = stmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, groupId)
+                            insertStmt.set(1, key)
+                            insertStmt.set(2, value)
+                            insertStmt.set(3, currentSeconds)
+                            insertStmt.set(4, ttlSeconds)
+                            insertStmt.set(5, groupId)
+                            insertStmt.set(6, key)
+                            insertStmt.update()
+                        }
                         return true
                     } finally {
                         stmt.close()
+                        insertStmt.close()
                     }
                 } catch (_: Exception) {
                     return false
@@ -100,8 +139,10 @@ public class TaskGroupKVDao {
                     cleanupExpiredGroup(groupId)
                     let stmt = conn.prepareStatement("""
                         INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT (group_id, k) DO NOTHING
+                        SELECT ?, ?, ?, ?, ?
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM task_group_kv WHERE group_id = ? AND k = ?
+                        )
                     """)
                     try {
                         stmt.set(0, groupId)
@@ -109,6 +150,8 @@ public class TaskGroupKVDao {
                         stmt.set(2, value)
                         stmt.set(3, nowSeconds())
                         stmt.set(4, ttlSeconds)
+                        stmt.set(5, groupId)
+                        stmt.set(6, key)
                         let updateResult = stmt.update()
                         return updateResult.rowCount > 0
                     } finally {
@@ -132,38 +175,46 @@ public class TaskGroupKVDao {
             case Some(conn) =>
                 try {
                     cleanupExpiredGroup(groupId)
-                    let stmt = conn.prepareStatement("""
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE task_group_kv
+                        SET v = (CAST(v AS BIGINT) + ?)::text,
+                            created_at = ?,
+                            ttl_seconds = ?
+                        WHERE group_id = ? AND k = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
                         INSERT INTO task_group_kv (group_id, k, v, created_at, ttl_seconds)
-                        VALUES (?, ?, ?, ?, ?)
-                        ON CONFLICT (group_id, k)
-                        DO UPDATE SET
-                          v = (task_group_kv.v::bigint + EXCLUDED.v::bigint)::text,
-                          created_at = EXCLUDED.created_at,
-                          ttl_seconds = EXCLUDED.ttl_seconds
-                        RETURNING v
+                        SELECT ?, ?, ?, ?, ?
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM task_group_kv WHERE group_id = ? AND k = ?
+                        )
                     """)
                     try {
-                        stmt.set(0, groupId)
-                        stmt.set(1, key)
-                        stmt.set(2, delta.toString())
-                        stmt.set(3, nowSeconds())
-                        stmt.set(4, ttlSeconds)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                let valueStr = rs.getOrNull<String>(0) ?? ""
-                                try {
-                                    return Int64.parse(valueStr)
-                                } catch (_: Exception) {
-                                    return -1
-                                }
-                            }
-                        } finally {
-                            rs.close()
+                        let currentSeconds = nowSeconds()
+                        updateStmt.set(0, delta)
+                        updateStmt.set(1, currentSeconds)
+                        updateStmt.set(2, ttlSeconds)
+                        updateStmt.set(3, groupId)
+                        updateStmt.set(4, key)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount > 0) {
+                            return readNumericValue(conn, groupId, key)
                         }
-                        return -1
+                        insertStmt.set(0, groupId)
+                        insertStmt.set(1, key)
+                        insertStmt.set(2, delta.toString())
+                        insertStmt.set(3, currentSeconds)
+                        insertStmt.set(4, ttlSeconds)
+                        insertStmt.set(5, groupId)
+                        insertStmt.set(6, key)
+                        let inserted = insertStmt.update()
+                        if (inserted.rowCount > 0) {
+                            return delta
+                        }
+                        return readNumericValue(conn, groupId, key)
                     } finally {
-                        stmt.close()
+                        updateStmt.close()
+                        insertStmt.close()
                     }
                 } catch (_: Exception) {
                     return -1

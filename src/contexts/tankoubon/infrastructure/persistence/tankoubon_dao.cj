@@ -433,18 +433,37 @@ public class TankoubonDao {
                         return false
                     }
 
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order) VALUES (?, ?, ?) ON CONFLICT (tankoubon_id, archive_id) DO UPDATE SET sort_order = EXCLUDED.sort_order")
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE tankoubon_archives
+                        SET sort_order = ?
+                        WHERE tankoubon_id = ? AND archive_id = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
+                        INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order)
+                        SELECT ?, ?, ?
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM tankoubon_archives WHERE tankoubon_id = ? AND archive_id = ?
+                        )
+                    """)
                     try {
-                        stmt.set(0, tankoubonInternalId)
-                        stmt.set(1, archiveInternalId)
-                        stmt.set(2, sortOrder)
-                        stmt.update()
+                        updateStmt.set(0, sortOrder)
+                        updateStmt.set(1, tankoubonInternalId)
+                        updateStmt.set(2, archiveInternalId)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, tankoubonInternalId)
+                            insertStmt.set(1, archiveInternalId)
+                            insertStmt.set(2, sortOrder)
+                            insertStmt.set(3, tankoubonInternalId)
+                            insertStmt.set(4, archiveInternalId)
+                            insertStmt.update()
+                        }
                         getLogger("tankoubon_dao").info("添加归档到Tankoubon成功",
                             ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
                         return true
                     } finally {
-                        stmt.close()
+                        updateStmt.close()
+                        insertStmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("tankoubon_dao").error("添加归档到Tankoubon失败",
@@ -534,12 +553,19 @@ public class TankoubonDao {
                         maxStmt.close()
                     }
 
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order) VALUES (?, ?, ?) ON CONFLICT (tankoubon_id, archive_id) DO NOTHING")
+                    let stmt = conn.prepareStatement("""
+                        INSERT INTO tankoubon_archives (tankoubon_id, archive_id, sort_order)
+                        SELECT ?, ?, ?
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM tankoubon_archives WHERE tankoubon_id = ? AND archive_id = ?
+                        )
+                    """)
                     try {
                         stmt.set(0, tankInternalId)
                         stmt.set(1, archiveInternalId)
                         stmt.set(2, nextOrder)
+                        stmt.set(3, tankInternalId)
+                        stmt.set(4, archiveInternalId)
                         stmt.update()
                         return true
                     } finally {
@@ -701,8 +727,6 @@ public class TankoubonDao {
                         SELECT t.metadata_id, n.slot, n.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         FROM target t
                         JOIN normalized n ON n.asset_id > 0
-                        ON CONFLICT (metadata_id, slot) DO UPDATE
-                        SET asset_id = EXCLUDED.asset_id, updated_at = CURRENT_TIMESTAMP
                     """)
                     try {
                         stmt.set(0, tankoubonId)

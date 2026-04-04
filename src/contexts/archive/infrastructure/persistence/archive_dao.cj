@@ -2109,8 +2109,6 @@ public class ArchiveDao {
                         SELECT t.metadata_id, n.slot, n.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                         FROM target t
                         JOIN normalized n ON n.asset_id > 0
-                        ON CONFLICT (metadata_id, slot) DO UPDATE
-                        SET asset_id = EXCLUDED.asset_id, updated_at = CURRENT_TIMESTAMP
                     """)
                     try {
                         stmt.set(0, archiveId)

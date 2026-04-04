@@ -34,8 +34,12 @@ public class TagI18nImportTaskRunner {
                 return
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement(
-                        "INSERT INTO tags (namespace, name, translations, links) VALUES (?, ?, ?::jsonb, ?) ON CONFLICT (namespace, name) DO UPDATE SET translations = EXCLUDED.translations, links = EXCLUDED.links, updated_at = CURRENT_TIMESTAMP")
+                    let updateStmt = conn.prepareStatement(
+                        "UPDATE tags SET translations = ?::jsonb, links = ?, updated_at = CURRENT_TIMESTAMP WHERE namespace = ? AND name = ?"
+                    )
+                    let insertStmt = conn.prepareStatement(
+                        "INSERT INTO tags (namespace, name, translations, links) SELECT ?, ?, ?::jsonb, ? WHERE NOT EXISTS (SELECT 1 FROM tags WHERE namespace = ? AND name = ?)"
+                    )
 
                     var received: Int64 = 0
                     var imported: Int64 = 0
@@ -57,11 +61,20 @@ public class TagI18nImportTaskRunner {
                         let nm = name.trimAscii()
                         if (ns.size == 0 || nm.size == 0) { return }
                         received += 1
-                        stmt.set(0, ns)
-                        stmt.set(1, nm)
-                        stmt.set(2, translations)
-                        stmt.set(3, links)
-                        stmt.update()
+                        updateStmt.set(0, translations)
+                        updateStmt.set(1, links)
+                        updateStmt.set(2, ns)
+                        updateStmt.set(3, nm)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, ns)
+                            insertStmt.set(1, nm)
+                            insertStmt.set(2, translations)
+                            insertStmt.set(3, links)
+                            insertStmt.set(4, ns)
+                            insertStmt.set(5, nm)
+                            insertStmt.update()
+                        }
                         imported += 1
                         tickProgress()
                     }
@@ -165,7 +178,8 @@ public class TagI18nImportTaskRunner {
 
                     let path = parameters.trimAscii()
                     if (path.size == 0) {
-                        try { stmt.close() } catch (_: Exception) {}
+                        try { updateStmt.close() } catch (_: Exception) {}
+                        try { insertStmt.close() } catch (_: Exception) {}
                         try { conn.close() } catch (_: Exception) {}
                         fail(taskId, "导入参数缺少文件路径")
                         return
@@ -173,7 +187,8 @@ public class TagI18nImportTaskRunner {
 
                     let filePath = Path(path)
                     if (!exists(filePath)) {
-                        try { stmt.close() } catch (_: Exception) {}
+                        try { updateStmt.close() } catch (_: Exception) {}
+                        try { insertStmt.close() } catch (_: Exception) {}
                         try { conn.close() } catch (_: Exception) {}
                         fail(taskId, "导入文件不存在: ${path}")
                         return
@@ -185,7 +200,8 @@ public class TagI18nImportTaskRunner {
                         parseRoot(reader)
                     }
 
-                    try { stmt.close() } catch (_: Exception) {}
+                    try { updateStmt.close() } catch (_: Exception) {}
+                    try { insertStmt.close() } catch (_: Exception) {}
                     try { conn.close() } catch (_: Exception) {}
 
                     let cacheVersion = TagDao.bumpTranslationSearchCacheVersion()

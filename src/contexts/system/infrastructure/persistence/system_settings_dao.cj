@@ -41,7 +41,7 @@ public class SystemSettingsDao {
                     // 检查表是否存在
                     let checkTable = conn.prepareStatement("""
                         SELECT EXISTS (
-                            SELECT FROM information_schema.tables
+                            SELECT 1 FROM information_schema.tables
                             WHERE table_name = 'system_settings'
                         )
                     """)
@@ -60,7 +60,7 @@ public class SystemSettingsDao {
                         logger.debug("system_settings表不存在，创建新表")
                         let createTableSql = """
                             CREATE TABLE system_settings (
-                                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                                id SERIAL PRIMARY KEY,
                                 key VARCHAR(255) NOT NULL UNIQUE,
                                 value TEXT NOT NULL,
                                 value_type VARCHAR(50) NOT NULL DEFAULT 'string',
@@ -330,26 +330,43 @@ public class SystemSettingsDao {
             case Some(conn) =>
                 
                 try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
-                        VALUES (?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (key)
-                        DO UPDATE SET
-                            value = EXCLUDED.value,
-                            value_type = EXCLUDED.value_type,
-                            category = EXCLUDED.category,
-                            description = EXCLUDED.description,
-                            is_encrypted = EXCLUDED.is_encrypted,
-                            updated_at = CURRENT_TIMESTAMP
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE system_settings
+                        SET value = ?, value_type = ?, category = ?, description = ?::jsonb, is_encrypted = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE key = ?
                     """)
-                    stmt.set(0, data.key)
-                    stmt.set(1, data.value)
-                    stmt.set(2, data.valueType)
-                    stmt.set(3, data.category)
-                    stmt.set(4, data.description)
-                    stmt.set(5, data.isEncrypted)
-                    stmt.update()
-                    stmt.close()
+                    try {
+                        updateStmt.set(0, data.value)
+                        updateStmt.set(1, data.valueType)
+                        updateStmt.set(2, data.category)
+                        updateStmt.set(3, data.description)
+                        updateStmt.set(4, data.isEncrypted)
+                        updateStmt.set(5, data.key)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            let insertStmt = conn.prepareStatement("""
+                                INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
+                                SELECT ?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP
+                                WHERE NOT EXISTS (
+                                    SELECT 1 FROM system_settings WHERE key = ?
+                                )
+                            """)
+                            try {
+                                insertStmt.set(0, data.key)
+                                insertStmt.set(1, data.value)
+                                insertStmt.set(2, data.valueType)
+                                insertStmt.set(3, data.category)
+                                insertStmt.set(4, data.description)
+                                insertStmt.set(5, data.isEncrypted)
+                                insertStmt.set(6, data.key)
+                                insertStmt.update()
+                            } finally {
+                                insertStmt.close()
+                            }
+                        }
+                    } finally {
+                        updateStmt.close()
+                    }
                     getLogger("system_settings_dao").info("更新设置", ("key", data.key))
                     return true
                 } catch (e: Exception) {
@@ -377,28 +394,42 @@ public class SystemSettingsDao {
             case Some(conn) =>
                 
                 try {
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
-                        VALUES (?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (key)
-                        DO UPDATE SET
-                            value = EXCLUDED.value,
-                            value_type = EXCLUDED.value_type,
-                            category = EXCLUDED.category,
-                            description = EXCLUDED.description,
-                            is_encrypted = EXCLUDED.is_encrypted,
-                            updated_at = CURRENT_TIMESTAMP
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE system_settings
+                        SET value = ?, value_type = ?, category = ?, description = ?::jsonb, is_encrypted = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE key = ?
                     """)
-                    for (data in settings) {
-                        stmt.set(0, data.key)
-                        stmt.set(1, data.value)
-                        stmt.set(2, data.valueType)
-                        stmt.set(3, data.category)
-                        stmt.set(4, data.description)
-                        stmt.set(5, data.isEncrypted)
-                        stmt.update()
+                    let insertStmt = conn.prepareStatement("""
+                        INSERT INTO system_settings (key, value, value_type, category, description, is_encrypted, updated_at)
+                        SELECT ?, ?, ?, ?, ?::jsonb, ?, CURRENT_TIMESTAMP
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM system_settings WHERE key = ?
+                        )
+                    """)
+                    try {
+                        for (data in settings) {
+                            updateStmt.set(0, data.value)
+                            updateStmt.set(1, data.valueType)
+                            updateStmt.set(2, data.category)
+                            updateStmt.set(3, data.description)
+                            updateStmt.set(4, data.isEncrypted)
+                            updateStmt.set(5, data.key)
+                            let updated = updateStmt.update()
+                            if (updated.rowCount <= 0) {
+                                insertStmt.set(0, data.key)
+                                insertStmt.set(1, data.value)
+                                insertStmt.set(2, data.valueType)
+                                insertStmt.set(3, data.category)
+                                insertStmt.set(4, data.description)
+                                insertStmt.set(5, data.isEncrypted)
+                                insertStmt.set(6, data.key)
+                                insertStmt.update()
+                            }
+                        }
+                    } finally {
+                        updateStmt.close()
+                        insertStmt.close()
                     }
-                    stmt.close()
                     getLogger("system_settings_dao").info("批量更新设置", ("count", settings.size.toString()))
                     return true
                 } catch (e: Exception) {

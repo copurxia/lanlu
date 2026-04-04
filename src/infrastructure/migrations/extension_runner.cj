@@ -26,8 +26,6 @@ public class ExtensionMigrationRunner {
 
                     let applied = MigrationRunner.getAppliedVersions(conn)
                     let allMigrations = ExtensionMigrationRegistry.getAll()
-                    let latestSchemaVersion = latestRegularSchemaVersion()
-
                     if (allMigrations.size == 0) {
                         logger.debug("No registered extension migrations")
                         return true
@@ -39,9 +37,9 @@ public class ExtensionMigrationRunner {
                             continue
                         }
 
-                        if (migration.targetSchemaVersion() != latestSchemaVersion) {
+                        if (!applied.contains(migration.targetSchemaVersion())) {
                             logger.error(
-                                "Extension migration ${migration.version()} targets ${migration.targetSchemaVersion()} but latest schema is ${latestSchemaVersion}"
+                                "Extension migration ${migration.version()} requires base schema ${migration.targetSchemaVersion()} but it is not applied"
                             )
                             return false
                         }
@@ -108,11 +106,4 @@ public class ExtensionMigrationRunner {
         return true
     }
 
-    private static func latestRegularSchemaVersion(): String {
-        var latest = ""
-        for (migration in MigrationRegistry.getAll()) {
-            latest = migration.version()
-        }
-        return latest
-    }
 }

@@ -28,12 +28,16 @@ public class UserTankoubonFavoriteDao {
 
                     let stmt = conn.prepareStatement("""
                         INSERT INTO user_tankoubon_favorites (user_id, tankoubon_id, created_at)
-                        VALUES (?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (user_id, tankoubon_id) DO NOTHING
+                        SELECT ?, ?, CURRENT_TIMESTAMP
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM user_tankoubon_favorites WHERE user_id = ? AND tankoubon_id = ?
+                        )
                     """)
                     try {
                         stmt.set(0, userId)
                         stmt.set(1, tankInternalId)
+                        stmt.set(2, userId)
+                        stmt.set(3, tankInternalId)
                         stmt.update()
                         return true
                     } finally {

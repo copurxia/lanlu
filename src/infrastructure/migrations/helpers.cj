@@ -16,7 +16,7 @@ public class MigrationHelpers {
      */
     public static func tableExists(conn: Connection, tableName: String): Bool {
         let stmt = conn.prepareStatement(
-            "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ?)"
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ?)"
         )
         try {
             stmt.set(0, tableName)
@@ -45,7 +45,7 @@ public class MigrationHelpers {
      */
     public static func columnExists(conn: Connection, tableName: String, columnName: String): Bool {
         let stmt = conn.prepareStatement(
-            "SELECT EXISTS (SELECT FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ? AND column_name = ?)"
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ? AND column_name = ?)"
         )
         try {
             stmt.set(0, tableName)
@@ -75,7 +75,7 @@ public class MigrationHelpers {
      */
     public static func indexExists(conn: Connection, indexName: String): Bool {
         let stmt = conn.prepareStatement(
-            "SELECT EXISTS (SELECT FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?)"
+            "SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = ?)"
         )
         try {
             stmt.set(0, indexName)
@@ -163,7 +163,7 @@ public class MigrationHelpers {
      */
     public static func viewExists(conn: Connection, viewName: String): Bool {
         let stmt = conn.prepareStatement(
-            "SELECT EXISTS (SELECT FROM information_schema.views WHERE table_schema = 'public' AND table_name = ?)"
+            "SELECT EXISTS (SELECT 1 FROM information_schema.views WHERE table_schema = 'public' AND table_name = ?)"
         )
         try {
             stmt.set(0, viewName)

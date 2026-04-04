@@ -19,7 +19,7 @@ public class V015_RecommendationTracking <: Migration {
     public func up(conn: Connection): Bool {
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE IF NOT EXISTS recommendation_impressions (
-                id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL DEFAULT 0,
                 session_key TEXT NOT NULL DEFAULT '',
                 scene VARCHAR(64) NOT NULL,
@@ -36,7 +36,7 @@ public class V015_RecommendationTracking <: Migration {
 
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE IF NOT EXISTS recommendation_interactions (
-                id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id BIGSERIAL PRIMARY KEY,
                 user_id BIGINT NOT NULL DEFAULT 0,
                 session_key TEXT NOT NULL DEFAULT '',
                 scene VARCHAR(64) NOT NULL,

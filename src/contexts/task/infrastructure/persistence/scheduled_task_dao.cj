@@ -53,7 +53,7 @@ public class ScheduledTaskDao {
                 
                 try {
                     // 检查表是否存在
-                    let checkTable = conn.prepareStatement("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'scheduled_tasks')")
+                    let checkTable = conn.prepareStatement("SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'scheduled_tasks')")
                     let rs = checkTable.query()
                     var tableExists = false
                     try {

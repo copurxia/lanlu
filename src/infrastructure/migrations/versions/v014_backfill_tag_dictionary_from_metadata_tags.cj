@@ -44,12 +44,42 @@ public class V014_BackfillTagDictionaryFromMetadataTags <: Migration {
                 FROM metadata_tags
                 WHERE btrim(tag) <> ''
             )
-            INSERT INTO tags (namespace, name)
-            SELECT namespace, name
-            FROM normalized
-            WHERE name <> ''
-            ON CONFLICT (namespace, name) DO UPDATE
+            UPDATE tags t
             SET updated_at = CURRENT_TIMESTAMP
+            FROM normalized n
+            WHERE n.name <> ''
+              AND t.namespace = n.namespace
+              AND t.name = n.name
+        """)) {
+            return false
+        }
+
+        if (!MigrationHelpers.execUpdate(conn, """
+            WITH normalized AS (
+                SELECT DISTINCT
+                    CASE
+                        WHEN position(':' IN btrim(tag)) > 0
+                            THEN btrim(substring(btrim(tag) FROM 1 FOR position(':' IN btrim(tag)) - 1))
+                        ELSE ''
+                    END AS namespace,
+                    CASE
+                        WHEN position(':' IN btrim(tag)) > 0
+                            THEN btrim(substring(btrim(tag) FROM position(':' IN btrim(tag)) + 1))
+                        ELSE btrim(tag)
+                    END AS name
+                FROM metadata_tags
+                WHERE btrim(tag) <> ''
+            )
+            INSERT INTO tags (namespace, name)
+            SELECT n.namespace, n.name
+            FROM normalized n
+            WHERE n.name <> ''
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM tags t
+                  WHERE t.namespace = n.namespace
+                    AND t.name = n.name
+              )
         """)) {
             return false
         }

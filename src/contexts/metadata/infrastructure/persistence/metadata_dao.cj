@@ -449,10 +449,18 @@ public class MetadataDao {
                             continue
                         }
                         seen.add(tag)
-                        let ins = conn.prepareStatement("INSERT INTO metadata_tags (metadata_id, tag) VALUES (?, ?) ON CONFLICT DO NOTHING")
+                        let ins = conn.prepareStatement("""
+                            INSERT INTO metadata_tags (metadata_id, tag)
+                            SELECT ?, ?
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM metadata_tags WHERE metadata_id = ? AND tag = ?
+                            )
+                        """)
                         try {
                             ins.set(0, metadataId)
                             ins.set(1, tag)
+                            ins.set(2, metadataId)
+                            ins.set(3, tag)
                             ins.update()
                         } finally {
                             ins.close()
@@ -514,14 +522,34 @@ public class MetadataDao {
                             continue
                         }
                         seen.add(slot)
-                        let ins = conn.prepareStatement("INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT (metadata_id, slot) DO UPDATE SET asset_id = EXCLUDED.asset_id, updated_at = CURRENT_TIMESTAMP")
+                        let updateAsset = conn.prepareStatement("""
+                            UPDATE metadata_assets
+                            SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE metadata_id = ? AND slot = ?
+                        """)
+                        let insertAsset = conn.prepareStatement("""
+                            INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                            SELECT ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = ?
+                            )
+                        """)
                         try {
-                            ins.set(0, metadataId)
-                            ins.set(1, slot)
-                            ins.set(2, asset.asset_id)
-                            ins.update()
+                            updateAsset.set(0, asset.asset_id)
+                            updateAsset.set(1, metadataId)
+                            updateAsset.set(2, slot)
+                            let updated = updateAsset.update()
+                            if (updated.rowCount <= 0) {
+                                insertAsset.set(0, metadataId)
+                                insertAsset.set(1, slot)
+                                insertAsset.set(2, asset.asset_id)
+                                insertAsset.set(3, metadataId)
+                                insertAsset.set(4, slot)
+                                insertAsset.update()
+                            }
                         } finally {
-                            ins.close()
+                            updateAsset.close()
+                            insertAsset.close()
                         }
                     }
 
@@ -561,14 +589,34 @@ public class MetadataDao {
                         return false
                     }
                     if (assetId > 0) {
-                        let stmt = conn.prepareStatement("INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT (metadata_id, slot) DO UPDATE SET asset_id = EXCLUDED.asset_id, updated_at = CURRENT_TIMESTAMP")
+                        let updateStmt = conn.prepareStatement("""
+                            UPDATE metadata_assets
+                            SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
+                            WHERE metadata_id = ? AND slot = ?
+                        """)
+                        let insertStmt = conn.prepareStatement("""
+                            INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                            SELECT ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = ?
+                            )
+                        """)
                         try {
-                            stmt.set(0, metadataId)
-                            stmt.set(1, normalizedSlot)
-                            stmt.set(2, assetId)
-                            stmt.update()
+                            updateStmt.set(0, assetId)
+                            updateStmt.set(1, metadataId)
+                            updateStmt.set(2, normalizedSlot)
+                            let updated = updateStmt.update()
+                            if (updated.rowCount <= 0) {
+                                insertStmt.set(0, metadataId)
+                                insertStmt.set(1, normalizedSlot)
+                                insertStmt.set(2, assetId)
+                                insertStmt.set(3, metadataId)
+                                insertStmt.set(4, normalizedSlot)
+                                insertStmt.update()
+                            }
                         } finally {
-                            stmt.close()
+                            updateStmt.close()
+                            insertStmt.close()
                         }
                     } else {
                         let stmt = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id = ? AND slot = ?")
@@ -802,13 +850,31 @@ public class MetadataDao {
                         let metadataId = getMetadataIdForPage(conn, normalizedParent, safeEntryPath)
                         if (metadataId > 0) {
                             if (item.thumb_asset_id > 0) {
-                                let upsertThumb = conn.prepareStatement("INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at) VALUES (?, 'thumb', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) ON CONFLICT (metadata_id, slot) DO UPDATE SET asset_id = EXCLUDED.asset_id, updated_at = CURRENT_TIMESTAMP")
+                                let updateThumb = conn.prepareStatement("""
+                                    UPDATE metadata_assets
+                                    SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
+                                    WHERE metadata_id = ? AND slot = 'thumb'
+                                """)
+                                let insertThumb = conn.prepareStatement("""
+                                    INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                                    SELECT ?, 'thumb', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                    WHERE NOT EXISTS (
+                                        SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = 'thumb'
+                                    )
+                                """)
                                 try {
-                                    upsertThumb.set(0, metadataId)
-                                    upsertThumb.set(1, item.thumb_asset_id)
-                                    upsertThumb.update()
+                                    updateThumb.set(0, item.thumb_asset_id)
+                                    updateThumb.set(1, metadataId)
+                                    let updated = updateThumb.update()
+                                    if (updated.rowCount <= 0) {
+                                        insertThumb.set(0, metadataId)
+                                        insertThumb.set(1, item.thumb_asset_id)
+                                        insertThumb.set(2, metadataId)
+                                        insertThumb.update()
+                                    }
                                 } finally {
-                                    upsertThumb.close()
+                                    updateThumb.close()
+                                    insertThumb.close()
                                 }
                             } else {
                                 let deleteThumb = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id = ? AND slot = 'thumb'")

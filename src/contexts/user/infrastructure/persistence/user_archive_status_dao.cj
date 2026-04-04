@@ -31,21 +31,33 @@ public class UserArchiveStatusDao {
             case Some(conn) =>
                 
                 try {
-                    // 使用 UPSERT 语法（INSERT ... ON CONFLICT）
-                    let stmt = conn.prepareStatement("""
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE user_archive_status
+                        SET is_new = true, updated_at = CURRENT_TIMESTAMP
+                        WHERE user_id = ? AND archive_id = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
                         INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (user_id, archive_id)
-                        DO UPDATE SET is_new = true, updated_at = CURRENT_TIMESTAMP
+                        SELECT ?, ?, true, CURRENT_TIMESTAMP
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM user_archive_status WHERE user_id = ? AND archive_id = ?
+                        )
                     """)
                     try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        stmt.set(2, true)
-                        stmt.update()
+                        updateStmt.set(0, userId)
+                        updateStmt.set(1, archiveId)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, userId)
+                            insertStmt.set(1, archiveId)
+                            insertStmt.set(2, userId)
+                            insertStmt.set(3, archiveId)
+                            insertStmt.update()
+                        }
                         return true
                     } finally {
-                        stmt.close()
+                        updateStmt.close()
+                        insertStmt.close()
                     }
                 } catch (e: Exception) {
                     logger.error("设置isNew标记失败", ("error", e.message))
@@ -69,21 +81,33 @@ public class UserArchiveStatusDao {
             case Some(conn) =>
                 
                 try {
-                    // 使用 UPSERT 语法
-                    let stmt = conn.prepareStatement("""
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE user_archive_status
+                        SET is_new = false, updated_at = CURRENT_TIMESTAMP
+                        WHERE user_id = ? AND archive_id = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
                         INSERT INTO user_archive_status (user_id, archive_id, is_new, updated_at)
-                        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (user_id, archive_id)
-                        DO UPDATE SET is_new = false, updated_at = CURRENT_TIMESTAMP
+                        SELECT ?, ?, false, CURRENT_TIMESTAMP
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM user_archive_status WHERE user_id = ? AND archive_id = ?
+                        )
                     """)
                     try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        stmt.set(2, false)
-                        stmt.update()
+                        updateStmt.set(0, userId)
+                        updateStmt.set(1, archiveId)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, userId)
+                            insertStmt.set(1, archiveId)
+                            insertStmt.set(2, userId)
+                            insertStmt.set(3, archiveId)
+                            insertStmt.update()
+                        }
                         return true
                     } finally {
-                        stmt.close()
+                        updateStmt.close()
+                        insertStmt.close()
                     }
                 } catch (e: Exception) {
                     logger.error("清除isNew标记失败", ("error", e.message))
@@ -111,26 +135,37 @@ public class UserArchiveStatusDao {
             case Some(conn) =>
                 
                 try {
-                    // 使用 UPSERT 语法，同时更新 progress 和 is_new
-                    let stmt = conn.prepareStatement("""
-                        INSERT INTO user_archive_status (user_id, archive_id, is_new, progress, updated_at)
-                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (user_id, archive_id)
-                        DO UPDATE SET
-                            is_new = false,
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE user_archive_status
+                        SET is_new = false,
                             progress = ?,
                             updated_at = CURRENT_TIMESTAMP
+                        WHERE user_id = ? AND archive_id = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
+                        INSERT INTO user_archive_status (user_id, archive_id, is_new, progress, updated_at)
+                        SELECT ?, ?, false, ?, CURRENT_TIMESTAMP
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM user_archive_status WHERE user_id = ? AND archive_id = ?
+                        )
                     """)
                     try {
-                        stmt.set(0, userId)
-                        stmt.set(1, archiveId)
-                        stmt.set(2, false)  // is_new = false，自动标记为已读
-                        stmt.set(3, progress)
-                        stmt.set(4, progress)  // 第二个 ? 用于 ON CONFLICT
-                        stmt.update()
+                        updateStmt.set(0, progress)
+                        updateStmt.set(1, userId)
+                        updateStmt.set(2, archiveId)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, userId)
+                            insertStmt.set(1, archiveId)
+                            insertStmt.set(2, progress)
+                            insertStmt.set(3, userId)
+                            insertStmt.set(4, archiveId)
+                            insertStmt.update()
+                        }
                         return true
                     } finally {
-                        stmt.close()
+                        updateStmt.close()
+                        insertStmt.close()
                     }
                 } catch (e: Exception) {
                     logger.error("更新阅读进度失败", ("error", e.message))

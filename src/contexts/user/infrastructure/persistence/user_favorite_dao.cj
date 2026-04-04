@@ -35,15 +35,18 @@ public class UserFavoriteDao {
             case Some(conn) =>
                 
                 try {
-                    // 使用 INSERT OR IGNORE 避免重复收藏
                     let stmt = conn.prepareStatement("""
                         INSERT INTO user_favorites (user_id, archive_id, created_at)
-                        VALUES (?, ?, CURRENT_TIMESTAMP)
-                        ON CONFLICT (user_id, archive_id) DO NOTHING
+                        SELECT ?, ?, CURRENT_TIMESTAMP
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM user_favorites WHERE user_id = ? AND archive_id = ?
+                        )
                     """)
                     try {
                         stmt.set(0, userId)
                         stmt.set(1, archiveId)
+                        stmt.set(2, userId)
+                        stmt.set(3, archiveId)
                         stmt.update()
                         return true
                     } finally {

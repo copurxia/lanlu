@@ -174,16 +174,9 @@ public class TagDao {
 
     /**
      * 内部方法：获取或创建标签（使用已有连接）
-     * 使用 INSERT ... ON CONFLICT 避免并发插入时的重复键错误
      */
     private static func getOrCreateTagInternal(conn: Connection, namespace: String, name: String): Int64 {
-        // 使用 upsert 模式：尝试插入，如果冲突则返回现有记录的 id
-        let stmt = conn.prepareStatement("""
-            INSERT INTO tags (namespace, name)
-            VALUES (?, ?)
-            ON CONFLICT (namespace, name) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-            RETURNING id
-        """)
+        let stmt = conn.prepareStatement("SELECT id FROM tags WHERE namespace = ? AND name = ? LIMIT 1")
         try {
             stmt.set(0, namespace)
             stmt.set(1, name)
@@ -197,6 +190,41 @@ public class TagDao {
             }
         } finally {
             stmt.close()
+        }
+
+        let insertStmt = conn.prepareStatement("""
+            INSERT INTO tags (namespace, name)
+            SELECT ?, ?
+            WHERE NOT EXISTS (
+                SELECT 1 FROM tags WHERE namespace = ? AND name = ?
+            )
+        """)
+        try {
+            insertStmt.set(0, namespace)
+            insertStmt.set(1, name)
+            insertStmt.set(2, namespace)
+            insertStmt.set(3, name)
+            insertStmt.update()
+        } catch (_: Exception) {
+            // Concurrent inserts may race; reload the row below.
+        } finally {
+            insertStmt.close()
+        }
+
+        let reloadStmt = conn.prepareStatement("SELECT id FROM tags WHERE namespace = ? AND name = ? LIMIT 1")
+        try {
+            reloadStmt.set(0, namespace)
+            reloadStmt.set(1, name)
+            let result = reloadStmt.query()
+            try {
+                if (result.next()) {
+                    return result.getOrNull<Int64>(0) ?? 0
+                }
+            } finally {
+                result.close()
+            }
+        } finally {
+            reloadStmt.close()
         }
 
         0
@@ -349,10 +377,18 @@ public class TagDao {
                         }
 
                         // Write unified relation into metadata_tags.
-                        let insertRelationStmt = conn.prepareStatement("INSERT INTO metadata_tags (metadata_id, tag) VALUES (?, ?) ON CONFLICT DO NOTHING")
+                        let insertRelationStmt = conn.prepareStatement("""
+                            INSERT INTO metadata_tags (metadata_id, tag)
+                            SELECT ?, ?
+                            WHERE NOT EXISTS (
+                                SELECT 1 FROM metadata_tags WHERE metadata_id = ? AND tag = ?
+                            )
+                        """)
                         try {
                             insertRelationStmt.set(0, metadataId)
                             insertRelationStmt.set(1, normalizedTag)
+                            insertRelationStmt.set(2, metadataId)
+                            insertRelationStmt.set(3, normalizedTag)
                             insertRelationStmt.update()
                         } finally {
                             insertRelationStmt.close()
@@ -1140,24 +1176,38 @@ public class TagDao {
                 
                 try {
                     let translationsJson = serializeTranslationsJson(translations)
-                    let stmt = conn.prepareStatement("""
+                    let updateStmt = conn.prepareStatement("""
+                        UPDATE tags
+                        SET translations = ?::jsonb, links = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE namespace = ? AND name = ?
+                    """)
+                    let insertStmt = conn.prepareStatement("""
                         INSERT INTO tags (namespace, name, translations, links)
-                        VALUES (?, ?, ?::jsonb, ?)
-                        ON CONFLICT (namespace, name)
-                        DO UPDATE SET translations = ?::jsonb, links = ?, updated_at = CURRENT_TIMESTAMP
+                        SELECT ?, ?, ?::jsonb, ?
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM tags WHERE namespace = ? AND name = ?
+                        )
                     """)
                     try {
-                        stmt.set(0, namespace)
-                        stmt.set(1, name)
-                        stmt.set(2, translationsJson)
-                        stmt.set(3, links)
-                        stmt.set(4, translationsJson)
-                        stmt.set(5, links)
-                        stmt.update()
+                        updateStmt.set(0, translationsJson)
+                        updateStmt.set(1, links)
+                        updateStmt.set(2, namespace)
+                        updateStmt.set(3, name)
+                        let updated = updateStmt.update()
+                        if (updated.rowCount <= 0) {
+                            insertStmt.set(0, namespace)
+                            insertStmt.set(1, name)
+                            insertStmt.set(2, translationsJson)
+                            insertStmt.set(3, links)
+                            insertStmt.set(4, namespace)
+                            insertStmt.set(5, name)
+                            insertStmt.update()
+                        }
                         invalidateTranslationSearchCache()
                         return true
                     } finally {
-                        stmt.close()
+                        updateStmt.close()
+                        insertStmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("upsert标签失败", ("error", e.message), ("namespace", namespace), ("name", name))
@@ -1859,12 +1909,18 @@ public class TagDao {
                     if (sourceTag.trimAscii().size > 0 && targetTag.trimAscii().size > 0) {
                         let insMetadata = conn.prepareStatement("""
                             INSERT INTO metadata_tags (metadata_id, tag)
-                            SELECT metadata_id, ? FROM metadata_tags WHERE tag = ?
-                            ON CONFLICT DO NOTHING
+                            SELECT mt.metadata_id, ?
+                            FROM metadata_tags mt
+                            WHERE mt.tag = ?
+                              AND NOT EXISTS (
+                                  SELECT 1 FROM metadata_tags existing
+                                  WHERE existing.metadata_id = mt.metadata_id AND existing.tag = ?
+                              )
                         """)
                         try {
                             insMetadata.set(0, targetTag)
                             insMetadata.set(1, sourceTag)
+                            insMetadata.set(2, targetTag)
                             insMetadata.update()
                         } finally { insMetadata.close() }
 

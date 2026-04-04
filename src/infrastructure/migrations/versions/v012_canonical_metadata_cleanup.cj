@@ -125,7 +125,15 @@ public class V012_CanonicalMetadataCleanup <: Migration {
                  AND mo.entity_id = a.arcid
                 JOIN archive_tags atg ON atg.archive_id = a.id
                 JOIN tags tg ON tg.id = atg.tag_id
-                ON CONFLICT DO NOTHING
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM metadata_tags mt
+                    WHERE mt.metadata_id = mo.id
+                      AND mt.tag = CASE
+                          WHEN COALESCE(tg.namespace, '') != '' THEN tg.namespace || ':' || tg.name
+                          ELSE tg.name
+                      END
+                )
             """)) {
                 return false
             }
@@ -148,7 +156,15 @@ public class V012_CanonicalMetadataCleanup <: Migration {
                  AND mo.entity_id = t.tankoubon_id
                 JOIN tankoubon_tags tt ON tt.tankoubon_id = t.id
                 JOIN tags tg ON tg.id = tt.tag_id
-                ON CONFLICT DO NOTHING
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM metadata_tags mt
+                    WHERE mt.metadata_id = mo.id
+                      AND mt.tag = CASE
+                          WHEN COALESCE(tg.namespace, '') != '' THEN tg.namespace || ':' || tg.name
+                          ELSE tg.name
+                      END
+                )
             """)) {
                 return false
             }
@@ -162,23 +178,48 @@ public class V012_CanonicalMetadataCleanup <: Migration {
     private func backfillAssetsFromLegacyColumns(conn: Connection): Bool {
         if (MigrationHelpers.columnExists(conn, "archives", "assets")) {
             if (!MigrationHelpers.execUpdate(conn, """
-                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                SELECT
-                    mo.id,
-                    LOWER(TRIM(kv.key)) AS slot,
-                    (kv.value)::BIGINT AS asset_id,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                FROM metadata_objects mo
-                JOIN archives a
-                  ON mo.entity_type = 'archive'
-                 AND mo.entity_id = a.arcid
-                CROSS JOIN LATERAL jsonb_each_text(COALESCE(a.assets, '{}'::jsonb)) kv(key, value)
-                WHERE kv.value ~ '^[0-9]+$'
-                  AND (kv.value)::BIGINT > 0
-                ON CONFLICT (metadata_id, slot) DO UPDATE
-                SET asset_id = EXCLUDED.asset_id,
+                UPDATE metadata_assets ma
+                SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        LOWER(TRIM(kv.key)) AS slot,
+                        (kv.value)::BIGINT AS asset_id
+                    FROM metadata_objects mo
+                    JOIN archives a
+                      ON mo.entity_type = 'archive'
+                     AND mo.entity_id = a.arcid
+                    CROSS JOIN LATERAL jsonb_each_text(COALESCE(a.assets, '{}'::jsonb)) kv(key, value)
+                    WHERE kv.value ~ '^[0-9]+$'
+                      AND (kv.value)::BIGINT > 0
+                ) src
+                WHERE ma.metadata_id = src.metadata_id
+                  AND ma.slot = src.slot
+            """)) {
+                return false
+            }
+            if (!MigrationHelpers.execUpdate(conn, """
+                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        LOWER(TRIM(kv.key)) AS slot,
+                        (kv.value)::BIGINT AS asset_id
+                    FROM metadata_objects mo
+                    JOIN archives a
+                      ON mo.entity_type = 'archive'
+                     AND mo.entity_id = a.arcid
+                    CROSS JOIN LATERAL jsonb_each_text(COALESCE(a.assets, '{}'::jsonb)) kv(key, value)
+                    WHERE kv.value ~ '^[0-9]+$'
+                      AND (kv.value)::BIGINT > 0
+                ) src
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_assets ma
+                    WHERE ma.metadata_id = src.metadata_id
+                      AND ma.slot = src.slot
+                )
             """)) {
                 return false
             }
@@ -186,21 +227,44 @@ public class V012_CanonicalMetadataCleanup <: Migration {
 
         if (MigrationHelpers.columnExists(conn, "archives", "cover_asset_id")) {
             if (!MigrationHelpers.execUpdate(conn, """
-                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                SELECT
-                    mo.id,
-                    'cover',
-                    a.cover_asset_id,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                FROM metadata_objects mo
-                JOIN archives a
-                  ON mo.entity_type = 'archive'
-                 AND mo.entity_id = a.arcid
-                WHERE COALESCE(a.cover_asset_id, 0) > 0
-                ON CONFLICT (metadata_id, slot) DO UPDATE
-                SET asset_id = EXCLUDED.asset_id,
+                UPDATE metadata_assets ma
+                SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        'cover' AS slot,
+                        a.cover_asset_id AS asset_id
+                    FROM metadata_objects mo
+                    JOIN archives a
+                      ON mo.entity_type = 'archive'
+                     AND mo.entity_id = a.arcid
+                    WHERE COALESCE(a.cover_asset_id, 0) > 0
+                ) src
+                WHERE ma.metadata_id = src.metadata_id
+                  AND ma.slot = src.slot
+            """)) {
+                return false
+            }
+            if (!MigrationHelpers.execUpdate(conn, """
+                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        'cover' AS slot,
+                        a.cover_asset_id AS asset_id
+                    FROM metadata_objects mo
+                    JOIN archives a
+                      ON mo.entity_type = 'archive'
+                     AND mo.entity_id = a.arcid
+                    WHERE COALESCE(a.cover_asset_id, 0) > 0
+                ) src
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_assets ma
+                    WHERE ma.metadata_id = src.metadata_id
+                      AND ma.slot = src.slot
+                )
             """)) {
                 return false
             }
@@ -208,23 +272,48 @@ public class V012_CanonicalMetadataCleanup <: Migration {
 
         if (MigrationHelpers.columnExists(conn, "tankoubons", "assets")) {
             if (!MigrationHelpers.execUpdate(conn, """
-                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                SELECT
-                    mo.id,
-                    LOWER(TRIM(kv.key)) AS slot,
-                    (kv.value)::BIGINT AS asset_id,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                FROM metadata_objects mo
-                JOIN tankoubons t
-                  ON mo.entity_type = 'tankoubon'
-                 AND mo.entity_id = t.tankoubon_id
-                CROSS JOIN LATERAL jsonb_each_text(COALESCE(t.assets, '{}'::jsonb)) kv(key, value)
-                WHERE kv.value ~ '^[0-9]+$'
-                  AND (kv.value)::BIGINT > 0
-                ON CONFLICT (metadata_id, slot) DO UPDATE
-                SET asset_id = EXCLUDED.asset_id,
+                UPDATE metadata_assets ma
+                SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        LOWER(TRIM(kv.key)) AS slot,
+                        (kv.value)::BIGINT AS asset_id
+                    FROM metadata_objects mo
+                    JOIN tankoubons t
+                      ON mo.entity_type = 'tankoubon'
+                     AND mo.entity_id = t.tankoubon_id
+                    CROSS JOIN LATERAL jsonb_each_text(COALESCE(t.assets, '{}'::jsonb)) kv(key, value)
+                    WHERE kv.value ~ '^[0-9]+$'
+                      AND (kv.value)::BIGINT > 0
+                ) src
+                WHERE ma.metadata_id = src.metadata_id
+                  AND ma.slot = src.slot
+            """)) {
+                return false
+            }
+            if (!MigrationHelpers.execUpdate(conn, """
+                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        LOWER(TRIM(kv.key)) AS slot,
+                        (kv.value)::BIGINT AS asset_id
+                    FROM metadata_objects mo
+                    JOIN tankoubons t
+                      ON mo.entity_type = 'tankoubon'
+                     AND mo.entity_id = t.tankoubon_id
+                    CROSS JOIN LATERAL jsonb_each_text(COALESCE(t.assets, '{}'::jsonb)) kv(key, value)
+                    WHERE kv.value ~ '^[0-9]+$'
+                      AND (kv.value)::BIGINT > 0
+                ) src
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_assets ma
+                    WHERE ma.metadata_id = src.metadata_id
+                      AND ma.slot = src.slot
+                )
             """)) {
                 return false
             }
@@ -232,21 +321,44 @@ public class V012_CanonicalMetadataCleanup <: Migration {
 
         if (MigrationHelpers.columnExists(conn, "tankoubons", "cover_asset_id")) {
             if (!MigrationHelpers.execUpdate(conn, """
-                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                SELECT
-                    mo.id,
-                    'cover',
-                    t.cover_asset_id,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                FROM metadata_objects mo
-                JOIN tankoubons t
-                  ON mo.entity_type = 'tankoubon'
-                 AND mo.entity_id = t.tankoubon_id
-                WHERE COALESCE(t.cover_asset_id, 0) > 0
-                ON CONFLICT (metadata_id, slot) DO UPDATE
-                SET asset_id = EXCLUDED.asset_id,
+                UPDATE metadata_assets ma
+                SET asset_id = src.asset_id,
                     updated_at = CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        'cover' AS slot,
+                        t.cover_asset_id AS asset_id
+                    FROM metadata_objects mo
+                    JOIN tankoubons t
+                      ON mo.entity_type = 'tankoubon'
+                     AND mo.entity_id = t.tankoubon_id
+                    WHERE COALESCE(t.cover_asset_id, 0) > 0
+                ) src
+                WHERE ma.metadata_id = src.metadata_id
+                  AND ma.slot = src.slot
+            """)) {
+                return false
+            }
+            if (!MigrationHelpers.execUpdate(conn, """
+                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                SELECT src.metadata_id, src.slot, src.asset_id, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                FROM (
+                    SELECT
+                        mo.id AS metadata_id,
+                        'cover' AS slot,
+                        t.cover_asset_id AS asset_id
+                    FROM metadata_objects mo
+                    JOIN tankoubons t
+                      ON mo.entity_type = 'tankoubon'
+                     AND mo.entity_id = t.tankoubon_id
+                    WHERE COALESCE(t.cover_asset_id, 0) > 0
+                ) src
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_assets ma
+                    WHERE ma.metadata_id = src.metadata_id
+                      AND ma.slot = src.slot
+                )
             """)) {
                 return false
             }

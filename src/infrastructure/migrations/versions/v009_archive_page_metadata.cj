@@ -22,7 +22,7 @@ public class V009_ArchivePageMetadata <: Migration {
     public func up(conn: Connection): Bool {
         let createTableSql = """
             CREATE TABLE IF NOT EXISTS archive_page_metadata (
-                id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id BIGSERIAL PRIMARY KEY,
                 archive_id BIGINT NOT NULL,
                 page_number INT NOT NULL,
                 entry_path TEXT NOT NULL DEFAULT '',

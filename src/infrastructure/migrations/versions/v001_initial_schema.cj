@@ -97,7 +97,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating users table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE users (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 username VARCHAR(64) NOT NULL UNIQUE,
                 password_salt VARCHAR(64) NOT NULL,
                 password_hash VARCHAR(64) NOT NULL,
@@ -131,7 +131,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating user_tokens table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE user_tokens (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 name VARCHAR(255) NOT NULL DEFAULT '',
                 token_type VARCHAR(50) NOT NULL DEFAULT 'session',
@@ -182,7 +182,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating plugins table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE plugins (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 version VARCHAR(50) NOT NULL,
                 namespace VARCHAR(100) NOT NULL DEFAULT '',
@@ -222,7 +222,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating categories table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE categories (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 catid VARCHAR(255) NOT NULL UNIQUE,
                 name VARCHAR(255) NOT NULL,
                 scan_path TEXT NOT NULL,
@@ -273,7 +273,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating archives table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE archives (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 arcid VARCHAR(255) NOT NULL UNIQUE,
                 title VARCHAR(1024) DEFAULT '',
                 filename VARCHAR(1024) NOT NULL,
@@ -329,7 +329,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating tags table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE tags (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 namespace VARCHAR(64) NOT NULL DEFAULT '',
                 name VARCHAR(255) NOT NULL,
                 translations JSONB NOT NULL DEFAULT '{}',
@@ -388,7 +388,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating user_archive_status table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE user_archive_status (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 archive_id INTEGER NOT NULL,
                 is_new BOOLEAN DEFAULT true,
@@ -420,7 +420,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating user_favorites table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE user_favorites (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 archive_id INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -446,7 +446,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating smart_filters table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE smart_filters (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 translations JSONB NOT NULL DEFAULT '{}',
                 icon VARCHAR(64) DEFAULT '',
@@ -493,7 +493,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating tankoubons table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE tankoubons (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 tankoubon_id VARCHAR(255) NOT NULL UNIQUE,
                 name VARCHAR(1024) NOT NULL,
                 summary TEXT DEFAULT '',
@@ -520,7 +520,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating tankoubon_archives table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE tankoubon_archives (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 tankoubon_id INTEGER NOT NULL,
                 archive_id INTEGER NOT NULL,
                 sort_order INTEGER DEFAULT 0,
@@ -572,7 +572,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating user_tankoubon_favorites table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE user_tankoubon_favorites (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 user_id INTEGER NOT NULL,
                 tankoubon_id INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -608,7 +608,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating tasks table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE tasks (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 task_type VARCHAR(100) NOT NULL,
                 status VARCHAR(50) NOT NULL DEFAULT 'pending',
@@ -686,7 +686,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating scheduled_tasks table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE scheduled_tasks (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 cron_expression VARCHAR(255) NOT NULL,
                 task_type VARCHAR(50) NOT NULL,
@@ -731,7 +731,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating assets table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE assets (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 owner_user_id BIGINT,
                 kind VARCHAR(50) NOT NULL DEFAULT '',
                 original_filename VARCHAR(1024) NOT NULL DEFAULT '',
@@ -765,7 +765,7 @@ public class V001_InitialSchema <: Migration {
         logger.debug("Creating system_settings table")
         if (!MigrationHelpers.execUpdate(conn, """
             CREATE TABLE system_settings (
-                id INTEGER PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+                id SERIAL PRIMARY KEY,
                 key VARCHAR(255) NOT NULL UNIQUE,
                 value TEXT NOT NULL,
                 value_type VARCHAR(50) NOT NULL DEFAULT 'string',

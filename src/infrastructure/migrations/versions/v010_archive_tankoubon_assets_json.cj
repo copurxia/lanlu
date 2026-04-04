@@ -28,7 +28,12 @@ public class V010_ArchiveTankoubonAssetsJson <: Migration {
 
         if (!MigrationHelpers.execUpdate(conn, """
             UPDATE archives
-            SET assets = jsonb_set(COALESCE(assets, '{}'::jsonb), '{cover}', to_jsonb(cover_asset_id), true)
+            SET assets = jsonb_set(
+                COALESCE(assets, '{}'::jsonb),
+                '{cover}',
+                CAST(CAST(cover_asset_id AS TEXT) AS JSONB),
+                true
+            )
             WHERE COALESCE(cover_asset_id, 0) > 0
               AND NOT jsonb_exists(COALESCE(assets, '{}'::jsonb), 'cover')
         """)) {
@@ -37,7 +42,12 @@ public class V010_ArchiveTankoubonAssetsJson <: Migration {
 
         if (!MigrationHelpers.execUpdate(conn, """
             UPDATE tankoubons
-            SET assets = jsonb_set(COALESCE(assets, '{}'::jsonb), '{cover}', to_jsonb(cover_asset_id), true)
+            SET assets = jsonb_set(
+                COALESCE(assets, '{}'::jsonb),
+                '{cover}',
+                CAST(CAST(cover_asset_id AS TEXT) AS JSONB),
+                true
+            )
             WHERE COALESCE(cover_asset_id, 0) > 0
               AND NOT jsonb_exists(COALESCE(assets, '{}'::jsonb), 'cover')
         """)) {
