@@ -802,6 +802,8 @@ public class WasmHostBridge {
         registerHostMethod("archive.listFiles", { ctx => handleArchiveListFiles(ctx) })
         registerHostMethod("archive.read_text", { ctx => handleArchiveReadText(ctx) })
         registerHostMethod("archive.readText", { ctx => handleArchiveReadText(ctx) })
+        registerHostMethod("archive.read_entry_bytes", { ctx => handleArchiveReadEntryBytes(ctx) })
+        registerHostMethod("archive.readEntryBytes", { ctx => handleArchiveReadEntryBytes(ctx) })
         registerHostMethod("archive.get_metadata", { ctx => handleArchiveGetMetadata(ctx) })
         registerHostMethod("archive.export_entries", { ctx => handleArchiveExportEntries(ctx) })
         registerHostMethod("archive.exportEntries", { ctx => handleArchiveExportEntries(ctx) })
@@ -1550,6 +1552,41 @@ public class WasmHostBridge {
             return (false, "{}", readErr)
         }
         return (true, buildAdjacentTextResponseJson(text), "")
+    }
+
+    private static func handleArchiveReadEntryBytes(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, capErr) = ensureHostCapability(ctx.executionId, ["archive.read_entry_bytes"], "archive.read_entry_bytes")
+        if (!allowed) { return (false, "{}", capErr) }
+        let (archiveId, entryName) = parseArchiveReadEntryTextParams(ctx.effectiveParams)
+        if (archiveId.size == 0 || entryName.trimAscii().size == 0) {
+            return (false, "{}", "missing archive_id/entry_name")
+        }
+        let safeName = normalizeSafeRelPath(entryName)
+        if (safeName.size == 0) {
+            return (false, "{}", "invalid entry_name")
+        }
+        match (resolveArchiveActualPath(archiveId.trimAscii())) {
+            case None => return (false, "{}", "archive not found or path unresolved")
+            case Some((archiveType, actualPath)) =>
+                let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+                let (exitCode, data, error) = handler.extractEntryToStream(actualPath, safeName)
+                if (exitCode != 0) {
+                    let err = try {
+                        String.fromUtf8(error)
+                    } catch (_: Exception) {
+                        ""
+                    }
+                    return (false, "{}", if (err.trimAscii().size > 0) { err } else { "extract failed" })
+                }
+                let hexData = toHexString(data)
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startObject()
+                w.writeName("data").writeValue(hexData)
+                w.writeName("size").writeValue(data.size)
+                w.endObject()
+                return (true, String.fromUtf8(out.bytes()), "")
+        }
     }
 
     private static func handleArchiveGetMetadata(ctx: WasmHostCallContext): (Bool, String, String) {
