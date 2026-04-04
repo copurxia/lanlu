@@ -366,9 +366,18 @@ export function BaseMediaCard({
 
         <div className="pt-3">
           <div className="h-5 mb-2">
-            <h3 className="font-semibold text-sm line-clamp-1" title={displayTitle}>
+            <button
+              type="button"
+              className="block w-full truncate text-left font-semibold text-sm transition-colors hover:underline hover:decoration-current hover:underline-offset-4"
+              title={displayTitle}
+              aria-label={displayTitle}
+              onClick={(event) => {
+                event.stopPropagation()
+                navigateToDetails()
+              }}
+            >
               {displayTitle}
-            </h3>
+            </button>
           </div>
           <div className={['text-xs text-muted-foreground', hideMetaOnMobile ? 'hidden sm:block' : ''].join(' ')}>
             {pagesLabel || t('archive.pages').replace('{count}', String(pagecount))}
