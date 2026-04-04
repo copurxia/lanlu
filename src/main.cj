@@ -11,6 +11,7 @@ import lanlu.infrastructure.migrations.*
 import lanlu.infrastructure.migrations.versions.*
 import lanlu.infrastructure.migrations.extensions.*
 import lanlu.infrastructure.kv.*
+import lanlu.infrastructure.middleware.*
 import std.convert.*
 import ignite.*
 import cjdotenv.load
@@ -205,9 +206,12 @@ main(): Int64 {
         serverHeader: "Lanlu",
         bodyLimit: 12 * 1024 * 1024,
         enableSwagger: true,
+        enableTlsPrecheck: true,
         tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
         tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
         ))
+
+    installObservabilityMiddleware(app)
 
     // 注册所有路由
     logger.debug("Application starting... step 15: registering routes")

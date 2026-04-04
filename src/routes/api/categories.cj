@@ -17,27 +17,27 @@ public func registerCategoryRoutes(router: App) {
     })
 
     // 创建新分类（需要管理员权限）
-    categories.post("", { ctx =>
+    categories.post("", audited("category.create", { ctx =>
         CategoryController.createCategory(ctx)
-    })
+    }, riskLevel: 2))
 
     // 触发媒体库扫描（需要管理员权限）
-    categories.post("/scan", { ctx =>
+    categories.post("/scan", audited("category.scan_all", { ctx =>
         CategoryController.scanAllCategories(ctx)
-    })
+    }, riskLevel: 2))
 
     // 更新分类（需要管理员权限）
-    categories.put("/:id", { ctx =>
+    categories.put("/:id", audited("category.update", { ctx =>
         CategoryController.updateCategory(ctx)
-    })
+    }, riskLevel: 2))
 
     // 删除分类（需要管理员权限）
-    categories.delete("/:id", { ctx =>
+    categories.delete("/:id", audited("category.delete", { ctx =>
         CategoryController.deleteCategory(ctx)
-    })
+    }, riskLevel: 2))
 
     // 触发分类扫描（需要管理员权限）
-    categories.post("/:id/scan", { ctx =>
+    categories.post("/:id/scan", audited("category.scan_one", { ctx =>
         CategoryController.scanCategory(ctx)
-    })
+    }, riskLevel: 2))
 }

@@ -24,9 +24,9 @@ public class ArchiveRoutes {
         })
 
         // 更新归档元数据
-        archives.put("/:id/metadata", { ctx =>
+        archives.put("/:id/metadata", audited("archive.metadata.update", { ctx =>
             ArchiveController.updateMetadata(ctx)
-        })
+        }, riskLevel: 3))
 
         // 获取归档文件列表
         archives.get("/:id/files", { ctx =>
@@ -49,46 +49,46 @@ public class ArchiveRoutes {
         })
 
         // 删除归档
-        archives.delete("/:id", { ctx =>
+        archives.delete("/:id", audited("archive.delete", { ctx =>
             ArchiveController.deleteArchive(ctx)
-        })
+        }, riskLevel: 2))
 
         // 设置归档的isNew标记
-        archives.put("/:id/isnew", { ctx =>
+        archives.put("/:id/isnew", audited("archive.isnew.set", { ctx =>
             ArchiveController.setIsNew(ctx)
-        })
+        }, riskLevel: 4))
 
         // 清除归档的isNew标记
-        archives.delete("/:id/isnew", { ctx =>
+        archives.delete("/:id/isnew", audited("archive.isnew.clear", { ctx =>
             ArchiveController.clearIsNew(ctx)
-        })
+        }, riskLevel: 4))
 
         // 更新阅读进度并自动标记为已读
-        archives.put("/:id/progress/:page", { ctx =>
+        archives.put("/:id/progress/:page", audited("archive.progress.update", { ctx =>
             ArchiveController.updateProgress(ctx)
-        })
+        }, riskLevel: 4))
 
         // 添加收藏
-        archives.put("/:id/favorite", { ctx =>
+        archives.put("/:id/favorite", audited("archive.favorite.add", { ctx =>
             ArchiveController.addFavorite(ctx)
-        })
+        }, riskLevel: 4))
 
         // 取消收藏
-        archives.delete("/:id/favorite", { ctx =>
+        archives.delete("/:id/favorite", audited("archive.favorite.remove", { ctx =>
             ArchiveController.removeFavorite(ctx)
-        })
+        }, riskLevel: 4))
 
         let protectedApi = router.group("/api")
         protectedApi.use(AuthMiddleware.requiredAuthMiddleware())
 
         // 从URL下载档案
-        protectedApi.post("/download_url", { ctx =>
+        protectedApi.post("/download_url", audited("archive.download_url.create", { ctx =>
             DownloadController.downloadFromUrl(ctx)
-        })
+        }, riskLevel: 2))
 
         // 执行元数据插件（进入TaskPool，返回job id）
-        protectedApi.post("/metadata_plugin", { ctx =>
+        protectedApi.post("/metadata_plugin", audited("archive.metadata_plugin.run", { ctx =>
             MetadataPluginController.runMetadataPlugin(ctx)
-        })
+        }, riskLevel: 2))
     }
 }

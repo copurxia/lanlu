@@ -34,22 +34,22 @@ private func registerTaskPoolRoutesAt(router: App, basePath: String) {
     })
 
     // 取消单个任务
-    taskpool.post("/:taskId/cancel", { ctx =>
+    taskpool.post("/:taskId/cancel", audited("taskpool.task.cancel", { ctx =>
         TaskPoolController.cancelTask(ctx)
-    })
+    }, riskLevel: 2))
 
     // 重试失败的任务
-    taskpool.post("/:taskId/retry", { ctx =>
+    taskpool.post("/:taskId/retry", audited("taskpool.task.retry", { ctx =>
         TaskPoolController.retryTask(ctx)
-    })
+    }, riskLevel: 2))
 
     // 响应运行中任务的 RPC 选择请求（用于 metadata preview 人工选择）
-    taskpool.post("/:taskId/rpc/select", { ctx =>
+    taskpool.post("/:taskId/rpc/select", audited("taskpool.task.rpc_select", { ctx =>
         TaskPoolController.respondRpcSelect(ctx)
-    })
+    }, riskLevel: 2))
 
     // 更新任务进度
-    taskpool.put("/:taskId/progress", { ctx =>
+    taskpool.put("/:taskId/progress", audited("taskpool.task.progress.update", { ctx =>
         TaskPoolController.updateTaskProgress(ctx)
-    })
+    }, riskLevel: 3))
 }

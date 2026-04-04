@@ -55,19 +55,19 @@ public func registerTagRoutes(router: App): Unit {
     })
 
     // 管理员接口：创建标签
-    adminTags.post("", { ctx =>
+    adminTags.post("", audited("tag.admin.create", { ctx =>
         TagController.adminCreate(ctx)
-    })
+    }, riskLevel: 2))
 
     // 管理员接口：更新标签
-    adminTags.put("/:id", { ctx =>
+    adminTags.put("/:id", audited("tag.admin.update", { ctx =>
         TagController.adminUpdate(ctx)
-    })
+    }, riskLevel: 2))
 
     // 管理员接口：删除标签
-    adminTags.delete("/:id", { ctx =>
+    adminTags.delete("/:id", audited("tag.admin.delete", { ctx =>
         TagController.adminDelete(ctx)
-    })
+    }, riskLevel: 2))
 
     // 管理员接口：导出标签
     adminTags.get("/export", { ctx =>
@@ -75,15 +75,15 @@ public func registerTagRoutes(router: App): Unit {
     })
 
     // 管理员接口：分片上传导入
-    adminTags.post("/import/init", { ctx =>
+    adminTags.post("/import/init", audited("tag.admin.import.init", { ctx =>
         TagController.adminImportInit(ctx)
-    })
+    }, riskLevel: 2))
 
-    adminTags.put("/import/chunk", { ctx =>
+    adminTags.put("/import/chunk", audited("tag.admin.import.chunk", { ctx =>
         TagController.adminImportUploadChunk(ctx)
-    })
+    }, riskLevel: 3))
 
-    adminTags.post("/import/complete", { ctx =>
+    adminTags.post("/import/complete", audited("tag.admin.import.complete", { ctx =>
         TagController.adminImportUploadComplete(ctx)
-    })
+    }, riskLevel: 2))
 }

@@ -13,8 +13,8 @@ public class RecommendationRoutes {
             RecommendationController.getRecommendations(ctx)
         })
 
-        recommendations.post("/interactions", { ctx =>
+        recommendations.post("/interactions", audited("recommendation.interaction.record", { ctx =>
             RecommendationController.recordInteraction(ctx)
-        })
+        }, riskLevel: 4))
     }
 }

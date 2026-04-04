@@ -75,14 +75,14 @@ private func registerSystemSettingsRoutesAt(router: App, basePath: String) {
     })
 
     // 更新单个设置
-    settings.put("", { ctx =>
+    settings.put("", audited("system.settings.update", { ctx =>
         SystemSettingsController.updateSetting(ctx)
-    })
+    }, riskLevel: 2))
 
     // 批量更新设置
-    settings.put("/batch", { ctx =>
+    settings.put("/batch", audited("system.settings.batch_update", { ctx =>
         SystemSettingsController.updateSettings(ctx)
-    })
+    }, riskLevel: 2))
 
     // 获取设置分类
     settings.get("/categories", { ctx =>
@@ -90,7 +90,7 @@ private func registerSystemSettingsRoutesAt(router: App, basePath: String) {
     })
 
     // 重新加载设置缓存
-    settings.post("/reload", { ctx =>
+    settings.post("/reload", audited("system.settings.reload", { ctx =>
         SystemSettingsController.reloadCache(ctx)
-    })
+    }, riskLevel: 2))
 }

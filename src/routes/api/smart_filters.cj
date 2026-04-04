@@ -30,27 +30,27 @@ public func registerSmartFilterRoutes(router: App) {
     })
 
     // 管理端：创建智能分类
-    adminSmartFilters.post("", { ctx =>
+    adminSmartFilters.post("", audited("smart_filter.admin.create", { ctx =>
         SmartFilterController.adminCreate(ctx)
-    })
+    }, riskLevel: 2))
 
     // 管理端：更新智能分类
-    adminSmartFilters.put("/:id", { ctx =>
+    adminSmartFilters.put("/:id", audited("smart_filter.admin.update", { ctx =>
         SmartFilterController.adminUpdate(ctx)
-    })
+    }, riskLevel: 2))
 
     // 管理端：删除智能分类
-    adminSmartFilters.delete("/:id", { ctx =>
+    adminSmartFilters.delete("/:id", audited("smart_filter.admin.delete", { ctx =>
         SmartFilterController.adminDelete(ctx)
-    })
+    }, riskLevel: 2))
 
     // 管理端：批量更新排序顺序
-    adminSmartFilters.post("/reorder", { ctx =>
+    adminSmartFilters.post("/reorder", audited("smart_filter.admin.reorder", { ctx =>
         SmartFilterController.adminReorder(ctx)
-    })
+    }, riskLevel: 3))
 
     // 管理端：切换启用状态
-    adminSmartFilters.post("/:id/toggle", { ctx =>
+    adminSmartFilters.post("/:id/toggle", audited("smart_filter.admin.toggle", { ctx =>
         SmartFilterController.adminToggle(ctx)
-    })
+    }, riskLevel: 3))
 }

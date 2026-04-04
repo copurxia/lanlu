@@ -82,12 +82,16 @@ public class AuthMiddleware {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
                 match (getUserIdByToken(tokenRaw)) {
-                    case Some(uid) => return Some(uid)
+                    case Some(uid) =>
+                        bindActor(ctx, uid)
+                        return Some(uid)
                     case None =>
                         match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                             case Some(decoded) =>
                                 match (getUserIdByToken(decoded)) {
-                                    case Some(uid2) => return Some(uid2)
+                                    case Some(uid2) =>
+                                        bindActor(ctx, uid2)
+                                        return Some(uid2)
                                     case None => ()
                                 }
                             case None => ()
@@ -106,12 +110,18 @@ public class AuthMiddleware {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
                 if (isValidUserToken(tokenRaw)) {
+                    if (let Some(uid) <- getUserIdByToken(tokenRaw)) {
+                        bindActor(ctx, uid)
+                    }
                     return true
                 }
                 // 兼容 LANraragi 文档：Bearer base64(token)
                 match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                     case Some(decoded) =>
                         if (isValidUserToken(decoded)) {
+                            if (let Some(uid2) <- getUserIdByToken(decoded)) {
+                                bindActor(ctx, uid2)
+                            }
                             return true
                         }
                     case None => ()
@@ -131,12 +141,16 @@ public class AuthMiddleware {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
                 match (getUserIdByToken(tokenRaw)) {
-                    case Some(uid) => return Some(uid)
+                    case Some(uid) =>
+                        bindActor(ctx, uid)
+                        return Some(uid)
                     case None =>
                         match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                             case Some(decoded) =>
                                 match (getUserIdByToken(decoded)) {
-                                    case Some(uid2) => return Some(uid2)
+                                    case Some(uid2) =>
+                                        bindActor(ctx, uid2)
+                                        return Some(uid2)
                                     case None => ()
                                 }
                             case None => ()
@@ -239,5 +253,9 @@ public class AuthMiddleware {
             tokenTouchThrottleSeconds
         )
         return true
+    }
+
+    private static func bindActor(ctx: Ctx, userId: Int64): Unit {
+        ctx.setLocal("actor", userId.toString())
     }
 }

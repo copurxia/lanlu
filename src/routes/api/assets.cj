@@ -26,16 +26,16 @@ public class AssetsRoutes {
             AssetController.getAsset(ctx)
         })
 
-        assets.post("/upload/init", withUser({ ctx, userId =>
+        assets.post("/upload/init", audited("asset.upload.init", withUser({ ctx, userId =>
             AssetUploadController.initUpload(ctx, userId)
-        }))
+        }), riskLevel: 2))
 
-        assets.put("/upload/chunk", { ctx =>
+        assets.put("/upload/chunk", audited("asset.upload.chunk", { ctx =>
             AssetUploadController.uploadChunk(ctx)
-        })
+        }, riskLevel: 3))
 
-        assets.delete("/upload/:taskId", { ctx =>
+        assets.delete("/upload/:taskId", audited("asset.upload.cancel", { ctx =>
             AssetUploadController.cancelUpload(ctx)
-        })
+        }, riskLevel: 3))
     }
 }

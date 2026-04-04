@@ -22,19 +22,19 @@ private func registerCronRoutesAt(router: App, basePath: String) {
     })
 
     // 启动CronService
-    cron.post("/start", { ctx =>
+    cron.post("/start", audited("cron.service.start", { ctx =>
         CronController.startService(ctx)
-    })
+    }, riskLevel: 2))
 
     // 停止CronService
-    cron.post("/stop", { ctx =>
+    cron.post("/stop", audited("cron.service.stop", { ctx =>
         CronController.stopService(ctx)
-    })
+    }, riskLevel: 2))
 
     // 验证Cron表达式
-    cron.post("/validate", { ctx =>
+    cron.post("/validate", audited("cron.expression.validate", { ctx =>
         CronController.validateExpression(ctx)
-    })
+    }, riskLevel: 4))
 
     // 获取可用的任务类型（与 TaskRunner 保持一致）
     cron.get("/task-types", { ctx =>
@@ -47,9 +47,9 @@ private func registerCronRoutesAt(router: App, basePath: String) {
     })
 
     // 创建定时任务
-    cron.post("/tasks", { ctx =>
+    cron.post("/tasks", audited("cron.task.create", { ctx =>
         CronController.createTask(ctx)
-    })
+    }, riskLevel: 2))
 
     // 获取单个定时任务
     cron.get("/tasks/:id", { ctx =>
@@ -57,27 +57,27 @@ private func registerCronRoutesAt(router: App, basePath: String) {
     })
 
     // 更新定时任务
-    cron.put("/tasks/:id", { ctx =>
+    cron.put("/tasks/:id", audited("cron.task.update", { ctx =>
         CronController.updateTask(ctx)
-    })
+    }, riskLevel: 2))
 
     // 删除定时任务
-    cron.delete("/tasks/:id", { ctx =>
+    cron.delete("/tasks/:id", audited("cron.task.delete", { ctx =>
         CronController.deleteTask(ctx)
-    })
+    }, riskLevel: 2))
 
     // 手动触发定时任务
-    cron.post("/tasks/:id/trigger", { ctx =>
+    cron.post("/tasks/:id/trigger", audited("cron.task.trigger", { ctx =>
         CronController.triggerTask(ctx)
-    })
+    }, riskLevel: 2))
 
     // 启用定时任务
-    cron.post("/tasks/:id/enable", { ctx =>
+    cron.post("/tasks/:id/enable", audited("cron.task.enable", { ctx =>
         CronController.enableTask(ctx)
-    })
+    }, riskLevel: 3))
 
     // 禁用定时任务
-    cron.post("/tasks/:id/disable", { ctx =>
+    cron.post("/tasks/:id/disable", audited("cron.task.disable", { ctx =>
         CronController.disableTask(ctx)
-    })
+    }, riskLevel: 3))
 }
