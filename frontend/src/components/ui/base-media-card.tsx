@@ -15,6 +15,7 @@ import { useBaseMediaCardController } from '@/hooks/use-base-media-card-controll
 import { useRecommendationTracker } from '@/hooks/use-recommendation-tracker'
 import { ArchiveService } from '@/lib/services/archive-service'
 import { buildReaderPath } from '@/lib/utils/reader'
+import { cn } from '@/lib/utils/utils'
 import { parseTags, stripNamespace } from '@/lib/utils/tag-utils'
 
 export type { BaseMediaCardProps } from '@/components/ui/base-media-card.types'
@@ -41,6 +42,7 @@ export function BaseMediaCard({
   hideMetaOnMobile = false,
   disableContentVisibility = false,
   coverHeight,
+  surfaceClassName,
   onFavoriteToggle,
   selectable = false,
   selectionMode = false,
@@ -213,7 +215,7 @@ export function BaseMediaCard({
         }}
         onContextMenu={handleContextMenu}
       >
-        <Card className="overflow-hidden bg-card/70 transition-shadow hover:shadow-lg dark:bg-card/70">
+        <Card className={cn('overflow-hidden bg-transparent transition-shadow hover:shadow-lg dark:bg-transparent', surfaceClassName)}>
           <div
             className="bg-muted relative"
             style={coverHeight != null ? { height: `${coverHeight}px` } : { aspectRatio: String(coverNaturalAspectRatio) }}
@@ -262,7 +264,7 @@ export function BaseMediaCard({
                 <button
                   type="button"
                   className={[
-                    'inline-flex h-7 w-7 items-center justify-center rounded-full border backdrop-blur-xs transition-colors',
+                    'inline-flex h-7 w-7 items-center justify-center rounded-full border transition-colors',
                     selected
                       ? 'bg-primary text-primary-foreground border-primary/60 shadow-xs'
                       : 'bg-black/50 text-white border-white/40 hover:bg-black/65',
@@ -299,7 +301,7 @@ export function BaseMediaCard({
               <Button
                 size="icon"
                 variant="secondary"
-                className="h-8 w-8 bg-white/15 text-white backdrop-blur-xs hover:bg-white/25"
+                className="h-8 w-8 bg-white/15 text-white hover:bg-white/25"
                 aria-label={detailsLabel || t('archive.details')}
                 title={detailsLabel || t('archive.details')}
                 onClick={navigateToDetails}
@@ -311,7 +313,7 @@ export function BaseMediaCard({
                 size="icon"
                 variant="secondary"
                 className={[
-                  'h-8 w-8 bg-white/15 text-white backdrop-blur-xs hover:bg-white/25',
+                  'h-8 w-8 bg-white/15 text-white hover:bg-white/25',
                   isFavorite ? 'text-red-400' : '',
                 ].filter(Boolean).join(' ')}
                 aria-label={isFavorite ? t('common.unfavorite') : t('common.favorite')}
@@ -342,12 +344,12 @@ export function BaseMediaCard({
                       ].join(' ')}
                     >
                       {hoverTags.map((tag) => (
-                        <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-xs">
+                        <span key={tag} className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white">
                           {stripNamespace(tag)}
                         </span>
                       ))}
                       {allTags.length > hoverTags.length && (
-                        <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white backdrop-blur-xs">
+                        <span className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white">
                           +{allTags.length - hoverTags.length}
                         </span>
                       )}

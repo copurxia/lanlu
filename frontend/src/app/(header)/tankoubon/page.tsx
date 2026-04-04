@@ -128,7 +128,7 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
 
   return (
     <div
-      className="relative rounded-lg border bg-card p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-xs"
+      className="relative rounded-lg border-none bg-transparent p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-xs"
       role="button"
       tabIndex={0}
       onClick={handleNavigateToReader}
@@ -1111,8 +1111,8 @@ function TankoubonDetailContent() {
       <main className="relative z-10 container mx-auto px-4 pt-6 pb-4 sm:pb-6 max-w-7xl">
         {/* Header / hero */}
         <div className="relative mb-8">
-          <div className="relative rounded-2xl border bg-card/70 backdrop-blur-sm dark:bg-card/70">
-            <div className="p-4 md:p-5">
+          <div className="relative rounded-2xl border-none bg-transparent shadow-none dark:bg-transparent">
+            <div className="p-0">
               {/* Mobile: keep hero clean; actions live in a bottom sheet. */}
               <div className="sm:hidden absolute right-4 top-4">
                 <Button
@@ -1128,14 +1128,14 @@ function TankoubonDetailContent() {
 
               <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div className="flex min-w-0 gap-4">
-                  <div className="relative h-44 w-32 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-48 sm:w-36 md:h-56 md:w-40 lg:h-60 lg:w-44">
+                  <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border-none bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
                     {coverUrl ? (
                       <Image
                         src={coverUrl}
                         alt={tankoubon.title || ''}
                         fill
                         className="object-cover"
-                        sizes="(max-width: 640px) 128px, (max-width: 768px) 144px, (max-width: 1024px) 160px, 176px"
+                        sizes="(max-width: 640px) 144px, (max-width: 768px) 160px, (max-width: 1024px) 176px, 192px"
                         unoptimized
                       />
                     ) : (
@@ -1176,6 +1176,37 @@ function TankoubonDetailContent() {
                     ) : null}
                   </div>
 
+                  <div className="hidden sm:inline-flex mt-4 w-fit flex-wrap items-center justify-start gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                      title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                      disabled={favoriteLoading}
+                      onClick={handleFavoriteClick}
+                    >
+                      <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0"
+                      title={t('common.edit')}
+                      onClick={() => setEditDialogOpen(true)}
+                    >
+                      <Edit className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-9 w-9 p-0 text-destructive"
+                      title={t('common.delete')}
+                      onClick={() => setDeleteDialogOpen(true)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+
                   {/* Desktop/tablet: show summary/tags in the right column; mobile shows them full width below. */}
                   <div className="hidden sm:block">
                     {tankoubon.description ? (
@@ -1194,7 +1225,7 @@ function TankoubonDetailContent() {
                 </div>
 
                 {/* Desktop/tablet actions; mobile actions are in the sheet. */}
-                <div className="hidden sm:flex shrink-0 flex-col items-end gap-3">
+                <div className="hidden">
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <Button
                       size="sm"
@@ -1363,7 +1394,7 @@ function TankoubonDetailContent() {
             <Spinner />
           </div>
         ) : archives.length === 0 ? (
-          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur-sm dark:bg-card/70">
+          <div className="text-center py-0 rounded-lg border-none bg-transparent shadow-none dark:bg-transparent">
             <p className="text-muted-foreground mb-4">{t('tankoubon.noArchives')}</p>
             <Button onClick={() => setAddArchiveDialogOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
@@ -1371,7 +1402,7 @@ function TankoubonDetailContent() {
             </Button>
           </div>
         ) : filteredArchives.length === 0 ? (
-          <div className="text-center py-12 rounded-lg border bg-card/70 backdrop-blur-sm dark:bg-card/70">
+          <div className="text-center py-0 rounded-lg border-none bg-transparent shadow-none dark:bg-transparent">
             <p className="text-muted-foreground mb-1">{t('tankoubon.noMatchingArchives')}</p>
             <Button variant="ghost" onClick={() => setArchiveFilter('')}>
               {t('common.reset')}
@@ -1392,6 +1423,7 @@ function TankoubonDetailContent() {
                       archive={archive}
                       index={index}
                       coverHeight={archiveGridCoverHeights[itemKey]}
+                      surfaceClassName="border-none shadow-none bg-transparent"
                       onCoverAspectRatioChange={(aspectRatio) => reportArchiveGridCoverAspectRatio(itemKey, aspectRatio)}
                     />
                     <Button
@@ -1433,7 +1465,7 @@ function TankoubonDetailContent() {
         )}
 
         {(relatedLoading || relatedTankoubons.length > 0) ? (
-          <section className="mt-8 rounded-2xl border bg-card/70 p-4 backdrop-blur-sm dark:bg-card/70 sm:p-5">
+          <section className="mt-8 rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent">
             <div className="mb-4">
               <h2 className="text-lg font-semibold">{t('tankoubon.relatedTitle')}</h2>
               <p className="text-sm text-muted-foreground">{t('tankoubon.relatedDescription')}</p>
@@ -1449,6 +1481,7 @@ function TankoubonDetailContent() {
                 scene="tankoubon_related"
                 seedEntityType="tankoubon"
                 seedEntityId={tankoubon.tankoubon_id}
+                cardSurfaceClassName="border-none shadow-none bg-transparent"
                 onOpenReader={(itemType, itemId) => {
                   void trackRelatedInteraction('open_reader', itemType, itemId);
                 }}

@@ -17,6 +17,7 @@ type RecommendationCardRowProps = {
   scene: RecommendationScene;
   seedEntityType?: RecommendationItemType;
   seedEntityId?: string;
+  cardSurfaceClassName?: string;
   onOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
   onOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
   onFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
@@ -28,6 +29,7 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
   scene,
   seedEntityType,
   seedEntityId,
+  cardSurfaceClassName,
   onOpenReader,
   onOpenDetails,
   onFavorite,
@@ -39,6 +41,7 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
   scene: RecommendationScene;
   seedEntityType?: RecommendationItemType;
   seedEntityId?: string;
+  cardSurfaceClassName?: string;
   onOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
   onOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
   onFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
@@ -53,6 +56,7 @@ const ArchiveRecommendationCard = memo(function ArchiveRecommendationCard({
         priority={index < 2}
         disableContentVisibility
         coverHeight={coverHeight}
+        surfaceClassName={cardSurfaceClassName}
         onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(`archive:${archive.arcid}`, aspectRatio)}
         recommendationContext={{
           scene,
@@ -73,6 +77,7 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
   scene,
   seedEntityType,
   seedEntityId,
+  cardSurfaceClassName,
   onOpenReader,
   onOpenDetails,
   onFavorite,
@@ -84,6 +89,7 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
   scene: RecommendationScene;
   seedEntityType?: RecommendationItemType;
   seedEntityId?: string;
+  cardSurfaceClassName?: string;
   onOpenReader?: (itemType: RecommendationItemType, itemId: string) => void;
   onOpenDetails?: (itemType: RecommendationItemType, itemId: string) => void;
   onFavorite?: (itemType: RecommendationItemType, itemId: string) => void;
@@ -97,6 +103,7 @@ const TankoubonRecommendationCard = memo(function TankoubonRecommendationCard({
         priority={index < 2}
         disableContentVisibility
         coverHeight={coverHeight}
+        surfaceClassName={cardSurfaceClassName}
         onCoverAspectRatioChange={(aspectRatio) => reportAspectRatio(`tankoubon:${tankoubon.tankoubon_id}`, aspectRatio)}
         recommendationContext={{
           scene,
@@ -116,6 +123,7 @@ export const RecommendationCardRow = memo(function RecommendationCardRow({
   scene,
   seedEntityType,
   seedEntityId,
+  cardSurfaceClassName,
   onOpenReader,
   onOpenDetails,
   onFavorite,
@@ -138,6 +146,7 @@ export const RecommendationCardRow = memo(function RecommendationCardRow({
             scene={scene}
             seedEntityType={seedEntityType}
             seedEntityId={seedEntityId}
+            cardSurfaceClassName={cardSurfaceClassName}
             onOpenReader={onOpenReader}
             onOpenDetails={onOpenDetails}
             onFavorite={onFavorite}
@@ -152,6 +161,7 @@ export const RecommendationCardRow = memo(function RecommendationCardRow({
             scene={scene}
             seedEntityType={seedEntityType}
             seedEntityId={seedEntityId}
+            cardSurfaceClassName={cardSurfaceClassName}
             onOpenReader={onOpenReader}
             onOpenDetails={onOpenDetails}
             onFavorite={onFavorite}

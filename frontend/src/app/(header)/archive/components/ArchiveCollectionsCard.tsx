@@ -45,6 +45,7 @@ function CollectionPreviewGrid({
               archive={archive}
               index={index}
               coverHeight={coverHeights[itemKey]}
+              surfaceClassName="border-none shadow-none bg-transparent"
               onCoverAspectRatioChange={(aspectRatio) => reportCoverAspectRatio(itemKey, aspectRatio)}
             />
           </div>
@@ -63,16 +64,16 @@ export function ArchiveCollectionsCard({
 }: Props) {
 
   return (
-    <Card className="bg-card/70 backdrop-blur-sm dark:bg-card/70">
-      <CardHeader className="pb-2">
+    <Card className="border-none bg-transparent shadow-none dark:bg-transparent">
+      <CardHeader className="!p-0">
         <CardTitle className="flex items-center text-base lg:text-lg">
           <FolderOpen className="w-4 h-4 mr-2" />
           {t('archive.collectionsTitle')}
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0 space-y-6">
+      <CardContent className="!p-0 space-y-6">
         {loading ? (
-          <div className="py-8 text-center text-muted-foreground">{t('common.loading')}</div>
+          <div className="py-0 text-center text-muted-foreground">{t('common.loading')}</div>
         ) : (
           tankoubons.map((tank) => {
             const archives = previewArchivesByTankoubonId[tank.tankoubon_id] || [];

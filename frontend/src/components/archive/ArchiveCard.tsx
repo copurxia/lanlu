@@ -10,6 +10,7 @@ interface ArchiveCardProps {
   priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
   disableContentVisibility?: boolean;
   coverHeight?: number;
+  surfaceClassName?: string;
   selectable?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
@@ -32,6 +33,7 @@ export function ArchiveCard({
   priority = false,
   disableContentVisibility = false,
   coverHeight,
+  surfaceClassName,
   selectable = false,
   selectionMode = false,
   selected = false,
@@ -66,6 +68,7 @@ export function ArchiveCard({
       priority={priority}
       disableContentVisibility={disableContentVisibility}
       coverHeight={coverHeight}
+      surfaceClassName={surfaceClassName}
       onFavoriteToggle={handleFavoriteToggle}
       selectable={selectable}
       selectionMode={selectionMode}

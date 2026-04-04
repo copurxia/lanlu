@@ -30,6 +30,7 @@ type MasonryThumbnailGridProps = {
   archiveId?: string;
   t: (key: string) => string;
   className?: string;
+  contentClassName?: string;
 };
 
 function getPageCustomTitle(page: PageInfo): string {
@@ -58,6 +59,7 @@ export function MasonryThumbnailGrid({
   archiveId,
   t,
   className = '',
+  contentClassName = CONTENT_PADDING_CLASS,
 }: MasonryThumbnailGridProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(0);
@@ -378,7 +380,7 @@ export function MasonryThumbnailGrid({
         className="overflow-y-auto h-full"
         onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
       >
-        <div className={CONTENT_PADDING_CLASS}>
+        <div className={contentClassName}>
           <div className="relative" style={{ height: `${gridLayout.totalHeight}px` }}>
             {visibleItems.map(renderThumbnailItem)}
           </div>

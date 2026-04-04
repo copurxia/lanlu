@@ -31,6 +31,7 @@ export interface BaseMediaCardProps {
   hideMetaOnMobile?: boolean
   disableContentVisibility?: boolean
   coverHeight?: number
+  surfaceClassName?: string
   onFavoriteToggle?: (id: string, isFavorite: boolean) => Promise<boolean>
   selectable?: boolean
   selectionMode?: boolean

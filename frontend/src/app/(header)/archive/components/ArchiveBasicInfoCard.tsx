@@ -12,14 +12,14 @@ type Props = {
 
 export function ArchiveBasicInfoCard({ metadata, t }: Props) {
   return (
-    <Card className="bg-card/70 backdrop-blur-sm dark:bg-card/70">
-      <CardHeader className="pb-2">
+    <Card className="border-none bg-transparent shadow-none dark:bg-transparent">
+      <CardHeader className="!p-0">
         <CardTitle className="flex items-center text-base lg:text-lg">
           <Info className="w-4 h-4 mr-2" />
           {t('archive.basicInfo')}
         </CardTitle>
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className="!p-0">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
           <div className="sm:col-span-2 flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.fileName')}</span>

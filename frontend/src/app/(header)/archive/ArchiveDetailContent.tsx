@@ -82,7 +82,7 @@ export function ArchiveDetailContent() {
     t,
   });
 
-  const [showPreview, setShowPreview] = useState(false);
+  const showPreview = true;
   const [relatedArchives, setRelatedArchives] = useState<Archive[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [metadataPluginPreviewPages, setMetadataPluginPreviewPages] = useState<MetadataPagePatchInput[]>([]);
@@ -711,11 +711,11 @@ export function ArchiveDetailContent() {
         <div className="space-y-6">
           {/* Header / hero (unified with Tankoubon page) */}
           <div className="relative">
-            <div className="relative rounded-2xl border bg-card/70 backdrop-blur-sm dark:bg-card/70">
-              <div className="p-4 md:p-5">
+            <div className="relative rounded-2xl border-none bg-transparent shadow-none dark:bg-transparent">
+              <div className="p-0">
                 <div className="flex flex-col gap-6 md:flex-row md:items-start md:justify-between">
                   <div className="flex min-w-0 gap-4">
-                    <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
+                    <div className="relative h-52 w-36 shrink-0 overflow-hidden rounded-xl border-none bg-muted sm:h-56 sm:w-40 md:h-64 md:w-44 lg:h-72 lg:w-48">
                       {coverAssetId ? (
                         <Image
                           src={`/api/assets/${coverAssetId}`}
@@ -763,14 +763,112 @@ export function ArchiveDetailContent() {
                         ) : null}
                       </div>
 
-                      {/* On mobile, summary/tags span full width below (to avoid an empty left column under the cover). */}
-                      <div className="hidden sm:block">
+                      {/* Desktop/tablet actions now sit above summary/tags. */}
+                      <div className="hidden sm:inline-flex mt-4 w-fit shrink-0 flex-col items-start gap-3">
+                        <div className="inline-flex flex-wrap items-center justify-start gap-2">
+                          <Link href={buildReaderPath(metadata.arcid, metadata.progress)}>
+                            <Button size="sm" variant="default" className="h-9">
+                              <BookOpen className="w-4 h-4 mr-2" />
+                              {t('archive.startReading')}
+                            </Button>
+                          </Link>
+
+                          <AddToTankoubonDialog
+                            archiveId={metadata.arcid}
+                            trigger={
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-9 w-9 p-0"
+                                title={t('tankoubon.addToCollection')}
+                              >
+                                <FolderPlus className="w-4 h-4" />
+                              </Button>
+                            }
+                          />
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
+                            title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+                            disabled={!isAuthenticated || favoriteLoading}
+                            onClick={handleFavoriteClick}
+                          >
+                            <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
+                          </Button>
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-9 w-9 p-0"
+                            title={t('archive.download')}
+                            onClick={() => {
+                              const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
+                              window.open(downloadUrl, '_blank');
+                            }}
+                          >
+                            <Download className="w-4 h-4" />
+                          </Button>
+
+                          {metadata.isnew ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-9 w-9 p-0"
+                              title={t('archive.markAsRead')}
+                              disabled={!isAuthenticated || isNewStatusLoading}
+                              onClick={handleMarkAsRead}
+                            >
+                              <CheckCircle className="w-4 h-4" />
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-9 w-9 p-0"
+                              title={t('archive.markAsNew')}
+                              disabled={!isAuthenticated || isNewStatusLoading}
+                              onClick={handleMarkAsNew}
+                            >
+                              <RotateCcw className="w-4 h-4" />
+                            </Button>
+                          )}
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-9 w-9 p-0"
+                            title={t('common.edit')}
+                            disabled={!isAuthenticated}
+                            onClick={openEditDialog}
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+
+                          {isAdmin ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-9 w-9 p-0 text-destructive"
+                            title={t('common.delete')}
+                              disabled={deleteLoading}
+                              onClick={handleDeleteArchive}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Summary/tags now follow the action row. */}
+                      <div className="hidden sm:block mt-4">
                         {metadata.description ? (
-                          <p className="mt-2 text-sm text-muted-foreground max-w-3xl line-clamp-3">
+                          <p className="text-sm text-muted-foreground max-w-3xl line-clamp-3">
                             {metadata.description}
                           </p>
                         ) : (
-                          <p className="mt-2 text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
+                          <p className="text-sm text-muted-foreground italic">{t('archive.noSummary')}</p>
                         )}
 
                         {tags.length > 0 ? (
@@ -799,107 +897,7 @@ export function ArchiveDetailContent() {
                     ) : null}
                   </div>
 
-                  {/* Desktop/tablet actions; mobile uses the bottom action bar */}
-                  <div className="hidden sm:flex shrink-0 flex-col items-end gap-3">
-                    <div className="flex flex-wrap items-center justify-end gap-2">
-                      <AddToTankoubonDialog
-                        archiveId={metadata.arcid}
-                        trigger={
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-9 w-9 p-0"
-                            title={t('tankoubon.addToCollection')}
-                          >
-                            <FolderPlus className="w-4 h-4" />
-                          </Button>
-                        }
-                      />
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className={`h-9 w-9 p-0 ${isFavorite ? 'text-red-500 border-red-500' : ''}`}
-                        title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-                        disabled={!isAuthenticated || favoriteLoading}
-                        onClick={handleFavoriteClick}
-                      >
-                        <Heart className={`w-4 h-4 ${isFavorite ? 'fill-current' : ''}`} />
-                      </Button>
-
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-9 w-9 p-0"
-                        title={t('archive.download')}
-                        onClick={() => {
-                          const downloadUrl = ArchiveService.getDownloadUrl(metadata.arcid);
-                          window.open(downloadUrl, '_blank');
-                        }}
-                      >
-                        <Download className="w-4 h-4" />
-                      </Button>
-
-                      {metadata.isnew ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-9 w-9 p-0"
-                          title={t('archive.markAsRead')}
-                          disabled={!isAuthenticated || isNewStatusLoading}
-                          onClick={handleMarkAsRead}
-                        >
-                          <CheckCircle className="w-4 h-4" />
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-9 w-9 p-0"
-                          title={t('archive.markAsNew')}
-                          disabled={!isAuthenticated || isNewStatusLoading}
-                          onClick={handleMarkAsNew}
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                        </Button>
-                      )}
-
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-9 w-9 p-0"
-                        title={t('common.edit')}
-                        disabled={!isAuthenticated}
-                        onClick={openEditDialog}
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-
-                      {isAdmin ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-9 w-9 p-0 text-destructive"
-                          title={t('common.delete')}
-                          disabled={deleteLoading}
-                          onClick={handleDeleteArchive}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      ) : null}
-
-                      <Link href={buildReaderPath(metadata.arcid, metadata.progress)}>
-                        <Button size="sm" variant="default" className="h-9">
-                          <BookOpen className="w-4 h-4 mr-2" />
-                          {t('archive.startReading')}
-                        </Button>
-                      </Link>
-                    </div>
-
-                  </div>
                 </div>
-
-
               </div>
             </div>
           </div>
@@ -953,15 +951,13 @@ export function ArchiveDetailContent() {
             />
           ) : null}
 
-          <ArchivePreviewCard
-            metadata={metadata}
-            t={t}
-            showPreview={showPreview}
-            setShowPreview={setShowPreview}
-            previewLoading={previewLoading}
-            previewError={previewError}
-            pages={pages}
-          />
+            <ArchivePreviewCard
+              metadata={metadata}
+              t={t}
+              previewLoading={previewLoading}
+              previewError={previewError}
+              pages={pages}
+            />
 
           {tankoubonsLoading || tankoubons.length > 0 ? (
             <ArchiveCollectionsCard
@@ -974,7 +970,7 @@ export function ArchiveDetailContent() {
           ) : null}
 
           {(relatedLoading || relatedArchives.length > 0) ? (
-            <section className="rounded-2xl border bg-card/70 p-4 backdrop-blur-sm dark:bg-card/70 sm:p-5">
+            <section className="rounded-2xl border-none bg-transparent p-0 shadow-none dark:bg-transparent">
               <div className="mb-4">
                 <h2 className="text-lg font-semibold">{t('archive.relatedTitle')}</h2>
                 <p className="text-sm text-muted-foreground">{t('archive.relatedDescription')}</p>
@@ -990,6 +986,7 @@ export function ArchiveDetailContent() {
                   scene="archive_related"
                   seedEntityType="archive"
                   seedEntityId={metadata.arcid}
+                  cardSurfaceClassName="border-none shadow-none bg-transparent"
                   onOpenReader={(itemType, itemId) => {
                     void trackRelatedInteraction('open_reader', itemType, itemId);
                   }}

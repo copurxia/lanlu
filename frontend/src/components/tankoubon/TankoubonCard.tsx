@@ -12,6 +12,7 @@ interface TankoubonCardProps {
   priority?: boolean;  // 优先加载图片（用于首屏 LCP 优化）
   disableContentVisibility?: boolean;
   coverHeight?: number;
+  surfaceClassName?: string;
   selectable?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
@@ -33,6 +34,7 @@ export function TankoubonCard({
   priority = false,
   disableContentVisibility = false,
   coverHeight,
+  surfaceClassName,
   selectable = false,
   selectionMode = false,
   selected = false,
@@ -68,6 +70,7 @@ export function TankoubonCard({
       priority={priority}
       disableContentVisibility={disableContentVisibility}
       coverHeight={coverHeight}
+      surfaceClassName={surfaceClassName}
       detailsLabel={t('common.details')}
       pagesLabel={t('tankoubon.totalPages').replace('{count}', String(tankoubon.pagecount || 0))}
       badge={
