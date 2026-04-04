@@ -3,6 +3,7 @@ package lanlu.infrastructure.middleware
 import ignite.*
 import ignite.middleware.*
 import ignite.governance.*
+import brotli_middleware.*
 import lanlu.shared.utils.*
 import lanlu.shared.views.*
 import std.time.{MonoTime, DateTime}
@@ -28,7 +29,10 @@ public func installObservabilityMiddleware(app: App): Unit {
         }
     )))
     app.use(httpAccessLogMiddleware())
-    app.use(lanluCompressMiddleware())
+    app.use(brotliMiddleware(
+        config: BrotliConfig(minBytes: 2048),
+        shouldSkip: { path => shouldSkipCompression(path) }
+    ))
 }
 
 public func audited(action: String, handler: Handler, riskLevel!: Int64 = 4): Handler {
@@ -60,17 +64,6 @@ private func httpAccessLogMiddleware(): Handler {
             ("latency_ms", "${latencyMs}"),
             ("ip", ctx.ip)
         )
-    }
-}
-
-private func lanluCompressMiddleware(): Handler {
-    let inner = compressMiddleware(config: CompressConfig(minBytes: 2048))
-    { ctx =>
-        if (shouldSkipCompression(ctx.path)) {
-            ctx.next()
-            return
-        }
-        inner(ctx)
     }
 }
 

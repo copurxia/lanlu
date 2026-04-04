@@ -30,7 +30,7 @@ jobs:
               build-essential clang ninja-build cmake binutils \
               xmake \
               pkg-config \
-              libarchive-dev libavif-dev \
+              libarchive-dev libavif-dev libbrotli-dev \
               libvips-dev libheif-dev librocksdb-dev
           else
             apt-get update
@@ -39,7 +39,7 @@ jobs:
               build-essential clang ninja-build cmake binutils \
               xmake \
               pkg-config \
-              libarchive-dev libavif-dev \
+              libarchive-dev libavif-dev brotli \
               libvips-dev libheif-dev librocksdb-dev
           fi
 

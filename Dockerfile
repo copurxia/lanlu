@@ -13,6 +13,7 @@ RUN set -eux; \
       imagemagick \
       libarchive13 \
       libavif16 \
+      libbrotli1 \
       libheif1 \
       libssl3 \
       librocksdb8.9 \
