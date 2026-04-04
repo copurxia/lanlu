@@ -35,7 +35,7 @@ public class InfoController {
 
             // DB extensions status (tracked list; can expand in the future).
             let installedExts = DatabaseMetaDao.getInstalledExtensions()
-            let trackedExts: Array<String> = ["pg_trgm"]
+            let trackedExts: Array<String> = ["pg_trgm", "unaccent"]
 
             let out = ByteBuffer()
             let w = JsonWriter(out)

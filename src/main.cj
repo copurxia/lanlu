@@ -79,6 +79,7 @@ main(): Int64 {
     MigrationRegistry.register(V016_DropTaskGroupKv())
     MigrationRegistry.register(V017_TaskpoolStateModel())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
+    ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()
     logger.debug("Application starting... step 9: database migrations completed")
     if (migrationsOk) {

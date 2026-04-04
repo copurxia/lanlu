@@ -90,6 +90,57 @@ public class TagDao {
     private static let translationSearchCacheNamespace = "tag_translation_search"
     private static let translationSearchCacheTtlSeconds: Int64 = 6 * 60 * 60
 
+    private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
+        let stmt = conn.prepareStatement("SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1")
+        try {
+            stmt.set(0, extensionName)
+            let rs = stmt.query()
+            try {
+                return rs.next()
+            } finally {
+                rs.close()
+            }
+        } catch (_: Exception) {
+            return false
+        } finally {
+            stmt.close()
+        }
+    }
+
+    private static func functionExists(conn: Connection, functionName: String): Bool {
+        let stmt = conn.prepareStatement("SELECT 1 FROM pg_proc WHERE proname = ? LIMIT 1")
+        try {
+            stmt.set(0, functionName)
+            let rs = stmt.query()
+            try {
+                return rs.next()
+            } finally {
+                rs.close()
+            }
+        } catch (_: Exception) {
+            return false
+        } finally {
+            stmt.close()
+        }
+    }
+
+    private static func getUnaccentFunction(conn: Connection): String {
+        if (functionExists(conn, "lanlu_immutable_unaccent")) {
+            return "lanlu_immutable_unaccent"
+        }
+        if (extensionInstalled(conn, "unaccent")) {
+            return "unaccent"
+        }
+        return ""
+    }
+
+    private static func wrapSearchExpr(expr: String, unaccentFunction: String): String {
+        if (unaccentFunction.size > 0) {
+            return "${unaccentFunction}(COALESCE(${expr}, ''))"
+        }
+        return "COALESCE(${expr}, '')"
+    }
+
     /**
      * 解析 namespace:name 格式的标签
      */
@@ -553,6 +604,7 @@ public class TagDao {
                 try {
                     var sql = "SELECT id, namespace, name, translations, links, icon_asset_id, background_asset_id, created_at, updated_at FROM tags WHERE 1=1"
                     var params: ArrayList<String> = ArrayList<String>()
+                    let unaccentFunction = getUnaccentFunction(conn)
 
                     match (namespace) {
                         case Some(ns) =>
@@ -564,7 +616,9 @@ public class TagDao {
                     match (query) {
                         case Some(q) =>
                             if (q.size > 0) {
-                                sql += " AND (name ILIKE ? OR translations::text ILIKE ?)"
+                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                                sql += " AND (" + wrapSearchExpr("name", unaccentFunction) + " ILIKE " + patternExpr +
+                                    " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
                                 let searchPattern = "%${q}%"
                                 params.add(searchPattern)
                                 params.add(searchPattern)
@@ -638,6 +692,7 @@ public class TagDao {
                         WHERE 1=1
                     """
                     var params: ArrayList<String> = ArrayList<String>()
+                    let unaccentFunction = getUnaccentFunction(conn)
 
                     // First param is lang for JSONB extraction.
                     params.add(effectiveLang)
@@ -652,7 +707,9 @@ public class TagDao {
                     match (query) {
                         case Some(q) =>
                             if (q.size > 0) {
-                                sql += " AND (name ILIKE ? OR translations::text ILIKE ?)"
+                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                                sql += " AND (" + wrapSearchExpr("name", unaccentFunction) + " ILIKE " + patternExpr +
+                                    " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
                                 let searchPattern = "%${q}%"
                                 params.add(searchPattern)
                                 params.add(searchPattern)
@@ -721,6 +778,7 @@ public class TagDao {
                 try {
                     var sql = "SELECT COUNT(*) FROM tags WHERE 1=1"
                     var params: ArrayList<String> = ArrayList<String>()
+                    let unaccentFunction = getUnaccentFunction(conn)
 
                     match (namespace) {
                         case Some(ns) =>
@@ -732,7 +790,9 @@ public class TagDao {
                     match (query) {
                         case Some(q) =>
                             if (q.size > 0) {
-                                sql += " AND (name ILIKE ? OR translations::text ILIKE ?)"
+                                let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                                sql += " AND (" + wrapSearchExpr("name", unaccentFunction) + " ILIKE " + patternExpr +
+                                    " OR " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + ")"
                                 let searchPattern = "%${q}%"
                                 params.add(searchPattern)
                                 params.add(searchPattern)
@@ -1459,9 +1519,11 @@ public class TagDao {
     private static func queryTagsByTranslationWithConn(conn: Connection, normalizedSearchTerm: String): ArrayList<String> {
         let result = ArrayList<String>()
         try {
+            let unaccentFunction = getUnaccentFunction(conn)
             // 使用 translations::text ILIKE 在 JSONB 文本中模糊搜索。
             // Add a LIMIT to cap worst-case work and response size (caller expands matches into OR tags LIKE ...).
-            let sql = "SELECT namespace, name FROM tags WHERE translations::text ILIKE ? LIMIT 200"
+            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+            let sql = "SELECT namespace, name FROM tags WHERE " + wrapSearchExpr("translations::text", unaccentFunction) + " ILIKE " + patternExpr + " LIMIT 200"
             let stmt = conn.prepareStatement(sql)
             try {
                 let pattern = "%" + normalizedSearchTerm + "%"
@@ -1624,49 +1686,49 @@ public class TagDao {
             case Some(conn) =>
                 
                 try {
+                    let unaccentFunction = getUnaccentFunction(conn)
+                    let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+                    let nameExpr = wrapSearchExpr("t.name", unaccentFunction)
+                    let fullNameExpr = wrapSearchExpr("CASE WHEN t.namespace != '' THEN t.namespace || ':' || t.name ELSE t.name END", unaccentFunction)
+                    let translationTextExpr = wrapSearchExpr("t.translations->?->>'text'", unaccentFunction)
+                    let translationsExpr = wrapSearchExpr("t.translations::text", unaccentFunction)
                     // 搜索标签名(namespace:name)和翻译文本。
                     // 默认只返回“已绑定档案”的标签，供全局搜索框等场景使用；
                     // 但编辑档案标签时需要可选到“未绑定任何档案”的标签，因此支持关闭该约束。
                     // 使用 JSONB 提取指定语言的翻译文本进行搜索。
                     // 优先级：1=name精确匹配, 2=name前缀匹配, 3=翻译精确匹配, 4=翻译前缀匹配, 5=模糊匹配
                     let sql = if (requireBound) {
-                        """
-                        SELECT DISTINCT t.namespace, t.name, t.translations,
-                               CASE
-                                   WHEN t.name ILIKE ? THEN 1
-                                   WHEN t.name ILIKE ? THEN 2
-                                   WHEN t.translations->?->>'text' ILIKE ? THEN 3
-                                   WHEN t.translations->?->>'text' ILIKE ? THEN 4
-                                   ELSE 5
-                               END as match_priority
-                        FROM tags t
-                        INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END
-                        INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'
-                        WHERE t.name ILIKE ?
-                           OR (t.namespace != '' AND t.namespace || ':' || t.name ILIKE ?)
-                           OR t.translations->?->>'text' ILIKE ?
-                           OR t.translations::text ILIKE ?
-                        ORDER BY match_priority, t.name
-                        LIMIT ?
-                        """
+                        "SELECT DISTINCT t.namespace, t.name, t.translations," +
+                        " CASE" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 1" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 2" +
+                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 3" +
+                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 4" +
+                        " ELSE 5 END as match_priority" +
+                        " FROM tags t" +
+                        " INNER JOIN metadata_tags mt ON mt.tag = CASE WHEN COALESCE(t.namespace, '') != '' THEN t.namespace || ':' || t.name ELSE t.name END" +
+                        " INNER JOIN metadata_objects mo ON mo.id = mt.metadata_id AND mo.entity_type = 'archive'" +
+                        " WHERE " + nameExpr + " ILIKE " + patternExpr +
+                        " OR " + fullNameExpr + " ILIKE " + patternExpr +
+                        " OR " + translationTextExpr + " ILIKE " + patternExpr +
+                        " OR " + translationsExpr + " ILIKE " + patternExpr +
+                        " ORDER BY match_priority, t.name" +
+                        " LIMIT ?"
                     } else {
-                        """
-                        SELECT DISTINCT t.namespace, t.name, t.translations,
-                               CASE
-                                   WHEN t.name ILIKE ? THEN 1
-                                   WHEN t.name ILIKE ? THEN 2
-                                   WHEN t.translations->?->>'text' ILIKE ? THEN 3
-                                   WHEN t.translations->?->>'text' ILIKE ? THEN 4
-                                   ELSE 5
-                               END as match_priority
-                        FROM tags t
-                        WHERE t.name ILIKE ?
-                           OR (t.namespace != '' AND t.namespace || ':' || t.name ILIKE ?)
-                           OR t.translations->?->>'text' ILIKE ?
-                           OR t.translations::text ILIKE ?
-                        ORDER BY match_priority, t.name
-                        LIMIT ?
-                        """
+                        "SELECT DISTINCT t.namespace, t.name, t.translations," +
+                        " CASE" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 1" +
+                        " WHEN " + nameExpr + " ILIKE " + patternExpr + " THEN 2" +
+                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 3" +
+                        " WHEN " + translationTextExpr + " ILIKE " + patternExpr + " THEN 4" +
+                        " ELSE 5 END as match_priority" +
+                        " FROM tags t" +
+                        " WHERE " + nameExpr + " ILIKE " + patternExpr +
+                        " OR " + fullNameExpr + " ILIKE " + patternExpr +
+                        " OR " + translationTextExpr + " ILIKE " + patternExpr +
+                        " OR " + translationsExpr + " ILIKE " + patternExpr +
+                        " ORDER BY match_priority, t.name" +
+                        " LIMIT ?"
                     }
                     let stmt = conn.prepareStatement(sql)
                     try {

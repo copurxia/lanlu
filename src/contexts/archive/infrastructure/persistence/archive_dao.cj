@@ -96,6 +96,74 @@ public class ArchiveMetadataBackfillRow {
  * 负责处理所有与归档相关的数据库操作
  */
 public class ArchiveDao {
+    private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
+        let stmt = conn.prepareStatement("SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1")
+        try {
+            stmt.set(0, extensionName)
+            let rs = stmt.query()
+            try {
+                return rs.next()
+            } finally {
+                rs.close()
+            }
+        } catch (_: Exception) {
+            return false
+        } finally {
+            stmt.close()
+        }
+    }
+
+    private static func functionExists(conn: Connection, functionName: String): Bool {
+        let stmt = conn.prepareStatement("SELECT 1 FROM pg_proc WHERE proname = ? LIMIT 1")
+        try {
+            stmt.set(0, functionName)
+            let rs = stmt.query()
+            try {
+                return rs.next()
+            } finally {
+                rs.close()
+            }
+        } catch (_: Exception) {
+            return false
+        } finally {
+            stmt.close()
+        }
+    }
+
+    private static func getUnaccentFunction(conn: Connection): String {
+        if (functionExists(conn, "lanlu_immutable_unaccent")) {
+            return "lanlu_immutable_unaccent"
+        }
+        if (extensionInstalled(conn, "unaccent")) {
+            return "unaccent"
+        }
+        return ""
+    }
+
+    private static func wrapSearchExpr(expr: String, unaccentFunction: String): String {
+        if (unaccentFunction.size > 0) {
+            return "${unaccentFunction}(COALESCE(${expr}, ''))"
+        }
+        return "COALESCE(${expr}, '')"
+    }
+
+    private static func buildArchiveTextMatchCondition(
+        pattern: String,
+        params: ArrayList<String>,
+        tableAlias: String,
+        unaccentFunction: String
+    ): String {
+        params.add(pattern)
+        params.add(pattern)
+        params.add(pattern)
+        let titleExpr = wrapSearchExpr("${tableAlias}.title", unaccentFunction)
+        let filenameExpr = wrapSearchExpr("${tableAlias}.filename", unaccentFunction)
+        let summaryExpr = wrapSearchExpr("${tableAlias}.summary", unaccentFunction)
+        let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+        return "(${titleExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${filenameExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} LIKE ${patternExpr} ESCAPE '\\' OR " +
+            buildTagLikeCondition(pattern, params, tableAlias, unaccentFunction)
+    }
+
     /**
      * 从搜索 token 中剥离 `$` 精确匹配后缀。
      * 约定：`xxx$` 表示对标签进行完全匹配（tag token 精确匹配）。
@@ -232,10 +300,17 @@ public class ArchiveDao {
      * 构建 tags 模糊匹配条件（结构化查询）。
      * 同时匹配 name 与 namespace:name 两种形式。
      */
-    private static func buildTagLikeCondition(pattern: String, params: ArrayList<String>, tableAlias: String): String {
+    private static func buildTagLikeCondition(pattern: String, params: ArrayList<String>, tableAlias: String, unaccentFunction: String): String {
         params.add(pattern)
         params.add(pattern)
-        return "EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = ${tableAlias}.arcid AND ((position(':' IN mt.tag) > 0 AND substring(mt.tag FROM position(':' IN mt.tag) + 1) LIKE ? ESCAPE '\\') OR mt.tag LIKE ? ESCAPE '\\'))"
+        let nameExpr = if (unaccentFunction.size > 0) {
+            "${unaccentFunction}(substring(mt.tag FROM position(':' IN mt.tag) + 1))"
+        } else {
+            "substring(mt.tag FROM position(':' IN mt.tag) + 1)"
+        }
+        let tagExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(mt.tag)" } else { "mt.tag" }
+        let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+        return "EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = ${tableAlias}.arcid AND ((position(':' IN mt.tag) > 0 AND ${nameExpr} LIKE ${patternExpr} ESCAPE '\\') OR ${tagExpr} LIKE ${patternExpr} ESCAPE '\\'))"
     }
 
     private static func ensureArchiveMetadataRoot(archiveId: String): Bool {
@@ -483,7 +558,7 @@ public class ArchiveDao {
      * @param filter 搜索词
      * @return 相关度评分表达式字符串
      */
-    private static func buildRelevanceExpr(filter: String, tablePrefix: String): String {
+    private static func buildRelevanceExpr(filter: String, tablePrefix: String, unaccentFunction: String): String {
         // 使用 SearchFilter 解析搜索语法
         let searchResult = SearchFilter.parse(filter)
 
@@ -504,9 +579,11 @@ public class ArchiveDao {
         var ilikeScoreExpr = "0"
         for (term in relevanceTerms) {
             let escapedTerm = term.replace("'", "''")
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + tablePrefix + "title ILIKE '%" + escapedTerm + "%' THEN 0.15 ELSE 0 END"
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + tablePrefix + "filename ILIKE '%" + escapedTerm + "%' THEN 0.1 ELSE 0 END"
-            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + tablePrefix + "tags ILIKE '%" + escapedTerm + "%' THEN 0.05 ELSE 0 END"
+            let pattern = "'%" + escapedTerm + "%'"
+            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(${pattern})" } else { pattern }
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + wrapSearchExpr(tablePrefix + "title", unaccentFunction) + " ILIKE " + patternExpr + " THEN 0.15 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + wrapSearchExpr(tablePrefix + "filename", unaccentFunction) + " ILIKE " + patternExpr + " THEN 0.1 ELSE 0 END"
+            ilikeScoreExpr = ilikeScoreExpr + " + CASE WHEN " + wrapSearchExpr(tablePrefix + "tags", unaccentFunction) + " ILIKE " + patternExpr + " THEN 0.05 ELSE 0 END"
         }
 
         // 构建用于全文搜索的查询字符串
@@ -556,6 +633,7 @@ public class ArchiveDao {
                 getLogger("archive_dao").info("搜索过滤器解析结果",
                     ("filter", filter),
                     ("terms", searchResult.terms.size.toString()))
+                let unaccentFunction = getUnaccentFunction(conn)
 
                 // 处理普通搜索词（支持通配符和翻译搜索）
                 if (searchResult.terms.size > 0) {
@@ -573,16 +651,12 @@ public class ArchiveDao {
                         }
 
                         let pattern = SearchFilter.toLikePattern(termValue)
-                        // 原有的字段匹配条件（tags 改为结构化查询）
-                        filterParams.add(pattern)
-                        filterParams.add(pattern)
-                        filterParams.add(pattern)
-                        var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archive_metadata_search")
+                        var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
 
                         // 查询翻译匹配的标签，添加 OR 条件
                         let translatedTags = TagDao.findTagsByTranslationWithConn(conn, termValue)
                         for (tagName in translatedTags) {
-                            fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search")
+                            fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
                         }
 
                         fieldCondition += ")"
@@ -615,15 +689,12 @@ public class ArchiveDao {
                         }
 
                         let pattern = SearchFilter.toLikePattern(phraseValue)
-                        filterParams.add(pattern)
-                        filterParams.add(pattern)
-                        filterParams.add(pattern)
-                        var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archive_metadata_search")
+                        var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
 
                         // 查询翻译匹配的标签
                         let translatedTags = TagDao.findTagsByTranslationWithConn(conn, phraseValue)
                         for (tagName in translatedTags) {
-                            fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search")
+                            fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
                         }
 
                         fieldCondition += ")"
@@ -646,15 +717,12 @@ public class ArchiveDao {
                         }
 
                         let pattern = SearchFilter.toLikePattern(excludeValue)
-                        filterParams.add(pattern)
-                        filterParams.add(pattern)
-                        filterParams.add(pattern)
-                        var fieldCondition = "(title LIKE ? ESCAPE '\\' OR filename LIKE ? ESCAPE '\\' OR summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archive_metadata_search")
+                        var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
 
                         // 查询翻译匹配的标签
                         let translatedTags = TagDao.findTagsByTranslationWithConn(conn, excludeValue)
                         for (tagName in translatedTags) {
-                            fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search")
+                            fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
                         }
 
                         fieldCondition += ")"
@@ -712,7 +780,7 @@ public class ArchiveDao {
 	                // 构建相关度评分表达式。
 	                // 优化：当存在 relevance 时，在 SQL 内部用 CTE 计算一次 relevance_score，
 	                // 然后复用于阈值过滤/排序，避免重复拼接/重复计算表达式。
-	                let relevanceExpr = buildRelevanceExpr(filter, "")
+	                let relevanceExpr = buildRelevanceExpr(filter, "", unaccentFunction)
 	                let hasRelevance = filter.size > 0 && relevanceExpr != "1"
 	                let minRelevanceThreshold = 0.05  // 最低相关度阈值
 
@@ -953,6 +1021,7 @@ public class ArchiveDao {
                     var whereConditions: ArrayList<String> = ArrayList<String>()
                     let searchResult = SearchFilter.parse(filter)
                     var filterParams: ArrayList<String> = ArrayList<String>()
+                    let unaccentFunction = getUnaccentFunction(conn)
 
                     // 处理普通搜索词（支持通配符和翻译搜索）
                     if (searchResult.terms.size > 0) {
@@ -968,14 +1037,11 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(termValue)
-                            filterParams.add(pattern)
-                            filterParams.add(pattern)
-                            filterParams.add(pattern)
-                            var fieldCondition = "(archive_metadata_search.title LIKE ? ESCAPE '\\' OR archive_metadata_search.filename LIKE ? ESCAPE '\\' OR archive_metadata_search.summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archive_metadata_search")
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
 
                             let translatedTags = TagDao.findTagsByTranslationWithConn(conn, termValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search")
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -1004,14 +1070,11 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(phraseValue)
-                            filterParams.add(pattern)
-                            filterParams.add(pattern)
-                            filterParams.add(pattern)
-                            var fieldCondition = "(archive_metadata_search.title LIKE ? ESCAPE '\\' OR archive_metadata_search.filename LIKE ? ESCAPE '\\' OR archive_metadata_search.summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archive_metadata_search")
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
 
                             let translatedTags = TagDao.findTagsByTranslationWithConn(conn, phraseValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search")
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -1032,14 +1095,11 @@ public class ArchiveDao {
                             }
 
                             let pattern = SearchFilter.toLikePattern(excludeValue)
-                            filterParams.add(pattern)
-                            filterParams.add(pattern)
-                            filterParams.add(pattern)
-                            var fieldCondition = "(archive_metadata_search.title LIKE ? ESCAPE '\\' OR archive_metadata_search.filename LIKE ? ESCAPE '\\' OR archive_metadata_search.summary LIKE ? ESCAPE '\\' OR " + buildTagLikeCondition(pattern, filterParams, "archive_metadata_search")
+                            var fieldCondition = buildArchiveTextMatchCondition(pattern, filterParams, "archive_metadata_search", unaccentFunction)
 
                             let translatedTags = TagDao.findTagsByTranslationWithConn(conn, excludeValue)
                             for (tagName in translatedTags) {
-                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search")
+                                fieldCondition += " OR " + buildTagLikeCondition("%" + tagName + "%", filterParams, "archive_metadata_search", unaccentFunction)
                             }
 
                             fieldCondition += ")"
@@ -1081,7 +1141,7 @@ public class ArchiveDao {
 	                        filterParams.add(dateTo + " 23:59:59")
 	                    }
 
-                    let relevanceExpr = buildRelevanceExpr(filter, "archive_metadata_search.")
+                    let relevanceExpr = buildRelevanceExpr(filter, "archive_metadata_search.", unaccentFunction)
                     let minRelevanceThreshold = 0.05
 
                     var whereClause = ""
