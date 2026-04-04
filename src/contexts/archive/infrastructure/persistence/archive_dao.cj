@@ -4,6 +4,7 @@ import std.database.sql.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import lanlu.shared.utils.SearchFilter
+import lanlu.infrastructure.kv.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
 import std.collection.*
@@ -96,6 +97,50 @@ public class ArchiveMetadataBackfillRow {
  * 负责处理所有与归档相关的数据库操作
  */
 public class ArchiveDao {
+    private static let logger = getLogger("archive_dao")
+    private static let archiveAssetsRawCacheTtlSeconds: Int64 = 7 * 24 * 60 * 60
+
+    private static func normalizeUniqueIds(ids: Array<String>): Array<String> {
+        return DerivedCacheUtils.normalizeUniqueIds(ids)
+    }
+
+    private static func buildArchiveAssetsRawCacheKey(version: Int64, archiveId: String): String {
+        return "v${version.toString()}:a${archiveId}"
+    }
+
+    private static func readArchiveAssetsRawCache(cacheKey: String): Option<String> {
+        let cacheNamespace = DerivedCacheUtils.getArchiveAssetsRawPayloadNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
+            case Some(payload) =>
+                let normalized = payload.trimAscii()
+                return Some(if (normalized.size > 0) { normalized } else { "{}" })
+            case None => return None
+        }
+    }
+
+    private static func writeArchiveAssetsRawCache(cacheKey: String, raw: String): Unit {
+        let cacheNamespace = DerivedCacheUtils.getArchiveAssetsRawPayloadNamespace()
+        let payload = raw.trimAscii()
+        let _ = PersistentCacheService.set(
+            cacheNamespace,
+            cacheKey,
+            if (payload.size > 0) { payload } else { "{}" },
+            archiveAssetsRawCacheTtlSeconds
+        )
+    }
+
+    private static func invalidateTankoubonAggregatedContent(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion(reason)
+    }
+
+    private static func invalidateTankoubonChildren(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpTankoubonChildrenVersion(reason)
+    }
+
+    private static func invalidateArchiveAssetsRaw(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpArchiveAssetsRawVersion(reason)
+    }
+
     private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
         let stmt = conn.prepareStatement("SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1")
         try {
@@ -1401,12 +1446,12 @@ public class ArchiveDao {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("获取归档Tankoubon映射失败", ("error", e.message))
+                    logger.error("获取归档Tankoubon映射失败", ("error", e.message))
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
         }
 
         return mapping
@@ -1433,7 +1478,7 @@ public class ArchiveDao {
                         stmt.set(6, archive.archive_type)
                         stmt.set(7, archive.category_id)
                         stmt.update()
-                        return MetadataDao.upsertRootMetadataObject(
+                        let ok = MetadataDao.upsertRootMetadataObject(
                             "archive",
                             archive.id,
                             archive.title,
@@ -1443,17 +1488,21 @@ public class ArchiveDao {
                             createdAt: archive.created_at,
                             updatedAt: archive.updated_at
                         )
+                        if (ok) {
+                            invalidateTankoubonAggregatedContent("archiveCreate:${archive.id}")
+                        }
+                        return ok
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("创建归档失败", ("error", e.message))
+                    logger.error("创建归档失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -1494,19 +1543,20 @@ public class ArchiveDao {
                         stmt.close()
                     }
                     if (!MetadataDao.upsertRootMetadataObject("archive", archiveId, title, "")) {
-                        getLogger("archive_dao").error("归档 metadata root 写入失败", ("archive_id", archiveId))
+                        logger.error("归档 metadata root 写入失败", ("archive_id", archiveId))
                         return false
                     }
-                    getLogger("archive_dao").info("归档记录插入成功", ("archive_id", archiveId))
+                    invalidateTankoubonAggregatedContent("archiveInsert:${archiveId}")
+                    logger.info("归档记录插入成功", ("archive_id", archiveId))
                     return true
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("插入语句执行失败", ("error", e.message))
+                    logger.error("插入语句执行失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("Failed to connect to database")
+                logger.error("Failed to connect to database")
                 return false
         }
     }
@@ -1532,7 +1582,7 @@ public class ArchiveDao {
                         stmt.set(6, archive.category_id)
                         stmt.set(7, archive.id)
                         stmt.update()
-                        return MetadataDao.upsertRootMetadataObject(
+                        let ok = MetadataDao.upsertRootMetadataObject(
                             "archive",
                             archive.id,
                             archive.title,
@@ -1542,17 +1592,21 @@ public class ArchiveDao {
                             createdAt: archive.created_at,
                             updatedAt: archive.updated_at
                         )
+                        if (ok) {
+                            invalidateTankoubonAggregatedContent("archiveUpdate:${archive.id}")
+                        }
+                        return ok
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("更新归档失败", ("error", e.message))
+                    logger.error("更新归档失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -1570,18 +1624,20 @@ public class ArchiveDao {
                     try {
                         stmt.set(0, id)
                         stmt.update()
+                        invalidateTankoubonAggregatedContent("archiveDelete:${id}")
+                        invalidateTankoubonChildren("archiveDelete:${id}")
                         return true  // 简化实现，假设更新成功
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("删除归档失败", ("error", e.message))
+                    logger.error("删除归档失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -1600,18 +1656,19 @@ public class ArchiveDao {
                         stmt.set(0, pageCount)
                         stmt.set(1, archiveId)
                         stmt.update()
+                        invalidateTankoubonAggregatedContent("updatePageCount:${archiveId}")
                         return true
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("更新归档页数失败", ("error", e.message))
+                    logger.error("更新归档页数失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -1635,13 +1692,13 @@ public class ArchiveDao {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("更新归档缩略图hash失败", ("error", e.message))
+                    logger.error("更新归档缩略图hash失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -1661,18 +1718,19 @@ public class ArchiveDao {
                         stmt.set(1, thumbHash)
                         stmt.set(2, archiveId)
                         stmt.update()
+                        invalidateTankoubonAggregatedContent("updateArchiveDetails:${archiveId}")
                         return true
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("更新归档详情失败", ("error", e.message))
+                    logger.error("更新归档详情失败", ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -2051,26 +2109,41 @@ public class ArchiveDao {
         let result = HashMap<String, String>()
         if (archiveIds.size == 0) { return result }
 
+        let normalizedIds = normalizeUniqueIds(archiveIds)
         let deduped = ArrayList<String>()
-        let seen = HashMap<String, Bool>()
-        for (archiveId in archiveIds) {
-            let id = archiveId.trimAscii()
-            if (id.size == 0) { continue }
-            match (seen.get(id)) {
-                case Some(_) => ()
-                case None =>
-                    seen[id] = true
-                    deduped.add(id)
-            }
+        for (archiveId in normalizedIds) {
+            deduped.add(archiveId)
         }
         if (deduped.size == 0) { return result }
+
+        let cacheVersion = DerivedCacheUtils.getArchiveAssetsRawVersion()
+        let misses = ArrayList<String>()
+        var hitCount = 0
+        for (archiveId in normalizedIds) {
+            let cacheKey = buildArchiveAssetsRawCacheKey(cacheVersion, archiveId)
+            match (readArchiveAssetsRawCache(cacheKey)) {
+                case Some(cached) =>
+                    result[archiveId] = cached
+                    hitCount += 1
+                case None =>
+                    misses.add(archiveId)
+            }
+        }
+
+        if (misses.size == 0) {
+            logger.debug("archive assets raw cache hit",
+                ("requested", normalizedIds.size.toString()),
+                ("hits", hitCount.toString()),
+                ("misses", "0"))
+            return result
+        }
 
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
                     var inClause = ""
-                    for (i in 0..deduped.size) {
+                    for (i in 0..misses.size) {
                         if (i > 0) { inClause += "," }
                         inClause += "?"
                     }
@@ -2091,8 +2164,8 @@ public class ArchiveDao {
                     """
                     let stmt = conn.prepareStatement(sql)
                     try {
-                        for (i in 0..deduped.size) {
-                            stmt.set(i, deduped[i])
+                        for (i in 0..misses.size) {
+                            stmt.set(i, misses[i])
                         }
                         let rs = stmt.query()
                         try {
@@ -2100,7 +2173,10 @@ public class ArchiveDao {
                                 let arcid = (rs.getOrNull<String>(0) ?? "").trimAscii()
                                 let raw = (rs.getOrNull<String>(1) ?? "").trimAscii()
                                 if (arcid.size == 0) { continue }
-                                result[arcid] = if (raw.size > 0) { raw } else { "{}" }
+                                let normalizedRaw = if (raw.size > 0) { raw } else { "{}" }
+                                result[arcid] = normalizedRaw
+                                let cacheKey = buildArchiveAssetsRawCacheKey(cacheVersion, arcid)
+                                writeArchiveAssetsRawCache(cacheKey, normalizedRaw)
                             }
                         } finally {
                             rs.close()
@@ -2108,13 +2184,29 @@ public class ArchiveDao {
                     } finally {
                         stmt.close()
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    logger.error("批量获取归档 assets JSON 失败", ("error", e.message))
                     return result
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None => ()
         }
+
+        for (archiveId in misses) {
+            match (result.get(archiveId)) {
+                case Some(_) => ()
+                case None =>
+                    result[archiveId] = "{}"
+                    let cacheKey = buildArchiveAssetsRawCacheKey(cacheVersion, archiveId)
+                    writeArchiveAssetsRawCache(cacheKey, "{}")
+            }
+        }
+
+        logger.debug("archive assets raw cache lookup",
+            ("requested", normalizedIds.size.toString()),
+            ("hits", hitCount.toString()),
+            ("misses", misses.size.toString()))
 
         return result
     }
@@ -2175,18 +2267,19 @@ public class ArchiveDao {
                         stmt.set(1, payload)
                         stmt.update()
                         let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
+                        invalidateArchiveAssetsRaw("updateArchiveAssetsRaw:${archiveId}")
                         return true
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("archive_dao").error("更新归档 assets JSON 失败", ("arcid", archiveId), ("error", e.message))
+                    logger.error("更新归档 assets JSON 失败", ("arcid", archiveId), ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("archive_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
                 return false
         }
     }
@@ -2202,6 +2295,7 @@ public class ArchiveDao {
             return false
         }
         let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
+        invalidateArchiveAssetsRaw("updateCoverAssetId:${archiveId}")
         return true
     }
 
@@ -2220,6 +2314,7 @@ public class ArchiveDao {
             return false
         }
         let _ = MetadataDao.touchRootMetadataObject("archive", archiveId)
+        invalidateArchiveAssetsRaw("updateArchiveAssetIdByKey:${archiveId}:${key}")
         return true
     }
 

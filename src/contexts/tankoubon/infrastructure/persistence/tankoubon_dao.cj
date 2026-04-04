@@ -3,8 +3,11 @@ package lanlu.contexts.tankoubon.infrastructure.persistence
 import std.database.sql.*
 import lanlu.shared.config.*
 import std.collection.*
+import std.io.{ByteBuffer, readToEnd}
 import stdx.log.*
+import stdx.encoding.json.stream.*
 import std.time.*
+import lanlu.infrastructure.kv.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
@@ -49,11 +52,196 @@ public class TankoubonAggregatedData {
     public var archive_count: Int32 = 0  // 归档数量
 }
 
+private class TankoubonAggregatedDataCacheCodec {
+    public static func encode(data: TankoubonAggregatedData): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("tankoubon_id").writeValue(data.tankoubon_id)
+        w.writeName("name").writeValue(data.name)
+        w.writeName("summary").writeValue(data.summary)
+        w.writeName("release_at").writeValue(data.release_at)
+        w.writeName("created_at").writeValue(data.created_at)
+        w.writeName("updated_at").writeValue(data.updated_at)
+        w.writeName("cover_asset_id").writeValue(data.cover_asset_id)
+        w.writeName("assets_raw").writeValue(data.assets_raw)
+        w.writeName("tags").writeValue(data.tags)
+        w.writeName("pagecount").writeValue(data.pagecount)
+        w.writeName("progress").writeValue(data.progress)
+        w.writeName("last_read_time").writeValue(data.last_read_time)
+        w.writeName("isnew").writeValue(data.isnew)
+        w.writeName("archive_count").writeValue(data.archive_count)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    public static func decode(payload: String): Option<TankoubonAggregatedData> {
+        let trimmed = payload.trimAscii()
+        if (trimmed.size == 0) {
+            return None
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let reader = JsonReader(buf)
+            if (reader.peek() != Some(BeginObject)) {
+                return None
+            }
+
+            let data = TankoubonAggregatedData()
+            reader.startObject()
+            while (reader.peek() != EndObject) {
+                let name = reader.readName()
+                match (name) {
+                    case "tankoubon_id" => data.tankoubon_id = reader.readValue<String>()
+                    case "name" => data.name = reader.readValue<String>()
+                    case "summary" => data.summary = reader.readValue<String>()
+                    case "release_at" => data.release_at = reader.readValue<String>()
+                    case "created_at" => data.created_at = reader.readValue<String>()
+                    case "updated_at" => data.updated_at = reader.readValue<String>()
+                    case "cover_asset_id" => data.cover_asset_id = reader.readValue<Int64>()
+                    case "assets_raw" => data.assets_raw = reader.readValue<String>()
+                    case "tags" => data.tags = reader.readValue<String>()
+                    case "pagecount" => data.pagecount = reader.readValue<Int32>()
+                    case "progress" => data.progress = reader.readValue<Int32>()
+                    case "last_read_time" => data.last_read_time = reader.readValue<String>()
+                    case "isnew" => data.isnew = reader.readValue<Bool>()
+                    case "archive_count" => data.archive_count = reader.readValue<Int32>()
+                    case _ => reader.skip()
+                }
+            }
+            reader.endObject()
+            if (data.assets_raw.trimAscii().size == 0) {
+                data.assets_raw = "{}"
+            }
+            return Some(data)
+        } catch (_: Exception) {
+            return None
+        }
+    }
+}
+
+private class StringArrayCacheCodec {
+    public static func encode(items: Array<String>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startArray()
+        for (item in items) {
+            w.writeValue(item)
+        }
+        w.endArray()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    public static func decode(payload: String): Option<Array<String>> {
+        let trimmed = payload.trimAscii()
+        if (trimmed.size == 0) {
+            return None
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let reader = JsonReader(buf)
+            if (reader.peek() != Some(BeginArray)) {
+                return None
+            }
+
+            let items = ArrayList<String>()
+            reader.startArray()
+            while (reader.peek() != EndArray) {
+                items.add(reader.readValue<String>())
+            }
+            reader.endArray()
+            return Some(items.toArray())
+        } catch (_: Exception) {
+            return None
+        }
+    }
+}
+
 /**
  * Tankoubon数据访问对象 (DAO)
  * 负责处理所有与Tankoubon相关的数据库操作
  */
 public class TankoubonDao {
+    private static let logger = getLogger("tankoubon_dao")
+    private static let aggregatedMetadataCacheTtlSeconds: Int64 = 7 * 24 * 60 * 60
+    private static let childrenCacheTtlSeconds: Int64 = 7 * 24 * 60 * 60
+
+    private static func normalizeUniqueIds(ids: Array<String>): Array<String> {
+        return DerivedCacheUtils.normalizeUniqueIds(ids)
+    }
+
+    private static func buildAggregatedMetadataCacheKey(contentVersion: Int64, userVersion: Int64, userId: Int64, tankoubonId: String): String {
+        return "cv${contentVersion.toString()}:uv${userVersion.toString()}:u${userId.toString()}:t${tankoubonId}"
+    }
+
+    private static func buildChildrenCacheKey(version: Int64, tankoubonId: String): String {
+        return "v${version.toString()}:t${tankoubonId}"
+    }
+
+    private static func readAggregatedMetadataCache(cacheKey: String): Option<TankoubonAggregatedData> {
+        let cacheNamespace = DerivedCacheUtils.getTankoubonAggregatedPayloadNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
+            case Some(payload) =>
+                match (TankoubonAggregatedDataCacheCodec.decode(payload)) {
+                    case Some(data) => return Some(data)
+                    case None =>
+                        let _ = PersistentCacheService.delete(cacheNamespace, cacheKey)
+                        logger.warn("tankoubon aggregated metadata cache payload decode failed; evicted key", ("key", cacheKey))
+                        return None
+                }
+            case None => return None
+        }
+    }
+
+    private static func writeAggregatedMetadataCache(cacheKey: String, data: TankoubonAggregatedData): Unit {
+        let cacheNamespace = DerivedCacheUtils.getTankoubonAggregatedPayloadNamespace()
+        let _ = PersistentCacheService.set(
+            cacheNamespace,
+            cacheKey,
+            TankoubonAggregatedDataCacheCodec.encode(data),
+            aggregatedMetadataCacheTtlSeconds
+        )
+    }
+
+    private static func readChildrenCache(cacheKey: String): Option<Array<String>> {
+        let cacheNamespace = DerivedCacheUtils.getTankoubonChildrenPayloadNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
+            case Some(payload) =>
+                match (StringArrayCacheCodec.decode(payload)) {
+                    case Some(items) => return Some(items)
+                    case None =>
+                        let _ = PersistentCacheService.delete(cacheNamespace, cacheKey)
+                        logger.warn("tankoubon children cache payload decode failed; evicted key", ("key", cacheKey))
+                        return None
+                }
+            case None => return None
+        }
+    }
+
+    private static func writeChildrenCache(cacheKey: String, items: Array<String>): Unit {
+        let cacheNamespace = DerivedCacheUtils.getTankoubonChildrenPayloadNamespace()
+        let _ = PersistentCacheService.set(
+            cacheNamespace,
+            cacheKey,
+            StringArrayCacheCodec.encode(items),
+            childrenCacheTtlSeconds
+        )
+    }
+
+    private static func invalidateTankoubonAggregatedContent(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion(reason)
+    }
+
+    private static func invalidateTankoubonChildren(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpTankoubonChildrenVersion(reason)
+    }
+
     /**
      * 解析 namespace:name 格式标签；无命名空间时 namespace 为空字符串。
      */
@@ -352,16 +540,17 @@ public class TankoubonDao {
                         stmt.set(0, tankoubonId)
                         stmt.update()
                         if (!MetadataDao.upsertRootMetadataObject("tankoubon", tankoubonId, name, "")) {
-                            getLogger("tankoubon_dao").error("创建Tankoubon metadata失败", ("tankoubonId", tankoubonId))
+                            logger.error("创建Tankoubon metadata失败", ("tankoubonId", tankoubonId))
                             return ""
                         }
-                        getLogger("tankoubon_dao").info("创建Tankoubon成功", ("tankoubonId", tankoubonId), ("name", name))
+                        invalidateTankoubonAggregatedContent("createTankoubon:${tankoubonId}")
+                        logger.info("创建Tankoubon成功", ("tankoubonId", tankoubonId), ("name", name))
                         return tankoubonId
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("tankoubon_dao").error("创建Tankoubon失败", ("name", name), ("error", e.message))
+                    logger.error("创建Tankoubon失败", ("name", name), ("error", e.message))
                     return ""
                 } finally {
                     try { conn.close() } catch (closeException: Exception) {}
@@ -377,10 +566,11 @@ public class TankoubonDao {
      */
     public static func updateTankoubon(tankoubonId: String, name: String, summary: String): Bool {
         if (!MetadataDao.upsertRootMetadataObject("tankoubon", tankoubonId, name, summary)) {
-            getLogger("tankoubon_dao").error("更新Tankoubon metadata失败", ("tankoubonId", tankoubonId))
+            logger.error("更新Tankoubon metadata失败", ("tankoubonId", tankoubonId))
             return false
         }
-        getLogger("tankoubon_dao").info("更新Tankoubon成功", ("tankoubonId", tankoubonId))
+        invalidateTankoubonAggregatedContent("updateTankoubon:${tankoubonId}")
+        logger.info("更新Tankoubon成功", ("tankoubonId", tankoubonId))
         return true
     }
 
@@ -397,7 +587,9 @@ public class TankoubonDao {
                     try {
                         stmt.set(0, tankoubonId)
                         stmt.update()
-                        getLogger("tankoubon_dao").info("删除Tankoubon成功", ("tankoubonId", tankoubonId))
+                        invalidateTankoubonAggregatedContent("deleteTankoubon:${tankoubonId}")
+                        invalidateTankoubonChildren("deleteTankoubon:${tankoubonId}")
+                        logger.info("删除Tankoubon成功", ("tankoubonId", tankoubonId))
                         return true
                     } finally {
                         stmt.close()
@@ -458,7 +650,9 @@ public class TankoubonDao {
                             insertStmt.set(4, archiveInternalId)
                             insertStmt.update()
                         }
-                        getLogger("tankoubon_dao").info("添加归档到Tankoubon成功",
+                        invalidateTankoubonAggregatedContent("addArchiveToTankoubon:${tankoubonId}")
+                        invalidateTankoubonChildren("addArchiveToTankoubon:${tankoubonId}")
+                        logger.info("添加归档到Tankoubon成功",
                             ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
                         return true
                     } finally {
@@ -501,7 +695,9 @@ public class TankoubonDao {
                         stmt.set(0, tankoubonInternalId)
                         stmt.set(1, archiveInternalId)
                         stmt.update()
-                        getLogger("tankoubon_dao").info("从Tankoubon移除归档成功",
+                        invalidateTankoubonAggregatedContent("removeArchiveFromTankoubon:${tankoubonId}")
+                        invalidateTankoubonChildren("removeArchiveFromTankoubon:${tankoubonId}")
+                        logger.info("从Tankoubon移除归档成功",
                             ("tankoubonId", tankoubonId), ("archiveArcid", archiveArcid))
                         return true
                     } finally {
@@ -567,6 +763,8 @@ public class TankoubonDao {
                         stmt.set(3, tankInternalId)
                         stmt.set(4, archiveInternalId)
                         stmt.update()
+                        invalidateTankoubonAggregatedContent("addArchiveToTankoubonAppend:${tankoubonId}")
+                        invalidateTankoubonChildren("addArchiveToTankoubonAppend:${tankoubonId}")
                         return true
                     } finally {
                         stmt.close()
@@ -628,9 +826,10 @@ public class TankoubonDao {
                         ins.set(2, rel)
                         ins.update()
                         if (!MetadataDao.upsertRootMetadataObject("tankoubon", tid, name, "")) {
-                            getLogger("tankoubon_dao").error("auto-created Tankoubon metadata root 写入失败", ("tankoubonId", tid))
+                            logger.error("auto-created Tankoubon metadata root 写入失败", ("tankoubonId", tid))
                             return ""
                         }
+                        invalidateTankoubonAggregatedContent("getOrCreateAutoTankoubon:${tid}")
                         return tid
                     } finally { ins.close() }
                 } catch (e: Exception) {
@@ -674,6 +873,7 @@ public class TankoubonDao {
             return false
         }
         let _ = touchTankoubonUpdatedAt(tankoubonId)
+        invalidateTankoubonAggregatedContent("updateTankoubonCover:${tankoubonId}")
         return true
     }
 
@@ -733,6 +933,7 @@ public class TankoubonDao {
                         stmt.set(1, payload)
                         stmt.update()
                         let _ = touchTankoubonUpdatedAt(tankoubonId)
+                        invalidateTankoubonAggregatedContent("updateTankoubonAssetsRaw:${tankoubonId}")
                         return true
                     } finally {
                         stmt.close()
@@ -761,6 +962,7 @@ public class TankoubonDao {
             return false
         }
         let _ = touchTankoubonUpdatedAt(tankoubonId)
+        invalidateTankoubonAggregatedContent("updateTankoubonAssetIdByKey:${tankoubonId}:${key}")
         return true
     }
 
@@ -784,6 +986,7 @@ public class TankoubonDao {
         }
 
         let _ = touchTankoubonUpdatedAt(normalizedId)
+        invalidateTankoubonAggregatedContent("updateTankoubonTags:${normalizedId}")
         return true
     }
 
@@ -1330,6 +1533,35 @@ public class TankoubonDao {
             return result
         }
 
+        let orderedIds = normalizeUniqueIds(tankoubonIds)
+        if (orderedIds.size == 0) {
+            return result
+        }
+
+        let contentVersion = DerivedCacheUtils.getTankoubonAggregatedContentVersion()
+        let userVersion = DerivedCacheUtils.getTankoubonAggregatedUserVersion(userId)
+        let misses = ArrayList<String>()
+        var hitCount = 0
+        for (tankoubonId in orderedIds) {
+            let cacheKey = buildAggregatedMetadataCacheKey(contentVersion, userVersion, userId, tankoubonId)
+            match (readAggregatedMetadataCache(cacheKey)) {
+                case Some(cached) =>
+                    result[tankoubonId] = cached
+                    hitCount += 1
+                case None =>
+                    misses.add(tankoubonId)
+            }
+        }
+
+        if (misses.size == 0) {
+            logger.debug("tankoubon aggregated metadata cache hit",
+                ("requested", orderedIds.size.toString()),
+                ("hits", hitCount.toString()),
+                ("misses", "0"),
+                ("userId", userId.toString()))
+            return result
+        }
+
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
@@ -1337,7 +1569,7 @@ public class TankoubonDao {
                 try {
                     // 构建 IN 子句的占位符
                     var placeholders = ""
-                    for (i in 0..tankoubonIds.size) {
+                    for (i in 0..misses.size) {
                         if (i > 0) { placeholders += "," }
                         placeholders += "?"
                     }
@@ -1383,8 +1615,8 @@ public class TankoubonDao {
                     """)
                     try {
                         stmt.set(0, userId)
-                        for (i in 0..tankoubonIds.size) {
-                            stmt.set(i + 1, tankoubonIds[i])
+                        for (i in 0..misses.size) {
+                            stmt.set(i + 1, misses[i])
                         }
 
                         // 临时存储，用于后续获取标签
@@ -1415,8 +1647,9 @@ public class TankoubonDao {
                         }
 
                         // 批量获取 tankoubon 自身标签和归档标签并合并
-                        let tankoubonTagsMap = getBatchTankoubonTagsForTankoubons(conn, tankoubonIds)
-                        let archiveTagsMap = getBatchArchiveTagsForTankoubons(conn, tankoubonIds)
+                        let missingIds = misses.toArray()
+                        let tankoubonTagsMap = getBatchTankoubonTagsForTankoubons(conn, missingIds)
+                        let archiveTagsMap = getBatchArchiveTagsForTankoubons(conn, missingIds)
                         for ((tid, data) in tempData) {
                             var tankoubonTags = ""
                             var archiveTags = ""
@@ -1430,18 +1663,25 @@ public class TankoubonDao {
                             }
                             data.tags = mergeTags(tankoubonTags, archiveTags)
                             result[tid] = data
+                            let cacheKey = buildAggregatedMetadataCacheKey(contentVersion, userVersion, userId, tid)
+                            writeAggregatedMetadataCache(cacheKey, data)
                         }
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("tankoubon_dao").error("批量获取Tankoubon聚合元数据失败", ("error", e.message))
+                    logger.error("批量获取Tankoubon聚合元数据失败", ("error", e.message))
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("tankoubon_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
         }
+        logger.debug("tankoubon aggregated metadata cache lookup",
+            ("requested", orderedIds.size.toString()),
+            ("hits", hitCount.toString()),
+            ("misses", misses.size.toString()),
+            ("userId", userId.toString()))
         return result
     }
 
@@ -1454,13 +1694,40 @@ public class TankoubonDao {
             return result
         }
 
+        let orderedIds = normalizeUniqueIds(tankoubonIds)
+        if (orderedIds.size == 0) {
+            return result
+        }
+
+        let cacheVersion = DerivedCacheUtils.getTankoubonChildrenVersion()
+        let misses = ArrayList<String>()
+        var hitCount = 0
+        for (tankoubonId in orderedIds) {
+            let cacheKey = buildChildrenCacheKey(cacheVersion, tankoubonId)
+            match (readChildrenCache(cacheKey)) {
+                case Some(cached) =>
+                    result[tankoubonId] = cached
+                    hitCount += 1
+                case None =>
+                    misses.add(tankoubonId)
+            }
+        }
+
+        if (misses.size == 0) {
+            logger.debug("tankoubon children cache hit",
+                ("requested", orderedIds.size.toString()),
+                ("hits", hitCount.toString()),
+                ("misses", "0"))
+            return result
+        }
+
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 
                 try {
                     var placeholders = ""
-                    for (i in 0..tankoubonIds.size) {
+                    for (i in 0..misses.size) {
                         if (i > 0) { placeholders += "," }
                         placeholders += "?"
                     }
@@ -1474,8 +1741,8 @@ public class TankoubonDao {
                         ORDER BY t.tankoubon_id, ta.sort_order, ta.id
                     """)
                     try {
-                        for (i in 0..tankoubonIds.size) {
-                            stmt.set(i, tankoubonIds[i])
+                        for (i in 0..misses.size) {
+                            stmt.set(i, misses[i])
                         }
                         let rs = stmt.query()
                         try {
@@ -1494,7 +1761,10 @@ public class TankoubonDao {
                                 }
                             }
                             for ((tid, list) in tempMap) {
-                                result[tid] = list.toArray()
+                                let children = list.toArray()
+                                result[tid] = children
+                                let cacheKey = buildChildrenCacheKey(cacheVersion, tid)
+                                writeChildrenCache(cacheKey, children)
                             }
                         } finally {
                             rs.close()
@@ -1503,13 +1773,26 @@ public class TankoubonDao {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    getLogger("tankoubon_dao").error("批量获取Tankoubon归档列表失败", ("error", e.message))
+                    logger.error("批量获取Tankoubon归档列表失败", ("error", e.message))
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                getLogger("tankoubon_dao").error("无法连接到数据库")
+                logger.error("无法连接到数据库")
         }
+        for (tankoubonId in misses) {
+            match (result.get(tankoubonId)) {
+                case Some(_) => ()
+                case None =>
+                    result[tankoubonId] = Array<String>()
+                    let cacheKey = buildChildrenCacheKey(cacheVersion, tankoubonId)
+                    writeChildrenCache(cacheKey, Array<String>())
+            }
+        }
+        logger.debug("tankoubon children cache lookup",
+            ("requested", orderedIds.size.toString()),
+            ("hits", hitCount.toString()),
+            ("misses", misses.size.toString()))
         return result
     }
 }

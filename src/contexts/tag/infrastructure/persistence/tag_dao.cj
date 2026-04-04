@@ -87,7 +87,6 @@ public class TagLiteData {
  */
 public class TagDao {
     private static let logger = getLogger("tag_dao")
-    private static let translationSearchCacheNamespace = "tag_translation_search"
     private static let translationSearchCacheTtlSeconds: Int64 = 6 * 60 * 60
 
     private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
@@ -409,6 +408,7 @@ public class TagDao {
                         } finally {
                             touchStmt.close()
                         }
+                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("updateArchiveTags:${archiveId}")
                         return true
                     }
 
@@ -453,6 +453,7 @@ public class TagDao {
                     } finally {
                         touchStmt.close()
                     }
+                    let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("updateArchiveTags:${archiveId}")
                     true
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("Error updating archive tags", ("error", e.message))
@@ -1427,12 +1428,20 @@ public class TagDao {
             return result
         }
 
-        let cacheVersion = PersistentCacheService.getNamespaceVersion(translationSearchCacheNamespace)
+        let cacheVersion = DerivedCacheUtils.getTagTranslationSearchVersion()
         let cacheKey = buildTranslationSearchCacheKey(cacheVersion, normalizedSearchTerm)
         match (readTranslationSearchCache(cacheKey)) {
-            case Some(cached) => return cached
+            case Some(cached) =>
+                logger.debug("tag translation search cache hit",
+                    ("searchTerm", normalizedSearchTerm),
+                    ("version", cacheVersion.toString()),
+                    ("resultCount", cached.size.toString()))
+                return cached
             case None => ()
         }
+        logger.debug("tag translation search cache miss",
+            ("searchTerm", normalizedSearchTerm),
+            ("version", cacheVersion.toString()))
 
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
@@ -1440,6 +1449,10 @@ public class TagDao {
                 try {
                     let queried = queryTagsByTranslationWithConn(conn, normalizedSearchTerm)
                     writeTranslationSearchCache(cacheKey, queried)
+                    logger.debug("tag translation search cache store",
+                        ("searchTerm", normalizedSearchTerm),
+                        ("version", cacheVersion.toString()),
+                        ("resultCount", queried.size.toString()))
                     return queried
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", normalizedSearchTerm))
@@ -1463,20 +1476,35 @@ public class TagDao {
             return result
         }
 
-        let cacheVersion = PersistentCacheService.getNamespaceVersion(translationSearchCacheNamespace)
+        let cacheVersion = DerivedCacheUtils.getTagTranslationSearchVersion()
         let cacheKey = buildTranslationSearchCacheKey(cacheVersion, normalizedSearchTerm)
         match (readTranslationSearchCache(cacheKey)) {
-            case Some(cached) => return cached
+            case Some(cached) =>
+                logger.debug("tag translation search cache hit",
+                    ("searchTerm", normalizedSearchTerm),
+                    ("version", cacheVersion.toString()),
+                    ("resultCount", cached.size.toString()),
+                    ("withConn", "true"))
+                return cached
             case None => ()
         }
+        logger.debug("tag translation search cache miss",
+            ("searchTerm", normalizedSearchTerm),
+            ("version", cacheVersion.toString()),
+            ("withConn", "true"))
 
         let queried = queryTagsByTranslationWithConn(conn, normalizedSearchTerm)
         writeTranslationSearchCache(cacheKey, queried)
+        logger.debug("tag translation search cache store",
+            ("searchTerm", normalizedSearchTerm),
+            ("version", cacheVersion.toString()),
+            ("resultCount", queried.size.toString()),
+            ("withConn", "true"))
         return queried
     }
 
     public static func bumpTranslationSearchCacheVersion(): Int64 {
-        return PersistentCacheService.bumpNamespaceVersion(translationSearchCacheNamespace)
+        return DerivedCacheUtils.bumpTagTranslationSearchVersion("tag_dao")
     }
 
     private static func invalidateTranslationSearchCache(): Unit {
@@ -1485,7 +1513,17 @@ public class TagDao {
     }
 
     private static func normalizeTranslationSearchTerm(searchTerm: String): String {
-        return searchTerm.trimAscii().toAsciiLower()
+        var normalized = searchTerm
+            .replace("　", " ")
+            .replace("\t", " ")
+            .replace("\r", " ")
+            .replace("\n", " ")
+            .trimAscii()
+            .toAsciiLower()
+        if (normalized.size == 0) {
+            return ""
+        }
+        return String.join(normalized.split(" ", removeEmpty: true), delimiter: " ")
     }
 
     private static func buildTranslationSearchCacheKey(version: Int64, normalizedSearchTerm: String): String {
@@ -1493,12 +1531,13 @@ public class TagDao {
     }
 
     private static func readTranslationSearchCache(cacheKey: String): Option<ArrayList<String>> {
-        match (PersistentCacheService.get(translationSearchCacheNamespace, cacheKey)) {
+        let cacheNamespace = DerivedCacheUtils.getTagTranslationSearchNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
             case Some(payload) =>
                 match (decodeCachedTranslationSearchResult(payload)) {
                     case Some(cached) => return Some(cached)
                     case None =>
-                        let _ = PersistentCacheService.delete(translationSearchCacheNamespace, cacheKey)
+                        let _ = PersistentCacheService.delete(cacheNamespace, cacheKey)
                         logger.warn("tag translation search cache payload decode failed; evicted key", ("key", cacheKey))
                         return None
                 }
@@ -1507,9 +1546,10 @@ public class TagDao {
     }
 
     private static func writeTranslationSearchCache(cacheKey: String, result: ArrayList<String>): Unit {
+        let cacheNamespace = DerivedCacheUtils.getTagTranslationSearchNamespace()
         let payload = encodeCachedTranslationSearchResult(result.toArray())
         let _ = PersistentCacheService.set(
-            translationSearchCacheNamespace,
+            cacheNamespace,
             cacheKey,
             payload,
             translationSearchCacheTtlSeconds

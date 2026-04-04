@@ -4,6 +4,7 @@ import std.database.sql.*
 import stdx.log.*
 import std.collection.*
 import lanlu.shared.config.*
+import lanlu.infrastructure.kv.*
 import lanlu.contexts.archive.infrastructure.persistence.ArchiveData
 import lanlu.contexts.archive.infrastructure.persistence.ArchiveDataMappers
 import lanlu.shared.utils.*
@@ -54,6 +55,7 @@ public class UserArchiveStatusDao {
                             insertStmt.set(3, archiveId)
                             insertStmt.update()
                         }
+                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "setIsNew:${archiveId.toString()}")
                         return true
                     } finally {
                         updateStmt.close()
@@ -104,6 +106,7 @@ public class UserArchiveStatusDao {
                             insertStmt.set(3, archiveId)
                             insertStmt.update()
                         }
+                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "clearIsNew:${archiveId.toString()}")
                         return true
                     } finally {
                         updateStmt.close()
@@ -162,6 +165,7 @@ public class UserArchiveStatusDao {
                             insertStmt.set(4, archiveId)
                             insertStmt.update()
                         }
+                        let _ = DerivedCacheUtils.bumpTankoubonAggregatedUserVersion(userId, "updateProgress:${archiveId.toString()}")
                         return true
                     } finally {
                         updateStmt.close()
