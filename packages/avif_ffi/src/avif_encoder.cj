@@ -63,31 +63,18 @@ public class AvifEncoder {
             // Tune for "thumbnail-like" speed. Defaults can be extremely slow depending on codec.
             // We keep quality reasonable and prioritize runtime determinism for server-side tasks.
             try {
-                let e0 = encoder.read()
-                let tuned = avifEncoder(
-                    e0.codecChoice,
-                    1,          // maxThreads
-                    8,          // speed (0=slowest, 10=fastest)
-                    e0.keyframeInterval,
-                    e0.timescale,
-                    e0.repetitionCount,
-                    e0.extraLayerCount,
-                    60,         // quality
-                    60,         // qualityAlpha
-                    e0.minQuantizer,
-                    e0.maxQuantizer,
-                    e0.minQuantizerAlpha,
-                    e0.maxQuantizerAlpha,
-                    e0.tileRowsLog2,
-                    e0.tileColsLog2,
-                    e0.autoTiling,
-                    e0.scalingMode,
-                    e0.ioStats,
-                    e0.diag,
-                    e0.data,
-                    e0.csOptions
-                )
-                encoder.write(tuned)
+                unsafe {
+                    // 直接通过指针偏移写入需要调优的字段，避免 read/write 整个 ~350 字节的 avifEncoder 结构体
+                    let base = CPointer<Int32>(CPointer<Unit>(encoder))
+                    // maxThreads: offset 4 bytes = 1 Int32
+                    (base + 1).write(1i32)
+                    // speed: offset 8 bytes = 2 Int32s
+                    (base + 2).write(8i32)
+                    // quality: offset 32 bytes = 8 Int32s
+                    (base + 8).write(60i32)
+                    // qualityAlpha: offset 36 bytes = 9 Int32s
+                    (base + 9).write(60i32)
+                }
             } catch (_: Exception) {
                 // Best-effort: if this fails, fall back to libavif defaults.
             }
@@ -149,12 +136,17 @@ public class AvifEncoder {
             }
 
             var bytes = Array<UInt8>(outSize, repeat: 0u8)
-            let base = view.data
-            for (i in 0..outSize) {
-                bytes[i] = (base + i).read()
+            try {
+                let handle = acquireArrayRawData(bytes)
+                let src = view.data
+                let dst = handle.pointer
+                for (i in 0..outSize) {
+                    (dst + i).write(src.read(i))
+                }
+                releaseArrayRawData(handle)
+            } finally {
+                avifRWDataFree(CPointer<avifRWData>(inout out))
             }
-
-            avifRWDataFree(CPointer<avifRWData>(inout out))
 
             // Ensure parent directory exists.
             try {

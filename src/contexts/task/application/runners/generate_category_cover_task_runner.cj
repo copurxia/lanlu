@@ -125,11 +125,7 @@ public class GenerateCategoryCoverTaskRunner {
     }
 
     private static func copyPixels(src: Array<UInt8>): Array<UInt8> {
-        var copied = Array<UInt8>(src.size, repeat: 0u8)
-        for (i in 0..Int64(src.size)) {
-            copied[i] = src[i]
-        }
-        return copied
+        return src.clone()
     }
 
     private static func blendOver(

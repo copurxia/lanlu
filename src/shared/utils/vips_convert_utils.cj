@@ -197,12 +197,25 @@ public class VipsConvertUtils {
             VipsApi.free(mem)
             return (false, Array<UInt8>(), 0i32, 0i32, "libvips rgba buffer size mismatch: ${n} != ${expected}")
         }
-
-        var pixels = Array<UInt8>(n, repeat: 0u8)
-        for (i in 0..n) {
-            pixels[i] = unsafe { (CPointer<UInt8>(mem) + i).read() }
+        let maxPixelBytes: Int64 = 64 * 1024 * 1024
+        if (n > maxPixelBytes) {
+            VipsApi.free(mem)
+            return (false, Array<UInt8>(), 0i32, 0i32, "libvips image too large: ${n} bytes exceeds ${maxPixelBytes} limit")
         }
-        VipsApi.free(mem)
+        var pixels = Array<UInt8>(n, repeat: 0u8)
+        try {
+            unsafe {
+                let handle = acquireArrayRawData(pixels)
+                let src = CPointer<UInt8>(mem)
+                let dst = handle.pointer
+                for (i in 0..n) {
+                    (dst + i).write(src.read(i))
+                }
+                releaseArrayRawData(handle)
+            }
+        } finally {
+            VipsApi.free(mem)
+        }
 
         return (true, pixels, w, h, "")
     }

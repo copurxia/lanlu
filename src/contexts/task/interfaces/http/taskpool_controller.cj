@@ -153,54 +153,63 @@ public class TaskPoolController {
         var revision = eventHub.currentRevision(taskId)
 
         while (true) {
-            let task = loadTaskForStreaming(taskId)
-            if (task.id == 0) {
-                sse.sendEvent("{\"error\":\"Task not found\"}", event: "error", id: "${eventId}")
-                return
-            }
-
-            // v2 stream payload: send bounded tail + delta to reduce client-side update cost.
-            let logTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
-            let stableRevision = eventHub.currentRevision(taskId)
-            if (stableRevision != revision) {
-                revision = stableRevision
-                continue
-            }
-            let logDelta = computeLogDelta(lastLogTail, logTail)
-            let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1, if (eventId == 1) { "snapshot" } else { "task_changed" })
-            if (eventId == 1 || payload != lastPayload) {
-                let eventName = if (eventId == 1) { "snapshot" } else { "task" }
-                sse.sendEvent(payload, event: eventName, id: "${eventId}")
-                lastPayload = payload
-                lastLogTail = logTail
-                eventId += 1
-            }
-
-            if (isTerminalStatus(task.status)) {
-                sse.sendEvent(payload, event: "done", id: "${eventId}")
-                return
-            }
-
-            let waitResult = eventHub.awaitNext(taskId, revision, taskStreamPingMillis)
-            revision = waitResult.revision
-            if (!waitResult.changed) {
-                sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
-                eventId += 1
-            } else {
-                let updatedTask = loadTaskForStreaming(taskId)
-                if (updatedTask.id == 0) {
+            try {
+                let task = loadTaskForStreaming(taskId)
+                if (task.id == 0) {
                     sse.sendEvent("{\"error\":\"Task not found\"}", event: "error", id: "${eventId}")
                     return
                 }
-                let updatedLogTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
-                let updatedLogDelta = computeLogDelta(lastLogTail, updatedLogTail)
-                let eventPayload = buildTaskStreamData(updatedTask, updatedLogTail, updatedLogDelta, false, waitResult.eventType)
-                if (eventPayload != lastPayload) {
-                    sse.sendEvent(eventPayload, event: "task", id: "${eventId}")
-                    lastPayload = eventPayload
-                    lastLogTail = updatedLogTail
+
+                // v2 stream payload: send bounded tail + delta to reduce client-side update cost.
+                let logTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+                let stableRevision = eventHub.currentRevision(taskId)
+                if (stableRevision != revision) {
+                    revision = stableRevision
+                    continue
+                }
+                let logDelta = computeLogDelta(lastLogTail, logTail)
+                let payload = buildTaskStreamData(task, logTail, logDelta, eventId == 1, if (eventId == 1) { "snapshot" } else { "task_changed" })
+                if (eventId == 1 || payload != lastPayload) {
+                    let eventName = if (eventId == 1) { "snapshot" } else { "task" }
+                    sse.sendEvent(payload, event: eventName, id: "${eventId}")
+                    lastPayload = payload
+                    lastLogTail = logTail
                     eventId += 1
                 }
+
+                if (isTerminalStatus(task.status)) {
+                    sse.sendEvent(payload, event: "done", id: "${eventId}")
+                    return
+                }
+
+                let waitResult = eventHub.awaitNext(taskId, revision, taskStreamPingMillis)
+                revision = waitResult.revision
+                if (!waitResult.changed) {
+                    sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
+                    eventId += 1
+                } else {
+                    let updatedTask = loadTaskForStreaming(taskId)
+                    if (updatedTask.id == 0) {
+                        sse.sendEvent("{\"error\":\"Task not found\"}", event: "error", id: "${eventId}")
+                        return
+                    }
+                    let updatedLogTail = TaskIO.readLog(taskId, maxBytes: taskStreamLogMaxBytes)
+                    let updatedLogDelta = computeLogDelta(lastLogTail, updatedLogTail)
+                    let eventPayload = buildTaskStreamData(updatedTask, updatedLogTail, updatedLogDelta, false, waitResult.eventType)
+                    if (eventPayload != lastPayload) {
+                        sse.sendEvent(eventPayload, event: "task", id: "${eventId}")
+                        lastPayload = eventPayload
+                        lastLogTail = updatedLogTail
+                        eventId += 1
+                    }
+                }
+            } catch (e: Exception) {
+                getLogger("taskpool_stream").debug(
+                    "SSE stream closed",
+                    ("task_id", taskId.toString()),
+                    ("reason", e.message)
+                )
+                break
             }
         }
     }
