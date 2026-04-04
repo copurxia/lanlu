@@ -13,7 +13,7 @@ type Props = {
 export function ArchiveBasicInfoCard({ metadata, t }: Props) {
   return (
     <Card className="border-none bg-transparent shadow-none dark:bg-transparent">
-      <CardHeader className="!p-0">
+      <CardHeader className="!p-0 mb-3">
         <CardTitle className="flex items-center text-base lg:text-lg">
           <Info className="w-4 h-4 mr-2" />
           {t('archive.basicInfo')}
