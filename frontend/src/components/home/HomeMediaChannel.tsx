@@ -191,7 +191,11 @@ const ChannelPreviewTile = memo(function ChannelPreviewTile({
   style?: React.CSSProperties;
 }) {
   return (
-    <div className={cn('relative flex h-full items-center justify-center overflow-hidden bg-muted', className)} style={style}>
+    <div
+      className={cn('channel-layout-tile relative flex h-full items-center justify-center overflow-hidden bg-muted', className)}
+      data-ready={item.mediaKind === 'video' ? String(videoReady || Boolean(item.posterSrc)) : 'true'}
+      style={style}
+    >
       {item.mediaKind === 'video' ? (
         <>
           {!videoReady && !item.posterSrc ? (
@@ -292,14 +296,14 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   }
 
   return (
-    <div className="feed-media-fade w-full">
+    <div className="channel-layout-shell feed-media-fade w-full">
       {items.length === 0 ? (
         <div className="flex aspect-16/10 w-full items-center justify-center bg-muted px-4 text-center text-sm text-muted-foreground">
           {loading ? <Spinner size="sm" /> : emptyLabel}
         </div>
       ) : layout.kind === 'single' ? (
         <div
-          className="flex w-full items-center justify-center overflow-hidden bg-muted"
+          className="channel-layout-single flex w-full items-center justify-center overflow-hidden bg-muted"
           style={{
             height: `${layout.heroHeight}px`,
           }}
@@ -313,11 +317,11 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
           />
         </div>
       ) : layout.kind === 'rows' ? (
-        <div className="flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
+        <div className="channel-layout-stack flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
           {layout.rows.map((row, rowIndex) => (
             <div
               key={`row-${rowIndex}`}
-              className="flex gap-px"
+              className="channel-layout-row flex gap-px"
               style={{
                 height: `${row.height}px`,
               }}
@@ -338,7 +342,7 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
         </div>
       ) : layout.kind === 'hero-side' ? (
         <div
-          className="grid max-h-[460px] w-full gap-px overflow-hidden bg-border"
+          className="channel-layout-split grid max-h-[460px] w-full gap-px overflow-hidden bg-border"
           style={{
             gridTemplateColumns: `${layout.heroWidth}px ${Math.max(0, effectiveWidth - layout.heroWidth - 1)}px`,
             height: `${layout.totalHeight}px`,
@@ -351,11 +355,11 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
             videoReady={Boolean(videoReadyMap[layout.hero.id])}
             style={{ width: `${layout.heroWidth}px` }}
           />
-          <div className="flex flex-col gap-px overflow-hidden">
+          <div className="channel-layout-stack flex flex-col gap-px overflow-hidden">
             {layout.rows.map((row, rowIndex) => (
               <div
                 key={`side-row-${rowIndex}`}
-                className="flex gap-px"
+                className="channel-layout-row flex gap-px"
                 style={{
                   height: `${row.height}px`,
                 }}
@@ -376,9 +380,9 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
           </div>
         </div>
       ) : (
-        <div className="flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
+        <div className="channel-layout-stack flex max-h-[460px] w-full flex-col gap-px overflow-hidden bg-border">
           <div
-            className="flex"
+            className="channel-layout-single flex"
             style={{
               height: `${layout.heroHeight}px`,
             }}
@@ -394,7 +398,7 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
           {layout.rows.map((row, rowIndex) => (
             <div
               key={`row-${rowIndex}`}
-              className="flex gap-px"
+              className="channel-layout-row flex gap-px"
               style={{
                 height: `${row.height}px`,
               }}
@@ -568,7 +572,7 @@ function HomeMediaChannelCard({
 
         return (
           <article
-            className={cn('feed-card-enter px-1 py-2', selected && 'rounded-3xl bg-primary/5')}
+            className={cn('feed-card-enter px-1 py-2', selected && 'rounded-3xl bg-primary/6 dark:bg-primary/10')}
             style={{
               contentVisibility: 'auto',
               containIntrinsicSize: '380px 760px',
@@ -584,17 +588,17 @@ function HomeMediaChannelCard({
               <div className="min-w-0 flex-1">
                 <div
                   className={cn(
-                    'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white text-slate-900 shadow-xs',
+                    'group relative w-full overflow-hidden rounded-[1.75rem] rounded-bl-md border border-border/70 bg-card/95 text-card-foreground shadow-[0_16px_40px_hsl(var(--foreground)/0.08)] backdrop-blur-sm transition-[background-color,border-color,box-shadow] duration-200 dark:bg-card/88 dark:shadow-[0_20px_48px_hsl(220_40%_2%/0.35)]',
                     selected && 'ring-2 ring-primary/30'
                   )}
                 >
                   <div className="pointer-events-none absolute right-3 top-3 z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
-                    <div className="pointer-events-auto flex items-center gap-2 rounded-full bg-white/92 px-2 py-1 shadow-xs ring-1 ring-black/5 backdrop-blur-sm">
+                    <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border/60 bg-background/88 px-2 py-1 text-foreground shadow-[0_10px_28px_hsl(var(--foreground)/0.12)] backdrop-blur-md dark:bg-background/78 dark:shadow-[0_14px_30px_hsl(220_40%_2%/0.42)]">
                       <Button
                         asChild
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 rounded-full text-muted-foreground"
+                        className="h-8 w-8 rounded-full text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground"
                         title={t('archive.details')}
                       >
                         <Link href={detailPath} prefetch={false} onClick={(event) => event.stopPropagation()}>
@@ -606,7 +610,10 @@ function HomeMediaChannelCard({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className={cn('h-8 w-8 rounded-full text-muted-foreground', nextIsFavorite && 'text-red-500')}
+                        className={cn(
+                          'h-8 w-8 rounded-full text-muted-foreground hover:bg-accent/80 hover:text-accent-foreground',
+                          nextIsFavorite && 'text-red-500'
+                        )}
                         title={nextIsFavorite ? t('common.unfavorite') : t('common.favorite')}
                         disabled={favoriteLoading}
                         onClick={(event: MouseEvent<HTMLButtonElement>) => {
@@ -637,7 +644,7 @@ function HomeMediaChannelCard({
                   <button
                     type="button"
                     ref={previewRef}
-                    className="block w-full overflow-hidden text-left transition hover:opacity-95"
+                    className="block w-full overflow-hidden text-left transition-[opacity,filter] duration-200 hover:opacity-95"
                     onClick={() => {
                       if (selectionMode) {
                         toggleSelected(!selected);
@@ -662,7 +669,7 @@ function HomeMediaChannelCard({
                       <div>
                         <div
                           className={cn(
-                            'whitespace-pre-wrap wrap-break-word text-[15px] leading-6 text-slate-900',
+                            'whitespace-pre-wrap wrap-break-word text-[15px] leading-6 text-card-foreground',
                             !contentExpanded && canToggleContent && 'line-clamp-5'
                           )}
                         >
@@ -703,7 +710,7 @@ function HomeMediaChannelCard({
                     ) : null}
 
                     <div className="flex justify-end">
-                      <span className="text-xs text-slate-500">{contentMeta}</span>
+                      <span className="text-xs text-muted-foreground">{contentMeta}</span>
                     </div>
                   </div>
                 </div>

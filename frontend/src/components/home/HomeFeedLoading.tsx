@@ -90,7 +90,7 @@ export function ChannelFeedSkeleton({
         <div key={`channel-skeleton-${index}`} className="feed-card-enter px-1 py-2">
           <div className="flex items-end gap-3">
             <Skeleton className="feed-shimmer h-10 w-10 shrink-0 rounded-full" />
-            <div className="min-w-0 flex-1 overflow-hidden rounded-[1.75rem] rounded-bl-md border border-slate-200 bg-white shadow-xs">
+            <div className="min-w-0 flex-1 overflow-hidden rounded-[1.75rem] rounded-bl-md border border-border/70 bg-card/95 shadow-[0_16px_40px_hsl(var(--foreground)/0.08)] backdrop-blur-sm dark:bg-card/88 dark:shadow-[0_20px_48px_hsl(220_40%_2%/0.35)]">
               <FeedMediaPlaceholder className="aspect-16/10 w-full" />
               <div className="space-y-3 px-4 py-3 sm:px-5">
                 <div className="space-y-2">
