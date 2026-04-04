@@ -364,7 +364,7 @@ export function BaseMediaCard({
           </div>
         </Card>
 
-        <div className="pt-3">
+        <div className="pt-4">
           <div className="h-5 mb-2">
             <button
               type="button"
@@ -379,7 +379,7 @@ export function BaseMediaCard({
               {displayTitle}
             </button>
           </div>
-          <div className={['text-xs text-muted-foreground', hideMetaOnMobile ? 'hidden sm:block' : ''].join(' ')}>
+          <div className={['text-xs text-muted-foreground', hideMetaOnMobile ? 'hidden sm:block' : '', 'mt-1'].join(' ')}>
             {pagesLabel || t('archive.pages').replace('{count}', String(pagecount))}
             {progress > 0 && pagecount > 0 && ` • ${progressPercent}% ${t('common.read')}`}
           </div>
