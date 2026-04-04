@@ -1030,6 +1030,7 @@ function HomePageContent() {
           selectedTankoubonCount={selection.selectedTankoubonCount}
           hasAnySelected={selection.hasAnySelected}
           canBatchDownload={selection.canBatchDownload}
+          canBatchDelete={selection.canBatchDelete}
           batchActionRunning={selection.batchActionRunning}
           batchEditApplying={selection.batchEditApplying}
           favoriteActionLabel={selection.favoriteActionLabel}

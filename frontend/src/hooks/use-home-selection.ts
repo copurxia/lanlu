@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
+import { useAuth } from '@/contexts/AuthContext';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import type { BatchEditPayload } from '@/components/archive/BatchEditDialog';
 import { Archive } from '@/types/archive';
@@ -39,6 +40,7 @@ export function useHomeSelection(
   const { t } = useLanguage();
   const { success: showSuccess, error: showError, info: showInfo } = useToast();
   const { confirm } = useConfirmContext();
+  const { isAuthenticated, user } = useAuth();
 
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedArchiveIds, setSelectedArchiveIds] = useState<Set<string>>(new Set());
@@ -91,6 +93,10 @@ export function useHomeSelection(
   const favoriteActionLabel = nextFavoriteState ? t('common.favorite') : t('common.unfavorite');
   const allSelectedArchiveIsNew =
     selectedArchiveCount > 0 && selectedArchives.every((item) => Boolean(item.isnew));
+  const isAdmin = user?.isAdmin === true;
+  const canBatchDelete = hasAnySelected && (
+    selectedArchiveCount > 0 ? isAdmin : isAuthenticated
+  );
 
   const clearSelection = useCallback(() => {
     setSelectedArchiveIds(new Set());
@@ -327,6 +333,14 @@ export function useHomeSelection(
 
   const handleBatchDelete = useCallback(async () => {
     if (!hasAnySelected || batchActionRunning) return;
+    if (selectedArchiveCount > 0 && !isAdmin) {
+      showError(t('common.accessDenied'));
+      return;
+    }
+    if (selectedTankoubonCount > 0 && !isAuthenticated) {
+      showError(t('library.loginRequired'));
+      return;
+    }
     const ok = await confirm({
       title: t('common.delete'),
       description: t('home.batchDeleteConfirm').replace('{count}', String(selectedTotal)),
@@ -351,10 +365,15 @@ export function useHomeSelection(
     clearSelection,
     confirm,
     hasAnySelected,
+    isAdmin,
+    isAuthenticated,
     runBatchAction,
+    selectedArchiveCount,
     selectedArchiveIds,
+    selectedTankoubonCount,
     selectedTankoubonIds,
     selectedTotal,
+    showError,
     t,
   ]);
 
@@ -435,6 +454,7 @@ export function useHomeSelection(
     selectedTotal,
     hasAnySelected,
     canBatchDownload,
+    canBatchDelete,
     favoriteActionLabel,
     allSelectedArchiveIsNew,
     // Actions

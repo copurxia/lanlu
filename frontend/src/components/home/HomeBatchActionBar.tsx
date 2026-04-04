@@ -12,6 +12,7 @@ interface HomeBatchActionBarProps {
   selectedTankoubonCount: number;
   hasAnySelected: boolean;
   canBatchDownload: boolean;
+  canBatchDelete: boolean;
   batchActionRunning: boolean;
   batchEditApplying: boolean;
   favoriteActionLabel: string;
@@ -36,6 +37,7 @@ export function HomeBatchActionBar({
   selectedTankoubonCount,
   hasAnySelected,
   canBatchDownload,
+  canBatchDelete,
   batchActionRunning,
   batchEditApplying,
   favoriteActionLabel,
@@ -118,7 +120,7 @@ export function HomeBatchActionBar({
             variant="ghost"
             size="sm"
             className="h-9 rounded-full px-3 text-destructive hover:text-destructive"
-            disabled={!hasAnySelected || batchActionRunning}
+            disabled={!canBatchDelete || batchActionRunning}
             onClick={() => void onDelete()}
             title={t('common.delete')}
           >
