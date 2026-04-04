@@ -138,6 +138,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return fetchMe(false);
   }, [fetchMe]);
 
+  // 自动补全用户信息：当有 token 但 user 为空时，自动调用 ensureMe 拉取用户信息（含 isAdmin）
+  useEffect(() => {
+    if (token && !user && userStatus === 'token-only') {
+      void ensureMe();
+    }
+  }, [token, user, userStatus, ensureMe]);
+
   const value = {
     token,
     user,
