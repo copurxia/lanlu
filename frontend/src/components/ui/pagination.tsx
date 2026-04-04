@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight } from "lucide-react"
 import { useLanguage } from "@/contexts/LanguageContext"
@@ -20,8 +21,17 @@ export function Pagination({
 }: PaginationProps) {
   const { t } = useLanguage();
   const pages = []
-  // 在移动端显示更少的页码
-  const maxVisiblePages = typeof window !== 'undefined' && window.innerWidth < 768 ? 3 : 5
+  const [maxVisiblePages, setMaxVisiblePages] = useState(5)
+
+  useEffect(() => {
+    const updateMaxVisiblePages = () => {
+      setMaxVisiblePages(window.innerWidth < 768 ? 3 : 5)
+    }
+
+    updateMaxVisiblePages()
+    window.addEventListener('resize', updateMaxVisiblePages)
+    return () => window.removeEventListener('resize', updateMaxVisiblePages)
+  }, [])
   
   let startPage = Math.max(0, currentPage - Math.floor(maxVisiblePages / 2))
   const endPage = Math.min(totalPages - 1, startPage + maxVisiblePages - 1)

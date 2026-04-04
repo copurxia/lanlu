@@ -17,8 +17,8 @@ const DEFAULT_SERVER_NAME = 'Lanlu';
 const ServerInfoContext = createContext<ServerInfoContextType | undefined>(undefined);
 
 export function ServerInfoProvider({ children }: { children: ReactNode }) {
-  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(() => ArchiveService.getCachedServerInfo());
-  const [loading, setLoading] = useState(() => ArchiveService.getCachedServerInfo() == null);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const fetchServerInfo = useCallback(async (options?: { force?: boolean }) => {
@@ -36,7 +36,13 @@ export function ServerInfoProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchServerInfo();
+    const cached = ArchiveService.getCachedServerInfo();
+    if (cached) {
+      setServerInfo(cached);
+      setLoading(false);
+    }
+
+    void fetchServerInfo();
   }, [fetchServerInfo]);
 
   const serverName = serverInfo?.name || DEFAULT_SERVER_NAME;
