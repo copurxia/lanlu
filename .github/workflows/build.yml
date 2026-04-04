@@ -16,8 +16,7 @@ jobs:
       - name: Setup Cangjie
         uses: Zxilly/setup-cangjie@v2
         with:
-          channel: nightly
-          version: ${{ vars.NIGHTLY_VERSION }}
+          channel: sts
 
       - name: Install build tools
         run: |
