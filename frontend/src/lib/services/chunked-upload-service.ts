@@ -61,7 +61,9 @@ export class ChunkedUploadService {
   private static readonly CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
   private static readonly MAX_RETRIES = 3;
   private static readonly MAX_RETRIES_5XX = 5;  // 5xx 错误允许更多重试
-  private static readonly UPLOAD_TIMEOUT = 60000; // 60秒
+  // 空闲超时：600秒（10分钟），与后端 UPLOAD_IDLE_TIMEOUT_SECONDS 对齐
+  // 如果在此时间内没有数据传输活动，则认为连接已断开
+  private static readonly UPLOAD_IDLE_TIMEOUT = 600000;
   private static readonly SUPPORTED_EXTENSIONS = ['zip', 'rar', '7z', 'tar', 'gz', 'pdf', 'epub', 'mobi', 'cbz', 'cbr', 'cb7', 'cbt'];
   private static readonly MAX_CONCURRENT_CHUNKS = 1; // 顺序上传（与后端顺序写入一致）
 
@@ -400,7 +402,27 @@ export class ChunkedUploadService {
       const chunkIndex = orderedChunks[i];
 
       try {
-        await this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks);
+        // 计算当前分片之前已上传的字节数
+        const previousUploadedBytes = [...previouslyCompletedChunks, ...completedChunkIndices]
+          .reduce((total, idx) => {
+            const start = idx * this.CHUNK_SIZE;
+            const end = Math.min(start + this.CHUNK_SIZE, totalBytes);
+            return total + (end - start);
+          }, 0);
+
+        // 上传分片，并实时报告进度
+        await this.uploadChunkWithRetry(
+          file,
+          taskId,
+          chunkIndex,
+          totalChunks,
+          (chunkLoaded, chunkTotal) => {
+            // 计算总体进度：之前已完成的分片 + 当前分片内的进度
+            const currentProgress = previousUploadedBytes + chunkLoaded;
+            const progress = Math.round((currentProgress / totalBytes) * 100);
+            callbacks.onProgress(progress);
+          }
+        );
 
         // 更新localStorage中的completedChunks
         this.updateLocalStorageCompletedChunks(taskId, chunkIndex, totalChunks);
@@ -496,11 +518,12 @@ export class ChunkedUploadService {
     taskId: string,
     chunkIndex: number,
     totalChunks: number,
+    onChunkProgress?: (loaded: number, total: number) => void,
     retryCount = 0
   ): Promise<void> {
     try {
       const chunk = await this.getFileChunk(file, chunkIndex);
-      await this.uploadChunk(taskId, chunkIndex, totalChunks, chunk);
+      await this.uploadChunk(taskId, chunkIndex, totalChunks, chunk, onChunkProgress);
     } catch (error) {
       const { retryable, isPending409, is5xx } = this.isRetryableError(error);
 
@@ -522,7 +545,7 @@ export class ChunkedUploadService {
         }
 
         await this.delay(delayMs);
-        return this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks, retryCount + 1);
+        return this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks, onChunkProgress, retryCount + 1);
       } else {
         console.error(`分片 ${chunkIndex} 重试 ${maxRetries} 次后仍然失败`);
         throw new Error(`分片 ${chunkIndex} 上传失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -541,12 +564,14 @@ export class ChunkedUploadService {
 
   /**
    * 上传单个分片
+   * 使用空闲超时机制：监控数据传输活动，如果长时间无数据传输则取消请求
    */
   private static async uploadChunk(
     taskId: string,
     chunkIndex: number,
     totalChunks: number,
-    chunkData: Blob
+    chunkData: Blob,
+    onChunkProgress?: (loaded: number, total: number) => void
   ): Promise<void> {
     // 使用查询参数而不是FormData，因为后端使用getQuery获取参数
     const params = new URLSearchParams();
@@ -555,15 +580,71 @@ export class ChunkedUploadService {
     params.append('totalChunks', totalChunks.toString());
     params.append('filename', 'chunk.bin');
 
-    const response = await apiClient.put<ApiEnvelope<Record<string, any>>>(`/api/assets/upload/chunk?${params.toString()}`, chunkData, {
-      headers: {
-        'Content-Type': 'application/octet-stream',
-      },
-      timeout: this.UPLOAD_TIMEOUT,
-    });
+    // 创建 AbortController 用于空闲超时取消
+    const abortController = new AbortController();
+    let lastActivityTime = Date.now();
+    let idleCheckInterval: NodeJS.Timeout | null = null;
 
-    if (response.data?.code !== 200) {
-      throw new Error(response.data?.message || `Chunk ${chunkIndex} upload failed`);
+    // 启动空闲超时检测
+    const startIdleCheck = () => {
+      idleCheckInterval = setInterval(() => {
+        const idleTime = Date.now() - lastActivityTime;
+        if (idleTime > this.UPLOAD_IDLE_TIMEOUT) {
+          console.warn(`分片 ${chunkIndex} 上传空闲超时（${idleTime}ms），取消请求`);
+          abortController.abort();
+          if (idleCheckInterval) {
+            clearInterval(idleCheckInterval);
+            idleCheckInterval = null;
+          }
+        }
+      }, 5000); // 每5秒检查一次
+    };
+
+    // 停止空闲超时检测
+    const stopIdleCheck = () => {
+      if (idleCheckInterval) {
+        clearInterval(idleCheckInterval);
+        idleCheckInterval = null;
+      }
+    };
+
+    try {
+      startIdleCheck();
+
+      const response = await apiClient.put<ApiEnvelope<Record<string, any>>>(
+        `/api/assets/upload/chunk?${params.toString()}`,
+        chunkData,
+        {
+          headers: {
+            'Content-Type': 'application/octet-stream',
+          },
+          signal: abortController.signal,
+          // 不设置固定 timeout，依赖空闲超时检测
+          onUploadProgress: (progressEvent) => {
+            // 更新最后活动时间
+            lastActivityTime = Date.now();
+
+            if (progressEvent.total && onChunkProgress) {
+              onChunkProgress(progressEvent.loaded, progressEvent.total);
+            }
+          },
+        }
+      );
+
+      stopIdleCheck();
+
+      if (response.data?.code !== 200) {
+        throw new Error(response.data?.message || `Chunk ${chunkIndex} upload failed`);
+      }
+    } catch (error: any) {
+      stopIdleCheck();
+
+      // 如果是空闲超时导致的取消，抛出特定错误
+      if (error.name === 'AbortError' || error.code === 'ERR_CANCELED') {
+        throw new Error(`分片 ${chunkIndex} 上传空闲超时（${this.UPLOAD_IDLE_TIMEOUT / 1000}秒内无数据传输）`);
+      }
+
+      throw error;
     }
   }
 
