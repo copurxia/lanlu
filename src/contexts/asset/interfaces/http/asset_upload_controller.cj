@@ -149,12 +149,23 @@ public class AssetUploadController {
             let kvGroupId = "asset_upload:${task.id}"
             let kvStore = getTaskKVStore()
             kvStore.deleteGroup(kvGroupId)
-            let _ = kvStore.set(kvGroupId, "filesize", fileSize.toString(), UPLOAD_KV_TTL_SECONDS)
-            let _ = kvStore.set(kvGroupId, "chunk_size", chunkSize.toString(), UPLOAD_KV_TTL_SECONDS)
-            let _ = kvStore.set(kvGroupId, "total_chunks", totalChunks.toString(), UPLOAD_KV_TTL_SECONDS)
-            let _ = kvStore.set(kvGroupId, "uploaded_count", "0", UPLOAD_KV_TTL_SECONDS)
-            let _ = kvStore.set(kvGroupId, "written_offset", "0", UPLOAD_KV_TTL_SECONDS)
-            let _ = kvStore.set(kvGroupId, "last_reported_progress", "0", UPLOAD_KV_TTL_SECONDS)
+            let r1 = kvStore.set(kvGroupId, "filesize", fileSize.toString(), UPLOAD_KV_TTL_SECONDS)
+            let r2 = kvStore.set(kvGroupId, "chunk_size", chunkSize.toString(), UPLOAD_KV_TTL_SECONDS)
+            let r3 = kvStore.set(kvGroupId, "total_chunks", totalChunks.toString(), UPLOAD_KV_TTL_SECONDS)
+            let r4 = kvStore.set(kvGroupId, "uploaded_count", "0", UPLOAD_KV_TTL_SECONDS)
+            let r5 = kvStore.set(kvGroupId, "written_offset", "0", UPLOAD_KV_TTL_SECONDS)
+            let r6 = kvStore.set(kvGroupId, "last_reported_progress", "0", UPLOAD_KV_TTL_SECONDS)
+            let uploadLogger = getLogger("asset_upload")
+            uploadLogger.debug(
+                "[DBG] initUpload KV set results",
+                ("taskId", task.id.toString()),
+                ("filesize", r1.toString()),
+                ("chunk_size", r2.toString()),
+                ("total_chunks", r3.toString()),
+                ("uploaded_count", r4.toString()),
+                ("written_offset", r5.toString()),
+                ("last_reported_progress", r6.toString())
+            )
 
             ResponseView.successJson(ctx, "{\"taskId\":\"${task.id}\"}", "ok")
         } catch (e: Exception) {
@@ -195,11 +206,22 @@ public class AssetUploadController {
                 return
             }
             if (task.status == "pending") {
+                getLogger("asset_upload").warn(
+                    "[DBG] uploadChunk task pending",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr)
+                )
                 ctx.status(HttpStatusCode.STATUS_CONFLICT)
                 ResponseView.errorJson(ctx, "任务正在排队，请等待调度", 409)
                 return
             }
             if (task.status != "running") {
+                getLogger("asset_upload").warn(
+                    "[DBG] uploadChunk task not running",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr),
+                    ("status", task.status)
+                )
                 ctx.status(HttpStatusCode.STATUS_CONFLICT)
                 ResponseView.errorJson(ctx, "任务状态异常: ${task.status}", 409)
                 return
@@ -207,6 +229,12 @@ public class AssetUploadController {
 
             let uploadDir = Path("${CACHE_DIR}/task/${taskIdStr}")
             if (!exists(uploadDir)) {
+                getLogger("asset_upload").warn(
+                    "[DBG] uploadChunk dir missing",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr),
+                    ("dir", uploadDir.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Upload directory not found for taskId ${taskIdStr}", 400)
                 return
@@ -218,6 +246,18 @@ public class AssetUploadController {
             // 优化：批量读取KV，6次独立读 → 1次批量读
             let metaKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress"]
             let metaValues = kvStore.getMulti(kvGroupId, metaKeys)
+            let chunkLogger = getLogger("asset_upload")
+            chunkLogger.debug(
+                "[DBG] uploadChunk getMulti",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndexStr),
+                ("metaValuesSize", metaValues.size.toString()),
+                ("filesize", if (metaValues.size > 0) { match (metaValues[0]) { case Some(v) => v; case None => "None" } } else { "N/A" }),
+                ("chunk_size", if (metaValues.size > 1) { match (metaValues[1]) { case Some(v) => v; case None => "None" } } else { "N/A" }),
+                ("total_chunks", if (metaValues.size > 2) { match (metaValues[2]) { case Some(v) => v; case None => "None" } } else { "N/A" }),
+                ("uploaded_count", if (metaValues.size > 3) { match (metaValues[3]) { case Some(v) => v; case None => "None" } } else { "N/A" }),
+                ("written_offset", if (metaValues.size > 4) { match (metaValues[4]) { case Some(v) => v; case None => "None" } } else { "N/A" })
+            )
 
             var fileSize: Int64 = 0
             var chunkSize: Int64 = 0
@@ -254,6 +294,15 @@ public class AssetUploadController {
             }
 
             if (fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk invalid meta",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr),
+                    ("fileSize", fileSize.toString()),
+                    ("chunkSize", chunkSize.toString()),
+                    ("totalChunks", totalChunks.toString()),
+                    ("metaValuesSize", metaValues.size.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Invalid upload meta (kv)", 400)
                 return
@@ -313,7 +362,10 @@ public class AssetUploadController {
             let bodyStream = ctx.requestBody()
             var bytesWritten: Int64 = 0
             try {
-                let partFile = File(partPath, OpenMode.Append)
+                // 使用 ReadWrite + seek 实现幂等写入：重试时始终从 expectedOffset 分片写入，
+                // 避免 Append 模式下幺幺写入导致文件损坏。
+                let partFile = File(partPath, OpenMode.ReadWrite)
+                partFile.seek(SeekPosition.Begin(expectedOffset))
                 bytesWritten = streamWriteToFile(bodyStream, partFile)
                 
                 if (bytesWritten <= 0) {
@@ -329,6 +381,13 @@ public class AssetUploadController {
                 }
                 partFile.close()
             } catch (e: Exception) {
+                chunkLogger.error(
+                    "Failed to write chunk to file",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr),
+                    ("expectedOffset", expectedOffset.toString()),
+                    ("error", e.message)
+                )
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                 ResponseView.errorJson(ctx, "Failed to write chunk: ${e.message}", 500)
                 return
@@ -454,7 +513,8 @@ public class AssetUploadController {
                     return
                 }
                 TaskIO.appendLog(taskIdInt, "all chunks uploaded; handoff to asset_upload_process")
-                TaskPoolService.getInstance().notifyTaskAvailable()
+                // notifyTaskAvailable 已移除：应由 runWorker finally 块在退出并取消注册后再调用
+                // requestDispatch，避免 worker 仍在 activeWorkers 时就触发 dispatch 导致 double-claim。
             }
 
             ResponseView.successJson(ctx, "{}", "Chunk uploaded successfully")

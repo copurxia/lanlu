@@ -296,6 +296,13 @@ public class TaskPoolService {
                 kvStore.releaseGroup(groupId)
             }
 
+            // 若任务已 handoff 到不同类型但因 double-claim 被调度器抢先置为 running，
+            // worker 退出时将其重置回 pending，确保 requestDispatch() 能正常领取执行。
+            let handoffTask = TaskDao.getTaskDataById(task.id)
+            if (handoffTask.status == "running" && handoffTask.taskType != task.taskType) {
+                let _ = TaskDao.resetHandoffedTask(task.id, task.taskType)
+            }
+
             // 释放 slot 并尝试领取下一个 pending（使用原子操作）
             currentWorkers.fetchSub(1)
 
@@ -547,9 +554,11 @@ public class TaskPoolService {
                 return
             }
 
-            // async=1 分支会把当前 task 从 upload 改为 upload_process 并置为 pending，
-            // 这里视为“upload 阶段结束”，释放当前 worker，让新类型任务重新被领取执行。
-            if (task.status == "pending" && task.taskType != placeholderTaskType) {
+            // async=1 分支会把当前 task 从 upload 改为 upload_process，
+            // 检测到 task_type 变更即视为"upload 阶段结束"，释放当前 worker。
+            // 无论 status 是 pending 还是 running（safetyTick/notifyTaskAvailable 抢先
+            // dispatch 导致的 double-claim），都需要退出等待循环。
+            if (task.taskType != placeholderTaskType) {
                 TaskIO.appendLog(taskId, "${placeholderTaskType} task handed off to ${task.taskType}; release worker")
                 return
             }

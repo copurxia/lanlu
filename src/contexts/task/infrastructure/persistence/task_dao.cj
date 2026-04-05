@@ -594,6 +594,51 @@ public class TaskDao {
     }
 
     /**
+     * 将 handoff 后因 double-claim 被抢先置为 running 的任务重置回 pending，
+     * 以便 requestDispatch() 可以正常领取并执行新 task_type 的逻辑。
+     * 在 worker 退出 finally 块时调用。
+     */
+    public static func resetHandoffedTask(id: Int64, originalType: String): Bool {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks
+                        SET status = 'pending',
+                            phase  = 'queued'
+                        WHERE id = ? AND status = 'running' AND task_type != ?
+                    """)
+                    try {
+                        stmt.set(0, id)
+                        stmt.set(1, originalType)
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            logger.debug(
+                                "resetHandoffedTask: reset to pending",
+                                ("id", id.toString()),
+                                ("original_type", originalType)
+                            )
+                            TaskEventHub.getInstance().publishTaskChanged(id)
+                        }
+                        return result.rowCount > 0
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("resetHandoffedTask 失败", ("id", id.toString()), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
      * 定期清理超时的上传占位任务（running 且 timeout_at 已过期）
      */
     public static func failTimedOutUploadTasks(): Int64 {
