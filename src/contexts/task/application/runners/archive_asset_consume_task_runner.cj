@@ -24,13 +24,11 @@ public class ArchiveAssetConsumeTaskRunner {
         let categoryId = TaskRunnerUtils.parseField(parameters, "category_id")
         let filename = TaskRunnerUtils.parseField(parameters, "filename")
         let overwrite = parseBool(TaskRunnerUtils.parseField(parameters, "overwrite"))
+        let finalPartPathStr = TaskRunnerUtils.parseField(parameters, "final_part_path")
+        let chunkDirStr = TaskRunnerUtils.parseField(parameters, "chunk_dir")
 
         if (targetType != "archive") {
             TaskRunnerUtils.fail(taskId, "target_type must be archive")
-            return
-        }
-        if (stagingAssetId <= 0) {
-            TaskRunnerUtils.fail(taskId, "staging_asset_id is required")
             return
         }
         if (filename.size == 0) {
@@ -42,19 +40,37 @@ public class ArchiveAssetConsumeTaskRunner {
             return
         }
 
-        let staging = AssetDao.getById(stagingAssetId)
-        if (staging.id <= 0) {
-            TaskRunnerUtils.fail(taskId, "staging asset not found")
-            return
-        }
+        // 确定源文件路径：直连模式 (final_part_path) 或传统 staging 模式
+        var sourceFilePath: String = ""
+        var usingStagingAsset = false
 
-        let ext = TaskRunnerUtils.resolveAssetExt(staging, filename)
-        let assetRoot = context.paths.assetPath
-        let stagingPath = FileUtils.joinPath(assetRoot, "${stagingAssetId}.${ext}")
-        if (!exists(Path(stagingPath))) {
-            let _ = AssetDao.deleteById(stagingAssetId)
-            TaskRunnerUtils.fail(taskId, "staging asset file missing")
-            return
+        if (finalPartPathStr.size > 0 && stagingAssetId <= 0) {
+            // 直连落盘模式：跳过 staging，直接从 final.part 落盘
+            if (!exists(Path(finalPartPathStr))) {
+                TaskRunnerUtils.fail(taskId, "final_part file not found")
+                return
+            }
+            sourceFilePath = finalPartPathStr
+        } else {
+            // 传统 staging asset 模式
+            if (stagingAssetId <= 0) {
+                TaskRunnerUtils.fail(taskId, "staging_asset_id is required")
+                return
+            }
+            usingStagingAsset = true
+            let staging = AssetDao.getById(stagingAssetId)
+            if (staging.id <= 0) {
+                TaskRunnerUtils.fail(taskId, "staging asset not found")
+                return
+            }
+            let ext = TaskRunnerUtils.resolveAssetExt(staging, filename)
+            let assetRoot = context.paths.assetPath
+            sourceFilePath = FileUtils.joinPath(assetRoot, "${stagingAssetId}.${ext}")
+            if (!exists(Path(sourceFilePath))) {
+                let _ = AssetDao.deleteById(stagingAssetId)
+                TaskRunnerUtils.fail(taskId, "staging asset file missing")
+                return
+            }
         }
 
         let internalId = try {
@@ -66,7 +82,9 @@ public class ArchiveAssetConsumeTaskRunner {
         let category = match (categoryOpt) {
             case Some(cat) => cat
             case None =>
-                TaskRunnerUtils.cleanupStagingAssetByPath(stagingAssetId, stagingPath)
+                if (usingStagingAsset) {
+                    TaskRunnerUtils.cleanupStagingAssetByPath(stagingAssetId, sourceFilePath)
+                }
                 TaskRunnerUtils.fail(taskId, "Category not found")
                 return
         }
@@ -79,14 +97,18 @@ public class ArchiveAssetConsumeTaskRunner {
 
         if (exists(finalArchivePath)) {
             if (!overwrite) {
-                TaskRunnerUtils.cleanupStagingAssetByPath(stagingAssetId, stagingPath)
+                if (usingStagingAsset) {
+                    TaskRunnerUtils.cleanupStagingAssetByPath(stagingAssetId, sourceFilePath)
+                }
                 TaskRunnerUtils.fail(taskId, "File already exists: ${finalArchivePath.toString()}")
                 return
             }
             try {
                 remove(finalArchivePath)
             } catch (e: Exception) {
-                TaskRunnerUtils.cleanupStagingAssetByPath(stagingAssetId, stagingPath)
+                if (usingStagingAsset) {
+                    TaskRunnerUtils.cleanupStagingAssetByPath(stagingAssetId, sourceFilePath)
+                }
                 TaskRunnerUtils.fail(taskId, "Failed to delete existing file: ${e.message}")
                 return
             }
@@ -95,11 +117,11 @@ public class ArchiveAssetConsumeTaskRunner {
         TaskModel.updateTaskProgress(taskId, 60, "写入档案文件")
         try {
             try {
-                rename(Path(stagingPath), to: finalArchivePath)
+                rename(Path(sourceFilePath), to: finalArchivePath)
             } catch (e: Exception) {
                 if (e.message.contains("cross-device") || e.message.contains("Invalid cross-device link")) {
-                    copy(Path(stagingPath), to: finalArchivePath, overwrite: false)
-                    remove(Path(stagingPath))
+                    copy(Path(sourceFilePath), to: finalArchivePath, overwrite: false)
+                    remove(Path(sourceFilePath))
                 } else {
                     throw e
                 }
@@ -112,7 +134,18 @@ public class ArchiveAssetConsumeTaskRunner {
             return
         }
 
-        let _ = AssetDao.deleteById(stagingAssetId)
+        // 清理：根据模式分别处理
+        if (usingStagingAsset) {
+            let _ = AssetDao.deleteById(stagingAssetId)
+        } else if (chunkDirStr.size > 0) {
+            // 直连模式：清理上传临时目录
+            try {
+                let chunkDirPath = Path(chunkDirStr)
+                if (exists(chunkDirPath)) {
+                    remove(chunkDirPath, recursive: true)
+                }
+            } catch (_: Exception) {}
+        }
 
         var archivePath = finalArchivePath.toString()
         try {

@@ -4,6 +4,7 @@ import ignite.*
 import stdx.net.http.HttpStatusCode
 import std.convert.*
 import std.fs.*
+import std.io.*
 import lanlu.contexts.asset.infrastructure.persistence.*
 import lanlu.contexts.system.application.*
 import lanlu.shared.utils.*
@@ -42,18 +43,46 @@ public class AssetController {
 
         try {
             let fileInfo = FileInfo(filePath)
-            let etag = CacheUtils.generateETag("${filePath}:${fileInfo.size}:${fileInfo.lastModificationTime}")
+            let fileSize = Int64(fileInfo.size)
+            let etag = CacheUtils.generateETag("${filePath}:${fileSize}:${fileInfo.lastModificationTime}")
             if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
                 CacheUtils.sendNotModified(ctx, etag)
                 return
             }
 
-            let bytes = File.readFrom(Path(filePath))
             CacheUtils.setStaticCacheHeaders(ctx, etag)
             let ct = if (asset.contentType.size > 0) { asset.contentType } else { "application/octet-stream" }
             ctx.setHeader("Content-Type", ct)
+            ctx.setHeader("Content-Length", fileSize.toString())
             ctx.status(HttpStatusCode.STATUS_OK)
-            ctx.send(bytes)
+
+            // 流式发送：分块读取文件并写入响应流，避免大文件 OOM
+            let streamThreshold: Int64 = 2 * 1024 * 1024 // 2MB
+            if (fileSize <= streamThreshold) {
+                // 小文件直接全量读取
+                let bytes = File.readFrom(Path(filePath))
+                ctx.send(bytes)
+            } else {
+                // 大文件流式发送
+                let writer = ctx.writer()
+                let f = File(filePath, OpenMode.Read)
+                let chunkBufSize: Int64 = 131072 // 128KB
+                var remaining = fileSize
+                let chunkBuffer = Array<UInt8>(chunkBufSize, repeat: 0)
+                while (remaining > 0) {
+                    let bytesRead = f.read(chunkBuffer)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    if (bytesRead == chunkBufSize) {
+                        writer.write(chunkBuffer)
+                    } else {
+                        writer.write(chunkBuffer[0..bytesRead])
+                    }
+                    remaining -= bytesRead
+                }
+                f.close()
+            }
         } catch (e: Exception) {
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
             ResponseView.json(ctx, ApiResponse<String>(500, e.message, None))

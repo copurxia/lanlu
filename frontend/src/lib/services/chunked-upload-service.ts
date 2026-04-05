@@ -60,6 +60,7 @@ export class ChunkedUploadService {
   // 配置常量
   private static readonly CHUNK_SIZE = 10 * 1024 * 1024; // 10MB
   private static readonly MAX_RETRIES = 3;
+  private static readonly MAX_RETRIES_5XX = 5;  // 5xx 错误允许更多重试
   private static readonly UPLOAD_TIMEOUT = 60000; // 60秒
   private static readonly SUPPORTED_EXTENSIONS = ['zip', 'rar', '7z', 'tar', 'gz', 'pdf', 'epub', 'mobi', 'cbz', 'cbr', 'cb7', 'cbt'];
   private static readonly MAX_CONCURRENT_CHUNKS = 1; // 顺序上传（与后端顺序写入一致）
@@ -456,7 +457,39 @@ export class ChunkedUploadService {
   }
 
   /**
+   * 判断错误是否可重试
+   */
+  private static isRetryableError(error: any): { retryable: boolean; isPending409: boolean; is5xx: boolean } {
+    const status = Number(error?.response?.status ?? 0);
+    const message = String(error?.response?.data?.message ?? error?.message ?? '');
+
+    // 不可重试: 400 Bad Request, 404 Not Found, 文件已存在 (409 + 文件已存在)
+    if (status === 400 || status === 404) {
+      return { retryable: false, isPending409: false, is5xx: false };
+    }
+    if (status === 409 && message.includes('文件已存在')) {
+      return { retryable: false, isPending409: false, is5xx: false };
+    }
+
+    // 可重试: 409 pending（任务排队中）
+    if (status === 409) {
+      return { retryable: true, isPending409: true, is5xx: false };
+    }
+
+    // 可重试: 5xx 服务器错误（允许更多重试次数）
+    if (status >= 500) {
+      return { retryable: true, isPending409: false, is5xx: true };
+    }
+
+    // 网络超时、连接失败等视为可重试
+    return { retryable: true, isPending409: false, is5xx: false };
+  }
+
+  /**
    * 带重试机制的分片上传
+   * - 区分可重试/不可重试错误
+   * - 409 pending 使用更长的重试间隔（5s）
+   * - 5xx 错误允许最多 5 次重试，指数退避上限 16s
    */
   private static async uploadChunkWithRetry(
     file: File,
@@ -468,17 +501,30 @@ export class ChunkedUploadService {
     try {
       const chunk = await this.getFileChunk(file, chunkIndex);
       await this.uploadChunk(taskId, chunkIndex, totalChunks, chunk);
-      // 成功上传，如果之前有重试，说明重试成功了
-      if (retryCount > 0) {
-
-      }
     } catch (error) {
-      if (retryCount < this.MAX_RETRIES) {
+      const { retryable, isPending409, is5xx } = this.isRetryableError(error);
 
-        await this.delay(1000 * Math.pow(2, retryCount)); // 指数退避
+      if (!retryable) {
+        // 不可重试错误，直接抛出
+        throw new Error(`分片 ${chunkIndex} 上传失败 (不可重试): ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
+
+      const maxRetries = is5xx ? this.MAX_RETRIES_5XX : this.MAX_RETRIES;
+
+      if (retryCount < maxRetries) {
+        let delayMs: number;
+        if (isPending409) {
+          // 任务排队中：使用固定 5s 间隔
+          delayMs = 5000;
+        } else {
+          // 指数退避：1s, 2s, 4s, 8s, 16s（上限 16s）
+          delayMs = Math.min(1000 * Math.pow(2, retryCount), 16000);
+        }
+
+        await this.delay(delayMs);
         return this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks, retryCount + 1);
       } else {
-        console.error(`分片 ${chunkIndex} 重试 ${this.MAX_RETRIES} 次后仍然失败`);
+        console.error(`分片 ${chunkIndex} 重试 ${maxRetries} 次后仍然失败`);
         throw new Error(`分片 ${chunkIndex} 上传失败: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
     }

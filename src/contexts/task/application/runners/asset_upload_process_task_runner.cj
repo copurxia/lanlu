@@ -57,6 +57,47 @@ public class AssetUploadProcessTaskRunner {
             }
         }
 
+        // 优化：archive 类型跳过 staging asset，直接传递 final.part 路径给 consume runner
+        if (targetType == "archive") {
+            TaskModel.updateTaskProgress(taskId, 90, "创建消费任务")
+            let consumeParams = buildArchiveDirectConsumeParams(
+                finalPartPathStr, chunkDirStr, targetType, targetId, categoryId, filename, overwrite, uploadUserId
+            )
+            let groupId = "asset_upload:${taskId}"
+            let consumeTask = TaskModel.createTaskWithOptions(
+                resolveConsumeTaskName(targetType),
+                resolveConsumeTaskType(targetType),
+                consumeParams,
+                5,
+                groupId,
+                "asset_upload"
+            )
+            if (consumeTask.id <= 0) {
+                fail(taskId, "Failed to create consume task")
+                return
+            }
+            context.notifyTaskAvailable()
+            logger.debug(
+                "Created archive direct consume task",
+                [("consume_task_id", consumeTask.id.toString()), ("target_type", targetType)]
+            )
+            let out = ByteBuffer()
+            let w = JsonWriter(out)
+            w.startObject()
+            w.writeName("success").writeValue(1)
+            w.writeName("consume_task_id").writeValue(consumeTask.id)
+            w.writeName("target_type").writeValue(targetType)
+            w.endObject()
+            w.flush()
+            let okJson = String.fromUtf8(readToEnd(out))
+            TaskModel.updateTaskProgress(taskId, 100, "资产消费任务已创建")
+            TaskModel.completeTask(taskId, "asset_upload_process completed")
+            TaskIO.writeOutput(taskId, okJson)
+            TaskIO.appendLog(taskId, "asset_upload_process completed (archive direct): consume_task_id=${consumeTask.id}")
+            cleanupUploadKV(taskId)
+            return
+        }
+
         let ext = inferExtFromFilenameOrContentType(filename, contentType)
         let stagingKind = "upload_staging_${targetType}"
         let ownerOpt = if (uploadUserId > 0) { Some(uploadUserId) } else { Option<Int64>.None }
@@ -259,6 +300,36 @@ public class AssetUploadProcessTaskRunner {
         let w = JsonWriter(out)
         w.startObject()
         w.writeName("staging_asset_id").writeValue(stagingAssetId.toString())
+        w.writeName("target_type").writeValue(targetType)
+        w.writeName("target_id").writeValue(targetId)
+        w.writeName("category_id").writeValue(categoryId)
+        w.writeName("filename").writeValue(filename)
+        w.writeName("overwrite").writeValue(if (overwrite) { "true" } else { "false" })
+        w.writeName("upload_user_id").writeValue(uploadUserId.toString())
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    /**
+     * archive 直连落盘参数：传递 final_part_path 而非 staging_asset_id
+     */
+    private static func buildArchiveDirectConsumeParams(
+        finalPartPath: String,
+        chunkDir: String,
+        targetType: String,
+        targetId: String,
+        categoryId: String,
+        filename: String,
+        overwrite: Bool,
+        uploadUserId: Int64
+    ): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("staging_asset_id").writeValue("0")
+        w.writeName("final_part_path").writeValue(finalPartPath)
+        w.writeName("chunk_dir").writeValue(chunkDir)
         w.writeName("target_type").writeValue(targetType)
         w.writeName("target_id").writeValue(targetId)
         w.writeName("category_id").writeValue(categoryId)

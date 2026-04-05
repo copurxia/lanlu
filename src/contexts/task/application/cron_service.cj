@@ -193,6 +193,16 @@ public class CronService {
         } catch (e: Exception) {
             logger.warn("Failed to cleanup timed out upload tasks", ("error", e.message))
         }
+
+        // 清理孤立的上传临时文件目录
+        try {
+            let dirsCleaned = TaskPoolService.cleanupOrphanedUploadDirs()
+            if (dirsCleaned > 0) {
+                logger.debug("Cleaned up orphaned upload dirs", ("count", dirsCleaned.toString()))
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to cleanup orphaned upload dirs", ("error", e.message))
+        }
     }
 
     /**

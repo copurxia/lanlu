@@ -212,6 +212,40 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
     }
 
+    /**
+     * 批量写入同一 group 内的多个 key
+     *
+     * 一次加锁 + N 次 putRecord + 一次解锁，避免 N 次独立 set 导致的重复加锁。
+     */
+    public func setMulti(groupId: String, keys: Array<String>, values: Array<String>, ttlSeconds: Int64): Bool {
+        if (keys.size == 0 || keys.size != values.size) {
+            return false
+        }
+        let normalizedGroupId = normalizeGroupId(groupId)
+        if (normalizedGroupId.size == 0) {
+            return false
+        }
+
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
+        try {
+            var allOk = true
+            var i: Int64 = 0
+            while (i < keys.size) {
+                let normalizedKey = normalizeKey(keys[i])
+                if (normalizedKey.size > 0) {
+                    if (!putRecordNormalized(normalizedGroupId, normalizedKey, values[i], ttlSeconds)) {
+                        allOk = false
+                    }
+                }
+                i += 1
+            }
+            return allOk
+        } finally {
+            groupMutex.unlock()
+        }
+    }
+
     public func insertIfAbsent(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool {
         let normalizedGroupId = normalizeGroupId(groupId)
         let normalizedKey = normalizeKey(key)

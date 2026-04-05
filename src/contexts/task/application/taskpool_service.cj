@@ -4,6 +4,7 @@ import std.collection.*
 import std.sync.*
 import std.convert.*
 import std.time.*
+import std.fs.*
 import stdx.log.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.infrastructure.kv.*
@@ -153,6 +154,60 @@ public class TaskPoolService {
      */
     public static func cleanupTimedOutUploads(): Int64 {
         return TaskDao.failTimedOutUploadTasks()
+    }
+
+    /**
+     * 清理孤立的上传临时文件：由 CronService 周期性调用
+     * 扫描 data/cache/task/ 下的目录，清理已终态或不存在的任务对应的临时目录
+     */
+    public static func cleanupOrphanedUploadDirs(): Int64 {
+        let logger = getLogger("taskpool_cleanup")
+        let cacheTaskDir = "./data/cache/task"
+        if (!exists(Path(cacheTaskDir))) {
+            return 0
+        }
+
+        var cleanedCount: Int64 = 0
+        try {
+            let fileInfos = Directory.readFrom(Path(cacheTaskDir))
+            for (fi in fileInfos) {
+                let entry = fi.name
+                let taskIdOpt = try { Some(Int64.parse(entry)) } catch (_: Exception) { Option<Int64>.None }
+                match (taskIdOpt) {
+                    case Some(taskId) =>
+                        let task = TaskDao.getTaskDataById(taskId)
+                        let shouldCleanup = if (task.id == 0) {
+                            // 任务不存在（DB 中已无记录）
+                            true
+                        } else if (task.status == "completed" || task.status == "failed" || task.status == "stopped") {
+                            // 任务已终态
+                            true
+                        } else {
+                            false
+                        }
+                        if (shouldCleanup) {
+                            let dirPath = Path("${cacheTaskDir}/${entry}")
+                            try {
+                                remove(dirPath, recursive: true)
+                                cleanedCount += 1
+                                logger.debug("Cleaned up orphaned upload dir", ("taskId", entry))
+                            } catch (e: Exception) {
+                                logger.warn("Failed to clean upload dir", ("taskId", entry), ("error", e.message))
+                            }
+                            // 同时清理对应的 KV 组
+                            TaskKVService.getStore().deleteGroup("asset_upload:${entry}")
+                        }
+                    case None => () // 非数字目录名，跳过
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Failed to scan upload cache dir", ("error", e.message))
+        }
+
+        if (cleanedCount > 0) {
+            logger.debug("Upload dir cleanup completed", ("cleaned", cleanedCount.toString()))
+        }
+        return cleanedCount
     }
 
     /**
