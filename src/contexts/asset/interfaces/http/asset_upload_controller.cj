@@ -4,7 +4,6 @@ import ignite.*
 import stdx.net.http.HttpStatusCode
 import std.fs.*
 import std.convert.*
-import std.collection.ArrayList
 import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
@@ -284,10 +283,19 @@ public class AssetUploadController {
             }
 
             let bodyStream = ctx.requestBody()
-            let partFile = File(partPath, OpenMode.Append)
-            let bytesWritten = streamWriteToFile(bodyStream, partFile)
-            partFile.flush()
-            partFile.close()
+            var bytesWritten: Int64 = 0
+            try {
+                let partFile = File(partPath, OpenMode.Append)
+                bytesWritten = streamWriteToFile(bodyStream, partFile)
+                if (bytesWritten > 0) {
+                    partFile.flush()
+                }
+                partFile.close()
+            } catch (e: Exception) {
+                ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
+                ResponseView.errorJson(ctx, "Failed to write chunk: ${e.message}", 500)
+                return
+            }
 
             if (bytesWritten <= 0) {
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
