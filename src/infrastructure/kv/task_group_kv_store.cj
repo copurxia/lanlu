@@ -312,6 +312,68 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
     }
 
+    /**
+     * 批量读取同一 group 内的多个 key
+     * 
+     * 优化说明：
+     * - 一次加锁、一次 multiGet、一次解锁
+     * - 避免多次独立 get 导致的重复加锁和 RocksDB 调用
+     * - 6次独立读 → 1次批量读，RocksDB I/O 减少83%
+     *
+     * @param groupId 分组ID
+     * @param keys 需要读取的key数组
+     * @return 与keys对应的值数组，缺失或过期的key返回None
+     */
+    public func getMulti(groupId: String, keys: Array<String>): Array<Option<String>> {
+        let normalizedGroupId = normalizeGroupId(groupId)
+        if (normalizedGroupId.size == 0 || keys.size == 0) {
+            return Array<Option<String>>(keys.size, { _ => None })
+        }
+
+        // 构建完整的存储key
+        let storageKeys = Array<String>(keys.size, { i =>
+            buildStorageKey(normalizedGroupId, normalizeKey(keys[i]))
+        })
+
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        groupMutex.lock()
+        try {
+            let storeOpt = LocalKVService.getStore()
+            match (storeOpt) {
+                case Some(store) =>
+                    // 一次性批量读取
+                    let rawValues = store.multiGet(namespace, storageKeys)
+                    
+                    // 解码并检查过期
+                    let results = Array<Option<String>>(rawValues.size, { i =>
+                        match (rawValues[i]) {
+                            case Some(payload) =>
+                                match (TaskGroupKVRecordCodec.decode(payload)) {
+                                    case Some(record) =>
+                                        if (isExpired(record)) {
+                                            let _ = deleteNormalizedKey(storageKeys[i])
+                                            None
+                                        } else {
+                                            Some(record.value)
+                                        }
+                                    case None =>
+                                        let _ = deleteNormalizedKey(storageKeys[i])
+                                        logger.warn("task kv record decode failed during multiGet", ("group_id", normalizedGroupId), ("key", keys[i]))
+                                        None
+                                }
+                            case None => None
+                        }
+                    })
+                    return results
+                case None =>
+                    logger.warn("task kv unavailable because LocalKVService is not ready")
+                    return Array<Option<String>>(keys.size, { _ => None })
+            }
+        } finally {
+            groupMutex.unlock()
+        }
+    }
+
     private func getValueNormalized(groupId: String, key: String): Option<String> {
         match (getRecordNormalized(groupId, key)) {
             case Some(record) => return Some(record.value)

@@ -479,6 +479,68 @@ public class TaskDao {
     }
 
     /**
+     * 原子性地延长任务超时时间并更新进度
+     * 
+     * 优化说明：
+     * - 将 extendTaskTimeout + updateTaskProgressPreserveStatus 合并为单次SQL
+     * - 减少数据库往返次数，从2次DB写降至1次
+     * - 适用于高频调用的分片上传场景
+     * - 仅更新 running 状态的任务，避免误更新已完成任务
+     *
+     * @param id 任务ID
+     * @param timeoutSeconds 超时秒数
+     * @param progress 进度百分比（0-100）
+     * @param message 进度消息
+     * @return 是否更新成功
+     */
+    public static func extendTimeoutAndUpdateProgress(
+        id: Int64,
+        timeoutSeconds: Int32,
+        progress: Int32,
+        message: String
+    ): Bool {
+        let logger = getLogger("task_dao")
+        if (timeoutSeconds <= 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks
+                        SET timeout_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 second'),
+                            message = ?,
+                            progress = ?
+                        WHERE id = ? AND status = 'running'
+                    """)
+                    try {
+                        stmt.set(0, Int64(timeoutSeconds))
+                        stmt.set(1, message)
+                        stmt.set(2, progress)
+                        stmt.set(3, id)
+                        let updateResult = stmt.update()
+                        if (updateResult.rowCount > 0) {
+                            TaskEventHub.getInstance().publishTaskChanged(id)
+                        }
+                        return updateResult.rowCount > 0
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("延长超时并更新进度失败", ("id", id.toString()), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
      * 定期清理超时的上传占位任务（running 且 timeout_at 已过期）
      */
     public static func failTimedOutUploadTasks(): Int64 {

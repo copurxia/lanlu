@@ -155,6 +155,7 @@ public class AssetUploadController {
             let _ = kvStore.set(kvGroupId, "total_chunks", totalChunks.toString(), UPLOAD_KV_TTL_SECONDS)
             let _ = kvStore.set(kvGroupId, "uploaded_count", "0", UPLOAD_KV_TTL_SECONDS)
             let _ = kvStore.set(kvGroupId, "written_offset", "0", UPLOAD_KV_TTL_SECONDS)
+            let _ = kvStore.set(kvGroupId, "last_reported_progress", "0", UPLOAD_KV_TTL_SECONDS)
 
             ResponseView.successJson(ctx, "{\"taskId\":\"${task.id}\"}", "ok")
         } catch (e: Exception) {
@@ -214,20 +215,43 @@ public class AssetUploadController {
 
             let kvGroupId = "asset_upload:${taskIdStr}"
             let kvStore = getTaskKVStore()
+            
+            // 优化：批量读取KV，6次独立读 → 1次批量读
+            let metaKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress"]
+            let metaValues = kvStore.getMulti(kvGroupId, metaKeys)
+
             var fileSize: Int64 = 0
             var chunkSize: Int64 = 0
             var totalChunks: Int64 = 0
-            match (kvStore.get(kvGroupId, "filesize")) {
-                case Some(v) => try { fileSize = Int64.parse(v) } catch (_: Exception) { fileSize = 0 }
-                case None => fileSize = 0
-            }
-            match (kvStore.get(kvGroupId, "chunk_size")) {
-                case Some(v) => try { chunkSize = Int64.parse(v) } catch (_: Exception) { chunkSize = 0 }
-                case None => chunkSize = 0
-            }
-            match (kvStore.get(kvGroupId, "total_chunks")) {
-                case Some(v) => try { totalChunks = Int64.parse(v) } catch (_: Exception) { totalChunks = 0 }
-                case None => totalChunks = 0
+            var uploadedCount: Int64 = 0
+            var currentOffset: Int64 = 0
+            var lastReportedProgress: Int64 = 0
+
+            if (metaValues.size == 6) {
+                match (metaValues[0]) {
+                    case Some(v) => try { fileSize = Int64.parse(v) } catch (_: Exception) { fileSize = 0 }
+                    case None => fileSize = 0
+                }
+                match (metaValues[1]) {
+                    case Some(v) => try { chunkSize = Int64.parse(v) } catch (_: Exception) { chunkSize = 0 }
+                    case None => chunkSize = 0
+                }
+                match (metaValues[2]) {
+                    case Some(v) => try { totalChunks = Int64.parse(v) } catch (_: Exception) { totalChunks = 0 }
+                    case None => totalChunks = 0
+                }
+                match (metaValues[3]) {
+                    case Some(v) => try { uploadedCount = Int64.parse(v) } catch (_: Exception) { uploadedCount = 0 }
+                    case None => uploadedCount = 0
+                }
+                match (metaValues[4]) {
+                    case Some(v) => try { currentOffset = Int64.parse(v) } catch (_: Exception) { currentOffset = 0 }
+                    case None => currentOffset = 0
+                }
+                match (metaValues[5]) {
+                    case Some(v) => try { lastReportedProgress = Int64.parse(v) } catch (_: Exception) { lastReportedProgress = 0 }
+                    case None => lastReportedProgress = 0
+                }
             }
 
             if (fileSize <= 0 || chunkSize <= 0 || totalChunks <= 0) {
@@ -251,12 +275,7 @@ public class AssetUploadController {
                 return
             }
 
-            var uploadedCount: Int64 = 0
-            match (kvStore.get(kvGroupId, "uploaded_count")) {
-                case Some(v) =>
-                    try { uploadedCount = Int64.parse(v) } catch (_: Exception) { uploadedCount = 0 }
-                case None => uploadedCount = 0
-            }
+            // 顺序校验
             if (chunkIndex < uploadedCount) {
                 let _ = TaskDao.extendTaskTimeout(taskIdInt, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 ResponseView.successJson(ctx, "{}", "Chunk already uploaded")
@@ -272,9 +291,19 @@ public class AssetUploadController {
                 return
             }
 
-            // 优化点1：流式写入，避免ArrayList内存膨胀
-            // 原实现：逐字节添加到ArrayList，导致O(n)次内存分配和拷贝
-            // 优化后：直接写入文件，内存峰值从20MB降至8KB
+            // 偏移量校验（关键bug修复：先校验再写入）
+            let expectedOffset = chunkIndex * chunkSize
+            if (currentOffset != expectedOffset) {
+                ctx.status(HttpStatusCode.STATUS_CONFLICT)
+                ResponseView.errorJson(
+                    ctx,
+                    "Upload offset mismatch: expected ${expectedOffset.toString()} got ${currentOffset.toString()}",
+                    409
+                )
+                return
+            }
+
+            // 文件存在性检查和流式写入
             let partPath = Path("${uploadDir.toString()}/${UPLOAD_PART_FILE}")
             if (!exists(partPath)) {
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
@@ -287,7 +316,16 @@ public class AssetUploadController {
             try {
                 let partFile = File(partPath, OpenMode.Append)
                 bytesWritten = streamWriteToFile(bodyStream, partFile)
-                if (bytesWritten > 0) {
+                
+                if (bytesWritten <= 0) {
+                    partFile.close()
+                    ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                    ResponseView.errorJson(ctx, "Empty body", 400)
+                    return
+                }
+                
+                // 仅在最后一块分片时flush
+                if (chunkIndex == totalChunks - 1) {
                     partFile.flush()
                 }
                 partFile.close()
@@ -297,13 +335,7 @@ public class AssetUploadController {
                 return
             }
 
-            if (bytesWritten <= 0) {
-                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-                ResponseView.errorJson(ctx, "Empty body", 400)
-                return
-            }
-
-            let expectedOffset = chunkIndex * chunkSize
+            // 大小校验
             if (expectedOffset < 0 || expectedOffset >= fileSize) {
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Invalid chunk offset", 400)
@@ -320,33 +352,9 @@ public class AssetUploadController {
                 return
             }
 
-            // 优化点2：从TaskKV读取偏移量，避免文件系统stat调用
-            // 原实现：每次分片上传调用FileInfo(partPath).size，产生100次stat调用
-            // 优化后：从TaskKV读取，stat调用从100次降至1次（最终校验）
-            var currentOffset: Int64 = 0
-            match (kvStore.get(kvGroupId, "written_offset")) {
-                case Some(v) => try { currentOffset = Int64.parse(v) } catch (_: Exception) { currentOffset = 0 }
-                case None => currentOffset = 0
-            }
-
-            if (currentOffset != expectedOffset) {
-                ctx.status(HttpStatusCode.STATUS_CONFLICT)
-                ResponseView.errorJson(
-                    ctx,
-                    "Upload offset mismatch: expected ${expectedOffset.toString()} got ${currentOffset.toString()}",
-                    409
-                )
-                return
-            }
-
             // 更新偏移量，确保数据一致性
             let newOffset = currentOffset + bytesWritten
             let _ = kvStore.set(kvGroupId, "written_offset", newOffset.toString(), UPLOAD_KV_TTL_SECONDS)
-
-            let timeoutUpdated = TaskDao.extendTaskTimeout(taskIdInt, UPLOAD_IDLE_TIMEOUT_SECONDS)
-            if (!timeoutUpdated) {
-                getLogger("asset_upload").warn("Failed to extend upload timeout", ("taskId", taskIdStr))
-            }
 
             let chunkKey = "chunk_${chunkIndexStr}"
             var uploadedChunkCount: Int64 = 0
@@ -362,10 +370,32 @@ public class AssetUploadController {
                 }
             }
 
+            // 优化：合并DB写入，2次DB写 → 1次
             var uploadedProgress: Int64 = (uploadedChunkCount * 70) / totalChunks
             if (uploadedProgress < 0) { uploadedProgress = 0 }
             if (uploadedProgress > 70) { uploadedProgress = 70 }
-            TaskModel.updateTaskProgress(taskIdInt, Int32(uploadedProgress), "已上传 ${uploadedChunkCount.toString()}/${totalChunks.toString()} 个分片")
+
+            // 优化：进度变化超过3%或最后一块才更新DB
+            let shouldUpdateProgress = (uploadedProgress >= lastReportedProgress + 3) || (uploadedChunkCount == totalChunks)
+            if (shouldUpdateProgress) {
+                let dbUpdated = TaskDao.extendTimeoutAndUpdateProgress(
+                    taskIdInt,
+                    UPLOAD_IDLE_TIMEOUT_SECONDS,
+                    Int32(uploadedProgress),
+                    "已上传 ${uploadedChunkCount.toString()}/${totalChunks.toString()} 个分片"
+                )
+                if (!dbUpdated) {
+                    getLogger("asset_upload").warn("Failed to update task progress and timeout", ("taskId", taskIdStr))
+                }
+                // 更新最后报告的进度
+                let _ = kvStore.set(kvGroupId, "last_reported_progress", uploadedProgress.toString(), UPLOAD_KV_TTL_SECONDS)
+            } else {
+                // 仅延长超时，不更新进度
+                let timeoutUpdated = TaskDao.extendTaskTimeout(taskIdInt, UPLOAD_IDLE_TIMEOUT_SECONDS)
+                if (!timeoutUpdated) {
+                    getLogger("asset_upload").warn("Failed to extend upload timeout", ("taskId", taskIdStr))
+                }
+            }
 
             if (uploadedChunkCount >= totalChunks && task.taskType == "asset_upload") {
                 // 最终校验文件大小，检测数据完整性
@@ -759,7 +789,7 @@ public class AssetUploadController {
      *
      * @param inputStream 请求体输入流
      * @param file 目标文件（已打开为Append模式）
-     * @return 写入的总字节数，失败返回-1
+     * @return 写入的总字节数，空输入返回0
      */
     private static func streamWriteToFile(
         inputStream: InputStream,

@@ -34,6 +34,7 @@ public interface TaskKVStore {
     func releaseGroup(groupId: String): Unit
     func set(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool
     func get(groupId: String, key: String): Option<String>
+    func getMulti(groupId: String, keys: Array<String>): Array<Option<String>>
     func delete(groupId: String, key: String): Bool
     func deleteGroup(groupId: String): Unit
     func insertIfAbsent(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool
