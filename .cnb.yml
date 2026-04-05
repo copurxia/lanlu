@@ -112,9 +112,17 @@ $:
               CJ_VERSION=$(cjc -v 2>&1 | head -n1)
               CJ_VERSION_FILE="build-script-cache/release/.cj-version"
               mkdir -p build-script-cache/release
-              if [ -f "$CJ_VERSION_FILE" ] && [ "$(cat "$CJ_VERSION_FILE")" != "$CJ_VERSION" ]; then
-                echo "Cangjie version changed ($(cat "$CJ_VERSION_FILE") -> $CJ_VERSION), clearing build-script cache..."
-                find build-script-cache/release -mindepth 1 -not -name '.cj-version' -delete
+              if [ -f "$CJ_VERSION_FILE" ]; then
+                if [ "$(cat "$CJ_VERSION_FILE")" != "$CJ_VERSION" ]; then
+                  echo "Cangjie version changed ($(cat "$CJ_VERSION_FILE") -> $CJ_VERSION), clearing build-script cache..."
+                  find build-script-cache/release -mindepth 1 -not -name '.cj-version' -delete
+                fi
+              else
+                # Version file missing but cache exists, indicating stale cache from previous builds
+                if [ -d "build-script-cache/release/wasmedge_ffi" ]; then
+                  echo "Version file missing but cache exists, clearing build-script cache..."
+                  find build-script-cache/release -mindepth 1 -delete
+                fi
               fi
               echo "$CJ_VERSION" > "$CJ_VERSION_FILE"
 
