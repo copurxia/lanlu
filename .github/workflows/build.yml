@@ -17,6 +17,7 @@ jobs:
         uses: Zxilly/setup-cangjie@v2
         with:
           channel: sts
+          version: auto
 
       - name: Install build tools
         run: |
