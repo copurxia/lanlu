@@ -127,7 +127,6 @@ public class AssetUploadController {
                 return
             }
 
-            let _ = TaskDao.updateTaskStatus(task.id, "pending", "上传初始化完成，等待调度", 0)
             TaskPoolService.getInstance().notifyTaskAvailable()
 
             createTempDirectories()
@@ -448,8 +447,12 @@ public class AssetUploadController {
                 let paramsJson = String.fromUtf8(readToEnd(out))
 
                 TaskDao.updateTaskParameters(taskIdInt, paramsJson)
-                TaskDao.updateTaskType(taskIdInt, "asset_upload_process")
-                TaskDao.updateTaskStatus(taskIdInt, "pending", "分片上传完成，等待处理", 70)
+                let handoffOk = TaskDao.handoffUploadTask(taskIdInt, "分片上传完成，等待处理", 70)
+                if (!handoffOk) {
+                    getLogger("asset_upload").warn("handoffUploadTask returned false (task may have been cancelled)", ("taskId", taskIdStr))
+                    ResponseView.successJson(ctx, "{}", "Chunk uploaded but handoff skipped")
+                    return
+                }
                 TaskIO.appendLog(taskIdInt, "all chunks uploaded; handoff to asset_upload_process")
                 TaskPoolService.getInstance().notifyTaskAvailable()
             }

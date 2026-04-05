@@ -456,7 +456,7 @@ public class TaskDao {
                     let stmt = conn.prepareStatement("""
                         UPDATE tasks
                         SET timeout_at = CURRENT_TIMESTAMP + (? * INTERVAL '1 second')
-                        WHERE id = ?
+                        WHERE id = ? AND status = 'running'
                     """)
                     try {
                         stmt.set(0, Int64(timeoutSeconds))
@@ -530,6 +530,59 @@ public class TaskDao {
                     }
                 } catch (e: Exception) {
                     logger.error("延长超时并更新进度失败", ("id", id.toString()), ("error", e.message))
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                logger.error("无法创建数据库连接")
+                return false
+        }
+    }
+
+    /**
+     * 原子地将 asset_upload 任务转交给 asset_upload_process
+     *
+     * 修复说明：
+     * - 将 updateTaskType + updateTaskStatus 合并为单条 SQL，消除两步操作之间的竜态窗口
+     * - WHERE 已加上 status='running' AND task_type='asset_upload' 安全地幸，
+     *   若任务已被取消或失败，返回 false。
+     *
+     * @param id       任务ID
+     * @param message  转交后的状态消息
+     * @param progress 转交后的进度（0-100）
+     * @return 是否转交成功
+     */
+    public static func handoffUploadTask(id: Int64, message: String, progress: Int32): Bool {
+        let logger = getLogger("task_dao")
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE tasks
+                        SET task_type = 'asset_upload_process',
+                            status    = 'pending',
+                            message   = ?,
+                            progress  = ?,
+                            phase     = 'queued',
+                            waiting_reason = NULL
+                        WHERE id = ? AND status = 'running' AND task_type = 'asset_upload'
+                    """)
+                    try {
+                        stmt.set(0, message)
+                        stmt.set(1, progress)
+                        stmt.set(2, id)
+                        let updateResult = stmt.update()
+                        if (updateResult.rowCount > 0) {
+                            TaskEventHub.getInstance().publishTaskChanged(id)
+                        }
+                        return updateResult.rowCount > 0
+                    } finally {
+                        try { stmt.close() } catch (_: Exception) {}
+                    }
+                } catch (e: Exception) {
+                    logger.error("任务 handoff 失败", ("id", id.toString()), ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}

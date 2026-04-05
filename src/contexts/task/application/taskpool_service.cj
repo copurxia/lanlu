@@ -235,6 +235,17 @@ public class TaskPoolService {
                 )
 
                 for (task in tasks) {
+                    if (isTaskActivelyTracked(task.id)) {
+                        // 防御性检查：任务已在 activeWorkers 中，说明出现了 double-claim。
+                        // DB 状态已被 claimPendingTasks 改为 running，原 worker 仍在运行，
+                        // 直接跳过本次 spawn，不增加 currentWorkers 计数。
+                        logger.error(
+                            "double-claim detected: task already has an active worker, skip re-dispatch",
+                            ("task_id", task.id.toString()),
+                            ("task_type", task.taskType)
+                        )
+                        continue
+                    }
                     currentWorkers.fetchAdd(1)
                     let workerId = workerSeq.fetchAdd(1)
                     let taskData = task
