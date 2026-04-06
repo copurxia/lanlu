@@ -36,19 +36,22 @@ function MobileSubMenuItemRenderer({
 
   return (
     <>
-      <Button
-        variant="ghost"
+      <button
         disabled={item.disabled}
         className={cn(
-          "w-full justify-start h-auto py-3 px-2",
-          item.danger && "text-destructive hover:text-destructive"
+          "w-full flex items-center justify-start h-auto py-2.5 px-2 rounded-md text-sm font-medium transition-colors",
+          "hover:bg-accent hover:text-accent-foreground",
+          "active:bg-accent active:text-accent-foreground",
+          "focus:outline-none",
+          item.disabled && "pointer-events-none opacity-50",
+          item.danger && "text-destructive hover:text-destructive active:text-destructive"
         )}
         onClick={() => setShowSubMenu(true)}
       >
         {item.icon && <item.icon className="mr-2 h-4 w-4" />}
         <span className="flex-1 text-left">{item.label}</span>
         <ChevronLeft className="ml-auto h-4 w-4 rotate-180" />
-      </Button>
+      </button>
 
       {showSubMenu && (
         <div className="fixed inset-0 z-[60] bg-background">
@@ -75,12 +78,15 @@ function MobileSubMenuItemRenderer({
                       onBack={() => setShowSubMenu(false)}
                     />
                   ) : (
-                    <Button
-                      variant="ghost"
+                    <button
                       disabled={child.disabled}
                       className={cn(
-                        "w-full justify-start h-auto py-3 px-2",
-                        child.danger && "text-destructive hover:text-destructive"
+                        "w-full flex items-center justify-start h-auto py-2.5 px-2 rounded-md text-sm font-medium transition-colors",
+                        "hover:bg-accent hover:text-accent-foreground",
+                        "active:bg-accent active:text-accent-foreground",
+                        "focus:outline-none",
+                        child.disabled && "pointer-events-none opacity-50",
+                        child.danger && "text-destructive hover:text-destructive active:text-destructive"
                       )}
                       onClick={() => {
                         if (child.onClick) {
@@ -94,7 +100,7 @@ function MobileSubMenuItemRenderer({
                     >
                       {child.icon && <child.icon className="mr-2 h-4 w-4" />}
                       <span>{child.label}</span>
-                    </Button>
+                    </button>
                   )}
                 </React.Fragment>
               ))}
@@ -137,12 +143,15 @@ function MobileMenuItemGroupRenderer({
               onBack={onClose}
             />
           ) : (
-            <Button
-              variant="ghost"
+            <button
               disabled={item.disabled}
               className={cn(
-                "w-full justify-start h-auto py-3 px-2",
-                item.danger && "text-destructive hover:text-destructive"
+                "w-full flex items-center justify-start h-auto py-2.5 px-2 rounded-md text-sm font-medium transition-colors",
+                "hover:bg-accent hover:text-accent-foreground",
+                "active:bg-accent active:text-accent-foreground",
+                "focus:outline-none",
+                item.disabled && "pointer-events-none opacity-50",
+                item.danger && "text-destructive hover:text-destructive active:text-destructive"
               )}
               onClick={() => {
                 if (item.onClick) {
@@ -155,7 +164,7 @@ function MobileMenuItemGroupRenderer({
             >
               {item.icon && <item.icon className="mr-2 h-4 w-4" />}
               <span>{item.label}</span>
-            </Button>
+            </button>
           )}
         </React.Fragment>
       ))}
@@ -210,16 +219,18 @@ export function MobileMenuRenderer({
     <>
       {triggerWithClick}
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="bottom" className="h-auto max-h-[80vh]">
+        <SheetContent side="bottom" className="h-auto max-h-[80vh]" showCloseButton={false}>
+          {/* 拖拽指示器 */}
+          <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-muted" />
           {title && (
-            <SheetHeader className="pb-2">
+            <SheetHeader className="pb-1.5 pt-2">
               <SheetTitle className="text-center">{title}</SheetTitle>
               {subtitle && (
                 <p className="text-center text-sm text-muted-foreground">{subtitle}</p>
               )}
             </SheetHeader>
           )}
-          <div className="flex flex-col gap-1 overflow-y-auto">
+          <div className="flex flex-col gap-0.5 overflow-y-auto pb-2">
             {items.map((group, groupIndex) => (
               <MobileMenuItemGroupRenderer
                 key={groupIndex}
