@@ -58,6 +58,7 @@ export function ReaderWebtoonModeView({
   onMeasureImageHeight,
   onDoubleClick,
   onImageDragStart,
+  onVideoClick,
   t,
 }: {
   enabled: boolean;
@@ -96,6 +97,7 @@ export function ReaderWebtoonModeView({
   onMeasureImageHeight?: (pageIndex: number, naturalWidth: number, naturalHeight: number) => void;
   onDoubleClick: (e: React.MouseEvent) => void;
   onImageDragStart: (e: React.DragEvent) => void;
+  onVideoClick?: () => void;
   t: (key: string) => string;
 }) {
   if (!enabled) return null;
@@ -226,6 +228,7 @@ export function ReaderWebtoonModeView({
                           }}
                           onLoadedData={() => onImageLoaded(actualIndex)}
                           onError={() => onImageError(actualIndex)}
+                          onVideoClick={onVideoClick}
                         />
                       ) : page.type === 'audio' ? (
                         <ReaderAudioStage

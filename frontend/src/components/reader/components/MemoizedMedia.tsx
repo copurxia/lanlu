@@ -52,6 +52,7 @@ export const MemoizedVideo = memo(
       showNativeControls = false,
       onLoadedData,
       onError,
+      onVideoClick,
     }: {
       src: string;
       className?: string;
@@ -59,6 +60,7 @@ export const MemoizedVideo = memo(
       showNativeControls?: boolean;
       onLoadedData?: () => void;
       onError?: () => void;
+      onVideoClick?: () => void;
     },
     ref: React.ForwardedRef<HTMLVideoElement>
   ) {
@@ -67,9 +69,19 @@ export const MemoizedVideo = memo(
       const video = e.currentTarget;
       if (video.paused) {
         void video.play().catch(() => {});
-        return;
+      } else {
+        video.pause();
       }
-      video.pause();
+      // 通知父容器视频被点击，让父容器处理工具栏显示/隐藏
+      onVideoClick?.();
+    };
+
+    const handleTouchStart = (e: React.TouchEvent<HTMLVideoElement>) => {
+      if (!showNativeControls) {
+        e.stopPropagation();
+        // 触摸时也通知父容器
+        onVideoClick?.();
+      }
     };
 
     return (
@@ -84,9 +96,7 @@ export const MemoizedVideo = memo(
         onLoadedData={onLoadedData}
         onError={onError}
         onClick={showNativeControls ? undefined : handleTogglePlay}
-        onTouchStart={(e) => {
-          if (!showNativeControls) e.stopPropagation();
-        }}
+        onTouchStart={handleTouchStart}
       />
     );
   })

@@ -38,6 +38,7 @@ export function ReaderSingleModeView({
   onCacheImage,
   onDoubleClick,
   onImageDragStart,
+  onVideoClick,
   t,
 }: {
   enabled: boolean;
@@ -65,6 +66,7 @@ export function ReaderSingleModeView({
   onCacheImage: (url: string, pageIndex: number) => void;
   onDoubleClick: (e: React.MouseEvent) => void;
   onImageDragStart: (e: React.DragEvent) => void;
+  onVideoClick?: () => void;
   t: (key: string) => string;
 }) {
   const [imageMeta, setImageMeta] = useState<Record<number, { w: number; h: number; isLong: boolean }>>({});
@@ -428,6 +430,7 @@ export function ReaderSingleModeView({
                     }}
                     onLoadedData={() => onImageLoaded(currentPage)}
                     onError={() => onImageError(currentPage)}
+                    onVideoClick={onVideoClick}
                   />
                 ) : pages[currentPage]?.type === 'audio' ? (
                   <ReaderAudioStage
@@ -615,6 +618,7 @@ export function ReaderSingleModeView({
                       }}
                       onLoadedData={() => onImageLoaded(currentPage + 1)}
                       onError={() => onImageError(currentPage + 1)}
+                      onVideoClick={onVideoClick}
                     />
                   ) : pages[currentPage + 1]?.type === 'audio' ? (
                     <ReaderAudioStage

@@ -1736,6 +1736,11 @@ function ReaderContent() {
     e.preventDefault();
   }, []);
 
+  // 处理视频点击 - 切换工具栏显示/隐藏
+  const handleVideoClick = useCallback(() => {
+    toolbar.toggleToolbar();
+  }, [toolbar]);
+
   const tryTurnHtmlSpread = useCallback(
     (direction: 'prev' | 'next') => {
       if (!isHtmlSpreadView) return false;
@@ -2170,6 +2175,7 @@ function ReaderContent() {
 	          onCacheImage={imageLoading.cacheImage}
 	          onDoubleClick={handleDoubleClick}
 	          onImageDragStart={handleImageDragStart}
+	          onVideoClick={handleVideoClick}
 	          t={t}
 	        />
 
@@ -2238,6 +2244,7 @@ function ReaderContent() {
 	          onCacheImage={imageLoading.cacheImage}
 	          onDoubleClick={handleDoubleClick}
 	          onImageDragStart={handleImageDragStart}
+	          onVideoClick={handleVideoClick}
 	          t={t}
 	        />
       </div>
