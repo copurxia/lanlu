@@ -18,7 +18,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { useAuth } from '@/contexts/AuthContext';
@@ -496,15 +495,16 @@ export function HomeMediaItemMenu({
   return (
     <>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            aria-hidden
-            className="pointer-events-none fixed h-0 w-0 opacity-0"
-            style={{ left: menuPosition.x, top: menuPosition.y }}
-          />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" side="bottom" className="w-52">
+        <DropdownMenuContent
+          align="start"
+          side="bottom"
+          className="w-52"
+          style={{
+            position: 'fixed',
+            left: menuPosition.x,
+            top: menuPosition.y,
+          }}
+        >
           {selectable && !selectionMode ? (
             <>
               <DropdownMenuItem

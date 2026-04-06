@@ -135,21 +135,52 @@ export function DesktopMenuRenderer({
   title,
   subtitle,
 }: DesktopMenuRendererProps) {
-  // 右键菜单使用隐藏的触发按钮定位
-  const contextMenuTrigger = trigger === "context-menu" && (
-    <button
-      className="pointer-events-none fixed h-0 w-0 opacity-0"
-      style={{ left: menuPosition.x, top: menuPosition.y }}
-    />
-  )
+  // 对于右键菜单，使用虚拟锚点定位
+  if (trigger === "context-menu") {
+    return (
+      <DropdownMenu open={open} onOpenChange={onOpenChange}>
+        <DropdownMenuContent
+          align={align}
+          side="bottom"
+          style={{
+            width: typeof width === "number" ? `${width}px` : width,
+            position: 'fixed',
+            left: menuPosition.x,
+            top: menuPosition.y,
+          }}
+        >
+          {/* 用户信息头部 */}
+          {title && (
+            <div className="flex items-center justify-start gap-2 p-2">
+              <div className="flex flex-col space-y-1 leading-none">
+                <p className="font-medium">{title}</p>
+                {subtitle && (
+                  <p className="w-[200px] truncate text-sm text-muted-foreground">
+                    {subtitle}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          {items.map((group, groupIndex) => (
+            <MenuItemGroupRenderer
+              key={groupIndex}
+              group={group}
+              onSelect={onSelect}
+              isLastGroup={groupIndex === items.length - 1}
+            />
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    )
+  }
 
+  // 对于点击触发的菜单，使用正常的触发器
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
-        {trigger === "context-menu" ? (
-          contextMenuTrigger
-        ) : (
-          triggerElement ?? children ?? <button className="pointer-events-none fixed h-0 w-0 opacity-0" />
+        {triggerElement ?? children ?? (
+          <button className="sr-only" style={{ width: 0, height: 0, padding: 0, margin: 0, overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }} />
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent

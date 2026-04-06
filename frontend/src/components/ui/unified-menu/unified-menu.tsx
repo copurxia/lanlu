@@ -120,6 +120,27 @@ export function UnifiedMenu({
 
   // 根据模式渲染不同组件
   if (effectiveMode === "desktop") {
+    // 对于右键菜单，不需要外层div，直接渲染菜单内容
+    if (trigger === "context-menu") {
+      return (
+        <DesktopMenuRenderer
+          items={groupedItems}
+          trigger={trigger}
+          align={align}
+          width={width}
+          open={open}
+          onOpenChange={handleOpenChange}
+          onSelect={handleSelect}
+          menuPosition={menuPosition}
+          triggerElement={triggerElement}
+          title={title}
+          subtitle={subtitle}
+        >
+          {children}
+        </DesktopMenuRenderer>
+      )
+    }
+
     return (
       <div onContextMenu={handleContextMenu}>
         <DesktopMenuRenderer
