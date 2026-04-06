@@ -171,7 +171,7 @@ public class TaskPoolService {
         try {
             let fileInfos = Directory.readFrom(Path(cacheTaskDir))
             for (fi in fileInfos) {
-                let entry = fi.name
+                let entry = fi.path.fileName.toString()
                 let taskIdOpt = try { Some(Int64.parse(entry)) } catch (_: Exception) { Option<Int64>.None }
                 match (taskIdOpt) {
                     case Some(taskId) =>

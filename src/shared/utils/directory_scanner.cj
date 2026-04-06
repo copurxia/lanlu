@@ -145,7 +145,7 @@ public class DirectoryScanner {
             for (entry in entries) {
                 try {
                     if (entry.isRegular() || entry.isDirectory() || entry.isSymbolicLink()) {
-                        files.add(entry.name.toString())
+                        files.add(entry.path.fileName.toString())
                     }
                 } catch (_: Exception) {
                     // Skip entries with invalid names or permissions.
