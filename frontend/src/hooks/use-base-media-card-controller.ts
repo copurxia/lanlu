@@ -85,6 +85,7 @@ export function useBaseMediaCardController({
   const [editOpen, setEditOpen] = React.useState(false)
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [menuPosition, setMenuPosition] = React.useState({ x: 0, y: 0 })
+  const [previewOpen, setPreviewOpen] = React.useState(false)
   const hasMeasuredCoverAspectRatioRef = React.useRef(false)
 
   const isAdmin = user?.isAdmin === true
@@ -277,9 +278,11 @@ export function useBaseMediaCardController({
     isNewStatusLoading,
     menuOpen,
     menuPosition,
+    previewOpen,
     readStatusText: isNewStatusLoading ? t('common.loading') : isNew ? t('archive.markAsRead') : t('archive.markAsNew'),
     setEditOpen,
     setMenuOpen,
+    setPreviewOpen,
     toggleFavorite,
     toggleSelected,
   }

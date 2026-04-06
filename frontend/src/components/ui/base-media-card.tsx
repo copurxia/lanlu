@@ -13,6 +13,7 @@ import type { BaseMediaCardProps } from '@/components/ui/base-media-card.types'
 import { useLanguage } from '@/contexts/LanguageContext'
 import { useBaseMediaCardController } from '@/hooks/use-base-media-card-controller'
 import { useRecommendationTracker } from '@/hooks/use-recommendation-tracker'
+import { useLongPress } from '@/components/ui/unified-menu'
 import { ArchiveService } from '@/lib/services/archive-service'
 import { buildReaderPath } from '@/lib/utils/reader'
 import { cn } from '@/lib/utils/utils'
@@ -95,9 +96,11 @@ export function BaseMediaCard({
     isNewStatusLoading,
     menuOpen,
     menuPosition,
+    previewOpen,
     readStatusText,
     setEditOpen,
     setMenuOpen,
+    setPreviewOpen,
     toggleFavorite,
     toggleSelected,
   } = useBaseMediaCardController({
@@ -158,6 +161,59 @@ export function BaseMediaCard({
     router.push(detailPath)
   }, [detailPath, router, trackOpenDetails])
 
+  // 移动端长按处理：显示菜单
+  const handleLongPressMenu = React.useCallback(() => {
+    if (selectionMode) return
+    setPreviewOpen(false)
+    setMenuOpen(true)
+  }, [selectionMode])
+
+  // 长按菜单的触摸事件（1500ms触发）
+  const longPressMenuHandlers = useLongPress(handleLongPressMenu, { threshold: 1500 })
+
+  // 预览浮层的定时器
+  const previewTimerRef = React.useRef<NodeJS.Timeout | null>(null)
+
+  // 触摸开始：启动预览定时器（200ms后显示预览）
+  const handleTouchStart = React.useCallback((event: React.TouchEvent) => {
+    if (selectionMode) return
+    longPressMenuHandlers.onTouchStart(event)
+
+    // 200ms后显示预览浮层
+    previewTimerRef.current = setTimeout(() => {
+      setPreviewOpen(true)
+    }, 200)
+  }, [selectionMode, longPressMenuHandlers])
+
+  // 触摸结束：清除预览定时器（但不关闭浮层）
+  const handleTouchEnd = React.useCallback(() => {
+    longPressMenuHandlers.onTouchEnd()
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current)
+      previewTimerRef.current = null
+    }
+    // 不关闭浮层，让用户可以继续查看
+  }, [longPressMenuHandlers])
+
+  // 触摸移动：清除预览定时器（但不关闭浮层）
+  const handleTouchMove = React.useCallback(() => {
+    longPressMenuHandlers.onTouchMove()
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current)
+      previewTimerRef.current = null
+    }
+    // 不关闭浮层，让用户可以继续查看
+  }, [longPressMenuHandlers])
+
+  // 菜单打开状态变化处理
+  const handleMenuOpenChange = React.useCallback((open: boolean) => {
+    setMenuOpen(open)
+    // 菜单打开时关闭预览浮层
+    if (open) {
+      setPreviewOpen(false)
+    }
+  }, [])
+
   return (
     <>
       <MediaCardActions
@@ -173,7 +229,7 @@ export function BaseMediaCard({
         menuPosition={menuPosition}
         onDelete={handleDelete}
         onDownload={handleDownload}
-        onOpenChange={setMenuOpen}
+        onOpenChange={handleMenuOpenChange}
         onOpenEdit={handleOpenEdit}
         onToggleFavorite={toggleFavorite}
         onToggleReadStatus={handleToggleReadStatus}
@@ -203,6 +259,9 @@ export function BaseMediaCard({
         }}
         title={hoverTitleParts.length > 0 ? `${displayTitle}\n${hoverTitleParts.join('\n')}` : displayTitle}
         onClick={(event) => {
+          // 关闭预览浮层
+          setPreviewOpen(false)
+
           if (selectionMode && selectable) {
             event.preventDefault()
             toggleSelected()
@@ -214,6 +273,9 @@ export function BaseMediaCard({
           event.preventDefault()
         }}
         onContextMenu={handleContextMenu}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+        onTouchMove={handleTouchMove}
       >
         <Card className={cn('overflow-hidden bg-transparent transition-shadow hover:shadow-lg dark:bg-transparent', surfaceClassName)}>
           <div
@@ -295,6 +357,7 @@ export function BaseMediaCard({
                 'flex',
                 'opacity-0 translate-y-1 transition-all',
                 'group-hover:opacity-100 group-hover:translate-y-0',
+                previewOpen ? 'opacity-100 translate-y-0' : '',
               ].join(' ')}
               onClick={(event) => event.stopPropagation()}
             >
@@ -332,6 +395,7 @@ export function BaseMediaCard({
               className={[
                 'pointer-events-none absolute inset-0 z-10 flex items-end bg-linear-to-t from-black/70 via-black/30 to-transparent transition-opacity',
                 'opacity-0 group-hover:opacity-100',
+                previewOpen ? 'opacity-100' : '',
               ].join(' ')}
             >
               {(allTags.length > 0 || displaySummary) && (
