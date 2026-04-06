@@ -1,6 +1,5 @@
 /**
  * UserMenu组件 - 使用UnifiedMenu实现
- * 统一桌面端和移动端的菜单实现
  * @module UserMenu
  */
 
@@ -66,7 +65,6 @@ export function UserMenu() {
       label: t("user.logout"),
       icon: LogOut,
       danger: true,
-      separator: true, // 在登出前添加分隔线
       onClick: logout,
     },
   ]
@@ -95,9 +93,7 @@ export function UserMenu() {
         items={userMenuItems}
         trigger="click"
         align="end"
-        width={224} // w-56 = 224px
         title={user?.username || t("user.menu")}
-        subtitle={t("user.loggedIn")}
         onSelect={handleSelect}
         triggerElement={
           <Button variant="ghost" className="relative h-10 w-10 rounded-full">

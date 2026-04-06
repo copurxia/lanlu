@@ -1,6 +1,5 @@
 /**
  * MediaCardActions组件 - 使用UnifiedMenu实现
- * 支持桌面端下拉菜单和移动端抽屉式菜单
  * @module media-card-actions
  */
 
@@ -74,6 +73,7 @@ export function MediaCardActions({
             id: 'use-multi-select',
             label: t('home.useMultiSelect'),
             icon: Square,
+            separator: true,
           },
         ]
       : []),
@@ -83,8 +83,6 @@ export function MediaCardActions({
       label: t('archive.startReading'),
       icon: BookOpen,
       disabled: !readerTargetId,
-      // 如果有"使用多选"，则在"开始阅读"前添加分割线
-      separator: selectable && !selectionMode,
     },
     // Archive类型特有操作
     ...(type === 'archive'
@@ -93,12 +91,14 @@ export function MediaCardActions({
             id: 'download',
             label: t('archive.download'),
             icon: Download,
+            group: 'actions',
           },
           {
             id: 'toggle-read-status',
             label: readStatusText,
             icon: isNew ? CheckCircle : RotateCcw,
             disabled: menuActionDisabled || isNewStatusLoading,
+            group: 'actions',
           },
         ]
       : []),
@@ -112,6 +112,7 @@ export function MediaCardActions({
           : t('common.favorite'),
       icon: Heart,
       disabled: menuActionDisabled || favoriteLoading || !canToggleFavorite,
+      group: 'actions',
       customRender: (item, close) => (
         <button
           key={item.id}
@@ -133,7 +134,7 @@ export function MediaCardActions({
       label: t('common.edit'),
       icon: Edit,
       disabled: menuActionDisabled || !canEdit,
-      separator: true, // 在编辑前添加分割线
+      group: 'management',
     },
     // 删除
     {
