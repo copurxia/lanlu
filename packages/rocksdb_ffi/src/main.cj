@@ -175,9 +175,9 @@ public class RocksDb {
 
         let keyPtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
         let keyLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let valuePtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
+        let valuePtrs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
         let valueLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let errs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
+        let errs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
 
         for (i in 0..keys.size) {
             let rawKey = unsafe { LibC.mallocCString(keys[i]) }
@@ -207,7 +207,7 @@ public class RocksDb {
             let results = ArrayList<Option<String>>()
             for (i in 0..keys.size) {
                 if (!errs[i].isNull()) {
-                    let error = unsafe { errs[i].toString() }
+                    let error = unsafe { CString(errs[i]).toString() }
                     return (false, [], error)
                 }
 
@@ -230,10 +230,10 @@ public class RocksDb {
                     unsafe { LibC.free(keyPtrs[i]) }
                 }
                 if (!valuePtrs[i].isNull()) {
-                    unsafe { LibC.free(valuePtrs[i]) }
+                    unsafe { rocksdb_free(CPointer<Unit>(valuePtrs[i])) }
                 }
                 if (!errs[i].isNull()) {
-                    unsafe { LibC.free(errs[i]) }
+                    unsafe { rocksdb_free(CPointer<Unit>(errs[i])) }
                 }
             }
         }
@@ -579,11 +579,11 @@ public class RocksDb {
         return text
     }
 
-    private static func readCStringBytes(ptr: CString, length: UIntNative): String {
+    private static func readCStringBytes(ptr: CPointer<UInt8>, length: UIntNative): String {
         if (ptr.isNull() || length == 0) {
             return ""
         }
-        return unsafe { ptr.toString() }
+        return unsafe { CString(ptr).toString() }
     }
 
     private static func readIteratorBytes(iter: CPointer<rocksdb_iterator_t>, readKey: Bool): String {

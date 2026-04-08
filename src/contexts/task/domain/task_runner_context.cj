@@ -5,6 +5,16 @@ package lanlu.contexts.task.domain
  */
 public type TaskNotifier = () -> Unit
 
+public class UploadChunkCommitResult {
+    public var inserted: Bool = false
+    public var uploadedChunkCount: Int64 = 0
+    public var writtenOffset: Int64 = 0
+    public var updatedProgress: Bool = false
+    public var updatedTimeoutTs: Bool = false
+
+    public init() {}
+}
+
 /**
  * TaskRunner 运行时路径配置
  */
@@ -40,6 +50,16 @@ public interface TaskKVStore {
     func setMulti(groupId: String, keys: Array<String>, values: Array<String>, ttlSeconds: Int64): Bool
     func insertIfAbsent(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool
     func increment(groupId: String, key: String, delta: Int64, ttlSeconds: Int64): Int64
+    func commitUploadChunk(
+        groupId: String,
+        chunkKey: String,
+        newOffset: Int64,
+        uploadedProgress: Int64,
+        shouldUpdateProgress: Bool,
+        shouldUpdateTimeoutTs: Bool,
+        nowTs: Int64,
+        ttlSeconds: Int64
+    ): UploadChunkCommitResult
     func hasGroup(groupId: String): Bool
     func getKeys(groupId: String): Array<String>
 }

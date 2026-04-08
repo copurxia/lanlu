@@ -74,14 +74,14 @@ public class TaskGroupKVStore <: TaskKVStore {
     private static let namespace = "task_group_kv"
     private static var instance: Option<TaskGroupKVStore> = None
     private static let instanceMutex: Mutex = Mutex()
-    private static let operationLockCount: Int64 = 64
 
     private let refCountMutex: Mutex = Mutex()
-    private let operationLocks: Array<Mutex>
+    private let operationMutexMapGuard: Mutex = Mutex()
+    private var operationMutexMap: HashMap<String, Mutex>
     private var groupRefCounts: HashMap<String, Int32>
 
     private init() {
-        operationLocks = Array<Mutex>(operationLockCount, { i => if (i >= 0) { Mutex() } else { Mutex() } })
+        operationMutexMap = HashMap<String, Mutex>()
         groupRefCounts = HashMap<String, Int32>()
     }
 
@@ -296,6 +296,99 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
     }
 
+    public func commitUploadChunk(
+        groupId: String,
+        chunkKey: String,
+        newOffset: Int64,
+        uploadedProgress: Int64,
+        shouldUpdateProgress: Bool,
+        shouldUpdateTimeoutTs: Bool,
+        nowTs: Int64,
+        ttlSeconds: Int64
+    ): UploadChunkCommitResult {
+        let result = UploadChunkCommitResult()
+        let normalizedGroupId = normalizeGroupId(groupId)
+        let normalizedChunkKey = normalizeKey(chunkKey)
+        if (normalizedGroupId.size == 0 || normalizedChunkKey.size == 0) {
+            return result
+        }
+
+        let t0 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        let groupMutex = getOperationMutex(normalizedGroupId)
+        logger.debug(
+            "[KV] commitUploadChunk waiting for lock",
+            ("group_id", normalizedGroupId),
+            ("chunk_key", normalizedChunkKey)
+        )
+        groupMutex.lock()
+        let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        logger.debug(
+            "[KV] commitUploadChunk acquired lock",
+            ("group_id", normalizedGroupId),
+            ("chunk_key", normalizedChunkKey),
+            ("wait_lock_ms", (t1 - t0).toString())
+        )
+
+        try {
+            match (getRecordNormalized(normalizedGroupId, normalizedChunkKey)) {
+                case Some(_) =>
+                    result.inserted = false
+                case None =>
+                    if (putRecordNormalized(normalizedGroupId, normalizedChunkKey, "1", ttlSeconds)) {
+                        result.inserted = true
+                    }
+            }
+
+            if (result.inserted) {
+                var currentValue: Int64 = 0
+                match (getRecordNormalized(normalizedGroupId, "uploaded_count")) {
+                    case Some(record) =>
+                        try {
+                            currentValue = Int64.parse(record.value)
+                        } catch (_: Exception) {
+                            currentValue = 0
+                        }
+                    case None => currentValue = 0
+                }
+                result.uploadedChunkCount = currentValue + 1
+                let _ = putRecordNormalized(normalizedGroupId, "uploaded_count", result.uploadedChunkCount.toString(), ttlSeconds)
+            } else {
+                match (getRecordNormalized(normalizedGroupId, "uploaded_count")) {
+                    case Some(record) =>
+                        try {
+                            result.uploadedChunkCount = Int64.parse(record.value)
+                        } catch (_: Exception) {
+                            result.uploadedChunkCount = 0
+                        }
+                    case None => result.uploadedChunkCount = 0
+                }
+            }
+
+            result.writtenOffset = newOffset
+            let _ = putRecordNormalized(normalizedGroupId, "written_offset", newOffset.toString(), ttlSeconds)
+            if (shouldUpdateProgress) {
+                result.updatedProgress = putRecordNormalized(normalizedGroupId, "last_reported_progress", uploadedProgress.toString(), ttlSeconds)
+            }
+            if (shouldUpdateTimeoutTs) {
+                result.updatedTimeoutTs = putRecordNormalized(normalizedGroupId, "last_timeout_extend_ts", nowTs.toString(), ttlSeconds)
+            }
+
+            let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+            logger.debug(
+                "[KV] commitUploadChunk completed",
+                ("group_id", normalizedGroupId),
+                ("chunk_key", normalizedChunkKey),
+                ("inserted", result.inserted.toString()),
+                ("uploaded_count", result.uploadedChunkCount.toString()),
+                ("wait_lock_ms", (t1 - t0).toString()),
+                ("store_call_ms", (t2 - t1).toString())
+            )
+            return result
+        } finally {
+            groupMutex.unlock()
+        }
+    }
+
     public func hasGroup(groupId: String): Bool {
         let normalizedGroupId = normalizeGroupId(groupId)
         if (normalizedGroupId.size == 0) {
@@ -435,8 +528,8 @@ public class TaskGroupKVStore <: TaskKVStore {
                         ("total_ms", (t5 - t0).toString()),
                         ("build_keys_ms", (t1 - t0).toString()),
                         ("wait_lock_ms", (t2 - t1).toString()),
-                        ("rocksdb_ms", (t4 - t3).toString()),
-                        ("decode_ms", (t5 - t4).toString())
+                        ("store_call_ms", (t4 - t3).toString()),
+                        ("post_process_ms", (t5 - t4).toString())
                     )
                     
                     return results
@@ -578,18 +671,18 @@ public class TaskGroupKVStore <: TaskKVStore {
     }
 
     private func getOperationMutex(groupId: String): Mutex {
-        let lockIndex = getOperationLockIndex(groupId)
-        return operationLocks[lockIndex]
-    }
-
-    private func getOperationLockIndex(groupId: String): Int64 {
-        let hash = groupId.hashCode()
-        let positiveHash = if (hash < 0) {
-            -hash
-        } else {
-            hash
+        operationMutexMapGuard.lock()
+        try {
+            match (operationMutexMap.get(groupId)) {
+                case Some(groupMutex) => return groupMutex
+                case None =>
+                    let groupMutex = Mutex()
+                    operationMutexMap[groupId] = groupMutex
+                    return groupMutex
+            }
+        } finally {
+            operationMutexMapGuard.unlock()
         }
-        return positiveHash % operationLocks.size
     }
 
     private static func nowSeconds(): Int64 {

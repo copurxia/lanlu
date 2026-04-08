@@ -152,23 +152,15 @@ public class AssetUploadController {
             let kvGroupId = "asset_upload:${task.id}"
             let kvStore = getTaskKVStore()
             kvStore.deleteGroup(kvGroupId)
-            let r1 = kvStore.set(kvGroupId, "filesize", fileSize.toString(), UPLOAD_KV_TTL_SECONDS)
-            let r2 = kvStore.set(kvGroupId, "chunk_size", chunkSize.toString(), UPLOAD_KV_TTL_SECONDS)
-            let r3 = kvStore.set(kvGroupId, "total_chunks", totalChunks.toString(), UPLOAD_KV_TTL_SECONDS)
-            let r4 = kvStore.set(kvGroupId, "uploaded_count", "0", UPLOAD_KV_TTL_SECONDS)
-            let r5 = kvStore.set(kvGroupId, "written_offset", "0", UPLOAD_KV_TTL_SECONDS)
-            let r6 = kvStore.set(kvGroupId, "last_reported_progress", "0", UPLOAD_KV_TTL_SECONDS)
-            let r7 = kvStore.set(kvGroupId, "last_timeout_extend_ts", "0", UPLOAD_KV_TTL_SECONDS)
+            let initKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress", "last_timeout_extend_ts"]
+            let initValues = [fileSize.toString(), chunkSize.toString(), totalChunks.toString(), "0", "0", "0", "0"]
+            let initOk = kvStore.setMulti(kvGroupId, initKeys, initValues, UPLOAD_KV_TTL_SECONDS)
             let uploadLogger = getLogger("asset_upload")
             uploadLogger.debug(
                 "[DBG] initUpload KV set results",
                 ("taskId", task.id.toString()),
-                ("filesize", r1.toString()),
-                ("chunk_size", r2.toString()),
-                ("total_chunks", r3.toString()),
-                ("uploaded_count", r4.toString()),
-                ("written_offset", r5.toString()),
-                ("last_reported_progress", r6.toString())
+                ("init_ok", initOk.toString()),
+                ("key_count", initKeys.size.toString())
             )
 
             ResponseView.successJson(ctx, "{\"taskId\":\"${task.id}\"}", "ok")
@@ -608,28 +600,31 @@ public class AssetUploadController {
             )
 
             let chunkKey = "chunk_${chunkIndexStr}"
+            let expectedUploadedChunkCount = uploadedCount + 1
             var uploadedChunkCount: Int64 = 0
-            let inserted = kvStore.insertIfAbsent(kvGroupId, chunkKey, "1", UPLOAD_KV_TTL_SECONDS)
-            if (inserted) {
-                uploadedChunkCount = kvStore.increment(kvGroupId, "uploaded_count", 1, UPLOAD_KV_TTL_SECONDS)
-            }
-            if (uploadedChunkCount <= 0) {
-                match (kvStore.get(kvGroupId, "uploaded_count")) {
-                    case Some(v) =>
-                        try { uploadedChunkCount = Int64.parse(v) } catch (_: Exception) { uploadedChunkCount = 0 }
-                    case None => uploadedChunkCount = 0
-                }
-            }
-
-            // 优化：合并DB写入，2次DB写 → 1次
-            var uploadedProgress: Int64 = (uploadedChunkCount * 70) / totalChunks
+            // 优化：将分片提交涉及的 KV 读写收敛到一次组内原子提交
+            var uploadedProgress: Int64 = (expectedUploadedChunkCount * 70) / totalChunks
             if (uploadedProgress < 0) { uploadedProgress = 0 }
             if (uploadedProgress > 70) { uploadedProgress = 70 }
 
             // 优化：进度变化超过5%或最后一块才更新DB
-            let shouldUpdateProgress = (uploadedProgress >= lastReportedProgress + 5) || (uploadedChunkCount == totalChunks)
+            let shouldUpdateProgress = (uploadedProgress >= lastReportedProgress + 5) || (expectedUploadedChunkCount == totalChunks)
             // 获取当前时间戳用于惰性超时延长判断
             let nowTs = DateTime.now().toUnixTimeStamp().toSeconds()
+            let elapsed = nowTs - lastTimeoutExtendTs
+            let shouldUpdateTimeoutTs = shouldUpdateProgress || (elapsed >= TIMEOUT_EXTEND_INTERVAL_SECONDS || lastTimeoutExtendTs == 0)
+            let commitResult = kvStore.commitUploadChunk(
+                kvGroupId,
+                chunkKey,
+                newOffset,
+                uploadedProgress,
+                shouldUpdateProgress,
+                shouldUpdateTimeoutTs,
+                nowTs,
+                UPLOAD_KV_TTL_SECONDS
+            )
+            uploadedChunkCount = commitResult.uploadedChunkCount
+
             if (shouldUpdateProgress) {
                 let dbUpdated = TaskDao.extendTimeoutAndUpdateProgress(
                     taskIdInt,
@@ -640,27 +635,10 @@ public class AssetUploadController {
                 if (!dbUpdated) {
                     getLogger("asset_upload").warn("Failed to update task progress and timeout", ("taskId", taskIdStr))
                 }
-                // 优化：批量写 written_offset + last_reported_progress + last_timeout_extend_ts
-                let _ = kvStore.setMulti(kvGroupId,
-                    ["written_offset", "last_reported_progress", "last_timeout_extend_ts"],
-                    [newOffset.toString(), uploadedProgress.toString(), nowTs.toString()],
-                    UPLOAD_KV_TTL_SECONDS)
-            } else {
-                // 惰性超时延长：仅当距上次延长超过 TIMEOUT_EXTEND_INTERVAL_SECONDS 时才执行 DB 写
-                let elapsed = nowTs - lastTimeoutExtendTs
-                if (elapsed >= TIMEOUT_EXTEND_INTERVAL_SECONDS || lastTimeoutExtendTs == 0) {
-                    let timeoutUpdated = TaskDao.extendTaskTimeout(taskIdInt, UPLOAD_IDLE_TIMEOUT_SECONDS)
-                    if (!timeoutUpdated) {
-                        getLogger("asset_upload").warn("Failed to extend upload timeout", ("taskId", taskIdStr))
-                    }
-                    // 优化：批量写 written_offset + last_timeout_extend_ts
-                    let _ = kvStore.setMulti(kvGroupId,
-                        ["written_offset", "last_timeout_extend_ts"],
-                        [newOffset.toString(), nowTs.toString()],
-                        UPLOAD_KV_TTL_SECONDS)
-                } else {
-                    // 仅更新 written_offset
-                    let _ = kvStore.set(kvGroupId, "written_offset", newOffset.toString(), UPLOAD_KV_TTL_SECONDS)
+            } else if (shouldUpdateTimeoutTs) {
+                let timeoutUpdated = TaskDao.extendTaskTimeout(taskIdInt, UPLOAD_IDLE_TIMEOUT_SECONDS)
+                if (!timeoutUpdated) {
+                    getLogger("asset_upload").warn("Failed to extend upload timeout", ("taskId", taskIdStr))
                 }
             }
 

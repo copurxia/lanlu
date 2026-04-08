@@ -136,9 +136,9 @@ foreign func rocksdb_multi_get(
     numKeys: UIntNative,
     keysList: CPointer<CString>,
     keyListSizes: CPointer<UIntNative>,
-    valuesList: CPointer<CString>,
+    valuesList: CPointer<CPointer<UInt8>>,
     valueListSizes: CPointer<UIntNative>,
-    errs: CPointer<CString>
+    errs: CPointer<CPointer<UInt8>>
 ): Unit
 
 foreign func rocksdb_put(
