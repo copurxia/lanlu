@@ -4,6 +4,7 @@ import std.collection.*
 import std.sync.*
 import std.fs.*
 import std.convert.*
+import std.time.*
 import std.env.getVariable
 import lanlu.contexts.system.infrastructure.persistence.*
 import lanlu.shared.utils.*
@@ -32,6 +33,7 @@ public interface LocalKVStore {
 
 public class RocksDbLocalKVStore <: LocalKVStore {
     private let db: RocksDb
+    private static let logger = getLogger("rocksdb_local_kv")
 
     public init(db: RocksDb) {
         this.db = db
@@ -54,11 +56,41 @@ public class RocksDbLocalKVStore <: LocalKVStore {
             return []
         }
 
+        let t0 = DateTime.now().toUnixTimeStamp().toMilliseconds()
         let fullKeys = Array<String>(keys.size, { i => composeKey(namespace, keys[i]) })
-        let (ok, values, _) = db.multiGet(fullKeys)
+        let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        
+        logger.debug(
+            "[KV] RocksDb multiGet calling",
+            ("namespace", namespace),
+            ("key_count", keys.size.toString()),
+            ("compose_ms", (t1 - t0).toString())
+        )
+        
+        let (ok, values, err) = db.multiGet(fullKeys)
+        let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        
         if (!ok) {
+            logger.warn(
+                "[KV] RocksDb multiGet failed",
+                ("namespace", namespace),
+                ("key_count", keys.size.toString()),
+                ("rocksdb_ms", (t2 - t1).toString()),
+                ("error", err)
+            )
             return Array<Option<String>>(keys.size, { _ => None })
         }
+        
+        let foundCount = values.filter({ v => v.isSome() }).size
+        logger.debug(
+            "[KV] RocksDb multiGet completed",
+            ("namespace", namespace),
+            ("key_count", keys.size.toString()),
+            ("found_count", foundCount.toString()),
+            ("rocksdb_ms", (t2 - t1).toString()),
+            ("total_ms", (t2 - t0).toString())
+        )
+        
         return values
     }
 

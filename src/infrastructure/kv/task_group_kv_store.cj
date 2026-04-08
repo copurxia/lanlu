@@ -364,19 +364,47 @@ public class TaskGroupKVStore <: TaskKVStore {
             return Array<Option<String>>(keys.size, { _ => None })
         }
 
+        let t0 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        
         // 构建完整的存储key
         let storageKeys = Array<String>(keys.size, { i =>
             buildStorageKey(normalizedGroupId, normalizeKey(keys[i]))
         })
 
+        let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
         let groupMutex = getOperationMutex(normalizedGroupId)
+        
+        logger.debug(
+            "[KV] getMulti waiting for lock",
+            ("group_id", normalizedGroupId),
+            ("key_count", keys.size.toString()),
+            ("build_keys_ms", (t1 - t0).toString())
+        )
+        
         groupMutex.lock()
+        let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+        logger.debug(
+            "[KV] getMulti acquired lock",
+            ("group_id", normalizedGroupId),
+            ("wait_lock_ms", (t2 - t1).toString())
+        )
+        
         try {
             let storeOpt = LocalKVService.getStore()
             match (storeOpt) {
                 case Some(store) =>
+                    let t3 = DateTime.now().toUnixTimeStamp().toMilliseconds()
                     // 一次性批量读取
                     let rawValues = store.multiGet(namespace, storageKeys)
+                    let t4 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+                    
+                    logger.debug(
+                        "[KV] getMulti multiGet completed",
+                        ("group_id", normalizedGroupId),
+                        ("key_count", keys.size.toString()),
+                        ("rocksdb_ms", (t4 - t3).toString()),
+                        ("found_count", rawValues.filter({ v => v.isSome() }).size.toString())
+                    )
                     
                     // 解码并检查过期
                     let results = Array<Option<String>>(rawValues.size, { i =>
@@ -398,6 +426,19 @@ public class TaskGroupKVStore <: TaskKVStore {
                             case None => None
                         }
                     })
+                    
+                    let t5 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+                    logger.debug(
+                        "[KV] getMulti completed",
+                        ("group_id", normalizedGroupId),
+                        ("key_count", keys.size.toString()),
+                        ("total_ms", (t5 - t0).toString()),
+                        ("build_keys_ms", (t1 - t0).toString()),
+                        ("wait_lock_ms", (t2 - t1).toString()),
+                        ("rocksdb_ms", (t4 - t3).toString()),
+                        ("decode_ms", (t5 - t4).toString())
+                    )
+                    
                     return results
                 case None =>
                     logger.warn("task kv unavailable because LocalKVService is not ready")
