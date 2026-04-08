@@ -183,11 +183,28 @@ public class AssetUploadController {
      */
     public static func uploadChunk(ctx: Ctx): Unit {
         try {
+            let chunkLogger = getLogger("asset_upload")
             let taskIdStr = ctx.query("taskId") ?? ""
             let chunkIndexStr = ctx.query("chunkIndex") ?? ""
             let totalChunksStr = ctx.query("totalChunks") ?? ""
 
+            chunkLogger.debug(
+                "[DBG] uploadChunk controller entered",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndexStr),
+                ("totalChunksQuery", totalChunksStr),
+                ("contentType", ctx.header("Content-Type") ?? ""),
+                ("contentLength", ctx.header("Content-Length") ?? ""),
+                ("transferEncoding", ctx.header("Transfer-Encoding") ?? "")
+            )
+
             if (taskIdStr.size == 0 || chunkIndexStr.size == 0 || totalChunksStr.size == 0) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk missing required params",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr),
+                    ("totalChunksQuery", totalChunksStr)
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Missing required parameters: taskId, chunkIndex, totalChunks", 400)
                 return
@@ -198,19 +215,44 @@ public class AssetUploadController {
             let taskIdInt = try {
                 Int64.parse(taskIdStr)
             } catch (_: Exception) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk invalid taskId",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr)
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Invalid taskId", 400)
                 return
             }
 
+            chunkLogger.debug(
+                "[DBG] uploadChunk parsed query",
+                ("taskId", taskIdStr),
+                ("taskIdInt", taskIdInt.toString()),
+                ("chunkIndex", chunkIndex.toString()),
+                ("totalChunksQuery", totalChunksFromQuery.toString())
+            )
+
             let task = TaskDao.getTaskDataById(taskIdInt)
+            chunkLogger.debug(
+                "[DBG] uploadChunk task lookup",
+                ("taskId", taskIdStr),
+                ("resolvedTaskId", task.id.toString()),
+                ("status", task.status),
+                ("taskType", task.taskType)
+            )
             if (task.id == 0) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk task not found",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndexStr)
+                )
                 ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
                 ResponseView.errorJson(ctx, "Task not found", 404)
                 return
             }
             if (task.status == "pending") {
-                getLogger("asset_upload").warn(
+                chunkLogger.warn(
                     "[DBG] uploadChunk task pending",
                     ("taskId", taskIdStr),
                     ("chunkIndex", chunkIndexStr)
@@ -220,7 +262,7 @@ public class AssetUploadController {
                 return
             }
             if (task.status != "running") {
-                getLogger("asset_upload").warn(
+                chunkLogger.warn(
                     "[DBG] uploadChunk task not running",
                     ("taskId", taskIdStr),
                     ("chunkIndex", chunkIndexStr),
@@ -233,7 +275,7 @@ public class AssetUploadController {
 
             let uploadDir = Path("${CACHE_DIR}/task/${taskIdStr}")
             if (!exists(uploadDir)) {
-                getLogger("asset_upload").warn(
+                chunkLogger.warn(
                     "[DBG] uploadChunk dir missing",
                     ("taskId", taskIdStr),
                     ("chunkIndex", chunkIndexStr),
@@ -250,7 +292,6 @@ public class AssetUploadController {
             // 优化：批量读取KV，6次独立读 → 1次批量读
             let metaKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress", "last_timeout_extend_ts"]
             let metaValues = kvStore.getMulti(kvGroupId, metaKeys)
-            let chunkLogger = getLogger("asset_upload")
             chunkLogger.debug(
                 "[DBG] uploadChunk getMulti",
                 ("taskId", taskIdStr),
@@ -318,17 +359,46 @@ public class AssetUploadController {
                 ResponseView.errorJson(ctx, "Invalid upload meta (kv)", 400)
                 return
             }
+            chunkLogger.debug(
+                "[DBG] uploadChunk kv meta parsed",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndex.toString()),
+                ("fileSize", fileSize.toString()),
+                ("chunkSize", chunkSize.toString()),
+                ("totalChunks", totalChunks.toString()),
+                ("uploadedCount", uploadedCount.toString()),
+                ("currentOffset", currentOffset.toString())
+            )
             if (chunkSize > MAX_UPLOAD_CHUNK_SIZE) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk chunk size exceeds limit",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("chunkSize", chunkSize.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "chunk_size exceeds 10MB", 400)
                 return
             }
             if (totalChunksFromQuery != totalChunks) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk totalChunks mismatch",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("queryTotalChunks", totalChunksFromQuery.toString()),
+                    ("kvTotalChunks", totalChunks.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "totalChunks mismatch", 400)
                 return
             }
             if (chunkIndex < 0 || chunkIndex >= totalChunks) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk invalid chunk index",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("totalChunks", totalChunks.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Invalid chunkIndex", 400)
                 return
@@ -336,11 +406,23 @@ public class AssetUploadController {
 
             // 顺序校验
             if (chunkIndex < uploadedCount) {
+                chunkLogger.debug(
+                    "[DBG] uploadChunk already uploaded",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("uploadedCount", uploadedCount.toString())
+                )
                 let _ = TaskDao.extendTaskTimeout(taskIdInt, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 ResponseView.successJson(ctx, "{}", "Chunk already uploaded")
                 return
             }
             if (chunkIndex > uploadedCount) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk out of order",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("uploadedCount", uploadedCount.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_CONFLICT)
                 ResponseView.errorJson(
                     ctx,
@@ -393,22 +475,53 @@ public class AssetUploadController {
             // 文件存在性检查和流式写入
             let partPath = Path("${uploadDir.toString()}/${UPLOAD_PART_FILE}")
             if (!exists(partPath)) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk part file missing",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("partPath", partPath.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Upload part file not found", 400)
                 return
             }
 
+            chunkLogger.debug(
+                "[DBG] uploadChunk acquiring body stream",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndex.toString()),
+                ("expectedOffset", expectedOffset.toString()),
+                ("partPath", partPath.toString())
+            )
             let bodyStream = ctx.requestBody()
             var bytesWritten: Int64 = 0
             try {
                 // 使用 ReadWrite + seek 实现幂等写入：重试时始终从 expectedOffset 分片写入，
                 // 避免 Append 模式下幺幺写入导致文件损坏。
+                chunkLogger.debug(
+                    "[DBG] uploadChunk opening part file",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("partPath", partPath.toString())
+                )
                 let partFile = File(partPath, OpenMode.ReadWrite)
                 partFile.seek(SeekPosition.Begin(expectedOffset))
                 bytesWritten = streamWriteToFile(bodyStream, partFile)
+                chunkLogger.debug(
+                    "[DBG] uploadChunk stream write completed",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("bytesWritten", bytesWritten.toString()),
+                    ("expectedOffset", expectedOffset.toString())
+                )
                 
                 if (bytesWritten <= 0) {
                     partFile.close()
+                    chunkLogger.warn(
+                        "[DBG] uploadChunk empty body",
+                        ("taskId", taskIdStr),
+                        ("chunkIndex", chunkIndex.toString())
+                    )
                     ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                     ResponseView.errorJson(ctx, "Empty body", 400)
                     return
@@ -434,16 +547,39 @@ public class AssetUploadController {
 
             // 大小校验
             if (expectedOffset < 0 || expectedOffset >= fileSize) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk invalid chunk offset",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("expectedOffset", expectedOffset.toString()),
+                    ("fileSize", fileSize.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Invalid chunk offset", 400)
                 return
             }
             if (expectedOffset + bytesWritten > fileSize) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk exceeds file size",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("expectedOffset", expectedOffset.toString()),
+                    ("bytesWritten", bytesWritten.toString()),
+                    ("fileSize", fileSize.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Chunk exceeds file size", 400)
                 return
             }
             if (chunkIndex != totalChunks - 1 && bytesWritten != chunkSize) {
+                chunkLogger.warn(
+                    "[DBG] uploadChunk invalid chunk size",
+                    ("taskId", taskIdStr),
+                    ("chunkIndex", chunkIndex.toString()),
+                    ("bytesWritten", bytesWritten.toString()),
+                    ("expectedChunkSize", chunkSize.toString()),
+                    ("totalChunks", totalChunks.toString())
+                )
                 ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
                 ResponseView.errorJson(ctx, "Invalid chunk size", 400)
                 return
@@ -451,6 +587,12 @@ public class AssetUploadController {
 
             // 更新偏移量
             let newOffset = currentOffset + bytesWritten
+            chunkLogger.debug(
+                "[DBG] uploadChunk post write state",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndex.toString()),
+                ("newOffset", newOffset.toString())
+            )
 
             let chunkKey = "chunk_${chunkIndexStr}"
             var uploadedChunkCount: Int64 = 0

@@ -11,6 +11,7 @@ import std.time.{MonoTime, DateTime}
 private let accessLogger = getLogger("http_access")
 private let recoverLogger = getLogger("http_recover")
 private let auditLogger = getLogger("http_audit")
+private let uploadEntryLogger = getLogger("upload_entry")
 
 public func installObservabilityMiddleware(app: App): Unit {
     app.use(requestIdMiddleware(config: RequestIdConfig()))
@@ -28,6 +29,7 @@ public func installObservabilityMiddleware(app: App): Unit {
             ResponseView.errorJson(ctx, "Internal Server Error", 500)
         }
     )))
+    app.use(uploadChunkDebugMiddleware())
     app.use(httpAccessLogMiddleware())
     app.use(brotliMiddleware(
         config: BrotliConfig(minBytes: 2048),
@@ -65,6 +67,59 @@ private func httpAccessLogMiddleware(): Handler {
             ("ip", ctx.ip)
         )
     }
+}
+
+private func uploadChunkDebugMiddleware(): Handler {
+    { ctx =>
+        if (!isUploadChunkRoute(ctx)) {
+            ctx.next()
+            return
+        }
+
+        let start = MonoTime.now()
+        let requestId = ctx.getLocal("request_id") ?? "-"
+        let taskId = ctx.query("taskId") ?? ""
+        let chunkIndex = ctx.query("chunkIndex") ?? ""
+        let totalChunks = ctx.query("totalChunks") ?? ""
+        let contentType = ctx.header("Content-Type") ?? ""
+        let contentLength = ctx.header("Content-Length") ?? ""
+        let transferEncoding = ctx.header("Transfer-Encoding") ?? ""
+        let userAgent = ctx.header("User-Agent") ?? ""
+
+        uploadEntryLogger.debug(
+            "upload chunk request received",
+            ("request_id", requestId),
+            ("method", ctx.method),
+            ("path", ctx.path),
+            ("task_id", taskId),
+            ("chunk_index", chunkIndex),
+            ("total_chunks", totalChunks),
+            ("content_type", contentType),
+            ("content_length", contentLength),
+            ("transfer_encoding", transferEncoding),
+            ("user_agent", userAgent),
+            ("ip", ctx.ip)
+        )
+
+        ctx.next()
+
+        let latencyMs = (MonoTime.now() - start).toMilliseconds()
+        uploadEntryLogger.debug(
+            "upload chunk request completed",
+            ("request_id", requestId),
+            ("method", ctx.method),
+            ("path", ctx.path),
+            ("task_id", taskId),
+            ("chunk_index", chunkIndex),
+            ("total_chunks", totalChunks),
+            ("status", "${ctx.responseStatus}"),
+            ("latency_ms", "${latencyMs}")
+        )
+    }
+}
+
+private func isUploadChunkRoute(ctx: Ctx): Bool {
+    return ctx.method == "PUT" && ctx.path == "/api/assets/upload/chunk"
 }
 
 private func shouldSkipCompression(path: String): Bool {
