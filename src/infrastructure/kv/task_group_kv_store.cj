@@ -229,18 +229,16 @@ public class TaskGroupKVStore <: TaskKVStore {
         let groupMutex = getOperationMutex(normalizedGroupId)
         groupMutex.lock()
         try {
-            var allOk = true
+            let entries = ArrayList<(String, String)>()
             var i: Int64 = 0
             while (i < keys.size) {
                 let normalizedKey = normalizeKey(keys[i])
                 if (normalizedKey.size > 0) {
-                    if (!putRecordNormalized(normalizedGroupId, normalizedKey, values[i], ttlSeconds)) {
-                        allOk = false
-                    }
+                    entries.add((buildStorageKey(normalizedGroupId, normalizedKey), encodeRecord(values[i], ttlSeconds)))
                 }
                 i += 1
             }
-            return allOk
+            return putEncodedRecords(entries.toArray())
         } finally {
             groupMutex.unlock()
         }
@@ -330,6 +328,7 @@ public class TaskGroupKVStore <: TaskKVStore {
         )
 
         try {
+            let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
             match (getRecordNormalized(normalizedGroupId, normalizedChunkKey)) {
                 case Some(_) =>
                     result.inserted = false
@@ -365,15 +364,26 @@ public class TaskGroupKVStore <: TaskKVStore {
             }
 
             result.writtenOffset = newOffset
-            let _ = putRecordNormalized(normalizedGroupId, "written_offset", newOffset.toString(), ttlSeconds)
+            let readDoneAt = DateTime.now().toUnixTimeStamp().toMilliseconds()
+            let encodedEntries = ArrayList<(String, String)>()
+            encodedEntries.add((buildStorageKey(normalizedGroupId, "uploaded_count"), encodeRecord(result.uploadedChunkCount.toString(), ttlSeconds)))
+            encodedEntries.add((buildStorageKey(normalizedGroupId, "written_offset"), encodeRecord(newOffset.toString(), ttlSeconds)))
             if (shouldUpdateProgress) {
-                result.updatedProgress = putRecordNormalized(normalizedGroupId, "last_reported_progress", uploadedProgress.toString(), ttlSeconds)
+                encodedEntries.add((buildStorageKey(normalizedGroupId, "last_reported_progress"), encodeRecord(uploadedProgress.toString(), ttlSeconds)))
             }
             if (shouldUpdateTimeoutTs) {
-                result.updatedTimeoutTs = putRecordNormalized(normalizedGroupId, "last_timeout_extend_ts", nowTs.toString(), ttlSeconds)
+                encodedEntries.add((buildStorageKey(normalizedGroupId, "last_timeout_extend_ts"), encodeRecord(nowTs.toString(), ttlSeconds)))
             }
 
-            let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+            let writeOk = putEncodedRecords(encodedEntries.toArray())
+            if (shouldUpdateProgress) {
+                result.updatedProgress = writeOk
+            }
+            if (shouldUpdateTimeoutTs) {
+                result.updatedTimeoutTs = writeOk
+            }
+
+            let t3 = DateTime.now().toUnixTimeStamp().toMilliseconds()
             logger.debug(
                 "[KV] commitUploadChunk completed",
                 ("group_id", normalizedGroupId),
@@ -381,7 +391,9 @@ public class TaskGroupKVStore <: TaskKVStore {
                 ("inserted", result.inserted.toString()),
                 ("uploaded_count", result.uploadedChunkCount.toString()),
                 ("wait_lock_ms", (t1 - t0).toString()),
-                ("store_call_ms", (t2 - t1).toString())
+                ("pre_write_ms", (readDoneAt - t2).toString()),
+                ("write_batch_ms", (t3 - readDoneAt).toString()),
+                ("store_call_ms", (t3 - t1).toString())
             )
             return result
         } finally {
@@ -576,14 +588,28 @@ public class TaskGroupKVStore <: TaskKVStore {
     }
 
     private func putRecordNormalized(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool {
+        let encodedRecord = encodeRecord(value, ttlSeconds)
+        return putEncodedRecord(buildStorageKey(groupId, key), encodedRecord)
+    }
+
+    private func putEncodedRecord(storageKey: String, encodedRecord: String): Bool {
         let storeOpt = LocalKVService.getStore()
         match (storeOpt) {
-            case Some(store) =>
-                let record = TaskGroupKVRecord()
-                record.value = value
-                record.createdAt = nowSeconds()
-                record.ttlSeconds = ttlSeconds
-                return store.put(namespace, buildStorageKey(groupId, key), TaskGroupKVRecordCodec.encode(record))
+            case Some(store) => return store.put(namespace, storageKey, encodedRecord)
+            case None =>
+                logger.warn("task kv unavailable because LocalKVService is not ready")
+                return false
+        }
+    }
+
+    private func putEncodedRecords(entries: Array<(String, String)>): Bool {
+        if (entries.size == 0) {
+            return true
+        }
+
+        let storeOpt = LocalKVService.getStore()
+        match (storeOpt) {
+            case Some(store) => return store.putMany(namespace, entries)
             case None =>
                 logger.warn("task kv unavailable because LocalKVService is not ready")
                 return false
@@ -687,6 +713,14 @@ public class TaskGroupKVStore <: TaskKVStore {
 
     private static func nowSeconds(): Int64 {
         return DateTime.now().toUnixTimeStamp().toSeconds()
+    }
+
+    private static func encodeRecord(value: String, ttlSeconds: Int64): String {
+        let record = TaskGroupKVRecord()
+        record.value = value
+        record.createdAt = nowSeconds()
+        record.ttlSeconds = ttlSeconds
+        return TaskGroupKVRecordCodec.encode(record)
     }
 
     private static func isExpired(record: TaskGroupKVRecord): Bool {

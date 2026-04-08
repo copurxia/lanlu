@@ -25,6 +25,7 @@ public interface LocalKVStore {
     func get(namespace: String, key: String): Option<String>
     func multiGet(namespace: String, keys: Array<String>): Array<Option<String>>
     func put(namespace: String, key: String, value: String): Bool
+    func putMany(namespace: String, entries: Array<(String, String)>): Bool
     func delete(namespace: String, key: String): Bool
     func deleteMany(namespace: String, keys: Array<String>): Bool
     func deleteRange(namespace: String, startKey: String, endKey: String): Bool
@@ -96,6 +97,18 @@ public class RocksDbLocalKVStore <: LocalKVStore {
 
     public func put(namespace: String, key: String, value: String): Bool {
         let (ok, _) = db.put(composeKey(namespace, key), value)
+        return ok
+    }
+
+    public func putMany(namespace: String, entries: Array<(String, String)>): Bool {
+        if (entries.size == 0) {
+            return true
+        }
+
+        let fullEntries = Array<(String, String)>(entries.size, { i =>
+            (composeKey(namespace, entries[i][0]), entries[i][1])
+        })
+        let (ok, _) = db.writeBatch(fullEntries, [], [], [])
         return ok
     }
 

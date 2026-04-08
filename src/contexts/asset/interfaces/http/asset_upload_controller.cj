@@ -613,6 +613,17 @@ public class AssetUploadController {
             let nowTs = DateTime.now().toUnixTimeStamp().toSeconds()
             let elapsed = nowTs - lastTimeoutExtendTs
             let shouldUpdateTimeoutTs = shouldUpdateProgress || (elapsed >= TIMEOUT_EXTEND_INTERVAL_SECONDS || lastTimeoutExtendTs == 0)
+            let commitStartMs = DateTime.now().toUnixTimeStamp().toMilliseconds()
+            chunkLogger.debug(
+                "[DBG] uploadChunk before commitUploadChunk",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndex.toString()),
+                ("chunkKey", chunkKey),
+                ("newOffset", newOffset.toString()),
+                ("uploadedProgress", uploadedProgress.toString()),
+                ("shouldUpdateProgress", shouldUpdateProgress.toString()),
+                ("shouldUpdateTimeoutTs", shouldUpdateTimeoutTs.toString())
+            )
             let commitResult = kvStore.commitUploadChunk(
                 kvGroupId,
                 chunkKey,
@@ -623,7 +634,19 @@ public class AssetUploadController {
                 nowTs,
                 UPLOAD_KV_TTL_SECONDS
             )
+            let commitEndMs = DateTime.now().toUnixTimeStamp().toMilliseconds()
             uploadedChunkCount = commitResult.uploadedChunkCount
+            chunkLogger.debug(
+                "[DBG] uploadChunk after commitUploadChunk",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndex.toString()),
+                ("commitMs", (commitEndMs - commitStartMs).toString()),
+                ("inserted", commitResult.inserted.toString()),
+                ("uploadedChunkCount", commitResult.uploadedChunkCount.toString()),
+                ("writtenOffset", commitResult.writtenOffset.toString()),
+                ("updatedProgress", commitResult.updatedProgress.toString()),
+                ("updatedTimeoutTs", commitResult.updatedTimeoutTs.toString())
+            )
 
             if (shouldUpdateProgress) {
                 let dbUpdated = TaskDao.extendTimeoutAndUpdateProgress(
