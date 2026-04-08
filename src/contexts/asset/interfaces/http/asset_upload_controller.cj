@@ -291,7 +291,20 @@ public class AssetUploadController {
             
             // 优化：批量读取KV，6次独立读 → 1次批量读
             let metaKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress", "last_timeout_extend_ts"]
+            chunkLogger.debug(
+                "[DBG] uploadChunk before getMulti",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndexStr),
+                ("kvGroupId", kvGroupId),
+                ("metaKeyCount", metaKeys.size.toString())
+            )
             let metaValues = kvStore.getMulti(kvGroupId, metaKeys)
+            chunkLogger.debug(
+                "[DBG] uploadChunk after getMulti",
+                ("taskId", taskIdStr),
+                ("chunkIndex", chunkIndexStr),
+                ("metaValuesSize", metaValues.size.toString())
+            )
             chunkLogger.debug(
                 "[DBG] uploadChunk getMulti",
                 ("taskId", taskIdStr),
