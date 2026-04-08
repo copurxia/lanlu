@@ -10,6 +10,7 @@ import type { PageInfo } from '@/lib/services/archive-service';
 import { MasonryThumbnailGrid } from '@/components/ui/masonry-thumbnail-grid';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLocalStorage } from '@/hooks/common-hooks';
+import { getPageReleaseAt } from '@/lib/utils/tv-media';
 
 type ArchivePreviewViewMode = 'thumbnails' | 'list' | 'tree';
 
@@ -37,7 +38,10 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 }
 
 function getPageDisplayDescription(page: PageInfo): string {
-  return page.metadata?.description?.trim() || '';
+  const releaseAt = getPageReleaseAt(page);
+  const description = page.metadata?.description?.trim() || '';
+  if (!releaseAt) return description;
+  return description ? `${releaseAt} · ${description}` : releaseAt;
 }
 
 function getPageDisplayThumb(page: PageInfo): string {
@@ -217,7 +221,7 @@ export function ArchivePreviewCard({
     });
   }, []);
 
-  const renderFileTreeNode = useCallback((node: FileTreeNode, depth: number): React.ReactNode => {
+  function renderFileTreeNode(node: FileTreeNode, depth: number): React.ReactNode {
     if (node.kind === 'folder') {
       const isExpanded = expandedFolderIds.has(node.id);
       return (
@@ -267,7 +271,7 @@ export function ArchivePreviewCard({
         <span className="shrink-0 pr-1 text-[10px] text-muted-foreground">{node.pageIndex + 1}</span>
       </Link>
     );
-  }, [expandedFolderIds, metadata.arcid, toggleFolder]);
+  }
 
   const renderPageListItem = useCallback((page: PageInfo, index: number) => {
     const displayTitle = getPageDisplayTitle(page, index, t, String(metadata.archivetype || ''));

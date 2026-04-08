@@ -393,6 +393,7 @@ public class ArchiveController {
                         item.title = meta.title
                     }
                     item.description = meta.description
+                    item.releaseAt = meta.release_at
                     item.thumbAssetId = meta.thumb_asset_id
                     item.lyricsAssetId = readExtraInt64(meta.extra_data, "lyrics_asset_id")
                     item.hidden = meta.hidden_in_files
@@ -511,6 +512,7 @@ public class ArchiveController {
                 w.writeName("description").writeValue(metadataDescription)
                 w.writeName("thumb_asset_id").writeValue(metadataThumbAssetId)
                 w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
+                w.writeName("release_at").writeValue(item.releaseAt)
                 w.endObject()
             }
             w.endObject()
@@ -1663,6 +1665,7 @@ private class ArchiveFilesPageItem {
     public var href: String = ""
     public var title: String = ""
     public var description: String = ""
+    public var releaseAt: String = ""
     public var thumbAssetId: Int64 = 0
     public var lyricsAssetId: Int64 = 0
     public var sortIndex: Int32 = 0

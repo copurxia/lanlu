@@ -5,6 +5,7 @@ import { Film, FileText, Music } from 'lucide-react';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
+import { getPageReleaseAt } from '@/lib/utils/tv-media';
 
 const GRID_GAP_PX = 8;
 const OVERSCAN_PX = 480;
@@ -49,6 +50,11 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 
 function getPageDisplayThumb(page: PageInfo): string {
   return page.metadata?.thumb?.trim() || '';
+}
+
+function getPageDisplayDescription(page: PageInfo): string {
+  const releaseAt = getPageReleaseAt(page);
+  return releaseAt || '';
 }
 
 export function MasonryThumbnailGrid({
@@ -251,6 +257,7 @@ export function MasonryThumbnailGrid({
     const itemKey = getLayoutKey(page, index);
     const isVideoReady = Boolean(videoReadyMap[itemKey]);
     const displayTitle = getPageDisplayTitle(page, index, t);
+    const displayDescription = getPageDisplayDescription(page);
     const hasCustomTitle = getPageCustomTitle(page).length > 0;
     const captionText = hasCustomTitle ? displayTitle : String(index + 1);
 
@@ -343,6 +350,7 @@ export function MasonryThumbnailGrid({
           key={index}
           href={`/reader?id=${archiveId}&page=${index + 1}`}
           className={baseClassName}
+          title={displayDescription || displayTitle}
           style={{
             top,
             left,
@@ -361,6 +369,7 @@ export function MasonryThumbnailGrid({
         type="button"
         onClick={() => onSelectPage?.(index)}
         className={baseClassName}
+        title={displayDescription || displayTitle}
         style={{
           top,
           left,

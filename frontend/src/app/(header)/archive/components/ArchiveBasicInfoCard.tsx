@@ -4,6 +4,7 @@ import { Info } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ArchiveMetadata } from '@/types/archive';
 import { formatDate, formatFileSize } from '@/lib/utils/utils';
+import { isTvArchiveMetadata } from '@/lib/utils/tv-media';
 
 type Props = {
   metadata: ArchiveMetadata;
@@ -11,6 +12,8 @@ type Props = {
 };
 
 export function ArchiveBasicInfoCard({ metadata, t }: Props) {
+  const isTvArchive = isTvArchiveMetadata(metadata);
+
   return (
     <Card className="border-none bg-transparent shadow-none dark:bg-transparent">
       <CardHeader className="!p-0 mb-3">
@@ -32,13 +35,22 @@ export function ArchiveBasicInfoCard({ metadata, t }: Props) {
           </div>
 
           <div className="flex items-start justify-between gap-3">
-            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.pageCount')}</span>
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">
+              {isTvArchive ? t('archive.episodeCount') : t('archive.pageCount')}
+            </span>
             <span className="flex-1 text-right whitespace-normal wrap-break-word">{metadata.pagecount ?? 0}</span>
           </div>
           <div className="flex items-start justify-between gap-3">
             <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.progress')}</span>
             <span className="flex-1 text-right whitespace-normal wrap-break-word">
               {metadata.progress ?? 0}/{metadata.pagecount ?? 0}
+            </span>
+          </div>
+
+          <div className="flex items-start justify-between gap-3">
+            <span className="text-muted-foreground whitespace-nowrap shrink-0">{t('archive.releaseAt')}</span>
+            <span className="flex-1 text-right whitespace-normal wrap-break-word">
+              {formatDate(metadata.release_at || '', t('archive.unknown'))}
             </span>
           </div>
 

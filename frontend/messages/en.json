@@ -204,6 +204,7 @@
     "metadataPluginNoPlugins": "No metadata plugins found (install/enable in Settings → Plugins)",
     "readOnline": "Read Online",
     "basicInfo": "Basic Information",
+    "episodeCount": "Episodes",
     "fileInfo": "File Information",
     "timeInfo": "Time Information",
     "tags": "Tags",

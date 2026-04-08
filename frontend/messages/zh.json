@@ -207,6 +207,7 @@
     "metadataPluginNoPlugins": "未发现 Metadata 插件（请在设置-插件中安装/启用）",
     "readOnline": "在线阅读",
     "basicInfo": "基本信息",
+    "episodeCount": "集数",
     "fileInfo": "文件信息",
     "timeInfo": "时间信息",
     "tags": "标签",

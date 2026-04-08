@@ -7,6 +7,7 @@ import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLocalStorage } from '@/hooks/common-hooks';
 import type { PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
+import { getPageReleaseAt } from '@/lib/utils/tv-media';
 
 const SIDEBAR_HORIZONTAL_PADDING_PX = 24;
 const SIDEBAR_GRID_GAP_PX = 8;
@@ -86,7 +87,10 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 }
 
 function getPageDisplayDescription(page: PageInfo): string {
-  return page.metadata?.description?.trim() || '';
+  const releaseAt = getPageReleaseAt(page);
+  const description = page.metadata?.description?.trim() || '';
+  if (!releaseAt) return description;
+  return description ? `${releaseAt} · ${description}` : releaseAt;
 }
 
 function getPageDisplayThumb(page: PageInfo): string {

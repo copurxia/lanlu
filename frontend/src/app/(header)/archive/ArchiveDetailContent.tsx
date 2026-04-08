@@ -25,6 +25,7 @@ import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { getTvMetaSummary, isTvArchiveMetadata } from '@/lib/utils/tv-media';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
 import { buildExactTagSearchQuery } from '@/lib/utils/tag-utils';
@@ -108,6 +109,8 @@ export function ArchiveDetailContent() {
     if (!pagecount || !progress) return 0;
     return Math.max(0, Math.min(100, Math.round((progress / pagecount) * 100)));
   }, [metadata?.pagecount, metadata?.progress]);
+  const isTvArchive = useMemo(() => isTvArchiveMetadata(metadata), [metadata]);
+  const tvMetaSummary = useMemo(() => getTvMetaSummary(metadata?.tags), [metadata?.tags]);
 
   // metadata.tags can be translated by backend (via ?lang=).
   // Build a reverse map so hover/click can still target the canonical tag stored in DB.
@@ -738,6 +741,17 @@ export function ArchiveDetailContent() {
                           <BookOpen className="w-3 h-3 mr-1" />
                           {t('archive.archiveLabel')}
                         </Badge>
+                        {isTvArchive && tvMetaSummary.season ? (
+                          <Badge variant="secondary">S{tvMetaSummary.season.padStart(2, '0')}</Badge>
+                        ) : null}
+                        {isTvArchive && tvMetaSummary.status ? (
+                          <Badge variant="outline" className="capitalize">
+                            {tvMetaSummary.status}
+                          </Badge>
+                        ) : null}
+                        {isTvArchive && tvMetaSummary.year ? (
+                          <Badge variant="outline">{tvMetaSummary.year}</Badge>
+                        ) : null}
                         <h1 className="text-lg sm:text-xl md:text-2xl font-bold tracking-tight wrap-break-word">
                           {metadata.title}
                         </h1>
@@ -747,7 +761,11 @@ export function ArchiveDetailContent() {
                       <div className="mt-2">
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                           <span className="tabular-nums">
-                            {t('archive.pageCount')} {metadata.pagecount}
+                            {isTvArchive ? t('archive.episodeCount') : t('archive.pageCount')} {metadata.pagecount}
+                          </span>
+                          <span className="text-muted-foreground/60">•</span>
+                          <span className="tabular-nums truncate" title={metadata.release_at}>
+                            {t('archive.releaseAt')} {metadata.release_at || t('archive.unknown')}
                           </span>
                           <span className="text-muted-foreground/60">•</span>
                           <span className="tabular-nums truncate" title={metadata.updated_at}>

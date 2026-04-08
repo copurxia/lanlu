@@ -61,6 +61,7 @@ export interface MetadataPagePatchInput {
   lyrics_asset_id?: number;
   order_index?: number;
   hidden_in_files?: boolean;
+  release_at?: string;
 }
 
 // 页面信息接口（支持图片、视频和HTML）
@@ -75,6 +76,7 @@ export interface PageInfo {
     thumb_asset_id?: number;
     thumb?: string;
     lyrics_asset_id?: number;
+    release_at?: string;
   };
 }
 
@@ -254,6 +256,10 @@ export class ArchiveService {
           thumb_asset_id: thumbAssetId > 0 ? thumbAssetId : undefined,
           thumb: thumbUrl || undefined,
           lyrics_asset_id: lyricsAssetId > 0 ? lyricsAssetId : undefined,
+          release_at:
+            typeof rawPage.metadata.release_at === 'string' && rawPage.metadata.release_at.trim()
+              ? rawPage.metadata.release_at.trim()
+              : undefined,
         };
       })();
 
