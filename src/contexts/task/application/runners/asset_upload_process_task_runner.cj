@@ -19,6 +19,7 @@ public class AssetUploadProcessTaskRunner {
         let logger = getLogger("asset_upload_process_task")
         TaskIO.appendLog(taskId, "asset_upload_process task started")
 
+        let uploadTaskId = parseInt64Safely(parseField(parameters, "upload_task_id"))
         let filename = parseField(parameters, "filename")
         let categoryId = parseField(parameters, "category_id")
         let targetType = parseField(parameters, "target_type").trimAscii().toAsciiLower()
@@ -63,7 +64,7 @@ public class AssetUploadProcessTaskRunner {
             let consumeParams = buildArchiveDirectConsumeParams(
                 finalPartPathStr, chunkDirStr, targetType, targetId, categoryId, filename, overwrite, uploadUserId
             )
-            let groupId = "asset_upload:${taskId}"
+            let groupId = buildUploadGroupId(taskId, uploadTaskId)
             let consumeTask = TaskModel.createTaskWithOptions(
                 resolveConsumeTaskName(targetType),
                 resolveConsumeTaskType(targetType),
@@ -77,10 +78,7 @@ public class AssetUploadProcessTaskRunner {
                 return
             }
             context.notifyTaskAvailable()
-            logger.debug(
-                "Created archive direct consume task",
-                [("consume_task_id", consumeTask.id.toString()), ("target_type", targetType)]
-            )
+            logger.debug("Created archive direct consume task", ("consume_task_id", consumeTask.id.toString()), ("target_type", targetType))
             let out = ByteBuffer()
             let w = JsonWriter(out)
             w.startObject()
@@ -94,7 +92,7 @@ public class AssetUploadProcessTaskRunner {
             TaskModel.completeTask(taskId, "asset_upload_process completed")
             TaskIO.writeOutput(taskId, okJson)
             TaskIO.appendLog(taskId, "asset_upload_process completed (archive direct): consume_task_id=${consumeTask.id}")
-            cleanupUploadKV(taskId)
+            cleanupUploadKV(uploadTaskId)
             return
         }
 
@@ -164,7 +162,7 @@ public class AssetUploadProcessTaskRunner {
             uploadUserId
         )
 
-        let groupId = "asset_upload:${taskId}"
+        let groupId = buildUploadGroupId(taskId, uploadTaskId)
         let consumeTask = TaskModel.createTaskWithOptions(
             resolveConsumeTaskName(targetType),
             consumeTaskType,
@@ -183,7 +181,9 @@ public class AssetUploadProcessTaskRunner {
         context.notifyTaskAvailable()
         logger.debug(
             "Created consume task for asset upload",
-            [("consume_task_id", consumeTask.id.toString()), ("target_type", targetType), ("staging_asset_id", stagingAssetId.toString())]
+            ("consume_task_id", consumeTask.id.toString()),
+            ("target_type", targetType),
+            ("staging_asset_id", stagingAssetId.toString())
         )
 
         let out = ByteBuffer()
@@ -201,7 +201,7 @@ public class AssetUploadProcessTaskRunner {
         TaskModel.completeTask(taskId, "asset_upload_process completed")
         TaskIO.writeOutput(taskId, okJson)
         TaskIO.appendLog(taskId, "asset_upload_process completed: consume_task_id=${consumeTask.id}")
-        cleanupUploadKV(taskId)
+        cleanupUploadKV(uploadTaskId)
     }
 
     private static func parseField(parameters: String, key: String): String {
@@ -355,11 +355,18 @@ public class AssetUploadProcessTaskRunner {
     }
 
     private static func cleanupUploadKV(taskId: Int64): Unit {
+        if (taskId <= 0) {
+            return
+        }
         TaskKVService.getStore().deleteGroup("asset_upload:${taskId.toString()}")
     }
 
+    private static func buildUploadGroupId(taskId: Int64, uploadTaskId: Int64): String {
+        let groupTaskId = if (uploadTaskId > 0) { uploadTaskId } else { taskId }
+        return "asset_upload:${groupTaskId.toString()}"
+    }
+
     private static func fail(taskId: Int64, message: String): Unit {
-        cleanupUploadKV(taskId)
         TaskRunnerOutput.fail(taskId, message)
     }
 }

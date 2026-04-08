@@ -1,4 +1,4 @@
-import { apiClient } from '../api';
+import { apiClient, uploadClient } from '../api';
 import { TaskPoolService } from './taskpool-service';
 import type { ApiEnvelope } from '@/types/common';
 
@@ -106,7 +106,10 @@ export class ChunkedUploadService {
       // 5. 等待任务进入 running 状态（TaskPool 调度机制介入）
       const waitingResult = await this.waitForTaskReady(taskId, callbacks);
       if (!waitingResult.ready) {
-        await this.cancelUploadTask(taskId);
+        const terminal = await this.getTerminalTaskIfAny(taskId);
+        if (terminal && this.isTerminalTaskStatus(terminal.status)) {
+          this.cleanupUploadSession(taskId);
+        }
         return { success: false, error: waitingResult.error || '任务等待超时或失败' };
       }
 
@@ -128,20 +131,18 @@ export class ChunkedUploadService {
       
       // 如果有失败的分片（已包含 chunk 内部重试），直接返回错误
       if (firstUploadResult.failedChunks.length > 0) {
-        await this.cancelUploadTask(taskId);
         return {
           success: false,
-          error: `分片上传失败: ${firstUploadResult.failedChunks.length} 个分片失败`
+          error: `上传中断，可继续重试：${firstUploadResult.failedChunks.length} 个分片未完成`
         };
       }
 
       // 8. 验证所有分片都已上传完成
       if (totalCompletedChunks !== totalChunks) {
         console.error(`分片数量不匹配: 期望 ${totalChunks}, 实际 ${totalCompletedChunks}`);
-        await this.cancelUploadTask(taskId);
         return {
           success: false,
-          error: `分片数量不匹配: 期望 ${totalChunks}, 实际 ${totalCompletedChunks}`
+          error: `上传中断，可继续重试：分片数量不匹配，期望 ${totalChunks}，实际 ${totalCompletedChunks}`
         };
       }
 
@@ -153,13 +154,7 @@ export class ChunkedUploadService {
 
       // 如果有taskId，清理localStorage中的上传会话数据
       if (taskId) {
-        await this.cancelUploadTask(taskId);
-        try {
-          localStorage.removeItem(`upload_${taskId}`);
-
-        } catch (cleanupError) {
-          console.warn('Failed to clean localStorage after upload failure:', cleanupError);
-        }
+        await this.cleanupTerminalUploadSession(taskId);
       }
 
       return {
@@ -416,7 +411,7 @@ export class ChunkedUploadService {
           taskId,
           chunkIndex,
           totalChunks,
-          (chunkLoaded, chunkTotal) => {
+          (chunkLoaded) => {
             // 计算总体进度：之前已完成的分片 + 当前分片内的进度
             const currentProgress = previousUploadedBytes + chunkLoaded;
             const progress = Math.round((currentProgress / totalBytes) * 100);
@@ -495,7 +490,12 @@ export class ChunkedUploadService {
 
     // 可重试: 409 pending（任务排队中）
     if (status === 409) {
-      return { retryable: true, isPending409: true, is5xx: false };
+      const isRecoverable409 =
+        message.includes('任务正在排队') ||
+        message.includes('任务状态异常: pending') ||
+        message.includes('Out of order chunk') ||
+        message.includes('Upload offset mismatch');
+      return { retryable: isRecoverable409, isPending409: isRecoverable409, is5xx: false };
     }
 
     // 可重试: 5xx 服务器错误（允许更多重试次数）
@@ -545,6 +545,12 @@ export class ChunkedUploadService {
         }
 
         await this.delay(delayMs);
+        if (isPending409) {
+          const latestTask = await this.getTaskSafely(taskId);
+          if (latestTask && this.isTerminalTaskStatus(latestTask.status)) {
+            throw new Error(latestTask.message || `任务状态为 ${latestTask.status}`);
+          }
+        }
         return this.uploadChunkWithRetry(file, taskId, chunkIndex, totalChunks, onChunkProgress, retryCount + 1);
       } else {
         console.error(`分片 ${chunkIndex} 重试 ${maxRetries} 次后仍然失败`);
@@ -611,7 +617,7 @@ export class ChunkedUploadService {
     try {
       startIdleCheck();
 
-      const response = await apiClient.put<ApiEnvelope<Record<string, any>>>(
+      const response = await uploadClient.put<ApiEnvelope<Record<string, any>>>(
         `/api/assets/upload/chunk?${params.toString()}`,
         chunkData,
         {
@@ -674,6 +680,24 @@ export class ChunkedUploadService {
       this.cleanupUploadSession(taskId);
       if (task.status === 'completed') {
         let resultPayload = this.parseTaskResult(task.result);
+        const processTaskId = Number(resultPayload?.process_task_id || 0);
+        if (processTaskId > 0) {
+          const processTask = await TaskPoolService.waitForTaskTerminal(processTaskId, {
+            timeoutMs,
+            onUpdate: (nextTask) => {
+              if (typeof nextTask.progress === 'number') {
+                lastProgress = Math.max(lastProgress, Math.min(100, Math.max(0, nextTask.progress)));
+                callbacks.onProgress(lastProgress);
+              }
+            },
+          });
+
+          if (processTask.status !== 'completed') {
+            return { success: false, error: processTask.message || `任务状态为 ${processTask.status}` };
+          }
+          const processPayload = this.parseTaskResult(processTask.result);
+          resultPayload = { ...(resultPayload || {}), ...(processPayload || {}) };
+        }
         const consumeTaskId = Number(resultPayload?.consume_task_id || 0);
         if (consumeTaskId > 0) {
           const consumeTask = await TaskPoolService.waitForTaskTerminal(consumeTaskId, {
@@ -728,7 +752,6 @@ export class ChunkedUploadService {
       if (session.status === 'pending') {
         const waitingResult = await this.waitForTaskReady(taskId, callbacks);
         if (!waitingResult.ready) {
-          await this.cancelUploadTask(taskId);
           return { success: false, error: waitingResult.error || '任务等待超时或失败' };
         }
       }
@@ -762,18 +785,9 @@ export class ChunkedUploadService {
 
       // 如果有失败的分片（已包含 chunk 内部重试），直接返回错误
       if (uploadResult.failedChunks.length > 0) {
-        // 清理localStorage中的失败会话数据
-        await this.cancelUploadTask(taskId);
-        try {
-          localStorage.removeItem(`upload_${taskId}`);
-
-        } catch (cleanupError) {
-          console.warn('Failed to clean localStorage after failed resume upload:', cleanupError);
-        }
-
         return {
           success: false,
-          error: `恢复上传时分片上传失败: ${uploadResult.failedChunks.length} 个分片失败`
+          error: `恢复上传中断，可继续重试：${uploadResult.failedChunks.length} 个分片未完成`
         };
       }
 
@@ -781,18 +795,9 @@ export class ChunkedUploadService {
       if (totalCompletedChunks !== totalChunks) {
         console.error(`恢复上传分片数量不匹配: 期望 ${totalChunks}, 实际 ${totalCompletedChunks}`);
 
-        // 清理localStorage中的失败会话数据
-        await this.cancelUploadTask(taskId);
-        try {
-          localStorage.removeItem(`upload_${taskId}`);
-
-        } catch (cleanupError) {
-          console.warn('Failed to clean localStorage after resume upload chunk count mismatch:', cleanupError);
-        }
-
         return {
           success: false,
-          error: `恢复上传分片数量不匹配: 期望 ${totalChunks}, 实际 ${totalCompletedChunks}`
+          error: `恢复上传中断，可继续重试：分片数量不匹配，期望 ${totalChunks}，实际 ${totalCompletedChunks}`
         };
       }
 
@@ -800,14 +805,7 @@ export class ChunkedUploadService {
       return await this.waitForTaskCompletion(taskId, callbacks);
 
     } catch (error) {
-      // 恢复上传失败时清理localStorage
-      await this.cancelUploadTask(taskId);
-      try {
-        localStorage.removeItem(`upload_${taskId}`);
-
-      } catch (cleanupError) {
-        console.warn('Failed to clean localStorage after resume upload failure:', cleanupError);
-      }
+      await this.cleanupTerminalUploadSession(taskId);
 
       return {
         success: false,
@@ -831,6 +829,37 @@ export class ChunkedUploadService {
       await apiClient.delete(`/api/assets/upload/${taskId}`);
     } catch (error) {
       console.warn(`Failed to cancel upload task ${taskId}:`, error);
+    }
+  }
+
+  private static isTerminalTaskStatus(status: string | undefined): boolean {
+    return status === 'completed' || status === 'failed' || status === 'stopped';
+  }
+
+  private static async getTaskSafely(taskId: string) {
+    try {
+      return await TaskPoolService.getTaskById(parseInt(taskId, 10));
+    } catch {
+      return null;
+    }
+  }
+
+  private static async getTerminalTaskIfAny(taskId: string) {
+    const task = await this.getTaskSafely(taskId);
+    if (task && this.isTerminalTaskStatus(task.status)) {
+      return task;
+    }
+    return null;
+  }
+
+  private static async cleanupTerminalUploadSession(taskId: string): Promise<void> {
+    const terminalTask = await this.getTerminalTaskIfAny(taskId);
+    if (!terminalTask) return;
+
+    try {
+      localStorage.removeItem(`upload_${taskId}`);
+    } catch (cleanupError) {
+      console.warn('Failed to clean localStorage after terminal upload:', cleanupError);
     }
   }
 

@@ -89,7 +89,7 @@ export const apiClient = axios.create({
 export const uploadClient = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 300000
+  timeout: 0
 });
 
 // 统一设置拦截器

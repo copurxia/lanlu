@@ -650,9 +650,9 @@ public class TaskDao {
                     let stmt = conn.prepareStatement("""
                         UPDATE tasks
                         SET status = 'failed',
-                            message = '上传超时：10分钟内无分片上传',
+                            message = '上传任务超时：10分钟内未完成',
                             completed_at = CURRENT_TIMESTAMP
-                        WHERE task_type IN ('upload', 'asset_upload')
+                        WHERE task_type IN ('upload', 'asset_upload', 'asset_upload_process', 'archive_asset_consume', 'tag_asset_consume', 'avatar_asset_consume', 'metadata_asset_consume', 'plugin_asset_consume')
                           AND status = 'running'
                           AND timeout_at IS NOT NULL
                           AND timeout_at <= CURRENT_TIMESTAMP

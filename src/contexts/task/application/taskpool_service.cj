@@ -538,16 +538,22 @@ public class TaskPoolService {
             case "upload_process" =>
                 UploadProcessTaskRunner.run(task.id, task.parameters, context)
             case "asset_upload_process" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 AssetUploadProcessTaskRunner.run(task.id, task.parameters, context)
             case "archive_asset_consume" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 ArchiveAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "tag_asset_consume" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 TagAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "avatar_asset_consume" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 AvatarAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "metadata_asset_consume" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 MetadataAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "plugin_asset_consume" =>
+                let _ = TaskDao.extendTaskTimeout(task.id, UPLOAD_IDLE_TIMEOUT_SECONDS)
                 PluginAssetConsumeTaskRunner.run(task.id, task.parameters, context)
             case "metadata_plugin" =>
                 MetadataPluginTaskRunner.run(task.id, task.parameters, context)
