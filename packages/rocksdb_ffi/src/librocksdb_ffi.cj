@@ -8,7 +8,28 @@ public struct rocksdb_t {
 }
 
 @C
+public struct rocksdb_transactiondb_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
+public struct rocksdb_optimistictransactiondb_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
 public struct rocksdb_options_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
+public struct rocksdb_transactiondb_options_t {
     init() {
         throw Exception("type should not be inited")
     }
@@ -29,6 +50,20 @@ public struct rocksdb_cache_t {
 }
 
 @C
+public struct rocksdb_transaction_options_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
+public struct rocksdb_optimistictransaction_options_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
 public struct rocksdb_readoptions_t {
     init() {
         throw Exception("type should not be inited")
@@ -37,6 +72,13 @@ public struct rocksdb_readoptions_t {
 
 @C
 public struct rocksdb_writeoptions_t {
+    init() {
+        throw Exception("type should not be inited")
+    }
+}
+
+@C
+public struct rocksdb_transaction_t {
     init() {
         throw Exception("type should not be inited")
     }
@@ -92,6 +134,16 @@ foreign func rocksdb_cache_destroy(cache: CPointer<rocksdb_cache_t>): Unit
 
 foreign func rocksdb_open(options: CPointer<rocksdb_options_t>, name: CString, errptr: CPointer<CPointer<UInt8>>): CPointer<rocksdb_t>
 foreign func rocksdb_close(db: CPointer<rocksdb_t>): Unit
+foreign func rocksdb_optimistictransactiondb_open(
+    options: CPointer<rocksdb_options_t>,
+    name: CString,
+    errptr: CPointer<CPointer<UInt8>>
+): CPointer<rocksdb_optimistictransactiondb_t>
+foreign func rocksdb_optimistictransactiondb_get_base_db(
+    db: CPointer<rocksdb_optimistictransactiondb_t>
+): CPointer<rocksdb_t>
+foreign func rocksdb_optimistictransactiondb_close_base_db(db: CPointer<rocksdb_t>): Unit
+foreign func rocksdb_optimistictransactiondb_close(db: CPointer<rocksdb_optimistictransactiondb_t>): Unit
 
 foreign func rocksdb_readoptions_create(): CPointer<rocksdb_readoptions_t>
 foreign func rocksdb_readoptions_destroy(options: CPointer<rocksdb_readoptions_t>): Unit
@@ -101,6 +153,56 @@ foreign func rocksdb_readoptions_set_total_order_seek(options: CPointer<rocksdb_
 foreign func rocksdb_writeoptions_create(): CPointer<rocksdb_writeoptions_t>
 foreign func rocksdb_writeoptions_destroy(options: CPointer<rocksdb_writeoptions_t>): Unit
 foreign func rocksdb_writeoptions_set_sync(options: CPointer<rocksdb_writeoptions_t>, value: UInt8): Unit
+foreign func rocksdb_transaction_options_create(): CPointer<rocksdb_transaction_options_t>
+foreign func rocksdb_transaction_options_destroy(options: CPointer<rocksdb_transaction_options_t>): Unit
+foreign func rocksdb_transaction_options_set_set_snapshot(options: CPointer<rocksdb_transaction_options_t>, value: UInt8): Unit
+foreign func rocksdb_optimistictransaction_options_create(): CPointer<rocksdb_optimistictransaction_options_t>
+foreign func rocksdb_optimistictransaction_options_destroy(options: CPointer<rocksdb_optimistictransaction_options_t>): Unit
+foreign func rocksdb_optimistictransaction_options_set_set_snapshot(
+    options: CPointer<rocksdb_optimistictransaction_options_t>,
+    value: UInt8
+): Unit
+foreign func rocksdb_optimistictransaction_begin(
+    db: CPointer<rocksdb_optimistictransactiondb_t>,
+    write_options: CPointer<rocksdb_writeoptions_t>,
+    txn_options: CPointer<rocksdb_optimistictransaction_options_t>,
+    old_txn: CPointer<rocksdb_transaction_t>
+): CPointer<rocksdb_transaction_t>
+foreign func rocksdb_transaction_destroy(txn: CPointer<rocksdb_transaction_t>): Unit
+foreign func rocksdb_transaction_commit(txn: CPointer<rocksdb_transaction_t>, errptr: CPointer<CPointer<UInt8>>): Unit
+foreign func rocksdb_transaction_rollback(txn: CPointer<rocksdb_transaction_t>, errptr: CPointer<CPointer<UInt8>>): Unit
+foreign func rocksdb_transaction_get(
+    txn: CPointer<rocksdb_transaction_t>,
+    options: CPointer<rocksdb_readoptions_t>,
+    key: CString,
+    keylen: UIntNative,
+    vallen: CPointer<UIntNative>,
+    errptr: CPointer<CPointer<UInt8>>
+): CPointer<UInt8>
+foreign func rocksdb_transaction_multi_get(
+    txn: CPointer<rocksdb_transaction_t>,
+    options: CPointer<rocksdb_readoptions_t>,
+    numKeys: UIntNative,
+    keysList: CPointer<CString>,
+    keyListSizes: CPointer<UIntNative>,
+    valuesList: CPointer<CPointer<UInt8>>,
+    valueListSizes: CPointer<UIntNative>,
+    errs: CPointer<CPointer<UInt8>>
+): Unit
+foreign func rocksdb_transaction_put(
+    txn: CPointer<rocksdb_transaction_t>,
+    key: CString,
+    keylen: UIntNative,
+    value: CString,
+    vallen: UIntNative,
+    errptr: CPointer<CPointer<UInt8>>
+): Unit
+foreign func rocksdb_transaction_delete(
+    txn: CPointer<rocksdb_transaction_t>,
+    key: CString,
+    keylen: UIntNative,
+    errptr: CPointer<CPointer<UInt8>>
+): Unit
 
 foreign func rocksdb_create_iterator(
     db: CPointer<rocksdb_t>,

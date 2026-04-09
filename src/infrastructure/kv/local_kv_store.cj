@@ -8,7 +8,8 @@ import std.time.*
 import std.env.getVariable
 import lanlu.contexts.system.infrastructure.persistence.*
 import lanlu.shared.utils.*
-import rocksdb_ffi.RocksDb
+import rocksdb_ffi.OptimisticRocksDb
+import rocksdb_ffi.RocksDbTxn
 
 private class LocalKvBootstrapConfig {
     public var cachePath: String
@@ -32,11 +33,26 @@ public interface LocalKVStore {
     func scan(namespace: String, keyPrefix: String): Array<(String, String)>
 }
 
+public interface LocalKVTransactionalStore {
+    func beginTransaction(namespace: String): (Bool, Option<LocalKVTransaction>, String)
+    func isConflictError(error: String): Bool
+}
+
+public interface LocalKVTransaction {
+    func get(key: String): (Bool, Option<String>, String)
+    func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String)
+    func put(key: String, value: String): (Bool, String)
+    func delete(key: String): (Bool, String)
+    func commit(): (Bool, String)
+    func rollback(): (Bool, String)
+    func close(): Unit
+}
+
 public class RocksDbLocalKVStore <: LocalKVStore {
-    private let db: RocksDb
+    private let db: OptimisticRocksDb
     private static let logger = getLogger("rocksdb_local_kv")
 
-    public init(db: RocksDb) {
+    public init(db: OptimisticRocksDb) {
         this.db = db
     }
 
@@ -154,6 +170,68 @@ public class RocksDbLocalKVStore <: LocalKVStore {
     }
 }
 
+public class RocksDbTransactionalStore <: LocalKVTransactionalStore {
+    private let db: OptimisticRocksDb
+
+    public init(db: OptimisticRocksDb) {
+        this.db = db
+    }
+
+    public func beginTransaction(namespace: String): (Bool, Option<LocalKVTransaction>, String) {
+        let (ok, txnOpt, err) = db.beginTransaction()
+        if (!ok || txnOpt.isNone()) {
+            return (ok, None, err)
+        }
+        return (true, Some(RocksDbNamespaceTransaction(namespace, txnOpt.getOrThrow())), "")
+    }
+
+    public func isConflictError(error: String): Bool {
+        return OptimisticRocksDb.isConflictError(error)
+    }
+}
+
+private class RocksDbNamespaceTransaction <: LocalKVTransaction {
+    private let namespace: String
+    private let txn: RocksDbTxn
+
+    public init(namespace: String, txn: RocksDbTxn) {
+        this.namespace = namespace
+        this.txn = txn
+    }
+
+    public func get(key: String): (Bool, Option<String>, String) {
+        return txn.get(composeKey(key))
+    }
+
+    public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
+        return txn.multiGet(Array<String>(keys.size, { i => composeKey(keys[i]) }))
+    }
+
+    public func put(key: String, value: String): (Bool, String) {
+        return txn.put(composeKey(key), value)
+    }
+
+    public func delete(key: String): (Bool, String) {
+        return txn.delete(composeKey(key))
+    }
+
+    public func commit(): (Bool, String) {
+        return txn.commit()
+    }
+
+    public func rollback(): (Bool, String) {
+        return txn.rollback()
+    }
+
+    public func close(): Unit {
+        txn.close()
+    }
+
+    private func composeKey(key: String): String {
+        return "${namespace}:${key}"
+    }
+}
+
 public class LocalKVService {
     private static let logger = getLogger("local_kv_service")
     private static let mutex = Mutex()
@@ -162,6 +240,7 @@ public class LocalKVService {
     private static let minKvMemoryMb: Int32 = 4
     private static var initialized = false
     private static var store: Option<LocalKVStore> = Option<LocalKVStore>.None
+    private static var transactionalStore: Option<LocalKVTransactionalStore> = Option<LocalKVTransactionalStore>.None
 
     public static func initializeFromSettings(): Bool {
         mutex.lock()
@@ -176,7 +255,7 @@ public class LocalKVService {
         let dbPath = FileUtils.joinPath(bootstrapConfig.cachePath, "rocksdb")
         FileUtils.ensureDirectoryExists(Path(dbPath))
 
-        let (ok, dbOpt, err) = RocksDb.openBalanced(dbPath, bootstrapConfig.kvMemoryMb)
+        let (ok, dbOpt, err) = OptimisticRocksDb.openOptimistic(dbPath, bootstrapConfig.kvMemoryMb)
         if (!ok) {
             logger.warn(
                 "Failed to initialize RocksDB local KV; falling back to no-cache mode",
@@ -189,7 +268,9 @@ public class LocalKVService {
             return false
         }
 
-        store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(dbOpt.getOrThrow()))
+        let db = dbOpt.getOrThrow()
+        store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(db))
+        transactionalStore = Option<LocalKVTransactionalStore>.Some(RocksDbTransactionalStore(db))
         logger.info("Initialized RocksDB local KV", ("path", dbPath), ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()))
         mutex.unlock()
         return true
@@ -198,6 +279,13 @@ public class LocalKVService {
     public static func getStore(): Option<LocalKVStore> {
         mutex.lock()
         let res = store
+        mutex.unlock()
+        return res
+    }
+
+    public static func getTransactionalStore(): Option<LocalKVTransactionalStore> {
+        mutex.lock()
+        let res = transactionalStore
         mutex.unlock()
         return res
     }
