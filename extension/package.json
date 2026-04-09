@@ -2,6 +2,7 @@
   "name": "lanlu-extension",
   "version": "0.1.0",
   "private": true,
+  "license": "BSD-3-Clause",
   "packageManager": "pnpm@10.27.0",
   "scripts": {
     "dev": "plasmo dev --src-path=.",

@@ -2,6 +2,7 @@
   "name": "lanlu-frontend",
   "version": "0.1.0",
   "private": true,
+  "license": "BSD-3-Clause",
   "scripts": {
     "dev": "next dev",
     "build": "next build && node scripts/generate-brotli.mjs",

@@ -3,6 +3,7 @@
   name = "lanlu"
   description = "nothing here"
   version = "1.0.0"
+  license = "BSD-3-Clause"
   output-type = "executable"
   compile-option = ""
   override-compile-option = ""

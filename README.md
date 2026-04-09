@@ -223,4 +223,4 @@ grep -nE "已创建默认管理员账户|用户名:|密码:" ./data/logs/system.
 
 ## 许可证
 
-MIT License
+BSD 3-Clause License
