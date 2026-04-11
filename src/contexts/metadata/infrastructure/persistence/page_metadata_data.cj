@@ -18,4 +18,20 @@ public class PageMetadataData {
     public var release_at: String = ""
     public var created_at: String = ""
     public var updated_at: String = ""
+    public var attachments: Array<PageAttachmentData> = Array<PageAttachmentData>()
+    public var attachments_provided: Bool = false
+}
+
+public class PageAttachmentData {
+    public var id: Int64 = 0
+    public var metadata_id: Int64 = 0
+    public var slot: String = ""
+    public var asset_id: Int64 = 0
+    public var name: String = ""
+    public var mime_type: String = ""
+    public var kind: String = ""
+    public var language: String = ""
+    public var order_index: Int32 = 0
+    public var created_at: String = ""
+    public var updated_at: String = ""
 }

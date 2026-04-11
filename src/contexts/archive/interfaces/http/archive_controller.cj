@@ -249,11 +249,31 @@ public class ArchiveController {
         w: JsonWriter,
         item: ArchiveFilesPageItem
     ): Unit {
+        func writeAttachments(): Unit {
+            w.writeName("attachments")
+            w.startArray()
+            for (attachment in item.attachments) {
+                if (attachment.asset_id <= 0 || attachment.slot.trimAscii().size == 0) {
+                    continue
+                }
+                w.startObject()
+                w.writeName("slot").writeValue(attachment.slot)
+                w.writeName("asset_id").writeValue(attachment.asset_id)
+                w.writeName("name").writeValue(attachment.name)
+                w.writeName("mime_type").writeValue(attachment.mime_type)
+                w.writeName("kind").writeValue(attachment.kind)
+                w.writeName("language").writeValue(attachment.language)
+                w.writeName("order_index").writeValue(attachment.order_index)
+                w.endObject()
+            }
+            w.endArray()
+        }
+
         w.startObject()
         w.writeName("title").writeValue(item.title)
         w.writeName("description").writeValue(item.description)
         w.writeName("thumb_asset_id").writeValue(item.thumbAssetId)
-        w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
+        writeAttachments()
         w.writeName("release_at").writeValue(item.releaseAt)
         w.endObject()
     }
@@ -460,7 +480,7 @@ public class ArchiveController {
         let entriesWithTitle = handler.listEntriesWithTitle(actualPath)
 
         // handler 已经进行了适当的过滤：EPUB返回HTML文件，其他返回媒体文件
-        let pageMetadata = MetadataDao.listPageMetadata(id)
+        let pageMetadata = MetadataDao.listPageMetadata(id, includeAttachments: includeMetadata)
         var metadataByPath = HashMap<String, PageMetadataData>()
         var metadataByPage = HashMap<Int32, PageMetadataData>()
         var sidecarThumbByBase = HashMap<String, Int64>()
@@ -523,7 +543,7 @@ public class ArchiveController {
                     item.description = meta.description
                     item.releaseAt = meta.release_at
                     item.thumbAssetId = meta.thumb_asset_id
-                    item.lyricsAssetId = readExtraInt64(meta.extra_data, "lyrics_asset_id")
+                    item.attachments = meta.attachments
                     item.hidden = meta.hidden_in_files
                     if (meta.sort_index > 0) {
                         item.hasSort = true
@@ -771,7 +791,7 @@ public class ArchiveController {
                     rootAssetIds.add(coverAssetId)
                 }
                 let pageThumbAssetIds = MetadataDao.getPageThumbAssetIds(id)
-                let pageLyricsAssetIds = MetadataDao.getPageLyricsAssetIds(id)
+                let pageAttachmentAssetIds = MetadataDao.getPageAttachmentAssetIds(id)
                 let archivePath = getArchiveBasePath(archive.id)
 
                 // 4. 删除档案记录
@@ -786,7 +806,7 @@ public class ArchiveController {
                             rootAssetIds.add(assetId)
                         }
                     }
-                    for (assetId in pageLyricsAssetIds) {
+                    for (assetId in pageAttachmentAssetIds) {
                         if (assetId > 0) {
                             rootAssetIds.add(assetId)
                         }
@@ -1855,7 +1875,7 @@ private class ArchiveFilesPageItem {
     public var description: String = ""
     public var releaseAt: String = ""
     public var thumbAssetId: Int64 = 0
-    public var lyricsAssetId: Int64 = 0
+    public var attachments: Array<PageAttachmentData> = Array<PageAttachmentData>()
     public var sortIndex: Int32 = 0
     public var originalIndex: Int32 = 0
     public var hidden: Bool = false

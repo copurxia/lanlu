@@ -343,7 +343,10 @@
     "unknownArchive": "Unknown Archive",
     "audioLyricsLoading": "Loading lyrics...",
     "audioLyricsLoadFailed": "Failed to load lyrics.",
-    "audioLyricsEmpty": "No lyrics available."
+    "audioLyricsEmpty": "No lyrics available.",
+    "audioSubtitleLoading": "Loading subtitle text...",
+    "audioSubtitleLoadFailed": "Failed to load subtitle text.",
+    "audioSubtitleEmpty": "No subtitle text available."
   },
   "login": {
     "description": "Manage your comic archives with ease and style",

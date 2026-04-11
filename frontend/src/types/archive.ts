@@ -24,14 +24,24 @@ export interface MetadataLocator {
   [key: string]: unknown;
 }
 
+export interface MetadataPageAttachment {
+  slot: string;
+  asset_id?: number;
+  path?: string;
+  name: string;
+  mime_type?: string;
+  kind?: string;
+  language?: string;
+  order_index?: number;
+}
+
 export interface MetadataPagePatch {
   page_number?: number;
   entry_path?: string;
   title?: string;
   description?: string;
   thumb?: string;
-  lyrics?: string;
-  lyrics_asset_id?: number;
+  attachments?: MetadataPageAttachment[];
   order_index?: number;
   hidden_in_files?: boolean;
   release_at?: string;

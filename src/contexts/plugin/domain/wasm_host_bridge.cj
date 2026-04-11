@@ -1320,7 +1320,7 @@ public class WasmHostBridge {
 
     private static func isAdjacentAssetField(field: String): Bool {
         let f = field.trimAscii().toAsciiLower()
-        return f == "cover" || f == "backdrop" || f == "clearlogo" || f == "thumb" || f == "lyrics"
+        return f == "cover" || f == "backdrop" || f == "clearlogo" || f == "thumb" || f == "path"
     }
 
     private static func maybeMaterializeAdjacentRef(
@@ -1859,7 +1859,6 @@ public class WasmHostBridge {
         w.writeName("pages")
         w.startArray()
         for (page in pages) {
-            let lyricsAssetId = readExtraInt64(page.extra_data, "lyrics_asset_id")
             w.startObject()
             w.writeName("title").writeValue(page.title)
             w.writeName("description").writeValue(page.description)
@@ -1867,7 +1866,23 @@ public class WasmHostBridge {
             w.writeName("entry_path").writeValue(page.entry_path)
             w.writeName("archive_id").writeValue(archiveId)
             w.writeName("thumb").writeValue(page.thumb_asset_id)
-            w.writeName("lyrics_asset_id").writeValue(lyricsAssetId)
+            w.writeName("attachments")
+            w.startArray()
+            for (attachment in page.attachments) {
+                if (attachment.asset_id <= 0 || attachment.slot.trimAscii().size == 0) {
+                    continue
+                }
+                w.startObject()
+                w.writeName("slot").writeValue(attachment.slot)
+                w.writeName("asset_id").writeValue(attachment.asset_id)
+                w.writeName("name").writeValue(attachment.name)
+                w.writeName("mime_type").writeValue(attachment.mime_type)
+                w.writeName("kind").writeValue(attachment.kind)
+                w.writeName("language").writeValue(attachment.language)
+                w.writeName("order_index").writeValue(attachment.order_index)
+                w.endObject()
+            }
+            w.endArray()
             w.writeName("release_at").writeValue(page.release_at)
             w.writeName("created_at").writeValue(page.created_at)
             w.writeName("updated_at").writeValue(page.updated_at)

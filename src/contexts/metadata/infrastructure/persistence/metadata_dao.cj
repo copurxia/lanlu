@@ -241,6 +241,57 @@ public class MetadataDao {
         return 0
     }
 
+    private static func loadPageAttachments(conn: Connection, metadataId: Int64): Array<PageAttachmentData> {
+        if (metadataId <= 0) {
+            return Array<PageAttachmentData>()
+        }
+
+        let out = ArrayList<PageAttachmentData>()
+        let stmt = conn.prepareStatement("""
+            SELECT id,
+                   COALESCE(slot, ''),
+                   COALESCE(asset_id, 0),
+                   COALESCE(name, ''),
+                   COALESCE(mime_type, ''),
+                   COALESCE(kind, ''),
+                   COALESCE(language, ''),
+                   COALESCE(order_index, 0),
+                   COALESCE(created_at::TEXT, ''),
+                   COALESCE(updated_at::TEXT, '')
+            FROM metadata_page_assets
+            WHERE metadata_id = ?
+            ORDER BY order_index, slot, name, id
+        """)
+        try {
+            stmt.set(0, metadataId)
+            let rs = stmt.query()
+            try {
+                while (rs.next()) {
+                    let item = PageAttachmentData()
+                    item.id = rs.getOrNull<Int64>(0) ?? 0
+                    item.metadata_id = metadataId
+                    item.slot = (rs.getOrNull<String>(1) ?? "").trimAscii().toAsciiLower()
+                    item.asset_id = rs.getOrNull<Int64>(2) ?? 0
+                    item.name = rs.getOrNull<String>(3) ?? ""
+                    item.mime_type = rs.getOrNull<String>(4) ?? ""
+                    item.kind = (rs.getOrNull<String>(5) ?? "").trimAscii().toAsciiLower()
+                    item.language = (rs.getOrNull<String>(6) ?? "").trimAscii().toAsciiLower()
+                    item.order_index = rs.getOrNull<Int32>(7) ?? 0
+                    item.created_at = rs.getOrNull<String>(8) ?? ""
+                    item.updated_at = rs.getOrNull<String>(9) ?? ""
+                    if (item.slot.size > 0 && item.asset_id > 0) {
+                        out.add(item)
+                    }
+                }
+            } finally {
+                rs.close()
+            }
+        } finally {
+            stmt.close()
+        }
+        return out.toArray()
+    }
+
     public static func getMetadataObject(entityType: String, entityId: String): Option<MetadataObjectData> {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
@@ -679,7 +730,7 @@ public class MetadataDao {
         }
     }
 
-    public static func listPageMetadata(parentArchiveId: String): Array<PageMetadataData> {
+    public static func listPageMetadata(parentArchiveId: String, includeAttachments!: Bool = true): Array<PageMetadataData> {
         let normalizedParent = parentArchiveId.trimAscii()
         if (normalizedParent.size == 0) {
             return Array<PageMetadataData>()
@@ -690,7 +741,39 @@ public class MetadataDao {
             case None => return Array<PageMetadataData>()
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement("""
+                    let sql = if (includeAttachments) {
+                        """
+                        SELECT mo.id,
+                               COALESCE(mo.page_number, 0),
+                               COALESCE(mo.entry_path, ''),
+                               COALESCE(mo.title, ''),
+                               COALESCE(mo.description, ''),
+                               COALESCE(mo.order_index, 0),
+                               COALESCE(ma.asset_id, 0),
+                               COALESCE(CAST(mo.extra_data AS TEXT), '{}'),
+                               COALESCE(mo.release_at::TEXT, ''),
+                               COALESCE(mo.created_at::TEXT, ''),
+                               COALESCE(mo.updated_at::TEXT, ''),
+                               COALESCE(mpa.id, 0),
+                               COALESCE(mpa.slot, ''),
+                               COALESCE(mpa.asset_id, 0),
+                               COALESCE(mpa.name, ''),
+                               COALESCE(mpa.mime_type, ''),
+                               COALESCE(mpa.kind, ''),
+                               COALESCE(mpa.language, ''),
+                               COALESCE(mpa.order_index, 0),
+                               COALESCE(mpa.created_at::TEXT, ''),
+                               COALESCE(mpa.updated_at::TEXT, '')
+                        FROM metadata_objects mo
+                        LEFT JOIN metadata_assets ma ON ma.metadata_id = mo.id AND ma.slot = 'thumb'
+                        LEFT JOIN metadata_page_assets mpa ON mpa.metadata_id = mo.id
+                        WHERE mo.entity_type = 'page'
+                          AND mo.parent_entity_type = 'archive'
+                          AND mo.parent_entity_id = ?
+                        ORDER BY mo.page_number, mo.id, mpa.order_index, mpa.slot, mpa.name, mpa.id
+                        """
+                    } else {
+                        """
                         SELECT mo.id,
                                COALESCE(mo.page_number, 0),
                                COALESCE(mo.entry_path, ''),
@@ -708,32 +791,77 @@ public class MetadataDao {
                           AND mo.parent_entity_type = 'archive'
                           AND mo.parent_entity_id = ?
                         ORDER BY mo.page_number, mo.id
-                    """)
+                        """
+                    }
+                    let stmt = conn.prepareStatement(sql)
                     try {
                         stmt.set(0, normalizedParent)
                         let rs = stmt.query()
                         let out = ArrayList<PageMetadataData>()
+                        let attachmentsByMetadataId = HashMap<Int64, ArrayList<PageAttachmentData>>()
+                        var currentMetadataId: Int64 = -1
                         try {
                             while (rs.next()) {
-                                let item = PageMetadataData()
-                                item.id = rs.getOrNull<Int64>(0) ?? 0
-                                item.archive_id = 0
-                                item.page_number = rs.getOrNull<Int32>(1) ?? 0
-                                item.entry_path = rs.getOrNull<String>(2) ?? ""
-                                item.title = rs.getOrNull<String>(3) ?? ""
-                                item.description = rs.getOrNull<String>(4) ?? ""
-                                item.sort_index = rs.getOrNull<Int32>(5) ?? 0
-                                item.thumb_asset_id = rs.getOrNull<Int64>(6) ?? 0
-                                item.extra_data = rs.getOrNull<String>(7) ?? "{}"
-                                item.hidden_in_files = readExtraBool(item.extra_data, "hidden_in_files")
-                                item.thumbhash = readExtraString(item.extra_data, "thumbhash")
-                                item.release_at = rs.getOrNull<String>(8) ?? ""
-                                item.created_at = rs.getOrNull<String>(9) ?? ""
-                                item.updated_at = rs.getOrNull<String>(10) ?? ""
-                                out.add(item)
+                                let metadataId = rs.getOrNull<Int64>(0) ?? 0
+                                if (metadataId != currentMetadataId) {
+                                    let item = PageMetadataData()
+                                    item.id = metadataId
+                                    item.archive_id = 0
+                                    item.page_number = rs.getOrNull<Int32>(1) ?? 0
+                                    item.entry_path = rs.getOrNull<String>(2) ?? ""
+                                    item.title = rs.getOrNull<String>(3) ?? ""
+                                    item.description = rs.getOrNull<String>(4) ?? ""
+                                    item.sort_index = rs.getOrNull<Int32>(5) ?? 0
+                                    item.thumb_asset_id = rs.getOrNull<Int64>(6) ?? 0
+                                    item.extra_data = rs.getOrNull<String>(7) ?? "{}"
+                                    item.hidden_in_files = readExtraBool(item.extra_data, "hidden_in_files")
+                                    item.thumbhash = readExtraString(item.extra_data, "thumbhash")
+                                    item.release_at = rs.getOrNull<String>(8) ?? ""
+                                    item.created_at = rs.getOrNull<String>(9) ?? ""
+                                    item.updated_at = rs.getOrNull<String>(10) ?? ""
+                                    out.add(item)
+                                    currentMetadataId = metadataId
+                                }
+
+                                if (includeAttachments) {
+                                    let attachmentId = rs.getOrNull<Int64>(11) ?? 0
+                                    let attachmentSlot = (rs.getOrNull<String>(12) ?? "").trimAscii().toAsciiLower()
+                                    let attachmentAssetId = rs.getOrNull<Int64>(13) ?? 0
+                                    if (attachmentId > 0 && attachmentSlot.size > 0 && attachmentAssetId > 0) {
+                                        let attachment = PageAttachmentData()
+                                        attachment.id = attachmentId
+                                        attachment.metadata_id = currentMetadataId
+                                        attachment.slot = attachmentSlot
+                                        attachment.asset_id = attachmentAssetId
+                                        attachment.name = rs.getOrNull<String>(14) ?? ""
+                                        attachment.mime_type = rs.getOrNull<String>(15) ?? ""
+                                        attachment.kind = (rs.getOrNull<String>(16) ?? "").trimAscii().toAsciiLower()
+                                        attachment.language = (rs.getOrNull<String>(17) ?? "").trimAscii().toAsciiLower()
+                                        attachment.order_index = rs.getOrNull<Int32>(18) ?? 0
+                                        attachment.created_at = rs.getOrNull<String>(19) ?? ""
+                                        attachment.updated_at = rs.getOrNull<String>(20) ?? ""
+                                        match (attachmentsByMetadataId.get(currentMetadataId)) {
+                                            case Some(existing) =>
+                                                existing.add(attachment)
+                                            case None =>
+                                                let list = ArrayList<PageAttachmentData>()
+                                                list.add(attachment)
+                                                attachmentsByMetadataId[currentMetadataId] = list
+                                        }
+                                    }
+                                }
                             }
                         } finally {
                             rs.close()
+                        }
+                        if (includeAttachments) {
+                            for (item in out) {
+                                match (attachmentsByMetadataId.get(item.id)) {
+                                    case Some(attachments) =>
+                                        item.attachments = attachments.toArray()
+                                    case None => ()
+                                }
+                            }
                         }
                         return out.toArray()
                     } finally {
@@ -885,6 +1013,44 @@ public class MetadataDao {
                                     deleteThumb.close()
                                 }
                             }
+
+                            if (item.attachments_provided) {
+                                let deleteAttachments = conn.prepareStatement("DELETE FROM metadata_page_assets WHERE metadata_id = ?")
+                                try {
+                                    deleteAttachments.set(0, metadataId)
+                                    deleteAttachments.update()
+                                } finally {
+                                    deleteAttachments.close()
+                                }
+
+                                for (attachment in item.attachments) {
+                                    let slot = attachment.slot.trimAscii().toAsciiLower()
+                                    let name = attachment.name.trimAscii()
+                                    if (slot.size == 0 || name.size == 0 || attachment.asset_id <= 0) {
+                                        continue
+                                    }
+                                    let insertAttachment = conn.prepareStatement("""
+                                        INSERT INTO metadata_page_assets (
+                                            metadata_id, slot, asset_id, name, mime_type, kind, language, order_index, created_at, updated_at
+                                        ) VALUES (
+                                            ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                                        )
+                                    """)
+                                    try {
+                                        insertAttachment.set(0, metadataId)
+                                        insertAttachment.set(1, slot)
+                                        insertAttachment.set(2, attachment.asset_id)
+                                        insertAttachment.set(3, name)
+                                        insertAttachment.set(4, attachment.mime_type.trimAscii())
+                                        insertAttachment.set(5, attachment.kind.trimAscii().toAsciiLower())
+                                        insertAttachment.set(6, attachment.language.trimAscii().toAsciiLower())
+                                        insertAttachment.set(7, attachment.order_index)
+                                        insertAttachment.update()
+                                    } finally {
+                                        insertAttachment.close()
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -929,24 +1095,21 @@ public class MetadataDao {
         return out.toArray()
     }
 
-    public static func getPageLyricsAssetIds(parentArchiveId: String): Array<Int64> {
+    public static func getPageAttachmentAssetIds(parentArchiveId: String, slot!: String = ""): Array<Int64> {
         let pages = listPageMetadata(parentArchiveId)
         let out = ArrayList<Int64>()
         let seen = HashSet<Int64>()
         for (page in pages) {
-            let rawValue = readExtraString(page.extra_data, "lyrics_asset_id").trimAscii()
-            if (rawValue.size == 0) {
-                continue
-            }
-            let assetId = try {
-                let parsed = Int64.parse(rawValue)
-                if (parsed > 0) { parsed } else { 0 }
-            } catch (_: Exception) {
-                0
-            }
-            if (assetId > 0 && !seen.contains(assetId)) {
-                seen.add(assetId)
-                out.add(assetId)
+            for (attachment in page.attachments) {
+                let normalizedSlot = slot.trimAscii().toAsciiLower()
+                if (normalizedSlot.size > 0 && attachment.slot.trimAscii().toAsciiLower() != normalizedSlot) {
+                    continue
+                }
+                let assetId = attachment.asset_id
+                if (assetId > 0 && !seen.contains(assetId)) {
+                    seen.add(assetId)
+                    out.add(assetId)
+                }
             }
         }
         return out.toArray()

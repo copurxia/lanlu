@@ -133,6 +133,37 @@ public class MetadataPatchService {
         return archive.thumbhash.trimAscii()
     }
 
+    private static func writePageAttachmentsArray(w: JsonWriter, attachments: Array<PageAttachmentData>): Unit {
+        w.writeName("attachments")
+        w.startArray()
+        for (attachment in attachments) {
+            let slot = attachment.slot.trimAscii().toAsciiLower()
+            if (slot.size == 0 || attachment.asset_id <= 0) {
+                continue
+            }
+            w.startObject()
+            w.writeName("slot").writeValue(slot)
+            w.writeName("asset_id").writeValue(attachment.asset_id)
+            if (attachment.name.trimAscii().size > 0) {
+                w.writeName("name").writeValue(attachment.name)
+            }
+            if (attachment.mime_type.trimAscii().size > 0) {
+                w.writeName("mime_type").writeValue(attachment.mime_type)
+            }
+            if (attachment.kind.trimAscii().size > 0) {
+                w.writeName("kind").writeValue(attachment.kind)
+            }
+            if (attachment.language.trimAscii().size > 0) {
+                w.writeName("language").writeValue(attachment.language)
+            }
+            if (attachment.order_index > 0) {
+                w.writeName("order_index").writeValue(attachment.order_index)
+            }
+            w.endObject()
+        }
+        w.endArray()
+    }
+
     private static func writeLocatorObject(w: JsonWriter, entityType: String, entityId: String, volumeNo!: Int32 = 0, orderIndex!: Int32 = 0): Unit {
         w.writeName("locator")
         w.startObject()
@@ -408,6 +439,31 @@ public class MetadataPatchService {
                     return patch
                 }
 
+                func parsePageAttachmentObject(): PageAttachmentPatch {
+                    let attachment = PageAttachmentPatch()
+                    if (r.peek() != Some(BeginObject)) {
+                        return attachment
+                    }
+
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let ak = r.readName()
+                        match (ak) {
+                            case "slot" => attachment.slot = readStringFlexible().trimAscii().toAsciiLower()
+                            case "asset_id" => attachment.assetId = readInt64Flexible()
+                            case "path" => attachment.path = readStringFlexible().trimAscii()
+                            case "name" => attachment.name = readStringFlexible().trimAscii()
+                            case "mime_type" => attachment.mimeType = readStringFlexible().trimAscii()
+                            case "kind" => attachment.kind = readStringFlexible().trimAscii().toAsciiLower()
+                            case "language" => attachment.language = readStringFlexible().trimAscii().toAsciiLower()
+                            case "order_index" => attachment.orderIndex = readInt32Flexible()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    return attachment
+                }
+
                 r.startObject()
                 while (r.peek() != EndObject) {
                     let pk = r.readName()
@@ -417,12 +473,24 @@ public class MetadataPatchService {
                         case "title" => patch.title = readStringFlexible()
                         case "description" => patch.description = readStringFlexible()
                         case "thumb" => patch.thumb = readStringFlexible().trimAscii()
-                        case "lyrics" =>
-                            patch.lyrics = readStringFlexible().trimAscii()
-                            patch.lyricsProvided = true
-                        case "lyrics_asset_id" =>
-                            patch.lyricsAssetId = readInt64Flexible()
-                            patch.lyricsAssetIdProvided = true
+                        case "attachments" =>
+                            patch.attachmentsProvided = true
+                            match (r.peek()) {
+                                case Some(BeginArray) =>
+                                    let attachments = ArrayList<PageAttachmentPatch>()
+                                    r.startArray()
+                                    while (r.peek() != EndArray) {
+                                        let attachment = parsePageAttachmentObject()
+                                        if (attachment.slot.trimAscii().size > 0 &&
+                                            (attachment.assetId > 0 || attachment.path.trimAscii().size > 0)) {
+                                            attachments.add(attachment)
+                                        }
+                                    }
+                                    r.endArray()
+                                    patch.attachments = attachments.toArray()
+                                case Some(_) => r.skip()
+                                case None => ()
+                            }
                         case "release_at" =>
                             patch.releaseAt = readStringFlexible().trimAscii()
                             patch.releaseAtProvided = true
@@ -726,10 +794,7 @@ public class MetadataPatchService {
             if (meta.thumb_asset_id > 0) {
                 w.writeName("thumb").writeValue(meta.thumb_asset_id)
             }
-            let pageLyricsAssetId = readExtraInt64(meta.extra_data, "lyrics_asset_id")
-            if (pageLyricsAssetId > 0) {
-                w.writeName("lyrics_asset_id").writeValue(pageLyricsAssetId)
-            }
+            writePageAttachmentsArray(w, meta.attachments)
             if (meta.sort_index > 0) {
                 w.writeName("order_index").writeValue(meta.sort_index)
             }
@@ -963,14 +1028,106 @@ public class MetadataPatchService {
         return patch
     }
 
-    private static func parsePositiveAssetId(rawValue: String): Int64 {
+    private static func tryExtractAssetId(rawValue: String): Int64 {
+        let trimmed = rawValue.trimAscii()
+        if (trimmed.size == 0) {
+            return 0
+        }
+
+        var candidate: Int64 = 0
+        for (segment in trimmed.split("/")) {
+            let token = segment.trimAscii()
+            if (token.size == 0) {
+                continue
+            }
+            var core = token
+            match (token.lastIndexOf(".")) {
+                case Some(dotIndex) =>
+                    let ext = token[(dotIndex + 1)..token.size].trimAscii()
+                    if (ext.size > 0 && ext.size <= 8) {
+                        core = token[0..dotIndex].trimAscii()
+                    }
+                case None => ()
+            }
+
+            if (core.size == 0) {
+                continue
+            }
+            try {
+                let parsed = Int64.parse(core)
+                if (parsed > 0) {
+                    candidate = parsed
+                }
+            } catch (_: Exception) {
+                continue
+            }
+        }
+
+        return candidate
+    }
+
+    private static func parseAssetReferenceId(rawValue: String): Int64 {
         let trimmed = rawValue.trimAscii()
         if (trimmed.size == 0) { return 0 }
         try {
             let parsed = Int64.parse(trimmed)
             return if (parsed > 0) { parsed } else { 0 }
         } catch (_: Exception) {
-            return 0
+            return tryExtractAssetId(trimmed)
+        }
+    }
+
+    private static func guessAttachmentKind(name: String, fallback: String): String {
+        let normalizedFallback = fallback.trimAscii().toAsciiLower()
+        if (normalizedFallback.size > 0) {
+            return normalizedFallback
+        }
+
+        let trimmed = name.trimAscii()
+        match (trimmed.lastIndexOf(".")) {
+            case Some(dotIndex) => return trimmed[(dotIndex + 1)..trimmed.size].trimAscii().toAsciiLower()
+            case None => return ""
+        }
+    }
+
+    private static func guessAttachmentMimeType(kind: String): String {
+        match (kind.trimAscii().toAsciiLower()) {
+            case "ass" => return "text/x-ssa"
+            case "ssa" => return "text/x-ssa"
+            case "srt" => return "application/x-subrip"
+            case "vtt" => return "text/vtt"
+            case "lrc" => return "text/plain"
+            case "txt" => return "text/plain"
+            case "sub" => return "application/octet-stream"
+            case "idx" => return "application/octet-stream"
+            case "sup" => return "application/octet-stream"
+            case _ => return "application/octet-stream"
+        }
+    }
+
+    private static func normalizeAttachmentSlot(rawSlot: String, kind: String): String {
+        let normalized = rawSlot.trimAscii().toAsciiLower()
+        if (normalized == "lyrics" || normalized == "subtitle" || normalized == "misc") {
+            return normalized
+        }
+        let normalizedKind = kind.trimAscii().toAsciiLower()
+        if (normalizedKind == "lrc" || normalizedKind == "txt") {
+            return "lyrics"
+        }
+        if (normalizedKind == "ass" || normalizedKind == "ssa" || normalizedKind == "srt" || normalizedKind == "vtt" || normalizedKind == "sub" || normalizedKind == "idx" || normalizedKind == "sup") {
+            return "subtitle"
+        }
+        return "misc"
+    }
+
+    private static func attachmentDisplayName(path: String): String {
+        let normalized = path.trimAscii().replace("\\", "/")
+        if (normalized.size == 0) {
+            return ""
+        }
+        match (normalized.lastIndexOf("/")) {
+            case Some(slashIndex) => return normalized[(slashIndex + 1)..normalized.size].trimAscii()
+            case None => return normalized
         }
     }
 
@@ -996,7 +1153,7 @@ public class MetadataPatchService {
             return
         }
 
-        let directAssetId = parsePositiveAssetId(value)
+        let directAssetId = parseAssetReferenceId(value)
         if (directAssetId > 0) {
             let updated = MetadataDao.setMetadataAssetId("archive", archiveId, key, directAssetId)
             if (updated) {
@@ -1079,7 +1236,7 @@ public class MetadataPatchService {
             return
         }
 
-        let directAssetId = parsePositiveAssetId(value)
+        let directAssetId = parseAssetReferenceId(value)
         if (directAssetId > 0) {
             let updated = MetadataDao.setMetadataAssetId("tankoubon", tankoubonId, key, directAssetId)
             if (updated) {
@@ -1337,7 +1494,7 @@ public class MetadataPatchService {
 
             let patchThumb = patch.thumb.trimAscii()
             if (patchThumb.size > 0) {
-                let directAssetId = parsePositiveAssetId(patchThumb)
+                let directAssetId = parseAssetReferenceId(patchThumb)
                 if (directAssetId > 0) {
                     item.thumb_asset_id = directAssetId
                     item.thumbhash = getAssetThumbhash(directAssetId)
@@ -1371,55 +1528,88 @@ public class MetadataPatchService {
                 }
             }
 
-            var oldLyricsAssetId = readExtraInt64(item.extra_data, "lyrics_asset_id")
-            if (patch.lyricsAssetIdProvided || patch.lyricsProvided) {
-                var nextLyricsAssetId = oldLyricsAssetId
-                var shouldApplyLyricsField = true
-                if (patch.lyricsAssetIdProvided) {
-                    nextLyricsAssetId = if (patch.lyricsAssetId > 0) { patch.lyricsAssetId } else { 0 }
+            if (patch.attachmentsProvided) {
+                item.attachments_provided = true
+                let nextAttachments = ArrayList<PageAttachmentData>()
+                let pageToken = if (item.page_number > 0) {
+                    item.page_number.toString()
+                } else if (item.entry_path.trimAscii().size > 0) {
+                    item.entry_path.trimAscii().replace("/", "_")
                 } else {
-                    let patchLyrics = patch.lyrics.trimAscii()
-                    if (patchLyrics.size == 0) {
-                        nextLyricsAssetId = 0
+                    DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
+                }
+                for (attachmentPatch in patch.attachments) {
+                    let kind = guessAttachmentKind(attachmentPatch.name, attachmentPatch.kind)
+                    let slot = normalizeAttachmentSlot(attachmentPatch.slot, kind)
+                    var name = if (attachmentPatch.name.trimAscii().size > 0) {
+                        attachmentPatch.name.trimAscii()
+                    } else if (attachmentPatch.path.trimAscii().size > 0) {
+                        attachmentDisplayName(attachmentPatch.path)
                     } else {
-                        let directLyricsAssetId = parsePositiveAssetId(patchLyrics)
-                        if (directLyricsAssetId > 0) {
-                            nextLyricsAssetId = directLyricsAssetId
-                        } else if (pluginNamespace.trimAscii().size > 0) {
-                            let pageToken = if (item.page_number > 0) {
-                                item.page_number.toString()
-                            } else if (item.entry_path.trimAscii().size > 0) {
-                                item.entry_path.trimAscii().replace("/", "_")
-                            } else {
-                                DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
-                            }
-                            let (okLyrics, newLyricsAssetId, lyricsErr) = PluginTaskService.installRawAssetFromPluginPath(
-                                patchLyrics,
-                                pluginNamespace,
-                                "page_lyrics",
-                                "${archiveId}_${pageToken}.lrc"
-                            )
-                            if (okLyrics && newLyricsAssetId > 0) {
-                                nextLyricsAssetId = newLyricsAssetId
-                                cleanupNewAssetIds.add(newLyricsAssetId)
-                            } else {
-                                shouldApplyLyricsField = false
-                                logWarn(taskId, "failed to install page lyrics from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}): ${lyricsErr}")
-                            }
+                        "attachment"
+                    }
+                    if (name.trimAscii().size == 0) {
+                        name = "attachment"
+                    }
+                    let mimeType = if (attachmentPatch.mimeType.trimAscii().size > 0) {
+                        attachmentPatch.mimeType.trimAscii()
+                    } else {
+                        guessAttachmentMimeType(kind)
+                    }
+
+                    var resolvedAssetId = if (attachmentPatch.assetId > 0) { attachmentPatch.assetId } else { 0 }
+                    if (resolvedAssetId <= 0) {
+                        resolvedAssetId = parseAssetReferenceId(attachmentPatch.path)
+                    }
+
+                    if (resolvedAssetId <= 0) {
+                        let attachmentPath = attachmentPatch.path.trimAscii()
+                        if (attachmentPath.size == 0) {
+                            continue
+                        }
+                        if (pluginNamespace.trimAscii().size == 0) {
+                            logWarn(taskId, "skip page attachment without metadata namespace archive=${archiveId}, path=${entryPath}, name=${name}")
+                            continue
+                        }
+                        let ext = match (name.lastIndexOf(".")) {
+                            case Some(dotIndex) => name[(dotIndex + 1)..name.size].trimAscii()
+                            case None => kind
+                        }
+                        let outputName = if (ext.trimAscii().size > 0) {
+                            "${archiveId}_${pageToken}_${slot}.${ext.trimAscii()}"
                         } else {
-                            shouldApplyLyricsField = false
-                            logWarn(taskId, "skip page lyrics patch without metadata namespace archive=${archiveId}, path=${entryPath}")
+                            "${archiveId}_${pageToken}_${slot}"
+                        }
+                        let (okAttachment, newAttachmentAssetId, attachmentErr) = PluginTaskService.installRawAssetFromPluginPath(
+                            attachmentPath,
+                            pluginNamespace,
+                            "page_attachment_${slot}",
+                            outputName
+                        )
+                        if (okAttachment && newAttachmentAssetId > 0) {
+                            resolvedAssetId = newAttachmentAssetId
+                            cleanupNewAssetIds.add(newAttachmentAssetId)
+                        } else {
+                            logWarn(taskId, "failed to install page attachment from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}, name=${name}): ${attachmentErr}")
+                            continue
                         }
                     }
-                }
 
-                if (shouldApplyLyricsField) {
-                    item.extra_data = writeExtraInt64(item.extra_data, "lyrics_asset_id", nextLyricsAssetId, true)
-                    if (oldLyricsAssetId > 0 && oldLyricsAssetId != nextLyricsAssetId) {
-                        deleteOldAssetIds.add(oldLyricsAssetId)
+                    if (resolvedAssetId <= 0) {
+                        continue
                     }
-                    oldLyricsAssetId = nextLyricsAssetId
+
+                    let attachment = PageAttachmentData()
+                    attachment.slot = slot
+                    attachment.asset_id = resolvedAssetId
+                    attachment.name = name
+                    attachment.mime_type = mimeType
+                    attachment.kind = kind
+                    attachment.language = attachmentPatch.language.trimAscii().toAsciiLower()
+                    attachment.order_index = attachmentPatch.orderIndex
+                    nextAttachments.add(attachment)
                 }
+                item.attachments = nextAttachments.toArray()
             }
 
             items.add(item)

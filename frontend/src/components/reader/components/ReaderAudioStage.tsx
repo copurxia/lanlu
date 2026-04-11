@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MemoizedAudio, MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { ArchiveService } from '@/lib/services/archive-service';
@@ -33,6 +32,18 @@ async function loadLyricsText(assetId: number): Promise<string> {
 
   lyricsInflight.set(assetId, request);
   return request;
+}
+
+async function loadSubtitleText(assetId: number): Promise<string> {
+  if (!assetId || assetId <= 0) return '';
+  const url = ArchiveService.getAssetUrl(assetId);
+  if (!url) return '';
+  const response = await apiClient.get<string>(url, {
+    responseType: 'text',
+    transformResponse: [(v) => v],
+  });
+  const text = typeof response.data === 'string' ? response.data : String(response.data || '');
+  return text.replace(/^\uFEFF/, '').trim();
 }
 
 type TimedLyricLine = {
@@ -99,7 +110,8 @@ export function ReaderAudioStage({
   description,
   thumb,
   audioUrl,
-  lyricsAssetId,
+  lyricsAttachmentAssetId,
+  subtitleAttachmentAssetId,
   audioRef,
   onLoadedData,
   onError,
@@ -109,7 +121,8 @@ export function ReaderAudioStage({
   description?: string;
   thumb?: string;
   audioUrl: string;
-  lyricsAssetId?: number;
+  lyricsAttachmentAssetId?: number;
+  subtitleAttachmentAssetId?: number;
   audioRef: (el: HTMLAudioElement | null) => void;
   onLoadedData: () => void;
   onError: () => void;
@@ -118,6 +131,9 @@ export function ReaderAudioStage({
   const [lyrics, setLyrics] = useState('');
   const [lyricsLoading, setLyricsLoading] = useState(false);
   const [lyricsError, setLyricsError] = useState(false);
+  const [subtitleText, setSubtitleText] = useState('');
+  const [subtitleLoading, setSubtitleLoading] = useState(false);
+  const [subtitleError, setSubtitleError] = useState(false);
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -128,7 +144,7 @@ export function ReaderAudioStage({
 
   useEffect(() => {
     let cancelled = false;
-    const assetId = Number(lyricsAssetId || 0);
+    const assetId = Number(lyricsAttachmentAssetId || 0);
     if (!assetId || assetId <= 0) {
       setLyrics('');
       setLyricsLoading(false);
@@ -154,7 +170,37 @@ export function ReaderAudioStage({
     return () => {
       cancelled = true;
     };
-  }, [lyricsAssetId]);
+  }, [lyricsAttachmentAssetId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const assetId = Number(subtitleAttachmentAssetId || 0);
+    if (!assetId || assetId <= 0) {
+      setSubtitleText('');
+      setSubtitleLoading(false);
+      setSubtitleError(false);
+      return;
+    }
+
+    setSubtitleLoading(true);
+    setSubtitleError(false);
+    loadSubtitleText(assetId)
+      .then((text) => {
+        if (cancelled) return;
+        setSubtitleText(text);
+        setSubtitleLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSubtitleText('');
+        setSubtitleLoading(false);
+        setSubtitleError(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [subtitleAttachmentAssetId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
@@ -308,6 +354,15 @@ export function ReaderAudioStage({
     [lyrics]
   );
   const activeTimedIndex = hasTimedLyrics ? getActiveTimedLyricIndex(timedLyrics, currentTime) : -1;
+  const subtitleLines = useMemo(
+    () =>
+      subtitleText
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    [subtitleText]
+  );
+  const hasSubtitleText = subtitleLines.length > 0;
   const waveStageStyle = useMemo(
     () => ({ ['--wave-beat' as const]: (isPlaying ? waveBeat : 0).toFixed(3) }) as Record<string, string>,
     [isPlaying, waveBeat]
@@ -432,6 +487,24 @@ export function ReaderAudioStage({
                       {line}
                     </div>
                   ))}
+                </div>
+              ) : null}
+              {Number(subtitleAttachmentAssetId || 0) > 0 ? (
+                <div className="mt-6 border-t border-white/15 pt-4">
+                  {subtitleLoading ? <div className="py-2 text-center text-sm text-white/75">{t('reader.audioSubtitleLoading')}</div> : null}
+                  {!subtitleLoading && subtitleError ? <div className="py-2 text-center text-sm text-white/75">{t('reader.audioSubtitleLoadFailed')}</div> : null}
+                  {!subtitleLoading && !subtitleError && !hasSubtitleText ? (
+                    <div className="py-2 text-center text-sm text-white/75">{t('reader.audioSubtitleEmpty')}</div>
+                  ) : null}
+                  {!subtitleLoading && !subtitleError && hasSubtitleText ? (
+                    <div className="space-y-1 pb-8">
+                      {subtitleLines.map((line, index) => (
+                        <div key={`${index}-${line}`} className="wrap-break-word text-center text-sm text-white/78 sm:text-base">
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

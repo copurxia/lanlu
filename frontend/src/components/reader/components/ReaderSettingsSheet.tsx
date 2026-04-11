@@ -50,6 +50,9 @@ export function ReaderSettingsSheet({
   mediaSourceOptions,
   activeMediaSourceIndex,
   onMediaSourceChange,
+  subtitleOptions,
+  activeSubtitleIndex,
+  onSubtitleChange,
   t,
 }: {
   open: boolean;
@@ -66,6 +69,9 @@ export function ReaderSettingsSheet({
   mediaSourceOptions?: ReaderMediaSourceOption[];
   activeMediaSourceIndex?: number;
   onMediaSourceChange?: (value: number) => void;
+  subtitleOptions?: ReaderMediaSourceOption[];
+  activeSubtitleIndex?: number;
+  onSubtitleChange?: (value: number) => void;
   t: (key: string) => string;
 }) {
   const router = useRouter();
@@ -305,6 +311,41 @@ export function ReaderSettingsSheet({
                     size="sm"
                     className="rounded-lg"
                     onClick={() => onMediaSourceChange?.(option.value)}
+                  >
+                    <span className="max-w-[14rem] truncate">{option.label}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {isNarrowScreen && subtitleOptions && subtitleOptions.length > 0 ? (
+            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Subtitle</span>
+                <span className="text-xs text-muted-foreground">
+                  {(activeSubtitleIndex ?? -1) >= 0 ? `${(activeSubtitleIndex ?? 0) + 1}/${subtitleOptions.length}` : 'Off'}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  key="settings-subtitle-off"
+                  type="button"
+                  variant={(activeSubtitleIndex ?? -1) < 0 ? 'default' : 'outline'}
+                  size="sm"
+                  className="rounded-lg"
+                  onClick={() => onSubtitleChange?.(-1)}
+                >
+                  Off
+                </Button>
+                {subtitleOptions.map((option) => (
+                  <Button
+                    key={`settings-subtitle-${option.value}`}
+                    type="button"
+                    variant={activeSubtitleIndex === option.value ? 'default' : 'outline'}
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => onSubtitleChange?.(option.value)}
                   >
                     <span className="max-w-[14rem] truncate">{option.label}</span>
                   </Button>

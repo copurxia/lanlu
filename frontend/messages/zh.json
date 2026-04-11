@@ -346,7 +346,10 @@
     "unknownArchive": "未知归档",
     "audioLyricsLoading": "歌词加载中...",
     "audioLyricsLoadFailed": "歌词加载失败。",
-    "audioLyricsEmpty": "暂无歌词。"
+    "audioLyricsEmpty": "暂无歌词。",
+    "audioSubtitleLoading": "字幕文本加载中...",
+    "audioSubtitleLoadFailed": "字幕文本加载失败。",
+    "audioSubtitleEmpty": "暂无字幕文本。"
   },
   "login": {
     "description": "轻松优雅地管理您的漫画归档",

@@ -76,6 +76,7 @@ import { buildReaderProgressLaneSpecs } from '@/features/reader/application/use-
 import { mapPageDtosToReaderPageItems } from '@/features/reader/domain/mappers/page-dto-mapper';
 import { computeCollectionEndNextAction, computeCollectionEndReturnRealPage, computePrevBoundaryAction } from '@/features/reader/application/use-cases/compute-reader-boundary-navigation';
 import { useReaderSourceSession } from '@/features/reader/presentation/hooks/useReaderSourceSession';
+import type { MetadataPageAttachment } from '@/types/archive';
 
 const ReaderSidebar = dynamic(
   () => import('@/components/reader/components/ReaderSidebar').then((m) => m.ReaderSidebar)
@@ -171,6 +172,22 @@ function buildSourceOptionLabels(
   return candidateLabels;
 }
 
+function buildSubtitleOptionLabel(attachment: MetadataPageAttachment, subtitleIndex: number): string {
+  const language = String(attachment.language || '').trim();
+  const kind = String(attachment.kind || '').trim().toLowerCase();
+  const name = String(attachment.name || '').trim();
+  if (language && kind) return `${language} · ${kind}`;
+  if (language) return language;
+  if (name && kind && !name.toLowerCase().endsWith(`.${kind}`)) return `${name} · ${kind}`;
+  if (name) return name;
+  if (kind) return kind;
+  return `Subtitle ${subtitleIndex + 1}`;
+}
+
+function buildSubtitleSourceKey(pageIndex: number, sourceIndex: number): string {
+  return `${pageIndex}:${sourceIndex}`;
+}
+
 function resolvePageWithSource<
   T extends {
     type: 'image' | 'video' | 'audio' | 'html';
@@ -180,7 +197,7 @@ function resolvePageWithSource<
       description?: string;
       thumb_asset_id?: number;
       thumb?: string;
-      lyrics_asset_id?: number;
+      attachments?: MetadataPageAttachment[];
       release_at?: string;
     };
     defaultSource?: {
@@ -194,7 +211,7 @@ function resolvePageWithSource<
         description?: string;
         thumb_asset_id?: number;
         thumb?: string;
-        lyrics_asset_id?: number;
+        attachments?: MetadataPageAttachment[];
         release_at?: string;
       };
     };
@@ -209,7 +226,7 @@ function resolvePageWithSource<
         description?: string;
         thumb_asset_id?: number;
         thumb?: string;
-        lyrics_asset_id?: number;
+        attachments?: MetadataPageAttachment[];
         release_at?: string;
       };
     }>;
@@ -295,6 +312,8 @@ function ReaderContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedProgressLaneId, setExpandedProgressLaneId] = useState<string | null>(null);
   const [currentSourceIndexByPageIndex, setCurrentSourceIndexByPageIndex] = useState<Record<number, number>>({});
+  const [currentSubtitleIndexBySourceKey, setCurrentSubtitleIndexBySourceKey] = useState<Record<string, number>>({});
+  const subtitlePreferenceRef = useRef<{ language: string; name: string } | null>(null);
   const [videoTimelineByPageIndex, setVideoTimelineByPageIndex] = useState<
     Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number }>
   >({});
@@ -548,6 +567,62 @@ function ReaderContent() {
     () => pages.map((page, pageIndex) => resolvePageWithSource(page, currentSourceIndexByPageIndex[pageIndex])),
     [currentSourceIndexByPageIndex, pages]
   );
+
+  const currentSubtitleIndexByPageIndex = useMemo(() => {
+    const out: Record<number, number> = {};
+    for (let i = 0; i < effectivePages.length; i += 1) {
+      const sourceIndex = currentSourceIndexByPageIndex[i] ?? effectivePages[i]?.defaultSourceIndex ?? 0;
+      const key = buildSubtitleSourceKey(i, sourceIndex);
+      out[i] = currentSubtitleIndexBySourceKey[key] ?? -1;
+    }
+    return out;
+  }, [currentSourceIndexByPageIndex, currentSubtitleIndexBySourceKey, effectivePages]);
+
+  useEffect(() => {
+    setCurrentSubtitleIndexBySourceKey((prev) => {
+      let changed = false;
+      const next: Record<string, number> = {};
+      for (let i = 0; i < effectivePages.length; i += 1) {
+        const page = effectivePages[i];
+        const sourceIndex = currentSourceIndexByPageIndex[i] ?? page?.defaultSourceIndex ?? 0;
+        const key = buildSubtitleSourceKey(i, sourceIndex);
+        const subtitleAttachments = ArchiveService.getSubtitleAttachments(page.effectiveMetadata || page.metadata);
+        const subtitleCount = subtitleAttachments.length;
+        const existing = prev[key];
+        if (subtitleCount <= 0) {
+          if (existing !== undefined) changed = true;
+          continue;
+        }
+
+        let resolved =
+          typeof existing === 'number' && existing >= 0 && existing < subtitleCount
+            ? existing
+            : -1;
+
+        if (resolved < 0 && subtitlePreferenceRef.current) {
+          const preferredLanguage = subtitlePreferenceRef.current.language.trim().toLowerCase();
+          const preferredName = subtitlePreferenceRef.current.name.trim().toLowerCase();
+          const matchedIndex = subtitleAttachments.findIndex((attachment) => {
+            const currentLanguage = String(attachment.language || '').trim().toLowerCase();
+            const currentName = String(attachment.name || '').trim().toLowerCase();
+            return currentLanguage === preferredLanguage && currentName === preferredName;
+          });
+          if (matchedIndex >= 0) {
+            resolved = matchedIndex;
+          }
+        }
+
+        next[key] = resolved;
+        if (prev[key] !== resolved) changed = true;
+      }
+
+      const prevKeys = Object.keys(prev);
+      if (!changed && prevKeys.length === Object.keys(next).length) {
+        return prev;
+      }
+      return next;
+    });
+  }, [currentSourceIndexByPageIndex, effectivePages]);
 
 
   useEffect(() => {
@@ -1552,6 +1627,32 @@ function ReaderContent() {
     [currentSourceIndexByPageIndex, pages, videoTimelineByPageIndex]
   );
 
+  const handleChangePageSubtitle = useCallback(
+    (pageIndex: number, nextSubtitleIndex: number) => {
+      const page = effectivePages[pageIndex];
+      const subtitleAttachments = ArchiveService.getSubtitleAttachments(page?.effectiveMetadata || page?.metadata);
+      const subtitleCount = subtitleAttachments.length;
+      if (!page || subtitleCount <= 0) return;
+      const resolved = nextSubtitleIndex < 0 ? -1 : Math.max(0, Math.min(subtitleCount - 1, nextSubtitleIndex));
+      const sourceIndex = currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0;
+      const key = buildSubtitleSourceKey(pageIndex, sourceIndex);
+      if ((currentSubtitleIndexBySourceKey[key] ?? -1) === resolved) return;
+
+      if (resolved >= 0) {
+        const selected = subtitleAttachments[resolved];
+        subtitlePreferenceRef.current = {
+          language: String(selected?.language || '').trim().toLowerCase(),
+          name: String(selected?.name || '').trim().toLowerCase(),
+        };
+      } else {
+        subtitlePreferenceRef.current = null;
+      }
+
+      setCurrentSubtitleIndexBySourceKey((prev) => ({ ...prev, [key]: resolved }));
+    },
+    [currentSourceIndexByPageIndex, currentSubtitleIndexBySourceKey, effectivePages]
+  );
+
   useEffect(() => {
     const pendingEntries = Object.entries(pendingSourceRestoreRef.current);
     if (pendingEntries.length <= 0) return;
@@ -1811,6 +1912,7 @@ function ReaderContent() {
 
       const pageIndex = lane.mediaPageIndex ?? -1;
       const page = pageIndex >= 0 ? pages[pageIndex] : undefined;
+      const effectivePage = pageIndex >= 0 ? effectivePages[pageIndex] : undefined;
       const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
       const snapshot = pageIndex >= 0 ? videoTimelineByPageIndex[pageIndex] : undefined;
       const sourceLabels = page ? buildSourceOptionLabels(page) : [];
@@ -1818,7 +1920,15 @@ function ReaderContent() {
         value: sourceIndex,
         label: sourceLabels[sourceIndex] || `Source ${sourceIndex + 1}`,
       }));
+      const subtitleAttachments = ArchiveService.getSubtitleAttachments(effectivePage?.effectiveMetadata || effectivePage?.metadata);
+      const subtitleOptions = lane.kind === 'video' || lane.kind === 'audio'
+        ? subtitleAttachments.map((attachment, subtitleIndex) => ({
+            value: subtitleIndex,
+            label: buildSubtitleOptionLabel(attachment, subtitleIndex),
+          }))
+        : undefined;
       const activeSourceIndex = pageIndex >= 0 ? currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0 : 0;
+      const activeSubtitleIndex = pageIndex >= 0 ? currentSubtitleIndexByPageIndex[pageIndex] ?? -1 : -1;
       const currentTime =
         snapshot?.currentTime ??
         (videoElement && Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0);
@@ -1865,7 +1975,10 @@ function ReaderContent() {
         volume,
         sourceOptions,
         activeSourceIndex,
+        subtitleOptions,
+        activeSubtitleIndex,
         onSourceChange: (nextSourceIndex: number) => handleChangePageSource(pageIndex, nextSourceIndex),
+        onSubtitleChange: (nextSubtitleIndex: number) => handleChangePageSubtitle(pageIndex, nextSubtitleIndex),
         onTogglePlay: () => {
           if (!videoElement) return;
           if (videoElement.paused) {
@@ -1896,6 +2009,9 @@ function ReaderContent() {
     });
   }, [
     currentSourceIndexByPageIndex,
+    currentSubtitleIndexByPageIndex,
+    effectivePages,
+    handleChangePageSubtitle,
     handleChangePageSource,
     handleSliderChangePage,
     pages,
@@ -2433,6 +2549,7 @@ function ReaderContent() {
             tapTurnPageEnabled={tapTurnPageEnabled}
             longPageEnabled={longPageEnabled}
  	          pages={effectivePages as any}
+            currentSubtitleIndexByPageIndex={currentSubtitleIndexByPageIndex}
  	          cachedPages={imageLoading.cachedPages}
  	          currentPage={currentPage}
  	          doublePageMode={doublePageMode}
@@ -2491,6 +2608,7 @@ function ReaderContent() {
 	          sidebarOpen={sidebar.sidebarOpen}
 	          onScroll={handleWebtoonScroll}
 	          pages={streamPages}
+            currentSubtitleIndexByPageIndex={currentSubtitleIndexByPageIndex}
 	          finishedId={activeArchiveId}
 	          finishedTitle={displayArchiveTitle}
 	          finishedCoverAssetId={getArchiveAssetId(archive.archiveMetadata, 'cover')}

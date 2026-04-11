@@ -174,20 +174,31 @@ public class PageMetadataPatch {
     public var title: String = ""
     public var description: String = ""
     public var thumb: String = ""
-    public var lyrics: String = ""
-    public var lyricsAssetId: Int64 = 0
     public var releaseAt: String = ""
     public var createdAt: String = ""
     public var updatedAt: String = ""
     public var sort: Int32 = 0
-    public var lyricsProvided: Bool = false
-    public var lyricsAssetIdProvided: Bool = false
     public var releaseAtProvided: Bool = false
     public var createdAtProvided: Bool = false
     public var updatedAtProvided: Bool = false
     public var sortProvided: Bool = false
     public var hiddenInFiles: Bool = false
     public var hiddenInFilesProvided: Bool = false
+    public var attachments: Array<PageAttachmentPatch> = Array<PageAttachmentPatch>()
+    public var attachmentsProvided: Bool = false
+
+    public init() {}
+}
+
+public class PageAttachmentPatch {
+    public var slot: String = ""
+    public var assetId: Int64 = 0
+    public var path: String = ""
+    public var name: String = ""
+    public var mimeType: String = ""
+    public var kind: String = ""
+    public var language: String = ""
+    public var orderIndex: Int32 = 0
 
     public init() {}
 }

@@ -1,9 +1,10 @@
 /* eslint-disable react-hooks/immutability */
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
-import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { ReaderAudioStage } from '@/components/reader/components/ReaderAudioStage';
 import { ReaderCollectionEndPage } from '@/components/reader/components/ReaderCollectionEndPage';
+import { ReaderVideoStage } from '@/components/reader/components/ReaderVideoStage';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
@@ -28,6 +29,7 @@ export function ReaderWebtoonModeView({
   sidebarOpen,
   onScroll,
   pages,
+  currentSubtitleIndexByPageIndex,
   finishedId,
   finishedTitle,
   finishedCoverAssetId,
@@ -67,6 +69,7 @@ export function ReaderWebtoonModeView({
   sidebarOpen: boolean;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   pages: ReaderWebtoonPage[];
+  currentSubtitleIndexByPageIndex: Record<number, number>;
   finishedId: string | null;
   finishedTitle: string;
   finishedCoverAssetId?: number;
@@ -185,6 +188,12 @@ export function ReaderWebtoonModeView({
                   {(() => {
                     const pageUrl = ArchiveService.getResolvedPageUrl(page);
                     const pageMetadata = ArchiveService.getPageDisplayMetadata(page);
+                    const subtitleAttachments = ArchiveService.getSubtitleAttachments(pageMetadata);
+                    const subtitleIndex = currentSubtitleIndexByPageIndex[actualIndex] ?? -1;
+                    const activeSubtitleAttachment =
+                      subtitleIndex >= 0 && subtitleIndex < subtitleAttachments.length
+                        ? subtitleAttachments[subtitleIndex]
+                        : undefined;
                     const pageTitle =
                       ArchiveService.getPageDisplayTitle(page) ||
                       t('reader.pageAlt').replace('{page}', String(actualIndex + 1));
@@ -218,12 +227,14 @@ export function ReaderWebtoonModeView({
                   >
                     <div className="relative w-full h-full flex justify-center">
                       {page.type === 'video' ? (
-                        <MemoizedVideo
+                        <ReaderVideoStage
                           key={`page-${actualIndex}`}
                           src={pageUrl}
-                          ref={(el) => {
+                          videoRef={(el) => {
                             videoRefs.current[actualIndex] = el;
                           }}
+                          subtitleAssetId={activeSubtitleAttachment?.asset_id}
+                          subtitleKind={activeSubtitleAttachment?.kind}
                           className="object-contain select-none"
                           style={{
                             maxWidth: '100%',
@@ -243,7 +254,8 @@ export function ReaderWebtoonModeView({
                           title={pageTitle}
                           description={pageMetadata?.description}
                           thumb={pageMetadata?.thumb}
-                          lyricsAssetId={pageMetadata?.lyrics_asset_id}
+                          lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(pageMetadata)?.asset_id}
+                          subtitleAttachmentAssetId={activeSubtitleAttachment?.asset_id}
                           audioUrl={pageUrl}
                           audioRef={(el) => {
                             videoRefs.current[actualIndex] = el;

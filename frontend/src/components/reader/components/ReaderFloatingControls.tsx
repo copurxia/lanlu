@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils/utils';
-import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo } from 'lucide-react';
+import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo, Captions } from 'lucide-react';
 import { ReaderSettingsSheet, type ReaderMediaSourceOption, type ReaderSettingButton } from '@/components/reader/components/ReaderSettingsSheet';
 import type { ArchiveMetadata } from '@/types/archive';
 import { useEffect, useMemo, useState } from 'react';
@@ -30,6 +30,9 @@ export type ReaderProgressLane = {
   sourceOptions?: ReaderMediaSourceOption[];
   activeSourceIndex?: number;
   onSourceChange?: (value: number) => void;
+  subtitleOptions?: ReaderMediaSourceOption[];
+  activeSubtitleIndex?: number;
+  onSubtitleChange?: (value: number) => void;
 };
 
 const floatingSurfaceClass = 'bg-[hsl(var(--background)/0.55)] backdrop-blur-xl border border-[hsl(var(--border)/0.8)] shadow-lg';
@@ -259,6 +262,9 @@ export function ReaderFloatingControls({
                     mediaSourceOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.sourceOptions : undefined}
                     activeMediaSourceIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSourceIndex : undefined}
                     onMediaSourceChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSourceChange : undefined}
+                    subtitleOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.subtitleOptions : undefined}
+                    activeSubtitleIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndex : undefined}
+                    onSubtitleChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSubtitleChange : undefined}
                     t={t}
                   />
                 </div>
@@ -407,6 +413,42 @@ export function ReaderFloatingControls({
                     className="h-2"
                   />
                 </div>
+
+                {resolvedActiveLane.subtitleOptions && resolvedActiveLane.subtitleOptions.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 text-sm font-medium">
+                      <span className="text-muted-foreground">Subtitle</span>
+                      <span className="text-xs text-muted-foreground">
+                        {resolvedActiveLane.activeSubtitleIndex != null && resolvedActiveLane.activeSubtitleIndex >= 0
+                          ? `${resolvedActiveLane.activeSubtitleIndex + 1}/${resolvedActiveLane.subtitleOptions.length}`
+                          : 'Off'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant={(resolvedActiveLane.activeSubtitleIndex ?? -1) < 0 ? 'default' : 'outline'}
+                        size="sm"
+                        className="rounded-lg"
+                        onClick={() => resolvedActiveLane.onSubtitleChange?.(-1)}
+                      >
+                        Off
+                      </Button>
+                      {resolvedActiveLane.subtitleOptions.map((option) => (
+                        <Button
+                          key={`media-subtitle-${option.value}`}
+                          type="button"
+                          variant={resolvedActiveLane.activeSubtitleIndex === option.value ? 'default' : 'outline'}
+                          size="sm"
+                          className="rounded-lg"
+                          onClick={() => resolvedActiveLane.onSubtitleChange?.(option.value)}
+                        >
+                          <span className="max-w-[14rem] truncate">{option.label}</span>
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </SheetContent>
@@ -552,6 +594,48 @@ export function ReaderFloatingControls({
                             </PopoverContent>
                           </Popover>
                         ) : null}
+                        {lane.subtitleOptions && lane.subtitleOptions.length > 0 ? (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={cn(
+                                  "rounded-full h-8 w-8 p-0 transition-all duration-150 ease-out hover:bg-transparent hover:border-transparent hover:shadow-none hover:text-foreground",
+                                  lane.activeSubtitleIndex != null && lane.activeSubtitleIndex >= 0 ? "text-foreground" : "text-foreground/80"
+                                )}
+                                title="Switch subtitle"
+                              >
+                                <Captions className="w-4 h-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-72 rounded-xl p-2">
+                              <div className="space-y-1">
+                                <Button
+                                  type="button"
+                                  variant={(lane.activeSubtitleIndex ?? -1) < 0 ? 'default' : 'ghost'}
+                                  size="sm"
+                                  className="w-full justify-start rounded-lg"
+                                  onClick={() => lane.onSubtitleChange?.(-1)}
+                                >
+                                  <span className="truncate">Off</span>
+                                </Button>
+                                {lane.subtitleOptions.map((option) => (
+                                  <Button
+                                    key={`${lane.id}-popover-subtitle-${option.value}`}
+                                    type="button"
+                                    variant={lane.activeSubtitleIndex === option.value ? 'default' : 'ghost'}
+                                    size="sm"
+                                    className="w-full justify-start rounded-lg"
+                                    onClick={() => lane.onSubtitleChange?.(option.value)}
+                                  >
+                                    <span className="truncate">{option.label}</span>
+                                  </Button>
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        ) : null}
                       </>
                     ) : null}
                   </div>
@@ -578,6 +662,9 @@ export function ReaderFloatingControls({
           mediaSourceOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.sourceOptions : undefined}
           activeMediaSourceIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSourceIndex : undefined}
           onMediaSourceChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSourceChange : undefined}
+          subtitleOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.subtitleOptions : undefined}
+          activeSubtitleIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndex : undefined}
+          onSubtitleChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSubtitleChange : undefined}
           t={t}
         />
       </div>

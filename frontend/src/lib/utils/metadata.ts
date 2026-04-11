@@ -5,6 +5,7 @@ import type {
   MetadataChild,
   MetadataLocator,
   MetadataObject,
+  MetadataPageAttachment,
   MetadataPagePatch,
 } from '@/types/archive';
 import type { TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
@@ -128,8 +129,33 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
     const title = readString(row.title);
     const description = readString(row.description);
     const thumb = readString(row.thumb);
-    const lyrics = readString(row.lyrics);
-    const lyricsAssetId = readNumber(row.lyrics_asset_id);
+    const attachments = Array.isArray(row.attachments)
+      ? row.attachments
+          .map((entry) => {
+            const attachment = asRecord(entry);
+            const slot = readString(attachment.slot).toLowerCase();
+            const name = readString(attachment.name);
+            const assetId = readNumber(attachment.asset_id);
+            const path = readString(attachment.path);
+            const mimeType = readString(attachment.mime_type);
+            const kind = readString(attachment.kind).toLowerCase();
+            const language = readString(attachment.language).toLowerCase();
+            const orderIndex = readNumber(attachment.order_index);
+            if (!slot || !name) return null;
+            const next: MetadataPageAttachment = {
+              slot,
+              name,
+              asset_id: typeof assetId === 'number' && assetId > 0 ? Math.trunc(assetId) : undefined,
+              path: path || undefined,
+              mime_type: mimeType || undefined,
+              kind: kind || undefined,
+              language: language || undefined,
+              order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
+            };
+            return next;
+          })
+          .filter((entry): entry is MetadataPageAttachment => Boolean(entry))
+      : undefined;
     const releaseAt = readString(row.release_at ?? row.releaseAt);
     const updatedAt = readString(row.updated_at ?? row.updatedAt);
     const createdAt = readString(row.created_at ?? row.createdAt);
@@ -142,11 +168,7 @@ export function normalizeMetadataPages(rawPages: unknown): MetadataPagePatch[] {
       title: title || undefined,
       description: description || undefined,
       thumb: thumb || undefined,
-      lyrics: lyrics || undefined,
-      lyrics_asset_id:
-        typeof lyricsAssetId === 'number' && Number.isFinite(lyricsAssetId) && lyricsAssetId > 0
-          ? Math.trunc(lyricsAssetId)
-          : undefined,
+      attachments: attachments && attachments.length > 0 ? attachments : undefined,
       order_index: typeof orderIndex === 'number' && Number.isFinite(orderIndex) ? Math.trunc(orderIndex) : undefined,
       hidden_in_files: hiddenInFiles || undefined,
       release_at: releaseAt || undefined,

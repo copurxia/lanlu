@@ -1,3 +1,5 @@
+import type { MetadataPageAttachment } from '@/types/archive';
+
 export type ReaderContentItemType = "image" | "video" | "audio" | "html";
 export type ReaderItemType = ReaderContentItemType | "virtual-end";
 
@@ -6,7 +8,7 @@ export type ReaderItemMetadata = {
   description?: string;
   thumb_asset_id?: number;
   thumb?: string;
-  lyrics_asset_id?: number;
+  attachments?: MetadataPageAttachment[];
   release_at?: string;
 };
 

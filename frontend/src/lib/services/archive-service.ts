@@ -1,5 +1,5 @@
 import { apiClient } from '../api';
-import { Archive, SearchResponse, SearchParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload, ArchiveFilesParams } from '@/types/archive';
+import { Archive, SearchResponse, SearchParams, ArchiveMetadata, MetadataAssetInput, MetadataObject, MetadataUpdatePayload, ArchiveFilesParams, MetadataPageAttachment } from '@/types/archive';
 import type { Tankoubon } from '@/types/tankoubon';
 import { ServerInfo } from '@/types/server';
 import { ChunkedUploadService, UploadMetadata, UploadProgressCallback, UploadResult } from './chunked-upload-service';
@@ -57,8 +57,7 @@ export interface MetadataPagePatchInput {
   title?: string;
   description?: string;
   thumb?: string;
-  lyrics?: string;
-  lyrics_asset_id?: number;
+  attachments?: MetadataPageAttachment[];
   order_index?: number;
   hidden_in_files?: boolean;
   release_at?: string;
@@ -75,7 +74,7 @@ export interface PageSourceInfo {
     description?: string;
     thumb_asset_id?: number;
     thumb?: string;
-    lyrics_asset_id?: number;
+    attachments?: MetadataPageAttachment[];
     release_at?: string;
   };
 }
@@ -95,7 +94,7 @@ export interface PageInfo {
     description?: string;
     thumb_asset_id?: number;
     thumb?: string;
-    lyrics_asset_id?: number;
+    attachments?: MetadataPageAttachment[];
     release_at?: string;
   };
 }
@@ -250,24 +249,45 @@ export class ArchiveService {
   static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[] }> {
     const response = await apiClient.get(`/api/archives/${id}/files`, { params });
     const pages = (response.data.pages || []).map((rawPage: any): PageInfo => {
+      const normalizeAttachments = (rawAttachments: any): MetadataPageAttachment[] | undefined => {
+        if (!Array.isArray(rawAttachments)) return undefined;
+        const attachments: MetadataPageAttachment[] = [];
+        for (const rawAttachment of rawAttachments) {
+          const slot = typeof rawAttachment?.slot === 'string' ? rawAttachment.slot.trim().toLowerCase() : '';
+          const name = typeof rawAttachment?.name === 'string' ? rawAttachment.name.trim() : '';
+          const rawAssetId = Number(rawAttachment?.asset_id || 0);
+          const assetId = Number.isFinite(rawAssetId) && rawAssetId > 0 ? Math.trunc(rawAssetId) : 0;
+          if (!slot || !name || assetId <= 0) continue;
+          attachments.push({
+            slot,
+            name,
+            asset_id: assetId,
+            mime_type: typeof rawAttachment?.mime_type === 'string' && rawAttachment.mime_type.trim() ? rawAttachment.mime_type.trim() : undefined,
+            kind: typeof rawAttachment?.kind === 'string' && rawAttachment.kind.trim() ? rawAttachment.kind.trim().toLowerCase() : undefined,
+            language: typeof rawAttachment?.language === 'string' && rawAttachment.language.trim() ? rawAttachment.language.trim().toLowerCase() : undefined,
+            order_index: Number.isFinite(Number(rawAttachment?.order_index)) ? Math.trunc(Number(rawAttachment.order_index)) : undefined,
+          });
+        }
+        return attachments.length > 0 ? attachments : undefined;
+      };
+
       const normalizeMetadata = (rawMetadata: any) => {
         if (!rawMetadata) return undefined;
         const rawThumbAssetId = Number(rawMetadata.thumb_asset_id || 0);
         const thumbAssetId = Number.isFinite(rawThumbAssetId) && rawThumbAssetId > 0 ? rawThumbAssetId : 0;
-        const rawLyricsAssetId = Number(rawMetadata.lyrics_asset_id || 0);
-        const lyricsAssetId = Number.isFinite(rawLyricsAssetId) && rawLyricsAssetId > 0 ? rawLyricsAssetId : 0;
         const legacyThumb = typeof rawMetadata.thumb === 'string' ? rawMetadata.thumb : '';
         const thumbUrl = thumbAssetId > 0
           ? this.addTokenToUrl(`/api/assets/${thumbAssetId}`)
           : legacyThumb
           ? this.addTokenToUrl(legacyThumb)
           : '';
+        const attachments = normalizeAttachments(rawMetadata.attachments);
 
         return {
           ...rawMetadata,
           thumb_asset_id: thumbAssetId > 0 ? thumbAssetId : undefined,
           thumb: thumbUrl || undefined,
-          lyrics_asset_id: lyricsAssetId > 0 ? lyricsAssetId : undefined,
+          attachments,
           release_at:
             typeof rawMetadata.release_at === 'string' && rawMetadata.release_at.trim()
               ? rawMetadata.release_at.trim()
@@ -446,6 +466,33 @@ export class ArchiveService {
     return this.getPageSource(page, sourceIndex)?.url?.trim() || '';
   }
 
+  static getPageAttachments(
+    metadata: { attachments?: MetadataPageAttachment[] } | null | undefined,
+    slot?: string
+  ): MetadataPageAttachment[] {
+    const attachments = Array.isArray(metadata?.attachments) ? metadata.attachments : [];
+    const normalizedSlot = String(slot || '').trim().toLowerCase();
+    if (!normalizedSlot) return attachments;
+    return attachments.filter((attachment) => attachment.slot === normalizedSlot);
+  }
+
+  static getPreferredLyricsAttachment(
+    metadata: { attachments?: MetadataPageAttachment[] } | null | undefined
+  ): MetadataPageAttachment | undefined {
+    return this.getPageAttachments(metadata, 'lyrics')[0];
+  }
+
+  static getSubtitleAttachments(
+    metadata: { attachments?: MetadataPageAttachment[] } | null | undefined
+  ): MetadataPageAttachment[] {
+    return this.getPageAttachments(metadata, 'subtitle').slice().sort((a, b) => {
+      const orderA = typeof a.order_index === 'number' ? a.order_index : 0;
+      const orderB = typeof b.order_index === 'number' ? b.order_index : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }
+
   static getPageMediaType(page: PageInfo | null | undefined, sourceIndex?: number): PageSourceInfo['type'] | PageInfo['type'] | '' {
     return this.getPageSource(page, sourceIndex)?.type || page?.type || '';
   }
@@ -521,7 +568,6 @@ export class ArchiveService {
   }
 
   static async getServerInfo(options?: { force?: boolean }): Promise<ServerInfo> {
-    const now = Date.now();
     if (!options?.force) {
       const cached = this.getCachedServerInfo();
       if (cached) {

@@ -1,8 +1,9 @@
 /* eslint-disable react-hooks/immutability */
 import { HtmlRenderer } from '@/components/ui/html-renderer';
 import { Spinner } from '@/components/ui/spinner';
-import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
+import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { ReaderAudioStage } from '@/components/reader/components/ReaderAudioStage';
+import { ReaderVideoStage } from '@/components/reader/components/ReaderVideoStage';
 import { getTapTurnAction } from '@/components/reader/hooks/useReaderInteractionHandlers';
 import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
@@ -19,6 +20,7 @@ export function ReaderSingleModeView({
   tapTurnPageEnabled,
   longPageEnabled,
   pages,
+  currentSubtitleIndexByPageIndex,
   cachedPages,
   currentPage,
   doublePageMode,
@@ -47,6 +49,7 @@ export function ReaderSingleModeView({
   tapTurnPageEnabled: boolean;
   longPageEnabled: boolean;
   pages: PageInfo[];
+  currentSubtitleIndexByPageIndex: Record<number, number>;
   cachedPages: string[];
   currentPage: number;
   doublePageMode: boolean;
@@ -107,6 +110,14 @@ export function ReaderSingleModeView({
   const getPageMetadata = useCallback((pageIndex: number) => {
     return ArchiveService.getPageDisplayMetadata(pages[pageIndex]);
   }, [pages]);
+
+  const getSubtitleAttachment = useCallback((pageIndex: number) => {
+    const metadata = getPageMetadata(pageIndex);
+    const attachments = ArchiveService.getSubtitleAttachments(metadata);
+    const currentIndex = currentSubtitleIndexByPageIndex[pageIndex] ?? -1;
+    if (currentIndex < 0 || currentIndex >= attachments.length) return undefined;
+    return attachments[currentIndex];
+  }, [currentSubtitleIndexByPageIndex, getPageMetadata]);
 
   const getPageTitle = useCallback((pageIndex: number, fallbackPageNumber: number): string => {
     return (
@@ -422,12 +433,14 @@ export function ReaderSingleModeView({
                 } h-full min-w-0`}
               >
                 {pages[currentPage]?.type === 'video' ? (
-                  <MemoizedVideo
+                  <ReaderVideoStage
                     key={`page-${currentPage}`}
                     src={getPageUrl(currentPage)}
-                    ref={(el) => {
+                    videoRef={(el) => {
                       videoRefs.current[currentPage] = el;
                     }}
+                    subtitleAssetId={getSubtitleAttachment(currentPage)?.asset_id}
+                    subtitleKind={getSubtitleAttachment(currentPage)?.kind}
                     className={`
                       ${
                         doublePageMode && !isHtmlSpreadView && !(splitCoverMode && currentPage === 0)
@@ -456,7 +469,8 @@ export function ReaderSingleModeView({
                     }
                     description={getPageMetadata(currentPage)?.description}
                     thumb={getPageMetadata(currentPage)?.thumb}
-                    lyricsAssetId={getPageMetadata(currentPage)?.lyrics_asset_id}
+                    lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(getPageMetadata(currentPage))?.asset_id}
+                    subtitleAttachmentAssetId={getSubtitleAttachment(currentPage)?.asset_id}
                     audioUrl={getPageUrl(currentPage)}
                     audioRef={(el) => {
                       videoRefs.current[currentPage] = el;
@@ -616,12 +630,14 @@ export function ReaderSingleModeView({
                 currentPage + 1 < pages.length && (
                 <div className="relative flex-1 h-full min-w-0">
                   {pages[currentPage + 1]?.type === 'video' ? (
-                    <MemoizedVideo
+                    <ReaderVideoStage
                       key={`page-${currentPage + 1}`}
                       src={getPageUrl(currentPage + 1)}
-                      ref={(el) => {
+                      videoRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;
                       }}
+                      subtitleAssetId={getSubtitleAttachment(currentPage + 1)?.asset_id}
+                      subtitleKind={getSubtitleAttachment(currentPage + 1)?.kind}
                       className={`
                         object-cover select-none touch-none
                         w-full h-full
@@ -644,7 +660,8 @@ export function ReaderSingleModeView({
                       }
                       description={getPageMetadata(currentPage + 1)?.description}
                       thumb={getPageMetadata(currentPage + 1)?.thumb}
-                      lyricsAssetId={getPageMetadata(currentPage + 1)?.lyrics_asset_id}
+                      lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(getPageMetadata(currentPage + 1))?.asset_id}
+                      subtitleAttachmentAssetId={getSubtitleAttachment(currentPage + 1)?.asset_id}
                       audioUrl={getPageUrl(currentPage + 1)}
                       audioRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;

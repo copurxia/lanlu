@@ -78,6 +78,7 @@ main(): Int64 {
     MigrationRegistry.register(V015_RecommendationTracking())
     MigrationRegistry.register(V016_DropTaskGroupKv())
     MigrationRegistry.register(V017_TaskpoolStateModel())
+    MigrationRegistry.register(V018_PageMetadataAttachments())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()
