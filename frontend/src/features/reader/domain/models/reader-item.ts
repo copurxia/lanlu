@@ -7,14 +7,28 @@ export type ReaderItemMetadata = {
   thumb_asset_id?: number;
   thumb?: string;
   lyrics_asset_id?: number;
+  release_at?: string;
 };
 
-export type ReaderPageItem = {
-  archiveId: string;
+export type ReaderPageSourceItem = {
+  id: string;
   path: string;
   url: string;
   type: ReaderContentItemType;
   title?: string;
+  metadata?: ReaderItemMetadata;
+};
+
+export type ReaderPageItem = {
+  id: string;
+  archiveId: string;
+  type: ReaderContentItemType;
+  title?: string;
+  groupKey?: string;
+  defaultSourceIndex?: number;
+  sourceCount?: number;
+  defaultSource?: ReaderPageSourceItem;
+  sources?: ReaderPageSourceItem[];
   metadata?: ReaderItemMetadata;
 };
 

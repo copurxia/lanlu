@@ -64,12 +64,32 @@ export interface MetadataPagePatchInput {
   release_at?: string;
 }
 
-// 页面信息接口（支持图片、视频和HTML）
-export interface PageInfo {
+export interface PageSourceInfo {
+  id: string;
   path: string;
   url: string;
   type: 'image' | 'video' | 'audio' | 'html';
+  title?: string;
+  metadata?: {
+    title?: string;
+    description?: string;
+    thumb_asset_id?: number;
+    thumb?: string;
+    lyrics_asset_id?: number;
+    release_at?: string;
+  };
+}
+
+// 页面信息接口（支持图片、视频和HTML）
+export interface PageInfo {
+  id: string;
+  type: 'image' | 'video' | 'audio' | 'html';
   title?: string;  // 章节标题（EPUB类型会有值）
+  groupKey?: string;
+  defaultSourceIndex?: number;
+  sourceCount?: number;
+  defaultSource?: PageSourceInfo;
+  sources?: PageSourceInfo[];
   metadata?: {
     title?: string;
     description?: string;
@@ -230,21 +250,13 @@ export class ArchiveService {
   static async getFiles(id: string, params?: ArchiveFilesParams): Promise<{ pages: PageInfo[] }> {
     const response = await apiClient.get(`/api/archives/${id}/files`, { params });
     const pages = (response.data.pages || []).map((rawPage: any): PageInfo => {
-      const path = typeof rawPage?.path === 'string' && rawPage.path.trim()
-        ? rawPage.path
-        : this.extractPathFromPageUrl(String(rawPage?.url || ''));
-      const pageUrl = path
-        ? this.addTokenToUrl(this.getPageUrl(id, path))
-        : this.addTokenToUrl(String(rawPage?.url || ''));
-
-      const metadata = (() => {
-        if (!rawPage?.metadata) return undefined;
-
-        const rawThumbAssetId = Number(rawPage.metadata.thumb_asset_id || 0);
+      const normalizeMetadata = (rawMetadata: any) => {
+        if (!rawMetadata) return undefined;
+        const rawThumbAssetId = Number(rawMetadata.thumb_asset_id || 0);
         const thumbAssetId = Number.isFinite(rawThumbAssetId) && rawThumbAssetId > 0 ? rawThumbAssetId : 0;
-        const rawLyricsAssetId = Number(rawPage.metadata.lyrics_asset_id || 0);
+        const rawLyricsAssetId = Number(rawMetadata.lyrics_asset_id || 0);
         const lyricsAssetId = Number.isFinite(rawLyricsAssetId) && rawLyricsAssetId > 0 ? rawLyricsAssetId : 0;
-        const legacyThumb = typeof rawPage.metadata.thumb === 'string' ? rawPage.metadata.thumb : '';
+        const legacyThumb = typeof rawMetadata.thumb === 'string' ? rawMetadata.thumb : '';
         const thumbUrl = thumbAssetId > 0
           ? this.addTokenToUrl(`/api/assets/${thumbAssetId}`)
           : legacyThumb
@@ -252,21 +264,105 @@ export class ArchiveService {
           : '';
 
         return {
-          ...rawPage.metadata,
+          ...rawMetadata,
           thumb_asset_id: thumbAssetId > 0 ? thumbAssetId : undefined,
           thumb: thumbUrl || undefined,
           lyrics_asset_id: lyricsAssetId > 0 ? lyricsAssetId : undefined,
           release_at:
-            typeof rawPage.metadata.release_at === 'string' && rawPage.metadata.release_at.trim()
-              ? rawPage.metadata.release_at.trim()
+            typeof rawMetadata.release_at === 'string' && rawMetadata.release_at.trim()
+              ? rawMetadata.release_at.trim()
               : undefined,
         };
-      })();
+      };
+
+      const normalizePath = (raw: any): string => {
+        return typeof raw?.path === 'string' && raw.path.trim()
+          ? raw.path
+          : this.extractPathFromPageUrl(String(raw?.url || ''));
+      };
+
+      const buildPageUrl = (path: string, fallbackUrl: string): string => {
+        return path
+          ? this.addTokenToUrl(this.getPageUrl(id, path))
+          : this.addTokenToUrl(String(fallbackUrl || ''));
+      };
+
+      const path = normalizePath(rawPage);
+      const metadata = normalizeMetadata(rawPage?.metadata);
+      const rawDefaultSource = rawPage?.default_source ?? rawPage?.defaultSource;
+      const sources = Array.isArray(rawPage?.sources)
+        ? rawPage.sources.map((rawSource: any): PageSourceInfo => {
+            const sourcePath = normalizePath(rawSource);
+            return {
+              id:
+                typeof rawSource?.id === 'string' && rawSource.id.trim()
+                  ? rawSource.id.trim()
+                  : sourcePath || String(rawSource?.title || '').trim() || `${rawPage?.group_key || path}-source`,
+              path: sourcePath,
+              url: buildPageUrl(sourcePath, String(rawSource?.url || '')),
+              type:
+                rawSource?.type === 'video' || rawSource?.type === 'audio' || rawSource?.type === 'html'
+                  ? rawSource.type
+                  : 'image',
+              title: typeof rawSource?.title === 'string' && rawSource.title.trim() ? rawSource.title.trim() : undefined,
+              metadata: normalizeMetadata(rawSource?.metadata),
+            };
+          })
+        : undefined;
+      const rawDefaultSourceIndex = Number(rawPage?.default_source_index ?? rawPage?.defaultSourceIndex ?? 0);
+      const defaultSourceIndex =
+        Number.isFinite(rawDefaultSourceIndex) && rawDefaultSourceIndex >= 0 ? Math.trunc(rawDefaultSourceIndex) : 0;
+      const sourceCount = Array.isArray(sources) ? sources.length : Number(rawPage?.source_count || 0);
+      const fallbackDefaultSource = (rawDefaultSource || path)
+        ? {
+            id:
+              typeof rawDefaultSource?.id === 'string' && rawDefaultSource.id.trim()
+                ? rawDefaultSource.id.trim()
+                : typeof rawPage?.id === 'string' && rawPage.id.trim()
+                ? rawPage.id.trim()
+                : normalizePath(rawDefaultSource) || path,
+            path: normalizePath(rawDefaultSource) || path,
+            url: buildPageUrl(normalizePath(rawDefaultSource) || path, String(rawDefaultSource?.url || rawPage?.url || '')),
+            type:
+              rawDefaultSource?.type === 'video' || rawDefaultSource?.type === 'audio' || rawDefaultSource?.type === 'html'
+                ? rawDefaultSource.type
+                : rawPage?.type === 'video' || rawPage?.type === 'audio' || rawPage?.type === 'html'
+                ? rawPage.type
+                : 'image',
+            title:
+              typeof rawDefaultSource?.title === 'string' && rawDefaultSource.title.trim()
+                ? rawDefaultSource.title.trim()
+                : typeof rawPage?.title === 'string' && rawPage.title.trim()
+                ? rawPage.title.trim()
+                : undefined,
+            metadata: normalizeMetadata(rawDefaultSource?.metadata) || metadata,
+          } satisfies PageSourceInfo
+        : undefined;
+      const defaultSource =
+        sources && sources.length > 0
+          ? sources[Math.max(0, Math.min(sources.length - 1, defaultSourceIndex))]
+          : fallbackDefaultSource;
 
       return {
-        ...rawPage,
-        path,
-        url: pageUrl,
+        id:
+          typeof rawPage?.id === 'string' && rawPage.id.trim()
+            ? rawPage.id.trim()
+            : typeof rawPage?.group_key === 'string' && rawPage.group_key.trim()
+            ? rawPage.group_key.trim()
+            : defaultSource?.id || path,
+        type:
+          rawPage?.type === 'video' || rawPage?.type === 'audio' || rawPage?.type === 'html'
+            ? rawPage.type
+            : 'image',
+        title: typeof rawPage?.title === 'string' && rawPage.title.trim() ? rawPage.title.trim() : undefined,
+        groupKey:
+          typeof rawPage?.group_key === 'string' && rawPage.group_key.trim()
+            ? rawPage.group_key.trim()
+            : undefined,
+        defaultSourceIndex,
+        sourceCount: sourceCount > 0 ? sourceCount : undefined,
+        defaultSource,
+        sources: sources && sources.length > 0 ? sources : undefined,
         metadata,
       };
     });
@@ -318,6 +414,55 @@ export class ArchiveService {
     const normalizedPath = String(path || '').trim();
     const encodedPath = encodeURIComponent(normalizedPath);
     return `/api/archives/${id}/page?path=${encodedPath}`;
+  }
+
+  static getPageDefaultSource(page: Pick<PageInfo, 'defaultSource' | 'sources' | 'defaultSourceIndex'> | null | undefined): PageSourceInfo | undefined {
+    if (!page) return undefined;
+    if (page.defaultSource) return page.defaultSource;
+    const sources = Array.isArray(page.sources) ? page.sources : [];
+    if (sources.length <= 0) return undefined;
+    const sourceIndex = Math.max(0, Math.min(sources.length - 1, page.defaultSourceIndex ?? 0));
+    return sources[sourceIndex];
+  }
+
+  static getPageSource(
+    page: Pick<PageInfo, 'defaultSource' | 'sources' | 'defaultSourceIndex'> | null | undefined,
+    sourceIndex?: number
+  ): PageSourceInfo | undefined {
+    if (!page) return undefined;
+    const sources = Array.isArray(page.sources) ? page.sources : [];
+    if (typeof sourceIndex === 'number' && sources.length > 0) {
+      const clamped = Math.max(0, Math.min(sources.length - 1, sourceIndex));
+      return sources[clamped];
+    }
+    return this.getPageDefaultSource(page);
+  }
+
+  static getPagePath(page: PageInfo | null | undefined, sourceIndex?: number): string {
+    return this.getPageSource(page, sourceIndex)?.path?.trim() || '';
+  }
+
+  static getResolvedPageUrl(page: PageInfo | null | undefined, sourceIndex?: number): string {
+    return this.getPageSource(page, sourceIndex)?.url?.trim() || '';
+  }
+
+  static getPageMediaType(page: PageInfo | null | undefined, sourceIndex?: number): PageSourceInfo['type'] | PageInfo['type'] | '' {
+    return this.getPageSource(page, sourceIndex)?.type || page?.type || '';
+  }
+
+  static getPagePrimaryKey(page: Pick<PageInfo, 'id' | 'defaultSource' | 'sources' | 'defaultSourceIndex'> | null | undefined): string {
+    if (!page) return '';
+    return String(page.id || this.getPageSource(page)?.id || this.getPageSource(page)?.path || '').trim();
+  }
+
+  static getPageDisplayTitle(page: PageInfo | null | undefined, sourceIndex?: number): string {
+    const source = this.getPageSource(page, sourceIndex);
+    return String(source?.metadata?.title || page?.metadata?.title || source?.title || page?.title || '').trim();
+  }
+
+  static getPageDisplayMetadata(page: PageInfo | null | undefined, sourceIndex?: number): PageInfo['metadata'] | undefined {
+    const source = this.getPageSource(page, sourceIndex);
+    return source?.metadata || page?.metadata;
   }
 
   static getDownloadUrl(id: string): string {

@@ -79,7 +79,7 @@ export function useReaderHtmlPages({
       const page = pages[pageIndex];
       if (!page || page.type !== 'html') return;
       const pageArchiveId = ((page as { archiveId?: string }).archiveId || id || '').trim();
-      const pagePath = String(page.path || '').trim();
+      const pagePath = ArchiveService.getPagePath(page);
       if (!pageArchiveId) return;
       if (!pagePath) return;
       if (htmlContentsRef.current[pageIndex]) return;

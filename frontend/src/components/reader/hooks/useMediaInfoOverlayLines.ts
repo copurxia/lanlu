@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/refs */
 import { useMemo, useRef } from 'react';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import {
   formatKiB,
   formatMiB,
@@ -210,7 +210,8 @@ export function useMediaInfoOverlayLines({
       const p = pages[index];
       if (!p) return;
       const prefix = indices.length === 2 ? `#${idx + 1} ` : '';
-      const src = p.type === 'image' ? cachedPages[index] || p.url : p.url;
+      const pageUrl = ArchiveService.getResolvedPageUrl(p);
+      const src = p.type === 'image' ? cachedPages[index] || pageUrl : pageUrl;
       const cached = p.type === 'image' ? Boolean(cachedPages[index]) : false;
       const state = loadedImages.has(index) ? 'loaded' : imagesLoading.has(index) ? 'loading' : 'idle';
       lines.push(`${prefix}${p.type}  ${getLastPathSegment(src)}  ${state}${cached ? '  cached' : ''}`);

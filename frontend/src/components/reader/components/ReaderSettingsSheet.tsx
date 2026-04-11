@@ -30,6 +30,11 @@ export type ReaderSettingButton = {
   tooltip: string;
 };
 
+export type ReaderMediaSourceOption = {
+  value: number;
+  label: string;
+};
+
 export function ReaderSettingsSheet({
   open,
   onOpenChange,
@@ -42,6 +47,9 @@ export function ReaderSettingsSheet({
   autoPlayMode,
   autoPlayInterval,
   onAutoPlayIntervalChange,
+  mediaSourceOptions,
+  activeMediaSourceIndex,
+  onMediaSourceChange,
   t,
 }: {
   open: boolean;
@@ -55,6 +63,9 @@ export function ReaderSettingsSheet({
   autoPlayMode: boolean;
   autoPlayInterval: number;
   onAutoPlayIntervalChange: (seconds: number) => void;
+  mediaSourceOptions?: ReaderMediaSourceOption[];
+  activeMediaSourceIndex?: number;
+  onMediaSourceChange?: (value: number) => void;
   t: (key: string) => string;
 }) {
   const router = useRouter();
@@ -276,6 +287,31 @@ export function ReaderSettingsSheet({
               />
             </div>
           )}
+
+          {isNarrowScreen && mediaSourceOptions && mediaSourceOptions.length > 1 ? (
+            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Source</span>
+                <span className="text-xs text-muted-foreground">
+                  {(activeMediaSourceIndex ?? 0) + 1}/{mediaSourceOptions.length}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {mediaSourceOptions.map((option) => (
+                  <Button
+                    key={`settings-source-${option.value}`}
+                    type="button"
+                    variant={activeMediaSourceIndex === option.value ? 'default' : 'outline'}
+                    size="sm"
+                    className="rounded-lg"
+                    onClick={() => onMediaSourceChange?.(option.value)}
+                  >
+                    <span className="max-w-[14rem] truncate">{option.label}</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <SheetFooter className="mt-5 border-t border-border/60 pt-4">

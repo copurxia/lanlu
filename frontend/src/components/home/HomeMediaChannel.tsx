@@ -124,7 +124,9 @@ function getAuthorInitial(author: string): string {
 }
 
 function getPagePreviewMedia(page: PageInfo): { mediaKind: ChannelPreviewItem['mediaKind']; posterSrc?: string; src: string } | null {
-  const posterSrc = page.metadata?.thumb?.trim() || '';
+  const pageMetadata = ArchiveService.getPageDisplayMetadata(page);
+  const pageUrl = ArchiveService.getResolvedPageUrl(page);
+  const posterSrc = pageMetadata?.thumb?.trim() || '';
   if (page.type === 'video') {
     if (posterSrc) {
       return {
@@ -133,17 +135,17 @@ function getPagePreviewMedia(page: PageInfo): { mediaKind: ChannelPreviewItem['m
         src: posterSrc,
       };
     }
-    if (!page.url.trim()) return null;
+    if (!pageUrl.trim()) return null;
     return {
       mediaKind: 'video',
-      src: page.url.trim(),
+      src: pageUrl.trim(),
     };
   }
-  if (page.type === 'image' && page.url.trim()) {
+  if (page.type === 'image' && pageUrl.trim()) {
     return {
       mediaKind: 'image',
       posterSrc: posterSrc || undefined,
-      src: posterSrc || page.url.trim(),
+      src: posterSrc || pageUrl.trim(),
     };
   }
   if (posterSrc) {
@@ -162,7 +164,7 @@ async function loadChannelPreviewSources(archiveId: string): Promise<ChannelPrev
     .flatMap((page, index) => {
       const media = getPagePreviewMedia(page);
       if (!media) return [];
-      const pageKey = page.path || String(index);
+      const pageKey = ArchiveService.getPagePrimaryKey(page) || String(index);
       return [{
         id: `${archiveId}:${pageKey}`,
         label: page.title || '',

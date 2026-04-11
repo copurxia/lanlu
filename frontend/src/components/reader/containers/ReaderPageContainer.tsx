@@ -103,11 +103,133 @@ function formatVideoClock(seconds: number): string {
 
 function getPageHeaderTitle(page?: { title?: string; metadata?: { title?: string } } | null): string {
   if (!page) return '';
-  const metaTitle = page.metadata?.title?.trim();
-  if (metaTitle) return metaTitle;
-  const pageTitle = page.title?.trim();
-  if (pageTitle) return pageTitle;
-  return '';
+  return ArchiveService.getPageDisplayTitle(page as any);
+}
+
+function getPagePathFileName(path?: string | null): string {
+  const normalized = String(path || '').trim().replace(/\\/g, '/');
+  if (!normalized) return '';
+  const segments = normalized.split('/');
+  return segments[segments.length - 1] || normalized;
+}
+
+function computeCommonPrefixLength(values: string[]): number {
+  if (values.length <= 1) return 0;
+  const first = values[0] || '';
+  let index = 0;
+  while (index < first.length) {
+    const ch = first[index];
+    if (values.some((value) => index >= value.length || value[index] !== ch)) break;
+    index += 1;
+  }
+  return index;
+}
+
+function computeCommonSuffixLength(values: string[], prefixLength: number): number {
+  if (values.length <= 1) return 0;
+  const first = values[0] || '';
+  let offset = 0;
+  while (offset < first.length - prefixLength) {
+    const firstIndex = first.length - 1 - offset;
+    const ch = first[firstIndex];
+    if (
+      values.some((value) => {
+        const valueIndex = value.length - 1 - offset;
+        return valueIndex < prefixLength || valueIndex < 0 || value[valueIndex] !== ch;
+      })
+    ) {
+      break;
+    }
+    offset += 1;
+  }
+  return offset;
+}
+
+function buildSourceOptionLabels(
+  page: {
+    sources?: Array<{ title?: string; path: string }>;
+  }
+): string[] {
+  const fileNames = (page.sources || []).map((source, sourceIndex) => {
+    return getPagePathFileName(source.path) || String(source.title || '').trim() || `Source ${sourceIndex + 1}`;
+  });
+  if (fileNames.length <= 1) return fileNames;
+
+  const prefixLength = computeCommonPrefixLength(fileNames);
+  const suffixLength = computeCommonSuffixLength(fileNames, prefixLength);
+  const candidateLabels = fileNames.map((fileName, sourceIndex) => {
+    const endIndex = Math.max(prefixLength, fileName.length - suffixLength);
+    const diff = fileName.slice(prefixLength, endIndex).trim().replace(/^[\s._-]+|[\s._-]+$/g, '');
+    return diff || fileName || `Source ${sourceIndex + 1}`;
+  });
+
+  const uniqueCount = new Set(candidateLabels).size;
+  const tooShort = candidateLabels.some((label) => label.length < 2);
+  if (uniqueCount !== candidateLabels.length || tooShort) {
+    return fileNames;
+  }
+  return candidateLabels;
+}
+
+function resolvePageWithSource<
+  T extends {
+    type: 'image' | 'video' | 'audio' | 'html';
+    title?: string;
+    metadata?: {
+      title?: string;
+      description?: string;
+      thumb_asset_id?: number;
+      thumb?: string;
+      lyrics_asset_id?: number;
+      release_at?: string;
+    };
+    defaultSource?: {
+      id: string;
+      path: string;
+      url: string;
+      type: 'image' | 'video' | 'audio' | 'html';
+      title?: string;
+      metadata?: {
+        title?: string;
+        description?: string;
+        thumb_asset_id?: number;
+        thumb?: string;
+        lyrics_asset_id?: number;
+        release_at?: string;
+      };
+    };
+    sources?: Array<{
+      id: string;
+      path: string;
+      url: string;
+      type: 'image' | 'video' | 'audio' | 'html';
+      title?: string;
+      metadata?: {
+        title?: string;
+        description?: string;
+        thumb_asset_id?: number;
+        thumb?: string;
+        lyrics_asset_id?: number;
+        release_at?: string;
+      };
+    }>;
+  }
+>(page: T, sourceIndex?: number): T & {
+  path: string;
+  url: string;
+  effectiveType: 'image' | 'video' | 'audio' | 'html';
+  effectiveTitle?: string;
+  effectiveMetadata?: T['metadata'];
+} {
+  const source = ArchiveService.getPageSource(page as any, sourceIndex);
+  return {
+    ...page,
+    path: source?.path || '',
+    url: source?.url || '',
+    effectiveType: source?.type || page.type,
+    effectiveTitle: source?.title || page.title,
+    effectiveMetadata: source?.metadata || page.metadata,
+  };
 }
 
 function measureElementContentWidth(el: HTMLElement | null): number {
@@ -172,9 +294,11 @@ function ReaderContent() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedProgressLaneId, setExpandedProgressLaneId] = useState<string | null>(null);
+  const [currentSourceIndexByPageIndex, setCurrentSourceIndexByPageIndex] = useState<Record<number, number>>({});
   const [videoTimelineByPageIndex, setVideoTimelineByPageIndex] = useState<
     Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number }>
   >({});
+  const pendingSourceRestoreRef = useRef<Record<number, { currentTime: number; paused: boolean; muted: boolean; volume: number }>>({});
   const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
   const [prevArchiveId, setPrevArchiveId] = useState<string | null>(null);
   const [nextArchiveByArchiveId, setNextArchiveByArchiveId] = useState<Record<string, EndPageNextArchive | null>>({});
@@ -391,6 +515,40 @@ function ReaderContent() {
     appendedArchiveIdsRef,
   });
 
+  useEffect(() => {
+    setCurrentSourceIndexByPageIndex((prev) => {
+      let changed = false;
+      const next: Record<number, number> = {};
+      for (let i = 0; i < pages.length; i += 1) {
+        const page = pages[i];
+        const sourceCount = page.sources?.length ?? 0;
+        if (sourceCount <= 0) {
+          if (prev[i] !== undefined) changed = true;
+          continue;
+        }
+        const fallbackIndex = Math.max(0, Math.min(sourceCount - 1, page.defaultSourceIndex ?? 0));
+        const existing = prev[i];
+        const resolved =
+          typeof existing === 'number' && existing >= 0 && existing < sourceCount
+            ? existing
+            : fallbackIndex;
+        next[i] = resolved;
+        if (prev[i] !== resolved) changed = true;
+      }
+
+      const prevKeys = Object.keys(prev);
+      if (!changed && prevKeys.length === Object.keys(next).length) {
+        return prev;
+      }
+      return next;
+    });
+  }, [pages]);
+
+  const effectivePages = useMemo(
+    () => pages.map((page, pageIndex) => resolvePageWithSource(page, currentSourceIndexByPageIndex[pageIndex])),
+    [currentSourceIndexByPageIndex, pages]
+  );
+
 
   useEffect(() => {
     nextArchiveCandidateCacheRef.current.clear();
@@ -403,11 +561,11 @@ function ReaderContent() {
     () =>
       buildReaderStream({
         sourceArchiveId,
-        pages,
+        pages: effectivePages,
         segments,
         includeInterChapterVirtualPages: hasInterChapterVirtualPages,
       }),
-    [hasInterChapterVirtualPages, pages, segments, sourceArchiveId]
+    [effectivePages, hasInterChapterVirtualPages, segments, sourceArchiveId]
   );
   const effectiveSegments = readerStream.effectiveSegments;
   const streamPages = readerStream.items;
@@ -419,7 +577,7 @@ function ReaderContent() {
     () =>
       deriveReaderPosition({
         currentPage,
-        pages,
+        pages: effectivePages,
         streamPages,
         effectiveSegments,
         sourceArchiveId,
@@ -427,7 +585,7 @@ function ReaderContent() {
         doublePageMode,
         seamlessEnabled,
       }),
-    [currentPage, doublePageMode, effectiveSegments, pages, readingMode, seamlessEnabled, sourceArchiveId, streamPages]
+    [currentPage, doublePageMode, effectiveSegments, effectivePages, readingMode, seamlessEnabled, sourceArchiveId, streamPages]
   );
   const {
     activeSegment,
@@ -470,7 +628,7 @@ function ReaderContent() {
   }, []);
 
   const archive = useReaderArchiveMetadata({ id: activeArchiveId, language });
-  const { htmlContents, loadHtmlPage } = useReaderHtmlPages({ id: sourceArchiveId, pages, onError: setError });
+  const { htmlContents, loadHtmlPage } = useReaderHtmlPages({ id: sourceArchiveId, pages: effectivePages, onError: setError });
 
   // 用于跟踪拆分封面模式的变化，避免无限循环
   const splitCoverModeRef = useRef(splitCoverMode);
@@ -591,15 +749,15 @@ function ReaderContent() {
       doublePageMode &&
       !isCurrentHtmlPage &&
       !(splitCoverMode && currentPage === 0) &&
-      currentPage + 1 < pages.length
+      currentPage + 1 < effectivePages.length
     ) {
       return [currentPage, currentPage + 1];
     }
     return [currentPage];
-  }, [currentPage, currentRealPage, doublePageMode, isCurrentHtmlPage, pages.length, readingMode, splitCoverMode]);
+  }, [currentPage, currentRealPage, doublePageMode, effectivePages.length, isCurrentHtmlPage, readingMode, splitCoverMode]);
 
   const imageLoading = useReaderImageLoading({
-    pages,
+    pages: effectivePages,
     readingMode,
     currentPage: readingMode === 'webtoon' ? currentRealPage : currentPage,
     priorityIndices,
@@ -618,8 +776,8 @@ function ReaderContent() {
   }, [currentPage]);
 
   useEffect(() => {
-    pagesLengthRef.current = pages.length;
-  }, [pages.length]);
+    pagesLengthRef.current = effectivePages.length;
+  }, [effectivePages.length]);
 
   useEffect(() => {
     appendedArchiveIdsRef.current = new Set(segments.map((segment) => segment.archiveId));
@@ -1337,7 +1495,7 @@ function ReaderContent() {
 
   // 加载HTML页面内容（单页模式：当前页；条漫模式：可见范围内）
   useEffect(() => {
-    if (!sourceArchiveId || pages.length === 0) return;
+    if (!sourceArchiveId || effectivePages.length === 0) return;
 
     if (readingMode === 'webtoon') {
       for (let i = webtoonVirtualization.visibleRange.start; i <= webtoonVirtualization.visibleRange.end; i += 1) {
@@ -1349,10 +1507,10 @@ function ReaderContent() {
       return;
     }
 
-    if (currentRealPage >= 0 && currentRealPage < pages.length && pages[currentRealPage]?.type === 'html') {
+    if (currentRealPage >= 0 && currentRealPage < effectivePages.length && effectivePages[currentRealPage]?.effectiveType === 'html') {
       void loadHtmlPage(currentRealPage);
     }
-  }, [sourceArchiveId, pages, currentRealPage, readingMode, streamPages, webtoonVirtualization.visibleRange, loadHtmlPage]);
+  }, [sourceArchiveId, effectivePages, currentRealPage, readingMode, streamPages, webtoonVirtualization.visibleRange, loadHtmlPage]);
 
   // 重置变换
   const resetTransform = useCallback(() => {
@@ -1361,8 +1519,108 @@ function ReaderContent() {
     setTranslateY(0);
   }, []);
 
+  const handleChangePageSource = useCallback(
+    (pageIndex: number, nextSourceIndex: number) => {
+      const page = pages[pageIndex];
+      const sourceCount = page?.sources?.length ?? 0;
+      if (!page || sourceCount <= 1) return;
+      const clampedIndex = Math.max(0, Math.min(sourceCount - 1, nextSourceIndex));
+      if (currentSourceIndexByPageIndex[pageIndex] === clampedIndex) return;
+
+      const mediaElement = videoRefs.current[pageIndex];
+      if (mediaElement) {
+        pendingSourceRestoreRef.current[pageIndex] = {
+          currentTime: Number.isFinite(mediaElement.currentTime) && mediaElement.currentTime >= 0 ? mediaElement.currentTime : 0,
+          paused: mediaElement.paused,
+          muted: mediaElement.muted,
+          volume: Number.isFinite(mediaElement.volume) ? Math.max(0, Math.min(1, mediaElement.volume)) : 1,
+        };
+      } else {
+        const snapshot = videoTimelineByPageIndex[pageIndex];
+        if (snapshot) {
+          pendingSourceRestoreRef.current[pageIndex] = {
+            currentTime: snapshot.currentTime,
+            paused: snapshot.paused,
+            muted: snapshot.muted,
+            volume: snapshot.volume,
+          };
+        }
+      }
+
+      setCurrentSourceIndexByPageIndex((prev) => ({ ...prev, [pageIndex]: clampedIndex }));
+    },
+    [currentSourceIndexByPageIndex, pages, videoTimelineByPageIndex]
+  );
+
+  useEffect(() => {
+    const pendingEntries = Object.entries(pendingSourceRestoreRef.current);
+    if (pendingEntries.length <= 0) return;
+
+    const cleanups: Array<() => void> = [];
+    for (const [pageIndexText] of pendingEntries) {
+      const pageIndex = Number.parseInt(pageIndexText, 10);
+      if (!Number.isFinite(pageIndex)) continue;
+      const element = videoRefs.current[pageIndex];
+      if (!element) continue;
+
+      let applied = false;
+      const applyRestore = () => {
+        if (applied) return;
+        const currentRestore = pendingSourceRestoreRef.current[pageIndex];
+        if (!currentRestore) return;
+        applied = true;
+
+        const duration = Number.isFinite(element.duration) && element.duration > 0 ? element.duration : 0;
+        const targetTime = duration > 0
+          ? Math.max(0, Math.min(duration, currentRestore.currentTime))
+          : Math.max(0, currentRestore.currentTime);
+        try {
+          element.currentTime = targetTime;
+        } catch {
+          // ignore browsers that block seeking before metadata is fully ready
+        }
+        element.muted = currentRestore.muted;
+        element.volume = Math.max(0, Math.min(1, currentRestore.volume));
+        if (!currentRestore.paused) {
+          void element.play().catch(() => {});
+        } else {
+          element.pause();
+        }
+
+        setVideoTimelineByPageIndex((prev) => ({
+          ...prev,
+          [pageIndex]: {
+            currentTime: targetTime,
+            duration,
+            paused: element.paused,
+            muted: element.muted,
+            volume: Number.isFinite(element.volume) ? element.volume : currentRestore.volume,
+          },
+        }));
+        delete pendingSourceRestoreRef.current[pageIndex];
+      };
+
+      if (element.readyState >= 1) {
+        applyRestore();
+        continue;
+      }
+
+      const handleReady = () => applyRestore();
+      element.addEventListener('loadedmetadata', handleReady);
+      element.addEventListener('canplay', handleReady);
+      cleanups.push(() => {
+        element.removeEventListener('loadedmetadata', handleReady);
+        element.removeEventListener('canplay', handleReady);
+      });
+    }
+
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [effectivePages, videoTimelineByPageIndex]);
+
   const sidebar = useReaderSidebar({
-    pages,
+    pages: effectivePages as any,
     currentPage: readingMode === 'webtoon' ? currentRealPage : currentPage,
     resetKey: sourceArchiveId,
     loading,
@@ -1379,7 +1637,7 @@ function ReaderContent() {
   const mediaInfoOverlayLines = useMediaInfoOverlayLines({
     enabled: mediaInfoEnabled,
     tick: mediaInfoTick,
-    pages,
+    pages: effectivePages as any,
     currentPage: readingMode === 'webtoon' ? currentRealPage : currentPage,
     readingMode,
     doublePageMode,
@@ -1453,10 +1711,10 @@ function ReaderContent() {
         splitCoverMode,
         isHtmlSpreadView,
         currentPage: readingMode === 'webtoon' ? currentRealPage : currentPage,
-        pagesLength: pages.length,
-        getPageType: (pageIndex) => pages[pageIndex]?.type ?? null,
+        pagesLength: effectivePages.length,
+        getPageType: (pageIndex) => effectivePages[pageIndex]?.effectiveType ?? null,
       }),
-    [currentPage, currentRealPage, doublePageMode, isHtmlSpreadView, pages, readingMode, splitCoverMode]
+    [currentPage, currentRealPage, doublePageMode, effectivePages, isHtmlSpreadView, readingMode, splitCoverMode]
   );
 
   const mediaLanePageIndexes = useMemo(
@@ -1552,8 +1810,15 @@ function ReaderContent() {
       }
 
       const pageIndex = lane.mediaPageIndex ?? -1;
+      const page = pageIndex >= 0 ? pages[pageIndex] : undefined;
       const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
       const snapshot = pageIndex >= 0 ? videoTimelineByPageIndex[pageIndex] : undefined;
+      const sourceLabels = page ? buildSourceOptionLabels(page) : [];
+      const sourceOptions = page?.sources?.map((_, sourceIndex) => ({
+        value: sourceIndex,
+        label: sourceLabels[sourceIndex] || `Source ${sourceIndex + 1}`,
+      }));
+      const activeSourceIndex = pageIndex >= 0 ? currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0 : 0;
       const currentTime =
         snapshot?.currentTime ??
         (videoElement && Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0);
@@ -1598,6 +1863,9 @@ function ReaderContent() {
         isPlaying,
         isMuted,
         volume,
+        sourceOptions,
+        activeSourceIndex,
+        onSourceChange: (nextSourceIndex: number) => handleChangePageSource(pageIndex, nextSourceIndex),
         onTogglePlay: () => {
           if (!videoElement) return;
           if (videoElement.paused) {
@@ -1626,7 +1894,16 @@ function ReaderContent() {
         },
       };
     });
-  }, [progressLaneSpecs, sliderCurrentPage, sliderTotalPages, handleSliderChangePage, videoTimelineByPageIndex]);
+  }, [
+    currentSourceIndexByPageIndex,
+    handleChangePageSource,
+    handleSliderChangePage,
+    pages,
+    progressLaneSpecs,
+    sliderCurrentPage,
+    sliderTotalPages,
+    videoTimelineByPageIndex,
+  ]);
 
   useEffect(() => {
     if (progressLanes.length <= 0) {
@@ -1760,7 +2037,7 @@ function ReaderContent() {
         readingMode,
         doublePageMode,
         splitCoverMode,
-        tailPageType: activeSegmentLastRealPage >= 0 ? pages[activeSegmentLastRealPage]?.type : null,
+        tailPageType: activeSegmentLastRealPage >= 0 ? effectivePages[activeSegmentLastRealPage]?.effectiveType ?? null : null,
       });
       if (targetReal == null) return;
 
@@ -1801,7 +2078,7 @@ function ReaderContent() {
     isCollectionEndPage,
     requestChapterJump,
     navigateToPrevArchiveEnd,
-    pages,
+    effectivePages,
     prevArchiveId,
     activeSegment,
     seamlessEnabled,
@@ -1906,7 +2183,7 @@ function ReaderContent() {
   });
 
   useReaderWheelNavigation({
-    pages,
+    pages: effectivePages as any,
     currentPage,
     readingMode,
     autoHideEnabled,
@@ -1975,7 +2252,7 @@ function ReaderContent() {
   useEffect(() => {
     if (isCurrentOrTailHtmlPage) return;
 
-    if (doublePageMode && pages.length > 0) {
+    if (doublePageMode && effectivePages.length > 0) {
       // 使用ref来避免无限循环
       const prevSplitCoverMode = splitCoverModeRef.current;
       splitCoverModeRef.current = splitCoverMode;
@@ -2017,12 +2294,12 @@ function ReaderContent() {
         }
       }
     }
-  }, [splitCoverMode, doublePageMode, currentPage, pages.length, isCurrentOrTailHtmlPage, setCurrentPage]);
+  }, [splitCoverMode, doublePageMode, currentPage, effectivePages.length, isCurrentOrTailHtmlPage, setCurrentPage]);
 
   const displayArchiveTitle = useMemo(() => {
     if (!isCollectionEndPage) {
       const primaryIndex = currentRealPage;
-      const primaryPageTitle = getPageHeaderTitle(pages[primaryIndex]);
+      const primaryPageTitle = getPageHeaderTitle(effectivePages[primaryIndex] as any);
       if (primaryPageTitle) return primaryPageTitle;
 
       const hasSecondVisiblePage =
@@ -2031,7 +2308,7 @@ function ReaderContent() {
         !isHtmlSpreadView &&
         !(splitCoverMode && currentPage === 0);
       if (hasSecondVisiblePage) {
-        const secondaryPageTitle = getPageHeaderTitle(pages[primaryIndex + 1]);
+        const secondaryPageTitle = getPageHeaderTitle(effectivePages[primaryIndex + 1] as any);
         if (secondaryPageTitle) return secondaryPageTitle;
       }
     }
@@ -2045,7 +2322,7 @@ function ReaderContent() {
     doublePageMode,
     isCollectionEndPage,
     isHtmlSpreadView,
-    pages,
+    effectivePages,
     readingMode,
     splitCoverMode,
   ]);
@@ -2059,7 +2336,7 @@ function ReaderContent() {
     );
   }
 
-  if (error || pages.length === 0) {
+  if (error || effectivePages.length === 0) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <div className="text-center">
@@ -2133,14 +2410,14 @@ function ReaderContent() {
         {shouldRenderSidebar ? (
           <ReaderSidebar
             open={sidebar.sidebarOpen}
-            allPages={pages}
+            allPages={effectivePages as any}
             sidebarScrollRef={sidebar.sidebarScrollRef}
             sidebarLoading={sidebar.sidebarLoading}
             isEpub={sidebar.isEpub}
             sidebarDisplayPages={sidebar.sidebarDisplayPages}
             currentPage={readingMode === 'webtoon' ? currentRealPage : currentPage}
-            pagesLength={pages.length}
-            canLoadMore={sidebar.sidebarLoadedCount < pages.length}
+            pagesLength={effectivePages.length}
+            canLoadMore={sidebar.sidebarLoadedCount < effectivePages.length}
             onSelectPage={sidebar.handleSidebarPageSelect}
             onLoadMore={sidebar.handleLoadMoreSidebarPages}
             onOpenChange={sidebar.setSidebarOpen}
@@ -2155,7 +2432,7 @@ function ReaderContent() {
             readerAreaRef={readerAreaRef}
             tapTurnPageEnabled={tapTurnPageEnabled}
             longPageEnabled={longPageEnabled}
- 	          pages={pages}
+ 	          pages={effectivePages as any}
  	          cachedPages={imageLoading.cachedPages}
  	          currentPage={currentPage}
  	          doublePageMode={doublePageMode}
@@ -2199,7 +2476,7 @@ function ReaderContent() {
 	          imagesLoading={imageLoading.imagesLoading}
 	          currentPage={currentPage}
 	          doublePageMode={doublePageMode}
-	          pages={pages}
+	          pages={effectivePages as any}
 	          cachedPages={imageLoading.cachedPages}
 	          onLoaded={imageLoading.handleImageLoad}
 	          onError={imageLoading.handleImageError}

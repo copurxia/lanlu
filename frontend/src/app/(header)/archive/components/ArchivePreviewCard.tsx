@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import type { ArchiveMetadata } from '@/types/archive';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import { MasonryThumbnailGrid } from '@/components/ui/masonry-thumbnail-grid';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLocalStorage } from '@/hooks/common-hooks';
@@ -21,11 +21,7 @@ function isArchivePreviewViewMode(value: unknown): value is ArchivePreviewViewMo
 }
 
 function getPageCustomTitle(page: PageInfo): string {
-  const metaTitle = page.metadata?.title?.trim();
-  if (metaTitle) return metaTitle;
-  const pageTitle = page.title?.trim();
-  if (pageTitle) return pageTitle;
-  return '';
+  return ArchiveService.getPageDisplayTitle(page);
 }
 
 function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string, archivetype: string): string {
@@ -39,13 +35,13 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 
 function getPageDisplayDescription(page: PageInfo): string {
   const releaseAt = getPageReleaseAt(page);
-  const description = page.metadata?.description?.trim() || '';
+  const description = ArchiveService.getPageDisplayMetadata(page)?.description?.trim() || '';
   if (!releaseAt) return description;
   return description ? `${releaseAt} · ${description}` : releaseAt;
 }
 
 function getPageDisplayThumb(page: PageInfo): string {
-  return page.metadata?.thumb?.trim() || '';
+  return ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
 }
 
 function getPagePathSegments(path: string): string[] {
@@ -122,7 +118,7 @@ export function ArchivePreviewCard({
     const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
     pages.forEach((page, pageIndex) => {
-      const pathSegments = getPagePathSegments(page.path);
+      const pathSegments = getPagePathSegments(ArchiveService.getPagePath(page));
       const fallbackName = getPageDisplayTitle(page, pageIndex, t, String(metadata.archivetype || ''));
       const segments = pathSegments.length > 0 ? [...pathSegments] : [fallbackName];
       const fileName = segments[segments.length - 1] || fallbackName;
@@ -277,8 +273,9 @@ export function ArchivePreviewCard({
     const displayTitle = getPageDisplayTitle(page, index, t, String(metadata.archivetype || ''));
     const description = getPageDisplayDescription(page);
     const metadataThumb = getPageDisplayThumb(page);
-    const thumbSrc = metadataThumb || (page.type === 'image' ? page.url : '');
-    const pagePathSegments = getPagePathSegments(String(page.path || ''));
+    const pageUrl = ArchiveService.getResolvedPageUrl(page);
+    const thumbSrc = metadataThumb || (page.type === 'image' ? pageUrl : '');
+    const pagePathSegments = getPagePathSegments(ArchiveService.getPagePath(page));
     const fileName = pagePathSegments[pagePathSegments.length - 1] || '';
     const subtitle = fileName && fileName !== displayTitle ? fileName : '';
     const pageIcon = page.type === 'video'

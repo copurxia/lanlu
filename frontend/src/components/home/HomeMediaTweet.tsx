@@ -105,8 +105,10 @@ function getAuthorInitial(author: string): string {
 }
 
 function getPagePreviewSrc(page: PageInfo): string {
-  if (page.metadata?.thumb?.trim()) return page.metadata.thumb.trim();
-  if (page.type === 'image' && page.url.trim()) return page.url.trim();
+  const pageMetadata = ArchiveService.getPageDisplayMetadata(page);
+  const pageUrl = ArchiveService.getResolvedPageUrl(page);
+  if (pageMetadata?.thumb?.trim()) return pageMetadata.thumb.trim();
+  if (page.type === 'image' && pageUrl.trim()) return pageUrl.trim();
   return '';
 }
 
@@ -117,7 +119,7 @@ async function loadTweetPreviewSources(archiveId: string): Promise<TweetPreviewS
       const src = getPagePreviewSrc(page);
       if (!src) return null;
       return {
-        id: `${archiveId}:${page.path || index}`,
+        id: `${archiveId}:${ArchiveService.getPagePrimaryKey(page) || index}`,
         label: page.title || '',
         src,
       };

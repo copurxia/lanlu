@@ -1,5 +1,5 @@
 import type { ArchiveMetadata, MetadataPagePatch } from '@/types/archive';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 
 function normalizeTags(tags: unknown): string[] {
   if (!Array.isArray(tags)) return [];
@@ -47,7 +47,8 @@ export function getPageReleaseAt(page: PageInfo | MetadataPagePatch): string {
 
 export function getTvPageTitle(page: PageInfo | MetadataPagePatch): string {
   if ('metadata' in page) {
-    return String(page.metadata?.title || page.title || '').trim();
+    const source = ArchiveService.getPageDefaultSource(page);
+    return String(page.metadata?.title || page.title || source?.metadata?.title || source?.title || '').trim();
   }
   return String(page.title || '').trim();
 }

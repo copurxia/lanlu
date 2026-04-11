@@ -136,6 +136,128 @@ public class ArchiveController {
         return "image"
     }
 
+    private static func isAsciiDigit(value: UInt8): Bool {
+        return value >= 48 && value <= 57
+    }
+
+    private static func trimAsciiLower(value: String): String {
+        return value.trimAscii().toAsciiLower()
+    }
+
+    private static func zeroPad2(value: Int64): String {
+        if (value < 10) {
+            return "0${value}"
+        }
+        return value.toString()
+    }
+
+    private static func extractEpisodeToken(text: String): String {
+        let lower = trimAsciiLower(text)
+        if (lower.size < 6) {
+            return ""
+        }
+
+        for (i in 0..(lower.size - 5)) {
+            let ch = lower[i]
+            if (ch != 115) { // 's'
+                continue
+            }
+
+            var cursor = i + 1
+            var seasonDigits = ""
+            while (cursor < lower.size && seasonDigits.size < 3 && isAsciiDigit(lower[cursor])) {
+                seasonDigits += Rune(UInt32(lower[cursor])).toString()
+                cursor++
+            }
+            if (seasonDigits.size <= 0 || cursor >= lower.size || lower[cursor] != 101) { // 'e'
+                continue
+            }
+
+            cursor++
+            var episodeDigits = ""
+            while (cursor < lower.size && episodeDigits.size < 3 && isAsciiDigit(lower[cursor])) {
+                episodeDigits += Rune(UInt32(lower[cursor])).toString()
+                cursor++
+            }
+            if (episodeDigits.size <= 0) {
+                continue
+            }
+
+            let seasonNo = try { Int64.parse(seasonDigits) } catch (_: Exception) { 0i64 }
+            let episodeNo = try { Int64.parse(episodeDigits) } catch (_: Exception) { 0i64 }
+            if (seasonNo <= 0 || episodeNo <= 0) {
+                continue
+            }
+            return "s${zeroPad2(seasonNo)}e${zeroPad2(episodeNo)}"
+        }
+
+        return ""
+    }
+
+    private static func extractGroupKey(item: ArchiveFilesPageItem): String {
+        let fileType = item.fileType.trimAscii()
+        if (fileType != "video" && fileType != "audio") {
+            return ""
+        }
+        if (item.sortIndex > 0) {
+            return "${fileType}:sort:${item.sortIndex}"
+        }
+        let titleToken = extractEpisodeToken(item.title)
+        if (titleToken.size > 0) {
+            return "${fileType}:episode:${titleToken}"
+        }
+        let pathToken = extractEpisodeToken(item.href)
+        if (pathToken.size > 0) {
+            return "${fileType}:episode:${pathToken}"
+        }
+        return ""
+    }
+
+    private static func sourcePreferenceScore(item: ArchiveFilesPageItem): Int64 {
+        var score = 0i64
+        if (item.thumbAssetId > 0) {
+            score += 1000000000i64
+        }
+        if (item.hasSort && item.sortIndex > 0) {
+            score += Int64(100000000 - item.sortIndex)
+        } else if (item.sortIndex > 0) {
+            score += Int64(100000000 - item.sortIndex)
+        }
+        score += Int64(1000000 - item.originalIndex)
+        return score
+    }
+
+    private static func choosePreferredSource(
+        current: ArchiveFilesPageItem,
+        candidate: ArchiveFilesPageItem
+    ): ArchiveFilesPageItem {
+        let currentScore = sourcePreferenceScore(current)
+        let candidateScore = sourcePreferenceScore(candidate)
+        if (candidateScore > currentScore) {
+            return candidate
+        }
+        if (candidateScore < currentScore) {
+            return current
+        }
+        if (candidate.href.trimAscii().toAsciiLower() < current.href.trimAscii().toAsciiLower()) {
+            return candidate
+        }
+        return current
+    }
+
+    private static func writeArchiveFilePageMetadata(
+        w: JsonWriter,
+        item: ArchiveFilesPageItem
+    ): Unit {
+        w.startObject()
+        w.writeName("title").writeValue(item.title)
+        w.writeName("description").writeValue(item.description)
+        w.writeName("thumb_asset_id").writeValue(item.thumbAssetId)
+        w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
+        w.writeName("release_at").writeValue(item.releaseAt)
+        w.endObject()
+    }
+
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
@@ -364,6 +486,11 @@ public class ArchiveController {
             let entry = entriesWithTitle[i]
             let href = entry[0]
             let rawTitle = entry[1]
+            let fileType = if (archive.archive_type == ArchiveTypes.EPUB) {
+                "html"
+            } else {
+                resolveArchiveFileType(archive.archive_type, href)
+            }
             let pageNumber = Int32(i + 1)
             let pathKey = href.trimAscii()
 
@@ -384,6 +511,7 @@ public class ArchiveController {
 
             let item = ArchiveFilesPageItem()
             item.href = href
+            item.fileType = fileType
             item.originalIndex = pageNumber
             item.title = rawTitle
 
@@ -462,17 +590,51 @@ public class ArchiveController {
 
         var filteredPageFiles = ArrayList<ArchiveFilesPageItem>()
         for (item in pageFiles) {
-            let fileType = resolveArchiveFileType(archive.archive_type, item.href)
-            if (imagesOnlySpecified && imagesOnly && fileType != "image") {
+            if (imagesOnlySpecified && imagesOnly && item.fileType != "image") {
                 continue
             }
             filteredPageFiles.add(item)
         }
 
-        var responsePageFiles = ArrayList<ArchiveFilesPageItem>()
+        var groupedPageFiles = ArrayList<ArchiveFilesPageGroup>()
+        var groupedIndexByKey = HashMap<String, Int64>()
         let offsetInt = Int64(offset)
         let endExclusive = if (limit > 0i32) { Int64(offset + limit) } else { Int64(filteredPageFiles.size) }
         for (i in 0..filteredPageFiles.size) {
+            let item = filteredPageFiles[i]
+            let groupKey = extractGroupKey(item)
+            if (groupKey.size <= 0) {
+                let group = ArchiveFilesPageGroup()
+                group.groupKey = if (item.fileType == "video" || item.fileType == "audio") {
+                    "${item.fileType}:path:${item.href.trimAscii()}"
+                } else {
+                    ""
+                }
+                group.fileType = item.fileType
+                group.defaultSource = item
+                group.sources.add(item)
+                groupedPageFiles.add(group)
+                continue
+            }
+
+            match (groupedIndexByKey.get(groupKey)) {
+                case Some(existingIndex) =>
+                    let group = groupedPageFiles[existingIndex]
+                    group.sources.add(item)
+                    group.defaultSource = choosePreferredSource(group.defaultSource, item)
+                case None =>
+                    let group = ArchiveFilesPageGroup()
+                    group.groupKey = groupKey
+                    group.fileType = item.fileType
+                    group.defaultSource = item
+                    group.sources.add(item)
+                    groupedIndexByKey[groupKey] = Int64(groupedPageFiles.size)
+                    groupedPageFiles.add(group)
+            }
+        }
+
+        var responsePageFiles = ArrayList<ArchiveFilesPageGroup>()
+        for (i in 0..groupedPageFiles.size) {
             let idx = Int64(i)
             if (idx < offsetInt) {
                 continue
@@ -480,7 +642,7 @@ public class ArchiveController {
             if (idx >= endExclusive) {
                 break
             }
-            responsePageFiles.add(filteredPageFiles[i])
+            responsePageFiles.add(groupedPageFiles[i])
         }
 
         // 构建响应JSON（JsonWriter）
@@ -489,32 +651,57 @@ public class ArchiveController {
         w.startObject()
         w.writeName("pages")
         w.startArray()
-        for (item in responsePageFiles) {
-            let href = item.href
+        for (group in responsePageFiles) {
+            let item = group.defaultSource
             let title = item.title
-            let metadataTitle = item.title
-            let metadataDescription = item.description
-            let metadataThumbAssetId = item.thumbAssetId
-            let fileType = if (archive.archive_type == ArchiveTypes.EPUB) {
-                "html"
-            } else {
-                resolveArchiveFileType(archive.archive_type, href)
+            let fileType = item.fileType
+            var defaultSourceIndex = 0i32
+            for (sourceIndex in 0..group.sources.size) {
+                if (group.sources[sourceIndex].href == item.href) {
+                    defaultSourceIndex = Int32(sourceIndex)
+                    break
+                }
             }
 
             w.startObject()
-            w.writeName("path").writeValue(href)
+            w.writeName("id").writeValue(if (group.groupKey.size > 0) { group.groupKey } else { item.href })
             w.writeName("type").writeValue(fileType)
             w.writeName("title").writeValue(title)
+            if (group.groupKey.size > 0) {
+                w.writeName("group_key").writeValue(group.groupKey)
+            }
+            w.writeName("default_source_index").writeValue(defaultSourceIndex)
+            w.writeName("source_count").writeValue(group.sources.size)
             if (includeMetadata) {
                 w.writeName("metadata")
+                writeArchiveFilePageMetadata(w, item)
+            }
+            w.writeName("default_source")
+            w.startObject()
+            w.writeName("id").writeValue(item.href)
+            w.writeName("path").writeValue(item.href)
+            w.writeName("type").writeValue(item.fileType)
+            w.writeName("title").writeValue(item.title)
+            if (includeMetadata) {
+                w.writeName("metadata")
+                writeArchiveFilePageMetadata(w, item)
+            }
+            w.endObject()
+            w.writeName("sources")
+            w.startArray()
+            for (source in group.sources) {
                 w.startObject()
-                w.writeName("title").writeValue(metadataTitle)
-                w.writeName("description").writeValue(metadataDescription)
-                w.writeName("thumb_asset_id").writeValue(metadataThumbAssetId)
-                w.writeName("lyrics_asset_id").writeValue(item.lyricsAssetId)
-                w.writeName("release_at").writeValue(item.releaseAt)
+                w.writeName("id").writeValue(source.href)
+                w.writeName("path").writeValue(source.href)
+                w.writeName("type").writeValue(source.fileType)
+                w.writeName("title").writeValue(source.title)
+                if (includeMetadata) {
+                    w.writeName("metadata")
+                    writeArchiveFilePageMetadata(w, source)
+                }
                 w.endObject()
             }
+            w.endArray()
             w.endObject()
         }
         w.endArray()
@@ -1663,6 +1850,7 @@ public class ArchiveController {
 
 private class ArchiveFilesPageItem {
     public var href: String = ""
+    public var fileType: String = ""
     public var title: String = ""
     public var description: String = ""
     public var releaseAt: String = ""
@@ -1672,4 +1860,11 @@ private class ArchiveFilesPageItem {
     public var originalIndex: Int32 = 0
     public var hidden: Bool = false
     public var hasSort: Bool = false
+}
+
+private class ArchiveFilesPageGroup {
+    public var groupKey: String = ""
+    public var fileType: String = ""
+    public var defaultSource: ArchiveFilesPageItem = ArchiveFilesPageItem()
+    public var sources: ArrayList<ArchiveFilesPageItem> = ArrayList<ArchiveFilesPageItem>()
 }

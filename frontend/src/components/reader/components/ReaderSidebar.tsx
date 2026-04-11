@@ -5,7 +5,7 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { useLocalStorage } from '@/hooks/common-hooks';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 import { getPageReleaseAt } from '@/lib/utils/tv-media';
 
@@ -72,12 +72,12 @@ function getPagePathSegments(path: string): string[] {
     .filter(Boolean);
 }
 
+function getPagePathSegmentsFromPage(page: PageInfo): string[] {
+  return getPagePathSegments(ArchiveService.getPagePath(page));
+}
+
 function getPageCustomTitle(page: PageInfo): string {
-  const metaTitle = page.metadata?.title?.trim();
-  if (metaTitle) return metaTitle;
-  const pageTitle = page.title?.trim();
-  if (pageTitle) return pageTitle;
-  return '';
+  return ArchiveService.getPageDisplayTitle(page);
 }
 
 function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string): string {
@@ -88,13 +88,13 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 
 function getPageDisplayDescription(page: PageInfo): string {
   const releaseAt = getPageReleaseAt(page);
-  const description = page.metadata?.description?.trim() || '';
+  const description = ArchiveService.getPageDisplayMetadata(page)?.description?.trim() || '';
   if (!releaseAt) return description;
   return description ? `${releaseAt} · ${description}` : releaseAt;
 }
 
 function getPageDisplayThumb(page: PageInfo): string {
-  return page.metadata?.thumb?.trim() || '';
+  return ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
 }
 
 export function ReaderSidebar({
@@ -148,10 +148,8 @@ export function ReaderSidebar({
   }, [activeTab, setStoredActiveTab, storedActiveTab]);
 
   const getThumbLayoutKey = useCallback((page: PageInfo, index: number) => {
-    const path = String(page.path || '').trim();
-    if (path) return path;
-    const url = String(page.url || '').trim();
-    if (url) return url;
+    const pageKey = ArchiveService.getPagePrimaryKey(page);
+    if (pageKey) return pageKey;
     return `page-${index}`;
   }, []);
 
@@ -297,7 +295,7 @@ export function ReaderSidebar({
       t('reader.pageAlt').replace('{page}', String(pageIndex + 1));
 
     const parsedPages = allPages.map((page, pageIndex) => {
-      const pathSegments = getPagePathSegments(page.path);
+      const pathSegments = getPagePathSegmentsFromPage(page);
       const fallbackName = getPageDisplayTitle(page, pageIndex, t) || defaultPageLabel(pageIndex);
       return {
         archiveId: getPageArchiveId(page),
@@ -591,7 +589,7 @@ export function ReaderSidebar({
     const displayTitle = getPageDisplayTitle(page, index, t);
     const description = getPageDisplayDescription(page);
     const metadataThumb = getPageDisplayThumb(page);
-    const pagePathSegments = getPagePathSegments(page.path);
+    const pagePathSegments = getPagePathSegmentsFromPage(page);
     const fileName = pagePathSegments[pagePathSegments.length - 1] || '';
     const subtitle = fileName && fileName !== displayTitle ? fileName : '';
     const pageIcon = page.type === 'video'
@@ -647,7 +645,8 @@ export function ReaderSidebar({
     const isCurrentPage = currentPage === index;
     const metadataThumb = getPageDisplayThumb(page);
     const showVideoPreview = page.type === 'video' && !metadataThumb;
-    const thumbSrc = metadataThumb || (page.type === 'image' ? page.url : '');
+    const pageUrl = ArchiveService.getResolvedPageUrl(page);
+    const thumbSrc = metadataThumb || (page.type === 'image' ? pageUrl : '');
     const showImageThumb = Boolean(thumbSrc);
     const displayTitle = getPageDisplayTitle(page, index, t);
     const hasCustomTitle = getPageCustomTitle(page).length > 0;
@@ -680,7 +679,7 @@ export function ReaderSidebar({
         <div className="w-full overflow-hidden bg-muted/70" style={{ height: `${mediaHeight}px` }}>
           {showVideoPreview ? (
             <video
-              src={page.url}
+              src={pageUrl}
               className="block h-full w-full object-cover"
               muted
               loop

@@ -4,7 +4,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import { ReaderAudioStage } from '@/components/reader/components/ReaderAudioStage';
 import { ReaderCollectionEndPage } from '@/components/reader/components/ReaderCollectionEndPage';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 
 type ReaderVirtualEndPage = {
@@ -182,6 +182,14 @@ export function ReaderWebtoonModeView({
                   key={actualIndex}
                   className={`relative w-full ${isZoomedImage ? 'z-20' : ''}`}
                 >
+                  {(() => {
+                    const pageUrl = ArchiveService.getResolvedPageUrl(page);
+                    const pageMetadata = ArchiveService.getPageDisplayMetadata(page);
+                    const pageTitle =
+                      ArchiveService.getPageDisplayTitle(page) ||
+                      t('reader.pageAlt').replace('{page}', String(actualIndex + 1));
+                    return (
+                      <>
                   {imagesLoading.has(actualIndex) && !loadedImages.has(actualIndex) && (
                     <div
                       className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none"
@@ -212,7 +220,7 @@ export function ReaderWebtoonModeView({
                       {page.type === 'video' ? (
                         <MemoizedVideo
                           key={`page-${actualIndex}`}
-                          src={page.url}
+                          src={pageUrl}
                           ref={(el) => {
                             videoRefs.current[actualIndex] = el;
                           }}
@@ -232,11 +240,11 @@ export function ReaderWebtoonModeView({
                         />
                       ) : page.type === 'audio' ? (
                         <ReaderAudioStage
-                          title={page.metadata?.title || page.title || t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
-                          description={page.metadata?.description}
-                          thumb={page.metadata?.thumb}
-                          lyricsAssetId={page.metadata?.lyrics_asset_id}
-                          audioUrl={page.url}
+                          title={pageTitle}
+                          description={pageMetadata?.description}
+                          thumb={pageMetadata?.thumb}
+                          lyricsAssetId={pageMetadata?.lyrics_asset_id}
+                          audioUrl={pageUrl}
                           audioRef={(el) => {
                             videoRefs.current[actualIndex] = el;
                           }}
@@ -269,7 +277,7 @@ export function ReaderWebtoonModeView({
 	                          ref={(el) => {
 	                            imageRefs.current[actualIndex] = el;
 	                          }}
-	                          src={cachedPages[actualIndex] || page.url}
+	                          src={cachedPages[actualIndex] || pageUrl}
 	                          alt={t('reader.pageAlt').replace('{page}', String(actualIndex + 1))}
 	                          decoding="async"
 	                          loading="lazy"
@@ -292,18 +300,21 @@ export function ReaderWebtoonModeView({
 	                              onMeasureImageHeight?.(actualIndex, img.naturalWidth, img.naturalHeight);
 	                            }
 	                            onImageLoaded(actualIndex);
-	                            if (!cachedPages[actualIndex]) {
-	                              onCacheImage(page.url, actualIndex);
+	                            if (!cachedPages[actualIndex] && pageUrl) {
+	                              onCacheImage(pageUrl, actualIndex);
 	                            }
 	                          }}
 	                          onError={() => onImageError(actualIndex)}
 	                          onDoubleClick={onDoubleClick}
-	                          onDragStart={onImageDragStart}
-	                          draggable={false}
-	                        />
+                          onDragStart={onImageDragStart}
+                          draggable={false}
+                        />
 	                      )}
                     </div>
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               );
             }

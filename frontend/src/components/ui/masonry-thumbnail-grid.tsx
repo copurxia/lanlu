@@ -3,7 +3,7 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Film, FileText, Music } from 'lucide-react';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import type React from 'react';
 import { getPageReleaseAt } from '@/lib/utils/tv-media';
 
@@ -35,11 +35,7 @@ type MasonryThumbnailGridProps = {
 };
 
 function getPageCustomTitle(page: PageInfo): string {
-  const metaTitle = page.metadata?.title?.trim();
-  if (metaTitle) return metaTitle;
-  const pageTitle = page.title?.trim();
-  if (pageTitle) return pageTitle;
-  return '';
+  return ArchiveService.getPageDisplayTitle(page);
 }
 
 function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string): string {
@@ -49,7 +45,7 @@ function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string)
 }
 
 function getPageDisplayThumb(page: PageInfo): string {
-  return page.metadata?.thumb?.trim() || '';
+  return ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
 }
 
 function getPageDisplayDescription(page: PageInfo): string {
@@ -76,10 +72,8 @@ export function MasonryThumbnailGrid({
   const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
 
   const getLayoutKey = useCallback((page: PageInfo, index: number) => {
-    const path = String(page.path || '').trim();
-    if (path) return path;
-    const url = String(page.url || '').trim();
-    if (url) return url;
+    const pageKey = ArchiveService.getPagePrimaryKey(page);
+    if (pageKey) return pageKey;
     return `page-${index}`;
   }, []);
 
@@ -252,7 +246,8 @@ export function MasonryThumbnailGrid({
     const isCurrentPage = currentPage === index;
     const metadataThumb = getPageDisplayThumb(page);
     const isVideoPage = page.type === 'video';
-    const thumbSrc = isVideoPage ? '' : metadataThumb || (page.type === 'image' ? page.url : '');
+    const pageUrl = ArchiveService.getResolvedPageUrl(page);
+    const thumbSrc = isVideoPage ? '' : metadataThumb || (page.type === 'image' ? pageUrl : '');
     const showImageThumb = Boolean(thumbSrc);
     const itemKey = getLayoutKey(page, index);
     const isVideoReady = Boolean(videoReadyMap[itemKey]);
@@ -284,7 +279,7 @@ export function MasonryThumbnailGrid({
                 </div>
               ) : null}
               <video
-                src={page.url}
+                src={pageUrl}
                 poster={metadataThumb || undefined}
                 className="block h-full w-full object-cover"
                 muted

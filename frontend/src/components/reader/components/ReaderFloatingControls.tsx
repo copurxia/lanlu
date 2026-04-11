@@ -1,9 +1,10 @@
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils/utils';
-import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book } from 'lucide-react';
-import { ReaderSettingsSheet, type ReaderSettingButton } from '@/components/reader/components/ReaderSettingsSheet';
+import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo } from 'lucide-react';
+import { ReaderSettingsSheet, type ReaderMediaSourceOption, type ReaderSettingButton } from '@/components/reader/components/ReaderSettingsSheet';
 import type { ArchiveMetadata } from '@/types/archive';
 import { useEffect, useMemo, useState } from 'react';
 import type React from 'react';
@@ -26,6 +27,9 @@ export type ReaderProgressLane = {
   onSeekRelative?: (deltaSeconds: number) => void;
   onToggleMute?: () => void;
   onVolumeChange?: (value: number) => void;
+  sourceOptions?: ReaderMediaSourceOption[];
+  activeSourceIndex?: number;
+  onSourceChange?: (value: number) => void;
 };
 
 const floatingSurfaceClass = 'bg-[hsl(var(--background)/0.55)] backdrop-blur-xl border border-[hsl(var(--border)/0.8)] shadow-lg';
@@ -252,6 +256,9 @@ export function ReaderFloatingControls({
                     autoPlayMode={autoPlayMode}
                     autoPlayInterval={autoPlayInterval}
                     onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+                    mediaSourceOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.sourceOptions : undefined}
+                    activeMediaSourceIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSourceIndex : undefined}
+                    onMediaSourceChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSourceChange : undefined}
                     t={t}
                   />
                 </div>
@@ -515,6 +522,36 @@ export function ReaderFloatingControls({
                           step={0.01}
                           className="w-16 sm:w-24 h-2"
                         />
+                        {lane.sourceOptions && lane.sourceOptions.length > 1 ? (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="rounded-full h-8 w-8 p-0 text-foreground/80 transition-all duration-150 ease-out hover:bg-transparent hover:border-transparent hover:shadow-none hover:text-foreground"
+                                title="Switch source"
+                              >
+                                <ListVideo className="w-4 h-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-72 rounded-xl p-2">
+                              <div className="space-y-1">
+                                {lane.sourceOptions.map((option) => (
+                                  <Button
+                                    key={`${lane.id}-popover-source-${option.value}`}
+                                    type="button"
+                                    variant={lane.activeSourceIndex === option.value ? 'default' : 'ghost'}
+                                    size="sm"
+                                    className="w-full justify-start rounded-lg"
+                                    onClick={() => lane.onSourceChange?.(option.value)}
+                                  >
+                                    <span className="truncate">{option.label}</span>
+                                  </Button>
+                                ))}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        ) : null}
                       </>
                     ) : null}
                   </div>
@@ -538,6 +575,9 @@ export function ReaderFloatingControls({
           autoPlayMode={autoPlayMode}
           autoPlayInterval={autoPlayInterval}
           onAutoPlayIntervalChange={onAutoPlayIntervalChange}
+          mediaSourceOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.sourceOptions : undefined}
+          activeMediaSourceIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSourceIndex : undefined}
+          onMediaSourceChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSourceChange : undefined}
           t={t}
         />
       </div>

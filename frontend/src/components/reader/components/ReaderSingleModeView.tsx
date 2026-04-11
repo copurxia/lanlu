@@ -5,7 +5,7 @@ import { MemoizedImage, MemoizedVideo } from '@/components/reader/components/Mem
 import { ReaderAudioStage } from '@/components/reader/components/ReaderAudioStage';
 import { getTapTurnAction } from '@/components/reader/hooks/useReaderInteractionHandlers';
 import { getHtmlSpreadMetrics, getHtmlSpreadSlotOffset } from '@/components/reader/utils/html-spread';
-import type { PageInfo } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 
@@ -99,6 +99,21 @@ export function ReaderSingleModeView({
     !isHtmlSpreadView &&
     !(splitCoverMode && currentPage === 0) &&
     currentPage + 1 < pages.length;
+
+  const getPageUrl = useCallback((pageIndex: number): string => {
+    return ArchiveService.getResolvedPageUrl(pages[pageIndex]);
+  }, [pages]);
+
+  const getPageMetadata = useCallback((pageIndex: number) => {
+    return ArchiveService.getPageDisplayMetadata(pages[pageIndex]);
+  }, [pages]);
+
+  const getPageTitle = useCallback((pageIndex: number, fallbackPageNumber: number): string => {
+    return (
+      ArchiveService.getPageDisplayTitle(pages[pageIndex]) ||
+      t('reader.pageAlt').replace('{page}', String(fallbackPageNumber))
+    );
+  }, [pages, t]);
 
   useEffect(() => {
     const el = spreadViewportRef.current;
@@ -334,7 +349,7 @@ export function ReaderSingleModeView({
 	                    ref={(el) => {
 	                      imageRefs.current[currentPage] = el;
 	                    }}
-	                    src={cachedPages[currentPage] || pages[currentPage]?.url}
+	                    src={cachedPages[currentPage] || getPageUrl(currentPage)}
 	                    alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
 	                    decoding="async"
 	                    loading="eager"
@@ -351,8 +366,9 @@ export function ReaderSingleModeView({
 	                      imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
 	                      registerImageMeta(currentPage, img);
 	                      onImageLoaded(currentPage);
-	                      if (!cachedPages[currentPage] && pages[currentPage]) {
-	                        onCacheImage(pages[currentPage].url, currentPage);
+	                      const pageUrl = getPageUrl(currentPage);
+	                      if (!cachedPages[currentPage] && pageUrl) {
+	                        onCacheImage(pageUrl, currentPage);
 	                      }
 	                    }}
 	                    onError={() => onImageError(currentPage)}
@@ -368,7 +384,7 @@ export function ReaderSingleModeView({
 	                    ref={(el) => {
 	                      imageRefs.current[currentPage + 1] = el;
 	                    }}
-	                    src={cachedPages[currentPage + 1] || pages[currentPage + 1]?.url}
+	                    src={cachedPages[currentPage + 1] || getPageUrl(currentPage + 1)}
 	                    alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
 	                    decoding="async"
 	                    loading="eager"
@@ -385,8 +401,9 @@ export function ReaderSingleModeView({
 	                      imageRequestUrls.current[currentPage + 1] = img.currentSrc || img.src;
 	                      registerImageMeta(currentPage + 1, img);
 	                      onImageLoaded(currentPage + 1);
-	                      if (!cachedPages[currentPage + 1] && pages[currentPage + 1]) {
-	                        onCacheImage(pages[currentPage + 1].url, currentPage + 1);
+	                      const pageUrl = getPageUrl(currentPage + 1);
+	                      if (!cachedPages[currentPage + 1] && pageUrl) {
+	                        onCacheImage(pageUrl, currentPage + 1);
 	                      }
 	                    }}
 	                    onError={() => onImageError(currentPage + 1)}
@@ -407,7 +424,7 @@ export function ReaderSingleModeView({
                 {pages[currentPage]?.type === 'video' ? (
                   <MemoizedVideo
                     key={`page-${currentPage}`}
-                    src={pages[currentPage].url}
+                    src={getPageUrl(currentPage)}
                     ref={(el) => {
                       videoRefs.current[currentPage] = el;
                     }}
@@ -435,14 +452,12 @@ export function ReaderSingleModeView({
                 ) : pages[currentPage]?.type === 'audio' ? (
                   <ReaderAudioStage
                     title={
-                      pages[currentPage]?.metadata?.title ||
-                      pages[currentPage]?.title ||
-                      t('reader.pageAlt').replace('{page}', String(currentPage + 1))
+                      getPageTitle(currentPage, currentPage + 1)
                     }
-                    description={pages[currentPage]?.metadata?.description}
-                    thumb={pages[currentPage]?.metadata?.thumb}
-                    lyricsAssetId={pages[currentPage]?.metadata?.lyrics_asset_id}
-                    audioUrl={pages[currentPage].url}
+                    description={getPageMetadata(currentPage)?.description}
+                    thumb={getPageMetadata(currentPage)?.thumb}
+                    lyricsAssetId={getPageMetadata(currentPage)?.lyrics_asset_id}
+                    audioUrl={getPageUrl(currentPage)}
                     audioRef={(el) => {
                       videoRefs.current[currentPage] = el;
                     }}
@@ -505,7 +520,7 @@ export function ReaderSingleModeView({
 	                          ref={(el) => {
 	                            imageRefs.current[currentPage] = el;
 	                          }}
-	                          src={cachedPages[currentPage] || pages[currentPage]?.url}
+	                          src={cachedPages[currentPage] || getPageUrl(currentPage)}
 	                          alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
 	                          width={currentMeta.w}
 	                          height={currentMeta.h}
@@ -528,8 +543,9 @@ export function ReaderSingleModeView({
 	                            imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
 	                            registerImageMeta(currentPage, img);
 	                            onImageLoaded(currentPage);
-	                            if (!cachedPages[currentPage] && pages[currentPage]) {
-	                              onCacheImage(pages[currentPage].url, currentPage);
+	                            const pageUrl = getPageUrl(currentPage);
+	                            if (!cachedPages[currentPage] && pageUrl) {
+	                              onCacheImage(pageUrl, currentPage);
 	                            }
 	                          }}
 	                          onError={() => onImageError(currentPage)}
@@ -544,7 +560,7 @@ export function ReaderSingleModeView({
 	                            ref={(el) => {
 	                              imageRefs.current[currentPage] = el;
 	                            }}
-	                            src={cachedPages[currentPage] || pages[currentPage]?.url}
+	                            src={cachedPages[currentPage] || getPageUrl(currentPage)}
 	                            alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
 	                            decoding="async"
 	                            loading="eager"
@@ -577,8 +593,9 @@ export function ReaderSingleModeView({
 	                              imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
 	                              registerImageMeta(currentPage, img);
 	                              onImageLoaded(currentPage);
-	                              if (!cachedPages[currentPage] && pages[currentPage]) {
-	                                onCacheImage(pages[currentPage].url, currentPage);
+	                              const pageUrl = getPageUrl(currentPage);
+	                              if (!cachedPages[currentPage] && pageUrl) {
+	                                onCacheImage(pageUrl, currentPage);
 	                              }
 	                            }}
 	                            onError={() => onImageError(currentPage)}
@@ -601,7 +618,7 @@ export function ReaderSingleModeView({
                   {pages[currentPage + 1]?.type === 'video' ? (
                     <MemoizedVideo
                       key={`page-${currentPage + 1}`}
-                      src={pages[currentPage + 1].url}
+                      src={getPageUrl(currentPage + 1)}
                       ref={(el) => {
                         videoRefs.current[currentPage + 1] = el;
                       }}
@@ -623,14 +640,12 @@ export function ReaderSingleModeView({
                   ) : pages[currentPage + 1]?.type === 'audio' ? (
                     <ReaderAudioStage
                       title={
-                        pages[currentPage + 1]?.metadata?.title ||
-                        pages[currentPage + 1]?.title ||
-                        t('reader.pageAlt').replace('{page}', String(currentPage + 2))
+                        getPageTitle(currentPage + 1, currentPage + 2)
                       }
-                      description={pages[currentPage + 1]?.metadata?.description}
-                      thumb={pages[currentPage + 1]?.metadata?.thumb}
-                      lyricsAssetId={pages[currentPage + 1]?.metadata?.lyrics_asset_id}
-                      audioUrl={pages[currentPage + 1].url}
+                      description={getPageMetadata(currentPage + 1)?.description}
+                      thumb={getPageMetadata(currentPage + 1)?.thumb}
+                      lyricsAssetId={getPageMetadata(currentPage + 1)?.lyrics_asset_id}
+                      audioUrl={getPageUrl(currentPage + 1)}
                       audioRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;
                       }}
@@ -653,7 +668,7 @@ export function ReaderSingleModeView({
 	                      ref={(el) => {
 	                        imageRefs.current[currentPage + 1] = el;
 	                      }}
-	                      src={cachedPages[currentPage + 1] || pages[currentPage + 1]?.url}
+	                      src={cachedPages[currentPage + 1] || getPageUrl(currentPage + 1)}
 	                      alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
 	                      decoding="async"
 	                      loading="eager"
@@ -676,8 +691,9 @@ export function ReaderSingleModeView({
 	                        imageRequestUrls.current[currentPage + 1] = img.currentSrc || img.src;
 	                        registerImageMeta(currentPage + 1, img);
 	                        onImageLoaded(currentPage + 1);
-	                        if (!cachedPages[currentPage + 1] && pages[currentPage + 1]) {
-	                          onCacheImage(pages[currentPage + 1].url, currentPage + 1);
+	                        const pageUrl = getPageUrl(currentPage + 1);
+	                        if (!cachedPages[currentPage + 1] && pageUrl) {
+	                          onCacheImage(pageUrl, currentPage + 1);
 	                        }
 	                      }}
 	                      onError={() => onImageError(currentPage + 1)}
