@@ -11,6 +11,104 @@ import lanlu.contexts.system.infrastructure.persistence.*
 import lanlu.contexts.system.application.*
 import lanlu.shared.utils.*
 
+class SystemSettingUpdateReq <: JsonDeserializable<SystemSettingUpdateReq> {
+    var key: String = ""
+    var value: String = ""
+
+    private static func readValueAsString(r: JsonReader): String {
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(BeginArray) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(_) =>
+                return r.readValue<String>()
+            case None =>
+                return ""
+        }
+    }
+
+    public static func fromJson(r: JsonReader): SystemSettingUpdateReq {
+        let req = SystemSettingUpdateReq()
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "key" => req.key = r.readValue<String>().trimAscii()
+                            case "value" => req.value = readValueAsString(r)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => throw Exception("invalid json")
+            }
+        }
+        return req
+    }
+}
+
+class SystemSettingsBatchUpdateReq <: JsonDeserializable<SystemSettingsBatchUpdateReq> {
+    var settings: HashMap<String, String> = HashMap<String, String>()
+
+    private static func readValueAsString(r: JsonReader): String {
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(BeginArray) =>
+                let bytes = r.readValueBytes()
+                return String.fromUtf8(bytes)
+            case Some(_) =>
+                return r.readValue<String>()
+            case None =>
+                return ""
+        }
+    }
+
+    private static func readSettingsObject(r: JsonReader): HashMap<String, String> {
+        var settingsMap = HashMap<String, String>()
+        match (r.peek()) {
+            case Some(BeginObject) =>
+                r.startObject()
+                while (r.peek() != EndObject) {
+                    let k = r.readName()
+                    settingsMap[k] = readValueAsString(r)
+                }
+                r.endObject()
+            case _ =>
+                r.skip()
+        }
+        return settingsMap
+    }
+
+    public static func fromJson(r: JsonReader): SystemSettingsBatchUpdateReq {
+        let req = SystemSettingsBatchUpdateReq()
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "settings" => req.settings = readSettingsObject(r)
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => throw Exception("invalid json")
+            }
+        }
+        return req
+    }
+}
+
 /**
  * 系统设置控制器
  */
@@ -47,9 +145,9 @@ public class SystemSettingsController {
                 return
             }
 
-            // 解析JSON（简化实现）
-            let key = extractJsonValue(body, "key")
-            let value = extractJsonValue(body, "value")
+            let req = JsonCodec.decode<SystemSettingUpdateReq>(body)
+            let key = req.key
+            let value = req.value
 
             if (key.size == 0) {
                 ctx.status(400)
@@ -89,16 +187,8 @@ public class SystemSettingsController {
                 return
             }
 
-            // 解析JSON（简化实现）
-            let settingsJson = extractJsonObject(body, "settings")
-            if (settingsJson.size == 0) {
-                ctx.status(400)
-                ctx.json("{\"success\":false,\"message\":\"设置数据不能为空\"}")
-                return
-            }
-
-            // 解析设置键值对
-            var settingsMap = parseSettingsObject(settingsJson)
+            let req = JsonCodec.decode<SystemSettingsBatchUpdateReq>(body)
+            let settingsMap = req.settings
             if (settingsMap.size == 0) {
                 ctx.status(400)
                 ctx.json("{\"success\":false,\"message\":\"设置数据格式不正确\"}")
@@ -188,114 +278,4 @@ public class SystemSettingsController {
         return String.fromUtf8(readToEnd(out))
     }
 
-    /**
-     * 辅助方法：从JSON字符串提取值
-     */
-    private static func extractJsonValue(json: String, key: String): String {
-        if (json.size == 0) {
-            return ""
-        }
-        
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(json.rawData()) }
-            let r = JsonReader(buf)
-
-            match (r.peek()) {
-                case Some(BeginObject) =>
-                    r.startObject()
-                    while (r.peek() != EndObject) {
-                        let n = r.readName()
-                        if (n == key) {
-                            return r.readValue<String>()
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
-                case _ => return ""
-            }
-        } catch (e: Exception) {
-            return ""
-        }
-        
-        return ""
-    }
-    
-    /**
-     * 辅助方法：从JSON字符串中提取对象
-     */
-    private static func extractJsonObject(json: String, key: String): String {
-        if (json.size == 0) {
-            return ""
-        }
-        
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(json.rawData()) }
-            let r = JsonReader(buf)
-
-            match (r.peek()) {
-                case Some(BeginObject) =>
-                    r.startObject()
-                    while (r.peek() != EndObject) {
-                        let n = r.readName()
-                        if (n == key) {
-                            let bytes = r.readValueBytes()
-                            return String.fromUtf8(bytes)
-                        } else {
-                            r.skip()
-                        }
-                    }
-                    r.endObject()
-                case _ => return ""
-            }
-        } catch (e: Exception) {
-            return ""
-        }
-        
-        return ""
-    }
-    
-    /**
-     * 辅助方法：解析设置对象为键值对
-     */
-    private static func parseSettingsObject(settingsJson: String): HashMap<String, String> {
-        var settingsMap = HashMap<String, String>()
-        
-        if (settingsJson.size == 0) {
-            return settingsMap
-        }
-        
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(settingsJson.rawData()) }
-            let r = JsonReader(buf)
-
-            match (r.peek()) {
-                case Some(BeginObject) =>
-                    r.startObject()
-                    while (r.peek() != EndObject) {
-                        let k = r.readName()
-                        match (r.peek()) {
-                            case Some(BeginObject) =>
-                                let bytes = r.readValueBytes()
-                                settingsMap[k] = String.fromUtf8(bytes)
-                            case Some(BeginArray) =>
-                                let bytes = r.readValueBytes()
-                                settingsMap[k] = String.fromUtf8(bytes)
-                            case Some(_) =>
-                                settingsMap[k] = r.readValue<String>()
-                            case None => break
-                        }
-                    }
-                    r.endObject()
-                case _ => return settingsMap
-            }
-        } catch (_: Exception) {
-            return settingsMap
-        }
-        
-        return settingsMap
-    }
 }
