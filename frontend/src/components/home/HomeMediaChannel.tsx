@@ -25,9 +25,10 @@ import type { Tankoubon } from '@/types/tankoubon';
 
 const CHANNEL_PREVIEW_LIMIT = 9;
 const CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT = 24;
-const CHANNEL_PREVIEW_BATCH_INTERVAL_MS = 180;
 const CHANNEL_PREVIEW_INTERSECTION_MARGIN = '0px 0px';
+const CHANNEL_PREVIEW_INSERT_TIMEOUT_MS = 1200;
 const channelPreviewAspectRatioCache = new Map<string, number>();
+const channelPreviewMediaWarmCache = new Set<string>();
 const CHANNEL_PREVIEW_FILE_PARAMS = {
   limit: CHANNEL_PREVIEW_SOURCE_SCAN_LIMIT,
   offset: 0,
@@ -177,6 +178,47 @@ async function loadChannelPreviewSources(archiveId: string): Promise<ChannelPrev
     .slice(0, CHANNEL_PREVIEW_LIMIT);
 }
 
+function preloadChannelPreviewImage(src: string): Promise<void> {
+  if (!src) return Promise.resolve();
+  if (channelPreviewMediaWarmCache.has(src)) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    let settled = false;
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      image.onload = null;
+      image.onerror = null;
+      resolve();
+    };
+
+    const markLoaded = () => {
+      channelPreviewMediaWarmCache.add(src);
+      finish();
+    };
+
+    image.onload = () => {
+      if (typeof image.decode !== 'function') {
+        markLoaded();
+        return;
+      }
+      void image.decode().then(markLoaded).catch(markLoaded);
+    };
+    image.onerror = finish;
+    image.src = src;
+
+    if (image.complete) {
+      if (typeof image.decode !== 'function') {
+        markLoaded();
+        return;
+      }
+      void image.decode().then(markLoaded).catch(markLoaded);
+    }
+  });
+}
+
 const ChannelPreviewTile = memo(function ChannelPreviewTile({
   item,
   onMeasure,
@@ -261,7 +303,6 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   loading,
   onMeasure,
   placeholderVisible,
-  ready,
 }: {
   contentWidth: number;
   emptyLabel: string;
@@ -269,7 +310,6 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   loading: boolean;
   onMeasure: (cacheKey: string, aspectRatio: number) => void;
   placeholderVisible: boolean;
-  ready: boolean;
 }) {
   const [videoReadyMap, setVideoReadyMap] = useState<Record<string, boolean>>({});
   const itemIdsKey = useMemo(() => items.map((item) => item.id).join('|'), [items]);
@@ -294,7 +334,7 @@ const ChannelPreviewMedia = memo(function ChannelPreviewMedia({
   }, []);
 
   if (placeholderVisible) {
-    return <FeedPreviewPlaceholder className="aspect-16/10 w-full rounded-none" label={emptyLabel} />;
+    return <FeedPreviewPlaceholder className="aspect-16/10 w-full rounded-none" />;
   }
 
   return (
@@ -447,7 +487,7 @@ function HomeMediaChannelCard({
   const { t } = useLanguage();
   const [previewLayoutVersion, setPreviewLayoutVersion] = useState(0);
   const [contentExpanded, setContentExpanded] = useState(false);
-  const [revealedPreviewCount, setRevealedPreviewCount] = useState(0);
+  const [previewGateOpen, setPreviewGateOpen] = useState(false);
   const layoutFlushFrameRef = useRef<number | null>(null);
   const {
     items: previewSources,
@@ -487,35 +527,49 @@ function HomeMediaChannelCard({
   }, []);
 
   useEffect(() => {
-    setRevealedPreviewCount(0);
+    setPreviewGateOpen(false);
   }, [previewArchiveId, previewSourceIdsKey]);
 
   useEffect(() => {
-    if (!previewReady || previewSources.length === 0) return;
-
     let cancelled = false;
-    let timeoutId: number | null = null;
-    let nextCount = 0;
-
-    const revealNext = () => {
-      if (cancelled) return;
-
-      nextCount = Math.min(previewSources.length, nextCount + 1);
-      startTransition(() => {
-        setRevealedPreviewCount(nextCount);
-      });
-
-      if (nextCount >= previewSources.length) return;
-      timeoutId = window.setTimeout(revealNext, CHANNEL_PREVIEW_BATCH_INTERVAL_MS);
+    if (!previewReady) return () => {
+      cancelled = true;
     };
 
-    timeoutId = window.setTimeout(revealNext, 0);
+    if (previewSources.length === 0) {
+      setPreviewGateOpen(true);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    let gateOpened = false;
+    const openGate = () => {
+      if (cancelled || gateOpened) return;
+      gateOpened = true;
+      startTransition(() => {
+        setPreviewGateOpen(true);
+      });
+    };
+
+    const timeoutId = window.setTimeout(openGate, CHANNEL_PREVIEW_INSERT_TIMEOUT_MS);
+    const preloadTasks = previewSources
+      .map((item) => {
+        if (item.mediaKind === 'video') return null;
+        return preloadChannelPreviewImage(item.src);
+      })
+      .filter((task): task is Promise<void> => task !== null);
+
+    void Promise.all(preloadTasks)
+      .then(openGate)
+      .catch(openGate)
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+      });
 
     return () => {
       cancelled = true;
-      if (timeoutId != null) {
-        window.clearTimeout(timeoutId);
-      }
+      window.clearTimeout(timeoutId);
     };
   }, [previewReady, previewSourceIdsKey, previewSources.length]);
 
@@ -567,8 +621,8 @@ function HomeMediaChannelCard({
               };
             })
           : [];
-        const visiblePreviewItems = previewItems.slice(0, revealedPreviewCount);
-        const showPreviewPlaceholder = Boolean(previewArchiveId) && (!previewReady || (previewItems.length > 0 && revealedPreviewCount === 0));
+        const visiblePreviewItems = previewGateOpen ? previewItems : [];
+        const showPreviewPlaceholder = Boolean(previewArchiveId) && (!previewReady || (previewItems.length > 0 && !previewGateOpen));
 
         void previewLayoutVersion;
 
@@ -662,7 +716,6 @@ function HomeMediaChannelCard({
                       emptyLabel={displayTitle || author}
                       onMeasure={handleMeasurePreview}
                       placeholderVisible={showPreviewPlaceholder}
-                      ready={previewReady && visiblePreviewItems.length > 0}
                     />
                   </button>
 
