@@ -61,6 +61,8 @@ export function ReaderWebtoonModeView({
   onDoubleClick,
   onImageDragStart,
   onVideoClick,
+  onVideoEnded,
+  showToolbar,
   t,
 }: {
   enabled: boolean;
@@ -69,7 +71,7 @@ export function ReaderWebtoonModeView({
   sidebarOpen: boolean;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   pages: ReaderWebtoonPage[];
-  currentSubtitleIndexByPageIndex: Record<number, number>;
+  currentSubtitleIndexByPageIndex: Record<number, number[]>;
   finishedId: string | null;
   finishedTitle: string;
   finishedCoverAssetId?: number;
@@ -101,6 +103,8 @@ export function ReaderWebtoonModeView({
   onDoubleClick: (e: React.MouseEvent) => void;
   onImageDragStart: (e: React.DragEvent) => void;
   onVideoClick?: () => void;
+  onVideoEnded?: (pageIndex: number) => void;
+  showToolbar?: boolean;
   t: (key: string) => string;
 }) {
   if (!enabled) return null;
@@ -189,11 +193,10 @@ export function ReaderWebtoonModeView({
                     const pageUrl = ArchiveService.getResolvedPageUrl(page);
                     const pageMetadata = ArchiveService.getPageDisplayMetadata(page);
                     const subtitleAttachments = ArchiveService.getSubtitleAttachments(pageMetadata);
-                    const subtitleIndex = currentSubtitleIndexByPageIndex[actualIndex] ?? -1;
-                    const activeSubtitleAttachment =
-                      subtitleIndex >= 0 && subtitleIndex < subtitleAttachments.length
-                        ? subtitleAttachments[subtitleIndex]
-                        : undefined;
+                    const subtitleIndexes = currentSubtitleIndexByPageIndex[actualIndex] ?? [];
+                    const activeSubtitleAttachments = subtitleIndexes
+                      .filter((idx) => idx >= 0 && idx < subtitleAttachments.length)
+                      .map((idx) => subtitleAttachments[idx]);
                     const pageTitle =
                       ArchiveService.getPageDisplayTitle(page) ||
                       t('reader.pageAlt').replace('{page}', String(actualIndex + 1));
@@ -233,8 +236,9 @@ export function ReaderWebtoonModeView({
                           videoRef={(el) => {
                             videoRefs.current[actualIndex] = el;
                           }}
-                          subtitleAssetId={activeSubtitleAttachment?.asset_id}
-                          subtitleKind={activeSubtitleAttachment?.kind}
+                          subtitleAssetIds={activeSubtitleAttachments.map((att) => att.asset_id).filter((id): id is number => id !== undefined)}
+                          subtitleKinds={activeSubtitleAttachments.map((att) => att.kind).filter((kind): kind is string => kind !== undefined)}
+                          showToolbar={showToolbar}
                           className="object-contain select-none"
                           style={{
                             maxWidth: '100%',
@@ -248,6 +252,7 @@ export function ReaderWebtoonModeView({
                           onLoadedData={() => onImageLoaded(actualIndex)}
                           onError={() => onImageError(actualIndex)}
                           onVideoClick={onVideoClick}
+                          onEnded={() => onVideoEnded?.(actualIndex)}
                         />
                       ) : page.type === 'audio' ? (
                         <ReaderAudioStage
@@ -255,7 +260,7 @@ export function ReaderWebtoonModeView({
                           description={pageMetadata?.description}
                           thumb={pageMetadata?.thumb}
                           lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(pageMetadata)?.asset_id}
-                          subtitleAttachmentAssetId={activeSubtitleAttachment?.asset_id}
+                          subtitleAttachmentAssetId={activeSubtitleAttachments[0]?.asset_id}
                           audioUrl={pageUrl}
                           audioRef={(el) => {
                             videoRefs.current[actualIndex] = el;

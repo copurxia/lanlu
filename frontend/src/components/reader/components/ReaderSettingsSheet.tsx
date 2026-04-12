@@ -14,7 +14,8 @@ import {
 import { useLanguage } from '@/contexts/LanguageContext';
 import { TagService } from '@/lib/services/tag-service';
 import { stripNamespace } from '@/lib/utils/tag-utils';
-import { Settings } from 'lucide-react';
+import { cn } from '@/lib/utils/utils';
+import { Settings, Check } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import type { ArchiveMetadata } from '@/types/archive';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -51,7 +52,7 @@ export function ReaderSettingsSheet({
   activeMediaSourceIndex,
   onMediaSourceChange,
   subtitleOptions,
-  activeSubtitleIndex,
+  activeSubtitleIndexes,
   onSubtitleChange,
   t,
 }: {
@@ -70,7 +71,7 @@ export function ReaderSettingsSheet({
   activeMediaSourceIndex?: number;
   onMediaSourceChange?: (value: number) => void;
   subtitleOptions?: ReaderMediaSourceOption[];
-  activeSubtitleIndex?: number;
+  activeSubtitleIndexes?: number[];
   onSubtitleChange?: (value: number) => void;
   t: (key: string) => string;
 }) {
@@ -324,32 +325,26 @@ export function ReaderSettingsSheet({
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium">Subtitle</span>
                 <span className="text-xs text-muted-foreground">
-                  {(activeSubtitleIndex ?? -1) >= 0 ? `${(activeSubtitleIndex ?? 0) + 1}/${subtitleOptions.length}` : 'Off'}
+                  {(activeSubtitleIndexes?.length ?? 0) > 0 ? `${activeSubtitleIndexes?.length || 0}/${subtitleOptions.length}` : 'Off'}
                 </span>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button
-                  key="settings-subtitle-off"
-                  type="button"
-                  variant={(activeSubtitleIndex ?? -1) < 0 ? 'default' : 'outline'}
-                  size="sm"
-                  className="rounded-lg"
-                  onClick={() => onSubtitleChange?.(-1)}
-                >
-                  Off
-                </Button>
-                {subtitleOptions.map((option) => (
-                  <Button
-                    key={`settings-subtitle-${option.value}`}
-                    type="button"
-                    variant={activeSubtitleIndex === option.value ? 'default' : 'outline'}
-                    size="sm"
-                    className="rounded-lg"
-                    onClick={() => onSubtitleChange?.(option.value)}
-                  >
-                    <span className="max-w-[14rem] truncate">{option.label}</span>
-                  </Button>
-                ))}
+                {subtitleOptions.map((option) => {
+                  const isSelected = (activeSubtitleIndexes ?? []).includes(option.value);
+                  return (
+                    <Button
+                      key={`settings-subtitle-${option.value}`}
+                      type="button"
+                      variant={isSelected ? 'default' : 'outline'}
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={() => onSubtitleChange?.(option.value)}
+                    >
+                      <Check className={cn("w-3 h-3 mr-1", isSelected ? "opacity-100" : "opacity-0")} />
+                      <span className="max-w-[14rem] truncate">{option.label}</span>
+                    </Button>
+                  );
+                })}
               </div>
             </div>
           ) : null}

@@ -3,6 +3,7 @@ import type React from 'react';
 import { MemoizedVideo } from '@/components/reader/components/MemoizedMedia';
 import { ArchiveService } from '@/lib/services/archive-service';
 import { apiClient } from '@/lib/api';
+import { cn } from '@/lib/utils/utils';
 
 type SubtitleCue = {
   start: number;
@@ -134,49 +135,64 @@ function getActiveSubtitle(cues: SubtitleCue[], currentTime: number): SubtitleCu
 
 export function ReaderVideoStage({
   src,
-  subtitleAssetId,
-  subtitleKind,
+  subtitleAssetIds,
+  subtitleKinds,
+  showToolbar,
   className,
   style,
   videoRef,
   onLoadedData,
   onError,
   onVideoClick,
+  onEnded,
 }: {
   src: string;
-  subtitleAssetId?: number;
-  subtitleKind?: string;
+  subtitleAssetIds?: number[];
+  subtitleKinds?: string[];
+  showToolbar?: boolean;
   className?: string;
   style?: React.CSSProperties;
   videoRef: (el: HTMLVideoElement | null) => void;
   onLoadedData?: () => void;
   onError?: () => void;
   onVideoClick?: () => void;
+  onEnded?: () => void;
 }) {
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [subtitleText, setSubtitleText] = useState('');
+  const [subtitleTexts, setSubtitleTexts] = useState<Map<number, string>>(new Map());
 
   useEffect(() => {
     let cancelled = false;
-    const assetId = Number(subtitleAssetId || 0);
-    if (!assetId || assetId <= 0) {
-      setSubtitleText('');
+    const assetIds = (subtitleAssetIds || []).filter((id) => id > 0);
+    
+    if (assetIds.length === 0) {
+      setSubtitleTexts(new Map());
       return;
     }
 
-    loadSubtitleText(assetId)
-      .then((text) => {
-        if (!cancelled) setSubtitleText(text);
+    // Load all subtitle texts
+    Promise.all(
+      assetIds.map(async (assetId) => {
+        const text = await loadSubtitleText(assetId);
+        return { assetId, text };
       })
-      .catch(() => {
-        if (!cancelled) setSubtitleText('');
-      });
+    ).then((results) => {
+      if (!cancelled) {
+        const newMap = new Map<number, string>();
+        results.forEach(({ assetId, text }) => {
+          newMap.set(assetId, text);
+        });
+        setSubtitleTexts(newMap);
+      }
+    }).catch(() => {
+      if (!cancelled) setSubtitleTexts(new Map());
+    });
 
     return () => {
       cancelled = true;
     };
-  }, [subtitleAssetId]);
+  }, [subtitleAssetIds]);
 
   useEffect(() => {
     if (!videoEl) {
@@ -197,12 +213,31 @@ export function ReaderVideoStage({
     };
   }, [videoEl]);
 
-  const cues = useMemo(() => {
-    if (!subtitleText.trim()) return [];
-    return parseSubtitleText(subtitleText, subtitleKind);
-  }, [subtitleKind, subtitleText]);
+  const allCues = useMemo(() => {
+    if (subtitleTexts.size === 0) return [];
+    
+    const cuesBySubtitle: Array<{ assetId: number; cues: SubtitleCue[] }> = [];
+    
+    subtitleTexts.forEach((text, assetId) => {
+      if (text.trim()) {
+        const kindIndex = (subtitleAssetIds || []).indexOf(assetId);
+        const kind = subtitleKinds?.[kindIndex];
+        const cues = parseSubtitleText(text, kind);
+        cuesBySubtitle.push({ assetId, cues });
+      }
+    });
+    
+    return cuesBySubtitle;
+  }, [subtitleTexts, subtitleAssetIds, subtitleKinds]);
 
-  const activeCue = useMemo(() => getActiveSubtitle(cues, currentTime), [cues, currentTime]);
+  const activeCues = useMemo(() => {
+    const active: SubtitleCue[] = [];
+    for (const { cues } of allCues) {
+      const cue = getActiveSubtitle(cues, currentTime);
+      if (cue) active.push(cue);
+    }
+    return active;
+  }, [allCues, currentTime]);
 
   return (
     <div className="relative flex h-full w-full max-h-full max-w-full items-center justify-center">
@@ -217,11 +252,24 @@ export function ReaderVideoStage({
         onLoadedData={onLoadedData}
         onError={onError}
         onVideoClick={onVideoClick}
+        onEnded={onEnded}
       />
-      {activeCue ? (
-        <div className="pointer-events-none absolute inset-x-4 bottom-4 flex justify-center">
-          <div className="max-w-[92%] rounded-xl bg-black/68 px-3 py-2 text-center text-sm font-medium leading-6 text-white shadow-lg backdrop-blur-sm whitespace-pre-line">
-            {activeCue.text}
+      {activeCues.length > 0 ? (
+        <div 
+          className={cn(
+            "pointer-events-none absolute inset-x-4 flex justify-center transition-all duration-250 ease-out",
+            showToolbar ? "bottom-20" : "bottom-4"
+          )}
+        >
+          <div className="max-w-[92%] space-y-1">
+            {activeCues.map((cue, index) => (
+              <div
+                key={`subtitle-${index}`}
+                className="rounded-xl bg-black/68 px-3 py-2 text-center text-sm font-medium leading-6 text-white shadow-lg backdrop-blur-sm whitespace-pre-line"
+              >
+                {cue.text}
+              </div>
+            ))}
           </div>
         </div>
       ) : null}

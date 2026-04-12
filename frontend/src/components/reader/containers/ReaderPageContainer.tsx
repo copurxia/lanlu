@@ -22,6 +22,7 @@ import { useMediaInfoOverlayLines } from '@/components/reader/hooks/useMediaInfo
 import { useReaderProgressTracking } from '@/components/reader/hooks/useReaderProgressTracking';
 import { getTapTurnAction, useReaderInteractionHandlers } from '@/components/reader/hooks/useReaderInteractionHandlers';
 import { useReaderAutoPlay } from '@/components/reader/hooks/useReaderAutoPlay';
+import { useReaderVideoAutoNext } from '@/components/reader/hooks/useReaderVideoAutoNext';
 import { useReaderImageLoading } from '@/components/reader/hooks/useReaderImageLoading';
 import { useReaderSidebar } from '@/components/reader/hooks/useReaderSidebar';
 import { useReaderToolbarAutoHide } from '@/components/reader/hooks/useReaderToolbarAutoHide';
@@ -312,7 +313,7 @@ function ReaderContent() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [expandedProgressLaneId, setExpandedProgressLaneId] = useState<string | null>(null);
   const [currentSourceIndexByPageIndex, setCurrentSourceIndexByPageIndex] = useState<Record<number, number>>({});
-  const [currentSubtitleIndexBySourceKey, setCurrentSubtitleIndexBySourceKey] = useState<Record<string, number>>({});
+  const [currentSubtitleIndexBySourceKey, setCurrentSubtitleIndexBySourceKey] = useState<Record<string, number[]>>({});
   const subtitlePreferenceRef = useRef<{ language: string; name: string } | null>(null);
   const [videoTimelineByPageIndex, setVideoTimelineByPageIndex] = useState<
     Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number; buffered: number }>
@@ -569,11 +570,11 @@ function ReaderContent() {
   );
 
   const currentSubtitleIndexByPageIndex = useMemo(() => {
-    const out: Record<number, number> = {};
+    const out: Record<number, number[]> = {};
     for (let i = 0; i < effectivePages.length; i += 1) {
       const sourceIndex = currentSourceIndexByPageIndex[i] ?? effectivePages[i]?.defaultSourceIndex ?? 0;
       const key = buildSubtitleSourceKey(i, sourceIndex);
-      out[i] = currentSubtitleIndexBySourceKey[key] ?? -1;
+      out[i] = currentSubtitleIndexBySourceKey[key] ?? [];
     }
     return out;
   }, [currentSourceIndexByPageIndex, currentSubtitleIndexBySourceKey, effectivePages]);
@@ -581,7 +582,7 @@ function ReaderContent() {
   useEffect(() => {
     setCurrentSubtitleIndexBySourceKey((prev) => {
       let changed = false;
-      const next: Record<string, number> = {};
+      const next: Record<string, number[]> = {};
       for (let i = 0; i < effectivePages.length; i += 1) {
         const page = effectivePages[i];
         const sourceIndex = currentSourceIndexByPageIndex[i] ?? page?.defaultSourceIndex ?? 0;
@@ -594,12 +595,11 @@ function ReaderContent() {
           continue;
         }
 
-        let resolved =
-          typeof existing === 'number' && existing >= 0 && existing < subtitleCount
-            ? existing
-            : -1;
+        // Filter existing indexes to keep only valid ones
+        let resolved = (existing || []).filter((idx) => idx >= 0 && idx < subtitleCount);
 
-        if (resolved < 0 && subtitlePreferenceRef.current) {
+        // Auto-select preferred subtitle if none selected
+        if (resolved.length === 0 && subtitlePreferenceRef.current) {
           const preferredLanguage = subtitlePreferenceRef.current.language.trim().toLowerCase();
           const preferredName = subtitlePreferenceRef.current.name.trim().toLowerCase();
           const matchedIndex = subtitleAttachments.findIndex((attachment) => {
@@ -608,12 +608,12 @@ function ReaderContent() {
             return currentLanguage === preferredLanguage && currentName === preferredName;
           });
           if (matchedIndex >= 0) {
-            resolved = matchedIndex;
+            resolved = [matchedIndex];
           }
         }
 
         next[key] = resolved;
-        if (prev[key] !== resolved) changed = true;
+        if (JSON.stringify(prev[key] || []) !== JSON.stringify(resolved)) changed = true;
       }
 
       const prevKeys = Object.keys(prev);
@@ -1628,18 +1628,28 @@ function ReaderContent() {
   );
 
   const handleChangePageSubtitle = useCallback(
-    (pageIndex: number, nextSubtitleIndex: number) => {
+    (pageIndex: number, subtitleIndex: number) => {
       const page = effectivePages[pageIndex];
       const subtitleAttachments = ArchiveService.getSubtitleAttachments(page?.effectiveMetadata || page?.metadata);
       const subtitleCount = subtitleAttachments.length;
       if (!page || subtitleCount <= 0) return;
-      const resolved = nextSubtitleIndex < 0 ? -1 : Math.max(0, Math.min(subtitleCount - 1, nextSubtitleIndex));
+      
       const sourceIndex = currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0;
       const key = buildSubtitleSourceKey(pageIndex, sourceIndex);
-      if ((currentSubtitleIndexBySourceKey[key] ?? -1) === resolved) return;
-
-      if (resolved >= 0) {
-        const selected = subtitleAttachments[resolved];
+      const currentIndexes = currentSubtitleIndexBySourceKey[key] || [];
+      
+      // Toggle subtitle index: remove if exists, add if not exists
+      let nextIndexes: number[];
+      if (currentIndexes.includes(subtitleIndex)) {
+        nextIndexes = currentIndexes.filter((idx) => idx !== subtitleIndex);
+      } else {
+        nextIndexes = [...currentIndexes, subtitleIndex].sort((a, b) => a - b);
+      }
+      
+      // Update preference based on last selected subtitle
+      if (nextIndexes.length > 0) {
+        const lastIndex = nextIndexes[nextIndexes.length - 1];
+        const selected = subtitleAttachments[lastIndex];
         subtitlePreferenceRef.current = {
           language: String(selected?.language || '').trim().toLowerCase(),
           name: String(selected?.name || '').trim().toLowerCase(),
@@ -1648,7 +1658,7 @@ function ReaderContent() {
         subtitlePreferenceRef.current = null;
       }
 
-      setCurrentSubtitleIndexBySourceKey((prev) => ({ ...prev, [key]: resolved }));
+      setCurrentSubtitleIndexBySourceKey((prev) => ({ ...prev, [key]: nextIndexes }));
     },
     [currentSourceIndexByPageIndex, currentSubtitleIndexBySourceKey, effectivePages]
   );
@@ -1944,7 +1954,7 @@ function ReaderContent() {
           }))
         : undefined;
       const activeSourceIndex = pageIndex >= 0 ? currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0 : 0;
-      const activeSubtitleIndex = pageIndex >= 0 ? currentSubtitleIndexByPageIndex[pageIndex] ?? -1 : -1;
+      const activeSubtitleIndexes = pageIndex >= 0 ? currentSubtitleIndexByPageIndex[pageIndex] ?? [] : [];
       const currentTime =
         snapshot?.currentTime ??
         (videoElement && Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0);
@@ -1995,7 +2005,7 @@ function ReaderContent() {
         sourceOptions,
         activeSourceIndex,
         subtitleOptions,
-        activeSubtitleIndex,
+        activeSubtitleIndexes,
         onSourceChange: (nextSourceIndex: number) => handleChangePageSource(pageIndex, nextSourceIndex),
         onSubtitleChange: (nextSubtitleIndex: number) => handleChangePageSubtitle(pageIndex, nextSubtitleIndex),
         onTogglePlay: () => {
@@ -2355,6 +2365,15 @@ function ReaderContent() {
     onNextPage: handleNextPage,
     setAutoPlayMode,
   });
+
+  const { handleVideoEnded } = useReaderVideoAutoNext({
+    currentPage,
+    pagesLength: totalPages,
+    doublePageMode,
+    splitCoverMode,
+    onNextPage: handleNextPage,
+  });
+
   useReaderKeyboardNavigation({
     readingMode,
     onPrevPage: handlePrevPage,
@@ -2589,6 +2608,8 @@ function ReaderContent() {
 	          onDoubleClick={handleDoubleClick}
 	          onImageDragStart={handleImageDragStart}
 	          onVideoClick={handleVideoClick}
+	          onVideoEnded={handleVideoEnded}
+	          showToolbar={toolbar.showToolbar}
 	          t={t}
 	        />
 
@@ -2659,6 +2680,8 @@ function ReaderContent() {
 	          onDoubleClick={handleDoubleClick}
 	          onImageDragStart={handleImageDragStart}
 	          onVideoClick={handleVideoClick}
+	          onVideoEnded={handleVideoEnded}
+	          showToolbar={toolbar.showToolbar}
 	          t={t}
 	        />
       </div>

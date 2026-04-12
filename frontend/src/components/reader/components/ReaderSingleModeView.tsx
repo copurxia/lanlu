@@ -41,6 +41,8 @@ export function ReaderSingleModeView({
   onDoubleClick,
   onImageDragStart,
   onVideoClick,
+  onVideoEnded,
+  showToolbar,
   t,
 }: {
   enabled: boolean;
@@ -49,7 +51,7 @@ export function ReaderSingleModeView({
   tapTurnPageEnabled: boolean;
   longPageEnabled: boolean;
   pages: PageInfo[];
-  currentSubtitleIndexByPageIndex: Record<number, number>;
+  currentSubtitleIndexByPageIndex: Record<number, number[]>;
   cachedPages: string[];
   currentPage: number;
   doublePageMode: boolean;
@@ -70,6 +72,8 @@ export function ReaderSingleModeView({
   onDoubleClick: (e: React.MouseEvent) => void;
   onImageDragStart: (e: React.DragEvent) => void;
   onVideoClick?: () => void;
+  onVideoEnded?: (pageIndex: number) => void;
+  showToolbar?: boolean;
   t: (key: string) => string;
 }) {
   const [imageMeta, setImageMeta] = useState<Record<number, { w: number; h: number; isLong: boolean }>>({});
@@ -111,13 +115,26 @@ export function ReaderSingleModeView({
     return ArchiveService.getPageDisplayMetadata(pages[pageIndex]);
   }, [pages]);
 
-  const getSubtitleAttachment = useCallback((pageIndex: number) => {
+  const getSubtitleAttachments = useCallback((pageIndex: number) => {
     const metadata = getPageMetadata(pageIndex);
-    const attachments = ArchiveService.getSubtitleAttachments(metadata);
-    const currentIndex = currentSubtitleIndexByPageIndex[pageIndex] ?? -1;
-    if (currentIndex < 0 || currentIndex >= attachments.length) return undefined;
-    return attachments[currentIndex];
+    const allAttachments = ArchiveService.getSubtitleAttachments(metadata);
+    const currentIndexes = currentSubtitleIndexByPageIndex[pageIndex] ?? [];
+    return currentIndexes
+      .filter((idx) => idx >= 0 && idx < allAttachments.length)
+      .map((idx) => allAttachments[idx]);
   }, [currentSubtitleIndexByPageIndex, getPageMetadata]);
+
+  const getSubtitleAssetIds = useCallback((pageIndex: number) => {
+    return getSubtitleAttachments(pageIndex)
+      .map((att) => att.asset_id)
+      .filter((id): id is number => id !== undefined);
+  }, [getSubtitleAttachments]);
+
+  const getSubtitleKinds = useCallback((pageIndex: number) => {
+    return getSubtitleAttachments(pageIndex)
+      .map((att) => att.kind)
+      .filter((kind): kind is string => kind !== undefined);
+  }, [getSubtitleAttachments]);
 
   const getPageTitle = useCallback((pageIndex: number, fallbackPageNumber: number): string => {
     return (
@@ -439,8 +456,9 @@ export function ReaderSingleModeView({
                     videoRef={(el) => {
                       videoRefs.current[currentPage] = el;
                     }}
-                    subtitleAssetId={getSubtitleAttachment(currentPage)?.asset_id}
-                    subtitleKind={getSubtitleAttachment(currentPage)?.kind}
+                    subtitleAssetIds={getSubtitleAssetIds(currentPage)}
+                    subtitleKinds={getSubtitleKinds(currentPage)}
+                    showToolbar={showToolbar}
                     className={`
                       ${
                         doublePageMode && !isHtmlSpreadView && !(splitCoverMode && currentPage === 0)
@@ -461,6 +479,7 @@ export function ReaderSingleModeView({
                     onLoadedData={() => onImageLoaded(currentPage)}
                     onError={() => onImageError(currentPage)}
                     onVideoClick={onVideoClick}
+                    onEnded={() => onVideoEnded?.(currentPage)}
                   />
                 ) : pages[currentPage]?.type === 'audio' ? (
                   <ReaderAudioStage
@@ -470,7 +489,7 @@ export function ReaderSingleModeView({
                     description={getPageMetadata(currentPage)?.description}
                     thumb={getPageMetadata(currentPage)?.thumb}
                     lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(getPageMetadata(currentPage))?.asset_id}
-                    subtitleAttachmentAssetId={getSubtitleAttachment(currentPage)?.asset_id}
+                    subtitleAttachmentAssetId={getSubtitleAttachments(currentPage)[0]?.asset_id}
                     audioUrl={getPageUrl(currentPage)}
                     audioRef={(el) => {
                       videoRefs.current[currentPage] = el;
@@ -636,8 +655,9 @@ export function ReaderSingleModeView({
                       videoRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;
                       }}
-                      subtitleAssetId={getSubtitleAttachment(currentPage + 1)?.asset_id}
-                      subtitleKind={getSubtitleAttachment(currentPage + 1)?.kind}
+                      subtitleAssetIds={getSubtitleAssetIds(currentPage + 1)}
+                      subtitleKinds={getSubtitleKinds(currentPage + 1)}
+                      showToolbar={showToolbar}
                       className={`
                         object-cover select-none touch-none
                         w-full h-full
@@ -652,6 +672,7 @@ export function ReaderSingleModeView({
                       onLoadedData={() => onImageLoaded(currentPage + 1)}
                       onError={() => onImageError(currentPage + 1)}
                       onVideoClick={onVideoClick}
+                      onEnded={() => onVideoEnded?.(currentPage + 1)}
                     />
                   ) : pages[currentPage + 1]?.type === 'audio' ? (
                     <ReaderAudioStage
@@ -661,7 +682,7 @@ export function ReaderSingleModeView({
                       description={getPageMetadata(currentPage + 1)?.description}
                       thumb={getPageMetadata(currentPage + 1)?.thumb}
                       lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(getPageMetadata(currentPage + 1))?.asset_id}
-                      subtitleAttachmentAssetId={getSubtitleAttachment(currentPage + 1)?.asset_id}
+                      subtitleAttachmentAssetId={getSubtitleAttachments(currentPage + 1)[0]?.asset_id}
                       audioUrl={getPageUrl(currentPage + 1)}
                       audioRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;

@@ -53,6 +53,7 @@ export const MemoizedVideo = memo(
       onLoadedData,
       onError,
       onVideoClick,
+      onEnded,
     }: {
       src: string;
       className?: string;
@@ -61,6 +62,7 @@ export const MemoizedVideo = memo(
       onLoadedData?: () => void;
       onError?: () => void;
       onVideoClick?: () => void;
+      onEnded?: () => void;
     },
     ref: React.ForwardedRef<HTMLVideoElement>
   ) {
@@ -95,6 +97,7 @@ export const MemoizedVideo = memo(
         style={style}
         onLoadedData={onLoadedData}
         onError={onError}
+        onEnded={onEnded}
         onClick={showNativeControls ? undefined : handleTogglePlay}
         onTouchStart={handleTouchStart}
       />

@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils/utils';
-import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo, Captions } from 'lucide-react';
+import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo, Captions, Check } from 'lucide-react';
 import { ReaderSettingsSheet, type ReaderMediaSourceOption, type ReaderSettingButton } from '@/components/reader/components/ReaderSettingsSheet';
 import type { ArchiveMetadata } from '@/types/archive';
 import { useEffect, useMemo, useState } from 'react';
@@ -33,7 +33,7 @@ export type ReaderProgressLane = {
   activeSourceIndex?: number;
   onSourceChange?: (value: number) => void;
   subtitleOptions?: ReaderMediaSourceOption[];
-  activeSubtitleIndex?: number;
+  activeSubtitleIndexes?: number[];
   onSubtitleChange?: (value: number) => void;
 };
 
@@ -266,7 +266,7 @@ export function ReaderFloatingControls({
                     activeMediaSourceIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSourceIndex : undefined}
                     onMediaSourceChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSourceChange : undefined}
                     subtitleOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.subtitleOptions : undefined}
-                    activeSubtitleIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndex : undefined}
+                    activeSubtitleIndexes={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndexes : undefined}
                     onSubtitleChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSubtitleChange : undefined}
                     t={t}
                   />
@@ -423,33 +423,28 @@ export function ReaderFloatingControls({
                     <div className="flex items-center justify-between gap-3 text-sm font-medium">
                       <span className="text-muted-foreground">Subtitle</span>
                       <span className="text-xs text-muted-foreground">
-                        {resolvedActiveLane.activeSubtitleIndex != null && resolvedActiveLane.activeSubtitleIndex >= 0
-                          ? `${resolvedActiveLane.activeSubtitleIndex + 1}/${resolvedActiveLane.subtitleOptions.length}`
+                        {(resolvedActiveLane.activeSubtitleIndexes?.length ?? 0) > 0
+                          ? `${resolvedActiveLane.activeSubtitleIndexes?.length || 0}/${resolvedActiveLane.subtitleOptions.length}`
                           : 'Off'}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Button
-                        type="button"
-                        variant={(resolvedActiveLane.activeSubtitleIndex ?? -1) < 0 ? 'default' : 'outline'}
-                        size="sm"
-                        className="rounded-lg"
-                        onClick={() => resolvedActiveLane.onSubtitleChange?.(-1)}
-                      >
-                        Off
-                      </Button>
-                      {resolvedActiveLane.subtitleOptions.map((option) => (
-                        <Button
-                          key={`media-subtitle-${option.value}`}
-                          type="button"
-                          variant={resolvedActiveLane.activeSubtitleIndex === option.value ? 'default' : 'outline'}
-                          size="sm"
-                          className="rounded-lg"
-                          onClick={() => resolvedActiveLane.onSubtitleChange?.(option.value)}
-                        >
-                          <span className="max-w-[14rem] truncate">{option.label}</span>
-                        </Button>
-                      ))}
+                      {resolvedActiveLane.subtitleOptions.map((option) => {
+                        const isSelected = (resolvedActiveLane.activeSubtitleIndexes ?? []).includes(option.value);
+                        return (
+                          <Button
+                            key={`media-subtitle-${option.value}`}
+                            type="button"
+                            variant={isSelected ? 'default' : 'outline'}
+                            size="sm"
+                            className="rounded-lg"
+                            onClick={() => resolvedActiveLane.onSubtitleChange?.(option.value)}
+                          >
+                            <Check className={cn("w-3 h-3 mr-1", isSelected ? "opacity-100" : "opacity-0")} />
+                            <span className="max-w-[14rem] truncate">{option.label}</span>
+                          </Button>
+                        );
+                      })}
                     </div>
                   </div>
                 ) : null}
@@ -607,7 +602,7 @@ export function ReaderFloatingControls({
                                 size="sm"
                                 className={cn(
                                   "rounded-full h-8 w-8 p-0 transition-all duration-150 ease-out hover:bg-transparent hover:border-transparent hover:shadow-none hover:text-foreground",
-                                  lane.activeSubtitleIndex != null && lane.activeSubtitleIndex >= 0 ? "text-foreground" : "text-foreground/80"
+                                  (lane.activeSubtitleIndexes?.length ?? 0) > 0 ? "text-foreground" : "text-foreground/80"
                                 )}
                                 title="Switch subtitle"
                               >
@@ -616,27 +611,22 @@ export function ReaderFloatingControls({
                             </PopoverTrigger>
                             <PopoverContent align="end" className="w-72 rounded-xl p-2">
                               <div className="space-y-1">
-                                <Button
-                                  type="button"
-                                  variant={(lane.activeSubtitleIndex ?? -1) < 0 ? 'default' : 'ghost'}
-                                  size="sm"
-                                  className="w-full justify-start rounded-lg"
-                                  onClick={() => lane.onSubtitleChange?.(-1)}
-                                >
-                                  <span className="truncate">Off</span>
-                                </Button>
-                                {lane.subtitleOptions.map((option) => (
-                                  <Button
-                                    key={`${lane.id}-popover-subtitle-${option.value}`}
-                                    type="button"
-                                    variant={lane.activeSubtitleIndex === option.value ? 'default' : 'ghost'}
-                                    size="sm"
-                                    className="w-full justify-start rounded-lg"
-                                    onClick={() => lane.onSubtitleChange?.(option.value)}
-                                  >
-                                    <span className="truncate">{option.label}</span>
-                                  </Button>
-                                ))}
+                                {lane.subtitleOptions.map((option) => {
+                                  const isSelected = (lane.activeSubtitleIndexes ?? []).includes(option.value);
+                                  return (
+                                    <Button
+                                      key={`${lane.id}-popover-subtitle-${option.value}`}
+                                      type="button"
+                                      variant={isSelected ? 'default' : 'ghost'}
+                                      size="sm"
+                                      className="w-full justify-start rounded-lg"
+                                      onClick={() => lane.onSubtitleChange?.(option.value)}
+                                    >
+                                      <Check className={cn("w-4 h-4 mr-2", isSelected ? "opacity-100" : "opacity-0")} />
+                                      <span className="truncate">{option.label}</span>
+                                    </Button>
+                                  );
+                                })}
                               </div>
                             </PopoverContent>
                           </Popover>
@@ -668,7 +658,7 @@ export function ReaderFloatingControls({
           activeMediaSourceIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSourceIndex : undefined}
           onMediaSourceChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSourceChange : undefined}
           subtitleOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.subtitleOptions : undefined}
-          activeSubtitleIndex={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndex : undefined}
+          activeSubtitleIndexes={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndexes : undefined}
           onSubtitleChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSubtitleChange : undefined}
           t={t}
         />
