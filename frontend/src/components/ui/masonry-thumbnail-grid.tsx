@@ -4,6 +4,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Film, FileText, Music } from 'lucide-react';
 import { MemoizedImage } from '@/components/reader/components/MemoizedMedia';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
+import { useVirtualMasonryLayout, type VirtualMasonryLayoutItem } from '@/components/ui/hooks/useVirtualMasonryLayout';
 import type React from 'react';
 import { getPageReleaseAt } from '@/lib/utils/tv-media';
 
@@ -15,12 +16,8 @@ const CONTENT_PADDING_CLASS = 'px-3 pb-2 pt-2';
 const THUMB_CAPTION_HEIGHT_PX = 34;
 
 type ThumbnailLayoutItem = {
-  page: PageInfo;
-  index: number;
-  top: number;
-  left: number;
+  layout: VirtualMasonryLayoutItem<PageInfo>;
   mediaHeight: number;
-  cardHeight: number;
 };
 
 type MasonryThumbnailGridProps = {
@@ -51,6 +48,15 @@ function getPageDisplayThumb(page: PageInfo): string {
 function getPageDisplayDescription(page: PageInfo): string {
   const releaseAt = getPageReleaseAt(page);
   return releaseAt || '';
+}
+
+function getColumnCount(contentWidth: number): number {
+  if (contentWidth < 400) return 2;
+  if (contentWidth < 600) return 3;
+  if (contentWidth < 900) return 4;
+  if (contentWidth < 1200) return 5;
+  if (contentWidth < 1600) return 6;
+  return 7;
 }
 
 export function MasonryThumbnailGrid({
@@ -174,82 +180,40 @@ export function MasonryThumbnailGrid({
     };
   }, [updateViewport]);
 
-  const columns = useMemo(() => {
-    if (contentWidth < 400) return 2;
-    if (contentWidth < 600) return 3;
-    if (contentWidth < 900) return 4;
-    if (contentWidth < 1200) return 5;
-    if (contentWidth < 1600) return 6;
-    return 7;
-  }, [contentWidth]);
-
-  const itemWidth = useMemo(() => {
-    if (columns <= 0) return 0;
-    const totalGaps = GRID_GAP_PX * (columns - 1);
-    const width = Math.floor((contentWidth - totalGaps) / columns);
-    return Math.max(0, width);
-  }, [columns, contentWidth]);
-
-  const gridLayout = useMemo(() => {
-    if (columns <= 0 || itemWidth <= 0) {
-      return { items: [] as ThumbnailLayoutItem[], totalHeight: 0 };
-    }
-
-    const columnHeights = Array.from({ length: columns }, () => 0);
-    const items: ThumbnailLayoutItem[] = [];
-
-    pages.forEach((page, index) => {
+  const gridLayout = useVirtualMasonryLayout({
+    items: pages,
+    containerWidth: contentWidth,
+    scrollTop,
+    viewportHeight,
+    gap: GRID_GAP_PX,
+    overscan: OVERSCAN_PX,
+    getColumns: getColumnCount,
+    getItemKey: getLayoutKey,
+    getItemHeight: (page, index, itemWidth) => {
       const key = getLayoutKey(page, index);
       const aspectRatio = aspectRatios[key] || DEFAULT_ASPECT_RATIO;
       const mediaHeight = Math.max(64, Math.round(itemWidth / Math.max(aspectRatio, 0.05)));
-      const cardHeight = mediaHeight + THUMB_CAPTION_HEIGHT_PX;
-
-      let column = 0;
-      for (let i = 1; i < columnHeights.length; i += 1) {
-        if (columnHeights[i] < columnHeights[column]) {
-          column = i;
-        }
-      }
-
-      const top = columnHeights[column];
-      const left = column * (itemWidth + GRID_GAP_PX);
-      columnHeights[column] += cardHeight + GRID_GAP_PX;
-
-      items.push({
-        page,
-        index,
-        top,
-        left,
-        mediaHeight,
-        cardHeight,
-      });
-    });
-
-    const totalHeight = Math.max(0, ...columnHeights) - (items.length > 0 ? GRID_GAP_PX : 0);
-    return { items, totalHeight };
-  }, [getLayoutKey, columns, pages, aspectRatios, itemWidth]);
-
-  const canVirtualize = itemWidth > 0 && viewportHeight > 0;
+      return mediaHeight + THUMB_CAPTION_HEIGHT_PX;
+    },
+  });
 
   const visibleItems = useMemo(() => {
-    if (!gridLayout.items.length) return [] as ThumbnailLayoutItem[];
-    if (!canVirtualize) return gridLayout.items;
-
-    const minTop = Math.max(0, scrollTop - OVERSCAN_PX);
-    const maxBottom = scrollTop + viewportHeight + OVERSCAN_PX;
-
-    return gridLayout.items.filter((item) => item.top + item.cardHeight >= minTop && item.top <= maxBottom);
-  }, [canVirtualize, scrollTop, viewportHeight, gridLayout]);
+    return gridLayout.visibleItems.map((layoutItem) => ({
+      layout: layoutItem,
+      mediaHeight: Math.max(64, layoutItem.height - THUMB_CAPTION_HEIGHT_PX),
+    }));
+  }, [gridLayout.visibleItems]);
 
   const renderThumbnailItem = (item: ThumbnailLayoutItem) => {
-    const { page, index, top, left, mediaHeight, cardHeight } = item;
+    const { layout, mediaHeight } = item;
+    const { item: page, index, top, left, width, height } = layout;
     const isCurrentPage = currentPage === index;
     const metadataThumb = getPageDisplayThumb(page);
     const isVideoPage = page.type === 'video';
     const pageUrl = ArchiveService.getResolvedPageUrl(page);
     const thumbSrc = isVideoPage ? '' : metadataThumb || (page.type === 'image' ? pageUrl : '');
     const showImageThumb = Boolean(thumbSrc);
-    const itemKey = getLayoutKey(page, index);
+    const itemKey = layout.key;
     const isVideoReady = Boolean(videoReadyMap[itemKey]);
     const displayTitle = getPageDisplayTitle(page, index, t);
     const displayDescription = getPageDisplayDescription(page);
@@ -342,15 +306,15 @@ export function MasonryThumbnailGrid({
     if (isLink && archiveId) {
       return (
         <a
-          key={index}
+          key={itemKey}
           href={`/reader?id=${archiveId}&page=${index + 1}`}
           className={baseClassName}
           title={displayDescription || displayTitle}
           style={{
             top,
             left,
-            width: `${itemWidth}px`,
-            height: `${cardHeight}px`,
+            width: `${width}px`,
+            height: `${height}px`,
           }}
         >
           {content}
@@ -360,7 +324,7 @@ export function MasonryThumbnailGrid({
 
     return (
       <button
-        key={index}
+        key={itemKey}
         type="button"
         onClick={() => onSelectPage?.(index)}
         className={baseClassName}
@@ -368,8 +332,8 @@ export function MasonryThumbnailGrid({
         style={{
           top,
           left,
-          width: `${itemWidth}px`,
-          height: `${cardHeight}px`,
+          width: `${width}px`,
+          height: `${height}px`,
         }}
       >
         {content}

@@ -35,7 +35,7 @@ async function loadPluginService() {
 }
 
 export function useHomeSelection(
-  getVisibleItems: () => UseHomeSelectionVisibleItems,
+  visibleItems: UseHomeSelectionVisibleItems,
 ) {
   const { t } = useLanguage();
   const { success: showSuccess, error: showError, info: showInfo } = useToast();
@@ -51,7 +51,7 @@ export function useHomeSelection(
   const [batchActionRunning, setBatchActionRunning] = useState(false);
 
   const visibleItemMap = useMemo(() => {
-    const { archives, randomArchives, categoryRows } = getVisibleItems();
+    const { archives, randomArchives, categoryRows } = visibleItems;
     const map = new Map<string, Archive | Tankoubon>();
     const pushItem = (item: Archive | Tankoubon) => {
       if (isTankoubonItem(item)) {
@@ -66,7 +66,7 @@ export function useHomeSelection(
       items.forEach((item) => pushItem(item as Archive | Tankoubon));
     });
     return map;
-  }, [getVisibleItems]);
+  }, [visibleItems]);
 
   const selectedArchives = useMemo(() => {
     return Array.from(selectedArchiveIds)

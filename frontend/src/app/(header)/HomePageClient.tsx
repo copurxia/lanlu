@@ -202,11 +202,12 @@ function HomePageContent() {
   const [categoryRowsRefreshKey, setCategoryRowsRefreshKey] = useState(0);
 
   // --- Selection (extracted hook) ---
-  const selection = useHomeSelection(() => ({
+  const visibleSelectionItems = useMemo(() => ({
     archives,
     randomArchives,
     categoryRows,
-  }));
+  }), [archives, categoryRows, randomArchives]);
+  const selection = useHomeSelection(visibleSelectionItems);
 
   // Derived filter values
   const effectiveCategoryId = searchQuery ? 'all' : categoryId;
@@ -297,17 +298,20 @@ function HomePageContent() {
       setArchives((current) => {
         if (!append) return data;
         const merged = [...current];
+        const keySet = new Set(
+          current.map((item) => (
+            item && 'tankoubon_id' in item
+              ? `tankoubon:${item.tankoubon_id}`
+              : `archive:${item.arcid}`
+          ))
+        );
         for (const item of data) {
-          const isTank = item && 'tankoubon_id' in item;
-          const alreadyExists = merged.some((existing) => {
-            const exIsTank = existing && 'tankoubon_id' in existing;
-            return isTank && exIsTank
-              ? existing.tankoubon_id === item.tankoubon_id
-              : !isTank && !exIsTank
-                ? existing.arcid === item.arcid
-                : false;
-          });
-          if (!alreadyExists) merged.push(item);
+          const key = item && 'tankoubon_id' in item
+            ? `tankoubon:${item.tankoubon_id}`
+            : `archive:${item.arcid}`;
+          if (keySet.has(key)) continue;
+          keySet.add(key);
+          merged.push(item);
         }
         return merged;
       });
@@ -939,7 +943,7 @@ function HomePageContent() {
                 <>
                   <div className={centeredFeedClassName || undefined}>
                     {homeViewMode === 'masonry' ? (
-                      <HomeMediaMasonry items={archives} {...selectionProps} />
+                      <HomeMediaMasonry items={archives} scrollContainerRef={mainScrollRef} {...selectionProps} />
                     ) : homeViewMode === 'list' ? (
                       <HomeMediaList items={archives} {...selectionProps} />
                     ) : homeViewMode === 'tweet' ? (
