@@ -79,8 +79,10 @@ import { computeCollectionEndNextAction, computeCollectionEndReturnRealPage, com
 import { useReaderSourceSession } from '@/features/reader/presentation/hooks/useReaderSourceSession';
 import type { MetadataPageAttachment } from '@/types/archive';
 
+const loadReaderSidebar = () => import('@/components/reader/components/ReaderSidebar');
+
 const ReaderSidebar = dynamic(
-  () => import('@/components/reader/components/ReaderSidebar').then((m) => m.ReaderSidebar)
+  () => loadReaderSidebar().then((m) => m.ReaderSidebar)
 );
 const ReaderCollectionEndPage = dynamic(
   () => import('@/components/reader/components/ReaderCollectionEndPage').then((m) => m.ReaderCollectionEndPage)
@@ -2480,7 +2482,21 @@ function ReaderContent() {
     readingMode,
     splitCoverMode,
   ]);
-  const shouldRenderSidebar = sidebar.sidebarOpen || sidebar.sidebarLoading;
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const warmup = () => {
+      void loadReaderSidebar();
+    };
+
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(warmup);
+      return () => window.cancelIdleCallback(id);
+    }
+
+    const timer = window.setTimeout(warmup, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   if (loading) {
     return (
@@ -2561,23 +2577,21 @@ function ReaderContent() {
         ) : null}
 
         {/* 侧边栏导航 */}
-        {shouldRenderSidebar ? (
-          <ReaderSidebar
-            open={sidebar.sidebarOpen}
-            allPages={effectivePages as any}
-            sidebarScrollRef={sidebar.sidebarScrollRef}
-            sidebarLoading={sidebar.sidebarLoading}
-            isEpub={sidebar.isEpub}
-            sidebarDisplayPages={sidebar.sidebarDisplayPages}
-            currentPage={readingMode === 'webtoon' ? currentRealPage : currentPage}
-            pagesLength={effectivePages.length}
-            canLoadMore={sidebar.sidebarLoadedCount < effectivePages.length}
-            onSelectPage={sidebar.handleSidebarPageSelect}
-            onLoadMore={sidebar.handleLoadMoreSidebarPages}
-            onOpenChange={sidebar.setSidebarOpen}
-            t={t}
-          />
-        ) : null}
+        <ReaderSidebar
+          open={sidebar.sidebarOpen}
+          allPages={effectivePages as any}
+          sidebarScrollRef={sidebar.sidebarScrollRef}
+          sidebarLoading={sidebar.sidebarLoading}
+          isEpub={sidebar.isEpub}
+          sidebarDisplayPages={sidebar.sidebarDisplayPages}
+          currentPage={readingMode === 'webtoon' ? currentRealPage : currentPage}
+          pagesLength={effectivePages.length}
+          canLoadMore={sidebar.sidebarLoadedCount < effectivePages.length}
+          onSelectPage={sidebar.handleSidebarPageSelect}
+          onLoadMore={sidebar.handleLoadMoreSidebarPages}
+          onOpenChange={sidebar.setSidebarOpen}
+          t={t}
+        />
 
         {/* 单页模式 */}
  	        <ReaderSingleModeView
