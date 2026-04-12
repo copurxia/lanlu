@@ -629,10 +629,6 @@ function HomeMediaChannelCard({
         return (
           <article
             className={cn('feed-card-enter px-1 py-2', selected && 'rounded-3xl bg-primary/6 dark:bg-primary/10')}
-            style={{
-              contentVisibility: 'auto',
-              containIntrinsicSize: '380px 760px',
-            }}
             onContextMenuCapture={handleContextMenuCapture}
             onContextMenu={handleContextMenu}
           >
