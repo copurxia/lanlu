@@ -75,6 +75,10 @@ class ZipStoredEntryReader <: EntryReader {
     public func close(): Unit {
         rawStream.close()
     }
+
+    public func seek(_: Int64): Bool {
+        return false
+    }
 }
 
 class ZipDeflateEntryReader <: EntryReader {
@@ -112,6 +116,10 @@ class ZipDeflateEntryReader <: EntryReader {
         closed = true
         try { inflater.close() } catch (_: Exception) {}
         rawStream.close()
+    }
+
+    public func seek(_: Int64): Bool {
+        return false
     }
 }
 

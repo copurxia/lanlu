@@ -2456,6 +2456,47 @@ public class ArchiveDao {
     }
 
     /**
+     * 获取档案所属分类的 scan_path（轻量查询，避免额外聚合）
+     */
+    public static func getArchiveScanPathByArcid(arcid: String): String {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT c.scan_path
+                        FROM archives a
+                        JOIN categories c ON c.id = a.category_id
+                        WHERE a.arcid = ?
+                        LIMIT 1
+                    """)
+                    try {
+                        stmt.set(0, arcid)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<String>(0) ?? ""
+                            }
+                            return ""
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                } catch (e: Exception) {
+                    getLogger("archive_dao").error("获取档案扫描路径失败", ("error", e.message))
+                    return ""
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("archive_dao").error("无法连接到数据库")
+                return ""
+        }
+    }
+
+    /**
      * 获取档案的 category_id
      */
     public static func getArchiveCategoryId(arcid: String): Int64 {

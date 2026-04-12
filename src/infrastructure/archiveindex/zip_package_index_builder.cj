@@ -63,7 +63,7 @@ public class ZipPackageIndexBuilder {
                 }
 
                 let centralDirectory = readExactly(file, centralDirectoryOffset, centralDirectorySize)
-                let records = parseCentralDirectory(actualPath, centralDirectory)
+                let records = parseCentralDirectory(file, centralDirectory)
 
                 sort<ArchivePackageEntryRecord>(records, by: { a, b =>
                     NaturalSort.naturalCompare(a.name, b.name)
@@ -90,7 +90,7 @@ public class ZipPackageIndexBuilder {
         }
     }
 
-    private static func parseCentralDirectory(actualPath: String, centralDirectory: Array<Byte>): ArrayList<ArchivePackageEntryRecord> {
+    private static func parseCentralDirectory(file: File, centralDirectory: Array<Byte>): ArrayList<ArchivePackageEntryRecord> {
         let records = ArrayList<ArchivePackageEntryRecord>()
         var offset: Int64 = 0
         while (offset + 46 <= Int64(centralDirectory.size)) {
@@ -121,7 +121,7 @@ public class ZipPackageIndexBuilder {
                 record.title = ""
                 record.kind = detectKind(name)
                 record.localHeaderOffset = localHeaderOffset
-                record.dataOffset = computeDataOffset(actualPath, localHeaderOffset)
+                record.dataOffset = computeDataOffset(file, localHeaderOffset)
                 record.compressedSize = compressedSize
                 record.uncompressedSize = uncompressedSize
                 record.compressionMethod = compressionMethod
@@ -149,20 +149,15 @@ public class ZipPackageIndexBuilder {
         return -1
     }
 
-    private static func computeDataOffset(actualPath: String, localHeaderOffset: Int64): Int64 {
+    private static func computeDataOffset(file: File, localHeaderOffset: Int64): Int64 {
         try {
-            let file = File(Path(actualPath), Read)
-            try {
-                let localHeader = readExactly(file, localHeaderOffset, 30)
-                if (localHeader.size < 30 || readUInt32LE(localHeader, 0) != localHeaderSignature) {
-                    return -1
-                }
-                let fileNameLen = Int64(readUInt16LE(localHeader, 26))
-                let extraLen = Int64(readUInt16LE(localHeader, 28))
-                return localHeaderOffset + 30 + fileNameLen + extraLen
-            } finally {
-                file.close()
+            let localHeader = readExactly(file, localHeaderOffset, 30)
+            if (localHeader.size < 30 || readUInt32LE(localHeader, 0) != localHeaderSignature) {
+                return -1
             }
+            let fileNameLen = Int64(readUInt16LE(localHeader, 26))
+            let extraLen = Int64(readUInt16LE(localHeader, 28))
+            return localHeaderOffset + 30 + fileNameLen + extraLen
         } catch (_: Exception) {
             return -1
         }

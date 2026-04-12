@@ -1,9 +1,11 @@
 package lanlu.infrastructure.archivehandler
 
 import std.fs.*
+import std.io.SeekPosition
 import std.collection.*
 import lanlu.contexts.archive.domain.ArchiveTypes
 import lanlu.shared.utils.ArchiveUtils
+import lanlu.shared.utils.ArchiveEntryPathUtils
 import lanlu.shared.utils.DirectoryScanner
 import lanlu.shared.utils.NaturalSort
 import lanlu.shared.utils.FileUtils
@@ -37,6 +39,18 @@ public class FileEntryReader <: EntryReader {
         if (!closed) {
             closed = true
             file.close()
+        }
+    }
+
+    public func seek(offset: Int64): Bool {
+        if (closed || offset < 0 || offset > fileSize) {
+            return false
+        }
+        try {
+            file.seek(SeekPosition.Begin(offset))
+            return true
+        } catch (_: Exception) {
+            return false
         }
     }
 }
@@ -292,8 +306,12 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     public func extractEntryToStream(archivePath: String, entryName: String): (Int64, Array<UInt8>, Array<UInt8>) {
+        let safeEntryName = match (ArchiveEntryPathUtils.normalizeRelativeEntryPath(entryName)) {
+            case Some(value) => value
+            case None => return (1i64, Array<UInt8>(), "Invalid path".toArray())
+        }
         try {
-            let filePath = DirectoryScanner.joinPath(archivePath, entryName)
+            let filePath = DirectoryScanner.joinPath(archivePath, safeEntryName)
             if (!DirectoryScanner.fileExists(filePath)) {
                 let errorMsg = "File not found: ${filePath}"
                 return (1i64, Array<UInt8>(), errorMsg.toArray())
@@ -308,8 +326,12 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     public func getEntryReader(archivePath: String, entryName: String): (Int64, Option<EntryReader>, String) {
+        let safeEntryName = match (ArchiveEntryPathUtils.normalizeRelativeEntryPath(entryName)) {
+            case Some(value) => value
+            case None => return (1i64, None, "Invalid path")
+        }
         try {
-            let filePath = DirectoryScanner.joinPath(archivePath, entryName)
+            let filePath = DirectoryScanner.joinPath(archivePath, safeEntryName)
             if (!DirectoryScanner.fileExists(filePath)) {
                 return (1i64, None, "File not found: ${filePath}")
             }
@@ -321,8 +343,12 @@ public class FolderHandler <: ArchiveHandler {
     }
 
     public func extractEntryToFile(archivePath: String, entryName: String, outputPath: String): Bool {
+        let safeEntryName = match (ArchiveEntryPathUtils.normalizeRelativeEntryPath(entryName)) {
+            case Some(value) => value
+            case None => return false
+        }
         try {
-            let sourcePath = DirectoryScanner.joinPath(archivePath, entryName)
+            let sourcePath = DirectoryScanner.joinPath(archivePath, safeEntryName)
             if (!DirectoryScanner.fileExists(sourcePath)) {
                 return false
             }

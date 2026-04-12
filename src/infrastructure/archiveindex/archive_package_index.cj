@@ -3,6 +3,7 @@ package lanlu.infrastructure.archiveindex
 import std.collection.*
 import std.fs.*
 import std.io.{ByteBuffer, readToEnd}
+import std.sync.*
 import std.time.*
 import stdx.crypto.digest.*
 import stdx.encoding.hex.*
@@ -169,6 +170,10 @@ public class ArchivePackageIndexStore {
     private static let logger = getLogger("archive_package_index_store")
     private static let namespace = "archive_package_index"
     private static let cacheVersion: Int32 = 1
+    private static let buildLockCount: Int64 = 64
+    private static let buildLocks: Array<Mutex> = Array<Mutex>(buildLockCount, {
+        i => if (i >= 0) { Mutex() } else { Mutex() }
+    })
 
     public static func getOrBuild(
         archiveType: String,
@@ -187,41 +192,49 @@ public class ArchivePackageIndexStore {
         let key = buildStorageKey(archiveType, normalizedPath)
         let storeOpt = LocalKVService.getStore()
 
-        match (storeOpt) {
-            case Some(store) =>
-                match (store.get(namespace, key)) {
-                    case Some(payload) =>
-                        match (ArchivePackageIndexCodec.decode(payload)) {
-                            case Some(index) =>
-                                if (matchesFingerprint(index, archiveType, normalizedPath, fingerprint)) {
-                                    logger.debug("archive package index hit", ("path", normalizedPath))
-                                    return Some(index)
-                                }
-                                let _ = store.delete(namespace, key)
-                                logger.debug("archive package index stale", ("path", normalizedPath))
-                            case None =>
-                                let _ = store.delete(namespace, key)
-                                logger.warn("archive package index decode failed; evicted key", ("path", normalizedPath))
-                        }
-                    case None => ()
-                }
-            case None => ()
-        }
+        // Singleflight: serialize build path by (archiveType + actualPath) to avoid
+        // concurrent cache misses repeatedly rebuilding the same index.
+        let buildMutex = getBuildMutex("${archiveType}:${normalizedPath}")
+        buildMutex.lock()
+        try {
+            match (storeOpt) {
+                case Some(store) =>
+                    match (store.get(namespace, key)) {
+                        case Some(payload) =>
+                            match (ArchivePackageIndexCodec.decode(payload)) {
+                                case Some(index) =>
+                                    if (matchesFingerprint(index, archiveType, normalizedPath, fingerprint)) {
+                                        logger.debug("archive package index hit", ("path", normalizedPath))
+                                        return Some(index)
+                                    }
+                                    let _ = store.delete(namespace, key)
+                                    logger.debug("archive package index stale", ("path", normalizedPath))
+                                case None =>
+                                    let _ = store.delete(namespace, key)
+                                    logger.warn("archive package index decode failed; evicted key", ("path", normalizedPath))
+                            }
+                        case None => ()
+                    }
+                case None => ()
+            }
 
-        match (buildIndex(archiveType, normalizedPath, listEntriesWithTitle, fingerprint)) {
-            case Some(index) =>
-                match (storeOpt) {
-                    case Some(store) =>
-                        let encoded = ArchivePackageIndexCodec.encode(index)
-                        if (!store.put(namespace, key, encoded)) {
-                            logger.warn("failed to persist archive package index", ("path", normalizedPath))
-                        }
-                    case None => ()
-                }
-                return Some(index)
-            case None =>
-                logger.warn("failed to build archive package index", ("path", normalizedPath), ("archive_type", archiveType))
-                return None
+            match (buildIndex(archiveType, normalizedPath, listEntriesWithTitle, fingerprint)) {
+                case Some(index) =>
+                    match (storeOpt) {
+                        case Some(store) =>
+                            let encoded = ArchivePackageIndexCodec.encode(index)
+                            if (!store.put(namespace, key, encoded)) {
+                                logger.warn("failed to persist archive package index", ("path", normalizedPath))
+                            }
+                        case None => ()
+                    }
+                    return Some(index)
+                case None =>
+                    logger.warn("failed to build archive package index", ("path", normalizedPath), ("archive_type", archiveType))
+                    return None
+            }
+        } finally {
+            buildMutex.unlock()
         }
     }
 
@@ -325,5 +338,11 @@ public class ArchivePackageIndexStore {
         } catch (_: Exception) {
             return archiveType != ArchiveTypes.FOLDER
         }
+    }
+
+    private static func getBuildMutex(key: String): Mutex {
+        let hash = key.hashCode()
+        let positiveHash = if (hash < 0) { -hash } else { hash }
+        return buildLocks[positiveHash % buildLocks.size]
     }
 }

@@ -24,6 +24,11 @@ public interface EntryReader {
      * 关闭读取器，释放资源
      */
     func close(): Unit
+
+    /**
+     * 跳转到指定偏移。返回 true 表示成功，false 表示不支持或失败。
+     */
+    func seek(offset: Int64): Bool
 }
 
 /**
@@ -58,6 +63,15 @@ public class MemoryEntryReader <: EntryReader {
     public func close(): Unit {
         closed = true
     }
+
+    public func seek(offset: Int64): Bool {
+        if (offset < 0) {
+            return false
+        }
+        let target = if (offset > Int64(data.size)) { Int64(data.size) } else { offset }
+        this.offset = target
+        return true
+    }
 }
 
 /**
@@ -88,6 +102,10 @@ public class ArchiveStreamEntryReader <: EntryReader {
             closed = true
             reader.close()
         }
+    }
+
+    public func seek(_: Int64): Bool {
+        return false
     }
 }
 

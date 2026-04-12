@@ -11,7 +11,6 @@ import lanlu.shared.views.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.contexts.metadata.infrastructure.persistence.*
-import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.config.*
 import lanlu.infrastructure.middleware.*
@@ -21,9 +20,17 @@ import std.convert.*
 import std.collection.*
 import std.database.sql.*
 import std.io.{ByteBuffer, readToEnd}
+import std.sync.*
+import std.time.*
 import stdx.encoding.json.stream.*
 
 public class ArchiveController {
+    private static let logger = getLogger("archive_controller")
+    private static let archiveBasePathCacheMutex: Mutex = Mutex()
+    private static let archiveBasePathCacheTtlMs: Int64 = 30 * 1000
+    private static var archiveBasePathCacheValues: HashMap<String, String> = HashMap<String, String>()
+    private static var archiveBasePathCacheExpireAtMs: HashMap<String, Int64> = HashMap<String, Int64>()
+
     private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
         let raw = assetsRaw.trimAscii()
         let normalized = if (raw.size > 0) { raw } else { "{}" }
@@ -34,14 +41,49 @@ public class ArchiveController {
      * 获取档案的基础路径（从分类获取）
      */
     private static func getArchiveBasePath(arcid: String): String {
-        let categoryId = ArchiveDao.getArchiveCategoryId(arcid)
-        if (categoryId > 0) {
-            match (CategoryDao.getCategoryByInternalId(categoryId)) {
-                case Some(cat) => return cat.scanPath
+        let normalizedArcid = arcid.trimAscii()
+        if (normalizedArcid.size == 0) {
+            return ""
+        }
+
+        let now = nowMillis()
+        archiveBasePathCacheMutex.lock()
+        try {
+            match (archiveBasePathCacheExpireAtMs.get(normalizedArcid)) {
+                case Some(expireAtMs) =>
+                    if (expireAtMs > now) {
+                        match (archiveBasePathCacheValues.get(normalizedArcid)) {
+                            case Some(path) => return path
+                            case None => ()
+                        }
+                    } else {
+                        archiveBasePathCacheExpireAtMs.remove(normalizedArcid)
+                        archiveBasePathCacheValues.remove(normalizedArcid)
+                    }
                 case None => ()
             }
+        } finally {
+            archiveBasePathCacheMutex.unlock()
         }
-        return ""
+
+        let path = ArchiveDao.getArchiveScanPathByArcid(normalizedArcid)
+        if (path.size == 0) {
+            return ""
+        }
+
+        archiveBasePathCacheMutex.lock()
+        try {
+            archiveBasePathCacheValues[normalizedArcid] = path
+            archiveBasePathCacheExpireAtMs[normalizedArcid] = now + archiveBasePathCacheTtlMs
+        } finally {
+            archiveBasePathCacheMutex.unlock()
+        }
+
+        return path
+    }
+
+    private static func nowMillis(): Int64 {
+        return DateTime.now().toUnixTimeStamp().toMilliseconds()
     }
 
     /**
@@ -1001,8 +1043,17 @@ public class ArchiveController {
      * getPage 内部实现
      */
     private static func getPageInternal(ctx: Ctx, id: String, path: String): Unit {
-        if (path.size == 0) {
-            let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"No path specified.\",\"success\":0}"
+        let safePath = match (ArchiveEntryPathUtils.normalizeRelativeEntryPath(path)) {
+            case Some(value) => value
+            case None =>
+                let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Invalid path\",\"success\":0}"
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ResponseView.json(ctx, errorResponse)
+                return
+        }
+
+        if (safePath.size == 0) {
+            let errorResponse = "{\"operation\":\"serve_page\",\"error\":\"Invalid path\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
             ResponseView.json(ctx, errorResponse)
             return
@@ -1036,22 +1087,46 @@ public class ArchiveController {
 
             let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archive.archive_type)
             // 使用 Handler 获取流式读取器
-            let (exitCode, readerOpt, errorMsg) = handler.getEntryReader(actualPath, path)
+            let (exitCode, readerOpt, errorMsg) = handler.getEntryReader(actualPath, safePath)
 
             if (exitCode == 0) {
                 match (readerOpt) {
-                    case Some(reader) => sendPageDataWithReader(ctx, id, path, reader)
+                    case Some(reader) => sendPageDataWithReader(ctx, id, safePath, archive.archive_type, reader)
                     case None =>
+                        logger.error(
+                            "entry reader missing",
+                            ("arcid", id),
+                            ("entry_path", safePath),
+                            ("archive_type", archive.archive_type),
+                            ("range", "none"),
+                            ("error", "Reader is null")
+                        )
                         CacheUtils.setNoCacheHeaders(ctx)
                         ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                         ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
                 }
             } else {
+                logger.error(
+                    "failed to get entry reader",
+                    ("arcid", id),
+                    ("entry_path", safePath),
+                    ("archive_type", archive.archive_type),
+                    ("range", "none"),
+                    ("error", errorMsg)
+                )
                 CacheUtils.setNoCacheHeaders(ctx)
                 ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                 ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"${errorMsg}\",\"success\":0}")
             }
         } catch (e: Exception) {
+            logger.error(
+                "serve page exception",
+                ("arcid", id),
+                ("entry_path", safePath),
+                ("archive_type", archive.archive_type),
+                ("range", "none"),
+                ("error", e.message)
+            )
             CacheUtils.setNoCacheHeaders(ctx)
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
             ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"Exception: ${e.message}\",\"success\":0}")
@@ -1065,6 +1140,7 @@ public class ArchiveController {
         ctx: Ctx,
         id: String,
         path: String,
+        archiveType: String,
         reader: EntryReader
     ): Unit {
         let fileSize = reader.getSize()
@@ -1087,13 +1163,13 @@ public class ArchiveController {
             return
         }
         if (rangeState > 0) {
-            sendWithReaderChunkedRange(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd)
+            sendWithReaderChunkedRange(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd, id, path, archiveType)
             return
         }
 
         // 统一使用流式传输，避免大缓冲区占用内存
         // 小文件也可以使用流式传输，性能影响可忽略，但能避免内存峰值问题
-        sendWithReaderChunked(ctx, reader, contentType, etag)
+        sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
     }
 
     /**
@@ -1103,7 +1179,10 @@ public class ArchiveController {
         ctx: Ctx,
         reader: EntryReader,
         contentType: String,
-        etag: String
+        etag: String,
+        arcid: String,
+        entryPath: String,
+        archiveType: String
     ): Unit {
         // 设置响应头（在获取 writer 之前）
         ctx.setHeader("Content-Type", contentType)
@@ -1116,24 +1195,54 @@ public class ArchiveController {
 
         // 分块读取并发送
         let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+        try {
+            while (true) {
+                let bytesRead = reader.read(chunkBuffer)
+                if (bytesRead <= 0) {
+                    break
+                }
 
-        while (true) {
-            let bytesRead = reader.read(chunkBuffer)
-            if (bytesRead <= 0) {
-                break
+                if (bytesRead == CHUNK_SIZE) {
+                    writer.write(chunkBuffer)
+                } else {
+                    let lastChunk = Array<Byte>(bytesRead, { i => chunkBuffer[i] })
+                    writer.write(lastChunk)
+                }
             }
-
-            if (bytesRead == CHUNK_SIZE) {
-                // 完整块
-                writer.write(chunkBuffer)
+        } catch (e: Exception) {
+            if (isClientAbortError(e.message)) {
+                logger.info(
+                    "client aborted page stream",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", "none"),
+                    ("error", e.message)
+                )
             } else {
-                // 最后一块，可能不足 CHUNK_SIZE
-                let lastChunk = Array<Byte>(bytesRead, { i => chunkBuffer[i] })
-                writer.write(lastChunk)
+                logger.error(
+                    "failed to stream page data",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", "none"),
+                    ("error", e.message)
+                )
+            }
+        } finally {
+            try {
+                reader.close()
+            } catch (e: Exception) {
+                logger.warn(
+                    "failed to close entry reader",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", "none"),
+                    ("error", e.message)
+                )
             }
         }
-
-        reader.close()
     }
 
     /**
@@ -1146,8 +1255,13 @@ public class ArchiveController {
         etag: String,
         fileSize: Int64,
         rangeStart: Int64,
-        rangeEnd: Int64
+        rangeEnd: Int64,
+        arcid: String,
+        entryPath: String,
+        archiveType: String
     ): Unit {
+        let rangeExpr = "bytes ${rangeStart}-${rangeEnd}/${fileSize}"
+
         // 先跳过前置字节；EntryReader 不一定支持 seek，这里用读取丢弃实现
         if (!skipReaderBytes(reader, rangeStart)) {
             reader.close()
@@ -1167,39 +1281,71 @@ public class ArchiveController {
 
         var remaining = rangeEnd - rangeStart + 1
         let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+        try {
+            while (remaining > 0) {
+                let toRead = if (remaining > CHUNK_SIZE) { CHUNK_SIZE } else { remaining }
 
-        while (remaining > 0) {
-            let toRead = if (remaining > CHUNK_SIZE) { CHUNK_SIZE } else { remaining }
-
-            if (toRead == CHUNK_SIZE) {
-                let bytesRead = reader.read(chunkBuffer)
-                if (bytesRead <= 0) {
-                    break
-                }
-                if (bytesRead <= remaining) {
-                    writer.write(chunkBuffer.slice(0, bytesRead))
-                    remaining -= bytesRead
+                if (toRead == CHUNK_SIZE) {
+                    let bytesRead = reader.read(chunkBuffer)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    if (bytesRead <= remaining) {
+                        writer.write(chunkBuffer.slice(0, bytesRead))
+                        remaining -= bytesRead
+                    } else {
+                        writer.write(chunkBuffer.slice(0, remaining))
+                        remaining = 0
+                    }
                 } else {
-                    writer.write(chunkBuffer.slice(0, remaining))
-                    remaining = 0
-                }
-            } else {
-                let lastChunk = Array<Byte>(toRead, {_ => 0})
-                let bytesRead = reader.read(lastChunk)
-                if (bytesRead <= 0) {
-                    break
-                }
-                if (bytesRead <= remaining) {
-                    writer.write(lastChunk.slice(0, bytesRead))
-                    remaining -= bytesRead
-                } else {
-                    writer.write(lastChunk.slice(0, remaining))
-                    remaining = 0
+                    let lastChunk = Array<Byte>(toRead, {_ => 0})
+                    let bytesRead = reader.read(lastChunk)
+                    if (bytesRead <= 0) {
+                        break
+                    }
+                    if (bytesRead <= remaining) {
+                        writer.write(lastChunk.slice(0, bytesRead))
+                        remaining -= bytesRead
+                    } else {
+                        writer.write(lastChunk.slice(0, remaining))
+                        remaining = 0
+                    }
                 }
             }
+        } catch (e: Exception) {
+            if (isClientAbortError(e.message)) {
+                logger.info(
+                    "client aborted page range stream",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", rangeExpr),
+                    ("error", e.message)
+                )
+            } else {
+                logger.error(
+                    "failed to stream page range data",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", rangeExpr),
+                    ("error", e.message)
+                )
+            }
+        } finally {
+            try {
+                reader.close()
+            } catch (e: Exception) {
+                logger.warn(
+                    "failed to close entry reader",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", rangeExpr),
+                    ("error", e.message)
+                )
+            }
         }
-
-        reader.close()
     }
 
     /**
@@ -1207,6 +1353,9 @@ public class ArchiveController {
      */
     private static func skipReaderBytes(reader: EntryReader, skipBytes: Int64): Bool {
         if (skipBytes <= 0) {
+            return true
+        }
+        if (reader.seek(skipBytes)) {
             return true
         }
         let skipBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
@@ -1229,6 +1378,17 @@ public class ArchiveController {
             }
         }
         return true
+    }
+
+    private static func isClientAbortError(errorMessage: String): Bool {
+        let normalized = errorMessage.trimAscii().toAsciiLower()
+        if (normalized.size == 0) {
+            return false
+        }
+        return normalized.contains("broken pipe") ||
+               normalized.contains("connection reset") ||
+               normalized.contains("client abort") ||
+               normalized.contains("closed channel")
     }
 
     /**
