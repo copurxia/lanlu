@@ -1,4 +1,4 @@
-FROM ubuntu:latest
+FROM ubuntu:26.04
 
 WORKDIR /app
 
@@ -11,13 +11,13 @@ RUN set -eux; \
       fontconfig \
       ghostscript \
       imagemagick \
-      libarchive13 \
+      libarchive13t64 \
       libavif16 \
       libbrotli1 \
       libheif1 \
-      libssl3 \
-      librocksdb8.9 \
-      libvips \
+      libssl3t64 \
+      librocksdb9.11 \
+      libvips42t64 \
       tzdata \
       unzip; \
     mkdir -p /usr/local/share/fonts/harmonyos; \
