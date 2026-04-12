@@ -3,6 +3,7 @@ package lanlu.contexts.category.infrastructure.persistence
 import std.database.sql.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import lanlu.infrastructure.kv.*
 import std.collection.*
 import stdx.log.*
 
@@ -31,6 +32,10 @@ public class CategoryData {
  */
 public class CategoryDao {
     private static let logger = getLogger("category_dao")
+
+    private static func invalidateArchiveBasePath(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpArchiveBasePathVersion(reason)
+    }
 
     private static let CATEGORY_SELECT_WITH_COUNT = """
         SELECT c.id, c.catid, c.name, c.scan_path, c.description, c.icon,
@@ -363,6 +368,7 @@ public class CategoryDao {
                                 data.createdAt = rs.getOrNull<String>(1) ?? ""
                                 data.updatedAt = rs.getOrNull<String>(2) ?? ""
                                 data.archiveCount = 0
+                                invalidateArchiveBasePath("categoryCreate:${data.catid}")
                                 return Some(data)
                             }
                         } finally {
@@ -409,6 +415,9 @@ public class CategoryDao {
                         stmt.set(6, data.plugins)
                         stmt.set(7, catid)
                         let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            invalidateArchiveBasePath("categoryUpdate:${catid}")
+                        }
                         return result.rowCount > 0
                     } finally {
                         stmt.close()
@@ -471,7 +480,8 @@ public class CategoryDao {
                         if (result.rowCount <= 0) {
                             return (false, deletedArchives, "Failed to delete category")
                         }
-                        return (true, deletedArchives, "")
+                    invalidateArchiveBasePath("categoryDelete:${catid}")
+                    return (true, deletedArchives, "")
                     } finally {
                         delCatStmt.close()
                     }

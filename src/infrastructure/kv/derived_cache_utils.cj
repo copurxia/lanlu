@@ -17,6 +17,8 @@ public class DerivedCacheUtils {
     private static let tankoubonChildrenNamespace = "tankoubon_children"
     private static let archiveAssetsRawPayloadNamespace = "archive_assets_raw_cache"
     private static let archiveAssetsRawNamespace = "archive_assets_raw"
+    private static let archiveBasePathPayloadNamespace = "archive_base_path_cache"
+    private static let archiveBasePathNamespace = "archive_base_path"
 
     public static func normalizeUniqueIds(ids: Array<String>): Array<String> {
         let deduped = ArrayList<String>()
@@ -98,6 +100,19 @@ public class DerivedCacheUtils {
     public static func bumpArchiveAssetsRawVersion(reason: String): Int64 {
         let _ = reason
         return PersistentCacheService.bumpNamespaceVersion(archiveAssetsRawNamespace)
+    }
+
+    public static func getArchiveBasePathVersion(): Int64 {
+        return PersistentCacheService.getNamespaceVersion(archiveBasePathNamespace)
+    }
+
+    public static func getArchiveBasePathPayloadNamespace(): String {
+        return archiveBasePathPayloadNamespace
+    }
+
+    public static func bumpArchiveBasePathVersion(reason: String): Int64 {
+        let _ = reason
+        return PersistentCacheService.bumpNamespaceVersion(archiveBasePathNamespace)
     }
 
     private static func buildTankoubonAggregatedUserNamespace(userId: Int64): String {

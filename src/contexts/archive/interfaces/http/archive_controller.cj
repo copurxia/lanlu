@@ -15,26 +15,53 @@ import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.config.*
 import lanlu.infrastructure.middleware.*
 import lanlu.infrastructure.archivehandler.*
+import lanlu.infrastructure.kv.*
 import std.fs.*
 import std.convert.*
 import std.collection.*
 import std.database.sql.*
 import std.io.{ByteBuffer, readToEnd}
-import std.sync.*
-import std.time.*
 import stdx.encoding.json.stream.*
 
 public class ArchiveController {
     private static let logger = getLogger("archive_controller")
-    private static let archiveBasePathCacheMutex: Mutex = Mutex()
-    private static let archiveBasePathCacheTtlMs: Int64 = 30 * 1000
-    private static var archiveBasePathCacheValues: HashMap<String, String> = HashMap<String, String>()
-    private static var archiveBasePathCacheExpireAtMs: HashMap<String, Int64> = HashMap<String, Int64>()
 
     private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
         let raw = assetsRaw.trimAscii()
         let normalized = if (raw.size > 0) { raw } else { "{}" }
         w.writeName("assets").jsonValue(normalized)
+    }
+
+    private static func buildArchiveBasePathCacheKey(arcid: String): String {
+        let cacheVersion = DerivedCacheUtils.getArchiveBasePathVersion()
+        return "v${cacheVersion.toString()}:a${arcid.trimAscii()}"
+    }
+
+    private static func readArchiveBasePathCache(cacheKey: String): Option<String> {
+        let cacheNamespace = DerivedCacheUtils.getArchiveBasePathPayloadNamespace()
+        match (PersistentCacheService.get(cacheNamespace, cacheKey)) {
+            case Some(value) =>
+                let normalized = value.trimAscii()
+                if (normalized.size > 0) {
+                    return Some(normalized)
+                }
+                return None
+            case None => return None
+        }
+    }
+
+    private static func writeArchiveBasePathCache(cacheKey: String, scanPath: String): Unit {
+        let normalized = scanPath.trimAscii()
+        if (normalized.size == 0) {
+            return
+        }
+        let cacheNamespace = DerivedCacheUtils.getArchiveBasePathPayloadNamespace()
+        let _ = PersistentCacheService.set(
+            cacheNamespace,
+            cacheKey,
+            normalized,
+            0
+        )
     }
 
     /**
@@ -45,45 +72,19 @@ public class ArchiveController {
         if (normalizedArcid.size == 0) {
             return ""
         }
-
-        let now = nowMillis()
-        archiveBasePathCacheMutex.lock()
-        try {
-            match (archiveBasePathCacheExpireAtMs.get(normalizedArcid)) {
-                case Some(expireAtMs) =>
-                    if (expireAtMs > now) {
-                        match (archiveBasePathCacheValues.get(normalizedArcid)) {
-                            case Some(path) => return path
-                            case None => ()
-                        }
-                    } else {
-                        archiveBasePathCacheExpireAtMs.remove(normalizedArcid)
-                        archiveBasePathCacheValues.remove(normalizedArcid)
-                    }
-                case None => ()
-            }
-        } finally {
-            archiveBasePathCacheMutex.unlock()
+        let cacheKey = buildArchiveBasePathCacheKey(normalizedArcid)
+        match (readArchiveBasePathCache(cacheKey)) {
+            case Some(path) => return path
+            case None => ()
         }
 
         let path = ArchiveDao.getArchiveScanPathByArcid(normalizedArcid)
-        if (path.size == 0) {
-            return ""
+        if (path.size > 0) {
+            writeArchiveBasePathCache(cacheKey, path)
+            return path
         }
-
-        archiveBasePathCacheMutex.lock()
-        try {
-            archiveBasePathCacheValues[normalizedArcid] = path
-            archiveBasePathCacheExpireAtMs[normalizedArcid] = now + archiveBasePathCacheTtlMs
-        } finally {
-            archiveBasePathCacheMutex.unlock()
-        }
-
-        return path
-    }
-
-    private static func nowMillis(): Int64 {
-        return DateTime.now().toUnixTimeStamp().toMilliseconds()
+        logger.warn("failed to resolve archive base path", ("arcid", normalizedArcid))
+        return ""
     }
 
     /**

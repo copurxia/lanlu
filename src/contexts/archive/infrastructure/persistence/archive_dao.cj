@@ -141,6 +141,10 @@ public class ArchiveDao {
         let _ = DerivedCacheUtils.bumpArchiveAssetsRawVersion(reason)
     }
 
+    private static func invalidateArchiveBasePath(reason: String): Unit {
+        let _ = DerivedCacheUtils.bumpArchiveBasePathVersion(reason)
+    }
+
     private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
         let stmt = conn.prepareStatement("SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1")
         try {
@@ -1490,6 +1494,7 @@ public class ArchiveDao {
                         )
                         if (ok) {
                             invalidateTankoubonAggregatedContent("archiveCreate:${archive.id}")
+                            invalidateArchiveBasePath("archiveCreate:${archive.id}")
                         }
                         return ok
                     } finally {
@@ -1547,6 +1552,7 @@ public class ArchiveDao {
                         return false
                     }
                     invalidateTankoubonAggregatedContent("archiveInsert:${archiveId}")
+                    invalidateArchiveBasePath("archiveInsert:${archiveId}")
                     logger.info("归档记录插入成功", ("archive_id", archiveId))
                     return true
                 } catch (e: Exception) {
@@ -1594,6 +1600,7 @@ public class ArchiveDao {
                         )
                         if (ok) {
                             invalidateTankoubonAggregatedContent("archiveUpdate:${archive.id}")
+                            invalidateArchiveBasePath("archiveUpdate:${archive.id}")
                         }
                         return ok
                     } finally {
@@ -1626,6 +1633,7 @@ public class ArchiveDao {
                         stmt.update()
                         invalidateTankoubonAggregatedContent("archiveDelete:${id}")
                         invalidateTankoubonChildren("archiveDelete:${id}")
+                        invalidateArchiveBasePath("archiveDelete:${id}")
                         return true  // 简化实现，假设更新成功
                     } finally {
                         stmt.close()
@@ -2574,6 +2582,9 @@ public class ArchiveDao {
                         stmt.set(0, categoryId)
                         stmt.set(1, arcid)
                         let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            invalidateArchiveBasePath("updateArchiveCategoryId:${arcid}")
+                        }
                         return result.rowCount > 0
                     } finally {
                         stmt.close()
