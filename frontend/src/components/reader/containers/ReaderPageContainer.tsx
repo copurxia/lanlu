@@ -315,7 +315,7 @@ function ReaderContent() {
   const [currentSubtitleIndexBySourceKey, setCurrentSubtitleIndexBySourceKey] = useState<Record<string, number>>({});
   const subtitlePreferenceRef = useRef<{ language: string; name: string } | null>(null);
   const [videoTimelineByPageIndex, setVideoTimelineByPageIndex] = useState<
-    Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number }>
+    Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number; buffered: number }>
   >({});
   const pendingSourceRestoreRef = useRef<Record<number, { currentTime: number; paused: boolean; muted: boolean; volume: number }>>({});
   const [tankoubonContext, setTankoubonContext] = useState<Tankoubon | null>(null);
@@ -1696,6 +1696,7 @@ function ReaderContent() {
             paused: element.paused,
             muted: element.muted,
             volume: Number.isFinite(element.volume) ? element.volume : currentRestore.volume,
+            buffered: prev[pageIndex]?.buffered ?? 0,
           },
         }));
         delete pendingSourceRestoreRef.current[pageIndex];
@@ -1840,6 +1841,17 @@ function ReaderContent() {
         const nextPaused = el.paused;
         const nextMuted = el.muted;
         const nextVolume = Number.isFinite(el.volume) ? Math.max(0, Math.min(1, el.volume)) : 1;
+        // 计算已缓冲比例：取所有缓冲范围中包含当前时间的最远 end 点
+        let nextBuffered = 0;
+        if (nextDuration > 0 && el.buffered.length > 0) {
+          let maxEnd = 0;
+          for (let i = 0; i < el.buffered.length; i++) {
+            if (el.buffered.start(i) <= nextCurrent + 0.5) {
+              maxEnd = Math.max(maxEnd, el.buffered.end(i));
+            }
+          }
+          nextBuffered = Math.min(1, maxEnd / nextDuration);
+        }
         setVideoTimelineByPageIndex((prev) => {
           const previous = prev[pageIndex];
           if (
@@ -1848,7 +1860,8 @@ function ReaderContent() {
             previous.duration === nextDuration &&
             previous.paused === nextPaused &&
             previous.muted === nextMuted &&
-            previous.volume === nextVolume
+            previous.volume === nextVolume &&
+            previous.buffered === nextBuffered
           ) {
             return prev;
           }
@@ -1860,6 +1873,7 @@ function ReaderContent() {
               paused: nextPaused,
               muted: nextMuted,
               volume: nextVolume,
+              buffered: nextBuffered,
             },
           };
         });
@@ -1873,6 +1887,7 @@ function ReaderContent() {
       el.addEventListener('play', sync);
       el.addEventListener('pause', sync);
       el.addEventListener('volumechange', sync);
+      el.addEventListener('progress', sync);
 
       cleanups.push(() => {
         el.removeEventListener('timeupdate', sync);
@@ -1882,6 +1897,7 @@ function ReaderContent() {
         el.removeEventListener('play', sync);
         el.removeEventListener('pause', sync);
         el.removeEventListener('volumechange', sync);
+        el.removeEventListener('progress', sync);
       });
     }
 
@@ -1938,6 +1954,7 @@ function ReaderContent() {
       const isPlaying = snapshot ? !snapshot.paused : Boolean(videoElement && !videoElement.paused);
       const isMuted = snapshot?.muted ?? Boolean(videoElement?.muted);
       const volume = snapshot?.volume ?? (videoElement && Number.isFinite(videoElement.volume) ? videoElement.volume : 1);
+      const buffered = snapshot?.buffered ?? 0;
       const max = duration > 0 ? duration : 1;
 
       return {
@@ -1967,12 +1984,14 @@ function ReaderContent() {
               paused: videoElement.paused,
               muted: videoElement.muted,
               volume: Number.isFinite(videoElement.volume) ? videoElement.volume : 1,
+              buffered,
             },
           }));
         },
         isPlaying,
         isMuted,
         volume,
+        buffered,
         sourceOptions,
         activeSourceIndex,
         subtitleOptions,

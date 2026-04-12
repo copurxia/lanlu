@@ -13,17 +13,21 @@ interface SliderProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 
   step?: number
   trackClassName?: string
   rangeClassName?: string
+  /** 已缓冲比例（0~1），用于显示缓冲进度层 */
+  bufferedPercent?: number
 }
 
 const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
   (
-    { className, value = [0], onValueChange, max = 100, min = 0, step = 1, trackClassName, rangeClassName, ...props },
+    { className, value = [0], onValueChange, max = 100, min = 0, step = 1, trackClassName, rangeClassName, bufferedPercent, ...props },
     ref
   ) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newValue = [parseFloat(e.target.value)];
       onValueChange?.(newValue);
     };
+
+    const clampedBuffered = bufferedPercent != null ? Math.max(0, Math.min(1, bufferedPercent)) : null;
 
     return (
       <div className={cn("relative flex w-full touch-none select-none items-center", className)}>
@@ -34,6 +38,12 @@ const Slider = React.forwardRef<HTMLInputElement, SliderProps>(
             trackClassName
           )}
         >
+          {clampedBuffered != null && (
+            <div
+              className="absolute h-full bg-black/25 dark:bg-white/20 transition-[width] duration-300 ease-out"
+              style={{ width: `${clampedBuffered * 100}%` }}
+            />
+          )}
           <div 
             className={cn("absolute h-full", progressFillClassName, rangeClassName)}
             style={{ width: `${((value[0] - min) / (max - min)) * 100}%` }}

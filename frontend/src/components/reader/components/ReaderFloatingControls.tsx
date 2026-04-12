@@ -23,6 +23,8 @@ export type ReaderProgressLane = {
   isPlaying?: boolean;
   isMuted?: boolean;
   volume?: number;
+  /** 已缓冲比例（0~1） */
+  buffered?: number;
   onTogglePlay?: () => void;
   onSeekRelative?: (deltaSeconds: number) => void;
   onToggleMute?: () => void;
@@ -110,6 +112,7 @@ function MobileMediaControls({
           min={lane.min ?? 0}
           step={lane.step ?? 1}
           className="min-w-0 flex-1 h-2"
+          bufferedPercent={lane.buffered}
         />
         <span className="min-w-[72px] text-right text-xs font-medium tabular-nums text-foreground/95">
           {lane.valueText ?? `${Math.round(lane.value)}/${Math.round(lane.max)}`}
@@ -389,6 +392,7 @@ export function ReaderFloatingControls({
                     min={resolvedActiveLane.min ?? 0}
                     step={resolvedActiveLane.step ?? 1}
                     className="h-2"
+                    bufferedPercent={resolvedActiveLane.buffered}
                   />
                 </div>
 
@@ -535,6 +539,7 @@ export function ReaderFloatingControls({
                       min={lane.min ?? 0}
                       step={lane.step ?? 1}
                       className="w-28 sm:w-52 h-2"
+                      bufferedPercent={lane.kind !== 'book' ? lane.buffered : undefined}
                     />
                     <span
                       className={cn(
