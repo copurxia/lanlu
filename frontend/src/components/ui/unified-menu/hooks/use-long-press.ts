@@ -6,7 +6,7 @@
 
 "use client"
 
-import { useState, useRef, useCallback } from "react"
+import { useRef, useCallback } from "react"
 import type { TouchEvent } from "react"
 
 /**
@@ -45,12 +45,11 @@ export function useLongPress(
   callback: () => void,
   { threshold = 500 }: UseLongPressOptions = {}
 ): UseLongPressReturn {
-  const [target, setTarget] = useState<EventTarget | null>(null)
   const timerRef = useRef<NodeJS.Timeout | undefined>(undefined)
 
   const start = useCallback(
-    (event: TouchEvent) => {
-      setTarget(event.currentTarget)
+    (_event: TouchEvent) => {
+      void _event
       timerRef.current = setTimeout(callback, threshold)
     },
     [callback, threshold]
@@ -60,7 +59,6 @@ export function useLongPress(
     if (timerRef.current) {
       clearTimeout(timerRef.current)
     }
-    setTarget(null)
   }, [])
 
   return {

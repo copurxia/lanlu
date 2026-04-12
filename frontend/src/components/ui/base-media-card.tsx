@@ -150,6 +150,18 @@ export function BaseMediaCard({
     ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined)
     : detailPath
   const progressPercent = pagecount > 0 ? Math.round((progress / pagecount) * 100) : 0
+  const [touchInputEnabled, setTouchInputEnabled] = React.useState(false)
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return
+    const mediaQuery = window.matchMedia?.('(pointer: coarse)')
+    const update = () => {
+      setTouchInputEnabled(Boolean(mediaQuery?.matches || navigator.maxTouchPoints > 0))
+    }
+    update()
+    mediaQuery?.addEventListener?.('change', update)
+    return () => mediaQuery?.removeEventListener?.('change', update)
+  }, [])
 
   const navigateToReader = React.useCallback(() => {
     trackOpenReader()
@@ -166,7 +178,7 @@ export function BaseMediaCard({
     if (selectionMode) return
     setPreviewOpen(false)
     setMenuOpen(true)
-  }, [selectionMode])
+  }, [selectionMode, setMenuOpen, setPreviewOpen])
 
   // 长按菜单的触摸事件（1500ms触发）
   const longPressMenuHandlers = useLongPress(handleLongPressMenu, { threshold: 1500 })
@@ -183,7 +195,7 @@ export function BaseMediaCard({
     previewTimerRef.current = setTimeout(() => {
       setPreviewOpen(true)
     }, 200)
-  }, [selectionMode, longPressMenuHandlers])
+  }, [selectionMode, longPressMenuHandlers, setPreviewOpen])
 
   // 触摸结束：清除预览定时器（但不关闭浮层）
   const handleTouchEnd = React.useCallback(() => {
@@ -212,36 +224,38 @@ export function BaseMediaCard({
     if (open) {
       setPreviewOpen(false)
     }
-  }, [])
+  }, [setMenuOpen, setPreviewOpen])
 
   return (
     <>
-      <MediaCardActions
-        canDelete={canDelete}
-        canEdit={canEdit}
-        canToggleFavorite={Boolean(onFavoriteToggle)}
-        deleting={deleting}
-        favoriteLoading={favoriteLoading}
-        isFavorite={isFavorite}
-        isNew={isNew}
-        isNewStatusLoading={isNewStatusLoading}
-        menuOpen={menuOpen}
-        menuPosition={menuPosition}
-        onDelete={handleDelete}
-        onDownload={handleDownload}
-        onOpenChange={handleMenuOpenChange}
-        onOpenEdit={handleOpenEdit}
-        onToggleFavorite={toggleFavorite}
-        onToggleReadStatus={handleToggleReadStatus}
-        onUseMultiSelect={() => toggleSelected(true)}
-        onStartReading={navigateToReader}
-        readStatusText={readStatusText}
-        readerTargetId={readerTargetId}
-        selectable={selectable}
-        selectionMode={selectionMode}
-        t={t}
-        type={type}
-      />
+      {menuOpen ? (
+        <MediaCardActions
+          canDelete={canDelete}
+          canEdit={canEdit}
+          canToggleFavorite={Boolean(onFavoriteToggle)}
+          deleting={deleting}
+          favoriteLoading={favoriteLoading}
+          isFavorite={isFavorite}
+          isNew={isNew}
+          isNewStatusLoading={isNewStatusLoading}
+          menuOpen={menuOpen}
+          menuPosition={menuPosition}
+          onDelete={handleDelete}
+          onDownload={handleDownload}
+          onOpenChange={handleMenuOpenChange}
+          onOpenEdit={handleOpenEdit}
+          onToggleFavorite={toggleFavorite}
+          onToggleReadStatus={handleToggleReadStatus}
+          onUseMultiSelect={() => toggleSelected(true)}
+          onStartReading={navigateToReader}
+          readStatusText={readStatusText}
+          readerTargetId={readerTargetId}
+          selectable={selectable}
+          selectionMode={selectionMode}
+          t={t}
+          type={type}
+        />
+      ) : null}
 
       <div
         className={[
@@ -273,9 +287,9 @@ export function BaseMediaCard({
           event.preventDefault()
         }}
         onContextMenu={handleContextMenu}
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-        onTouchMove={handleTouchMove}
+        onTouchStart={touchInputEnabled ? handleTouchStart : undefined}
+        onTouchEnd={touchInputEnabled ? handleTouchEnd : undefined}
+        onTouchMove={touchInputEnabled ? handleTouchMove : undefined}
       >
         <Card className={cn('overflow-hidden bg-transparent transition-shadow hover:shadow-lg dark:bg-transparent', surfaceClassName)}>
           <div

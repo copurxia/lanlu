@@ -94,23 +94,14 @@ export function useBaseMediaCardController({
 
   React.useEffect(() => {
     setDisplayTitle(title)
-  }, [title])
-
-  React.useEffect(() => {
     setDisplaySummary(summary || '')
-  }, [summary])
-
-  React.useEffect(() => {
     setDisplayTags(tags || '')
-  }, [tags])
+  }, [summary, tags, title])
 
   React.useEffect(() => {
     setIsFavorite(isfavorite)
-  }, [isfavorite])
-
-  React.useEffect(() => {
     setIsNew(isnew)
-  }, [isnew])
+  }, [isfavorite, isnew])
 
   React.useEffect(() => {
     setImageError(false)
