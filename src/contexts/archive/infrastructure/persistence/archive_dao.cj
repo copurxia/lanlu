@@ -1630,11 +1630,15 @@ public class ArchiveDao {
                     let stmt = conn.prepareStatement("DELETE FROM archives WHERE arcid = ?")
                     try {
                         stmt.set(0, id)
-                        stmt.update()
-                        invalidateTankoubonAggregatedContent("archiveDelete:${id}")
-                        invalidateTankoubonChildren("archiveDelete:${id}")
-                        invalidateArchiveBasePath("archiveDelete:${id}")
-                        return true  // 简化实现，假设更新成功
+                        let result = stmt.update()
+                        if (result.rowCount > 0) {
+                            invalidateTankoubonAggregatedContent("archiveDelete:${id}")
+                            invalidateTankoubonChildren("archiveDelete:${id}")
+                            invalidateArchiveBasePath("archiveDelete:${id}")
+                            return true
+                        }
+                        logger.warn("删除归档未命中记录", ("arcid", id))
+                        return false
                     } finally {
                         stmt.close()
                     }
