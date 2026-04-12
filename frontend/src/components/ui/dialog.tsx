@@ -15,6 +15,8 @@ type DialogSize = 'sm' | 'md' | 'lg' | 'xl' | 'fluid'
 type DialogContextValue = {
   open: boolean
   onOpenChange?: (open: boolean) => void
+  titleId?: string
+  descriptionId?: string
 }
 
 const DialogContext = React.createContext<DialogContextValue | null>(null)
@@ -28,13 +30,15 @@ function useDialogContext() {
 const Dialog: React.FC<DialogProps> = ({ open = false, onOpenChange, children }) => {
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
+  const titleId = React.useId()
+  const descriptionId = React.useId()
 
   React.useEffect(() => {
     setMounted(true)
   }, [])
 
   return (
-    <DialogContext.Provider value={{ open: !!open, onOpenChange }}>
+    <DialogContext.Provider value={{ open: !!open, onOpenChange, titleId, descriptionId }}>
       {mounted ? children : null}
     </DialogContext.Provider>
   )
@@ -52,20 +56,26 @@ const DialogHeader: React.FC<{ className?: string; children: React.ReactNode }> 
 const DialogTitle: React.FC<{ className?: string; children: React.ReactNode }> = ({ 
   className, 
   children 
-}) => (
-  <h2 className={cn("text-lg font-semibold leading-none tracking-tight", className)}>
-    {children}
-  </h2>
-)
+}) => {
+  const { titleId } = useDialogContext()
+  return (
+    <h2 id={titleId} className={cn("text-lg font-semibold leading-none tracking-tight", className)}>
+      {children}
+    </h2>
+  )
+}
 
 const DialogDescription: React.FC<{ className?: string; children: React.ReactNode }> = ({ 
   className, 
   children 
-}) => (
-  <p className={cn("text-sm text-muted-foreground", className)}>
-    {children}
-  </p>
-)
+}) => {
+  const { descriptionId } = useDialogContext()
+  return (
+    <p id={descriptionId} className={cn("text-sm text-muted-foreground", className)}>
+      {children}
+    </p>
+  )
+}
 
 const DialogContent: React.FC<{
   className?: string
@@ -74,7 +84,7 @@ const DialogContent: React.FC<{
   overlayClassName?: string
   showOverlay?: boolean
 }> = ({ className, children, size = 'md', overlayClassName, showOverlay = true }) => {
-  const { open, onOpenChange } = useDialogContext()
+  const { open, onOpenChange, titleId, descriptionId } = useDialogContext()
   // 添加mounted状态以避免水合错误
   const [mounted, setMounted] = React.useState(false)
   const [isMobile, setIsMobile] = React.useState(false)
@@ -152,6 +162,8 @@ const DialogContent: React.FC<{
       <div
         role="dialog"
         aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         className={cn(
           "relative z-modal-content w-full border border-white/22 dark:border-white/12 bg-white/85 dark:bg-slate-950/85 backdrop-blur-xl shadow-[0_18px_45px_rgba(15,23,42,0.18)] overflow-hidden flex flex-col",
           "transition-[transform,opacity] duration-200 ease-out will-change-transform motion-reduce:transition-none",
