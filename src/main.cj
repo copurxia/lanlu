@@ -208,6 +208,8 @@ main(): Int64 {
         serverHeader: "Lanlu",
         bodyLimit: 12 * 1024 * 1024,
         enableSwagger: true,
+        enablePrintSwaggerUrl: false,
+        enableBannerSignature: false,
         enableTlsPrecheck: true,
         tlsCertFile: if (sslEnabled) { sslCertFile } else { "" },
         tlsKeyFile: if (sslEnabled) { sslKeyFile } else { "" },
