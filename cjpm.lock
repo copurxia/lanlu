@@ -1,8 +1,8 @@
 version = 0
 
 [requires]
-  ignite = {git = "https://gitcode.com/copur/ignite-cangjie.git", commitId = "5e27a5efe6d83250001958148b306416e27c028a", branch = "stdx"}
-  jinguissl = {git = "https://atomgit.com/cinyu/jinguiSSL", commitId = "772699c016b313a85c4f5ac8c22489466bff3a67"}
+  ignite = {git = "https://gitcode.com/copur/ignite-cangjie.git", commitId = "66b50c86db73b0125e4940da9fa0f221bfb3cb3b", branch = "stdx"}
+  jinguissl = {git = "https://atomgit.com/cinyu/jinguiSSL", commitId = "46fb5994816c07413dfddba2fd4f6822ff1346fd"}
   opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", commitId = "faa031286906108a2bb53b52e68e4bbe71be9827", branch = "master", output-type = "static"}
   cjdotenv = {git = "https://gitcode.com/copur/cjdotenv.git", commitId = "cc1619b3d6677aa6a2d6ad359666d107f3b7ae26", branch = "master"}
   ahash = {git = "https://gitcode.com/copur/ahash.git", commitId = "9dceb7d65f2bbe78de7c8c28d0e43774f2ecfd11", branch = "master"}
