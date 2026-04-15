@@ -53,7 +53,6 @@ public class AssetController {
             CacheUtils.setStaticCacheHeaders(ctx, etag)
             let ct = if (asset.contentType.size > 0) { asset.contentType } else { "application/octet-stream" }
             ctx.setHeader("Content-Type", ct)
-            ctx.setHeader("Content-Length", fileSize.toString())
             ctx.status(HttpStatusCode.STATUS_OK)
 
             // 流式发送：分块读取文件并写入响应流，避免大文件 OOM
@@ -61,6 +60,7 @@ public class AssetController {
             if (fileSize <= streamThreshold) {
                 // 小文件直接全量读取
                 let bytes = File.readFrom(Path(filePath))
+                ctx.setHeader("Content-Length", fileSize.toString())
                 ctx.send(bytes)
             } else {
                 // 大文件流式发送
