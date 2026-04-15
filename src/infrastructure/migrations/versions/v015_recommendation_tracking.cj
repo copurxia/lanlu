@@ -2,7 +2,6 @@ package lanlu.infrastructure.migrations.versions
 
 import std.database.sql.*
 import lanlu.infrastructure.migrations.*
-import lanlu.shared.utils.*
 
 /**
  * V015: Add recommendation tracking tables and supporting indexes.

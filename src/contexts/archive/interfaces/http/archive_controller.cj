@@ -126,37 +126,6 @@ public class ArchiveController {
         return stem.trimAscii()
     }
 
-    private static func readExtraInt64(extraData: String, key: String): Int64 {
-        let normalized = extraData.trimAscii()
-        if (normalized.size == 0 || normalized == "null") {
-            return 0
-        }
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(normalized.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) {
-                return 0
-            }
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let name = r.readName()
-                if (name == key) {
-                    let raw = r.readValue<String>().trimAscii()
-                    try {
-                        let parsed = Int64.parse(raw)
-                        return if (parsed > 0) { parsed } else { 0 }
-                    } catch (_: Exception) {
-                        return 0
-                    }
-                }
-                r.skip()
-            }
-            r.endObject()
-        } catch (_: Exception) {}
-        return 0
-    }
-
     private static func parsePositiveIntQuery(ctx: Ctx, name: String): Int32 {
         let raw = (ctx.query(name) ?? "").trimAscii()
         if (raw.size == 0) {

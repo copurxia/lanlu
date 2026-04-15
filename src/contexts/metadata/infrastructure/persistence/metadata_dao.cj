@@ -1,7 +1,6 @@
 package lanlu.contexts.metadata.infrastructure.persistence
 
 import std.collection.*
-import std.convert.*
 import std.database.sql.*
 import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
@@ -239,57 +238,6 @@ public class MetadataDao {
             stmt.close()
         }
         return 0
-    }
-
-    private static func loadPageAttachments(conn: Connection, metadataId: Int64): Array<PageAttachmentData> {
-        if (metadataId <= 0) {
-            return Array<PageAttachmentData>()
-        }
-
-        let out = ArrayList<PageAttachmentData>()
-        let stmt = conn.prepareStatement("""
-            SELECT id,
-                   COALESCE(slot, ''),
-                   COALESCE(asset_id, 0),
-                   COALESCE(name, ''),
-                   COALESCE(mime_type, ''),
-                   COALESCE(kind, ''),
-                   COALESCE(language, ''),
-                   COALESCE(order_index, 0),
-                   COALESCE(created_at::TEXT, ''),
-                   COALESCE(updated_at::TEXT, '')
-            FROM metadata_page_assets
-            WHERE metadata_id = ?
-            ORDER BY order_index, slot, name, id
-        """)
-        try {
-            stmt.set(0, metadataId)
-            let rs = stmt.query()
-            try {
-                while (rs.next()) {
-                    let item = PageAttachmentData()
-                    item.id = rs.getOrNull<Int64>(0) ?? 0
-                    item.metadata_id = metadataId
-                    item.slot = (rs.getOrNull<String>(1) ?? "").trimAscii().toAsciiLower()
-                    item.asset_id = rs.getOrNull<Int64>(2) ?? 0
-                    item.name = rs.getOrNull<String>(3) ?? ""
-                    item.mime_type = rs.getOrNull<String>(4) ?? ""
-                    item.kind = (rs.getOrNull<String>(5) ?? "").trimAscii().toAsciiLower()
-                    item.language = (rs.getOrNull<String>(6) ?? "").trimAscii().toAsciiLower()
-                    item.order_index = rs.getOrNull<Int32>(7) ?? 0
-                    item.created_at = rs.getOrNull<String>(8) ?? ""
-                    item.updated_at = rs.getOrNull<String>(9) ?? ""
-                    if (item.slot.size > 0 && item.asset_id > 0) {
-                        out.add(item)
-                    }
-                }
-            } finally {
-                rs.close()
-            }
-        } finally {
-            stmt.close()
-        }
-        return out.toArray()
     }
 
     public static func getMetadataObject(entityType: String, entityId: String): Option<MetadataObjectData> {
