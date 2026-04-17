@@ -82,6 +82,7 @@ main(): Int64 {
     MigrationRegistry.register(V019_UserWebauthnCredentials())
     MigrationRegistry.register(V020_UserTotpCredentials())
     MigrationRegistry.register(V021_UserTokensSecurityMetadata())
+    MigrationRegistry.register(V022_UserPasswordHashArgon2id())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()

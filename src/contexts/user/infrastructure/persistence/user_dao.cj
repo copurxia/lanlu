@@ -11,6 +11,7 @@ public class UserRow {
     public var username: String = ""
     public var passwordSalt: String = ""
     public var passwordHash: String = ""
+    public var passwordHashVersion: String = ""
     public var isAdmin: Bool = false
     public var avatarAssetId: Int64 = 0
     public var createdAt: String = ""
@@ -27,7 +28,7 @@ public class UserDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, username, password_salt, password_hash, is_admin, avatar_asset_id, created_at
+                        SELECT id, username, password_salt, password_hash, password_hash_version, is_admin, avatar_asset_id, created_at
                         FROM users
                         WHERE username = ?
                     """)
@@ -41,9 +42,10 @@ public class UserDao {
                                 row.username = rs.getOrNull<String>(1) ?? ""
                                 row.passwordSalt = rs.getOrNull<String>(2) ?? ""
                                 row.passwordHash = rs.getOrNull<String>(3) ?? ""
-                                row.isAdmin = rs.getOrNull<Bool>(4) ?? false
-                                row.avatarAssetId = rs.getOrNull<Int64>(5) ?? 0
-                                row.createdAt = rs.getOrNull<String>(6) ?? ""
+                                row.passwordHashVersion = rs.getOrNull<String>(4) ?? ""
+                                row.isAdmin = rs.getOrNull<Bool>(5) ?? false
+                                row.avatarAssetId = rs.getOrNull<Int64>(6) ?? 0
+                                row.createdAt = rs.getOrNull<String>(7) ?? ""
                                 return row
                             }
                         } finally {
@@ -68,7 +70,7 @@ public class UserDao {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        SELECT id, username, password_salt, password_hash, is_admin, avatar_asset_id, created_at
+                        SELECT id, username, password_salt, password_hash, password_hash_version, is_admin, avatar_asset_id, created_at
                         FROM users
                         WHERE id = ?
                     """)
@@ -82,9 +84,10 @@ public class UserDao {
                                 row.username = rs.getOrNull<String>(1) ?? ""
                                 row.passwordSalt = rs.getOrNull<String>(2) ?? ""
                                 row.passwordHash = rs.getOrNull<String>(3) ?? ""
-                                row.isAdmin = rs.getOrNull<Bool>(4) ?? false
-                                row.avatarAssetId = rs.getOrNull<Int64>(5) ?? 0
-                                row.createdAt = rs.getOrNull<String>(6) ?? ""
+                                row.passwordHashVersion = rs.getOrNull<String>(4) ?? ""
+                                row.isAdmin = rs.getOrNull<Bool>(5) ?? false
+                                row.avatarAssetId = rs.getOrNull<Int64>(6) ?? 0
+                                row.createdAt = rs.getOrNull<String>(7) ?? ""
                                 return row
                             }
                         } finally {
@@ -113,24 +116,28 @@ public class UserDao {
             return None
         }
 
-        // 每个用户一份 salt（hex）
-        let salt = AuthUtils.generateTokenHex(bytesLen: 16) // 16 bytes -> 32 hex chars
-        let passHash = AuthUtils.sha256Hex("${salt}:${password}:${pepper}")
+        let passwordRecord = match (PasswordHashService.hashPassword(password, pepper)) {
+            case Some(record) => record
+            case None =>
+                logger.error("创建用户失败：无法生成密码哈希")
+                return None
+        }
 
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        INSERT INTO users (username, password_salt, password_hash, is_admin)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO users (username, password_salt, password_hash, password_hash_version, is_admin)
+                        VALUES (?, ?, ?, ?, ?)
                         RETURNING id
                     """)
                     try {
                         stmt.set(0, trimmed)
-                        stmt.set(1, salt)
-                        stmt.set(2, passHash)
-                        stmt.set(3, isAdmin)
+                        stmt.set(1, passwordRecord.salt)
+                        stmt.set(2, passwordRecord.hash)
+                        stmt.set(3, passwordRecord.version)
+                        stmt.set(4, isAdmin)
                         let rs = stmt.query()
                         try {
                             if (rs.next()) {
@@ -198,11 +205,10 @@ public class UserDao {
 
     public static func verifyPassword(username: String, password: String, pepper: String): Option<Int64> {
         let row = getByUsername(username.trimAscii())
-        if (row.id <= 0 || row.passwordSalt.size == 0 || row.passwordHash.size == 0) {
+        if (row.id <= 0 || row.passwordHash.size == 0) {
             return None
         }
-        let computed = AuthUtils.sha256Hex("${row.passwordSalt}:${password}:${pepper}")
-        if (computed == row.passwordHash) {
+        if (verifyPasswordRow(row, password, pepper)) {
             return Some(row.id)
         }
         return None
@@ -210,49 +216,20 @@ public class UserDao {
 
     public static func verifyPasswordByUserId(userId: Int64, password: String, pepper: String): Bool {
         let row = getById(userId)
-        if (row.id <= 0 || row.passwordSalt.size == 0 || row.passwordHash.size == 0) {
+        if (row.id <= 0 || row.passwordHash.size == 0) {
             return false
         }
-        let computed = AuthUtils.sha256Hex("${row.passwordSalt}:${password}:${pepper}")
-        return computed == row.passwordHash
+        return verifyPasswordRow(row, password, pepper)
     }
 
     /**
      * 修改用户密码
      */
     public static func changePassword(userId: Int64, newPassword: String, pepper: String): Bool {
-        let logger = getLogger("user_dao")
         if (newPassword.size < 6 || newPassword.size > 256) {
             return false
         }
-
-        let salt = AuthUtils.generateTokenHex(bytesLen: 16)
-        let passHash = AuthUtils.sha256Hex("${salt}:${newPassword}:${pepper}")
-
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
-                        UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?
-                    """)
-                    try {
-                        stmt.set(0, salt)
-                        stmt.set(1, passHash)
-                        stmt.set(2, userId)
-                        let affected = stmt.update()
-                        return affected.rowCount > 0
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (e: Exception) {
-                    logger.error("修改密码失败", ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => return false
-        }
+        return updatePasswordHash(userId, newPassword, pepper, "修改密码失败")
     }
 
     /**
@@ -465,32 +442,62 @@ public class UserDao {
      * 重置用户密码
      */
     public static func resetUserPassword(userId: Int64, newPassword: String, pepper: String): Bool {
-        let logger = getLogger("user_dao")
         if (newPassword.size < 6 || newPassword.size > 256) {
             return false
         }
+        return updatePasswordHash(userId, newPassword, pepper, "重置用户密码失败")
+    }
 
-        let salt = AuthUtils.generateTokenHex(bytesLen: 16)
-        let passHash = AuthUtils.sha256Hex("${salt}:${newPassword}:${pepper}")
+    private static func verifyPasswordRow(row: UserRow, password: String, pepper: String): Bool {
+        let result = PasswordHashService.verifyPassword(
+            row.passwordHashVersion,
+            row.passwordSalt,
+            row.passwordHash,
+            password,
+            pepper
+        )
+        if (!result.valid) {
+            return false
+        }
+        if (result.needsUpgrade) {
+            let upgraded = updatePasswordHash(row.id, password, pepper, "旧密码哈希透明迁移失败")
+            if (!upgraded) {
+                getLogger("user_dao").warn("旧密码哈希验证成功，但迁移到 Argon2id 失败", ("user_id", row.id.toString()))
+            }
+        }
+        return true
+    }
+
+    private static func updatePasswordHash(userId: Int64, password: String, pepper: String, errorMessage: String): Bool {
+        let logger = getLogger("user_dao")
+        let passwordRecord = match (PasswordHashService.hashPassword(password, pepper)) {
+            case Some(record) => record
+            case None =>
+                logger.error(errorMessage, ("error", "failed to generate password hash"))
+                return false
+        }
 
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
                     let stmt = conn.prepareStatement("""
-                        UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?
+                        UPDATE users
+                        SET password_salt = ?, password_hash = ?, password_hash_version = ?
+                        WHERE id = ?
                     """)
                     try {
-                        stmt.set(0, salt)
-                        stmt.set(1, passHash)
-                        stmt.set(2, userId)
+                        stmt.set(0, passwordRecord.salt)
+                        stmt.set(1, passwordRecord.hash)
+                        stmt.set(2, passwordRecord.version)
+                        stmt.set(3, userId)
                         let affected = stmt.update()
                         return affected.rowCount > 0
                     } finally {
                         stmt.close()
                     }
                 } catch (e: Exception) {
-                    logger.error("重置用户密码失败", ("error", e.message))
+                    logger.error(errorMessage, ("error", e.message))
                     return false
                 } finally {
                     try { conn.close() } catch (_: Exception) {}
