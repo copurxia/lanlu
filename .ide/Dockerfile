@@ -13,7 +13,7 @@ RUN set -eux; \
     ca-certificates curl git wget unzip zip xz-utils \
     build-essential clang ninja-build cmake binutils \
     pkg-config \
-    libarchive-dev libavif-dev libbrotli-dev \
+    libarchive-dev libavif-dev libbrotli-dev libargon2-dev \
     libvips-dev libheif-dev librocksdb-dev; \
   rm -rf /var/lib/apt/lists/*
 

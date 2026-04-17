@@ -12,6 +12,7 @@ RUN set -eux; \
       ghostscript \
       imagemagick \
       libarchive13t64 \
+      libargon2-1 \
       libavif16 \
       libbrotli1 \
       libheif1 \
