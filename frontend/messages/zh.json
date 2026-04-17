@@ -460,7 +460,7 @@
     "passkeyManagement": "Passkey 管理",
     "passkeyManagementDescription": "为当前账号注册、查看和删除 Passkey。",
     "passkeyName": "Passkey 名称",
-    "passkeyNamePlaceholder": "例如：我的 MacBook、工作电脑",
+    "passkeyNamePlaceholder": "例如：我的工作电脑",
     "passkeyRegister": "注册 Passkey",
     "passkeyRegistering": "注册中...",
     "passkeyRegistered": "Passkey 注册成功",
