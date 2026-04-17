@@ -12,6 +12,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { AuthService } from '@/lib/services/auth-service';
+import { WebauthnAuthService } from '@/lib/services/webauthn-auth-service';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { ThemeButton } from '@/components/theme/theme-toggle';
 import { Logo } from '@/components/brand/Logo';
@@ -26,10 +27,10 @@ function LoginForm() {
 
   const LOGIN_USERNAME_STORAGE_KEY = 'lanlu.login.username';
 
-  const [mode, setMode] = useState<'account' | 'token'>('account');
+  const [mode, setMode] = useState<'account' | 'passkey'>('account');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [tokenInput, setTokenInput] = useState('');
+  const [passkeySupported, setPasskeySupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -41,6 +42,10 @@ function LoginForm() {
   }, [isAuthenticated, router, redirectTo]);
 
   // If login fails and the user refreshes, restore the last attempted username.
+  useEffect(() => {
+    setPasskeySupported(WebauthnAuthService.isSupported());
+  }, []);
+
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(LOGIN_USERNAME_STORAGE_KEY);
@@ -79,14 +84,26 @@ function LoginForm() {
     }
   };
 
-  const handleTokenLogin = async () => {
-    if (!tokenInput.trim()) return;
+  const handlePasskeyLogin = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      login(tokenInput.trim(), null);
+      const resp = await WebauthnAuthService.loginWithPasskey();
+      try {
+        window.localStorage.removeItem(LOGIN_USERNAME_STORAGE_KEY);
+      } catch {
+        // Ignore.
+      }
+      login(resp.data.token.token, resp.data.user);
     } catch (e: any) {
-      setError(e?.message || 'Login failed');
+      try {
+        if (username.trim()) {
+          window.localStorage.setItem(LOGIN_USERNAME_STORAGE_KEY, username.trim());
+        }
+      } catch {
+        // Ignore.
+      }
+      setError(e?.response?.data?.message || e?.message || t('auth.passkeyLoginFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -95,7 +112,7 @@ function LoginForm() {
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return;
     if (mode === 'account') void handleAccountLogin();
-    else void handleTokenLogin();
+    else void handlePasskeyLogin();
   };
 
   if (isAuthenticated) {
@@ -163,15 +180,17 @@ function LoginForm() {
           <Card className="border-none shadow-none bg-transparent lg:bg-card lg:border lg:shadow-xs">
             <CardContent className="pt-6 px-0 lg:px-6">
               <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 mb-8">
+                <TabsList className={`grid w-full mb-8 ${passkeySupported ? 'grid-cols-2' : 'grid-cols-1'}`}>
                   <TabsTrigger value="account" className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4" />
                     {t('auth.accountLogin')}
                   </TabsTrigger>
-                  <TabsTrigger value="token" className="flex items-center gap-2">
-                    <Key className="h-4 w-4" />
-                    {t('auth.tokenLogin')}
-                  </TabsTrigger>
+                  {passkeySupported ? (
+                    <TabsTrigger value="passkey" className="flex items-center gap-2">
+                      <Key className="h-4 w-4" />
+                      {t('auth.passkeyLogin')}
+                    </TabsTrigger>
+                  ) : null}
                 </TabsList>
 
                 <TabsContent value="account" className="space-y-4">
@@ -204,21 +223,8 @@ function LoginForm() {
                   </div>
                 </TabsContent>
 
-                <TabsContent value="token" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="token">{t('auth.token')}</Label>
-                    <Input
-                      id="token"
-                      type="password"
-                      placeholder={t('auth.tokenPlaceholder')}
-                      value={tokenInput}
-                      onChange={(e) => setTokenInput(e.target.value)}
-                      onKeyDown={handleKeyPress}
-                      disabled={isLoading}
-                      autoComplete="off"
-                      className="h-11"
-                    />
-                  </div>
+                <TabsContent value="passkey" className="space-y-4">
+                  <p className="text-sm text-muted-foreground">{t('auth.passkeyLoginDescription')}</p>
                 </TabsContent>
               </Tabs>
 
@@ -231,12 +237,10 @@ function LoginForm() {
               <Button
                 type="button"
                 className="w-full mt-6 h-11 text-base font-medium transition-all active:scale-[0.98]"
-                onClick={mode === 'account' ? handleAccountLogin : handleTokenLogin}
+                onClick={mode === 'account' ? handleAccountLogin : handlePasskeyLogin}
                 disabled={
                   isLoading ||
-                  (mode === 'account'
-                    ? !username.trim() || !password
-                    : !tokenInput.trim())
+                  (mode === 'account' ? !username.trim() || !password : false)
                 }
               >
                 {isLoading ? (

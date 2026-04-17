@@ -11,7 +11,8 @@ import { KeyRound } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { AuthService } from '@/lib/services/auth-service';
-import type { AuthToken, AuthSession } from '@/types/auth';
+import { WebauthnAuthService } from '@/lib/services/webauthn-auth-service';
+import type { AuthToken, AuthSession, PasskeyCredential } from '@/types/auth';
 import { AuthGuard } from '@/components/settings/AuthGuard';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -36,6 +37,13 @@ export default function AuthSettingsPage() {
   // 登录设备
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  // Passkeys
+  const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([]);
+  const [passkeysLoading, setPasskeysLoading] = useState(false);
+  const [passkeySupported, setPasskeySupported] = useState(false);
+  const [registeringPasskey, setRegisteringPasskey] = useState(false);
+  const [newPasskeyName, setNewPasskeyName] = useState('');
 
   // 修改凭据表单
   const [newUsername, setNewUsername] = useState('');
@@ -92,6 +100,23 @@ export default function AuthSettingsPage() {
     }
   };
 
+  const loadPasskeys = async () => {
+    if (!isAuthenticated || !passkeySupported) return;
+    setPasskeysLoading(true);
+    try {
+      const resp = await WebauthnAuthService.listCredentials();
+      setPasskeys(resp.data.credentials || []);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || t('auth.passkeyLoadFailed'));
+    } finally {
+      setPasskeysLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setPasskeySupported(WebauthnAuthService.isSupported());
+  }, []);
+
   useEffect(() => {
     void (async () => {
       if (isAuthenticated) {
@@ -100,11 +125,11 @@ export default function AuthSettingsPage() {
         } catch {
           // ignore
         }
-        await Promise.all([loadTokens(), loadSessions()]);
+        await Promise.all([loadTokens(), loadSessions(), loadPasskeys()]);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  }, [isAuthenticated, passkeySupported]);
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -171,6 +196,43 @@ export default function AuthSettingsPage() {
       await loadSessions();
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to revoke session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const registerPasskey = async () => {
+    if (!passkeySupported) return;
+    setRegisteringPasskey(true);
+    setError(null);
+    setSuccessMsg(null);
+    try {
+      await WebauthnAuthService.registerPasskey(newPasskeyName.trim());
+      setNewPasskeyName('');
+      await loadPasskeys();
+      setSuccessMsg(t('auth.passkeyRegistered'));
+      toastSuccess(t('auth.passkeyRegistered'));
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.passkeyRegisterFailed');
+      setError(msg);
+      toastError(msg);
+    } finally {
+      setRegisteringPasskey(false);
+    }
+  };
+
+  const revokePasskey = async (id: number) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await WebauthnAuthService.revokeCredential(id);
+      await loadPasskeys();
+      setSuccessMsg(t('auth.passkeyDeleted'));
+      toastSuccess(t('auth.passkeyDeleted'));
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.passkeyDeleteFailed');
+      setError(msg);
+      toastError(msg);
     } finally {
       setLoading(false);
     }
@@ -575,6 +637,77 @@ export default function AuthSettingsPage() {
           <Button onClick={handleSave} disabled={loading || !canSave} className="w-full">
             {loading ? t('common.saving') : t('common.save')}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('auth.passkeyManagement')}</CardTitle>
+          <CardDescription>{t('auth.passkeyManagementDescription')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {passkeySupported ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                <div className="space-y-2">
+                  <Label htmlFor="newPasskeyName">{t('auth.passkeyName')}</Label>
+                  <Input
+                    id="newPasskeyName"
+                    value={newPasskeyName}
+                    onChange={(e) => setNewPasskeyName(e.target.value)}
+                    placeholder={t('auth.passkeyNamePlaceholder')}
+                    disabled={registeringPasskey}
+                  />
+                </div>
+                <Button onClick={registerPasskey} disabled={registeringPasskey}>
+                  {registeringPasskey ? t('auth.passkeyRegistering') : t('auth.passkeyRegister')}
+                </Button>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">{t('auth.passkeys')}</p>
+                <Button variant="ghost" size="sm" onClick={loadPasskeys} disabled={passkeysLoading}>
+                  {t('common.refresh')}
+                </Button>
+              </div>
+
+              {passkeysLoading ? (
+                <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+              ) : passkeys.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t('auth.noPasskeys')}</p>
+              ) : (
+                <div className="space-y-2">
+                  {passkeys.map((passkey) => (
+                    <div
+                      key={passkey.id}
+                      className="flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{passkey.name || t('auth.unnamedPasskey')}</span>
+                          <Badge variant="outline">{passkey.algorithm}</Badge>
+                          {passkey.userVerified ? <Badge variant="secondary">{t('auth.passkeyUserVerified')}</Badge> : null}
+                        </div>
+                        <p className="text-xs text-muted-foreground break-all">
+                          {passkey.credentialId}
+                        </p>
+                        {passkey.lastUsedAt ? (
+                          <p className="text-xs text-muted-foreground">
+                            {t('auth.lastUsed')}: {passkey.lastUsedAt}
+                          </p>
+                        ) : null}
+                      </div>
+                      <Button variant="destructive" size="sm" onClick={() => revokePasskey(passkey.id)} disabled={loading}>
+                        {t('common.delete')}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('auth.passkeyUnavailable')}</p>
+          )}
         </CardContent>
       </Card>
 

@@ -2,6 +2,7 @@ package lanlu.routes.api
 
 import ignite.*
 import lanlu.contexts.user.interfaces.http.AuthController
+import lanlu.contexts.user.interfaces.http.WebauthnController
 import lanlu.infrastructure.middleware.*
 
 private func withUser(action: (Ctx, Int64) -> Unit): Handler {
@@ -35,11 +36,21 @@ public func registerAuthRoutes(router: App) {
     router.post("/api/auth/login", audited("auth.login", { ctx =>
         AuthController.login(ctx)
     }, riskLevel: 3))
+    router.post("/api/auth/webauthn/authenticate/options", audited("auth.webauthn.authenticate.options", { ctx =>
+        WebauthnController.authenticateOptions(ctx)
+    }, riskLevel: 2))
+    router.post("/api/auth/webauthn/authenticate/verify", audited("auth.webauthn.authenticate.verify", { ctx =>
+        WebauthnController.authenticateVerify(ctx)
+    }, riskLevel: 3))
 
     router.get("/api/auth/me", withUser({ ctx, userId => AuthController.me(ctx, userId) }))
     router.get("/api/auth/tokens", withUser({ ctx, userId => AuthController.listTokens(ctx, userId) }))
     router.get("/api/auth/sessions", withUser({ ctx, userId => AuthController.listSessions(ctx, userId) }))
+    router.get("/api/auth/webauthn/credentials", withUser({ ctx, userId => WebauthnController.listCredentials(ctx, userId) }))
     router.post("/api/auth/tokens", audited("auth.token.create", withUser({ ctx, userId => AuthController.createToken(ctx, userId) }), riskLevel: 3))
+    router.post("/api/auth/webauthn/register/options", audited("auth.webauthn.register.options", withUser({ ctx, userId => WebauthnController.registerOptions(ctx, userId) }), riskLevel: 2))
+    router.post("/api/auth/webauthn/register/verify", audited("auth.webauthn.register.verify", withUser({ ctx, userId => WebauthnController.registerVerify(ctx, userId) }), riskLevel: 3))
+    router.delete("/api/auth/webauthn/credentials/:id", audited("auth.webauthn.credential.revoke", withUser({ ctx, userId => WebauthnController.revokeCredential(ctx, userId) }), riskLevel: 3))
     router.delete("/api/auth/tokens/:id", audited("auth.token.revoke", withUser({ ctx, userId => AuthController.revokeToken(ctx, userId) }), riskLevel: 3))
     router.post("/api/auth/password", audited("auth.password.change", withUser({ ctx, userId => AuthController.changePassword(ctx, userId) }), riskLevel: 2))
     router.post("/api/auth/username", audited("auth.username.change", withUser({ ctx, userId => AuthController.changeUsername(ctx, userId) }), riskLevel: 3))

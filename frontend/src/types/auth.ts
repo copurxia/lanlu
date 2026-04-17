@@ -30,3 +30,16 @@ export type AuthSession = {
   createdAt?: string;
   lastUsedAt?: string;
 };
+
+export type PasskeyCredential = {
+  id: number;
+  name: string;
+  credentialId: string;
+  algorithm: string;
+  transports: string[];
+  userVerified: boolean;
+  backupEligible: boolean;
+  backupState: boolean;
+  createdAt: string;
+  lastUsedAt: string;
+};
