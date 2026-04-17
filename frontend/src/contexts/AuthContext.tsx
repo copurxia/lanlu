@@ -3,17 +3,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import type { AuthUser } from '@/types/auth';
 import { AuthService } from '@/lib/services/auth-service';
-import { setAuthTokenCookie } from '@/lib/api';
 
-type AuthUserStatus = 'anonymous' | 'token-only' | 'loading' | 'resolved' | 'error';
+type AuthUserStatus = 'anonymous' | 'loading' | 'resolved' | 'error';
 
 interface AuthContextType {
   token: string | null;
   user: AuthUser | null;
   isAuthenticated: boolean;
   userStatus: AuthUserStatus;
-  login: (token: string, user?: AuthUser | null) => void;
-  logout: () => void;
+  login: (token?: string | null, user?: AuthUser | null) => void;
+  logout: () => Promise<void>;
   refreshMe: () => Promise<void>;
   ensureMe: () => Promise<AuthUser | null>;
 }
@@ -30,12 +29,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (typeof window === 'undefined') {
       return;
     }
-
-    const savedToken = localStorage.getItem('auth_token');
-    setToken(savedToken);
+    setToken(null);
     setUser(null);
-    setUserStatus(savedToken ? 'token-only' : 'anonymous');
-    setAuthTokenCookie(savedToken);
+    setUserStatus('loading');
   }, []);
 
   const clearAuthState = useCallback(() => {
@@ -43,14 +39,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setUserStatus('anonymous');
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token');
-    }
-    setAuthTokenCookie(null);
   }, []);
 
   const fetchMe = useCallback(async (force: boolean): Promise<AuthUser | null> => {
-    if (!token) {
+    if (!token && userStatus !== 'loading') {
       setUser(null);
       setUserStatus('anonymous');
       return null;
@@ -68,9 +60,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const request = (async () => {
       try {
         const me = await AuthService.me();
-        setUser(me.data.user);
+        const currentUser = me.data.user;
+        setToken('cookie-session');
+        setUser(currentUser);
         setUserStatus('resolved');
-        return me.data.user;
+        return currentUser;
       } catch (e: any) {
         if (e?.response?.status === 401 || e?.status === 401) {
           clearAuthState();
@@ -85,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     meRequestRef.current = request;
     return request;
-  }, [clearAuthState, token, user]);
+  }, [clearAuthState, token, user, userStatus]);
 
   // 监听 API 401 错误事件
   useEffect(() => {
@@ -107,23 +101,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [clearAuthState]);
 
-  const login = (newToken: string, newUser?: AuthUser | null) => {
+  const login = (newToken?: string | null, newUser?: AuthUser | null) => {
     meRequestRef.current = null;
-    setToken(newToken);
+    setToken(newToken || 'cookie-session');
     if (newUser) {
       setUser(newUser);
       setUserStatus('resolved');
     } else {
       setUser(null);
-      setUserStatus('token-only');
-    }
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('auth_token', newToken);
-      setAuthTokenCookie(newToken);
+      setUserStatus('loading');
+      void fetchMe(true).catch(() => {});
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await AuthService.logout();
+    } catch {
+      // Ignore logout API errors and clear local state anyway.
+    }
     clearAuthState();
     if (typeof window !== 'undefined') {
       window.location.href = '/login';
@@ -138,9 +134,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return fetchMe(false);
   }, [fetchMe]);
 
-  // 自动补全用户信息：当有 token 但 user 为空时，自动调用 ensureMe 拉取用户信息（含 isAdmin）
+  // 自动补全用户信息：当有 cookie 会话但 user 为空时，自动调用 ensureMe 拉取用户信息（含 isAdmin）
   useEffect(() => {
-    if (token && !user && userStatus === 'token-only') {
+    if (!user && userStatus === 'loading') {
       void ensureMe();
     }
   }, [token, user, userStatus, ensureMe]);
@@ -172,7 +168,7 @@ export function useAuth() {
       isAuthenticated: false,
       userStatus: 'anonymous' as const,
       login: () => {},
-      logout: () => {},
+      logout: async () => {},
       refreshMe: async () => {},
       ensureMe: async () => null,
     };

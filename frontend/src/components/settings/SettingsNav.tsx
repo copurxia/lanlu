@@ -49,7 +49,7 @@ export function SettingsNav({ onNavigate }: SettingsNavProps) {
     if (!isAuthenticated) {
       return;
     }
-    if (userStatus === 'token-only') {
+    if (userStatus === 'loading' || userStatus === 'error') {
       void ensureMe().catch(() => {});
     }
   }, [ensureMe, isAuthenticated, userStatus]);

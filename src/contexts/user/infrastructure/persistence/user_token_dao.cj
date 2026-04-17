@@ -236,4 +236,52 @@ public class UserTokenDao {
             case None => return false
         }
     }
+
+    public static func revokeById(tokenId: Int64): Bool {
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("UPDATE user_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS NULL")
+                    stmt.set(0, tokenId)
+                    let updated = stmt.update()
+                    stmt.close()
+                    return updated.rowCount > 0
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    public static func revokeAllByUserAndType(userId: Int64, tokenType: String): Bool {
+        let normalizedType = tokenType.trimAscii()
+        if (userId <= 0 || normalizedType.size == 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE user_tokens
+                        SET revoked_at = CURRENT_TIMESTAMP
+                        WHERE user_id = ? AND token_type = ? AND revoked_at IS NULL
+                    """)
+                    stmt.set(0, userId)
+                    stmt.set(1, normalizedType)
+                    let updated = stmt.update()
+                    stmt.close()
+                    return updated.rowCount >= 0
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
 }

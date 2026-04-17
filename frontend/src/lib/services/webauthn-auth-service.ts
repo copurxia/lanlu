@@ -131,6 +131,28 @@ export class WebauthnAuthService {
       typeof navigator.credentials !== 'undefined';
   }
 
+  private static async authenticateWithPasskey<ResultData>(
+    optionsUrl: string,
+    verifyUrl: string
+  ): Promise<ApiEnvelope<ResultData>> {
+    const optionsRes = await apiClient.post<ApiEnvelope<WebauthnAuthenticationOptionsPayload>>(
+      optionsUrl,
+      {}
+    );
+    const { challengeId, publicKey } = optionsRes.data.data;
+    const credential = await navigator.credentials.get({
+      publicKey: toRequestOptions(publicKey),
+    });
+    if (!(credential instanceof PublicKeyCredential)) {
+      throw new Error('Passkey authentication was cancelled');
+    }
+    const verifyRes = await apiClient.post<ApiEnvelope<ResultData>>(verifyUrl, {
+      challengeId,
+      credential: serializeAuthenticationCredential(credential),
+    });
+    return verifyRes.data;
+  }
+
   static async registerPasskey(name?: string) {
     const optionsRes = await apiClient.post<ApiEnvelope<WebauthnRegistrationOptionsPayload>>(
       '/api/auth/webauthn/register/options',
@@ -152,24 +174,17 @@ export class WebauthnAuthService {
   }
 
   static async loginWithPasskey() {
-    const optionsRes = await apiClient.post<ApiEnvelope<WebauthnAuthenticationOptionsPayload>>(
+    return this.authenticateWithPasskey<{ user: AuthUser; token: AuthToken & { token: string } }>(
       '/api/auth/webauthn/authenticate/options',
-      {}
+      '/api/auth/webauthn/authenticate/verify'
     );
-    const { challengeId, publicKey } = optionsRes.data.data;
-    const credential = await navigator.credentials.get({
-      publicKey: toRequestOptions(publicKey),
-    });
-    if (!(credential instanceof PublicKeyCredential)) {
-      throw new Error('Passkey authentication was cancelled');
-    }
-    const verifyRes = await apiClient.post<
-      ApiEnvelope<{ user: AuthUser; token: AuthToken & { token: string } }>
-    >('/api/auth/webauthn/authenticate/verify', {
-      challengeId,
-      credential: serializeAuthenticationCredential(credential),
-    });
-    return verifyRes.data;
+  }
+
+  static async verifyStepUpWithPasskey() {
+    return this.authenticateWithPasskey<null>(
+      '/api/auth/step-up/webauthn/options',
+      '/api/auth/step-up/webauthn/verify'
+    );
   }
 
   static async listCredentials() {
@@ -180,7 +195,9 @@ export class WebauthnAuthService {
   }
 
   static async revokeCredential(id: number) {
-    const res = await apiClient.delete<ApiEnvelope<null>>(`/api/auth/webauthn/credentials/${id}`);
+    const res = await apiClient.delete<ApiEnvelope<null>>(`/api/auth/webauthn/credentials/${id}`, {
+      data: {},
+    });
     return res.data;
   }
 }

@@ -42,7 +42,7 @@ export function SettingsPageWrapper({
     if (!requireAdmin || !isAuthenticated) {
       return;
     }
-    if (userStatus === 'token-only') {
+    if (userStatus === 'loading' || userStatus === 'error') {
       void ensureMe().catch(() => {});
     }
   }, [ensureMe, isAuthenticated, requireAdmin, userStatus]);
@@ -69,7 +69,7 @@ export function SettingsPageWrapper({
     );
   }
 
-  if (requireAdmin && (userStatus === 'token-only' || userStatus === 'loading')) {
+  if (requireAdmin && (userStatus === 'loading')) {
     return (
       <div className="space-y-6">
         <div className="space-y-1">

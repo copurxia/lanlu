@@ -1,5 +1,6 @@
 package lanlu.contexts.user.interfaces.http
 
+import std.collection.*
 import std.convert.*
 import ignite.*
 import stdx.net.http.HttpStatusCode
@@ -68,6 +69,7 @@ class TokenNameReq <: JsonDeserializable<TokenNameReq> {
 
 class NewPasswordReq <: JsonDeserializable<NewPasswordReq> {
     var newPassword: String = ""
+    var currentPassword: String = ""
 
     public static func fromJson(r: JsonReader): NewPasswordReq {
         let res = NewPasswordReq()
@@ -79,6 +81,7 @@ class NewPasswordReq <: JsonDeserializable<NewPasswordReq> {
                         let n = r.readName()
                         match (n) {
                             case "newPassword" => res.newPassword = r.readValue<String>()
+                            case "currentPassword" => res.currentPassword = r.readValue<String>()
                             case _ => r.skip()
                         }
                     }
@@ -142,6 +145,45 @@ class CreateUserReq <: JsonDeserializable<CreateUserReq> {
             }
         }
         return res
+    }
+}
+
+class StepUpPasswordReq <: JsonDeserializable<StepUpPasswordReq> {
+    var password: String = ""
+
+    public static func fromJson(r: JsonReader): StepUpPasswordReq {
+        let res = StepUpPasswordReq()
+        while (let Some(tok) <- r.peek()) {
+            match (tok) {
+                case BeginObject =>
+                    r.startObject()
+                    while (r.peek() != EndObject) {
+                        let n = r.readName()
+                        match (n) {
+                            case "password" => res.password = r.readValue<String>()
+                            case _ => r.skip()
+                        }
+                    }
+                    r.endObject()
+                    break
+                case _ => throw Exception("invalid json")
+            }
+        }
+        return res
+    }
+}
+
+class StepUpMethodsDataView <: JsonSerializable {
+    let methods: Array<String>
+
+    public init(methods: Array<String>) {
+        this.methods = methods
+    }
+
+    public func toJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("methods").writeValue<Array<String>>(methods)
+        w.endObject()
     }
 }
 
@@ -312,6 +354,59 @@ public class AuthController {
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
+    private static func setAuthFailureReason(ctx: Ctx, reason: String): Unit {
+        ctx.setLocal("auth_failure_reason", reason)
+    }
+
+    private static func setRateLimitScope(ctx: Ctx, scope: String): Unit {
+        ctx.setLocal("auth_rate_limit_scope", scope)
+    }
+
+    private static func checkRateLimit(ctx: Ctx, scope: String, identifier: String, message: String): Bool {
+        let decision = AuthSecurityService.checkRateLimit(scope, ctx.ip, identifier)
+        if (decision.allowed) {
+            return true
+        }
+
+        setAuthFailureReason(ctx, "rate_limited")
+        setRateLimitScope(ctx, scope)
+        if (decision.retryAfterSeconds > 0) {
+            ctx.setHeader("Retry-After", decision.retryAfterSeconds.toString())
+        }
+        reply<String>(ctx, UInt16(429), ApiResponse<String>(429, message, None))
+        return false
+    }
+
+    private static func verifyStepUpPassword(ctx: Ctx, userId: Int64, currentPassword: String): Bool {
+        if (currentPassword.trimAscii().size == 0) {
+            setAuthFailureReason(ctx, "reauth_missing")
+            reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "currentPassword is required", None))
+            return false
+        }
+
+        if (!UserDao.verifyPasswordByUserId(userId, currentPassword, AuthConfig.tokenPepper)) {
+            setAuthFailureReason(ctx, "reauth_failed")
+            reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current password is invalid", None))
+            return false
+        }
+        return true
+    }
+
+    private static func currentTokenId(ctx: Ctx): Int64 {
+        return try { Int64.parse(ctx.getLocal("auth_token_id") ?? "0") } catch (_: Exception) { 0 }
+    }
+
+    private static func requireRecentStepUp(ctx: Ctx, userId: Int64): Bool {
+        let tokenId = currentTokenId(ctx)
+        if (tokenId <= 0 || !AuthSecurityService.hasRecentStepUp(userId, tokenId)) {
+            setAuthFailureReason(ctx, "step_up_required")
+            ctx.setHeader("X-Auth-Step-Up-Required", "1")
+            reply<String>(ctx, UInt16(428), ApiResponse<String>(428, "step up authentication required", None))
+            return false
+        }
+        return true
+    }
+
     public static func login(ctx: Ctx): Unit {
         let logger = getLogger("auth_controller")
         try {
@@ -336,8 +431,14 @@ public class AuthController {
                 return
             }
 
+            let loginIdentifier = "${username.trimAscii().toAsciiLower()}"
+            if (!checkRateLimit(ctx, "auth_login", loginIdentifier, "too many login attempts")) {
+                return
+            }
+
             match (UserDao.verifyPassword(username, password, AuthConfig.tokenPepper)) {
                 case Some(userId) =>
+                    AuthSecurityService.clearFailures("auth_login", ctx.ip, loginIdentifier)
                     let row = UserDao.getById(userId)
                     let activeTotp = UserTotpCredentialDao.findActiveByUserId(userId)
                     if (activeTotp.id > 0) {
@@ -354,6 +455,7 @@ public class AuthController {
                     } else {
                         match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
                             case Some(tokenRes) =>
+                                AuthHttpUtils.setSessionCookie(ctx, tokenRes.token)
                                 let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
                                 let user = UserView(userId, username.trimAscii(), None, Some(avatarAssetId), None)
                                 let token = TokenView(tokenRes.tokenId, tokenName, tokenRes.prefix, Some(tokenRes.token), None, None, None)
@@ -363,6 +465,8 @@ public class AuthController {
                         }
                     }
                 case None =>
+                    AuthSecurityService.recordFailure("auth_login", ctx.ip, loginIdentifier)
+                    setAuthFailureReason(ctx, "invalid_credentials")
                     reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid credentials", None))
             }
         } catch (e: Exception) {
@@ -378,6 +482,38 @@ public class AuthController {
         let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
         let user = UserView(userId, username, Some(isAdmin), Some(avatarAssetId), None)
         reply<UserDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserDataView>(200, "ok", Some(UserDataView(user))))
+    }
+
+    public static func stepUpOptions(ctx: Ctx, userId: Int64): Unit {
+        let methods = ArrayList<String>()
+        methods.add("password")
+        let totpCredential = UserTotpCredentialDao.findActiveByUserId(userId)
+        if (totpCredential.id > 0) {
+            methods.add("totp")
+        }
+        let passkeys = UserWebauthnCredentialDao.listActiveByUser(userId)
+        if (passkeys.size > 0) {
+            methods.add("passkey")
+        }
+        reply<StepUpMethodsDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<StepUpMethodsDataView>(200, "ok", Some(StepUpMethodsDataView(methods.toArray()))))
+    }
+
+    public static func stepUpVerifyPassword(ctx: Ctx, userId: Int64): Unit {
+        let req = try { JsonCodec.decode<StepUpPasswordReq>(ctx.bodyString()) } catch (_: Exception) { StepUpPasswordReq() }
+        if (!verifyStepUpPassword(ctx, userId, req.password)) {
+            return
+        }
+        let tokenId = currentTokenId(ctx)
+        if (tokenId <= 0) {
+            setAuthFailureReason(ctx, "reauth_failed")
+            reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current session is invalid", None))
+            return
+        }
+        if (!AuthSecurityService.grantStepUp(userId, tokenId, "password")) {
+            reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to grant step up", None))
+            return
+        }
+        reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "step up verified", None))
     }
 
     public static func listTokens(ctx: Ctx, userId: Int64): Unit {
@@ -481,8 +617,13 @@ public class AuthController {
                 return
             }
 
-            // 直接修改密码，不需要验证当前密码（已通过token认证）
+            if (!requireRecentStepUp(ctx, userId)) {
+                return
+            }
+
             if (UserDao.changePassword(userId, newPassword, AuthConfig.tokenPepper)) {
+                let _ = UserTokenDao.revokeAllByUserAndType(userId, "session")
+                AuthHttpUtils.clearSessionCookie(ctx)
                 reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "password changed", None))
             } else {
                 reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to change password", None))
@@ -491,6 +632,18 @@ public class AuthController {
             logger.error("changePassword 处理异常", ("error", e.message))
             reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, e.message, None))
         }
+    }
+
+    public static func logout(ctx: Ctx): Unit {
+        let tokenIdStr = ctx.getLocal("auth_token_id") ?? ""
+        if (tokenIdStr.size > 0) {
+            let tokenId = try { Int64.parse(tokenIdStr) } catch (_: Exception) { 0 }
+            if (tokenId > 0) {
+                let _ = UserTokenDao.revokeById(tokenId)
+            }
+        }
+        AuthHttpUtils.clearSessionCookie(ctx)
+        reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "logged out", None))
     }
 
     public static func changeUsername(ctx: Ctx, userId: Int64): Unit {
@@ -708,7 +861,19 @@ public class AuthController {
                 return
             }
 
+            let adminUserId = try { Int64.parse(ctx.getLocal("actor") ?? "0") } catch (_: Exception) { 0 }
+            if (adminUserId <= 0) {
+                setAuthFailureReason(ctx, "reauth_missing")
+                reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "administrator session is invalid", None))
+                return
+            }
+
+            if (!requireRecentStepUp(ctx, adminUserId)) {
+                return
+            }
+
             if (UserDao.resetUserPassword(targetUserId, newPassword, AuthConfig.tokenPepper)) {
+                let _ = UserTokenDao.revokeAllByUserAndType(targetUserId, "session")
                 reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "password reset", None))
             } else {
                 reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "user not found", None))

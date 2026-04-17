@@ -10,7 +10,7 @@ import { Dialog, DialogBody, DialogContent, DialogFooter } from '@/components/ui
 import { Filter, Plus, Pencil, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { getApiUrl } from '@/lib/api';
+import { apiClient } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { ICON_OPTIONS, SORT_BY_OPTIONS, getIconByValue } from '@/lib/utils/constants';
@@ -33,7 +33,7 @@ interface SmartFilter {
 
 export default function SmartFiltersPage() {
   const { t, language } = useLanguage();
-  const { token } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { success } = useToast();
   const { confirm } = useConfirmContext();
   const [filters, setFilters] = useState<SmartFilter[]>([]);
@@ -61,23 +61,21 @@ export default function SmartFiltersPage() {
   });
 
   const loadFilters = useCallback(async () => {
+    if (!isAuthenticated) {
+      setFilters([]);
+      setLoading(false);
+      return;
+    }
     try {
       setLoading(true);
-      const response = await fetch(getApiUrl('/api/admin/smart_filters'), {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setFilters(data.data?.items || []);
-      }
+      const response = await apiClient.get('/api/admin/smart_filters');
+      setFilters(response.data.data?.items || []);
     } catch (error) {
       logger.apiError('load smart filters', error);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     loadFilters();
@@ -121,30 +119,18 @@ export default function SmartFiltersPage() {
 
   const handleSave = async () => {
     try {
-      const url = editingFilter
-        ? getApiUrl(`/api/admin/smart_filters/${editingFilter.id}`)
-        : getApiUrl('/api/admin/smart_filters');
-      const method = editingFilter ? 'PUT' : 'POST';
-
       // Convert _default back to empty string for API
       const dataToSave = {
         ...formData,
         sort_by: formData.sort_by === '_default' ? '' : formData.sort_by,
       };
-
-      const response = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(dataToSave),
-      });
-
-      if (response.ok) {
-        setDialogOpen(false);
-        loadFilters();
+      if (editingFilter) {
+        await apiClient.put(`/api/admin/smart_filters/${editingFilter.id}`, dataToSave);
+      } else {
+        await apiClient.post('/api/admin/smart_filters', dataToSave);
       }
+      setDialogOpen(false);
+      loadFilters();
     } catch (error) {
       logger.operationFailed('save smart filter', error);
     }
@@ -162,17 +148,9 @@ export default function SmartFiltersPage() {
     if (!confirmed) return;
 
     try {
-      const response = await fetch(getApiUrl(`/api/admin/smart_filters/${id}`), {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        loadFilters();
-        success('删除成功');
-      }
+      await apiClient.delete(`/api/admin/smart_filters/${id}`);
+      loadFilters();
+      success('删除成功');
     } catch (error) {
       logger.operationFailed('delete smart filter', error);
     }
@@ -180,16 +158,8 @@ export default function SmartFiltersPage() {
 
   const handleToggle = async (id: number) => {
     try {
-      const response = await fetch(getApiUrl(`/api/admin/smart_filters/${id}/toggle`), {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      if (response.ok) {
-        loadFilters();
-      }
+      await apiClient.post(`/api/admin/smart_filters/${id}/toggle`);
+      loadFilters();
     } catch (error) {
       logger.operationFailed('toggle smart filter', error);
     }
@@ -267,19 +237,7 @@ export default function SmartFiltersPage() {
         sort_order_num: idx,
       }));
 
-      const response = await fetch(getApiUrl('/api/admin/smart_filters/reorder'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ orders }),
-      });
-
-      if (!response.ok) {
-        logger.operationFailed('save sort order', new Error('Failed to save sort order'));
-        loadFilters(); // Reload on error
-      }
+      await apiClient.post('/api/admin/smart_filters/reorder', { orders });
     } catch (error) {
       logger.operationFailed('save sort order', error);
       loadFilters(); // Reload on error

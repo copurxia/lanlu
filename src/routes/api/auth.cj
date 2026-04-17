@@ -40,6 +40,10 @@ public func registerAuthRoutes(router: App) {
     router.post("/api/auth/login/totp/verify", audited("auth.login.totp.verify", { ctx =>
         TotpController.loginVerify(ctx)
     }, riskLevel: 3))
+    router.post("/api/auth/logout", audited("auth.logout", { ctx =>
+        let _ = AuthMiddleware.optionalUser(ctx)
+        AuthController.logout(ctx)
+    }, riskLevel: 2))
     router.post("/api/auth/webauthn/authenticate/options", audited("auth.webauthn.authenticate.options", { ctx =>
         WebauthnController.authenticateOptions(ctx)
     }, riskLevel: 2))
@@ -48,10 +52,15 @@ public func registerAuthRoutes(router: App) {
     }, riskLevel: 3))
 
     router.get("/api/auth/me", withUser({ ctx, userId => AuthController.me(ctx, userId) }))
+    router.get("/api/auth/step-up/options", withUser({ ctx, userId => AuthController.stepUpOptions(ctx, userId) }))
     router.get("/api/auth/tokens", withUser({ ctx, userId => AuthController.listTokens(ctx, userId) }))
     router.get("/api/auth/sessions", withUser({ ctx, userId => AuthController.listSessions(ctx, userId) }))
     router.get("/api/auth/totp/status", withUser({ ctx, userId => TotpController.status(ctx, userId) }))
     router.get("/api/auth/webauthn/credentials", withUser({ ctx, userId => WebauthnController.listCredentials(ctx, userId) }))
+    router.post("/api/auth/step-up/password", audited("auth.step_up.password", withUser({ ctx, userId => AuthController.stepUpVerifyPassword(ctx, userId) }), riskLevel: 3))
+    router.post("/api/auth/step-up/totp", audited("auth.step_up.totp", withUser({ ctx, userId => TotpController.stepUpVerify(ctx, userId) }), riskLevel: 3))
+    router.post("/api/auth/step-up/webauthn/options", audited("auth.step_up.webauthn.options", withUser({ ctx, userId => WebauthnController.stepUpAuthenticateOptions(ctx, userId) }), riskLevel: 3))
+    router.post("/api/auth/step-up/webauthn/verify", audited("auth.step_up.webauthn.verify", withUser({ ctx, userId => WebauthnController.stepUpAuthenticateVerify(ctx, userId) }), riskLevel: 3))
     router.post("/api/auth/tokens", audited("auth.token.create", withUser({ ctx, userId => AuthController.createToken(ctx, userId) }), riskLevel: 3))
     router.post("/api/auth/totp/enroll/start", audited("auth.totp.enroll.start", withUser({ ctx, userId => TotpController.enrollStart(ctx, userId) }), riskLevel: 3))
     router.post("/api/auth/totp/enroll/confirm", audited("auth.totp.enroll.confirm", withUser({ ctx, userId => TotpController.enrollConfirm(ctx, userId) }), riskLevel: 3))

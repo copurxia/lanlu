@@ -18,6 +18,7 @@ import { WebauthnAuthService } from '@/lib/services/webauthn-auth-service';
 import type { AuthToken, AuthSession, PasskeyCredential, TotpEnrollmentPayload, TotpStatus } from '@/types/auth';
 import { AuthGuard } from '@/components/settings/AuthGuard';
 import { useToast } from '@/hooks/use-toast';
+import { useStepUpDialog } from '@/hooks/use-step-up-dialog';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { User } from 'lucide-react';
@@ -26,6 +27,7 @@ export default function AuthSettingsPage() {
   const { t } = useLanguage();
   const { user, isAuthenticated, logout, refreshMe } = useAuth();
   const { success: toastSuccess, error: toastError } = useToast();
+  const { requestStepUp, stepUpDialog } = useStepUpDialog();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,9 +174,14 @@ export default function AuthSettingsPage() {
       }
 
       if (canChangePassword) {
+        if (!(await requestStepUp())) {
+          return;
+        }
         await AuthService.changePassword({ newPassword });
         setNewPassword('');
         setConfirmPassword('');
+        await logout();
+        return;
       }
 
       await refreshMe();
@@ -235,6 +242,9 @@ export default function AuthSettingsPage() {
     setError(null);
     setSuccessMsg(null);
     try {
+      if (!(await requestStepUp())) {
+        return;
+      }
       await WebauthnAuthService.registerPasskey(newPasskeyName.trim());
       setNewPasskeyName('');
       await loadPasskeys();
@@ -253,6 +263,9 @@ export default function AuthSettingsPage() {
     setLoading(true);
     setError(null);
     try {
+      if (!(await requestStepUp())) {
+        return;
+      }
       await WebauthnAuthService.revokeCredential(id);
       await loadPasskeys();
       setSuccessMsg(t('auth.passkeyDeleted'));
@@ -270,6 +283,9 @@ export default function AuthSettingsPage() {
     setEnrollingTotp(true);
     setError(null);
     try {
+      if (!(await requestStepUp())) {
+        return;
+      }
       const resp = await TotpAuthService.startEnrollment(totpName.trim());
       setTotpEnrollment(resp.data);
       setRecoveryCodes([]);
@@ -313,6 +329,9 @@ export default function AuthSettingsPage() {
     setRegeneratingRecoveryCodes(true);
     setError(null);
     try {
+      if (!(await requestStepUp())) {
+        return;
+      }
       const resp = await TotpAuthService.regenerateRecoveryCodes(totpCode.trim());
       setRecoveryCodes(resp.data.recoveryCodes || []);
       setTotpCode('');
@@ -333,6 +352,9 @@ export default function AuthSettingsPage() {
     setDisablingTotp(true);
     setError(null);
     try {
+      if (!(await requestStepUp())) {
+        return;
+      }
       await TotpAuthService.disable({
         code: totpDisableCode.trim(),
         recoveryCode: totpDisableRecoveryCode.trim(),
@@ -553,6 +575,7 @@ export default function AuthSettingsPage() {
       t={t}
     >
       <div className="space-y-6">
+        {stepUpDialog}
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <h2 className="text-xl font-semibold flex items-center gap-2">
@@ -848,11 +871,16 @@ export default function AuthSettingsPage() {
                     <Label htmlFor="totpCode">{t('auth.totpCode')}</Label>
                     <Input
                       id="totpCode"
+                      name="totp"
+                      type="text"
                       value={totpCode}
                       onChange={(e) => setTotpCode(e.target.value)}
                       placeholder={t('auth.totpCodePlaceholder')}
                       disabled={confirmingTotp}
                       inputMode="numeric"
+                      autoComplete="one-time-code"
+                      autoCapitalize="none"
+                      autoCorrect="off"
                     />
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -876,11 +904,16 @@ export default function AuthSettingsPage() {
                 <Label htmlFor="totpCurrentCode">{t('auth.totpCode')}</Label>
                 <Input
                   id="totpCurrentCode"
+                  name="totp"
+                  type="text"
                   value={totpCode}
                   onChange={(e) => setTotpCode(e.target.value)}
                   placeholder={t('auth.totpCodePlaceholder')}
                   disabled={regeneratingRecoveryCodes}
                   inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                 />
                 <Button onClick={regenerateTotpRecoveryCodes} disabled={regeneratingRecoveryCodes || !totpCode.trim()}>
                   {regeneratingRecoveryCodes ? t('auth.totpRegeneratingRecoveryCodes') : t('auth.regenerateRecoveryCodes')}
@@ -891,17 +924,28 @@ export default function AuthSettingsPage() {
                 <Label htmlFor="totpDisableCode">{t('auth.disableTotp')}</Label>
                 <Input
                   id="totpDisableCode"
+                  name="totp"
+                  type="text"
                   value={totpDisableCode}
                   onChange={(e) => setTotpDisableCode(e.target.value)}
                   placeholder={t('auth.totpCodePlaceholder')}
                   disabled={disablingTotp}
                   inputMode="numeric"
+                  autoComplete="one-time-code"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                 />
                 <Input
+                  id="totpDisableRecoveryCode"
+                  name="recovery_code"
+                  type="text"
                   value={totpDisableRecoveryCode}
                   onChange={(e) => setTotpDisableRecoveryCode(e.target.value)}
                   placeholder={t('auth.recoveryCodePlaceholder')}
                   disabled={disablingTotp}
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                 />
                 <Button
                   variant="destructive"

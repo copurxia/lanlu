@@ -90,7 +90,7 @@ function LoginForm() {
       } catch {
         // Ignore.
       }
-      login(resp.data.token.token, resp.data.user);
+      login(null, resp.data.user);
     } catch (e: any) {
       try {
         window.localStorage.setItem(LOGIN_USERNAME_STORAGE_KEY, username.trim());
@@ -124,7 +124,7 @@ function LoginForm() {
       setTotpChallengeId('');
       setTotpCode('');
       setRecoveryCode('');
-      login(resp.data.token.token, resp.data.user);
+      login(null, resp.data.user);
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || t('auth.totpVerifyFailed'));
     } finally {
@@ -142,7 +142,7 @@ function LoginForm() {
       } catch {
         // Ignore.
       }
-      login(resp.data.token.token, resp.data.user);
+      login(null, resp.data.user);
     } catch (e: any) {
       try {
         if (username.trim()) {
@@ -257,12 +257,17 @@ function LoginForm() {
                           <Label htmlFor="totpCode">{t('auth.totpCode')}</Label>
                           <Input
                             id="totpCode"
+                            name="totp"
+                            type="text"
                             value={totpCode}
                             onChange={(e) => setTotpCode(e.target.value)}
                             onKeyDown={handleKeyPress}
                             placeholder={t('auth.totpCodePlaceholder')}
                             disabled={isLoading}
                             inputMode="numeric"
+                            autoComplete="one-time-code"
+                            autoCapitalize="none"
+                            autoCorrect="off"
                             className="h-11"
                           />
                         </TabsContent>
@@ -270,11 +275,16 @@ function LoginForm() {
                           <Label htmlFor="recoveryCode">{t('auth.recoveryCode')}</Label>
                           <Input
                             id="recoveryCode"
+                            name="recovery_code"
+                            type="text"
                             value={recoveryCode}
                             onChange={(e) => setRecoveryCode(e.target.value)}
                             onKeyDown={handleKeyPress}
                             placeholder={t('auth.recoveryCodePlaceholder')}
                             disabled={isLoading}
+                            autoComplete="off"
+                            autoCapitalize="none"
+                            autoCorrect="off"
                             className="h-11"
                           />
                         </TabsContent>

@@ -157,12 +157,16 @@ private func emitLanluAudit(
     event.riskLevel = if (statusRisk < configuredRisk) { statusRisk } else { configuredRisk }
     emitAudit(event, config: AuditConfig(
         output: { msg =>
+            let authFailureReason = ctx.getLocal("auth_failure_reason") ?? ""
+            let rateLimitScope = ctx.getLocal("auth_rate_limit_scope") ?? ""
             auditLogger.info(
                 msg,
                 ("request_id", event.requestId),
                 ("actor", event.actor),
                 ("action", event.action),
-                ("status", "${event.statusCode}")
+                ("status", "${event.statusCode}"),
+                ("auth_failure_reason", authFailureReason),
+                ("auth_rate_limit_scope", rateLimitScope)
             )
         }
     ))

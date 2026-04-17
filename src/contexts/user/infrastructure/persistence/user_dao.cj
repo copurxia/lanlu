@@ -208,6 +208,15 @@ public class UserDao {
         return None
     }
 
+    public static func verifyPasswordByUserId(userId: Int64, password: String, pepper: String): Bool {
+        let row = getById(userId)
+        if (row.id <= 0 || row.passwordSalt.size == 0 || row.passwordHash.size == 0) {
+            return false
+        }
+        let computed = AuthUtils.sha256Hex("${row.passwordSalt}:${password}:${pepper}")
+        return computed == row.passwordHash
+    }
+
     /**
      * 修改用户密码
      */

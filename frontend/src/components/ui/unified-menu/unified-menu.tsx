@@ -95,7 +95,7 @@ export function UnifiedMenu({
       onSelect?.(id)
       setOpen(false)
     },
-    [onSelect]
+    [onSelect, setOpen]
   )
 
   const handleOpenChange = React.useCallback(
@@ -103,7 +103,7 @@ export function UnifiedMenu({
       setOpen(newOpen)
       onOpenChange?.(newOpen)
     },
-    [onOpenChange]
+    [onOpenChange, setOpen]
   )
 
   // 右键菜单处理
@@ -115,7 +115,7 @@ export function UnifiedMenu({
         setOpen(true)
       }
     },
-    [trigger]
+    [setMenuPosition, setOpen, trigger]
   )
 
   // 根据模式渲染不同组件

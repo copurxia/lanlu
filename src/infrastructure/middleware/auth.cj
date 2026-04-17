@@ -20,10 +20,9 @@ public class AuthMiddleware {
 
     /**
      * 从请求中解析 Bearer token
-     * 支持三种方式（按优先级）：
+     * 支持两种方式（按优先级）：
      * 1. Authorization: Bearer <token>
-     * 2. URL 查询参数: ?token=<token>（用于 SSE/EventSource）
-     * 3. Cookie: auth_token=<token>
+     * 2. Cookie: auth_token=<token>
      */
     private static func getBearerToken(ctx: Ctx): Option<String> {
         let authHeader = ctx.header("Authorization") ?? ""
@@ -39,12 +38,6 @@ public class AuthMiddleware {
                     if (token.size > 0) { return Some(token) }
                 }
             }
-        }
-
-        // 回退到 URL 查询参数 ?token=<token>（用于 EventSource）
-        let queryToken = ctx.query("token") ?? ""
-        if (queryToken.size > 0) {
-            return Some(queryToken)
         }
 
         // 回退到 Cookie: auth_token=<token>
@@ -81,17 +74,17 @@ public class AuthMiddleware {
     public static func optionalUser(ctx: Ctx): Option<Int64> {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
-                match (getUserIdByToken(tokenRaw)) {
-                    case Some(uid) =>
-                        bindActor(ctx, uid)
-                        return Some(uid)
+                match (getTokenRowByToken(tokenRaw)) {
+                    case Some(row) =>
+                        bindTokenContext(ctx, row)
+                        return Some(row.userId)
                     case None =>
                         match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                             case Some(decoded) =>
-                                match (getUserIdByToken(decoded)) {
-                                    case Some(uid2) =>
-                                        bindActor(ctx, uid2)
-                                        return Some(uid2)
+                                match (getTokenRowByToken(decoded)) {
+                                    case Some(row2) =>
+                                        bindTokenContext(ctx, row2)
+                                        return Some(row2.userId)
                                     case None => ()
                                 }
                             case None => ()
@@ -109,26 +102,27 @@ public class AuthMiddleware {
         // Bearer token：按用户 token 校验
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
-                if (isValidUserToken(tokenRaw)) {
-                    if (let Some(uid) <- getUserIdByToken(tokenRaw)) {
-                        bindActor(ctx, uid)
-                    }
-                    return true
+                match (getTokenRowByToken(tokenRaw)) {
+                    case Some(row) =>
+                        bindTokenContext(ctx, row)
+                        return true
+                    case None => ()
                 }
                 // 兼容 LANraragi 文档：Bearer base64(token)
                 match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                     case Some(decoded) =>
-                        if (isValidUserToken(decoded)) {
-                            if (let Some(uid2) <- getUserIdByToken(decoded)) {
-                                bindActor(ctx, uid2)
-                            }
-                            return true
+                        match (getTokenRowByToken(decoded)) {
+                            case Some(row2) =>
+                                bindTokenContext(ctx, row2)
+                                return true
+                            case None => ()
                         }
                     case None => ()
                 }
             case None => ()
         }
 
+        ctx.setHeader("X-Auth-Session-Invalid", "1")
         ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
         ResponseView.errorJson(ctx, "This API is protected and requires login.", 401)
         return false
@@ -140,17 +134,17 @@ public class AuthMiddleware {
     public static func requireUser(ctx: Ctx): Option<Int64> {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
-                match (getUserIdByToken(tokenRaw)) {
-                    case Some(uid) =>
-                        bindActor(ctx, uid)
-                        return Some(uid)
+                match (getTokenRowByToken(tokenRaw)) {
+                    case Some(row) =>
+                        bindTokenContext(ctx, row)
+                        return Some(row.userId)
                     case None =>
                         match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                             case Some(decoded) =>
-                                match (getUserIdByToken(decoded)) {
-                                    case Some(uid2) =>
-                                        bindActor(ctx, uid2)
-                                        return Some(uid2)
+                                match (getTokenRowByToken(decoded)) {
+                                    case Some(row2) =>
+                                        bindTokenContext(ctx, row2)
+                                        return Some(row2.userId)
                                     case None => ()
                                 }
                             case None => ()
@@ -159,6 +153,7 @@ public class AuthMiddleware {
             case None => ()
         }
 
+        ctx.setHeader("X-Auth-Session-Invalid", "1")
         ctx.status(HttpStatusCode.STATUS_UNAUTHORIZED)
         ResponseView.errorJson(ctx, "This API is protected and requires login.", 401)
         return None
@@ -205,14 +200,7 @@ public class AuthMiddleware {
         }
     }
 
-    private static func isValidUserToken(token: String): Bool {
-        match (getUserIdByToken(token)) {
-            case Some(_) => return true
-            case None => return false
-        }
-    }
-
-    private static func getUserIdByToken(token: String): Option<Int64> {
+    private static func getTokenRowByToken(token: String): Option<UserTokenRow> {
         let trimmed = token.trimAscii()
         if (trimmed.size == 0) {
             return None
@@ -226,7 +214,7 @@ public class AuthMiddleware {
             if (shouldTouchToken(row.id, nowSec)) {
                 UserTokenDao.touch(row.id)
             }
-            return Some(row.userId)
+            return Some(row)
         }
         return None
     }
@@ -257,5 +245,11 @@ public class AuthMiddleware {
 
     private static func bindActor(ctx: Ctx, userId: Int64): Unit {
         ctx.setLocal("actor", userId.toString())
+    }
+
+    private static func bindTokenContext(ctx: Ctx, row: UserTokenRow): Unit {
+        bindActor(ctx, row.userId)
+        ctx.setLocal("auth_token_id", row.id.toString())
+        ctx.setLocal("auth_token_type", row.tokenType)
     }
 }

@@ -1,5 +1,9 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
 
+export interface AuthRequestConfig extends InternalAxiosRequestConfig {
+  skipAuthRedirect?: boolean;
+}
+
 // 区分服务端和客户端的API配置
 const getApiConfig = () => {
   const configuredBaseUrl = (process.env.NEXT_PUBLIC_API_URL || '').trim();
@@ -20,22 +24,14 @@ const getApiConfig = () => {
 const { baseURL, skipRequest } = getApiConfig();
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
 
-function setAuthTokenCookie(token: string | null): void {
-  if (typeof document === 'undefined') return;
-
-  if (!token) {
-    document.cookie = 'auth_token=; Path=/; Max-Age=0; SameSite=Lax';
-    return;
-  }
-
-  document.cookie = `auth_token=${token}; Path=/; Max-Age=${60 * 60 * 24 * 30}; SameSite=Lax`;
-}
-
 /**
  * 获取认证 Token
  */
 export function getAuthToken(): string | null {
-  return (typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null) || API_KEY || null;
+  if (typeof window !== 'undefined') {
+    return null;
+  }
+  return API_KEY || null;
 }
 
 /**
@@ -55,14 +51,11 @@ function createRequestInterceptor(config: InternalAxiosRequestConfig): InternalA
 function handleResponseError(error: AxiosError, logPrefix: string = 'API'): Promise<never> {
   console.error(`${logPrefix} Error:`, (error.response?.data as any) || error.message);
 
-  if (error?.response?.status === 401) {
+  const requestConfig = error.config as AuthRequestConfig | undefined;
+  const sessionInvalid = error?.response?.headers?.['x-auth-session-invalid'] === '1';
+  if (error?.response?.status === 401 && sessionInvalid && !requestConfig?.skipAuthRedirect) {
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('auth_token');
-      setAuthTokenCookie(null);
       window.dispatchEvent(new CustomEvent('auth:unauthorized'));
-      const currentPath = window.location.pathname;
-      const redirectParam = currentPath === '/' ? '' : `?redirect=${encodeURIComponent(currentPath)}`;
-      window.location.href = `/login${redirectParam}`;
     }
   }
 
@@ -83,20 +76,22 @@ function setupInterceptors(client: AxiosInstance, logPrefix: string = 'API'): vo
 export const apiClient = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 10000
+  timeout: 10000,
+  withCredentials: true
 });
 
 export const uploadClient = axios.create({
   baseURL,
   headers: { 'Content-Type': 'application/json' },
-  timeout: 0
+  timeout: 0,
+  withCredentials: true
 });
 
 // 统一设置拦截器
 setupInterceptors(apiClient, 'API');
 setupInterceptors(uploadClient, 'Upload API');
 
-export { skipRequest, setAuthTokenCookie };
+export { skipRequest };
 
 export const getApiUrl = (path: string): string => `${baseURL}${path}`;
 

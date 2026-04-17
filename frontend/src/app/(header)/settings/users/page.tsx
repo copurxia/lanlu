@@ -14,6 +14,7 @@ import { apiClient } from '@/lib/api';
 import type { ApiEnvelope, AdminUser } from '@/types/auth';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
+import { useStepUpDialog } from '@/hooks/use-step-up-dialog';
 
 interface CreateUserForm {
   username: string;
@@ -30,6 +31,7 @@ export default function UsersSettingsPage() {
   const { user, isAuthenticated } = useAuth();
   const { success, error: showError } = useToast();
   const { confirm } = useConfirmContext();
+  const { requestStepUp, stepUpDialog } = useStepUpDialog();
 
   const [loading, setLoading] = useState(false);
 
@@ -157,6 +159,9 @@ export default function UsersSettingsPage() {
 
     setLoading(true);
     try {
+      if (!(await requestStepUp())) {
+        return;
+      }
       await apiClient.post(`/api/auth/admin/users/${resetPasswordUser.id}/reset-password`, {
         newPassword: resetPasswordForm.newPassword,
       });
@@ -214,6 +219,7 @@ export default function UsersSettingsPage() {
 
   return (
     <div className="space-y-6">
+      {stepUpDialog}
       <div className="flex items-center justify-between">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold flex items-center gap-2">
