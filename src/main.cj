@@ -80,6 +80,7 @@ main(): Int64 {
     MigrationRegistry.register(V017_TaskpoolStateModel())
     MigrationRegistry.register(V018_PageMetadataAttachments())
     MigrationRegistry.register(V019_UserWebauthnCredentials())
+    MigrationRegistry.register(V020_UserTotpCredentials())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()

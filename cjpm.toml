@@ -25,6 +25,7 @@
   brotli_middleware = { git = "https://gitcode.com/copur/brotli_middleware.git", branch = "stdx" }
   wasmedge_ffi = { git = "https://gitcode.com/copur/wasmedge_ffi.git", branch = "main" }
   semver = { path = "packages/semver" }
+  totp_cj = { path = "packages/totp_cj" }
   webauthn_cj = { git = "https://gitcode.com/copur/webauthn.git", branch = "main" }
 
 [target]

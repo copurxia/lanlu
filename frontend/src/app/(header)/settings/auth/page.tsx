@@ -8,11 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
 import { KeyRound } from 'lucide-react';
+import { QrCode, ShieldCheck } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { AuthService } from '@/lib/services/auth-service';
+import { TotpAuthService } from '@/lib/services/totp-auth-service';
 import { WebauthnAuthService } from '@/lib/services/webauthn-auth-service';
-import type { AuthToken, AuthSession, PasskeyCredential } from '@/types/auth';
+import type { AuthToken, AuthSession, PasskeyCredential, TotpEnrollmentPayload, TotpStatus } from '@/types/auth';
 import { AuthGuard } from '@/components/settings/AuthGuard';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -44,6 +47,18 @@ export default function AuthSettingsPage() {
   const [passkeySupported, setPasskeySupported] = useState(false);
   const [registeringPasskey, setRegisteringPasskey] = useState(false);
   const [newPasskeyName, setNewPasskeyName] = useState('');
+  const [totpStatus, setTotpStatus] = useState<TotpStatus | null>(null);
+  const [totpLoading, setTotpLoading] = useState(false);
+  const [enrollingTotp, setEnrollingTotp] = useState(false);
+  const [confirmingTotp, setConfirmingTotp] = useState(false);
+  const [regeneratingRecoveryCodes, setRegeneratingRecoveryCodes] = useState(false);
+  const [disablingTotp, setDisablingTotp] = useState(false);
+  const [totpEnrollment, setTotpEnrollment] = useState<TotpEnrollmentPayload | null>(null);
+  const [totpName, setTotpName] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [totpDisableCode, setTotpDisableCode] = useState('');
+  const [totpDisableRecoveryCode, setTotpDisableRecoveryCode] = useState('');
+  const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   // 修改凭据表单
   const [newUsername, setNewUsername] = useState('');
@@ -113,6 +128,19 @@ export default function AuthSettingsPage() {
     }
   };
 
+  const loadTotpStatus = async () => {
+    if (!isAuthenticated) return;
+    setTotpLoading(true);
+    try {
+      const resp = await TotpAuthService.getStatus();
+      setTotpStatus(resp.data);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || t('auth.totpStatusLoadFailed'));
+    } finally {
+      setTotpLoading(false);
+    }
+  };
+
   useEffect(() => {
     setPasskeySupported(WebauthnAuthService.isSupported());
   }, []);
@@ -125,7 +153,7 @@ export default function AuthSettingsPage() {
         } catch {
           // ignore
         }
-        await Promise.all([loadTokens(), loadSessions(), loadPasskeys()]);
+        await Promise.all([loadTokens(), loadSessions(), loadPasskeys(), loadTotpStatus()]);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -236,6 +264,115 @@ export default function AuthSettingsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const startTotpEnrollment = async () => {
+    setEnrollingTotp(true);
+    setError(null);
+    try {
+      const resp = await TotpAuthService.startEnrollment(totpName.trim());
+      setTotpEnrollment(resp.data);
+      setRecoveryCodes([]);
+      setSuccessMsg(null);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.totpEnrollStartFailed');
+      setError(msg);
+      toastError(msg);
+    } finally {
+      setEnrollingTotp(false);
+    }
+  };
+
+  const confirmTotpEnrollment = async () => {
+    if (!totpEnrollment || !totpCode.trim()) return;
+    setConfirmingTotp(true);
+    setError(null);
+    try {
+      const resp = await TotpAuthService.confirmEnrollment({
+        challengeId: totpEnrollment.challengeId,
+        code: totpCode.trim(),
+        name: totpName.trim(),
+      });
+      setRecoveryCodes(resp.data.recoveryCodes || []);
+      setTotpEnrollment(null);
+      setTotpCode('');
+      await loadTotpStatus();
+      setSuccessMsg(t('auth.totpEnabled'));
+      toastSuccess(t('auth.totpEnabled'));
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.totpConfirmFailed');
+      setError(msg);
+      toastError(msg);
+    } finally {
+      setConfirmingTotp(false);
+    }
+  };
+
+  const regenerateTotpRecoveryCodes = async () => {
+    if (!totpCode.trim()) return;
+    setRegeneratingRecoveryCodes(true);
+    setError(null);
+    try {
+      const resp = await TotpAuthService.regenerateRecoveryCodes(totpCode.trim());
+      setRecoveryCodes(resp.data.recoveryCodes || []);
+      setTotpCode('');
+      await loadTotpStatus();
+      setSuccessMsg(t('auth.totpRecoveryCodesRegenerated'));
+      toastSuccess(t('auth.totpRecoveryCodesRegenerated'));
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.totpRecoveryCodesRegenerateFailed');
+      setError(msg);
+      toastError(msg);
+    } finally {
+      setRegeneratingRecoveryCodes(false);
+    }
+  };
+
+  const disableTotp = async () => {
+    if (!totpDisableCode.trim() && !totpDisableRecoveryCode.trim()) return;
+    setDisablingTotp(true);
+    setError(null);
+    try {
+      await TotpAuthService.disable({
+        code: totpDisableCode.trim(),
+        recoveryCode: totpDisableRecoveryCode.trim(),
+      });
+      setTotpDisableCode('');
+      setTotpDisableRecoveryCode('');
+      setRecoveryCodes([]);
+      setTotpEnrollment(null);
+      setTotpCode('');
+      await loadTotpStatus();
+      setSuccessMsg(t('auth.totpDisabled'));
+      toastSuccess(t('auth.totpDisabled'));
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.totpDisableFailed');
+      setError(msg);
+      toastError(msg);
+    } finally {
+      setDisablingTotp(false);
+    }
+  };
+
+  const copyRecoveryCodes = async () => {
+    if (recoveryCodes.length === 0) return;
+    try {
+      await navigator.clipboard.writeText(recoveryCodes.join('\n'));
+      toastSuccess(t('auth.recoveryCodesCopied'));
+    } catch {
+      toastError(t('auth.recoveryCodesCopyFailed'));
+    }
+  };
+
+  const downloadRecoveryCodes = () => {
+    if (recoveryCodes.length === 0) return;
+    const blob = new Blob([recoveryCodes.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'lanlu-totp-recovery-codes.txt';
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleAvatarSelected = async (file: File | null) => {
@@ -637,6 +774,171 @@ export default function AuthSettingsPage() {
           <Button onClick={handleSave} disabled={loading || !canSave} className="w-full">
             {loading ? t('common.saving') : t('common.save')}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('auth.totpManagement')}</CardTitle>
+          <CardDescription>{t('auth.totpManagementDescription')}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground" />
+                <span className="font-medium">
+                  {totpStatus?.enabled ? t('auth.totpEnabledLabel') : t('auth.totpDisabledLabel')}
+                </span>
+              </div>
+              {totpStatus?.enabled ? (
+                <p className="text-sm text-muted-foreground">
+                  {totpStatus.credentialName || t('auth.totpDefaultCredential')}
+                  {totpStatus.createdAt ? ` · ${totpStatus.createdAt}` : ''}
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t('auth.totpSetupHint')}</p>
+              )}
+            </div>
+            <Button variant="ghost" size="sm" onClick={loadTotpStatus} disabled={totpLoading}>
+              {t('common.refresh')}
+            </Button>
+          </div>
+
+          {!totpStatus?.enabled ? (
+            <div className="space-y-4 rounded-md border p-4">
+              <div className="space-y-2">
+                <Label htmlFor="totpName">{t('auth.totpAppName')}</Label>
+                <Input
+                  id="totpName"
+                  value={totpName}
+                  onChange={(e) => setTotpName(e.target.value)}
+                  placeholder={t('auth.totpAppNamePlaceholder')}
+                  disabled={enrollingTotp || confirmingTotp}
+                />
+              </div>
+              {!totpEnrollment ? (
+                <Button onClick={startTotpEnrollment} disabled={enrollingTotp}>
+                  {enrollingTotp ? t('auth.totpGenerating') : t('auth.totpStartEnrollment')}
+                </Button>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex flex-col gap-4 md:flex-row">
+                    <div className="rounded-lg border bg-white p-3">
+                      <QRCodeSVG value={totpEnrollment.otpauthUri} size={160} />
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-3">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium flex items-center gap-2">
+                          <QrCode className="h-4 w-4" />
+                          {t('auth.scanQrCode')}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{t('auth.scanQrCodeDescription')}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium">{t('auth.manualEntryKey')}</p>
+                        <p className="break-all rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm">
+                          {totpEnrollment.manualEntryKey}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="totpCode">{t('auth.totpCode')}</Label>
+                    <Input
+                      id="totpCode"
+                      value={totpCode}
+                      onChange={(e) => setTotpCode(e.target.value)}
+                      placeholder={t('auth.totpCodePlaceholder')}
+                      disabled={confirmingTotp}
+                      inputMode="numeric"
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={confirmTotpEnrollment} disabled={confirmingTotp || !totpCode.trim()}>
+                      {confirmingTotp ? t('auth.totpConfirming') : t('auth.totpConfirmEnrollment')}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setTotpEnrollment(null)} disabled={confirmingTotp}>
+                      {t('common.cancel')}
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-4 rounded-md border p-4">
+              <p className="text-sm text-muted-foreground">
+                {t('auth.recoveryCodesRemaining')}: {totpStatus?.recoveryCodesRemaining ?? 0}
+              </p>
+
+              <div className="space-y-2">
+                <Label htmlFor="totpCurrentCode">{t('auth.totpCode')}</Label>
+                <Input
+                  id="totpCurrentCode"
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value)}
+                  placeholder={t('auth.totpCodePlaceholder')}
+                  disabled={regeneratingRecoveryCodes}
+                  inputMode="numeric"
+                />
+                <Button onClick={regenerateTotpRecoveryCodes} disabled={regeneratingRecoveryCodes || !totpCode.trim()}>
+                  {regeneratingRecoveryCodes ? t('auth.totpRegeneratingRecoveryCodes') : t('auth.regenerateRecoveryCodes')}
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="totpDisableCode">{t('auth.disableTotp')}</Label>
+                <Input
+                  id="totpDisableCode"
+                  value={totpDisableCode}
+                  onChange={(e) => setTotpDisableCode(e.target.value)}
+                  placeholder={t('auth.totpCodePlaceholder')}
+                  disabled={disablingTotp}
+                  inputMode="numeric"
+                />
+                <Input
+                  value={totpDisableRecoveryCode}
+                  onChange={(e) => setTotpDisableRecoveryCode(e.target.value)}
+                  placeholder={t('auth.recoveryCodePlaceholder')}
+                  disabled={disablingTotp}
+                />
+                <Button
+                  variant="destructive"
+                  onClick={disableTotp}
+                  disabled={disablingTotp || (!totpDisableCode.trim() && !totpDisableRecoveryCode.trim())}
+                >
+                  {disablingTotp ? t('auth.disablingTotp') : t('auth.disableTotp')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {recoveryCodes.length > 0 ? (
+            <div className="space-y-3 rounded-md border border-dashed p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium">{t('auth.recoveryCodes')}</p>
+                  <p className="text-sm text-muted-foreground">{t('auth.recoveryCodesDescription')}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={copyRecoveryCodes}>
+                    {t('auth.copyRecoveryCodes')}
+                  </Button>
+                  <Button variant="secondary" size="sm" onClick={downloadRecoveryCodes}>
+                    {t('auth.downloadRecoveryCodes')}
+                  </Button>
+                </div>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {recoveryCodes.map((code) => (
+                  <div key={code} className="rounded-md border bg-muted/40 px-3 py-2 font-mono text-sm">
+                    {code}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 

@@ -12,10 +12,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { AuthService } from '@/lib/services/auth-service';
+import { TotpAuthService } from '@/lib/services/totp-auth-service';
 import { WebauthnAuthService } from '@/lib/services/webauthn-auth-service';
 import { LanguageButton } from '@/components/language/LanguageButton';
 import { ThemeButton } from '@/components/theme/theme-toggle';
 import { Logo } from '@/components/brand/Logo';
+import type { AuthLoginPendingTotp } from '@/types/auth';
 
 function LoginForm() {
   const { t } = useLanguage();
@@ -30,6 +32,10 @@ function LoginForm() {
   const [mode, setMode] = useState<'account' | 'passkey'>('account');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [totpChallengeId, setTotpChallengeId] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
+  const [totpMethod, setTotpMethod] = useState<'totp' | 'recovery_code'>('totp');
   const [passkeySupported, setPasskeySupported] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -56,6 +62,11 @@ function LoginForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const isPendingTotp = (data: unknown): data is AuthLoginPendingTotp => {
+    if (!data || typeof data !== 'object') return false;
+    return (data as AuthLoginPendingTotp).requiresTotp === true;
+  };
+
   const handleAccountLogin = async () => {
     if (!username.trim() || !password) return;
     setIsLoading(true);
@@ -66,6 +77,14 @@ function LoginForm() {
         password,
         tokenName: 'web',
       });
+      if (isPendingTotp(resp.data)) {
+        setTotpChallengeId(resp.data.challengeId);
+        setTotpCode('');
+        setRecoveryCode('');
+        setTotpMethod('totp');
+        setPassword('');
+        return;
+      }
       try {
         window.localStorage.removeItem(LOGIN_USERNAME_STORAGE_KEY);
       } catch {
@@ -79,6 +98,35 @@ function LoginForm() {
         // Ignore.
       }
       setError(e?.response?.data?.message || e?.message || 'Login failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleTotpVerify = async () => {
+    if (!totpChallengeId.trim()) return;
+    if (totpMethod === 'totp' && !totpCode.trim()) return;
+    if (totpMethod === 'recovery_code' && !recoveryCode.trim()) return;
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const resp = await TotpAuthService.verifyLogin({
+        challengeId: totpChallengeId.trim(),
+        code: totpMethod === 'totp' ? totpCode.trim() : '',
+        recoveryCode: totpMethod === 'recovery_code' ? recoveryCode.trim() : '',
+      });
+      try {
+        window.localStorage.removeItem(LOGIN_USERNAME_STORAGE_KEY);
+      } catch {
+        // Ignore.
+      }
+      setTotpChallengeId('');
+      setTotpCode('');
+      setRecoveryCode('');
+      login(resp.data.token.token, resp.data.user);
+    } catch (e: any) {
+      setError(e?.response?.data?.message || e?.message || t('auth.totpVerifyFailed'));
     } finally {
       setIsLoading(false);
     }
@@ -111,7 +159,10 @@ function LoginForm() {
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter') return;
-    if (mode === 'account') void handleAccountLogin();
+    if (mode === 'account') {
+      if (totpChallengeId) void handleTotpVerify();
+      else void handleAccountLogin();
+    }
     else void handlePasskeyLogin();
   };
 
@@ -194,33 +245,75 @@ function LoginForm() {
                 </TabsList>
 
                 <TabsContent value="account" className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="username">{t('auth.username')}</Label>
-                    <Input
-                      id="username"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      onKeyDown={handleKeyPress}
-                      placeholder={t('auth.usernamePlaceholder')}
-                      disabled={isLoading}
-                      autoComplete="username"
-                      className="h-11"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="password">{t('auth.password')}</Label>
-                    <Input
-                      id="password"
-                      type="password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      onKeyDown={handleKeyPress}
-                      placeholder={t('auth.passwordPlaceholder')}
-                      disabled={isLoading}
-                      autoComplete="current-password"
-                      className="h-11"
-                    />
-                  </div>
+                  {totpChallengeId ? (
+                    <>
+                      <p className="text-sm text-muted-foreground">{t('auth.totpRequiredDescription')}</p>
+                      <Tabs value={totpMethod} onValueChange={(value) => setTotpMethod(value as 'totp' | 'recovery_code')}>
+                        <TabsList className="grid w-full grid-cols-2">
+                          <TabsTrigger value="totp">{t('auth.totpCode')}</TabsTrigger>
+                          <TabsTrigger value="recovery_code">{t('auth.recoveryCode')}</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="totp" className="space-y-2">
+                          <Label htmlFor="totpCode">{t('auth.totpCode')}</Label>
+                          <Input
+                            id="totpCode"
+                            value={totpCode}
+                            onChange={(e) => setTotpCode(e.target.value)}
+                            onKeyDown={handleKeyPress}
+                            placeholder={t('auth.totpCodePlaceholder')}
+                            disabled={isLoading}
+                            inputMode="numeric"
+                            className="h-11"
+                          />
+                        </TabsContent>
+                        <TabsContent value="recovery_code" className="space-y-2">
+                          <Label htmlFor="recoveryCode">{t('auth.recoveryCode')}</Label>
+                          <Input
+                            id="recoveryCode"
+                            value={recoveryCode}
+                            onChange={(e) => setRecoveryCode(e.target.value)}
+                            onKeyDown={handleKeyPress}
+                            placeholder={t('auth.recoveryCodePlaceholder')}
+                            disabled={isLoading}
+                            className="h-11"
+                          />
+                        </TabsContent>
+                      </Tabs>
+                      <Button type="button" variant="ghost" className="px-0" disabled={isLoading} onClick={() => setTotpChallengeId('')}>
+                        {t('common.back')}
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="space-y-2">
+                        <Label htmlFor="username">{t('auth.username')}</Label>
+                        <Input
+                          id="username"
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
+                          onKeyDown={handleKeyPress}
+                          placeholder={t('auth.usernamePlaceholder')}
+                          disabled={isLoading}
+                          autoComplete="username"
+                          className="h-11"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="password">{t('auth.password')}</Label>
+                        <Input
+                          id="password"
+                          type="password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          onKeyDown={handleKeyPress}
+                          placeholder={t('auth.passwordPlaceholder')}
+                          disabled={isLoading}
+                          autoComplete="current-password"
+                          className="h-11"
+                        />
+                      </div>
+                    </>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="passkey" className="space-y-4">
@@ -237,21 +330,25 @@ function LoginForm() {
               <Button
                 type="button"
                 className="w-full mt-6 h-11 text-base font-medium transition-all active:scale-[0.98]"
-                onClick={mode === 'account' ? handleAccountLogin : handlePasskeyLogin}
+                onClick={mode === 'account' ? (totpChallengeId ? handleTotpVerify : handleAccountLogin) : handlePasskeyLogin}
                 disabled={
                   isLoading ||
-                  (mode === 'account' ? !username.trim() || !password : false)
+                  (mode === 'account'
+                    ? (totpChallengeId
+                      ? (totpMethod === 'totp' ? !totpCode.trim() : !recoveryCode.trim())
+                      : (!username.trim() || !password))
+                    : false)
                 }
               >
                 {isLoading ? (
                   <div className="flex items-center gap-2">
                     <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    {t('auth.loggingIn')}
+                    {totpChallengeId ? t('auth.verifyingTotp') : t('auth.loggingIn')}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
                     <LogIn className="h-4 w-4" />
-                    {t('auth.login')}
+                    {totpChallengeId ? t('auth.verifyTotp') : t('auth.login')}
                   </div>
                 )}
               </Button>

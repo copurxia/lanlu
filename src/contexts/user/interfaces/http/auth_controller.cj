@@ -4,6 +4,7 @@ import std.convert.*
 import ignite.*
 import stdx.net.http.HttpStatusCode
 import lanlu.shared.config.*
+import lanlu.contexts.user.application.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import lanlu.shared.views.*
@@ -285,6 +286,26 @@ class UserAndPasswordView <: JsonSerializable {
     }
 }
 
+class LoginPendingTotpDataView <: JsonSerializable {
+    let requiresTotp: Bool
+    let challengeId: String
+    let methods: Array<String>
+
+    public init(challengeId: String) {
+        this.requiresTotp = true
+        this.challengeId = challengeId
+        this.methods = ["totp", "recovery_code"]
+    }
+
+    public func toJson(w: JsonWriter): Unit {
+        w.startObject()
+        w.writeName("requiresTotp").writeValue(requiresTotp)
+        w.writeName("challengeId").writeValue(challengeId)
+        w.writeName("methods").writeValue<Array<String>>(methods)
+        w.endObject()
+    }
+}
+
 public class AuthController {
     private static func reply<T>(ctx: Ctx, httpStatus: UInt16, resp: ApiResponse<T>): Unit where T <: JsonSerializable {
         ctx.status(httpStatus)
@@ -317,15 +338,29 @@ public class AuthController {
 
             match (UserDao.verifyPassword(username, password, AuthConfig.tokenPepper)) {
                 case Some(userId) =>
-                    match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
-                        case Some(tokenRes) =>
-                            let row = UserDao.getById(userId)
-                            let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
-                            let user = UserView(userId, username.trimAscii(), None, Some(avatarAssetId), None)
-                            let token = TokenView(tokenRes.tokenId, tokenName, tokenRes.prefix, Some(tokenRes.token), None, None, None)
-                            reply<UserTokenPairView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserTokenPairView>(200, "ok", Some(UserTokenPairView(user, token))))
-                        case None =>
-                            reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to create token", None))
+                    let row = UserDao.getById(userId)
+                    let activeTotp = UserTotpCredentialDao.findActiveByUserId(userId)
+                    if (activeTotp.id > 0) {
+                        match (TotpAuthService.createLoginChallenge(userId, row.username, tokenName)) {
+                            case Some(challenge) =>
+                                reply<LoginPendingTotpDataView>(
+                                    ctx,
+                                    UInt16(202),
+                                    ApiResponse<LoginPendingTotpDataView>(202, "totp required", Some(LoginPendingTotpDataView(challenge.challengeId)))
+                                )
+                            case None =>
+                                reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to create login challenge", None))
+                        }
+                    } else {
+                        match (UserTokenDao.createToken(userId, tokenName, "session", AuthConfig.tokenPepper)) {
+                            case Some(tokenRes) =>
+                                let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
+                                let user = UserView(userId, username.trimAscii(), None, Some(avatarAssetId), None)
+                                let token = TokenView(tokenRes.tokenId, tokenName, tokenRes.prefix, Some(tokenRes.token), None, None, None)
+                                reply<UserTokenPairView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserTokenPairView>(200, "ok", Some(UserTokenPairView(user, token))))
+                            case None =>
+                                reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to create token", None))
+                        }
                     }
                 case None =>
                     reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid credentials", None))

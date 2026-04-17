@@ -9,6 +9,7 @@ import std.fs.exists
  */
 public class AuthConfig {
     public static var tokenPepper: String
+    public static var totpSecretKey: String
 
     static init() {
         if (exists(".env")) {
@@ -16,6 +17,11 @@ public class AuthConfig {
         }
         // 复用现有 JWT_SECRET 作为 pepper，避免将 token/hash 直接暴露为可离线撞库的 SHA256(token)
         tokenPepper = getVariable("JWT_SECRET") ?? ""
+        let configuredTotpSecretKey = getVariable("AUTH_TOTP_SECRET_KEY") ?? ""
+        totpSecretKey = if (configuredTotpSecretKey.trimAscii().size > 0) {
+            configuredTotpSecretKey
+        } else {
+            tokenPepper
+        }
     }
 }
-

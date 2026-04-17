@@ -1,11 +1,11 @@
 import { apiClient } from '@/lib/api';
-import type { ApiEnvelope, AuthToken, AuthUser, AuthSession } from '@/types/auth';
+import type { ApiEnvelope, AuthToken, AuthUser, AuthSession, AuthLoginPendingTotp } from '@/types/auth';
 import { ChunkedUploadService } from './chunked-upload-service';
 
 export class AuthService {
   static async login(params: { username: string; password: string; tokenName?: string }) {
     const res = await apiClient.post<
-      ApiEnvelope<{ user: AuthUser; token: AuthToken & { token: string } }>
+      ApiEnvelope<{ user: AuthUser; token: AuthToken & { token: string } } | AuthLoginPendingTotp>
     >('/api/auth/login', {
       username: params.username,
       password: params.password,
