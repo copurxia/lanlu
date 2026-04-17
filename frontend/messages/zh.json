@@ -367,7 +367,7 @@
     "passwordPlaceholder": "请输入密码",
     "accountLogin": "账号登录",
     "passkeyLogin": "Passkey 登录",
-    "passkeyLoginDescription": "输入用户名后，使用当前设备上的 Passkey 完成登录。",
+    "passkeyLoginDescription": "使用当前设备上的 Passkey 完成登录。",
     "passkeyLoginFailed": "Passkey 登录失败",
     "passkeyUnavailable": "当前浏览器或设备不支持 Passkey。",
     "register": "注册",

@@ -364,7 +364,7 @@
     "passwordPlaceholder": "Enter password",
     "accountLogin": "Account Login",
     "passkeyLogin": "Passkey Login",
-    "passkeyLoginDescription": "Enter your username, then use a passkey from this device to sign in.",
+    "passkeyLoginDescription": "Use a passkey from this device to sign in.",
     "passkeyLoginFailed": "Passkey login failed",
     "passkeyUnavailable": "Passkeys are not available on this browser or device.",
     "register": "Register",
