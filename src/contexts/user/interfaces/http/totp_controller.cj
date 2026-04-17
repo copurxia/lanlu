@@ -1,7 +1,6 @@
 package lanlu.contexts.user.interfaces.http
 
 import ignite.*
-import std.convert.*
 import stdx.net.http.HttpStatusCode
 import stdx.encoding.json.stream.*
 import totp_cj.*
