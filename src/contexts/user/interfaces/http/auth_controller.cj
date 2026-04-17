@@ -221,9 +221,15 @@ class TokenView <: JsonSerializable {
     let createdAt: Option<String>
     let lastUsedAt: Option<String>
     let revokedAt: Option<String>
+    let current: Option<Bool>
+    let lastUsedIp: Option<String>
+    let userAgent: Option<String>
+    let expiresAt: Option<String>
 
     public init(id: Int64, name: String, prefix: String, token: Option<String>,
-                createdAt: Option<String>, lastUsedAt: Option<String>, revokedAt: Option<String>) {
+                createdAt: Option<String>, lastUsedAt: Option<String>, revokedAt: Option<String>,
+                current!: Option<Bool> = None, lastUsedIp!: Option<String> = None,
+                userAgent!: Option<String> = None, expiresAt!: Option<String> = None) {
         this.id = id
         this.name = name
         this.prefix = prefix
@@ -231,6 +237,10 @@ class TokenView <: JsonSerializable {
         this.createdAt = createdAt
         this.lastUsedAt = lastUsedAt
         this.revokedAt = revokedAt
+        this.current = current
+        this.lastUsedIp = lastUsedIp
+        this.userAgent = userAgent
+        this.expiresAt = expiresAt
     }
 
     public func toJson(w: JsonWriter): Unit {
@@ -242,6 +252,10 @@ class TokenView <: JsonSerializable {
         if (let Some(v) <- createdAt) { w.writeName("createdAt").writeValue(v) }
         if (let Some(v) <- lastUsedAt) { w.writeName("lastUsedAt").writeValue(v) }
         if (let Some(v) <- revokedAt) { w.writeName("revokedAt").writeValue(v) }
+        if (let Some(v) <- current) { w.writeName("current").writeValue(v) }
+        if (let Some(v) <- lastUsedIp) { w.writeName("lastUsedIp").writeValue(v) }
+        if (let Some(v) <- userAgent) { w.writeName("userAgent").writeValue(v) }
+        if (let Some(v) <- expiresAt) { w.writeName("expiresAt").writeValue(v) }
         w.endObject()
     }
 }
@@ -354,54 +368,16 @@ public class AuthController {
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
-    private static func setAuthFailureReason(ctx: Ctx, reason: String): Unit {
-        ctx.setLocal("auth_failure_reason", reason)
-    }
-
-    private static func setRateLimitScope(ctx: Ctx, scope: String): Unit {
-        ctx.setLocal("auth_rate_limit_scope", scope)
-    }
-
-    private static func checkRateLimit(ctx: Ctx, scope: String, identifier: String, message: String): Bool {
-        let decision = AuthSecurityService.checkRateLimit(scope, ctx.ip, identifier)
-        if (decision.allowed) {
-            return true
-        }
-
-        setAuthFailureReason(ctx, "rate_limited")
-        setRateLimitScope(ctx, scope)
-        if (decision.retryAfterSeconds > 0) {
-            ctx.setHeader("Retry-After", decision.retryAfterSeconds.toString())
-        }
-        reply<String>(ctx, UInt16(429), ApiResponse<String>(429, message, None))
-        return false
-    }
-
     private static func verifyStepUpPassword(ctx: Ctx, userId: Int64, currentPassword: String): Bool {
         if (currentPassword.trimAscii().size == 0) {
-            setAuthFailureReason(ctx, "reauth_missing")
+            AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_missing")
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "currentPassword is required", None))
             return false
         }
 
         if (!UserDao.verifyPasswordByUserId(userId, currentPassword, AuthConfig.tokenPepper)) {
-            setAuthFailureReason(ctx, "reauth_failed")
+            AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_failed")
             reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current password is invalid", None))
-            return false
-        }
-        return true
-    }
-
-    private static func currentTokenId(ctx: Ctx): Int64 {
-        return try { Int64.parse(ctx.getLocal("auth_token_id") ?? "0") } catch (_: Exception) { 0 }
-    }
-
-    private static func requireRecentStepUp(ctx: Ctx, userId: Int64): Bool {
-        let tokenId = currentTokenId(ctx)
-        if (tokenId <= 0 || !AuthSecurityService.hasRecentStepUp(userId, tokenId)) {
-            setAuthFailureReason(ctx, "step_up_required")
-            ctx.setHeader("X-Auth-Step-Up-Required", "1")
-            reply<String>(ctx, UInt16(428), ApiResponse<String>(428, "step up authentication required", None))
             return false
         }
         return true
@@ -432,7 +408,7 @@ public class AuthController {
             }
 
             let loginIdentifier = "${username.trimAscii().toAsciiLower()}"
-            if (!checkRateLimit(ctx, "auth_login", loginIdentifier, "too many login attempts")) {
+            if (!AuthSecurityHttpUtils.checkRateLimit(ctx, "auth_login", loginIdentifier, "too many login attempts")) {
                 return
             }
 
@@ -466,7 +442,7 @@ public class AuthController {
                     }
                 case None =>
                     AuthSecurityService.recordFailure("auth_login", ctx.ip, loginIdentifier)
-                    setAuthFailureReason(ctx, "invalid_credentials")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "invalid_credentials")
                     reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid credentials", None))
             }
         } catch (e: Exception) {
@@ -503,9 +479,9 @@ public class AuthController {
         if (!verifyStepUpPassword(ctx, userId, req.password)) {
             return
         }
-        let tokenId = currentTokenId(ctx)
+        let tokenId = AuthSecurityHttpUtils.currentTokenId(ctx)
         if (tokenId <= 0) {
-            setAuthFailureReason(ctx, "reauth_failed")
+            AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_failed")
             reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current session is invalid", None))
             return
         }
@@ -524,7 +500,18 @@ public class AuthController {
             views = Array<TokenView>(tokens.size, { _ => TokenView(0, "", "", None, None, None, None) })
             for (i in 0..tokens.size) {
                 let t = tokens[i]
-                views[i] = TokenView(t.id, t.name, t.tokenPrefix, None, Some(t.createdAt), Some(t.lastUsedAt), Some(t.revokedAt))
+                views[i] = TokenView(
+                    t.id,
+                    t.name,
+                    t.tokenPrefix,
+                    None,
+                    Some(t.createdAt),
+                    Some(t.lastUsedAt),
+                    Some(t.revokedAt),
+                    lastUsedIp: Some(t.lastUsedIp),
+                    userAgent: Some(t.userAgent),
+                    expiresAt: Some(t.expiresAt)
+                )
             }
         }
         reply<TokensDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<TokensDataView>(200, "ok", Some(TokensDataView(views))))
@@ -533,12 +520,25 @@ public class AuthController {
     // 列出登录设备（session类型的token）
     public static func listSessions(ctx: Ctx, userId: Int64): Unit {
         let tokens = UserTokenDao.listByUserAndType(userId, Some("session"))
+        let currentSessionId = AuthSecurityHttpUtils.currentTokenId(ctx)
         var views = Array<TokenView>()
         if (tokens.size > 0) {
             views = Array<TokenView>(tokens.size, { _ => TokenView(0, "", "", None, None, None, None) })
             for (i in 0..tokens.size) {
                 let t = tokens[i]
-                views[i] = TokenView(t.id, t.name, t.tokenPrefix, None, Some(t.createdAt), Some(t.lastUsedAt), None)
+                views[i] = TokenView(
+                    t.id,
+                    t.name,
+                    t.tokenPrefix,
+                    None,
+                    Some(t.createdAt),
+                    Some(t.lastUsedAt),
+                    None,
+                    current: Some(t.id == currentSessionId),
+                    lastUsedIp: Some(t.lastUsedIp),
+                    userAgent: Some(t.userAgent),
+                    expiresAt: Some(t.expiresAt)
+                )
             }
         }
         reply<SessionsDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<SessionsDataView>(200, "ok", Some(SessionsDataView(views))))
@@ -617,7 +617,7 @@ public class AuthController {
                 return
             }
 
-            if (!requireRecentStepUp(ctx, userId)) {
+            if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
                 return
             }
 
@@ -644,6 +644,42 @@ public class AuthController {
         }
         AuthHttpUtils.clearSessionCookie(ctx)
         reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "logged out", None))
+    }
+
+    public static func revokeSession(ctx: Ctx, userId: Int64): Unit {
+        let idStr = ctx.paramsOpt("id") ?? ""
+        if (idStr.size == 0) {
+            reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "session id required", None))
+            return
+        }
+        let sessionId = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
+        if (sessionId <= 0) {
+            reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "invalid session id", None))
+            return
+        }
+
+        if (UserTokenDao.revokeByUserAndType(userId, sessionId, "session")) {
+            if (sessionId == AuthSecurityHttpUtils.currentTokenId(ctx)) {
+                AuthHttpUtils.clearSessionCookie(ctx)
+            }
+            reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "session revoked", None))
+        } else {
+            reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "session not found", None))
+        }
+    }
+
+    public static func revokeOtherSessions(ctx: Ctx, userId: Int64): Unit {
+        let currentSessionId = AuthSecurityHttpUtils.currentTokenId(ctx)
+        if (currentSessionId <= 0) {
+            AuthSecurityHttpUtils.replyUnauthorized(ctx, "current session is invalid", failureReason: "reauth_failed")
+            return
+        }
+
+        if (UserTokenDao.revokeAllByUserAndTypeExcept(userId, "session", currentSessionId)) {
+            reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "other sessions revoked", None))
+        } else {
+            reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to revoke other sessions", None))
+        }
     }
 
     public static func changeUsername(ctx: Ctx, userId: Int64): Unit {
@@ -863,12 +899,12 @@ public class AuthController {
 
             let adminUserId = try { Int64.parse(ctx.getLocal("actor") ?? "0") } catch (_: Exception) { 0 }
             if (adminUserId <= 0) {
-                setAuthFailureReason(ctx, "reauth_missing")
+                AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_missing")
                 reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "administrator session is invalid", None))
                 return
             }
 
-            if (!requireRecentStepUp(ctx, adminUserId)) {
+            if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, adminUserId)) {
                 return
             }
 

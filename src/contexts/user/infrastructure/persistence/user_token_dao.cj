@@ -15,6 +15,9 @@ public class UserTokenRow {
     public var createdAt: String = ""
     public var lastUsedAt: String = ""
     public var revokedAt: String = ""
+    public var lastUsedIp: String = ""
+    public var userAgent: String = ""
+    public var expiresAt: String = ""
 
     public init() {}
 }
@@ -92,7 +95,8 @@ public class UserTokenDao {
                 try {
                     let stmt = conn.prepareStatement("""
                         SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
-                               COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
+                               COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
+                               COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
                         FROM user_tokens
                         WHERE token_hash = ? AND revoked_at IS NULL
                     """)
@@ -111,6 +115,9 @@ public class UserTokenDao {
                                 row.createdAt = rs.getOrNull<String>(6) ?? ""
                                 row.lastUsedAt = rs.getOrNull<String>(7) ?? ""
                                 row.revokedAt = rs.getOrNull<String>(8) ?? ""
+                                row.lastUsedIp = rs.getOrNull<String>(9) ?? ""
+                                row.userAgent = rs.getOrNull<String>(10) ?? ""
+                                row.expiresAt = rs.getOrNull<String>(11) ?? ""
                                 return row
                             }
                         } finally {
@@ -130,13 +137,25 @@ public class UserTokenDao {
     }
 
     public static func touch(tokenId: Int64): Bool {
+        return touchUsage(tokenId, "", "")
+    }
+
+    public static func touchUsage(tokenId: Int64, ip: String, userAgent: String): Bool {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement("UPDATE user_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?")
+                    let stmt = conn.prepareStatement("""
+                        UPDATE user_tokens
+                        SET last_used_at = CURRENT_TIMESTAMP,
+                            last_used_ip = ?,
+                            user_agent = ?
+                        WHERE id = ?
+                    """)
                     try {
-                        stmt.set(0, tokenId)
+                        stmt.set(0, ip.trimAscii())
+                        stmt.set(1, userAgent.trimAscii())
+                        stmt.set(2, tokenId)
                         stmt.update()
                         return true
                     } finally {
@@ -165,14 +184,16 @@ public class UserTokenDao {
                     let sql = match (tokenType) {
                         case Some(t) => """
                             SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
-                                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
+                                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
+                                   COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
                             FROM user_tokens
                             WHERE user_id = ? AND token_type = ? AND revoked_at IS NULL
                             ORDER BY id DESC
                         """
                         case None => """
                             SELECT id, user_id, name, token_type, token_prefix, token_hash, created_at,
-                                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, '')
+                                   COALESCE(last_used_at::text, ''), COALESCE(revoked_at::text, ''),
+                                   COALESCE(last_used_ip, ''), COALESCE(user_agent, ''), COALESCE(expires_at::text, '')
                             FROM user_tokens
                             WHERE user_id = ? AND revoked_at IS NULL
                             ORDER BY id DESC
@@ -198,6 +219,9 @@ public class UserTokenDao {
                                 row.createdAt = rs.getOrNull<String>(6) ?? ""
                                 row.lastUsedAt = rs.getOrNull<String>(7) ?? ""
                                 row.revokedAt = rs.getOrNull<String>(8) ?? ""
+                                row.lastUsedIp = rs.getOrNull<String>(9) ?? ""
+                                row.userAgent = rs.getOrNull<String>(10) ?? ""
+                                row.expiresAt = rs.getOrNull<String>(11) ?? ""
                                 out.add(row)
                             }
                         } finally {
@@ -256,6 +280,36 @@ public class UserTokenDao {
         }
     }
 
+    public static func revokeByUserAndType(userId: Int64, tokenId: Int64, tokenType: String): Bool {
+        let normalizedType = tokenType.trimAscii()
+        if (userId <= 0 || tokenId <= 0 || normalizedType.size == 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE user_tokens
+                        SET revoked_at = CURRENT_TIMESTAMP
+                        WHERE id = ? AND user_id = ? AND token_type = ? AND revoked_at IS NULL
+                    """)
+                    stmt.set(0, tokenId)
+                    stmt.set(1, userId)
+                    stmt.set(2, normalizedType)
+                    let updated = stmt.update()
+                    stmt.close()
+                    return updated.rowCount > 0
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
     public static func revokeAllByUserAndType(userId: Int64, tokenType: String): Bool {
         let normalizedType = tokenType.trimAscii()
         if (userId <= 0 || normalizedType.size == 0) {
@@ -273,6 +327,36 @@ public class UserTokenDao {
                     """)
                     stmt.set(0, userId)
                     stmt.set(1, normalizedType)
+                    let updated = stmt.update()
+                    stmt.close()
+                    return updated.rowCount >= 0
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
+    }
+
+    public static func revokeAllByUserAndTypeExcept(userId: Int64, tokenType: String, excludedTokenId: Int64): Bool {
+        let normalizedType = tokenType.trimAscii()
+        if (userId <= 0 || normalizedType.size == 0 || excludedTokenId <= 0) {
+            return false
+        }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        UPDATE user_tokens
+                        SET revoked_at = CURRENT_TIMESTAMP
+                        WHERE user_id = ? AND token_type = ? AND id <> ? AND revoked_at IS NULL
+                    """)
+                    stmt.set(0, userId)
+                    stmt.set(1, normalizedType)
+                    stmt.set(2, excludedTokenId)
                     let updated = stmt.update()
                     stmt.close()
                     return updated.rowCount >= 0

@@ -20,6 +20,9 @@ export type AuthToken = {
   prefix: string;
   createdAt?: string;
   lastUsedAt?: string;
+  lastUsedIp?: string;
+  userAgent?: string;
+  expiresAt?: string;
   token?: string; // only returned once on create/login/register
 };
 
@@ -35,6 +38,10 @@ export type AuthSession = {
   prefix: string;
   createdAt?: string;
   lastUsedAt?: string;
+  lastUsedIp?: string;
+  userAgent?: string;
+  expiresAt?: string;
+  current?: boolean;
 };
 
 export type PasskeyCredential = {

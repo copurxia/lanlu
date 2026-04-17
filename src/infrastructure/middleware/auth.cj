@@ -74,14 +74,14 @@ public class AuthMiddleware {
     public static func optionalUser(ctx: Ctx): Option<Int64> {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
-                match (getTokenRowByToken(tokenRaw)) {
+                match (getTokenRowByToken(ctx, tokenRaw)) {
                     case Some(row) =>
                         bindTokenContext(ctx, row)
                         return Some(row.userId)
                     case None =>
                         match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                             case Some(decoded) =>
-                                match (getTokenRowByToken(decoded)) {
+                                match (getTokenRowByToken(ctx, decoded)) {
                                     case Some(row2) =>
                                         bindTokenContext(ctx, row2)
                                         return Some(row2.userId)
@@ -102,7 +102,7 @@ public class AuthMiddleware {
         // Bearer token：按用户 token 校验
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
-                match (getTokenRowByToken(tokenRaw)) {
+                match (getTokenRowByToken(ctx, tokenRaw)) {
                     case Some(row) =>
                         bindTokenContext(ctx, row)
                         return true
@@ -111,7 +111,7 @@ public class AuthMiddleware {
                 // 兼容 LANraragi 文档：Bearer base64(token)
                 match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                     case Some(decoded) =>
-                        match (getTokenRowByToken(decoded)) {
+                        match (getTokenRowByToken(ctx, decoded)) {
                             case Some(row2) =>
                                 bindTokenContext(ctx, row2)
                                 return true
@@ -134,14 +134,14 @@ public class AuthMiddleware {
     public static func requireUser(ctx: Ctx): Option<Int64> {
         match (getBearerToken(ctx)) {
             case Some(tokenRaw) =>
-                match (getTokenRowByToken(tokenRaw)) {
+                match (getTokenRowByToken(ctx, tokenRaw)) {
                     case Some(row) =>
                         bindTokenContext(ctx, row)
                         return Some(row.userId)
                     case None =>
                         match (AuthUtils.tryDecodeBase64ToUtf8(tokenRaw)) {
                             case Some(decoded) =>
-                                match (getTokenRowByToken(decoded)) {
+                                match (getTokenRowByToken(ctx, decoded)) {
                                     case Some(row2) =>
                                         bindTokenContext(ctx, row2)
                                         return Some(row2.userId)
@@ -200,7 +200,7 @@ public class AuthMiddleware {
         }
     }
 
-    private static func getTokenRowByToken(token: String): Option<UserTokenRow> {
+    private static func getTokenRowByToken(ctx: Ctx, token: String): Option<UserTokenRow> {
         let trimmed = token.trimAscii()
         if (trimmed.size == 0) {
             return None
@@ -212,7 +212,8 @@ public class AuthMiddleware {
             // 轻量触达，记录 last_used（节流）
             let nowSec = DateTime.now().toUnixTimeStamp().toSeconds()
             if (shouldTouchToken(row.id, nowSec)) {
-                UserTokenDao.touch(row.id)
+                let userAgent = ctx.header("User-Agent") ?? ""
+                UserTokenDao.touchUsage(row.id, ctx.ip, userAgent)
             }
             return Some(row)
         }

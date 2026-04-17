@@ -69,6 +69,8 @@ public func registerAuthRoutes(router: App) {
     router.post("/api/auth/webauthn/register/verify", audited("auth.webauthn.register.verify", withUser({ ctx, userId => WebauthnController.registerVerify(ctx, userId) }), riskLevel: 3))
     router.delete("/api/auth/totp", audited("auth.totp.disable", withUser({ ctx, userId => TotpController.disable(ctx, userId) }), riskLevel: 3))
     router.delete("/api/auth/webauthn/credentials/:id", audited("auth.webauthn.credential.revoke", withUser({ ctx, userId => WebauthnController.revokeCredential(ctx, userId) }), riskLevel: 3))
+    router.delete("/api/auth/sessions/:id", audited("auth.session.revoke", withUser({ ctx, userId => AuthController.revokeSession(ctx, userId) }), riskLevel: 3))
+    router.post("/api/auth/sessions/revoke-others", audited("auth.session.revoke_others", withUser({ ctx, userId => AuthController.revokeOtherSessions(ctx, userId) }), riskLevel: 3))
     router.delete("/api/auth/tokens/:id", audited("auth.token.revoke", withUser({ ctx, userId => AuthController.revokeToken(ctx, userId) }), riskLevel: 3))
     router.post("/api/auth/password", audited("auth.password.change", withUser({ ctx, userId => AuthController.changePassword(ctx, userId) }), riskLevel: 2))
     router.post("/api/auth/username", audited("auth.username.change", withUser({ ctx, userId => AuthController.changeUsername(ctx, userId) }), riskLevel: 3))

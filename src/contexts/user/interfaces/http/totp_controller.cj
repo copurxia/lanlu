@@ -169,65 +169,13 @@ public class TotpController {
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
-    private static func setAuthFailureReason(ctx: Ctx, reason: String): Unit {
-        ctx.setLocal("auth_failure_reason", reason)
-    }
-
-    private static func setRateLimitScope(ctx: Ctx, scope: String): Unit {
-        ctx.setLocal("auth_rate_limit_scope", scope)
-    }
-
-    private static func checkRateLimit(ctx: Ctx, scope: String, identifier: String, message: String): Bool {
-        let decision = AuthSecurityService.checkRateLimit(scope, ctx.ip, identifier)
-        if (decision.allowed) {
-            return true
-        }
-
-        setAuthFailureReason(ctx, "rate_limited")
-        setRateLimitScope(ctx, scope)
-        if (decision.retryAfterSeconds > 0) {
-            ctx.setHeader("Retry-After", decision.retryAfterSeconds.toString())
-        }
-        reply<String>(ctx, UInt16(429), ApiResponse<String>(429, message, None))
-        return false
-    }
-
-    private static func verifyStepUpPassword(ctx: Ctx, userId: Int64, currentPassword: String): Bool {
-        if (currentPassword.trimAscii().size == 0) {
-            setAuthFailureReason(ctx, "reauth_missing")
-            reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "currentPassword is required", None))
-            return false
-        }
-        if (!UserDao.verifyPasswordByUserId(userId, currentPassword, AuthConfig.tokenPepper)) {
-            setAuthFailureReason(ctx, "reauth_failed")
-            reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current password is invalid", None))
-            return false
-        }
-        return true
-    }
-
-    private static func currentTokenId(ctx: Ctx): Int64 {
-        return try { Int64.parse(ctx.getLocal("auth_token_id") ?? "0") } catch (_: Exception) { 0 }
-    }
-
-    private static func requireRecentStepUp(ctx: Ctx, userId: Int64): Bool {
-        let tokenId = currentTokenId(ctx)
-        if (tokenId <= 0 || !AuthSecurityService.hasRecentStepUp(userId, tokenId)) {
-            setAuthFailureReason(ctx, "step_up_required")
-            ctx.setHeader("X-Auth-Step-Up-Required", "1")
-            reply<String>(ctx, UInt16(428), ApiResponse<String>(428, "step up authentication required", None))
-            return false
-        }
-        return true
-    }
-
     public static func loginVerify(ctx: Ctx): Unit {
         let req = try { JsonCodec.decode<TotpLoginVerifyReq>(ctx.bodyString()) } catch (_: Exception) { TotpLoginVerifyReq() }
         if (req.challengeId.size == 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "challengeId is required", None))
             return
         }
-        if (!checkRateLimit(ctx, "auth_login_totp_verify", req.challengeId, "too many totp verification attempts")) {
+        if (!AuthSecurityHttpUtils.checkRateLimit(ctx, "auth_login_totp_verify", req.challengeId, "too many totp verification attempts")) {
             return
         }
         let state = TotpAuthService.loadLoginChallenge(req.challengeId)
@@ -242,7 +190,7 @@ public class TotpController {
                 }
                 if (!validateAuthFactor(credential, req.code, req.recoveryCode)) {
                     AuthSecurityService.recordFailure("auth_login_totp_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "totp_invalid")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "totp_invalid")
                     reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid totp or recovery code", None))
                     return
                 }
@@ -278,7 +226,7 @@ public class TotpController {
         } else {
             TotpNameReq()
         }
-        if (!requireRecentStepUp(ctx, userId)) {
+        if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
         let user = UserDao.getById(userId)
@@ -370,11 +318,11 @@ public class TotpController {
             return
         }
         if (!validateAuthFactor(credential, req.code, req.recoveryCode)) {
-            setAuthFailureReason(ctx, "reauth_failed")
+            AuthSecurityHttpUtils.setAuthFailureReason(ctx, "reauth_failed")
             reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid totp or recovery code", None))
             return
         }
-        let tokenId = currentTokenId(ctx)
+        let tokenId = AuthSecurityHttpUtils.currentTokenId(ctx)
         if (tokenId <= 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current session is invalid", None))
             return
@@ -388,7 +336,7 @@ public class TotpController {
 
     public static func regenerateRecoveryCodes(ctx: Ctx, userId: Int64): Unit {
         let req = try { JsonCodec.decode<TotpCodeReq>(ctx.bodyString()) } catch (_: Exception) { TotpCodeReq() }
-        if (!requireRecentStepUp(ctx, userId)) {
+        if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
         let credential = UserTotpCredentialDao.findActiveByUserId(userId)
@@ -412,7 +360,7 @@ public class TotpController {
 
     public static func disable(ctx: Ctx, userId: Int64): Unit {
         let req = try { JsonCodec.decode<TotpCodeReq>(ctx.bodyString()) } catch (_: Exception) { TotpCodeReq() }
-        if (!requireRecentStepUp(ctx, userId)) {
+        if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
         let credential = UserTotpCredentialDao.findActiveByUserId(userId)

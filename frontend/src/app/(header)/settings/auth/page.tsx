@@ -19,6 +19,7 @@ import type { AuthToken, AuthSession, PasskeyCredential, TotpEnrollmentPayload, 
 import { AuthGuard } from '@/components/settings/AuthGuard';
 import { useToast } from '@/hooks/use-toast';
 import { useStepUpDialog } from '@/hooks/use-step-up-dialog';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { User } from 'lucide-react';
@@ -28,6 +29,7 @@ export default function AuthSettingsPage() {
   const { user, isAuthenticated, logout, refreshMe } = useAuth();
   const { success: toastSuccess, error: toastError } = useToast();
   const { requestStepUp, stepUpDialog } = useStepUpDialog();
+  const { confirm } = useConfirmContext();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -211,6 +213,15 @@ export default function AuthSettingsPage() {
   };
 
   const revokeToken = async (id: number) => {
+    const confirmed = await confirm({
+      title: t('auth.confirmRevokeTokenTitle'),
+      description: t('auth.confirmRevokeTokenDescription'),
+      confirmText: t('auth.revokeToken'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
     setLoading(true);
     setError(null);
     try {
@@ -224,13 +235,53 @@ export default function AuthSettingsPage() {
   };
 
   const revokeSession = async (id: number) => {
+    const targetSession = sessions.find((session) => session.id === id) || null;
+    const confirmed = await confirm({
+      title: targetSession?.current ? t('auth.confirmLogoutCurrentSessionTitle') : t('auth.confirmRevokeSessionTitle'),
+      description: targetSession?.current ? t('auth.confirmLogoutCurrentSessionDescription') : t('auth.confirmRevokeSessionDescription'),
+      confirmText: targetSession?.current ? t('auth.logout') : t('auth.revokeSession'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
     setLoading(true);
     setError(null);
     try {
-      await AuthService.revokeToken(id); // 同样使用 revokeToken API
+      await AuthService.revokeSession(id);
+      if (targetSession?.current) {
+        await logout();
+        return;
+      }
       await loadSessions();
     } catch (e: any) {
       setError(e?.response?.data?.message || e?.message || 'Failed to revoke session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const revokeOtherSessions = async () => {
+    const confirmed = await confirm({
+      title: t('auth.confirmRevokeOtherSessionsTitle'),
+      description: t('auth.confirmRevokeOtherSessionsDescription'),
+      confirmText: t('auth.revokeOtherSessions'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      await AuthService.revokeOtherSessions();
+      await loadSessions();
+      setSuccessMsg(t('auth.otherSessionsRevoked'));
+      toastSuccess(t('auth.otherSessionsRevoked'));
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || t('auth.revokeOtherSessionsFailed');
+      setError(msg);
+      toastError(msg);
     } finally {
       setLoading(false);
     }
@@ -260,6 +311,15 @@ export default function AuthSettingsPage() {
   };
 
   const revokePasskey = async (id: number) => {
+    const confirmed = await confirm({
+      title: t('auth.confirmDeletePasskeyTitle'),
+      description: t('auth.confirmDeletePasskeyDescription'),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
     setLoading(true);
     setError(null);
     try {
@@ -326,6 +386,15 @@ export default function AuthSettingsPage() {
 
   const regenerateTotpRecoveryCodes = async () => {
     if (!totpCode.trim()) return;
+    const confirmed = await confirm({
+      title: t('auth.confirmRegenerateRecoveryCodesTitle'),
+      description: t('auth.confirmRegenerateRecoveryCodesDescription'),
+      confirmText: t('auth.regenerateRecoveryCodes'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
     setRegeneratingRecoveryCodes(true);
     setError(null);
     try {
@@ -349,6 +418,15 @@ export default function AuthSettingsPage() {
 
   const disableTotp = async () => {
     if (!totpDisableCode.trim() && !totpDisableRecoveryCode.trim()) return;
+    const confirmed = await confirm({
+      title: t('auth.confirmDisableTotpTitle'),
+      description: t('auth.confirmDisableTotpDescription'),
+      confirmText: t('auth.disableTotp'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
     setDisablingTotp(true);
     setError(null);
     try {
@@ -1065,9 +1143,14 @@ export default function AuthSettingsPage() {
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">{t('auth.sessions')}</p>
-            <Button variant="ghost" size="sm" onClick={loadSessions} disabled={sessionsLoading}>
-              {t('common.refresh')}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={revokeOtherSessions} disabled={loading || sessionsLoading || sessions.length <= 1}>
+                {t('auth.revokeOtherSessions')}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={loadSessions} disabled={sessionsLoading}>
+                {t('common.refresh')}
+              </Button>
+            </div>
           </div>
           {sessionsLoading ? (
             <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
@@ -1084,15 +1167,26 @@ export default function AuthSettingsPage() {
                     <div className="flex items-center gap-2">
                       <span className="font-medium">{session.name || t('auth.unnamedSession')}</span>
                       <Badge variant="outline">{session.prefix}</Badge>
+                      {session.current ? <Badge>{t('auth.currentSession')}</Badge> : null}
                     </div>
+                    {session.createdAt && (
+                      <p className="text-xs text-muted-foreground">
+                        {t('auth.createdAt')}: {session.createdAt}
+                      </p>
+                    )}
                     {session.lastUsedAt && (
                       <p className="text-xs text-muted-foreground">
                         {t('auth.lastUsed')}: {session.lastUsedAt}
                       </p>
                     )}
+                    {session.lastUsedIp ? (
+                      <p className="text-xs text-muted-foreground">
+                        IP: {session.lastUsedIp}
+                      </p>
+                    ) : null}
                   </div>
                   <Button variant="destructive" size="sm" onClick={() => revokeSession(session.id)} disabled={loading}>
-                    {t('auth.revokeSession')}
+                    {session.current ? t('auth.logout') : t('auth.revokeSession')}
                   </Button>
                 </div>
               ))}

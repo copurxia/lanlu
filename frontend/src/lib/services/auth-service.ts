@@ -33,6 +33,16 @@ export class AuthService {
     return res.data as ApiEnvelope<{ sessions: AuthSession[] }>;
   }
 
+  static async revokeSession(id: number): Promise<ApiEnvelope<null>> {
+    const res = await apiClient.delete<ApiEnvelope<null>>(`/api/auth/sessions/${id}`);
+    return res.data as ApiEnvelope<null>;
+  }
+
+  static async revokeOtherSessions(): Promise<ApiEnvelope<null>> {
+    const res = await apiClient.post<ApiEnvelope<null>>('/api/auth/sessions/revoke-others', {});
+    return res.data as ApiEnvelope<null>;
+  }
+
   static async createToken(name: string): Promise<ApiEnvelope<{ token: AuthToken & { token: string } }>> {
     const res = await apiClient.post<ApiEnvelope<{ token: AuthToken & { token: string } }>>(
       '/api/auth/tokens',

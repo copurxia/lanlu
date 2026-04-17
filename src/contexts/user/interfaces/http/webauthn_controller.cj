@@ -567,58 +567,6 @@ public class WebauthnController {
         ctx.json(JsonCodec.encode<ApiResponse<T>>(resp))
     }
 
-    private static func setAuthFailureReason(ctx: Ctx, reason: String): Unit {
-        ctx.setLocal("auth_failure_reason", reason)
-    }
-
-    private static func setRateLimitScope(ctx: Ctx, scope: String): Unit {
-        ctx.setLocal("auth_rate_limit_scope", scope)
-    }
-
-    private static func checkRateLimit(ctx: Ctx, scope: String, identifier: String, message: String): Bool {
-        let decision = AuthSecurityService.checkRateLimit(scope, ctx.ip, identifier)
-        if (decision.allowed) {
-            return true
-        }
-
-        setAuthFailureReason(ctx, "rate_limited")
-        setRateLimitScope(ctx, scope)
-        if (decision.retryAfterSeconds > 0) {
-            ctx.setHeader("Retry-After", decision.retryAfterSeconds.toString())
-        }
-        reply<String>(ctx, UInt16(429), ApiResponse<String>(429, message, None))
-        return false
-    }
-
-    private static func verifyStepUpPassword(ctx: Ctx, userId: Int64, currentPassword: String): Bool {
-        if (currentPassword.trimAscii().size == 0) {
-            setAuthFailureReason(ctx, "reauth_missing")
-            reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "currentPassword is required", None))
-            return false
-        }
-        if (!UserDao.verifyPasswordByUserId(userId, currentPassword, AuthConfig.tokenPepper)) {
-            setAuthFailureReason(ctx, "reauth_failed")
-            reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "current password is invalid", None))
-            return false
-        }
-        return true
-    }
-
-    private static func currentTokenId(ctx: Ctx): Int64 {
-        return try { Int64.parse(ctx.getLocal("auth_token_id") ?? "0") } catch (_: Exception) { 0 }
-    }
-
-    private static func requireRecentStepUp(ctx: Ctx, userId: Int64): Bool {
-        let tokenId = currentTokenId(ctx)
-        if (tokenId <= 0 || !AuthSecurityService.hasRecentStepUp(userId, tokenId)) {
-            setAuthFailureReason(ctx, "step_up_required")
-            ctx.setHeader("X-Auth-Step-Up-Required", "1")
-            reply<String>(ctx, UInt16(428), ApiResponse<String>(428, "step up authentication required", None))
-            return false
-        }
-        return true
-    }
-
     public static func registerOptions(ctx: Ctx, userId: Int64): Unit {
         let requestBody = ctx.bodyString()
         let req = if (requestBody.trimAscii().size > 0) {
@@ -626,7 +574,7 @@ public class WebauthnController {
         } else {
             WebauthnRegisterOptionsReq()
         }
-        if (!requireRecentStepUp(ctx, userId)) {
+        if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
         let user = UserDao.getById(userId)
@@ -821,7 +769,7 @@ public class WebauthnController {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "challengeId is required", None))
             return
         }
-        if (!checkRateLimit(ctx, "auth_webauthn_verify", req.challengeId, "too many passkey verification attempts")) {
+        if (!AuthSecurityHttpUtils.checkRateLimit(ctx, "auth_webauthn_verify", req.challengeId, "too many passkey verification attempts")) {
             return
         }
         let stored = loadAuthenticationStateByNamespace(stepUpAuthenticationNamespace, req.challengeId)
@@ -848,7 +796,7 @@ public class WebauthnController {
                 let matchedCredential = UserWebauthnCredentialDao.findActiveByCredentialId(credentialLookupId)
                 if (matchedCredential.id <= 0 || matchedCredential.userId != userId) {
                     AuthSecurityService.recordFailure("auth_webauthn_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "webauthn_credential_not_found")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "webauthn_credential_not_found")
                     let _ = PersistentCacheService.delete(stepUpAuthenticationNamespace, req.challengeId)
                     reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "credential not found", None))
                     return
@@ -882,7 +830,7 @@ public class WebauthnController {
                         reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to update passkey usage", None))
                         return
                     }
-                    let tokenId = currentTokenId(ctx)
+                    let tokenId = AuthSecurityHttpUtils.currentTokenId(ctx)
                     if (tokenId <= 0 || !AuthSecurityService.grantStepUp(userId, tokenId, "passkey")) {
                         reply<String>(ctx, HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR, ApiResponse<String>(500, "failed to grant step up", None))
                         return
@@ -892,17 +840,17 @@ public class WebauthnController {
                     reply<String>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<String>(200, "step up verified", None))
                 } catch (e: WebauthnException) {
                     AuthSecurityService.recordFailure("auth_webauthn_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "webauthn_invalid")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "webauthn_invalid")
                     let _ = PersistentCacheService.delete(stepUpAuthenticationNamespace, req.challengeId)
                     reply<String>(ctx, mapWebauthnHttpStatus(e.code), ApiResponse<String>(Int32(mapWebauthnHttpStatus(e.code)), e.message, None))
                 } catch (e: Exception) {
                     AuthSecurityService.recordFailure("auth_webauthn_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "webauthn_invalid")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "webauthn_invalid")
                     let _ = PersistentCacheService.delete(stepUpAuthenticationNamespace, req.challengeId)
                     reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, e.message, None))
                 }
             case None =>
-                setAuthFailureReason(ctx, "challenge_expired")
+                AuthSecurityHttpUtils.setAuthFailureReason(ctx, "challenge_expired")
                 reply<String>(ctx, UInt16(410), ApiResponse<String>(410, "authentication state expired", None))
         }
     }
@@ -957,7 +905,7 @@ public class WebauthnController {
             reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, "challengeId is required", None))
             return
         }
-        if (!checkRateLimit(ctx, "auth_webauthn_verify", req.challengeId, "too many passkey verification attempts")) {
+        if (!AuthSecurityHttpUtils.checkRateLimit(ctx, "auth_webauthn_verify", req.challengeId, "too many passkey verification attempts")) {
             return
         }
         let stored = loadAuthenticationState(req.challengeId)
@@ -980,7 +928,7 @@ public class WebauthnController {
                 let matchedCredential = UserWebauthnCredentialDao.findActiveByCredentialId(credentialLookupId)
                 if (matchedCredential.id <= 0) {
                     AuthSecurityService.recordFailure("auth_webauthn_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "webauthn_credential_not_found")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "webauthn_credential_not_found")
                     let _ = PersistentCacheService.delete(authenticationNamespace, req.challengeId)
                     reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "credential not found", None))
                     return
@@ -1029,17 +977,17 @@ public class WebauthnController {
                     }
                 } catch (e: WebauthnException) {
                     AuthSecurityService.recordFailure("auth_webauthn_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "webauthn_invalid")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "webauthn_invalid")
                     let _ = PersistentCacheService.delete(authenticationNamespace, req.challengeId)
                     reply<String>(ctx, mapWebauthnHttpStatus(e.code), ApiResponse<String>(Int32(mapWebauthnHttpStatus(e.code)), e.message, None))
                 } catch (e: Exception) {
                     AuthSecurityService.recordFailure("auth_webauthn_verify", ctx.ip, req.challengeId)
-                    setAuthFailureReason(ctx, "webauthn_invalid")
+                    AuthSecurityHttpUtils.setAuthFailureReason(ctx, "webauthn_invalid")
                     let _ = PersistentCacheService.delete(authenticationNamespace, req.challengeId)
                     reply<String>(ctx, HttpStatusCode.STATUS_BAD_REQUEST, ApiResponse<String>(400, e.message, None))
                 }
             case None =>
-                setAuthFailureReason(ctx, "challenge_expired")
+                AuthSecurityHttpUtils.setAuthFailureReason(ctx, "challenge_expired")
                 reply<String>(ctx, UInt16(410), ApiResponse<String>(410, "authentication state expired", None))
         }
     }
@@ -1057,7 +1005,7 @@ public class WebauthnController {
         } else {
             WebauthnRevokeCredentialReq()
         }
-        if (!requireRecentStepUp(ctx, userId)) {
+        if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
         let idStr = ctx.paramsOpt("id") ?? ""
