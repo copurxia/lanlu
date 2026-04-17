@@ -13,3 +13,4 @@ version = 0
   cjpminfo = {git = "https://github.com/ystyle/cjpminfo.git", commitId = "ba8d9662e4ce2e69bacb300f427224cd75aa55f2", tag = "master"}
   brotli_middleware = {git = "https://gitcode.com/copur/brotli_middleware.git", commitId = "1c4d0eebbefe66f2fb360f935ecbcee86df95654", branch = "stdx"}
   wasmedge_ffi = {git = "https://gitcode.com/copur/wasmedge_ffi.git", commitId = "7c23c33910c87f19d9ff0a87a0cbde7c6bf5f906", branch = "main"}
+  webauthn_cj = {git = "https://gitcode.com/copur/webauthn.git", commitId = "9f30841de49084ce71d371871b101e66c59bfa9a", branch = "main"}
