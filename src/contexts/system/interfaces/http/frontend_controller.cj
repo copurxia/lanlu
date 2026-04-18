@@ -10,6 +10,14 @@ import lanlu.shared.utils.*
  */
 public class FrontendController {
 
+    private static func resolveRequestPath(ctx: Ctx): (String, String, String) {
+        let path = ctx.paramsOpt("*") ?? ctx.path
+        let cleanPath = if (path.contains("?")) { path.split("?")[0] } else { path }
+        var relativePath = cleanPath
+        while (relativePath.startsWith("/")) { relativePath = relativePath[1..relativePath.size] }
+        (path, cleanPath, relativePath)
+    }
+
     /**
      * 统一的路径服务函数
      * 根据请求路径自动判断是文件还是目录，目录时自动添加index.html
@@ -18,10 +26,7 @@ public class FrontendController {
     public static func servePath(ctx: Ctx, baseDir!: String = "frontend/out") {
         try {
             // 获取并清理路径
-            let path = ctx.paramsOpt("*") ?? ""
-            let cleanPath = if (path.contains("?")) { path.split("?")[0] } else { path }
-            var relativePath = cleanPath
-            while (relativePath.startsWith("/")) { relativePath = relativePath[1..relativePath.size] }
+            let (path, cleanPath, relativePath) = resolveRequestPath(ctx)
             println("Request path: ${path}, Clean path: ${cleanPath}, Relative path: ${relativePath}, Base dir: ${baseDir}")
 
             // 处理根路径
@@ -95,6 +100,7 @@ public class FrontendController {
             return
         }
 
+        ctx.status(200)
         applyCacheHeadersByPolicy(ctx, logicalPath, etag)
         applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, true)
         ctx.setHeader("Content-Type", contentType)
@@ -304,10 +310,7 @@ public class FrontendController {
     public static func servePathHead(ctx: Ctx, baseDir!: String = "frontend/out") {
         try {
             // 获取并清理路径
-            let path = ctx.paramsOpt("*") ?? ""
-            let cleanPath = if (path.contains("?")) { path.split("?")[0] } else { path }
-            var relativePath = cleanPath
-            while (relativePath.startsWith("/")) { relativePath = relativePath[1..relativePath.size] }
+            let (path, cleanPath, relativePath) = resolveRequestPath(ctx)
             println("HEAD Request path: ${path}, Clean path: ${cleanPath}, Relative path: ${relativePath}, Base dir: ${baseDir}")
 
             // 处理根路径

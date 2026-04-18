@@ -221,6 +221,7 @@ main(): Int64 {
         ))
 
     installObservabilityMiddleware(app)
+    installFrontendFallbackMiddleware(app)
 
     // 注册所有路由
     logger.debug("Application starting... step 15: registering routes")
