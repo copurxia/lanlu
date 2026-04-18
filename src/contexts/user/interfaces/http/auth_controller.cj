@@ -433,7 +433,9 @@ public class AuthController {
                             case Some(tokenRes) =>
                                 AuthHttpUtils.setSessionCookie(ctx, tokenRes.token)
                                 let avatarAssetId = if (row.id > 0) { row.avatarAssetId } else { 0 }
-                                let user = UserView(userId, username.trimAscii(), None, Some(avatarAssetId), None)
+                                let isAdmin = if (row.id > 0) { row.isAdmin } else { false }
+                                let resolvedUsername = if (row.id > 0) { row.username } else { username.trimAscii() }
+                                let user = UserView(userId, resolvedUsername, Some(isAdmin), Some(avatarAssetId), None)
                                 let token = TokenView(tokenRes.tokenId, tokenName, tokenRes.prefix, Some(tokenRes.token), None, None, None)
                                 reply<UserTokenPairView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserTokenPairView>(200, "ok", Some(UserTokenPairView(user, token))))
                             case None =>
@@ -715,7 +717,7 @@ public class AuthController {
             }
 
             if (UserDao.changeUsername(userId, newUsername)) {
-                let userView = UserView(userId, newUsername.trimAscii(), None, None, None)
+                let userView = UserView(userId, newUsername.trimAscii(), Some(user.isAdmin), Some(user.avatarAssetId), None)
                 reply<UserDataView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserDataView>(200, "username changed", Some(UserDataView(userView))))
             } else {
                 // 可能是用户名已被使用

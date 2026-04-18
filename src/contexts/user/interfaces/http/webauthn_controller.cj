@@ -947,7 +947,7 @@ public class WebauthnController {
                             AuthSecurityService.clearFailures("auth_webauthn_verify", ctx.ip, req.challengeId)
                             AuthHttpUtils.setSessionCookie(ctx, tokenRes.token)
                             let userRow = UserDao.getById(resolvedUserId)
-                            let userView = UserView(userRow.id, userRow.username, None, Some(userRow.avatarAssetId), None)
+                            let userView = UserView(userRow.id, userRow.username, Some(userRow.isAdmin), Some(userRow.avatarAssetId), None)
                             let tokenView = TokenView(tokenRes.tokenId, "webauthn", tokenRes.prefix, Some(tokenRes.token), None, None, None)
                             let _ = PersistentCacheService.delete(authenticationNamespace, req.challengeId)
                             reply<UserTokenPairView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserTokenPairView>(200, "ok", Some(UserTokenPairView(userView, tokenView))))

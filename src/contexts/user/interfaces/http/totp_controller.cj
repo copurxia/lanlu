@@ -199,7 +199,7 @@ public class TotpController {
                         AuthSecurityService.clearFailures("auth_login_totp_verify", ctx.ip, req.challengeId)
                         AuthHttpUtils.setSessionCookie(ctx, tokenRes.token)
                         let _ = TotpAuthService.deleteLoginChallenge(req.challengeId)
-                        let user = UserView(row.id, row.username, None, Some(row.avatarAssetId), None)
+                        let user = UserView(row.id, row.username, Some(row.isAdmin), Some(row.avatarAssetId), None)
                         let token = TokenView(tokenRes.tokenId, challenge.tokenName, tokenRes.prefix, Some(tokenRes.token), None, None, None)
                         reply<UserTokenPairView>(ctx, HttpStatusCode.STATUS_OK, ApiResponse<UserTokenPairView>(200, "ok", Some(UserTokenPairView(user, token))))
                     case None =>
