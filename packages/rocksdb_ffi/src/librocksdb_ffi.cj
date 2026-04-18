@@ -99,6 +99,13 @@ public struct rocksdb_iterator_t {
 }
 
 public const ROCKSDB_NO_COMPRESSION: Int32 = 0
+public const ROCKSDB_SNAPPY_COMPRESSION: Int32 = 1
+public const ROCKSDB_ZLIB_COMPRESSION: Int32 = 2
+public const ROCKSDB_BZ2_COMPRESSION: Int32 = 3
+public const ROCKSDB_LZ4_COMPRESSION: Int32 = 4
+public const ROCKSDB_LZ4HC_COMPRESSION: Int32 = 5
+public const ROCKSDB_XPRESS_COMPRESSION: Int32 = 6
+public const ROCKSDB_ZSTD_COMPRESSION: Int32 = 7
 
 foreign func rocksdb_options_create(): CPointer<rocksdb_options_t>
 foreign func rocksdb_options_destroy(options: CPointer<rocksdb_options_t>): Unit

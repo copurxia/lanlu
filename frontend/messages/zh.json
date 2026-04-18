@@ -940,6 +940,8 @@
       "loadError": "加载设置失败",
       "saveSuccess": "设置保存成功",
       "saveError": "保存设置失败",
+      "performanceNotice": "性能设置中包含 TaskPool 和 RocksDB 本地 KV 的调优项。",
+      "performanceRestartHint": "所有 `ROCKSDB_` 前缀的设置都需要在服务重启后生效。",
       "sslNotice": "启用 SSL/TLS 后，服务会通过 ALPN 自动支持 HTTP/2，无需额外开关。",
       "sslRestartHint": "SSL 设置保存后需要重启服务才会生效。",
       "longHint": "单位：毫秒",

@@ -121,7 +121,7 @@ public class SystemSettingsController {
     public static func getAllSettings(ctx: Ctx) {
         let logger = getLogger("system_settings_controller")
         try {
-            let settings = SystemSettingsDao.getAllSettings()
+            let settings = SystemSettingsService.filterVisibleSettings(SystemSettingsDao.getAllSettings())
             let json = settingsToJson(settings)
             ctx.json("{\"success\":true,\"data\":${json}}")
         } catch (e: Exception) {
@@ -197,6 +197,9 @@ public class SystemSettingsController {
 
             let success = SystemSettingsService.updateSettings(settingsMap)
             if (success) {
+                if (settingsMap.contains("MAX_CONCURRENT_JOBS")) {
+                    TaskPoolService.getInstance().reloadMaxWorkersConfig()
+                }
                 ctx.json("{\"success\":true,\"message\":\"批量更新系统设置成功\"}")
             } else {
                 ctx.status(500)

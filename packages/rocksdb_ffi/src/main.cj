@@ -2,6 +2,34 @@ package rocksdb_ffi
 
 import std.collection.*
 
+public class OptimisticRocksDbOptions {
+    public let kvMemoryMb: Int32
+    public let blockCacheMb: Int32
+    public let maxWriteBufferNumber: Int32
+    public let maxOpenFiles: Int32
+    public let maxBackgroundJobs: Int32
+    public let allowMmapReads: Bool
+    public let compressionType: Int32
+
+    public init(
+        kvMemoryMb: Int32,
+        blockCacheMb: Int32,
+        maxWriteBufferNumber: Int32,
+        maxOpenFiles: Int32,
+        maxBackgroundJobs: Int32,
+        allowMmapReads: Bool,
+        compressionType: Int32
+    ) {
+        this.kvMemoryMb = kvMemoryMb
+        this.blockCacheMb = blockCacheMb
+        this.maxWriteBufferNumber = maxWriteBufferNumber
+        this.maxOpenFiles = maxOpenFiles
+        this.maxBackgroundJobs = maxBackgroundJobs
+        this.allowMmapReads = allowMmapReads
+        this.compressionType = compressionType
+    }
+}
+
 public class RocksDb {
     private static let defaultKvMemoryMb: Int32 = 16
     private static let minKvMemoryMb: Int32 = 4
@@ -855,9 +883,15 @@ public class RocksDbTxn {
 public class OptimisticRocksDb {
     private static let defaultKvMemoryMb: Int32 = 16
     private static let minKvMemoryMb: Int32 = 4
+    private static let defaultBlockCacheMb: Int32 = 64
+    private static let minBlockCacheMb: Int32 = 4
+    private static let defaultMaxWriteBufferNumber: Int32 = 4
+    private static let minMaxWriteBufferNumber: Int32 = 1
+    private static let defaultMaxOpenFiles: Int32 = 256
+    private static let minMaxOpenFiles: Int32 = -1
+    private static let defaultMaxBackgroundJobs: Int32 = 2
+    private static let minMaxBackgroundJobs: Int32 = 1
     private static let dbWriteBufferMultiplier: UIntNative = 4
-    private static let blockCacheSizeBytes: UIntNative = 64 * 1024 * 1024
-
     private let db: CPointer<rocksdb_optimistictransactiondb_t>
     private let baseDb: CPointer<rocksdb_t>
     private let readOptions: CPointer<rocksdb_readoptions_t>
@@ -876,10 +910,16 @@ public class OptimisticRocksDb {
         this.writeOptions = writeOptions
     }
 
-    public static func openOptimistic(path: String, kvMemoryMb: Int32): (Bool, Option<OptimisticRocksDb>, String) {
-        let normalizedKvMemoryMb = normalizeKvMemoryMb(kvMemoryMb)
+    public static func openOptimistic(path: String, dbOptions: OptimisticRocksDbOptions): (Bool, Option<OptimisticRocksDb>, String) {
+        let normalizedKvMemoryMb = normalizeKvMemoryMb(dbOptions.kvMemoryMb)
+        let normalizedBlockCacheMb = normalizeBlockCacheMb(dbOptions.blockCacheMb)
+        let normalizedMaxWriteBufferNumber = normalizeMaxWriteBufferNumber(dbOptions.maxWriteBufferNumber)
+        let normalizedMaxOpenFiles = normalizeMaxOpenFiles(dbOptions.maxOpenFiles)
+        let normalizedMaxBackgroundJobs = normalizeMaxBackgroundJobs(dbOptions.maxBackgroundJobs)
+        let normalizedCompressionType = normalizeCompressionType(dbOptions.compressionType)
         let writeBufferSizeBytes = mbToBytes(normalizedKvMemoryMb)
         let dbWriteBufferSizeBytes = writeBufferSizeBytes * dbWriteBufferMultiplier
+        let blockCacheSizeBytes = mbToBytes(normalizedBlockCacheMb)
         let options = unsafe { rocksdb_options_create() }
         if (options.isNull()) {
             return (false, None, "rocksdb_options_create failed")
@@ -903,17 +943,17 @@ public class OptimisticRocksDb {
         unsafe {
             rocksdb_options_set_create_if_missing(options, 1u8)
             rocksdb_options_set_paranoid_checks(options, 0u8)
-            rocksdb_options_set_compression(options, ROCKSDB_NO_COMPRESSION)
+            rocksdb_options_set_compression(options, normalizedCompressionType)
             rocksdb_options_set_write_buffer_size(options, writeBufferSizeBytes)
             rocksdb_options_set_db_write_buffer_size(options, dbWriteBufferSizeBytes)
-            rocksdb_options_set_max_write_buffer_number(options, 4)
+            rocksdb_options_set_max_write_buffer_number(options, normalizedMaxWriteBufferNumber)
             rocksdb_options_set_min_write_buffer_number_to_merge(options, 1)
             rocksdb_options_set_max_write_buffer_number_to_maintain(options, 1)
-            rocksdb_options_set_max_open_files(options, 256)
-            rocksdb_options_set_max_background_jobs(options, 2)
+            rocksdb_options_set_max_open_files(options, normalizedMaxOpenFiles)
+            rocksdb_options_set_max_background_jobs(options, normalizedMaxBackgroundJobs)
             rocksdb_options_set_keep_log_file_num(options, 2)
             rocksdb_options_set_use_fsync(options, 0u8)
-            rocksdb_options_set_allow_mmap_reads(options, 1u8)
+            rocksdb_options_set_allow_mmap_reads(options, if (dbOptions.allowMmapReads) { 1u8 } else { 0u8 })
             rocksdb_options_set_bytes_per_sync(options, 0u64)
             rocksdb_block_based_options_set_no_block_cache(tableOptions, 0u8)
             rocksdb_block_based_options_set_block_cache(tableOptions, blockCache)
@@ -967,6 +1007,55 @@ public class OptimisticRocksDb {
 
         unsafe { rocksdb_writeoptions_set_sync(writeOptions, 0u8) }
         return (true, Some(OptimisticRocksDb(db, baseDb, readOptions, writeOptions)), "")
+    }
+
+    private static func normalizeBlockCacheMb(blockCacheMb: Int32): Int32 {
+        if (blockCacheMb <= 0) {
+            return defaultBlockCacheMb
+        }
+        if (blockCacheMb < minBlockCacheMb) {
+            return minBlockCacheMb
+        }
+        return blockCacheMb
+    }
+
+    private static func normalizeMaxWriteBufferNumber(maxWriteBufferNumber: Int32): Int32 {
+        if (maxWriteBufferNumber <= 0) {
+            return defaultMaxWriteBufferNumber
+        }
+        if (maxWriteBufferNumber < minMaxWriteBufferNumber) {
+            return minMaxWriteBufferNumber
+        }
+        return maxWriteBufferNumber
+    }
+
+    private static func normalizeMaxOpenFiles(maxOpenFiles: Int32): Int32 {
+        if (maxOpenFiles == 0 || maxOpenFiles < minMaxOpenFiles) {
+            return defaultMaxOpenFiles
+        }
+        return maxOpenFiles
+    }
+
+    private static func normalizeMaxBackgroundJobs(maxBackgroundJobs: Int32): Int32 {
+        if (maxBackgroundJobs <= 0) {
+            return defaultMaxBackgroundJobs
+        }
+        if (maxBackgroundJobs < minMaxBackgroundJobs) {
+            return minMaxBackgroundJobs
+        }
+        return maxBackgroundJobs
+    }
+
+    private static func normalizeCompressionType(compressionType: Int32): Int32 {
+        if (compressionType == ROCKSDB_NO_COMPRESSION) { return ROCKSDB_NO_COMPRESSION }
+        if (compressionType == ROCKSDB_SNAPPY_COMPRESSION) { return ROCKSDB_SNAPPY_COMPRESSION }
+        if (compressionType == ROCKSDB_ZLIB_COMPRESSION) { return ROCKSDB_ZLIB_COMPRESSION }
+        if (compressionType == ROCKSDB_BZ2_COMPRESSION) { return ROCKSDB_BZ2_COMPRESSION }
+        if (compressionType == ROCKSDB_LZ4_COMPRESSION) { return ROCKSDB_LZ4_COMPRESSION }
+        if (compressionType == ROCKSDB_LZ4HC_COMPRESSION) { return ROCKSDB_LZ4HC_COMPRESSION }
+        if (compressionType == ROCKSDB_XPRESS_COMPRESSION) { return ROCKSDB_XPRESS_COMPRESSION }
+        if (compressionType == ROCKSDB_ZSTD_COMPRESSION) { return ROCKSDB_ZSTD_COMPRESSION }
+        return ROCKSDB_NO_COMPRESSION
     }
 
     public func get(key: String): (Bool, Option<String>, String) {

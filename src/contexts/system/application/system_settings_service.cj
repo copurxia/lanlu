@@ -15,7 +15,7 @@ public class SystemSettingsService {
 
     /**
      * 初始化设置（写入默认设置）
-     * 每次启动时都会检查并补充缺失的设置项，同时更新description格式
+     * 每次启动时都会检查并补充缺失的设置项，同时同步设置元数据
      */
     public static func initializeFromEnv(): Bool {
         let logger = getLogger("system_settings_service")
@@ -26,6 +26,8 @@ public class SystemSettingsService {
             logger.error("创建设置表失败")
             return false
         }
+
+        pruneDeprecatedSettings()
 
         // 获取默认设置列表
         let defaultSettings = getDefaultSettingsList()
@@ -45,12 +47,27 @@ public class SystemSettingsService {
                 missingSettings.add(setting)
                 logger.debug("发现缺失的设置项", ("key", setting.key), ("default_value", setting.value))
             } else {
-                // 检查description格式是否正确（是否同时包含en和zh）
                 let existingSetting = existingSettingsMap[setting.key]
-                let needsUpdate = !isDescriptionFormatValid(existingSetting.description)
+                let needsDescriptionUpdate = !isDescriptionFormatValid(existingSetting.description)
+                let needsCategoryUpdate = existingSetting.category != setting.category
+                let needsValueTypeUpdate = existingSetting.valueType != setting.valueType
+                let needsEncryptionUpdate = existingSetting.isEncrypted != setting.isEncrypted
+                let needsUpdate = needsDescriptionUpdate || needsCategoryUpdate || needsValueTypeUpdate || needsEncryptionUpdate
                 if (needsUpdate) {
-                    updateSettings.add(setting)
-                    logger.debug("发现需要更新description格式的设置项", ("key", setting.key))
+                    let updatedSetting = SystemSettingData()
+                    updatedSetting.id = existingSetting.id
+                    updatedSetting.key = existingSetting.key
+                    updatedSetting.value = existingSetting.value
+                    updatedSetting.valueType = setting.valueType
+                    updatedSetting.category = setting.category
+                    updatedSetting.description = if (needsDescriptionUpdate || needsCategoryUpdate || needsValueTypeUpdate) {
+                        setting.description
+                    } else {
+                        existingSetting.description
+                    }
+                    updatedSetting.isEncrypted = setting.isEncrypted
+                    updateSettings.add(updatedSetting)
+                    logger.debug("发现需要同步元数据的设置项", ("key", setting.key))
                 }
             }
         }
@@ -72,15 +89,15 @@ public class SystemSettingsService {
         // 如果有需要更新的设置项，进行批量更新
         if (updateSettings.size > 0) {
             let updateArray = updateSettings.toArray()
-            logger.debug("更新 ${updateArray.size.toString()} 个设置项的description格式")
+            logger.debug("更新 ${updateArray.size.toString()} 个设置项的元数据")
             let success = SystemSettingsDao.upsertSettings(updateArray)
             if (!success) {
-                logger.error("更新description格式失败")
+                logger.error("更新设置元数据失败")
                 return false
             }
-            logger.debug("更新description格式成功")
+            logger.debug("更新设置元数据成功")
         } else {
-            logger.debug("所有设置项的description格式正确，无需更新")
+            logger.debug("所有设置项的元数据已是最新，无需更新")
         }
 
         // 重新加载缓存
@@ -113,14 +130,19 @@ public class SystemSettingsService {
         settings.add(createSetting("ASSET_PATH", "./data/assets", "path", "storage", "资源文件目录路径"))
         settings.add(createSetting("CACHE_PATH", "./data/cache", "path", "storage", "缓存目录路径"))
         settings.add(createSetting("PLUGIN_PATH", "./data/plugins", "path", "storage", "插件目录路径"))
-        settings.add(createSetting("ROCKSDB_KV_MEMORY_MB", "64", "integer", "storage", "KV内存占用(MB)"))
 
         // 性能设置 - 默认值
         settings.add(createSetting("MAX_CONCURRENT_JOBS", "8", "integer", "performance", "最大并发任务数"))
+        settings.add(createSetting("ROCKSDB_KV_MEMORY_MB", "64", "integer", "performance", "KV内存占用(MB)"))
+        settings.add(createSetting("ROCKSDB_BLOCK_CACHE_MB", "64", "integer", "performance", "RocksDB Block Cache 大小(MB)"))
+        settings.add(createSetting("ROCKSDB_MAX_WRITE_BUFFER_NUMBER", "4", "integer", "performance", "RocksDB 最大 Write Buffer 数"))
+        settings.add(createSetting("ROCKSDB_MAX_OPEN_FILES", "256", "integer", "performance", "RocksDB 最大打开文件数"))
+        settings.add(createSetting("ROCKSDB_MAX_BACKGROUND_JOBS", "2", "integer", "performance", "RocksDB 最大后台任务数"))
+        settings.add(createSetting("ROCKSDB_ALLOW_MMAP_READS", "true", "boolean", "performance", "RocksDB 允许 mmap 读取"))
+        settings.add(createSetting("ROCKSDB_COMPRESSION", "none", "string", "performance", "RocksDB 压缩算法（none/snappy/zlib/bz2/lz4/lz4hc/xpress/zstd）"))
         // TaskPool safety tick interval (seconds). Default 10 minutes.
         settings.add(createSetting("TASKPOOL_TICK_SECONDS", "600", "integer", "performance", "TaskPool 调度回退间隔（秒）"))
         settings.add(createSetting("SCAN_FALLBACK_INTERVAL_MS", "300000", "long", "performance", "扫描回退间隔（毫秒）"))
-        settings.add(createSetting("WASM_RUNTIME", "wasmedge", "string", "performance", "WASM 运行时（wasmedge）"))
 
         // 服务器信息设置 - 默认值
         settings.add(createSetting("SERVER_NAME", "兰鹿", "string", "server", "服务器名称"))
@@ -188,6 +210,13 @@ public class SystemSettingsService {
         translations["资源文件目录路径"] = "Asset Directory Path"
         translations["缓存目录路径"] = "Cache Directory Path"
         translations["KV内存占用(MB)"] = "KV Memory Usage (MB)"
+        translations["RocksDB Block Cache 大小(MB)"] = "RocksDB Block Cache Size (MB)"
+        translations["RocksDB 最大 Write Buffer 数"] = "RocksDB Max Write Buffer Number"
+        translations["RocksDB 最大打开文件数"] = "RocksDB Max Open Files"
+        translations["RocksDB 最大后台任务数"] = "RocksDB Max Background Jobs"
+        translations["RocksDB 允许 mmap 读取"] = "RocksDB Allow mmap Reads"
+        translations["RocksDB 压缩算法（none/snappy/zlib/bz2/lz4/lz4hc/xpress/zstd）"] =
+            "RocksDB Compression (none/snappy/zlib/bz2/lz4/lz4hc/xpress/zstd)"
         translations["扫描定时任务表达式"] = "Scan Cron Expression"
         translations["缩略图定时任务表达式"] = "Thumbnail Cron Expression"
         translations["启用自动扫描"] = "Enable Auto Scan"
@@ -196,7 +225,6 @@ public class SystemSettingsService {
         translations["最大并发任务数"] = "Max Concurrent Jobs"
         translations["TaskPool 调度回退间隔（秒）"] = "TaskPool Dispatch Fallback Interval (seconds)"
         translations["扫描回退间隔（毫秒）"] = "Scan Fallback Interval (ms)"
-        translations["WASM 运行时（wasmedge）"] = "WASM runtime (wasmedge)"
         translations["启用数据库检查"] = "Enable Database Check"
         translations["数据库检查定时任务表达式"] = "Database Check Cron Expression"
         translations["启用初始数据库检查"] = "Enable Initial Database Check"
@@ -368,12 +396,43 @@ public class SystemSettingsService {
         return ["storage", "performance", "server", "ssl"]
     }
 
+    public static func filterVisibleSettings(settings: Array<SystemSettingData>): Array<SystemSettingData> {
+        let visible = ArrayList<SystemSettingData>()
+        for (setting in settings) {
+            if (!isDeprecatedSettingKey(setting.key)) {
+                visible.add(setting)
+            }
+        }
+        return visible.toArray()
+    }
+
     private static func logRestartRequiredIfNeeded(key: String): Unit {
-        if (key == "CACHE_PATH" || key == "ROCKSDB_KV_MEMORY_MB") {
+        if (key == "CACHE_PATH" || key.startsWith("ROCKSDB_")) {
             getLogger("system_settings_service").warn(
                 "设置已更新，但 RocksDB 启动配置需要在进程重启后生效",
                 ("key", key)
             )
         }
+    }
+
+    private static func pruneDeprecatedSettings(): Unit {
+        for (key in getDeprecatedSettingKeys()) {
+            if (!SystemSettingsDao.deleteSetting(key)) {
+                getLogger("system_settings_service").warn("删除废弃设置失败", ("key", key))
+            }
+        }
+    }
+
+    private static func getDeprecatedSettingKeys(): Array<String> {
+        return ["WASM_RUNTIME"]
+    }
+
+    private static func isDeprecatedSettingKey(key: String): Bool {
+        for (deprecatedKey in getDeprecatedSettingKeys()) {
+            if (deprecatedKey == key) {
+                return true
+            }
+        }
+        return false
     }
 }

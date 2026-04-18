@@ -310,6 +310,13 @@ export default function SystemSettingsPage() {
                   </div>
                 )}
 
+                {category.id === 'performance' && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
+                    <p>{t('settings.system.performanceNotice')}</p>
+                    <p className="mt-2">{t('settings.system.performanceRestartHint')}</p>
+                  </div>
+                )}
+
                 {settings[category.id]?.map((setting) => (
                   <div key={setting.key}>
                     {renderSettingInput(setting)}
