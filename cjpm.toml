@@ -29,8 +29,11 @@
   totp_cj = { git = "https://gitcode.com/copur/totp-cj.git", branch = "main" }
   webauthn_cj = { git = "https://gitcode.com/copur/webauthn.git", branch = "main" }
 
+[package.package-configuration.lanlu]
+  compile-option = "--static"
+
 [target]
   [target.x86_64-unknown-linux-gnu]
-    compile-option = "--static -O2 --cfg \"ohos=false\""
+    compile-option = "-O2 --cfg \"ohos=false\""
     [target.x86_64-unknown-linux-gnu.bin-dependencies]
       path-option = [ "${CANGJIE_STDX_PATH}" ]
