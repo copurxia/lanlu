@@ -123,6 +123,10 @@ export function ReaderSidebar({
   const [thumbAspectRatios, setThumbAspectRatios] = useState<Record<string, number>>({});
   const fileTreeScrollRef = useRef<HTMLDivElement | null>(null);
   const wasOpenRef = useRef(false);
+  const previousCurrentPageRef = useRef(currentPage);
+  const previousActiveTabRef = useRef<SidebarTab | null>(null);
+  const pendingAutoScrollPageRef = useRef<number | null>(null);
+  const programmaticSidebarScrollRef = useRef(false);
   const activeTab = isSidebarTab(storedActiveTab) ? storedActiveTab : 'thumbnails';
 
   const setActiveTab = useCallback((nextTab: SidebarTab) => {
@@ -391,6 +395,18 @@ export function ReaderSidebar({
     });
   }, []);
 
+  const handleScrollableSidebarScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    setSidebarScrollTop(event.currentTarget.scrollTop);
+
+    if (programmaticSidebarScrollRef.current) return;
+    pendingAutoScrollPageRef.current = null;
+  }, []);
+
+  const handleLoadMoreClick = useCallback(() => {
+    pendingAutoScrollPageRef.current = null;
+    onLoadMore();
+  }, [onLoadMore]);
+
   useEffect(() => {
     const validFolders = new Set(fileTree.allFolderIds);
     if (validFolders.size === 0) {
@@ -508,19 +524,32 @@ export function ReaderSidebar({
     const isScrollableSidebarTab = activeTab === 'thumbnails' || activeTab === 'list';
     if (!open || !isScrollableSidebarTab) {
       wasOpenRef.current = false;
+      pendingAutoScrollPageRef.current = null;
       return;
     }
 
-    const sidebarElement = sidebarScrollRef.current;
-    if (!sidebarElement) return;
-    if (currentPage < 0 || currentPage >= sidebarDisplayPages.length) return;
-
     const openingNow = !wasOpenRef.current;
+    const pageChanged = previousCurrentPageRef.current !== currentPage;
+    const tabChanged = previousActiveTabRef.current !== activeTab;
+
+    previousCurrentPageRef.current = currentPage;
+    previousActiveTabRef.current = activeTab;
     wasOpenRef.current = true;
+
+    if (!openingNow && !pageChanged && !tabChanged) return;
+    pendingAutoScrollPageRef.current = currentPage;
+  }, [activeTab, currentPage, open]);
+
+  useEffect(() => {
+    const isScrollableSidebarTab = activeTab === 'thumbnails' || activeTab === 'list';
+    if (!open || !isScrollableSidebarTab) return;
+    if (pendingAutoScrollPageRef.current !== currentPage) return;
+    if (currentPage < 0 || currentPage >= sidebarDisplayPages.length) return;
 
     const rafId = requestAnimationFrame(() => {
       const container = sidebarScrollRef.current;
       if (!container) return;
+      if (pendingAutoScrollPageRef.current !== currentPage) return;
 
       const viewTop = container.scrollTop;
       const viewBottom = viewTop + container.clientHeight;
@@ -547,16 +576,25 @@ export function ReaderSidebar({
         itemTop < viewTop + keepVisiblePadding ||
         itemBottom > viewBottom - keepVisiblePadding;
 
-      if (!openingNow && !outsideViewport) return;
+      if (!outsideViewport) {
+        pendingAutoScrollPageRef.current = null;
+        return;
+      }
 
       const targetScrollTop = Math.max(
         0,
         Math.min(maxScrollTop, itemTop - Math.max(0, (container.clientHeight - itemHeight) / 2))
       );
 
+      pendingAutoScrollPageRef.current = null;
       if (Math.abs(targetScrollTop - viewTop) <= 2) return;
+
+      programmaticSidebarScrollRef.current = true;
       container.scrollTop = targetScrollTop;
       setSidebarScrollTop(targetScrollTop);
+      requestAnimationFrame(() => {
+        programmaticSidebarScrollRef.current = false;
+      });
     });
 
     return () => cancelAnimationFrame(rafId);
@@ -778,7 +816,7 @@ export function ReaderSidebar({
     <div
       ref={sidebarScrollRef}
       className="flex-1 overflow-y-auto"
-      onScroll={(e) => setSidebarScrollTop(e.currentTarget.scrollTop)}
+      onScroll={handleScrollableSidebarScroll}
     >
       <div className={SIDEBAR_CONTENT_PADDING_CLASS}>
         {sidebarLoading ? (
@@ -820,7 +858,7 @@ export function ReaderSidebar({
 
         {!isEpub && canLoadMore && (
           <div className="mt-3 text-center">
-            <Button variant="outline" onClick={onLoadMore} disabled={sidebarLoading} className="w-full">
+            <Button variant="outline" onClick={handleLoadMoreClick} disabled={sidebarLoading} className="w-full">
               {sidebarLoading ? <Spinner className="mr-2" /> : null}
               {t('archive.loadMore')}
             </Button>
