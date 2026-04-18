@@ -192,6 +192,9 @@ public class ScanPluginsTaskRunner {
             let runtimeMetadata = parsePluginMetadataJson(taskId, pluginInfoJson, wasmPath, "WASM")
             pluginMetadata = runtimeMetadata
 
+            if (pluginMetadata.metadata_error.trimAscii().size > 0) {
+                return ProcessResultData(false, "", pluginMetadata.metadata_error)
+            }
             if (pluginMetadata.name.size == 0) {
                 return ProcessResultData(false, "", "Failed to parse plugin metadata")
             }
@@ -246,7 +249,8 @@ public class ScanPluginsTaskRunner {
             pluginData.parameters = pluginMetadata.parameters
             pluginData.has_schema = pluginMetadata.has_schema
             pluginData.url_regex = pluginMetadata.url_regex
-            pluginData.login_from = pluginMetadata.login_from
+            pluginData.pre_hooks = pluginMetadata.pre_hooks
+            pluginData.after_hooks = pluginMetadata.after_hooks
             pluginData.icon = pluginMetadata.icon
             pluginData.enabled = true
             pluginData.installed = true
@@ -302,6 +306,38 @@ public class ScanPluginsTaskRunner {
                     case None => return ""
                 }
             }
+            func encodeStringArray(values: Array<String>): String {
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startArray()
+                for (value in values) {
+                    w.writeValue(value)
+                }
+                w.endArray()
+                w.flush()
+                return String.fromUtf8(readToEnd(out))
+            }
+            func readStringArrayJson(fieldName: String): String {
+                match (r.peek()) {
+                    case Some(BeginArray) =>
+                        let items = ArrayList<String>()
+                        r.startArray()
+                        while (r.peek() != EndArray) {
+                            match (r.peek()) {
+                                case Some(_) =>
+                                    items.add(r.readValue<String>().trimAscii())
+                                case None => break
+                            }
+                        }
+                        r.endArray()
+                        return encodeStringArray(items.toArray())
+                    case Some(_) =>
+                        metadata.metadata_error = "Plugin field ${fieldName} must be a string array"
+                        r.skip()
+                        return "[]"
+                    case None => return "[]"
+                }
+            }
 
             if (r.peek() != Some(BeginObject)) {
                 return PluginMetadata()
@@ -310,6 +346,10 @@ public class ScanPluginsTaskRunner {
             r.startObject()
             while (r.peek() != EndObject) {
                 let k = r.readName()
+                if (metadata.metadata_error.size > 0) {
+                    r.skip()
+                    continue
+                }
                 match (k) {
                     case "name" => metadata.name = r.readValue<String>().trimAscii()
                     case "namespace" => metadata.namespace = r.readValue<String>().trimAscii()
@@ -334,7 +374,11 @@ public class ScanPluginsTaskRunner {
                             case None => ()
                         }
                     case "url_regex" => metadata.url_regex = r.readValue<String>()
-                    case "login_from" => metadata.login_from = r.readValue<String>()
+                    case "pre" => metadata.pre_hooks = readStringArrayJson("pre")
+                    case "after" => metadata.after_hooks = readStringArrayJson("after")
+                    case "login_from" =>
+                        metadata.metadata_error = "Plugin still uses unsupported legacy field: login_from"
+                        r.skip()
                     case "icon" => metadata.icon = r.readValue<String>()
                     case "type" => metadata.plugin_type = r.readValue<String>().trimAscii()
                     case "plugin_type" => metadata.plugin_type = r.readValue<String>().trimAscii()
@@ -518,7 +562,8 @@ public class ScanPluginsTaskRunner {
         pluginData.tags = newMetadata.tags
         pluginData.permissions = newMetadata.permissions
         pluginData.url_regex = newMetadata.url_regex
-        pluginData.login_from = newMetadata.login_from
+        pluginData.pre_hooks = newMetadata.pre_hooks
+        pluginData.after_hooks = newMetadata.after_hooks
         pluginData.icon = newMetadata.icon
         pluginData.update_url = if (newMetadata.update_url.trimAscii().size > 0) { newMetadata.update_url } else { existingPlugin.update_url }
         pluginData.enabled = existingPlugin.enabled

@@ -56,10 +56,12 @@ class ParsedPluginInfo {
     public var tags: String = ""
     public var permissions: String = ""
     public var url_regex: String = ""
-    public var login_from: String = ""
+    public var pre_hooks: String = "[]"
+    public var after_hooks: String = "[]"
     public var icon: String = ""
     public var parameters: String = "[]"
     public var has_schema: Bool = false
+    public var parse_error: String = ""
 }
 
 class UpsertOutcome {
@@ -257,6 +259,11 @@ public class PluginManagerService {
 
         // 解析 plugin_info
         let info = parsePluginInfoFromFile(tempFile.toString(), trimmedUrl, "Temp")
+        if (info.parse_error.trimAscii().size > 0) {
+            try { remove(tempFile) } catch (_: Exception) {}
+            result.message = info.parse_error
+            return result
+        }
         if (info.pluginType.size == 0 || info.namespace.size == 0) {
             try { remove(tempFile) } catch (_: Exception) {}
             result.message = "Failed to get plugin info"
@@ -341,6 +348,10 @@ public class PluginManagerService {
         }
 
         let info = parsePluginInfoFromFile(uploadFile.toString(), "", "Upload")
+        if (info.parse_error.trimAscii().size > 0) {
+            result.message = info.parse_error
+            return result
+        }
         if (info.pluginType.size == 0 || info.namespace.size == 0) {
             result.message = "Failed to get plugin info"
             return result
@@ -474,6 +485,11 @@ public class PluginManagerService {
 
         // 解析 plugin_info
         let info = parsePluginInfoFromFile(tempFile.toString(), updateUrl, "Temp")
+        if (info.parse_error.trimAscii().size > 0) {
+            try { remove(tempFile) } catch (_: Exception) {}
+            result.message = info.parse_error
+            return result
+        }
         if (info.namespace.size == 0 || info.pluginType.size == 0) {
             try { remove(tempFile) } catch (_: Exception) {}
             result.message = "Failed to get plugin info from updated file"
@@ -618,6 +634,10 @@ public class PluginManagerService {
         let info = parsePluginInfoFromFile(tempFile.toString(), updateUrl, "Temp")
         try { remove(tempFile) } catch (_: Exception) {}
 
+        if (info.parse_error.trimAscii().size > 0) {
+            out.message = info.parse_error
+            return out
+        }
         if (info.namespace.size == 0 || info.pluginType.size == 0) {
             out.message = "Failed to get plugin info from updated file"
             return out
@@ -760,7 +780,46 @@ public class PluginManagerService {
             unsafe { buf.write(trimmed.rawData()) }
             let r = JsonReader(buf)
 
+            func encodeStringArray(values: Array<String>): String {
+                let out = ByteBuffer()
+                let w = JsonWriter(out)
+                w.startArray()
+                for (value in values) {
+                    w.writeValue(value)
+                }
+                w.endArray()
+                w.flush()
+                return String.fromUtf8(readToEnd(out))
+            }
+
+            func readStringArrayJson(fieldName: String): String {
+                match (r.peek()) {
+                    case Some(BeginArray) =>
+                        let items = ArrayList<String>()
+                        r.startArray()
+                        while (r.peek() != EndArray) {
+                            match (r.peek()) {
+                                case Some(_) =>
+                                    items.add(r.readValue<String>().trimAscii())
+                                case None => break
+                            }
+                        }
+                        r.endArray()
+                        return encodeStringArray(items.toArray())
+                    case Some(_) =>
+                        result.parse_error = "Plugin field ${fieldName} must be a string array"
+                        r.skip()
+                        return "[]"
+                    case None =>
+                        return "[]"
+                }
+            }
+
             func applyField(key: String): Unit {
+                if (result.parse_error.size > 0) {
+                    r.skip()
+                    return
+                }
                 match (key) {
                     case "type" =>
                         let t = r.readValue<String>().trimAscii()
@@ -777,7 +836,11 @@ public class PluginManagerService {
                     case "author" => result.author = r.readValue<String>()
                     case "tags" => result.tags = r.readValue<String>()
                     case "url_regex" => result.url_regex = r.readValue<String>()
-                    case "login_from" => result.login_from = r.readValue<String>()
+                    case "pre" => result.pre_hooks = readStringArrayJson("pre")
+                    case "after" => result.after_hooks = readStringArrayJson("after")
+                    case "login_from" =>
+                        result.parse_error = "Plugin still uses unsupported legacy field: login_from"
+                        r.skip()
                     case "icon" => result.icon = r.readValue<String>()
                     case "permissions" =>
                         match (r.peek()) {
@@ -864,6 +927,10 @@ public class PluginManagerService {
 
     private static func upsertPluginInDatabase(info: ParsedPluginInfo, fileName: String): UpsertOutcome {
         var out = UpsertOutcome()
+        if (info.parse_error.trimAscii().size > 0) {
+            out.error = info.parse_error.trimAscii()
+            return out
+        }
         if (info.namespace.trimAscii().size == 0) {
             out.error = "Plugin namespace is required"
             return out
@@ -885,7 +952,8 @@ public class PluginManagerService {
         pluginData.tags = info.tags
         pluginData.permissions = info.permissions
         pluginData.url_regex = info.url_regex
-        pluginData.login_from = info.login_from
+        pluginData.pre_hooks = info.pre_hooks
+        pluginData.after_hooks = info.after_hooks
         pluginData.icon = info.icon
         pluginData.update_url = info.updateUrl
         pluginData.installed = true

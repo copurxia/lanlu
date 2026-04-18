@@ -11,7 +11,8 @@ public class PluginTaskData {
     public var plugin_type: String = ""
     public var entry: String = ""
     public var url_regex: String = ""
-    public var login_from: String = ""
+    public var pre_hooks: String = "[]"
+    public var after_hooks: String = "[]"
     public var permissions: String = ""
     public var parameters: String = "[]"
     public var enabled: Bool = false
@@ -31,7 +32,8 @@ public class PluginTaskService {
         mapped.plugin_type = plugin.plugin_type
         mapped.entry = plugin.entry
         mapped.url_regex = plugin.url_regex
-        mapped.login_from = plugin.login_from
+        mapped.pre_hooks = plugin.pre_hooks
+        mapped.after_hooks = plugin.after_hooks
         mapped.permissions = plugin.permissions
         mapped.parameters = plugin.parameters
         mapped.enabled = plugin.enabled

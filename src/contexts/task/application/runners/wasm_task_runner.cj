@@ -82,6 +82,8 @@ public class WasmTaskParametersReq <: JsonDeserializable<WasmTaskParametersReq> 
 }
 
 public class WasmTaskRunner {
+    private static let pipelineKvTtlSeconds: Int64 = 86400
+
     public static func run(taskId: Int64, parameters: String): Unit {
         let (pluginNamespace, pluginType, groupId, targetType, targetId, oneshotParam, url, parentTaskId, extraParams, metadataJson) = parseParameters(parameters)
         appendMirroredLog(taskId, parentTaskId, "wasm_task started")
@@ -104,31 +106,92 @@ public class WasmTaskRunner {
                 fail(taskId, "Plugin is not a wasm plugin: ${pluginNamespace}")
                 return
             }
+            if (plugin.plugin_type.trimAscii() != pluginType.trimAscii()) {
+                fail(taskId, "Plugin type mismatch: expected ${pluginType}, got ${plugin.plugin_type}")
+                return
+            }
             let runtimePermissions = resolveRuntimePermissions(plugin)
+            let effectiveGroupId = resolveEffectiveGroupId(groupId, taskId, plugin.namespace)
+            let preHooks = parseHookNamespaces(plugin.pre_hooks, "pre", plugin.namespace)
+            let afterHooks = parseHookNamespaces(plugin.after_hooks, "after", plugin.namespace)
 
             TaskDao.updateTaskPluginNamespace(taskId, plugin.namespace)
-            var loginCookiesJson = ""
-            let effectiveLoginFrom = plugin.login_from.trimAscii()
-            if (effectiveLoginFrom.size > 0) {
-                let loginResult = handleLoginDependency(taskId, effectiveLoginFrom, groupId)
-                if (!loginResult.success) {
-                    fail(taskId, "Login plugin failed: ${loginResult.error}")
+            seedPipelineKv(effectiveGroupId, plugin.namespace, plugin.plugin_type, targetType, targetId, preHooks, afterHooks)
+
+            let totalStages = preHooks.size + afterHooks.size + 1
+            var completedStages: Int64 = 0
+
+            for (hookNamespace in preHooks) {
+                let hookPlugin = resolveHookPlugin(hookNamespace, "pre", plugin.namespace)
+                updateMirroredProgress(taskId, parentTaskId, computePipelineProgress(completedStages, totalStages), "执行前置阶段 ${hookPlugin.namespace}")
+                let hookResult = executeHookPhase(
+                    taskId,
+                    parentTaskId,
+                    hookPlugin,
+                    effectiveGroupId,
+                    targetType,
+                    targetId,
+                    oneshotParam,
+                    url,
+                    plugin.namespace,
+                    plugin.plugin_type
+                )
+                storePhaseResult(effectiveGroupId, hookPlugin.namespace, hookResult)
+                if (!hookResult.success) {
+                    fail(taskId, "Pre hook failed [${hookPlugin.namespace}]: ${hookResult.error}")
                     return
                 }
-                loginCookiesJson = loginResult.cookiesJson
+                completedStages += 1
             }
-            match (pluginType.trimAscii()) {
-                case "Metadata" =>
-                    executeMetadata(taskId, parentTaskId, plugin, runtimePermissions, targetType, targetId, oneshotParam, extraParams, metadataJson, loginCookiesJson, interactivePreviewEnabled)
-                case "Login" =>
-                    executeLogin(taskId, parentTaskId, plugin, runtimePermissions, interactivePreviewEnabled)
-                case "Download" =>
-                    executeDownload(taskId, parentTaskId, plugin, runtimePermissions, url, extraParams, loginCookiesJson, interactivePreviewEnabled)
-                case "Script" =>
-                    executeScript(taskId, parentTaskId, plugin, runtimePermissions, oneshotParam, extraParams, loginCookiesJson, interactivePreviewEnabled)
-                case _ =>
-                    fail(taskId, "Unsupported wasm plugin type: ${pluginType}")
+
+            updateMirroredProgress(taskId, parentTaskId, computePipelineProgress(completedStages, totalStages), "执行主插件 ${plugin.namespace}")
+            let mainResult = executeMainPhase(
+                taskId,
+                parentTaskId,
+                plugin,
+                runtimePermissions,
+                effectiveGroupId,
+                targetType,
+                targetId,
+                oneshotParam,
+                url,
+                extraParams,
+                metadataJson,
+                interactivePreviewEnabled
+            )
+            storePhaseResult(effectiveGroupId, plugin.namespace, mainResult)
+            if (!mainResult.success) {
+                fail(taskId, mainResult.error)
+                return
             }
+            completedStages += 1
+
+            for (hookNamespace in afterHooks) {
+                let hookPlugin = resolveHookPlugin(hookNamespace, "after", plugin.namespace)
+                updateMirroredProgress(taskId, parentTaskId, computePipelineProgress(completedStages, totalStages), "执行后置阶段 ${hookPlugin.namespace}")
+                let hookResult = executeHookPhase(
+                    taskId,
+                    parentTaskId,
+                    hookPlugin,
+                    effectiveGroupId,
+                    targetType,
+                    targetId,
+                    oneshotParam,
+                    url,
+                    plugin.namespace,
+                    plugin.plugin_type
+                )
+                storePhaseResult(effectiveGroupId, hookPlugin.namespace, hookResult)
+                if (!hookResult.success) {
+                    fail(taskId, "After hook failed [${hookPlugin.namespace}]: ${hookResult.error}")
+                    return
+                }
+                completedStages += 1
+            }
+
+            updateMirroredProgress(taskId, parentTaskId, 100, "WASM任务完成")
+            TaskModel.completeTask(taskId, "wasm_task completed")
+            TaskIO.writeOutput(taskId, mainResult.output)
         } catch (e: Exception) {
             fail(taskId, e.message)
         }
@@ -148,32 +211,109 @@ public class WasmTaskRunner {
         }
     }
 
+    private static func executeMainPhase(
+        taskId: Int64,
+        parentTaskId: Int64,
+        plugin: PluginTaskData,
+        runtimePermissions: String,
+        groupId: String,
+        targetType: String,
+        targetId: String,
+        oneshotParam: String,
+        url: String,
+        extraParams: String,
+        metadataJson: String,
+        interactivePreviewEnabled: Bool
+    ): TaskWaitResult {
+        match (plugin.plugin_type.trimAscii()) {
+            case "Metadata" =>
+                return executeMetadata(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, oneshotParam, extraParams, metadataJson, interactivePreviewEnabled)
+            case "Login" =>
+                return executeLogin(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, interactivePreviewEnabled)
+            case "Download" =>
+                return executeDownload(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, url, extraParams, interactivePreviewEnabled)
+            case "Script" =>
+                return executeScript(taskId, parentTaskId, plugin, runtimePermissions, groupId, targetType, targetId, oneshotParam, url, extraParams, interactivePreviewEnabled)
+            case _ =>
+                return TaskWaitResult(false, "Unsupported wasm plugin type: ${plugin.plugin_type}", "")
+        }
+    }
+
+    private static func executeHookPhase(
+        taskId: Int64,
+        parentTaskId: Int64,
+        plugin: PluginTaskData,
+        groupId: String,
+        targetType: String,
+        targetId: String,
+        oneshotParam: String,
+        url: String,
+        mainPluginNamespace: String,
+        mainPluginType: String
+    ): TaskWaitResult {
+        let runtimePermissions = resolveRuntimePermissions(plugin)
+        match (plugin.plugin_type.trimAscii()) {
+            case "Login" =>
+                return executeLogin(
+                    taskId,
+                    parentTaskId,
+                    plugin,
+                    runtimePermissions,
+                    groupId,
+                    targetType,
+                    targetId,
+                    url,
+                    false,
+                    mainPluginNamespace: mainPluginNamespace,
+                    mainPluginType: mainPluginType
+                )
+            case "Script" =>
+                return executeScript(
+                    taskId,
+                    parentTaskId,
+                    plugin,
+                    runtimePermissions,
+                    groupId,
+                    targetType,
+                    targetId,
+                    oneshotParam,
+                    url,
+                    "",
+                    false,
+                    mainPluginNamespace: mainPluginNamespace,
+                    mainPluginType: mainPluginType
+                )
+            case _ =>
+                return TaskWaitResult(false, "Unsupported ${plugin.plugin_type} hook plugin: ${plugin.namespace}", "")
+        }
+    }
+
     private static func executeMetadata(
         taskId: Int64,
         parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
+        groupId: String,
         targetType: String,
         targetId: String,
         oneshotParam: String,
         extraParams: String,
         metadataJson: String,
-        loginCookiesJson: String,
-        interactivePreviewEnabled: Bool
-    ): Unit {
+        interactivePreviewEnabled: Bool,
+        mainPluginNamespace!: String = "",
+        mainPluginType!: String = ""
+    ): TaskWaitResult {
         let effectiveType = targetType.trimAscii().toAsciiLower()
         let effectiveId = targetId.trimAscii()
         if (effectiveId.size == 0) {
-            fail(taskId, "Missing targetId")
-            return
+            return TaskWaitResult(false, "Missing targetId", "")
         }
 
         var metadataInputJson = normalizeMetadataInputJson(metadataJson)
         if (metadataInputJson.size == 0) {
             let (okMetadata, builtMetadata, metadataErr) = buildMetadataInputJsonForTarget(effectiveType, effectiveId)
             if (!okMetadata) {
-                fail(taskId, metadataErr)
-                return
+                return TaskWaitResult(false, metadataErr, "")
             }
             metadataInputJson = builtMetadata
         }
@@ -181,9 +321,17 @@ public class WasmTaskRunner {
         updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM插件输入")
         let baseParams = buildPluginParametersJson(plugin)
         let mergedParams = mergeParamsJson(baseParams, extraParams)
-        let contextParams = "{\"__target_type\":\"${effectiveType}\",\"__target_id\":\"${effectiveId}\",\"__task_id\":\"${taskId.toString()}\"}"
+        let contextParams = buildRuntimeContextParamsJson(
+            effectiveType,
+            effectiveId,
+            taskId,
+            groupId,
+            if (mainPluginNamespace.trimAscii().size > 0) { mainPluginNamespace } else { plugin.namespace },
+            if (mainPluginType.trimAscii().size > 0) { mainPluginType } else { plugin.plugin_type },
+            ""
+        )
         let finalParams = mergeParamsJson(mergedParams, contextParams)
-        let inputJson = buildMetadataInputJson("Metadata", effectiveType, effectiveId, metadataInputJson, oneshotParam, finalParams, loginCookiesJson)
+        let inputJson = buildMetadataInputJson("Metadata", effectiveType, effectiveId, metadataInputJson, oneshotParam, finalParams)
 
         updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
@@ -191,6 +339,7 @@ public class WasmTaskRunner {
             taskId,
             parentTaskId,
             plugin.namespace,
+            groupId,
             wasmPath,
             inputJson,
             effectiveType,
@@ -199,8 +348,7 @@ public class WasmTaskRunner {
             interactivePreviewEnabled
         )
         if (!result.success) {
-            fail(taskId, result.error)
-            return
+            return TaskWaitResult(false, result.error, "")
         }
 
         let normalizedOutput = if (interactivePreviewEnabled) {
@@ -208,10 +356,7 @@ public class WasmTaskRunner {
         } else {
             result.output
         }
-
-        updateMirroredProgress(taskId, parentTaskId, 100, "WASM任务完成")
-        TaskModel.completeTask(taskId, "wasm_task completed")
-        TaskIO.writeOutput(taskId, normalizedOutput)
+        return TaskWaitResult(true, "", normalizedOutput)
     }
 
     private static func executeLogin(
@@ -219,10 +364,27 @@ public class WasmTaskRunner {
         parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
-        interactivePreviewEnabled: Bool
-    ): Unit {
+        groupId: String,
+        targetType: String,
+        targetId: String,
+        url: String,
+        interactivePreviewEnabled: Bool,
+        mainPluginNamespace!: String = "",
+        mainPluginType!: String = ""
+    ): TaskWaitResult {
         updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM登录插件输入")
-        let paramsJson = buildPluginParametersJson(plugin)
+        let paramsJson = mergeParamsJson(
+            buildPluginParametersJson(plugin),
+            buildRuntimeContextParamsJson(
+                targetType.trimAscii().toAsciiLower(),
+                targetId.trimAscii(),
+                taskId,
+                groupId,
+                if (mainPluginNamespace.trimAscii().size > 0) { mainPluginNamespace } else { plugin.namespace },
+                if (mainPluginType.trimAscii().size > 0) { mainPluginType } else { plugin.plugin_type },
+                url
+            )
+        )
         let inputJson = buildLoginInputJson(paramsJson)
 
         updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM登录插件")
@@ -231,6 +393,7 @@ public class WasmTaskRunner {
             taskId,
             parentTaskId,
             plugin.namespace,
+            groupId,
             wasmPath,
             inputJson,
             runtimePermissions,
@@ -238,13 +401,9 @@ public class WasmTaskRunner {
             enableWasi: true
         )
         if (!result.success) {
-            fail(taskId, result.error)
-            return
+            return TaskWaitResult(false, result.error, "")
         }
-
-        updateMirroredProgress(taskId, parentTaskId, 100, "WASM登录任务完成")
-        TaskModel.completeTask(taskId, "wasm_task completed")
-        TaskIO.writeOutput(taskId, result.output)
+        return TaskWaitResult(true, "", result.output)
     }
 
     private static func executeDownload(
@@ -252,24 +411,39 @@ public class WasmTaskRunner {
         parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
+        groupId: String,
+        targetType: String,
+        targetId: String,
         url: String,
         extraParams: String,
-        loginCookiesJson: String,
-        interactivePreviewEnabled: Bool
-    ): Unit {
+        interactivePreviewEnabled: Bool,
+        mainPluginNamespace!: String = "",
+        mainPluginType!: String = ""
+    ): TaskWaitResult {
         let trimmedUrl = url.trimAscii()
         if (trimmedUrl.size == 0) {
-            fail(taskId, "Missing url")
-            return
+            return TaskWaitResult(false, "Missing url", "")
         }
 
         updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM下载插件输入")
         let baseParams = buildPluginParametersJson(plugin)
-        let finalParams = mergeParamsJson(baseParams, extraParams)
+        let mergedParams = mergeParamsJson(baseParams, extraParams)
+        let finalParams = mergeParamsJson(
+            mergedParams,
+            buildRuntimeContextParamsJson(
+                targetType.trimAscii().toAsciiLower(),
+                targetId.trimAscii(),
+                taskId,
+                groupId,
+                if (mainPluginNamespace.trimAscii().size > 0) { mainPluginNamespace } else { plugin.namespace },
+                if (mainPluginType.trimAscii().size > 0) { mainPluginType } else { plugin.plugin_type },
+                trimmedUrl
+            )
+        )
         let pluginRuntimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), plugin.namespace)
         FileUtils.ensureDirectoryExists(Path(pluginRuntimeHostDir))
         let pluginGuestDir = "/plugin"
-        let inputJson = buildDownloadInputJson("Download", trimmedUrl, pluginGuestDir, finalParams, loginCookiesJson)
+        let inputJson = buildDownloadInputJson("Download", trimmedUrl, pluginGuestDir, finalParams)
 
         updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM下载插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
@@ -277,6 +451,7 @@ public class WasmTaskRunner {
             taskId,
             parentTaskId,
             plugin.namespace,
+            groupId,
             wasmPath,
             inputJson,
             runtimePermissions,
@@ -286,13 +461,9 @@ public class WasmTaskRunner {
             wasiHostPath: pluginRuntimeHostDir
         )
         if (!result.success) {
-            fail(taskId, result.error)
-            return
+            return TaskWaitResult(false, result.error, "")
         }
-
-        updateMirroredProgress(taskId, parentTaskId, 100, "WASM下载任务完成")
-        TaskModel.completeTask(taskId, "wasm_task completed")
-        TaskIO.writeOutput(taskId, result.output)
+        return TaskWaitResult(true, "", result.output)
     }
 
     private static func executeScript(
@@ -300,15 +471,32 @@ public class WasmTaskRunner {
         parentTaskId: Int64,
         plugin: PluginTaskData,
         runtimePermissions: String,
+        groupId: String,
+        targetType: String,
+        targetId: String,
         oneshotParam: String,
+        url: String,
         extraParams: String,
-        loginCookiesJson: String,
-        interactivePreviewEnabled: Bool
-    ): Unit {
+        interactivePreviewEnabled: Bool,
+        mainPluginNamespace!: String = "",
+        mainPluginType!: String = ""
+    ): TaskWaitResult {
         updateMirroredProgress(taskId, parentTaskId, 20, "准备WASM脚本插件输入")
         let baseParams = buildPluginParametersJson(plugin)
-        let finalParams = mergeParamsJson(baseParams, extraParams)
-        let inputJson = buildScriptInputJson("Script", oneshotParam, finalParams, loginCookiesJson)
+        let mergedParams = mergeParamsJson(baseParams, extraParams)
+        let finalParams = mergeParamsJson(
+            mergedParams,
+            buildRuntimeContextParamsJson(
+                targetType.trimAscii().toAsciiLower(),
+                targetId.trimAscii(),
+                taskId,
+                groupId,
+                if (mainPluginNamespace.trimAscii().size > 0) { mainPluginNamespace } else { plugin.namespace },
+                if (mainPluginType.trimAscii().size > 0) { mainPluginType } else { plugin.plugin_type },
+                url
+            )
+        )
+        let inputJson = buildScriptInputJson("Script", oneshotParam, finalParams)
 
         updateMirroredProgress(taskId, parentTaskId, 40, "执行WASM脚本插件")
         let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
@@ -316,6 +504,7 @@ public class WasmTaskRunner {
             taskId,
             parentTaskId,
             plugin.namespace,
+            groupId,
             wasmPath,
             inputJson,
             runtimePermissions,
@@ -323,13 +512,200 @@ public class WasmTaskRunner {
             enableWasi: true
         )
         if (!result.success) {
-            fail(taskId, result.error)
-            return
+            return TaskWaitResult(false, result.error, "")
+        }
+        return TaskWaitResult(true, "", result.output)
+    }
+
+    private static func resolveEffectiveGroupId(groupId: String, taskId: Int64, pluginNamespace: String): String {
+        let trimmed = groupId.trimAscii()
+        if (trimmed.size > 0) {
+            return trimmed
+        }
+        let safeNamespace = pluginNamespace.trimAscii().replace("/", "_").replace("\\", "_").replace(" ", "_")
+        return "wasm:${safeNamespace}:${taskId.toString()}"
+    }
+
+    private static func parseHookNamespaces(rawJson: String, fieldName: String, pluginNamespace: String): Array<String> {
+        let trimmed = rawJson.trimAscii()
+        if (trimmed.size == 0 || trimmed == "[]") {
+            return Array<String>()
         }
 
-        updateMirroredProgress(taskId, parentTaskId, 100, "WASM脚本任务完成")
-        TaskModel.completeTask(taskId, "wasm_task completed")
-        TaskIO.writeOutput(taskId, result.output)
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginArray)) {
+                throw Exception("Plugin ${pluginNamespace} field ${fieldName} must be a string array")
+            }
+
+            let hooks = ArrayList<String>()
+            r.startArray()
+            while (r.peek() != EndArray) {
+                match (r.peek()) {
+                    case Some(_) =>
+                        let hook = r.readValue<String>().trimAscii()
+                        if (hook.size > 0) {
+                            hooks.add(hook)
+                        }
+                    case None => break
+                }
+            }
+            r.endArray()
+            return hooks.toArray()
+        } catch (e: Exception) {
+            throw Exception("Invalid ${fieldName} hooks for plugin ${pluginNamespace}: ${e.message}")
+        }
+    }
+
+    private static func resolveHookPlugin(namespace: String, phase: String, ownerNamespace: String): PluginTaskData {
+        let hookNamespace = namespace.trimAscii()
+        if (hookNamespace.size == 0) {
+            throw Exception("Plugin ${ownerNamespace} has empty ${phase} hook namespace")
+        }
+        let plugin = PluginTaskService.getPluginByNamespace(hookNamespace)
+        if (plugin.namespace.size == 0) {
+            throw Exception("${phase} hook plugin not found: ${hookNamespace}")
+        }
+        if (!PluginTaskService.isWasmPlugin(plugin)) {
+            throw Exception("${phase} hook plugin is not a wasm plugin: ${hookNamespace}")
+        }
+        let hookType = plugin.plugin_type.trimAscii()
+        if (hookType != "Login" && hookType != "Script") {
+            throw Exception("${phase} hook plugin must be Login or Script: ${hookNamespace}")
+        }
+        return plugin
+    }
+
+    private static func seedPipelineKv(groupId: String, mainNamespace: String, mainPluginType: String, targetType: String, targetId: String, preHooks: Array<String>, afterHooks: Array<String>): Unit {
+        let kvStore = TaskKVService.getStore()
+        let _ = kvStore.set(groupId, "__lanlu.pipeline.main_namespace", encodeJsonString(mainNamespace), pipelineKvTtlSeconds)
+        let _ = kvStore.set(groupId, "__lanlu.pipeline.target_type", encodeJsonString(targetType.trimAscii().toAsciiLower()), pipelineKvTtlSeconds)
+        let _ = kvStore.set(groupId, "__lanlu.pipeline.target_id", encodeJsonString(targetId.trimAscii()), pipelineKvTtlSeconds)
+        let _ = kvStore.set(groupId, "__lanlu.pipeline.plan", buildPipelinePlanJson(preHooks, mainNamespace, mainPluginType, afterHooks), pipelineKvTtlSeconds)
+    }
+
+    private static func buildPipelinePlanJson(preHooks: Array<String>, mainNamespace: String, mainPluginType: String, afterHooks: Array<String>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("pre")
+        w.startArray()
+        for (hook in preHooks) {
+            w.writeValue(hook)
+        }
+        w.endArray()
+        w.writeName("main")
+        w.startObject()
+        w.writeName("namespace").writeValue(mainNamespace)
+        w.writeName("plugin_type").writeValue(mainPluginType)
+        w.endObject()
+        w.writeName("after")
+        w.startArray()
+        for (hook in afterHooks) {
+            w.writeValue(hook)
+        }
+        w.endArray()
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildRuntimeContextParamsJson(
+        targetType: String,
+        targetId: String,
+        taskId: Int64,
+        groupId: String,
+        mainPluginNamespace: String,
+        mainPluginType: String,
+        url: String
+    ): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("__target_type").writeValue(targetType.trimAscii().toAsciiLower())
+        w.writeName("__target_id").writeValue(targetId.trimAscii())
+        w.writeName("__task_id").writeValue(taskId.toString())
+        w.writeName("__group_id").writeValue(groupId.trimAscii())
+        w.writeName("__main_plugin_namespace").writeValue(mainPluginNamespace.trimAscii())
+        w.writeName("__main_plugin_type").writeValue(mainPluginType.trimAscii())
+        if (url.trimAscii().size > 0) {
+            w.writeName("__url").writeValue(url.trimAscii())
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func storePhaseResult(groupId: String, namespace: String, result: TaskWaitResult): Unit {
+        let kvStore = TaskKVService.getStore()
+        let safeNamespace = namespace.trimAscii()
+        if (groupId.trimAscii().size == 0 || safeNamespace.size == 0) {
+            return
+        }
+        let statusValue = if (result.success) { "\"success\"" } else { "\"failed\"" }
+        let outputValue = normalizeJsonForKv(result.output)
+        let dataValue = extractPhaseDataJson(result.output)
+        let errorValue = if (result.error.trimAscii().size > 0) { encodeJsonString(result.error) } else { "null" }
+        let _ = kvStore.set(groupId, "__lanlu.phase.${safeNamespace}.status", statusValue, pipelineKvTtlSeconds)
+        let _ = kvStore.set(groupId, "__lanlu.phase.${safeNamespace}.output", outputValue, pipelineKvTtlSeconds)
+        let _ = kvStore.set(groupId, "__lanlu.phase.${safeNamespace}.error", errorValue, pipelineKvTtlSeconds)
+        let _ = kvStore.set(groupId, "__lanlu.phase.${safeNamespace}.data", dataValue, pipelineKvTtlSeconds)
+    }
+
+    private static func normalizeJsonForKv(raw: String): String {
+        let trimmed = raw.trimAscii()
+        if (trimmed.size == 0) {
+            return "null"
+        }
+        return trimmed
+    }
+
+    private static func encodeJsonString(value: String): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.writeValue(value)
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func extractPhaseDataJson(rawOutput: String): String {
+        let trimmed = rawOutput.trimAscii()
+        if (trimmed.size == 0) {
+            return "null"
+        }
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(trimmed.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return "null"
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let fieldName = r.readName()
+                if (fieldName == "data") {
+                    return String.fromUtf8(r.readValueBytes()).trimAscii()
+                }
+                r.skip()
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return "null"
+    }
+
+    private static func computePipelineProgress(completedStages: Int64, totalStages: Int64): Int32 {
+        if (totalStages <= 0) {
+            return 5
+        }
+        var clampedCompleted = completedStages
+        if (clampedCompleted < 0) { clampedCompleted = 0 }
+        if (clampedCompleted > totalStages) { clampedCompleted = totalStages }
+        let scaled = 5 + Int32((clampedCompleted * 80) / totalStages)
+        return if (scaled < 95) { scaled } else { 95 }
     }
 
     private static func parseParameters(parameters: String): (String, String, String, String, String, String, String, Int64, String, String) {
@@ -936,8 +1312,7 @@ public class WasmTaskRunner {
         targetId: String,
         metadataJson: String,
         oneshotParam: String,
-        params: String,
-        loginCookies: String
+        params: String
     ): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -964,14 +1339,6 @@ public class WasmTaskRunner {
             w.startObject()
             w.endObject()
         }
-        let cookiesTrimmed = loginCookies.trimAscii()
-        if (cookiesTrimmed.size > 0) {
-            w.writeName("loginCookies").jsonValue(cookiesTrimmed)
-        } else {
-            w.writeName("loginCookies")
-            w.startArray()
-            w.endArray()
-        }
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
@@ -991,9 +1358,6 @@ public class WasmTaskRunner {
             w.startObject()
             w.endObject()
         }
-        w.writeName("loginCookies")
-        w.startArray()
-        w.endArray()
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
@@ -1003,8 +1367,7 @@ public class WasmTaskRunner {
         pluginType: String,
         url: String,
         pluginDir: String,
-        params: String,
-        loginCookies: String
+        params: String
     ): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -1022,15 +1385,6 @@ public class WasmTaskRunner {
             w.startObject()
             w.endObject()
         }
-
-        let cookiesTrimmed = loginCookies.trimAscii()
-        if (cookiesTrimmed.size > 0) {
-            w.writeName("loginCookies").jsonValue(cookiesTrimmed)
-        } else {
-            w.writeName("loginCookies")
-            w.startArray()
-            w.endArray()
-        }
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
@@ -1039,8 +1393,7 @@ public class WasmTaskRunner {
     private static func buildScriptInputJson(
         pluginType: String,
         oneshotParam: String,
-        params: String,
-        loginCookies: String
+        params: String
     ): String {
         let out = ByteBuffer()
         let w = JsonWriter(out)
@@ -1057,130 +1410,9 @@ public class WasmTaskRunner {
             w.startObject()
             w.endObject()
         }
-
-        let cookiesTrimmed = loginCookies.trimAscii()
-        if (cookiesTrimmed.size > 0) {
-            w.writeName("loginCookies").jsonValue(cookiesTrimmed)
-        } else {
-            w.writeName("loginCookies")
-            w.startArray()
-            w.endArray()
-        }
-
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
-    }
-
-    private static func handleLoginDependency(taskId: Int64, loginNamespace: String, groupId: String): TaskWaitResult {
-        let kvStore = TaskKVService.getStore()
-        if (groupId.size > 0) {
-            match (kvStore.get(groupId, "login_cookies_${loginNamespace}")) {
-                case Some(cached) =>
-                    let trimmedCached = cached.trimAscii()
-                    if (trimmedCached.size > 0) {
-                        TaskIO.appendLog(taskId, "Using cached login cookies from KV store")
-                        return TaskWaitResult(true, "", "", trimmedCached)
-                    }
-                case None => ()
-            }
-        }
-
-        let loginPlugin = PluginTaskService.getPluginByNamespace(loginNamespace)
-        if (loginPlugin.namespace.size == 0) {
-            return TaskWaitResult(false, "Login plugin not found: ${loginNamespace}", "")
-        }
-        if (!PluginTaskService.isWasmPlugin(loginPlugin)) {
-            return TaskWaitResult(false, "Login plugin is not a wasm plugin: ${loginNamespace}", "")
-        }
-
-        let result = executeLoginPluginDirect(taskId, loginPlugin, false)
-        if (!result.success) {
-            return result
-        }
-
-        let cookiesJson = extractLoginCookiesJson(result.output).trimAscii()
-        if (cookiesJson.size == 0) {
-            return TaskWaitResult(false, "Login plugin returned empty cookies: ${loginNamespace}", "")
-        }
-
-        if (groupId.size > 0) {
-            let _ = kvStore.set(groupId, "login_cookies_${loginNamespace}", cookiesJson, 3600)
-        }
-        return TaskWaitResult(true, "", result.output, cookiesJson)
-    }
-
-    private static func executeLoginPluginDirect(taskId: Int64, plugin: PluginTaskData, interactivePreviewEnabled: Bool): TaskWaitResult {
-        let paramsJson = buildPluginParametersJson(plugin)
-        let inputJson = buildLoginInputJson(paramsJson)
-        let wasmPath = PluginTaskService.buildPluginFilePath(plugin.plugin_type, plugin.entry)
-        let result = WasmHostBridge.runGenericPlugin(
-            taskId,
-            0,
-            plugin.namespace,
-            wasmPath,
-            inputJson,
-            plugin.permissions,
-            interactivePreviewEnabled
-        )
-        if (!result.success) {
-            return TaskWaitResult(false, result.error, "")
-        }
-        return TaskWaitResult(true, "", result.output)
-    }
-
-    private static func extractLoginCookiesJson(output: String): String {
-        if (output.trimAscii().size == 0) {
-            return ""
-        }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(output.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) {
-                return ""
-            }
-
-            var success = false
-            var cookiesRaw = ""
-
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let n = r.readName()
-                match (n) {
-                    case "success" =>
-                        let v = r.readValue<String>().trimAscii()
-                        success = (v == "true" || v == "1")
-                    case "data" =>
-                        if (r.peek() == Some(BeginObject)) {
-                            r.startObject()
-                            while (r.peek() != EndObject) {
-                                let dn = r.readName()
-                                match (dn) {
-                                    case "cookies" =>
-                                        if (r.peek() == Some(BeginArray)) {
-                                            cookiesRaw = String.fromUtf8(r.readValueBytes())
-                                        } else {
-                                            r.skip()
-                                        }
-                                    case _ => r.skip()
-                                }
-                            }
-                            r.endObject()
-                        } else {
-                            r.skip()
-                        }
-                    case _ => r.skip()
-                }
-            }
-            r.endObject()
-
-            if (!success) { return "" }
-            return cookiesRaw
-        } catch (_: Exception) {}
-
-        return ""
     }
 
     private static func fail(taskId: Int64, message: String): Unit {

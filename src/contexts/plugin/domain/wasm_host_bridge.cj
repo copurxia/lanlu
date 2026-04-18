@@ -22,6 +22,7 @@ import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.infrastructure.archivehandler.*
+import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
 
 public class WasmExecutionResult {
@@ -43,6 +44,7 @@ class WasmExecutionState {
     public var taskId: Int64 = 0
     public var parentTaskId: Int64 = 0
     public var pluginNamespace: String = ""
+    public var groupId: String = ""
     public var interactiveSelectEnabled: Bool = false
     public var responseBytes: Array<UInt8> = Array<UInt8>()
     public var errorBytes: Array<UInt8> = Array<UInt8>()
@@ -167,6 +169,7 @@ public class WasmHostCallContext {
     public var executionId: Int64 = 0
     public var pluginNamespace: String = ""
     public var taskId: Int64 = 0
+    public var groupId: String = ""
     public var method: String = ""
     public var effectiveParams: String = "{}"
     public var interactiveSelectEnabled: Bool = false
@@ -192,6 +195,7 @@ public class WasmHostBridge {
         taskId: Int64,
         parentTaskId: Int64,
         pluginNamespace: String,
+        groupId: String,
         wasmPath: String,
         inputJson: String,
         targetType: String,
@@ -213,7 +217,7 @@ public class WasmHostBridge {
             return WasmExecutionResult(false, "", e.message)
         }
 
-        let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, permissions, interactiveSelectEnabled)
+        let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, groupId, permissions, interactiveSelectEnabled)
 
         try {
             let created = WasmEdgePluginInstance(executionId, true)
@@ -275,6 +279,7 @@ public class WasmHostBridge {
         taskId: Int64,
         parentTaskId: Int64,
         pluginNamespace: String,
+        groupId: String,
         wasmPath: String,
         inputJson: String,
         permissions: String,
@@ -297,7 +302,7 @@ public class WasmHostBridge {
             return WasmExecutionResult(false, "", e.message)
         }
 
-        let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, permissions, interactiveSelectEnabled)
+        let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, groupId, permissions, interactiveSelectEnabled)
 
         try {
             let created = WasmEdgePluginInstance(executionId, enableWasi)
@@ -377,7 +382,7 @@ public class WasmHostBridge {
             return (false, "", e.message)
         }
 
-        let executionId = createExecutionState(0, 0, "", "", false)
+        let executionId = createExecutionState(0, 0, "", "", "", false)
 
         try {
             let created = WasmEdgePluginInstance(executionId, true)
@@ -521,7 +526,7 @@ public class WasmHostBridge {
             return result
         }
 
-        let (pluginNamespace, taskId, _, interactiveSelectEnabled) = getExecutionContext(executionId)
+        let (pluginNamespace, taskId, _, _, interactiveSelectEnabled) = getExecutionContext(executionId)
         let (method, paramsRaw) = parseHostRequest(trimmed)
         if (method.size == 0) {
             let elapsed = nowMillis() - startedAt
@@ -796,11 +801,19 @@ public class WasmHostBridge {
         registerHostMethod("tankoubon.list_archives", { ctx => handleTankoubonListArchives(ctx) })
         registerHostMethod("tags.list", { ctx => handleTagsList(ctx) })
         registerHostMethod("tags.merge", { ctx => handleTagsMerge(ctx) })
+        registerHostMethod("task_kv.get", { ctx => handleTaskKvGet(ctx) })
+        registerHostMethod("taskKv.get", { ctx => handleTaskKvGet(ctx) })
+        registerHostMethod("task_kv.set", { ctx => handleTaskKvSet(ctx) })
+        registerHostMethod("taskKv.set", { ctx => handleTaskKvSet(ctx) })
+        registerHostMethod("task_kv.delete", { ctx => handleTaskKvDelete(ctx) })
+        registerHostMethod("taskKv.delete", { ctx => handleTaskKvDelete(ctx) })
+        registerHostMethod("task_kv.list_keys", { ctx => handleTaskKvListKeys(ctx) })
+        registerHostMethod("taskKv.listKeys", { ctx => handleTaskKvListKeys(ctx) })
         registerHostMethod("ui.select", { ctx => handleUiSelect(ctx) })
         hostMethodRegistryInitialized = true
     }
 
-    private static func createExecutionState(taskId: Int64, parentTaskId: Int64, pluginNamespace: String, permissions: String, interactiveSelectEnabled: Bool): Int64 {
+    private static func createExecutionState(taskId: Int64, parentTaskId: Int64, pluginNamespace: String, groupId: String, permissions: String, interactiveSelectEnabled: Bool): Int64 {
         stateMutex.lock()
         executionSeq += 1
         let executionId = executionSeq
@@ -809,6 +822,7 @@ public class WasmHostBridge {
         state.taskId = taskId
         state.parentTaskId = parentTaskId
         state.pluginNamespace = pluginNamespace.trimAscii()
+        state.groupId = groupId.trimAscii()
         state.interactiveSelectEnabled = interactiveSelectEnabled
         state.permissions = parsePermissionMap(permissions)
         executionStates[executionId] = state
@@ -833,19 +847,33 @@ public class WasmHostBridge {
         }
     }
 
-    private static func getExecutionContext(executionId: Int64): (String, Int64, Int64, Bool) {
+    private static func getExecutionContext(executionId: Int64): (String, Int64, Int64, String, Bool) {
         stateMutex.lock()
         match (executionStates.get(executionId)) {
             case Some(state) =>
                 let namespace = state.pluginNamespace
                 let taskId = state.taskId
                 let parentTaskId = state.parentTaskId
+                let groupId = state.groupId
                 let interactive = state.interactiveSelectEnabled
                 stateMutex.unlock()
-                return (namespace, taskId, parentTaskId, interactive)
+                return (namespace, taskId, parentTaskId, groupId, interactive)
             case None =>
                 stateMutex.unlock()
-                return ("", 0, 0, false)
+                return ("", 0, 0, "", false)
+        }
+    }
+
+    private static func getExecutionGroupId(executionId: Int64): String {
+        stateMutex.lock()
+        match (executionStates.get(executionId)) {
+            case Some(state) =>
+                let groupId = state.groupId
+                stateMutex.unlock()
+                return groupId
+            case None =>
+                stateMutex.unlock()
+                return ""
         }
     }
 
@@ -1456,6 +1484,7 @@ public class WasmHostBridge {
                 ctx.executionId = executionId
                 ctx.pluginNamespace = pluginNamespace
                 ctx.taskId = taskId
+                ctx.groupId = getExecutionGroupId(executionId)
                 ctx.method = key
                 ctx.effectiveParams = effectiveParams
                 ctx.interactiveSelectEnabled = interactiveSelectEnabled
@@ -1630,10 +1659,169 @@ public class WasmHostBridge {
         return (true, "{\"merged\":true}", "")
     }
 
+    private static func handleTaskKvGet(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.read"], "task_kv.read")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = ctx.groupId.trimAscii()
+        if (groupId.size == 0) {
+            return (false, "{}", "task group unavailable")
+        }
+        let key = parseTaskKvKey(ctx.effectiveParams)
+        if (key.size == 0) {
+            return (false, "{}", "missing key")
+        }
+        match (TaskKVService.getStore().get(groupId, key)) {
+            case Some(value) => return (true, buildTaskKvValueResponseJson(true, value), "")
+            case None => return (true, buildTaskKvValueResponseJson(false, "null"), "")
+        }
+    }
+
+    private static func handleTaskKvSet(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.write"], "task_kv.write")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = ctx.groupId.trimAscii()
+        if (groupId.size == 0) {
+            return (false, "{}", "task group unavailable")
+        }
+        let (key, valueRaw, ttlSeconds) = parseTaskKvSetParams(ctx.effectiveParams)
+        if (key.size == 0) {
+            return (false, "{}", "missing key")
+        }
+        let ok = TaskKVService.getStore().set(groupId, key, valueRaw, ttlSeconds)
+        return (true, buildTaskKvMutationResponseJson("stored", ok), "")
+    }
+
+    private static func handleTaskKvDelete(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.write"], "task_kv.write")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = ctx.groupId.trimAscii()
+        if (groupId.size == 0) {
+            return (false, "{}", "task group unavailable")
+        }
+        let key = parseTaskKvKey(ctx.effectiveParams)
+        if (key.size == 0) {
+            return (false, "{}", "missing key")
+        }
+        let deleted = TaskKVService.getStore().delete(groupId, key)
+        return (true, buildTaskKvMutationResponseJson("deleted", deleted), "")
+    }
+
+    private static func handleTaskKvListKeys(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["task_kv.read"], "task_kv.read")
+        if (!allowed) { return (false, "{}", err) }
+        let groupId = ctx.groupId.trimAscii()
+        if (groupId.size == 0) {
+            return (false, "{}", "task group unavailable")
+        }
+        let keys = TaskKVService.getStore().getKeys(groupId)
+        return (true, buildTaskKvListKeysResponseJson(keys), "")
+    }
+
     private static func handleUiSelect(ctx: WasmHostCallContext): (Bool, String, String) {
         let (allowed, err) = ensureHostCapability(ctx.executionId, ["ui.select"], "ui.select")
         if (!allowed) { return (false, "{}", err) }
         return handleUiSelectCall(ctx.executionId, ctx.taskId, ctx.effectiveParams, ctx.interactiveSelectEnabled)
+    }
+
+    private static func parseTaskKvKey(raw: String): String {
+        var key = ""
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(raw.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return ""
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                match (name) {
+                    case "key" => key = r.readValue<String>().trimAscii()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+        return key
+    }
+
+    private static func parseTaskKvSetParams(raw: String): (String, String, Int64) {
+        var key = ""
+        var valueRaw = "null"
+        var ttlSeconds: Int64 = 86400
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(raw.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return ("", "null", ttlSeconds)
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let name = r.readName()
+                match (name) {
+                    case "key" => key = r.readValue<String>().trimAscii()
+                    case "value" => valueRaw = String.fromUtf8(r.readValueBytes()).trimAscii()
+                    case "ttl_seconds" => ttlSeconds = parseInt64Loose(r.readValue<String>(), 86400)
+                    case "ttlSeconds" => ttlSeconds = parseInt64Loose(r.readValue<String>(), 86400)
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        if (ttlSeconds <= 0) {
+            ttlSeconds = 86400
+        }
+        if (valueRaw.trimAscii().size == 0) {
+            valueRaw = "null"
+        }
+        return (key, valueRaw, ttlSeconds)
+    }
+
+    private static func buildTaskKvValueResponseJson(found: Bool, valueRaw: String): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("found").writeValue(found)
+        w.writeName("value")
+        if (found) {
+            w.jsonValue(valueRaw.trimAscii())
+        } else {
+            w.jsonValue("null")
+        }
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildTaskKvMutationResponseJson(fieldName: String, value: Bool): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName(fieldName).writeValue(value)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
+    private static func buildTaskKvListKeysResponseJson(keys: Array<String>): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("keys")
+        w.startArray()
+        for (key in keys) {
+            let trimmed = key.trimAscii()
+            if (trimmed.size > 0) {
+                w.writeValue(trimmed)
+            }
+        }
+        w.endArray()
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     private static func ensureHostCapability(executionId: Int64, candidates: Array<String>, requiredLabel: String): (Bool, String) {

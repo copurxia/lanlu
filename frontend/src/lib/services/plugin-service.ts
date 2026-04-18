@@ -7,7 +7,6 @@ export interface Plugin {
   id: number;
   name: string;
   namespace: string;
-  login_from: string;
   version: string;
   plugin_type: string;  // API返回的是 plugin_type，不是 type
   author: string;
