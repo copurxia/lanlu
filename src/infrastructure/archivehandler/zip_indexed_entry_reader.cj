@@ -101,12 +101,7 @@ class ZipDeflateEntryReader <: EntryReader {
         if (closed) {
             return 0
         }
-        try {
-            return inflater.read(buffer)
-        } catch (_: Exception) {
-            closed = true
-            return 0
-        }
+        return inflater.read(buffer)
     }
 
     public func close(): Unit {

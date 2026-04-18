@@ -862,8 +862,10 @@ public class ArchiveController {
     // GET /api/archives/{id}/download
     // 大文件阈值：5MB
     private static let CHUNKED_THRESHOLD: Int64 = 5 * 1024 * 1024
-    // 分块大小：1MB
+    // 下载分块大小：1MB
     private static let CHUNK_SIZE: Int64 = 1024 * 1024
+    // 页面流式传输分块大小：256KB
+    private static let PAGE_STREAM_CHUNK_SIZE: Int64 = 256 * 1024
 
     public static func downloadArchive(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id").getOrThrow()
@@ -1164,7 +1166,7 @@ public class ArchiveController {
         let writer = ctx.writer()
 
         // 分块读取并发送
-        let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+        let chunkBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
         try {
             while (true) {
                 let bytesRead = reader.read(chunkBuffer)
@@ -1172,7 +1174,7 @@ public class ArchiveController {
                     break
                 }
 
-                if (bytesRead == CHUNK_SIZE) {
+                if (bytesRead == PAGE_STREAM_CHUNK_SIZE) {
                     writer.write(chunkBuffer)
                 } else {
                     let lastChunk = Array<Byte>(bytesRead, { i => chunkBuffer[i] })
@@ -1250,12 +1252,12 @@ public class ArchiveController {
         let writer = ctx.writer()
 
         var remaining = rangeEnd - rangeStart + 1
-        let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+        let chunkBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
         try {
             while (remaining > 0) {
-                let toRead = if (remaining > CHUNK_SIZE) { CHUNK_SIZE } else { remaining }
+                let toRead = if (remaining > PAGE_STREAM_CHUNK_SIZE) { PAGE_STREAM_CHUNK_SIZE } else { remaining }
 
-                if (toRead == CHUNK_SIZE) {
+                if (toRead == PAGE_STREAM_CHUNK_SIZE) {
                     let bytesRead = reader.read(chunkBuffer)
                     if (bytesRead <= 0) {
                         break
@@ -1328,11 +1330,11 @@ public class ArchiveController {
         if (reader.seek(skipBytes)) {
             return true
         }
-        let skipBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+        let skipBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
         var remaining = skipBytes
         while (remaining > 0) {
-            let toRead = if (remaining > CHUNK_SIZE) { CHUNK_SIZE } else { remaining }
-            if (toRead == CHUNK_SIZE) {
+            let toRead = if (remaining > PAGE_STREAM_CHUNK_SIZE) { PAGE_STREAM_CHUNK_SIZE } else { remaining }
+            if (toRead == PAGE_STREAM_CHUNK_SIZE) {
                 let bytesRead = reader.read(skipBuffer)
                 if (bytesRead <= 0) {
                     return false
