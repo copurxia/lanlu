@@ -224,6 +224,7 @@
     "fileName": "File Name:",
     "fileSize": "File Size:",
     "fileType": "File Type:",
+    "releaseAt": "Release Date:",
     "createdAt": "Created At:",
     "updatedAt": "Updated At:",
     "unknown": "Unknown",

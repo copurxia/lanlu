@@ -227,6 +227,7 @@
     "fileName": "文件名:",
     "fileSize": "文件大小:",
     "fileType": "文件类型:",
+    "releaseAt": "发行时间:",
     "createdAt": "创建时间:",
     "updatedAt": "更新时间:",
     "unknown": "未知",
