@@ -60,8 +60,6 @@ export default function AuthSettingsPage() {
   const [totpEnrollment, setTotpEnrollment] = useState<TotpEnrollmentPayload | null>(null);
   const [totpName, setTotpName] = useState('');
   const [totpCode, setTotpCode] = useState('');
-  const [totpDisableCode, setTotpDisableCode] = useState('');
-  const [totpDisableRecoveryCode, setTotpDisableRecoveryCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[]>([]);
 
   // 修改凭据表单
@@ -417,28 +415,13 @@ export default function AuthSettingsPage() {
   };
 
   const disableTotp = async () => {
-    if (!totpDisableCode.trim() && !totpDisableRecoveryCode.trim()) return;
-    const confirmed = await confirm({
-      title: t('auth.confirmDisableTotpTitle'),
-      description: t('auth.confirmDisableTotpDescription'),
-      confirmText: t('auth.disableTotp'),
-      cancelText: t('common.cancel'),
-      variant: 'destructive',
-    });
-    if (!confirmed) return;
-
     setDisablingTotp(true);
     setError(null);
     try {
       if (!(await requestStepUp())) {
         return;
       }
-      await TotpAuthService.disable({
-        code: totpDisableCode.trim(),
-        recoveryCode: totpDisableRecoveryCode.trim(),
-      });
-      setTotpDisableCode('');
-      setTotpDisableRecoveryCode('');
+      await TotpAuthService.disable();
       setRecoveryCodes([]);
       setTotpEnrollment(null);
       setTotpCode('');
@@ -999,36 +982,10 @@ export default function AuthSettingsPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="totpDisableCode">{t('auth.disableTotp')}</Label>
-                <Input
-                  id="totpDisableCode"
-                  name="totp"
-                  type="text"
-                  value={totpDisableCode}
-                  onChange={(e) => setTotpDisableCode(e.target.value)}
-                  placeholder={t('auth.totpCodePlaceholder')}
-                  disabled={disablingTotp}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
-                <Input
-                  id="totpDisableRecoveryCode"
-                  name="recovery_code"
-                  type="text"
-                  value={totpDisableRecoveryCode}
-                  onChange={(e) => setTotpDisableRecoveryCode(e.target.value)}
-                  placeholder={t('auth.recoveryCodePlaceholder')}
-                  disabled={disablingTotp}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                />
                 <Button
                   variant="destructive"
                   onClick={disableTotp}
-                  disabled={disablingTotp || (!totpDisableCode.trim() && !totpDisableRecoveryCode.trim())}
+                  disabled={disablingTotp}
                 >
                   {disablingTotp ? t('auth.disablingTotp') : t('auth.disableTotp')}
                 </Button>

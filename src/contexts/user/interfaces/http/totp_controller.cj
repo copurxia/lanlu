@@ -358,17 +358,12 @@ public class TotpController {
     }
 
     public static func disable(ctx: Ctx, userId: Int64): Unit {
-        let req = try { JsonCodec.decode<TotpCodeReq>(ctx.bodyString()) } catch (_: Exception) { TotpCodeReq() }
         if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }
         let credential = UserTotpCredentialDao.findActiveByUserId(userId)
         if (credential.id <= 0) {
             reply<String>(ctx, HttpStatusCode.STATUS_NOT_FOUND, ApiResponse<String>(404, "totp is not enabled", None))
-            return
-        }
-        if (!validateAuthFactor(credential, req.code, req.recoveryCode)) {
-            reply<String>(ctx, HttpStatusCode.STATUS_UNAUTHORIZED, ApiResponse<String>(401, "invalid totp or recovery code", None))
             return
         }
         if (UserTotpCredentialDao.revoke(userId)) {

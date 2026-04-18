@@ -289,9 +289,6 @@ function LoginForm() {
                           />
                         </TabsContent>
                       </Tabs>
-                      <Button type="button" variant="ghost" className="px-0" disabled={isLoading} onClick={() => setTotpChallengeId('')}>
-                        {t('common.back')}
-                      </Button>
                     </>
                   ) : (
                     <>
@@ -337,31 +334,56 @@ function LoginForm() {
                 </div>
               )}
 
-              <Button
-                type="button"
-                className="w-full mt-6 h-11 text-base font-medium transition-all active:scale-[0.98]"
-                onClick={mode === 'account' ? (totpChallengeId ? handleTotpVerify : handleAccountLogin) : handlePasskeyLogin}
-                disabled={
-                  isLoading ||
-                  (mode === 'account'
-                    ? (totpChallengeId
-                      ? (totpMethod === 'totp' ? !totpCode.trim() : !recoveryCode.trim())
-                      : (!username.trim() || !password))
-                    : false)
-                }
-              >
-                {isLoading ? (
-                  <div className="flex items-center gap-2">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    {totpChallengeId ? t('auth.verifyingTotp') : t('auth.loggingIn')}
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <LogIn className="h-4 w-4" />
-                    {totpChallengeId ? t('auth.verifyTotp') : t('auth.login')}
-                  </div>
-                )}
-              </Button>
+              {totpChallengeId ? (
+                <div className="mt-6 grid grid-cols-2 gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 w-full"
+                    disabled={isLoading}
+                    onClick={() => setTotpChallengeId('')}
+                  >
+                    {t('common.back')}
+                  </Button>
+                  <Button
+                    type="button"
+                    className="h-11 w-full text-base font-medium transition-all active:scale-[0.98]"
+                    onClick={handleTotpVerify}
+                    disabled={isLoading || (totpMethod === 'totp' ? !totpCode.trim() : !recoveryCode.trim())}
+                  >
+                    {isLoading ? (
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                        {t('auth.verifyingTotp')}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <LogIn className="h-4 w-4" />
+                        {t('auth.verifyTotp')}
+                      </div>
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  className="w-full mt-6 h-11 text-base font-medium transition-all active:scale-[0.98]"
+                  onClick={mode === 'account' ? handleAccountLogin : handlePasskeyLogin}
+                  disabled={isLoading || (mode === 'account' ? (!username.trim() || !password) : false)}
+                >
+                  {isLoading ? (
+                    <div className="flex items-center gap-2">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                      {t('auth.loggingIn')}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <LogIn className="h-4 w-4" />
+                      {t('auth.login')}
+                    </div>
+                  )}
+                </Button>
+              )}
             </CardContent>
           </Card>
 

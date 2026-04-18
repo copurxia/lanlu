@@ -48,13 +48,8 @@ export class TotpAuthService {
     return res.data;
   }
 
-  static async disable(params: { code?: string; recoveryCode?: string }) {
-    const res = await apiClient.delete<ApiEnvelope<null>>('/api/auth/totp', {
-      data: {
-        code: params.code || '',
-        recoveryCode: params.recoveryCode || '',
-      },
-    });
+  static async disable() {
+    const res = await apiClient.delete<ApiEnvelope<null>>('/api/auth/totp');
     return res.data;
   }
 }
