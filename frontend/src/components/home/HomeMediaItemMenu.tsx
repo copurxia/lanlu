@@ -216,8 +216,8 @@ export function HomeMediaItemMenu({
     setFavoriteLoading(true);
     try {
       const success = type === 'archive'
-        ? await FavoriteService.toggleFavorite(id, isFavorite)
-        : await FavoriteService.toggleTankoubonFavorite(id, isFavorite);
+        ? await FavoriteService.setFavorite('archive', id, !isFavorite)
+        : await FavoriteService.setFavorite('tankoubon', id, !isFavorite);
       if (success) {
         setIsFavorite((current) => !current);
       }

@@ -105,11 +105,6 @@ function formatVideoClock(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function getPageHeaderTitle(page?: { title?: string; metadata?: { title?: string } } | null): string {
-  if (!page) return '';
-  return ArchiveService.getPageDisplayTitle(page as any);
-}
-
 function getPagePathFileName(path?: string | null): string {
   const normalized = String(path || '').trim().replace(/\\/g, '/');
   if (!normalized) return '';
@@ -2455,7 +2450,7 @@ function ReaderContent() {
   const displayArchiveTitle = useMemo(() => {
     if (!isCollectionEndPage) {
       const primaryIndex = currentRealPage;
-      const primaryPageTitle = getPageHeaderTitle(effectivePages[primaryIndex] as any);
+      const primaryPageTitle = ArchiveService.getPageDisplayTitle(effectivePages[primaryIndex] as any);
       if (primaryPageTitle) return primaryPageTitle;
 
       const hasSecondVisiblePage =
@@ -2464,7 +2459,7 @@ function ReaderContent() {
         !isHtmlSpreadView &&
         !(splitCoverMode && currentPage === 0);
       if (hasSecondVisiblePage) {
-        const secondaryPageTitle = getPageHeaderTitle(effectivePages[primaryIndex + 1] as any);
+        const secondaryPageTitle = ArchiveService.getPageDisplayTitle(effectivePages[primaryIndex + 1] as any);
         if (secondaryPageTitle) return secondaryPageTitle;
       }
     }

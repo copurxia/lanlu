@@ -107,22 +107,14 @@ export function ReaderSingleModeView({
     !(splitCoverMode && currentPage === 0) &&
     currentPage + 1 < pages.length;
 
-  const getPageUrl = useCallback((pageIndex: number): string => {
-    return ArchiveService.getResolvedPageUrl(pages[pageIndex]);
-  }, [pages]);
-
-  const getPageMetadata = useCallback((pageIndex: number) => {
-    return ArchiveService.getPageDisplayMetadata(pages[pageIndex]);
-  }, [pages]);
-
   const getSubtitleAttachments = useCallback((pageIndex: number) => {
-    const metadata = getPageMetadata(pageIndex);
+    const metadata = ArchiveService.getPageDisplayMetadata(pages[pageIndex]);
     const allAttachments = ArchiveService.getSubtitleAttachments(metadata);
     const currentIndexes = currentSubtitleIndexByPageIndex[pageIndex] ?? [];
     return currentIndexes
       .filter((idx) => idx >= 0 && idx < allAttachments.length)
       .map((idx) => allAttachments[idx]);
-  }, [currentSubtitleIndexByPageIndex, getPageMetadata]);
+  }, [currentSubtitleIndexByPageIndex, pages]);
 
   const getSubtitleAssetIds = useCallback((pageIndex: number) => {
     return getSubtitleAttachments(pageIndex)
@@ -377,7 +369,7 @@ export function ReaderSingleModeView({
 	                    ref={(el) => {
 	                      imageRefs.current[currentPage] = el;
 	                    }}
-	                    src={cachedPages[currentPage] || getPageUrl(currentPage)}
+	                    src={cachedPages[currentPage] || ArchiveService.getResolvedPageUrl(pages[currentPage])}
 	                    alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
 	                    decoding="async"
 	                    loading="eager"
@@ -394,7 +386,7 @@ export function ReaderSingleModeView({
 	                      imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
 	                      registerImageMeta(currentPage, img);
 	                      onImageLoaded(currentPage);
-	                      const pageUrl = getPageUrl(currentPage);
+	                      const pageUrl = ArchiveService.getResolvedPageUrl(pages[currentPage]);
 	                      if (!cachedPages[currentPage] && pageUrl) {
 	                        onCacheImage(pageUrl, currentPage);
 	                      }
@@ -412,7 +404,7 @@ export function ReaderSingleModeView({
 	                    ref={(el) => {
 	                      imageRefs.current[currentPage + 1] = el;
 	                    }}
-	                    src={cachedPages[currentPage + 1] || getPageUrl(currentPage + 1)}
+	                    src={cachedPages[currentPage + 1] || ArchiveService.getResolvedPageUrl(pages[currentPage + 1])}
 	                    alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
 	                    decoding="async"
 	                    loading="eager"
@@ -429,7 +421,7 @@ export function ReaderSingleModeView({
 	                      imageRequestUrls.current[currentPage + 1] = img.currentSrc || img.src;
 	                      registerImageMeta(currentPage + 1, img);
 	                      onImageLoaded(currentPage + 1);
-	                      const pageUrl = getPageUrl(currentPage + 1);
+	                      const pageUrl = ArchiveService.getResolvedPageUrl(pages[currentPage + 1]);
 	                      if (!cachedPages[currentPage + 1] && pageUrl) {
 	                        onCacheImage(pageUrl, currentPage + 1);
 	                      }
@@ -452,7 +444,7 @@ export function ReaderSingleModeView({
                 {pages[currentPage]?.type === 'video' ? (
                   <ReaderVideoStage
                     key={`page-${currentPage}`}
-                    src={getPageUrl(currentPage)}
+                    src={ArchiveService.getResolvedPageUrl(pages[currentPage])}
                     videoRef={(el) => {
                       videoRefs.current[currentPage] = el;
                     }}
@@ -486,11 +478,11 @@ export function ReaderSingleModeView({
                     title={
                       getPageTitle(currentPage, currentPage + 1)
                     }
-                    description={getPageMetadata(currentPage)?.description}
-                    thumb={getPageMetadata(currentPage)?.thumb}
-                    lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(getPageMetadata(currentPage))?.asset_id}
+                    description={ArchiveService.getPageDisplayMetadata(pages[currentPage])?.description}
+                    thumb={ArchiveService.getPageDisplayMetadata(pages[currentPage])?.thumb}
+                    lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(ArchiveService.getPageDisplayMetadata(pages[currentPage]))?.asset_id}
                     subtitleAttachmentAssetId={getSubtitleAttachments(currentPage)[0]?.asset_id}
-                    audioUrl={getPageUrl(currentPage)}
+                    audioUrl={ArchiveService.getResolvedPageUrl(pages[currentPage])}
                     audioRef={(el) => {
                       videoRefs.current[currentPage] = el;
                     }}
@@ -553,7 +545,7 @@ export function ReaderSingleModeView({
 	                          ref={(el) => {
 	                            imageRefs.current[currentPage] = el;
 	                          }}
-	                          src={cachedPages[currentPage] || getPageUrl(currentPage)}
+	                          src={cachedPages[currentPage] || ArchiveService.getResolvedPageUrl(pages[currentPage])}
 	                          alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
 	                          width={currentMeta.w}
 	                          height={currentMeta.h}
@@ -576,7 +568,7 @@ export function ReaderSingleModeView({
 	                            imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
 	                            registerImageMeta(currentPage, img);
 	                            onImageLoaded(currentPage);
-	                            const pageUrl = getPageUrl(currentPage);
+	                            const pageUrl = ArchiveService.getResolvedPageUrl(pages[currentPage]);
 	                            if (!cachedPages[currentPage] && pageUrl) {
 	                              onCacheImage(pageUrl, currentPage);
 	                            }
@@ -593,7 +585,7 @@ export function ReaderSingleModeView({
 	                            ref={(el) => {
 	                              imageRefs.current[currentPage] = el;
 	                            }}
-	                            src={cachedPages[currentPage] || getPageUrl(currentPage)}
+	                            src={cachedPages[currentPage] || ArchiveService.getResolvedPageUrl(pages[currentPage])}
 	                            alt={t('reader.pageAlt').replace('{page}', String(currentPage + 1))}
 	                            decoding="async"
 	                            loading="eager"
@@ -626,7 +618,7 @@ export function ReaderSingleModeView({
 	                              imageRequestUrls.current[currentPage] = img.currentSrc || img.src;
 	                              registerImageMeta(currentPage, img);
 	                              onImageLoaded(currentPage);
-	                              const pageUrl = getPageUrl(currentPage);
+	                              const pageUrl = ArchiveService.getResolvedPageUrl(pages[currentPage]);
 	                              if (!cachedPages[currentPage] && pageUrl) {
 	                                onCacheImage(pageUrl, currentPage);
 	                              }
@@ -651,7 +643,7 @@ export function ReaderSingleModeView({
                   {pages[currentPage + 1]?.type === 'video' ? (
                     <ReaderVideoStage
                       key={`page-${currentPage + 1}`}
-                      src={getPageUrl(currentPage + 1)}
+                      src={ArchiveService.getResolvedPageUrl(pages[currentPage + 1])}
                       videoRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;
                       }}
@@ -679,11 +671,11 @@ export function ReaderSingleModeView({
                       title={
                         getPageTitle(currentPage + 1, currentPage + 2)
                       }
-                      description={getPageMetadata(currentPage + 1)?.description}
-                      thumb={getPageMetadata(currentPage + 1)?.thumb}
-                      lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(getPageMetadata(currentPage + 1))?.asset_id}
+                      description={ArchiveService.getPageDisplayMetadata(pages[currentPage + 1])?.description}
+                      thumb={ArchiveService.getPageDisplayMetadata(pages[currentPage + 1])?.thumb}
+                      lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(ArchiveService.getPageDisplayMetadata(pages[currentPage + 1]))?.asset_id}
                       subtitleAttachmentAssetId={getSubtitleAttachments(currentPage + 1)[0]?.asset_id}
-                      audioUrl={getPageUrl(currentPage + 1)}
+                      audioUrl={ArchiveService.getResolvedPageUrl(pages[currentPage + 1])}
                       audioRef={(el) => {
                         videoRefs.current[currentPage + 1] = el;
                       }}
@@ -706,7 +698,7 @@ export function ReaderSingleModeView({
 	                      ref={(el) => {
 	                        imageRefs.current[currentPage + 1] = el;
 	                      }}
-	                      src={cachedPages[currentPage + 1] || getPageUrl(currentPage + 1)}
+	                      src={cachedPages[currentPage + 1] || ArchiveService.getResolvedPageUrl(pages[currentPage + 1])}
 	                      alt={t('reader.pageAlt').replace('{page}', String(currentPage + 2))}
 	                      decoding="async"
 	                      loading="eager"
@@ -729,7 +721,7 @@ export function ReaderSingleModeView({
 	                        imageRequestUrls.current[currentPage + 1] = img.currentSrc || img.src;
 	                        registerImageMeta(currentPage + 1, img);
 	                        onImageLoaded(currentPage + 1);
-	                        const pageUrl = getPageUrl(currentPage + 1);
+	                        const pageUrl = ArchiveService.getResolvedPageUrl(pages[currentPage + 1]);
 	                        if (!cachedPages[currentPage + 1] && pageUrl) {
 	                          onCacheImage(pageUrl, currentPage + 1);
 	                        }

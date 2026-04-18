@@ -1,6 +1,5 @@
 import { apiClient } from '@/lib/api';
 import type { ApiEnvelope } from '@/types/common';
-import { WebauthnAuthService } from './webauthn-auth-service';
 
 export type StepUpOptions = {
   methods: string[];
@@ -23,9 +22,5 @@ export class StepUpAuthService {
       recoveryCode: params.recoveryCode || '',
     });
     return res.data as ApiEnvelope<null>;
-  }
-
-  static async verifyPasskey(): Promise<ApiEnvelope<null>> {
-    return WebauthnAuthService.verifyStepUpWithPasskey();
   }
 }

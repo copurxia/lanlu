@@ -51,7 +51,7 @@ export function TankoubonCard({
   const coverAssetId = getCoverAssetId(tankoubon) ?? 0;
 
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
-    return await FavoriteService.toggleTankoubonFavorite(id, isFavorite);
+    return await FavoriteService.setFavorite('tankoubon', id, !isFavorite);
   };
 
   return (

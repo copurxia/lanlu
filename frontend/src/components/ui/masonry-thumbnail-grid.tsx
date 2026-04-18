@@ -31,18 +31,10 @@ type MasonryThumbnailGridProps = {
   contentClassName?: string;
 };
 
-function getPageCustomTitle(page: PageInfo): string {
-  return ArchiveService.getPageDisplayTitle(page);
-}
-
 function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string): string {
-  const customTitle = getPageCustomTitle(page);
+  const customTitle = ArchiveService.getPageDisplayTitle(page);
   if (customTitle) return customTitle;
   return t('reader.pageAlt').replace('{page}', String(pageIndex + 1));
-}
-
-function getPageDisplayThumb(page: PageInfo): string {
-  return ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
 }
 
 function getPageDisplayDescription(page: PageInfo): string {
@@ -208,7 +200,7 @@ export function MasonryThumbnailGrid({
     const { layout, mediaHeight } = item;
     const { item: page, index, top, left, width, height } = layout;
     const isCurrentPage = currentPage === index;
-    const metadataThumb = getPageDisplayThumb(page);
+    const metadataThumb = ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
     const isVideoPage = page.type === 'video';
     const pageUrl = ArchiveService.getResolvedPageUrl(page);
     const thumbSrc = isVideoPage ? '' : metadataThumb || (page.type === 'image' ? pageUrl : '');
@@ -217,7 +209,7 @@ export function MasonryThumbnailGrid({
     const isVideoReady = Boolean(videoReadyMap[itemKey]);
     const displayTitle = getPageDisplayTitle(page, index, t);
     const displayDescription = getPageDisplayDescription(page);
-    const hasCustomTitle = getPageCustomTitle(page).length > 0;
+    const hasCustomTitle = ArchiveService.getPageDisplayTitle(page).length > 0;
     const captionText = hasCustomTitle ? displayTitle : String(index + 1);
 
     const content = (

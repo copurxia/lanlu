@@ -383,15 +383,11 @@ export function useHomeSelection(
     const FavoriteService = await loadFavoriteService();
     const jobs: Array<() => Promise<void>> = [
       ...Array.from(selectedArchiveIds).map((id) => async () => {
-        const ok = shouldFavorite
-          ? await FavoriteService.addFavorite(id)
-          : await FavoriteService.removeFavorite(id);
+        const ok = await FavoriteService.setFavorite('archive', id, shouldFavorite);
         if (!ok) throw new Error(`favorite archive failed: ${id}`);
       }),
       ...Array.from(selectedTankoubonIds).map((id) => async () => {
-        const ok = shouldFavorite
-          ? await FavoriteService.addTankoubonFavorite(id)
-          : await FavoriteService.removeTankoubonFavorite(id);
+        const ok = await FavoriteService.setFavorite('tankoubon', id, shouldFavorite);
         if (!ok) throw new Error(`favorite tankoubon failed: ${id}`);
       }),
     ];

@@ -45,10 +45,6 @@ public class AssetUploadController {
     // 惰性超时延长：距上次 DB 写超过此秒数时才执行 extendTaskTimeout
     private static let TIMEOUT_EXTEND_INTERVAL_SECONDS: Int64 = 60
 
-    private static func getTaskKVStore(): TaskKVStore {
-        return TaskKVService.getStore()
-    }
-
     /**
      * POST /api/assets/upload/init
      */
@@ -150,7 +146,7 @@ public class AssetUploadController {
             }
 
             let kvGroupId = "asset_upload:${task.id}"
-            let kvStore = getTaskKVStore()
+            let kvStore = TaskKVService.getStore()
             kvStore.deleteGroup(kvGroupId)
             let initKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress", "last_timeout_extend_ts"]
             let initValues = [fileSize.toString(), chunkSize.toString(), totalChunks.toString(), "0", "0", "0", "0"]
@@ -279,7 +275,7 @@ public class AssetUploadController {
             }
 
             let kvGroupId = "asset_upload:${taskIdStr}"
-            let kvStore = getTaskKVStore()
+            let kvStore = TaskKVService.getStore()
             
             // 优化：批量读取KV，6次独立读 → 1次批量读
             let metaKeys = ["filesize", "chunk_size", "total_chunks", "uploaded_count", "written_offset", "last_reported_progress", "last_timeout_extend_ts"]
@@ -789,7 +785,7 @@ public class AssetUploadController {
                 cleanupUploadDir(uploadDir)
             }
 
-            getTaskKVStore().deleteGroup("asset_upload:${taskIdStr}")
+            TaskKVService.getStore().deleteGroup("asset_upload:${taskIdStr}")
             ResponseView.successJson(ctx, "{}", "ok")
         } catch (e: Exception) {
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)

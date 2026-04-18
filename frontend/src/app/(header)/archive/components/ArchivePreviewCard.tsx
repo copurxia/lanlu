@@ -20,12 +20,8 @@ function isArchivePreviewViewMode(value: unknown): value is ArchivePreviewViewMo
   return value === 'thumbnails' || value === 'list' || value === 'tree';
 }
 
-function getPageCustomTitle(page: PageInfo): string {
-  return ArchiveService.getPageDisplayTitle(page);
-}
-
 function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string, archivetype: string): string {
-  const customTitle = getPageCustomTitle(page);
+  const customTitle = ArchiveService.getPageDisplayTitle(page);
   if (customTitle) return customTitle;
   if (archivetype === 'epub') {
     return `${t('archive.chapter')} ${pageIndex + 1}`;
@@ -38,10 +34,6 @@ function getPageDisplayDescription(page: PageInfo): string {
   const description = ArchiveService.getPageDisplayMetadata(page)?.description?.trim() || '';
   if (!releaseAt) return description;
   return description ? `${releaseAt} · ${description}` : releaseAt;
-}
-
-function getPageDisplayThumb(page: PageInfo): string {
-  return ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
 }
 
 function getPagePathSegments(path: string): string[] {
@@ -272,7 +264,7 @@ export function ArchivePreviewCard({
   const renderPageListItem = useCallback((page: PageInfo, index: number) => {
     const displayTitle = getPageDisplayTitle(page, index, t, String(metadata.archivetype || ''));
     const description = getPageDisplayDescription(page);
-    const metadataThumb = getPageDisplayThumb(page);
+    const metadataThumb = ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
     const pageUrl = ArchiveService.getResolvedPageUrl(page);
     const thumbSrc = metadataThumb || (page.type === 'image' ? pageUrl : '');
     const pagePathSegments = getPagePathSegments(ArchiveService.getPagePath(page));

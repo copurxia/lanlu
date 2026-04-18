@@ -11,6 +11,7 @@ import stdx.encoding.json.stream.*
 import semver.*
 import lanlu.contexts.plugin.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.task.infrastructure.persistence.ScheduledTaskDao
 import lanlu.contexts.plugin.domain.*
 import lanlu.shared.utils.*
 
@@ -726,7 +727,7 @@ public class PluginManagerService {
         // Delete cron task for script plugins (best-effort).
         if (plugin.plugin_type == "Script") {
             let cronName = "plugin_script:${plugin.namespace}"
-            try { let _ = ScheduledTaskModel.deleteByName(cronName) } catch (_: Exception) {}
+            try { let _ = ScheduledTaskDao.deleteByName(cronName) } catch (_: Exception) {}
         }
 
         if (!PluginDao.delete(ns)) {

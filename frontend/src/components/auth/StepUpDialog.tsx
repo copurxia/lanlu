@@ -72,7 +72,7 @@ export function StepUpDialog({ open, onOpenChange, onVerified }: StepUpDialogPro
           recoveryCode: totpMode === 'recovery' ? recoveryCode : '',
         });
       } else {
-        await StepUpAuthService.verifyPasskey();
+        await WebauthnAuthService.verifyStepUpWithPasskey();
       }
       onVerified();
     } catch (e: any) {

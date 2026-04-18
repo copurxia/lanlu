@@ -360,41 +360,6 @@ public class ScheduledTaskModel {
     }
 
     /**
-     * 删除定时任务
-     */
-    public static func delete(id: Int64): Bool {
-        return ScheduledTaskDao.delete(id)
-    }
-
-    /**
-     * 根据名称删除定时任务
-     */
-    public static func deleteByName(name: String): Bool {
-        return ScheduledTaskDao.deleteByName(name)
-    }
-
-    /**
-     * 启用定时任务
-     */
-    public static func enable(id: Int64): Bool {
-        return ScheduledTaskDao.setEnabled(id, true)
-    }
-
-    /**
-     * 禁用定时任务
-     */
-    public static func disable(id: Int64): Bool {
-        return ScheduledTaskDao.setEnabled(id, false)
-    }
-
-    /**
-     * 更新任务执行结果
-     */
-    public static func updateRunResult(id: Int64, success: Bool, errorMessage: String): Bool {
-        return ScheduledTaskDao.updateRunResult(id, success, errorMessage)
-    }
-
-    /**
      * 更新下次执行时间
      */
     public static func updateNextRunTime(id: Int64): Bool {

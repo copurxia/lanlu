@@ -213,7 +213,7 @@ public class TankoubonController {
             case None => ()
         }
 
-        let success = TankoubonModel.deleteTankoubon(id)
+        let success = TankoubonDao.deleteTankoubon(id)
         if (success) {
             let _ = MetadataDao.deleteEntity("tankoubon", id)
             for (assetId in assetIds) {
@@ -236,7 +236,7 @@ public class TankoubonController {
         let tankoubonId = ctx.paramsOpt("id") ?? ""
         let archiveId = ctx.paramsOpt("archive") ?? ""
         
-        let success = TankoubonModel.addArchiveToTankoubon(tankoubonId, archiveId)
+        let success = TankoubonDao.addArchiveToTankoubonAppend(tankoubonId, archiveId)
         if (success) {
             let successResponse = "{\"error\":\"\",\"operation\":\"add_to_tankoubon\",\"success\":1,\"successMessage\":\"Added archive to tankoubon!\"}"
             ctx.json(successResponse)
@@ -253,7 +253,7 @@ public class TankoubonController {
         let tankoubonId = ctx.paramsOpt("id") ?? ""
         let archiveId = ctx.paramsOpt("archive") ?? ""
         
-        let success = TankoubonModel.removeArchiveFromTankoubon(tankoubonId, archiveId)
+        let success = TankoubonDao.removeArchiveFromTankoubon(tankoubonId, archiveId)
         if (success) {
             let successResponse = "{\"error\":\"\",\"operation\":\"remove_from_tankoubon\",\"success\":1,\"successMessage\":\"Removed archive from tankoubon!\"}"
             ctx.json(successResponse)

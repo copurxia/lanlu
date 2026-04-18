@@ -185,7 +185,7 @@ export function ArchiveDetailContent() {
 
     setFavoriteLoading(true);
     try {
-      const ok = await FavoriteService.toggleFavorite(id, isFavorite);
+      const ok = await FavoriteService.setFavorite('archive', id, !isFavorite);
       if (ok) setIsFavorite(!isFavorite);
     } catch (err) {
       logger.operationFailed('toggle favorite', err);

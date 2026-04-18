@@ -362,20 +362,6 @@ public class SystemSettingsService {
     }
 
     /**
-     * 获取所有设置（按分类）
-     */
-    public static func getSettingsByCategory(category: String): Array<SystemSettingData> {
-        return SystemSettingsDao.getSettingsByCategory(category)
-    }
-
-    /**
-     * 获取所有设置
-     */
-    public static func getAllSettings(): Array<SystemSettingData> {
-        return SystemSettingsDao.getAllSettings()
-    }
-
-    /**
      * 获取所有分类（仅返回系统设置页面显示的分类，不包含 cron）
      */
     public static func getCategories(): Array<String> {

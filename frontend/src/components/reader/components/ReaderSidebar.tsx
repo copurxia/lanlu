@@ -72,16 +72,8 @@ function getPagePathSegments(path: string): string[] {
     .filter(Boolean);
 }
 
-function getPagePathSegmentsFromPage(page: PageInfo): string[] {
-  return getPagePathSegments(ArchiveService.getPagePath(page));
-}
-
-function getPageCustomTitle(page: PageInfo): string {
-  return ArchiveService.getPageDisplayTitle(page);
-}
-
 function getPageDisplayTitle(page: PageInfo, pageIndex: number, t: (key: string) => string): string {
-  const customTitle = getPageCustomTitle(page);
+  const customTitle = ArchiveService.getPageDisplayTitle(page);
   if (customTitle) return customTitle;
   return t('reader.pageAlt').replace('{page}', String(pageIndex + 1));
 }
@@ -91,10 +83,6 @@ function getPageDisplayDescription(page: PageInfo): string {
   const description = ArchiveService.getPageDisplayMetadata(page)?.description?.trim() || '';
   if (!releaseAt) return description;
   return description ? `${releaseAt} · ${description}` : releaseAt;
-}
-
-function getPageDisplayThumb(page: PageInfo): string {
-  return ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
 }
 
 export function ReaderSidebar({
@@ -295,7 +283,7 @@ export function ReaderSidebar({
       t('reader.pageAlt').replace('{page}', String(pageIndex + 1));
 
     const parsedPages = allPages.map((page, pageIndex) => {
-      const pathSegments = getPagePathSegmentsFromPage(page);
+      const pathSegments = getPagePathSegments(ArchiveService.getPagePath(page));
       const fallbackName = getPageDisplayTitle(page, pageIndex, t) || defaultPageLabel(pageIndex);
       return {
         archiveId: getPageArchiveId(page),
@@ -588,8 +576,8 @@ export function ReaderSidebar({
   const renderListItem = (page: PageInfo, index: number) => {
     const displayTitle = getPageDisplayTitle(page, index, t);
     const description = getPageDisplayDescription(page);
-    const metadataThumb = getPageDisplayThumb(page);
-    const pagePathSegments = getPagePathSegmentsFromPage(page);
+    const metadataThumb = ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
+    const pagePathSegments = getPagePathSegments(ArchiveService.getPagePath(page));
     const fileName = pagePathSegments[pagePathSegments.length - 1] || '';
     const subtitle = fileName && fileName !== displayTitle ? fileName : '';
     const pageIcon = page.type === 'video'
@@ -643,13 +631,13 @@ export function ReaderSidebar({
   const renderThumbnailItem = (item: ThumbnailLayoutItem) => {
     const { page, index, top, left, mediaHeight, cardHeight } = item;
     const isCurrentPage = currentPage === index;
-    const metadataThumb = getPageDisplayThumb(page);
+    const metadataThumb = ArchiveService.getPageDisplayMetadata(page)?.thumb?.trim() || '';
     const showVideoPreview = page.type === 'video' && !metadataThumb;
     const pageUrl = ArchiveService.getResolvedPageUrl(page);
     const thumbSrc = metadataThumb || (page.type === 'image' ? pageUrl : '');
     const showImageThumb = Boolean(thumbSrc);
     const displayTitle = getPageDisplayTitle(page, index, t);
-    const hasCustomTitle = getPageCustomTitle(page).length > 0;
+    const hasCustomTitle = ArchiveService.getPageDisplayTitle(page).length > 0;
     const captionText = hasCustomTitle ? displayTitle : String(index + 1);
 
     return (
@@ -813,7 +801,7 @@ export function ReaderSidebar({
                     {index + 1}
                   </span>
                   <span className="flex-1 truncate text-sm group-hover:text-primary transition-colors">
-                    {getPageCustomTitle(page) || `${t('archive.chapter')} ${index + 1}`}
+                    {ArchiveService.getPageDisplayTitle(page) || `${t('archive.chapter')} ${index + 1}`}
                   </span>
                   <Book className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors" />
                 </button>

@@ -653,20 +653,6 @@ export class ArchiveService {
     );
   }
 
-  /**
-   * 验证文件
-   */
-  static validateFile(file: File) {
-    return ChunkedUploadService.validateFile(file);
-  }
-
-  /**
-   * 获取错误消息
-   */
-  static getUploadErrorMessage(error: any): string {
-    return ChunkedUploadService.getErrorMessage(error);
-  }
-
   // ==================== 下载相关方法 ====================
 
   /**

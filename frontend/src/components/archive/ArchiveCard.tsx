@@ -48,7 +48,7 @@ export function ArchiveCard({
   const coverAssetId = getArchiveAssetId(archive, 'cover');
 
   const handleFavoriteToggle = async (id: string, isFavorite: boolean) => {
-    return await FavoriteService.toggleFavorite(id, isFavorite);
+    return await FavoriteService.setFavorite('archive', id, !isFavorite);
   };
 
   return (

@@ -45,13 +45,6 @@ public class Archive {
     }
 
     /**
-     * 获取文件扩展名（别名，与API文档一致）
-     */
-    public func extension(): String {
-        return getExtension()
-    }
-
-    /**
      * 获取文件大小
      */
     public func size(): Int64 {
@@ -112,13 +105,6 @@ public class ArchiveModel {
         archive.archive_type = archiveData.archive_type
         archive.tags = archiveData.tags
         return archive
-    }
-
-    /**
-     * 根据 arcid 获取 archives 表的内部 ID
-     */
-    public static func getArchiveIdByArcid(arcid: String): Int64 {
-        return ArchiveDao.getArchiveInternalId(arcid)
     }
 
     /**
@@ -208,13 +194,6 @@ public class ArchiveModel {
 
         println("返回${archives.size}条记录，总记录数: ${totalCount}")
         return (archives.toArray(), totalCount)
-    }
-
-    /**
-     * 获取归档元数据
-     */
-    public static func getArchiveMetadata(id: String): Archive {
-        return getArchiveById(id)
     }
 
     /**

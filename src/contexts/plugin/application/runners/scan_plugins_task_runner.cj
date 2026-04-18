@@ -8,6 +8,7 @@ import std.io.{ByteBuffer, readToEnd}
 import std.collection.*
 import stdx.encoding.json.stream.*
 import lanlu.contexts.task.domain.*
+import lanlu.contexts.task.infrastructure.persistence.ScheduledTaskDao
 import lanlu.contexts.plugin.domain.*
 import lanlu.shared.utils.*
 import lanlu.contexts.plugin.infrastructure.persistence.*
@@ -583,7 +584,7 @@ public class ScanPluginsTaskRunner {
             syncScriptScheduledTask(taskId, newMetadata, pluginType, entryPath.trimAscii().toAsciiLower().endsWith(".wasm"))
             if (existingPlugin.plugin_type == "Script" && pluginType != "Script") {
                 let cronName = buildScriptScheduledTaskName(existingPlugin.namespace)
-                if (ScheduledTaskModel.deleteByName(cronName)) {
+                if (ScheduledTaskDao.deleteByName(cronName)) {
                     TaskIO.appendLog(taskId, "Removed cron task (type changed) for plugin: ${cronName}")
                 }
             }
@@ -636,7 +637,7 @@ public class ScanPluginsTaskRunner {
                     TaskIO.appendLog(taskId, "Removed plugin: ${plugin.namespace}")
                     if (plugin.plugin_type == "Script") {
                         let cronName = buildScriptScheduledTaskName(plugin.namespace)
-                        if (ScheduledTaskModel.deleteByName(cronName)) {
+                        if (ScheduledTaskDao.deleteByName(cronName)) {
                             TaskIO.appendLog(taskId, "Removed cron task for script plugin: ${cronName}")
                         }
                     }

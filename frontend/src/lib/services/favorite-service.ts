@@ -29,15 +29,7 @@ async function favoriteAction(
 }
 
 export class FavoriteService {
-  // Archive 收藏
-  static addFavorite = (arcid: string) => favoriteAction('archive', arcid, 'add');
-  static removeFavorite = (arcid: string) => favoriteAction('archive', arcid, 'remove');
-  static toggleFavorite = (arcid: string, isFav: boolean) =>
-    favoriteAction('archive', arcid, isFav ? 'remove' : 'add');
-
-  // Tankoubon 收藏
-  static addTankoubonFavorite = (id: string) => favoriteAction('tankoubon', id, 'add');
-  static removeTankoubonFavorite = (id: string) => favoriteAction('tankoubon', id, 'remove');
-  static toggleTankoubonFavorite = (id: string, isFav: boolean) =>
-    favoriteAction('tankoubon', id, isFav ? 'remove' : 'add');
+  static setFavorite(type: EntityType, id: string, shouldFavorite: boolean): Promise<boolean> {
+    return favoriteAction(type, id, shouldFavorite ? 'add' : 'remove');
+  }
 }

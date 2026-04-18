@@ -387,9 +387,9 @@ public class CronService {
 
             // 更新执行结果
             if (success) {
-                ScheduledTaskModel.updateRunResult(task.id, true, "")
+                ScheduledTaskDao.updateRunResult(task.id, true, "")
             } else {
-                ScheduledTaskModel.updateRunResult(task.id, false, "Failed to trigger task")
+                ScheduledTaskDao.updateRunResult(task.id, false, "Failed to trigger task")
             }
 
             // 计算并更新下次执行时间
@@ -497,7 +497,7 @@ public class CronService {
                 logger.debug("Manually triggering scheduled task", ("id", scheduledTaskId.toString()), ("name", task.name))
                 let success = triggerTask(task)
                 if (success) {
-                    ScheduledTaskModel.updateRunResult(scheduledTaskId, true, "")
+                    ScheduledTaskDao.updateRunResult(scheduledTaskId, true, "")
                 }
                 return success
             case None =>
@@ -556,7 +556,7 @@ public class CronService {
      * 删除定时任务
      */
     public func deleteScheduledTask(id: Int64): Bool {
-        let result = ScheduledTaskModel.delete(id)
+        let result = ScheduledTaskDao.delete(id)
 
         // 删除任务后刷新缓存
         if (result) {
@@ -570,7 +570,7 @@ public class CronService {
      * 启用定时任务
      */
     public func enableScheduledTask(id: Int64): Bool {
-        let result = ScheduledTaskModel.enable(id)
+        let result = ScheduledTaskDao.setEnabled(id, true)
         if (result) {
             // 重新计算下次执行时间
             ScheduledTaskModel.updateNextRunTime(id)
@@ -585,7 +585,7 @@ public class CronService {
      * 禁用定时任务
      */
     public func disableScheduledTask(id: Int64): Bool {
-        let result = ScheduledTaskModel.disable(id)
+        let result = ScheduledTaskDao.setEnabled(id, false)
 
         // 禁用任务后刷新缓存
         if (result) {

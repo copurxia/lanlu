@@ -272,39 +272,4 @@ public class TankoubonModel {
         return Tankoubon("", "", "", "", [])
     }
 
-    /**
-     * 更新单行本
-     */
-    public static func updateTankoubon(id: String, name: String, summary: String, _: String, _: Array<String>): Bool {
-        return TankoubonDao.updateTankoubon(id, name, summary)
-    }
-
-    public static func updateTankoubonCover(id: String, coverAssetId: Int64): Bool {
-        return TankoubonDao.updateTankoubonCover(id, coverAssetId)
-    }
-
-    public static func updateTankoubonTags(id: String, tagsString: String): Bool {
-        return TankoubonDao.updateTankoubonTags(id, tagsString)
-    }
-
-    /**
-     * 删除单行本
-     */
-    public static func deleteTankoubon(id: String): Bool {
-        return TankoubonDao.deleteTankoubon(id)
-    }
-
-    /**
-     * 向单行本添加档案
-     */
-    public static func addArchiveToTankoubon(tankoubonId: String, archiveId: String): Bool {
-        return TankoubonDao.addArchiveToTankoubonAppend(tankoubonId, archiveId)
-    }
-
-    /**
-     * 从单行本移除档案
-     */
-    public static func removeArchiveFromTankoubon(tankoubonId: String, archiveId: String): Bool {
-        return TankoubonDao.removeArchiveFromTankoubon(tankoubonId, archiveId)
-    }
 }

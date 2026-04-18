@@ -121,7 +121,7 @@ public class SystemSettingsController {
     public static func getAllSettings(ctx: Ctx) {
         let logger = getLogger("system_settings_controller")
         try {
-            let settings = SystemSettingsService.getAllSettings()
+            let settings = SystemSettingsDao.getAllSettings()
             let json = settingsToJson(settings)
             ctx.json("{\"success\":true,\"data\":${json}}")
         } catch (e: Exception) {

@@ -66,13 +66,8 @@ export function useReaderArchiveMetadata({
       e?.stopPropagation();
 
       try {
-        if (isFavorited) {
-          await FavoriteService.removeFavorite(id);
-          setIsFavorited(false);
-        } else {
-          await FavoriteService.addFavorite(id);
-          setIsFavorited(true);
-        }
+        await FavoriteService.setFavorite('archive', id, !isFavorited);
+        setIsFavorited((current) => !current);
       } catch (err) {
         logger.operationFailed('toggle favorite', err);
       }

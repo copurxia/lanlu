@@ -113,7 +113,7 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
     if (favoriteLoading) return;
     setFavoriteLoading(true);
     try {
-      const success = await FavoriteService.toggleFavorite(archive.arcid, isFavorite);
+      const success = await FavoriteService.setFavorite('archive', archive.arcid, !isFavorite);
       if (success) setIsFavorite(!isFavorite);
     } catch (error) {
       logger.operationFailed('toggle archive favorite', error);
@@ -570,7 +570,7 @@ function TankoubonDetailContent() {
     if (!tankoubon || favoriteLoading) return;
     setFavoriteLoading(true);
     try {
-      const success = await FavoriteService.toggleTankoubonFavorite(tankoubon.tankoubon_id, isFavorite);
+      const success = await FavoriteService.setFavorite('tankoubon', tankoubon.tankoubon_id, !isFavorite);
       if (success) {
         setIsFavorite(!isFavorite);
         setTankoubon({ ...tankoubon, isfavorite: !isFavorite });
