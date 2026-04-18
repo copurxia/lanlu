@@ -3,6 +3,7 @@ import { BaseMediaCard } from '@/components/ui/base-media-card';
 import { FavoriteService } from '@/lib/services/favorite-service';
 import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import type { RecommendationItemType, RecommendationScene } from '@/types/recommendation';
+import type { MenuItem } from '@/components/ui/unified-menu';
 
 interface ArchiveCardProps {
   archive: Archive;
@@ -16,6 +17,7 @@ interface ArchiveCardProps {
   selected?: boolean;
   onToggleSelect?: (selected: boolean) => void;
   onRequestEnterSelection?: () => void;
+  extraMenuItems?: MenuItem[];
   onCoverAspectRatioChange?: (aspectRatio: number) => void;
   recommendationContext?: {
     scene: RecommendationScene;
@@ -39,6 +41,7 @@ export function ArchiveCard({
   selected = false,
   onToggleSelect,
   onRequestEnterSelection,
+  extraMenuItems,
   onCoverAspectRatioChange,
   recommendationContext,
   onRecommendationOpenReader,
@@ -75,6 +78,7 @@ export function ArchiveCard({
       selected={selected}
       onToggleSelect={onToggleSelect}
       onRequestEnterSelection={onRequestEnterSelection}
+      extraMenuItems={extraMenuItems}
       onCoverAspectRatioChange={onCoverAspectRatioChange}
       recommendationContext={recommendationContext}
       onRecommendationOpenReader={onRecommendationOpenReader}

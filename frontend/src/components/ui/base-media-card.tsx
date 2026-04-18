@@ -50,6 +50,7 @@ export function BaseMediaCard({
   selected = false,
   onToggleSelect,
   onRequestEnterSelection,
+  extraMenuItems,
   onCoverAspectRatioChange,
   recommendationContext,
   onRecommendationOpenReader,
@@ -250,6 +251,7 @@ export function BaseMediaCard({
           onStartReading={navigateToReader}
           readStatusText={readStatusText}
           readerTargetId={readerTargetId}
+          extraMenuItems={extraMenuItems}
           selectable={selectable}
           selectionMode={selectionMode}
           t={t}

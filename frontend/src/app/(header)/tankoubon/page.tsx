@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
 import { ArchiveCard } from '@/components/archive/ArchiveCard';
+import { HomeBatchActionBar, type BatchActionBarItem } from '@/components/home/HomeBatchActionBar';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Spinner } from '@/components/ui/spinner';
@@ -38,22 +39,27 @@ import { FavoriteService } from '@/lib/services/favorite-service';
 import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { RecommendationService } from '@/lib/services/recommendation-service';
 import { TagService } from '@/lib/services/tag-service';
+import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useGridRowCoverHeights } from '@/hooks/use-grid-row-cover-heights';
 import { useToast } from '@/hooks/use-toast';
+import { appEvents, AppEvents } from '@/lib/utils/events';
 import { logger } from '@/lib/utils/logger';
 import { stripNamespace, parseTags } from '@/lib/utils/tag-utils';
 import { getArchiveAssetId, getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs, normalizeTankoubonMemberMetadataPatch } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { cn } from '@/lib/utils/utils';
 import { ArchiveMetadataEditDialog } from '@/components/archive/ArchiveMetadataEditDialog';
 import { RecommendationCardRow } from '@/components/recommendations/RecommendationCardRow';
-import { ArrowLeft, Edit, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, X, ExternalLink, LayoutGrid, List, Eye } from 'lucide-react';
+import { ArrowLeft, Check, Download, Edit, RotateCcw, Trash2, Plus, BookOpen, Heart, Search, MoreHorizontal, Square, X, ExternalLink, LayoutGrid, List, Eye, Minus } from 'lucide-react';
 import type { Tankoubon, TankoubonMemberMetadataPatch, TankoubonMetadata } from '@/types/tankoubon';
 import type { Archive } from '@/types/archive';
 import type { RecommendationItemType } from '@/types/recommendation';
 import Image from 'next/image';
+import type { BatchEditPayload } from '@/components/archive/BatchEditDialog';
 
 type ArchiveViewMode = 'grid' | 'list';
 
@@ -94,12 +100,23 @@ type ArchiveListItemProps = {
   archive: Archive;
   isRemoving: boolean;
   onRemove: () => void;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 };
 
-function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps) {
+function ArchiveListItem({
+  archive,
+  isRemoving,
+  onRemove,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+}: ArchiveListItemProps) {
   const router = useRouter();
   const { t } = useLanguage();
   const coverAssetId = getArchiveAssetId(archive, 'cover');
+  const canSelect = Boolean(onToggleSelect);
   const [isFavorite, setIsFavorite] = useState(archive.isfavorite || false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const parsedTags = useMemo(() => parseTags(archive.tags).map(stripNamespace).slice(0, 8), [archive.tags]);
@@ -126,60 +143,96 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
     router.push(buildReaderPath(archive.arcid, archive.progress));
   };
 
+  const handleActivate = () => {
+    if (selectionMode) {
+      onToggleSelect?.();
+      return;
+    }
+    handleNavigateToReader();
+  };
+
   return (
     <div
-      className="relative rounded-lg border-none bg-transparent p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-xs"
+      className={cn(
+        'relative rounded-lg border-none bg-transparent p-3 sm:p-4 cursor-pointer transition-shadow hover:shadow-xs',
+        selectionMode && selected && 'bg-primary/5 ring-1 ring-primary/30',
+        selectionMode && !selected && 'bg-muted/20',
+      )}
       role="button"
       tabIndex={0}
-      onClick={handleNavigateToReader}
+      onClick={handleActivate}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          handleNavigateToReader();
+          handleActivate();
         }
       }}
     >
-      <div className="absolute right-3 top-3 flex items-center gap-2">
-        <Button
-          asChild
-          variant="secondary"
-          size="icon"
-          className="h-8 w-8"
-          title={t('archive.details')}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <Link href={`/archive?id=${archive.arcid}`} prefetch={false}>
-            <Eye className="h-4 w-4" />
-          </Link>
-        </Button>
-        <Button
+      {canSelect ? (
+        <button
           type="button"
-          variant="secondary"
-          size="icon"
-          className={`h-8 w-8 ${isFavorite ? 'text-red-500' : ''}`}
-          title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
-          disabled={favoriteLoading}
-          onClick={handleFavoriteClick}
-        >
-          {favoriteLoading ? <Spinner size="sm" /> : <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />}
-        </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="h-8 w-8"
-          title={t('tankoubon.removeArchive')}
-          disabled={isRemoving}
+          className={[
+            'absolute left-3 top-3 z-10 inline-flex h-7 w-7 items-center justify-center rounded-full border transition-colors',
+            selected
+              ? 'bg-primary text-primary-foreground border-primary/60 shadow-xs'
+              : selectionMode
+                ? 'bg-background/95 text-foreground border-border shadow-xs hover:bg-background'
+                : 'bg-background/90 text-muted-foreground border-border/80 shadow-xs hover:bg-background hover:text-foreground',
+          ].join(' ')}
           onClick={(e) => {
             e.stopPropagation();
-            onRemove();
+            onToggleSelect?.();
           }}
+          aria-label={selected ? t('home.unselectItem') : t('home.selectItem')}
+          title={selected ? t('home.unselectItem') : t('home.selectItem')}
         >
-          {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
-        </Button>
-      </div>
+          {selected ? <Check className="h-4 w-4" /> : <Square className="h-4 w-4" />}
+        </button>
+      ) : null}
 
-      <div className="flex gap-3 sm:gap-4">
+      {!selectionMode ? (
+        <div className="absolute right-3 top-3 flex items-center gap-2">
+          <Button
+            asChild
+            variant="secondary"
+            size="icon"
+            className="h-8 w-8"
+            title={t('archive.details')}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Link href={`/archive?id=${archive.arcid}`} prefetch={false}>
+              <Eye className="h-4 w-4" />
+            </Link>
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className={`h-8 w-8 ${isFavorite ? 'text-red-500' : ''}`}
+            title={isFavorite ? t('common.unfavorite') : t('common.favorite')}
+            disabled={favoriteLoading}
+            onClick={handleFavoriteClick}
+          >
+            {favoriteLoading ? <Spinner size="sm" /> : <Heart className={`h-4 w-4 ${isFavorite ? 'fill-current' : ''}`} />}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            size="icon"
+            className="h-8 w-8"
+            title={t('tankoubon.removeArchive')}
+            disabled={isRemoving}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+          >
+            {isRemoving ? <Spinner size="sm" /> : <Minus className="h-4 w-4" />}
+          </Button>
+        </div>
+      ) : null}
+
+      <div className={cn('flex gap-3 sm:gap-4', canSelect && 'pl-10')}>
         <div className="relative h-24 w-16 shrink-0 overflow-hidden rounded-md bg-muted">
           {coverAssetId ? (
             <Image
@@ -197,7 +250,7 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
           )}
         </div>
 
-        <div className="min-w-0 flex-1 pr-28">
+        <div className={cn('min-w-0 flex-1', !selectionMode && 'pr-28')}>
           <h3 className="font-semibold leading-tight line-clamp-2 hover:text-primary transition-colors" title={archive.title}>
             {archive.title}
           </h3>
@@ -232,6 +285,8 @@ function ArchiveListItem({ archive, isRemoving, onRemove }: ArchiveListItemProps
 function TankoubonDetailContent() {
   const { t, language } = useLanguage();
   const { success, error: showError } = useToast();
+  const { confirm } = useConfirmContext();
+  const { user } = useAuth();
   const searchParams = useSearchParams();
   const router = useRouter();
   const tankoubonId = searchParams?.get('id') ?? null;
@@ -318,6 +373,14 @@ function TankoubonDetailContent() {
   // Archive filter (within this collection)
   const [archiveFilter, setArchiveFilter] = useState('');
   const [archiveViewMode, setArchiveViewMode] = useState<ArchiveViewMode>('grid');
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedArchiveIds, setSelectedArchiveIds] = useState<Set<string>>(new Set());
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [batchEditApplying, setBatchEditApplying] = useState(false);
+  const [batchMetadataPlugins, setBatchMetadataPlugins] = useState<Array<{ namespace: string; name: string }>>([]);
+  const [batchActionRunning, setBatchActionRunning] = useState(false);
+  const [removeSelectedDialogOpen, setRemoveSelectedDialogOpen] = useState(false);
+  const [batchRemovingArchives, setBatchRemovingArchives] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -339,6 +402,26 @@ function TankoubonDetailContent() {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(ARCHIVE_VIEW_MODE_STORAGE_KEY, mode);
     }
+  }, []);
+
+  const enterSelectionMode = useCallback(() => {
+    setSelectionMode(true);
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setBatchEditOpen(false);
+    setSelectedArchiveIds(new Set());
+  }, []);
+
+  const toggleArchiveCardSelection = useCallback((arcid: string, nextSelected?: boolean) => {
+    setSelectedArchiveIds((prev) => {
+      const next = new Set(prev);
+      const shouldSelect = typeof nextSelected === 'boolean' ? nextSelected : !next.has(arcid);
+      if (shouldSelect) next.add(arcid);
+      else next.delete(arcid);
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -457,6 +540,56 @@ function TankoubonDetailContent() {
       fetchArchives();
     }
   }, [tankoubon, fetchArchives]);
+
+  useEffect(() => {
+    const handleArchivesRefresh = () => {
+      fetchTankoubon();
+    };
+    appEvents.on(AppEvents.ARCHIVES_REFRESH, handleArchivesRefresh);
+    return () => {
+      appEvents.off(AppEvents.ARCHIVES_REFRESH, handleArchivesRefresh);
+    };
+  }, [fetchTankoubon]);
+
+  useEffect(() => {
+    setSelectedArchiveIds((prev) => {
+      if (prev.size === 0) return prev;
+      const availableIds = new Set(archives.map((archive) => archive.arcid));
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (availableIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [archives]);
+
+  useEffect(() => {
+    if (!batchEditOpen) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const metas = await PluginService.getMetadataPlugins();
+        if (cancelled) return;
+        setBatchMetadataPlugins(
+          metas
+            .filter((plugin) => plugin.enabled)
+            .map((plugin) => ({ namespace: plugin.namespace, name: plugin.name || plugin.namespace }))
+        );
+      } catch {
+        if (!cancelled) setBatchMetadataPlugins([]);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [batchEditOpen]);
 
   useEffect(() => {
     if (!tankoubonId) {
@@ -975,6 +1108,56 @@ function TankoubonDetailContent() {
     setRemoveTarget(null);
   };
 
+  const handleRemoveSelectedArchives = async () => {
+    if (!tankoubon || selectedArchiveIds.size === 0 || batchRemovingArchives) return;
+
+    const arcids = Array.from(selectedArchiveIds);
+
+    try {
+      setBatchRemovingArchives(true);
+      setRemovingArcids((prev) => {
+        const next = new Set(prev);
+        arcids.forEach((arcid) => next.add(arcid));
+        return next;
+      });
+
+      const settled = await Promise.allSettled(
+        arcids.map((arcid) => TankoubonService.removeArchiveFromTankoubon(tankoubon.tankoubon_id, arcid))
+      );
+      const successCount = settled.filter((item) => item.status === 'fulfilled').length;
+      const failedCount = settled.length - successCount;
+
+      if (failedCount > 0) {
+        showError(
+          successCount > 0
+            ? t('tankoubon.removeSelectedPartial')
+                .replace('{success}', String(successCount))
+                .replace('{count}', String(arcids.length))
+            : t('tankoubon.removeSelectedFailed')
+        );
+      } else {
+        success(
+          t('tankoubon.removeSelectedSuccess')
+            .replace('{count}', String(successCount))
+        );
+      }
+
+      setRemoveSelectedDialogOpen(false);
+      exitSelectionMode();
+      await fetchTankoubon();
+    } catch (error) {
+      logger.operationFailed('remove selected archives', error, { tankoubonId: tankoubon.tankoubon_id });
+      showError(t('tankoubon.removeSelectedFailed'));
+    } finally {
+      setBatchRemovingArchives(false);
+      setRemovingArcids((prev) => {
+        const next = new Set(prev);
+        arcids.forEach((arcid) => next.delete(arcid));
+        return next;
+      });
+    }
+  };
+
   // Search for archives to add
   const searchArchives = async () => {
     try {
@@ -1046,6 +1229,316 @@ function TankoubonDetailContent() {
       return title.includes(q) || tags.includes(q);
     });
   }, [archives, archiveFilter]);
+  const selectedArchiveCount = selectedArchiveIds.size;
+  const archiveItemMap = useMemo(
+    () => new Map(archives.map((archive) => [archive.arcid, archive])),
+    [archives]
+  );
+  const selectedArchiveItems = useMemo(
+    () => Array.from(selectedArchiveIds)
+      .map((id) => archiveItemMap.get(id))
+      .filter((item): item is Archive => Boolean(item)),
+    [archiveItemMap, selectedArchiveIds]
+  );
+  const hasAnySelected = selectedArchiveCount > 0;
+  const canBatchDownload = selectedArchiveCount > 0;
+  const allSelectedArchiveFavorited =
+    selectedArchiveCount > 0 && selectedArchiveItems.every((item) => Boolean(item.isfavorite));
+  const nextFavoriteState = !allSelectedArchiveFavorited;
+  const favoriteActionLabel = nextFavoriteState ? t('common.favorite') : t('common.unfavorite');
+  const allSelectedArchiveIsNew =
+    selectedArchiveCount > 0 && selectedArchiveItems.every((item) => Boolean(item.isnew));
+  const canBatchDelete = selectedArchiveCount > 0 && user?.isAdmin === true;
+
+  const runBatchAction = useCallback(async (title: string, jobs: Array<() => Promise<void>>) => {
+    if (jobs.length === 0 || batchActionRunning) return;
+
+    setBatchActionRunning(true);
+    const settled = await Promise.allSettled(jobs.map((job) => job()));
+    const successCount = settled.filter((item) => item.status === 'fulfilled').length;
+    const failedCount = settled.length - successCount;
+
+    if (failedCount > 0) {
+      showError(`${title}: ${successCount}/${settled.length} ${t('home.batchDoneWithFailures')}`);
+    } else {
+      success(`${title}: ${successCount}/${settled.length}`);
+    }
+
+    appEvents.emit(AppEvents.ARCHIVES_REFRESH);
+    setBatchActionRunning(false);
+  }, [batchActionRunning, showError, success, t]);
+
+  const mergeTags = useCallback((source: string[], add: string[], remove: string[]) => {
+    const current = source.map((tag) => String(tag || '').trim()).filter(Boolean);
+    const removeSet = new Set(remove.map((tag) => String(tag || '').trim()).filter(Boolean));
+    const next = current.filter((tag) => !removeSet.has(tag));
+    for (const tag of add.map((item) => String(item || '').trim()).filter(Boolean)) {
+      if (!next.includes(tag)) next.push(tag);
+    }
+    return next;
+  }, []);
+
+  const applySummary = useCallback((current: string, mode: BatchEditPayload['summaryMode'], value: string) => {
+    const rawCurrent = String(current || '');
+    const rawValue = String(value || '');
+    if (mode === 'clear') return '';
+    if (mode === 'replace') return rawValue.trim();
+    return rawCurrent.trim() ? `${rawCurrent}\n${rawValue}`.trim() : rawValue.trim();
+  }, []);
+
+  const handleBatchFavorite = useCallback(async () => {
+    if (!hasAnySelected || batchActionRunning || batchEditApplying || batchRemovingArchives) return;
+    const shouldFavorite = nextFavoriteState;
+    const jobs: Array<() => Promise<void>> = Array.from(selectedArchiveIds).map((id) => async () => {
+      const ok = await FavoriteService.setFavorite('archive', id, shouldFavorite);
+      if (!ok) throw new Error(`favorite archive failed: ${id}`);
+    });
+    await runBatchAction(favoriteActionLabel, jobs);
+  }, [
+    batchActionRunning,
+    batchEditApplying,
+    batchRemovingArchives,
+    favoriteActionLabel,
+    hasAnySelected,
+    nextFavoriteState,
+    runBatchAction,
+    selectedArchiveIds,
+  ]);
+
+  const handleBatchReadStatus = useCallback(async () => {
+    if (!canBatchDownload || batchActionRunning || batchEditApplying || batchRemovingArchives) return;
+    const toRead = allSelectedArchiveIsNew;
+    const title = toRead ? t('archive.markAsRead') : t('archive.markAsNew');
+    const jobs: Array<() => Promise<void>> = Array.from(selectedArchiveIds).map((id) => {
+      return () => (toRead ? ArchiveService.clearIsNew(id) : ArchiveService.setIsNew(id));
+    });
+    await runBatchAction(title, jobs);
+  }, [
+    allSelectedArchiveIsNew,
+    batchActionRunning,
+    batchEditApplying,
+    batchRemovingArchives,
+    canBatchDownload,
+    runBatchAction,
+    selectedArchiveIds,
+    t,
+  ]);
+
+  const handleBatchDownload = useCallback(async () => {
+    if (!canBatchDownload || batchActionRunning || batchEditApplying || batchRemovingArchives) return;
+    Array.from(selectedArchiveIds).forEach((id) => {
+      window.open(ArchiveService.getDownloadUrl(id), '_blank');
+    });
+    success(
+      t('home.batchDownloadStarted').replace('{count}', String(selectedArchiveIds.size))
+    );
+  }, [
+    batchActionRunning,
+    batchEditApplying,
+    batchRemovingArchives,
+    canBatchDownload,
+    selectedArchiveIds,
+    success,
+    t,
+  ]);
+
+  const handleBatchDelete = useCallback(async () => {
+    if (!hasAnySelected || batchActionRunning || batchEditApplying || batchRemovingArchives) return;
+    if (!canBatchDelete) {
+      showError(t('common.accessDenied'));
+      return;
+    }
+
+    const confirmed = await confirm({
+      title: t('common.delete'),
+      description: t('home.batchDeleteConfirm').replace('{count}', String(selectedArchiveCount)),
+      confirmText: t('common.delete'),
+      cancelText: t('common.cancel'),
+      variant: 'destructive',
+    });
+    if (!confirmed) return;
+
+    const jobs: Array<() => Promise<void>> = Array.from(selectedArchiveIds).map((id) => () => ArchiveService.deleteArchive(id));
+    await runBatchAction(t('common.delete'), jobs);
+    exitSelectionMode();
+    await fetchTankoubon();
+  }, [
+    batchActionRunning,
+    batchEditApplying,
+    batchRemovingArchives,
+    canBatchDelete,
+    confirm,
+    exitSelectionMode,
+    fetchTankoubon,
+    hasAnySelected,
+    runBatchAction,
+    selectedArchiveCount,
+    selectedArchiveIds,
+    showError,
+    t,
+  ]);
+
+  const applyBatchEdit = useCallback(async (payload: BatchEditPayload): Promise<boolean> => {
+    if (!hasAnySelected || batchEditApplying) return false;
+    if (payload.runMetadataPlugin && !payload.metadataPluginNamespace.trim()) {
+      showError(t('archive.metadataPluginSelectRequired'));
+      return false;
+    }
+
+    const applyToArchives = payload.scope !== 'tankoubon';
+    const pluginArchiveCount = applyToArchives ? selectedArchiveIds.size : 0;
+
+    if (payload.runMetadataPlugin && pluginArchiveCount > 0) {
+      const pluginDisplay = payload.metadataPluginNamespace.trim();
+      const confirmed = await confirm({
+        title: t('home.batchMetadataPluginConfirmTitle'),
+        description: t('home.batchMetadataPluginConfirmDescription')
+          .replace('{plugin}', pluginDisplay)
+          .replace('{count}', String(pluginArchiveCount))
+          .replace('{archives}', String(pluginArchiveCount))
+          .replace('{tankoubons}', '0'),
+        confirmText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+      });
+      if (!confirmed) return false;
+    }
+
+    setBatchEditApplying(true);
+    try {
+      const archiveJobs: Array<() => Promise<void>> = applyToArchives
+        ? Array.from(selectedArchiveIds).map((id) => async () => {
+            if (payload.updateTitle || payload.updateSummary || payload.updateTags) {
+              const metadata = await ArchiveService.getMetadata(id);
+              const baseTitle = String(metadata.title || '');
+              const nextTitle = payload.updateTitle
+                ? `${payload.titlePrefix}${baseTitle}${payload.titleSuffix}`.trim()
+                : baseTitle;
+              const baseSummary = String(metadata.description || '');
+              const nextSummary = payload.updateSummary
+                ? applySummary(baseSummary, payload.summaryMode, payload.summaryValue)
+                : baseSummary;
+              const baseTags = Array.isArray(metadata.tags) ? metadata.tags : [];
+              const nextTags = payload.updateTags
+                ? mergeTags(baseTags, payload.tagsAdd, payload.tagsRemove)
+                : baseTags;
+
+              await ArchiveService.updateMetadata(id, {
+                title: nextTitle || baseTitle,
+                type: 0,
+                description: nextSummary,
+                tags: nextTags,
+                assets: metadata.assets,
+              });
+            }
+
+            if (payload.runMetadataPlugin) {
+              await ArchiveService.runMetadataPluginForTarget(
+                'archive',
+                id,
+                payload.metadataPluginNamespace,
+                payload.metadataPluginParam,
+                undefined,
+                { writeBack: true }
+              );
+            }
+          })
+        : [];
+
+      const settled = await Promise.allSettled(archiveJobs.map((job) => job()));
+      const successCount = settled.filter((item) => item.status === 'fulfilled').length;
+      const failedCount = settled.length - successCount;
+      if (failedCount > 0) {
+        showError(`${t('home.batchEditApplyResult')}: ${successCount}/${settled.length} ${t('home.batchDoneWithFailures')}`);
+      } else {
+        success(`${t('home.batchEditApplyResult')}: ${successCount}/${settled.length}`);
+      }
+      appEvents.emit(AppEvents.ARCHIVES_REFRESH);
+      setSelectedArchiveIds(new Set());
+      return true;
+    } finally {
+      setBatchEditApplying(false);
+    }
+  }, [
+    applySummary,
+    batchEditApplying,
+    confirm,
+    hasAnySelected,
+    mergeTags,
+    selectedArchiveIds,
+    showError,
+    success,
+    t,
+  ]);
+
+  const batchActions = useMemo<BatchActionBarItem[]>(() => [
+    {
+      id: 'edit',
+      label: t('common.edit'),
+      title: t('common.edit'),
+      icon: <Edit className="mr-1 h-4 w-4" />,
+      disabled: !hasAnySelected || batchActionRunning || batchEditApplying || batchRemovingArchives,
+      onClick: () => setBatchEditOpen(true),
+    },
+    {
+      id: 'favorite',
+      label: favoriteActionLabel,
+      title: favoriteActionLabel,
+      icon: <Heart className="mr-1 h-4 w-4" />,
+      disabled: !hasAnySelected || batchActionRunning || batchEditApplying || batchRemovingArchives,
+      onClick: () => void handleBatchFavorite(),
+    },
+    {
+      id: 'download',
+      label: t('archive.download'),
+      title: t('archive.download'),
+      icon: <Download className="mr-1 h-4 w-4" />,
+      disabled: !canBatchDownload || batchActionRunning || batchEditApplying || batchRemovingArchives,
+      onClick: () => void handleBatchDownload(),
+    },
+    {
+      id: 'read-status',
+      label: allSelectedArchiveIsNew ? t('archive.markAsRead') : t('archive.markAsNew'),
+      title: allSelectedArchiveIsNew ? t('archive.markAsRead') : t('archive.markAsNew'),
+      icon: allSelectedArchiveIsNew
+        ? <Check className="mr-1 h-4 w-4" />
+        : <RotateCcw className="mr-1 h-4 w-4" />,
+      disabled: !canBatchDownload || batchActionRunning || batchEditApplying || batchRemovingArchives,
+      onClick: () => void handleBatchReadStatus(),
+    },
+    {
+      id: 'delete',
+      label: t('common.delete'),
+      title: t('common.delete'),
+      icon: <Trash2 className="mr-1 h-4 w-4" />,
+      disabled: !canBatchDelete || batchActionRunning || batchEditApplying || batchRemovingArchives,
+      destructive: true,
+      onClick: () => void handleBatchDelete(),
+    },
+    {
+      id: 'remove-selected',
+      label: t('tankoubon.removeSelected'),
+      title: t('tankoubon.removeSelected'),
+      icon: batchRemovingArchives
+        ? <Spinner size="sm" className="mr-1" />
+        : <Minus className="mr-1 h-4 w-4" />,
+      disabled: !hasAnySelected || batchActionRunning || batchEditApplying || batchRemovingArchives,
+      onClick: () => setRemoveSelectedDialogOpen(true),
+    },
+  ], [
+    allSelectedArchiveIsNew,
+    batchActionRunning,
+    batchEditApplying,
+    batchRemovingArchives,
+    canBatchDownload,
+    canBatchDelete,
+    favoriteActionLabel,
+    handleBatchDelete,
+    handleBatchDownload,
+    handleBatchFavorite,
+    handleBatchReadStatus,
+    hasAnySelected,
+    t,
+  ]);
   const filteredArchiveKeys = useMemo(
     () => filteredArchives.map((archive) => `tankoubon-archive:${archive.arcid}`),
     [filteredArchives]
@@ -1424,22 +1917,42 @@ function TankoubonDetailContent() {
                       index={index}
                       coverHeight={archiveGridCoverHeights[itemKey]}
                       surfaceClassName="border-none shadow-none bg-transparent"
+                      selectable
+                      selectionMode={selectionMode}
+                      selected={selectedArchiveIds.has(archive.arcid)}
+                      onToggleSelect={(selected) => toggleArchiveCardSelection(archive.arcid, selected)}
+                      onRequestEnterSelection={enterSelectionMode}
+                      extraMenuItems={[
+                        {
+                          id: `remove-from-tankoubon:${archive.arcid}`,
+                          label: t('tankoubon.removeArchive'),
+                          icon: Minus,
+                          group: 'management',
+                          disabled: isRemoving,
+                          onClick: () => {
+                            setRemoveTarget(archive);
+                            setRemoveDialogOpen(true);
+                          },
+                        },
+                      ]}
                       onCoverAspectRatioChange={(aspectRatio) => reportArchiveGridCoverAspectRatio(itemKey, aspectRatio)}
                     />
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="icon"
-                      className="absolute right-2 top-2 h-8 w-8 rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus:opacity-100"
-                      title={t('tankoubon.removeArchive')}
-                      disabled={isRemoving}
-                      onClick={() => {
-                        setRemoveTarget(archive);
-                        setRemoveDialogOpen(true);
-                      }}
-                    >
-                      {isRemoving ? <Spinner size="sm" /> : <Trash2 className="h-4 w-4" />}
-                    </Button>
+                    {!selectionMode ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="icon"
+                        className="absolute right-2 top-2 h-8 w-8 rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus:opacity-100"
+                        title={t('tankoubon.removeArchive')}
+                        disabled={isRemoving}
+                        onClick={() => {
+                          setRemoveTarget(archive);
+                          setRemoveDialogOpen(true);
+                        }}
+                      >
+                        {isRemoving ? <Spinner size="sm" /> : <Minus className="h-4 w-4" />}
+                      </Button>
+                    ) : null}
                   </div>
                 );
               })}
@@ -1454,6 +1967,14 @@ function TankoubonDetailContent() {
                   key={archive.arcid}
                   archive={archive}
                   isRemoving={isRemoving}
+                  selectionMode={selectionMode}
+                  selected={selectedArchiveIds.has(archive.arcid)}
+                  onToggleSelect={() => {
+                    if (!selectionMode) {
+                      enterSelectionMode();
+                    }
+                    toggleArchiveCardSelection(archive.arcid);
+                  }}
                   onRemove={() => {
                     setRemoveTarget(archive);
                     setRemoveDialogOpen(true);
@@ -1509,7 +2030,16 @@ function TankoubonDetailContent() {
           onConfirm={confirmRemoveArchive}
           confirmText={t('common.remove')}
           cancelText={t('common.cancel')}
-          variant="destructive"
+        />
+
+        <ConfirmDialog
+          open={removeSelectedDialogOpen}
+          onOpenChange={setRemoveSelectedDialogOpen}
+          title={t('tankoubon.removeSelectedConfirmTitle')}
+          description={t('tankoubon.removeSelectedConfirmMessage').replace('{count}', String(selectedArchiveCount))}
+          onConfirm={handleRemoveSelectedArchives}
+          confirmText={t('common.remove')}
+          cancelText={t('common.cancel')}
         />
 
         <ArchiveMetadataEditDialog
@@ -1652,6 +2182,26 @@ function TankoubonDetailContent() {
           </DialogContent>
         </Dialog>
       </main>
+
+      {selectionMode ? (
+        <HomeBatchActionBar
+          visible={selectionMode}
+          selectedTotal={selectedArchiveCount}
+          hasAnySelected={selectedArchiveCount > 0}
+          selectedArchiveCount={selectedArchiveCount}
+          selectedTankoubonCount={0}
+          batchActionRunning={batchActionRunning}
+          batchEditApplying={batchEditApplying}
+          batchEditOpen={batchEditOpen}
+          setBatchEditOpen={setBatchEditOpen}
+          metadataPlugins={batchMetadataPlugins}
+          actions={batchActions}
+          showBatchEditDialog
+          onApplyBatchEdit={applyBatchEdit}
+          onExit={exitSelectionMode}
+          t={t}
+        />
+      ) : null}
 
       <MobileBottomNav />
     </div>

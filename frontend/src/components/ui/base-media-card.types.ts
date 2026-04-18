@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { RecommendationItemType, RecommendationScene } from '@/types/recommendation'
+import type { MenuItem } from '@/components/ui/unified-menu'
 
 export type BaseMediaCardType = RecommendationItemType
 
@@ -38,6 +39,7 @@ export interface BaseMediaCardProps {
   selected?: boolean
   onToggleSelect?: (selected: boolean) => void
   onRequestEnterSelection?: () => void
+  extraMenuItems?: MenuItem[]
   onCoverAspectRatioChange?: (aspectRatio: number) => void
   recommendationContext?: MediaCardRecommendationContext
   onRecommendationOpenReader?: (itemType: RecommendationItemType, itemId: string) => void

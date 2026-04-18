@@ -15,6 +15,7 @@ type MediaCardActionsProps = {
   canEdit: boolean
   canToggleFavorite: boolean
   deleting: boolean
+  extraMenuItems?: MenuItem[]
   favoriteLoading: boolean
   isFavorite: boolean
   isNew: boolean
@@ -42,6 +43,7 @@ export function MediaCardActions({
   canEdit,
   canToggleFavorite,
   deleting,
+  extraMenuItems,
   favoriteLoading,
   isFavorite,
   isNew,
@@ -135,6 +137,7 @@ export function MediaCardActions({
       disabled: menuActionDisabled || !canEdit,
       separator: true, // 在编辑前添加分割线
     },
+    ...(extraMenuItems ?? []),
     // 删除
     {
       id: 'delete',
