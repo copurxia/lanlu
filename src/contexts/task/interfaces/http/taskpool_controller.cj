@@ -19,74 +19,74 @@ public class TaskPoolController {
     private static let taskStreamLogMaxBytes: Int64 = 4 * 1024
 
     /**
-     * 分页获取任务列表
-     * GET /api/taskpool/tasks?page=1&pageSize=10&status=pending
+     * 任务列表 SSE 流
+     * GET /api/admin/taskpool/tasks?page=1&pageSize=10&status=running
      */
     public static func getTasks(ctx: Ctx) {
         let pageStr = ctx.query("page") ?? "1"
         let pageSizeStr = ctx.query("pageSize") ?? "10"
-        let statusRaw = ctx.query("status") ?? ""
+        let statusRaw = (ctx.query("status") ?? "").trimAscii()
 
-        let page = try {
+        var page = try {
             Int32.parse(pageStr)
         } catch (_: Exception) {
             1i32
         }
-
-        let pageSize = try {
+        var pageSize = try {
             Int32.parse(pageSizeStr)
         } catch (_: Exception) {
             10i32
         }
+        if (page < 1) { page = 1 }
+        if (pageSize < 1) { pageSize = 10 }
 
-        // 计算偏移量
-        let offset = (page - 1) * pageSize
-
-        // 可选状态过滤（用于前端 tabs + 正确分页）
-        // Frontend sends lowercase; keep strict matching to avoid relying on extra String APIs.
         let status = statusRaw
         let hasStatusFilter = status.size > 0 && status != "all"
-        if (hasStatusFilter) {
-            // Only allow known statuses to avoid unexpected DB usage/typos.
-            if (status != "pending" && status != "running" && status != "waiting" && status != "completed" && status != "failed" && status != "stopped") {
-                ctx.status(400)
-                ctx.json("{\"error\":\"Invalid status\"}")
-                return
+        if (hasStatusFilter && !isValidTaskStatus(status)) {
+            ctx.status(400)
+            ctx.json("{\"error\":\"Invalid status\"}")
+            return
+        }
+
+        let sse = ctx.sse()
+        let eventHub = TaskEventHub.getInstance()
+        var eventId = 1i64
+        var lastPayload = ""
+        var revision = eventHub.currentListRevision()
+
+        while (true) {
+            try {
+                let stableRevision = eventHub.currentListRevision()
+                if (stableRevision != revision) {
+                    revision = stableRevision
+                    continue
+                }
+
+                let payload = buildTaskListStreamData(page, pageSize, status, if (eventId == 1) { "snapshot" } else { "task_list_changed" })
+                if (eventId == 1 || payload != lastPayload) {
+                    let eventName = if (eventId == 1) { "snapshot" } else { "tasks" }
+                    sse.sendEvent(payload, event: eventName, id: "${eventId}")
+                    lastPayload = payload
+                    eventId += 1
+                }
+
+                let waitResult = eventHub.awaitListNext(revision, taskStreamPingMillis)
+                revision = waitResult.revision
+                if (!waitResult.changed) {
+                    sse.sendEvent("{\"ok\":1}", event: "ping", id: "${eventId}")
+                    eventId += 1
+                }
+            } catch (e: Exception) {
+                getLogger("taskpool_list_stream").debug(
+                    "Task list SSE stream closed",
+                    ("status", status),
+                    ("page", page.toString()),
+                    ("page_size", pageSize.toString()),
+                    ("reason", e.message)
+                )
+                break
             }
         }
-
-        // 获取任务列表和总数
-        let tasks = if (hasStatusFilter) {
-            TaskDao.getTasksWithPaginationByStatus(offset, pageSize, status)
-        } else {
-            TaskDao.getTasksWithPagination(offset, pageSize)
-        }
-        let total = if (hasStatusFilter) {
-            TaskDao.getTaskCountByStatus(status)
-        } else {
-            TaskDao.getTaskCount()
-        }
-        // 用于前端 “全部” 标签的徽章显示（即使当前在筛选状态下也可显示总量）
-        let totalAll = TaskDao.getTaskCount()
-        let totalPages = (total + pageSize - 1) / pageSize
-
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("tasks")
-        w.startArray()
-        for (t in tasks) {
-            writeTaskDataJson(w, t)
-        }
-        w.endArray()
-        w.writeName("total").writeValue(total)
-        w.writeName("totalAll").writeValue(totalAll)
-        w.writeName("page").writeValue(page)
-        w.writeName("pageSize").writeValue(pageSize)
-        w.writeName("totalPages").writeValue(totalPages)
-        w.endObject()
-        w.flush()
-        ctx.json(String.fromUtf8(readToEnd(out)))
     }
 
     /**
@@ -473,17 +473,19 @@ public class TaskPoolController {
     /**
      * 将任务数据转换为JSON
      */
-    private static func writeTaskDataJson(w: JsonWriter, task: TaskData): Unit {
+    private static func writeTaskDataJson(w: JsonWriter, task: TaskData, messageOverride!: String = "", resultOverride!: String = ""): Unit {
+        let effectiveMessage = if (messageOverride.size > 0) { messageOverride } else { task.message }
+        let effectiveResult = if (resultOverride.size > 0) { resultOverride } else { task.result }
         w.startObject()
         w.writeName("id").writeValue(task.id)
         w.writeName("name").writeValue(task.name)
         w.writeName("task_type").writeValue(task.taskType)
         w.writeName("status").writeValue(task.status)
         w.writeName("progress").writeValue(task.progress)
-        w.writeName("message").writeValue(task.message)
+        w.writeName("message").writeValue(effectiveMessage)
         w.writeName("plugin_namespace").writeValue(task.pluginNamespace)
         w.writeName("parameters").writeValue(task.parameters)
-        w.writeName("result").writeValue(task.result)
+        w.writeName("result").writeValue(effectiveResult)
         w.writeName("priority").writeValue(task.priority)
         w.writeName("group_id").writeValue(task.groupId)
         w.writeName("timeout_at").writeValue(task.timeoutAt)
@@ -583,6 +585,52 @@ public class TaskPoolController {
 
     private static func isTerminalStatus(status: String): Bool {
         return status == "completed" || status == "failed" || status == "stopped"
+    }
+
+    private static func isValidTaskStatus(status: String): Bool {
+        return status == "pending" || status == "running" || status == "waiting" || status == "completed" || status == "failed" || status == "stopped"
+    }
+
+    private static func buildTaskListStreamData(page: Int32, pageSize: Int32, status: String, eventType: String): String {
+        let hasStatusFilter = status.size > 0 && status != "all"
+        let offset = (page - 1) * pageSize
+        let tasks = if (hasStatusFilter) {
+            TaskDao.getTasksWithPaginationByStatus(offset, pageSize, status)
+        } else {
+            TaskDao.getTasksWithPagination(offset, pageSize)
+        }
+        let total = if (hasStatusFilter) {
+            TaskDao.getTaskCountByStatus(status)
+        } else {
+            TaskDao.getTaskCount()
+        }
+        let totalAll = TaskDao.getTaskCount()
+        let totalPages = if (pageSize > 0) { (total + pageSize - 1) / pageSize } else { 0i32 }
+
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("v").writeValue(2)
+        w.writeName("event_type").writeValue(eventType)
+        w.writeName("data")
+        w.startObject()
+        w.writeName("tasks")
+        w.startArray()
+        for (task in tasks) {
+            let logText = TaskIO.readLog(task.id, maxBytes: taskStreamLogMaxBytes)
+            let outputText = TaskIO.readOutput(task.id, maxBytes: 32 * 1024)
+            writeTaskDataJson(w, task, messageOverride: logText, resultOverride: outputText)
+        }
+        w.endArray()
+        w.writeName("total").writeValue(total)
+        w.writeName("totalAll").writeValue(totalAll)
+        w.writeName("page").writeValue(page)
+        w.writeName("pageSize").writeValue(pageSize)
+        w.writeName("totalPages").writeValue(totalPages)
+        w.endObject()
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
     }
 
     private static func computeTaskPhase(task: TaskData): String {

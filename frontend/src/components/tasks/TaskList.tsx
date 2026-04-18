@@ -1,8 +1,8 @@
 'use client';
 
 import { memo, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Task, TaskPageResult } from '@/types/task';
-import { TaskPoolService, type TaskStreamPayload } from '@/lib/services/taskpool-service';
+import { Task } from '@/types/task';
+import { TaskPoolService } from '@/lib/services/taskpool-service';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,7 +28,6 @@ import { useToast } from '@/hooks/use-toast';
 const ALLOWED_FILTERS = ['all', 'pending', 'running', 'waiting', 'completed', 'failed'] as const;
 type AllowedFilter = (typeof ALLOWED_FILTERS)[number];
 
-const STREAM_FLUSH_INTERVAL_MS = 300;
 const LOG_PREVIEW_RECENT_LINES = 80;
 const LOG_PREVIEW_LAST_LINE_MAX = 160;
 
@@ -44,10 +43,6 @@ function normalizePageIndex(value: string | null): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) return 0;
   return parsed - 1;
-}
-
-function isTerminalStatus(status: string): boolean {
-  return status === 'completed' || status === 'failed' || status === 'stopped';
 }
 
 function formatTimestamp(value?: string): string {
@@ -391,13 +386,8 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const hasLoadedOnceRef = useRef(false);
-  const latestFetchIdRef = useRef(0);
-  const taskStreamUnsubsRef = useRef<Map<number, () => void>>(new Map());
-  const streamRefreshScheduledRef = useRef(false);
-  const streamFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const streamBufferRef = useRef<Map<number, TaskStreamPayload>>(new Map());
-  const streamEventCountRef = useRef(0);
-  const streamFlushCountRef = useRef(0);
+  const previousStreamStateRef = useRef<{ filter: AllowedFilter; page: number; refreshKey: string } | null>(null);
+  const [localRefreshKey, setLocalRefreshKey] = useState(0);
 
   const [pageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
@@ -405,6 +395,10 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
   const [totalAll, setTotalAll] = useState<number | null>(null);
   const currentPage = useMemo(() => normalizePageIndex(searchParams.get('page')), [searchParams]);
   const activeFilter = useMemo(() => normalizeFilter(searchParams.get('tab')), [searchParams]);
+  const refreshKey = useMemo(
+    () => `${refreshToken ?? 0}:${localRefreshKey}`,
+    [localRefreshKey, refreshToken]
+  );
 
   const updateUrl = useCallback(
     (nextFilter: AllowedFilter, nextPageIndex: number) => {
@@ -421,68 +415,78 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
     [pathname, router, searchParams]
   );
 
-  const fetchTasks = useCallback(
-    async (
-      filter: AllowedFilter,
-      page: number,
-      opts: {
-        mode?: 'initial' | 'update' | 'manual' | 'auto';
-      } = {}
-    ) => {
-      const fetchId = ++latestFetchIdRef.current;
-      const mode = opts.mode ?? 'update';
+  useEffect(() => {
+    const previousStreamState = previousStreamStateRef.current;
+    const isInitialLoad = !hasLoadedOnceRef.current;
+    const isQueryChange =
+      previousStreamState !== null &&
+      (previousStreamState.filter !== activeFilter || previousStreamState.page !== currentPage);
+    const isManualRefresh =
+      previousStreamState !== null && !isQueryChange && previousStreamState.refreshKey !== refreshKey;
+    previousStreamStateRef.current = { filter: activeFilter, page: currentPage, refreshKey };
 
-      try {
-        setError(null);
-        if (mode === 'initial') setLoading(true);
-        if (mode === 'update') setUpdating(true);
-        if (mode === 'manual') setRefreshing(true);
+    setError(null);
+    if (isInitialLoad) {
+      setLoading(true);
+    } else if (isManualRefresh) {
+      setRefreshing(true);
+    } else if (isQueryChange) {
+      setUpdating(true);
+    }
 
-        const result: TaskPageResult = await TaskPoolService.getTasks(
-          page + 1,
-          pageSize,
-          filter !== 'all' ? filter : undefined
-        );
+    let closed = false;
+    const unsubscribe = TaskPoolService.subscribeTaskList(
+      {
+        page: currentPage + 1,
+        pageSize,
+        status: activeFilter !== 'all' ? activeFilter : undefined,
+      },
+      {
+        onTasks: (result) => {
+          if (closed) return;
 
-        if (fetchId !== latestFetchIdRef.current) return;
+          hasLoadedOnceRef.current = true;
+          setError(null);
+          setTasks(Array.isArray(result.tasks) ? result.tasks : []);
+          setTotal(typeof result.total === 'number' ? result.total : 0);
+          setTotalAll(typeof result.totalAll === 'number' ? result.totalAll : null);
+          setTotalPages(typeof result.totalPages === 'number' ? result.totalPages : 0);
+          setLoading(false);
+          setRefreshing(false);
+          setUpdating(false);
 
-        setTasks(Array.isArray(result.tasks) ? result.tasks : []);
-        setTotal(typeof result.total === 'number' ? result.total : 0);
-        setTotalAll(typeof result.totalAll === 'number' ? result.totalAll : null);
-        setTotalPages(typeof result.totalPages === 'number' ? result.totalPages : 0);
-        hasLoadedOnceRef.current = true;
-      } catch (err) {
-        console.error('Failed to fetch tasks:', err);
-        if (fetchId !== latestFetchIdRef.current) return;
-        setError(err instanceof Error ? err.message : 'Failed to fetch tasks');
-        setTasks([]);
-        setTotal(0);
-        setTotalAll(null);
-        setTotalPages(0);
-      } finally {
-        if (fetchId !== latestFetchIdRef.current) return;
-        setLoading(false);
-        setRefreshing(false);
-        setUpdating(false);
+          if (result.totalPages > 0 && currentPage > result.totalPages - 1) {
+            updateUrl(activeFilter, result.totalPages - 1);
+            return;
+          }
+
+          if (result.totalPages === 0 && currentPage !== 0) {
+            updateUrl(activeFilter, 0);
+          }
+        },
+        onError: (streamError) => {
+          if (closed) return;
+          console.warn('Task list stream error:', streamError);
+
+          if (!hasLoadedOnceRef.current) {
+            setError(streamError.message || 'Failed to connect task stream');
+            setLoading(false);
+            setRefreshing(false);
+            setUpdating(false);
+          }
+        },
       }
-    },
-    [pageSize]
-  );
+    );
 
-  useEffect(() => {
-    fetchTasks(activeFilter, currentPage, { mode: hasLoadedOnceRef.current ? 'update' : 'initial' });
-  }, [activeFilter, currentPage, fetchTasks]);
+    return () => {
+      closed = true;
+      unsubscribe();
+    };
+  }, [activeFilter, currentPage, pageSize, refreshKey, updateUrl]);
 
-  useEffect(() => {
-    if (!hasLoadedOnceRef.current) return;
-    if (typeof refreshToken !== 'number') return;
-    if (refreshToken <= 0) return;
-    fetchTasks(activeFilter, currentPage, { mode: 'manual' });
-  }, [activeFilter, currentPage, fetchTasks, refreshToken]);
-
-  const handleRefresh = useCallback(async () => {
-    await fetchTasks(activeFilter, currentPage, { mode: 'manual' });
-  }, [activeFilter, currentPage, fetchTasks]);
+  const handleRefresh = useCallback(() => {
+    setLocalRefreshKey((prev) => prev + 1);
+  }, []);
 
   const handleCancelTask = useCallback(
     async (taskId: number) => {
@@ -499,7 +503,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
       try {
         const ok = await TaskPoolService.cancelTask(taskId);
         if (ok) {
-          await handleRefresh();
+          handleRefresh();
           showSuccess(t('settings.taskManagement.canceled'));
         } else {
           setError(t('settings.taskManagement.failedToCancel'));
@@ -516,7 +520,7 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
       try {
         const result = await TaskPoolService.retryTask(taskId);
         if (result.success) {
-          await handleRefresh();
+          handleRefresh();
         } else {
           setError(t('settings.taskManagement.failedToRetry'));
         }
@@ -539,124 +543,6 @@ export function TaskList({ className, refreshToken }: TaskListProps) {
     setUpdating(true);
     updateUrl(activeFilter, page);
   };
-
-  useEffect(() => {
-    const unsubs = taskStreamUnsubsRef.current;
-    return () => {
-      if (streamFlushTimerRef.current) {
-        clearTimeout(streamFlushTimerRef.current);
-        streamFlushTimerRef.current = null;
-      }
-      unsubs.forEach((unsubscribe) => unsubscribe());
-      unsubs.clear();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!hasLoadedOnceRef.current || loading || refreshing || updating) return;
-
-    const activeTasks = tasks.filter((task) => task?.status === 'running' || task?.status === 'pending' || task?.status === 'waiting');
-    const activeTaskIds = new Set(activeTasks.map((task) => task.id));
-
-    taskStreamUnsubsRef.current.forEach((unsubscribe, taskId) => {
-      if (activeTaskIds.has(taskId)) return;
-      unsubscribe();
-      taskStreamUnsubsRef.current.delete(taskId);
-    });
-
-    const scheduleRefresh = () => {
-      if (streamRefreshScheduledRef.current) return;
-      streamRefreshScheduledRef.current = true;
-      void fetchTasks(activeFilter, currentPage, { mode: 'auto' }).finally(() => {
-        streamRefreshScheduledRef.current = false;
-      });
-    };
-
-    const flushBufferedUpdates = (opts: { forceRefresh?: boolean } = {}) => {
-      const buffered = streamBufferRef.current;
-      if (buffered.size === 0) {
-        if (opts.forceRefresh) scheduleRefresh();
-        return;
-      }
-
-      const updatesByTaskId = new Map(buffered);
-      buffered.clear();
-      streamFlushCountRef.current += 1;
-
-      let terminalSeen = false;
-      setTasks((prev) =>
-        prev.map((item) => {
-          const payload = updatesByTaskId.get(item.id);
-          if (!payload) return item;
-
-          const nextLog = payload.logDelta ?? payload.logTail ?? payload.log;
-          if (isTerminalStatus(payload.task.status)) terminalSeen = true;
-
-          if (!nextLog || nextLog.trim().length === 0) {
-            return { ...item, ...payload.task };
-          }
-
-          const mergedMessage = payload.mode === 'delta'
-            ? `${item.message || ''}${nextLog}`
-            : nextLog;
-
-          return { ...item, ...payload.task, message: mergedMessage };
-        })
-      );
-
-      if (opts.forceRefresh || terminalSeen) {
-        scheduleRefresh();
-      }
-
-      // SSE 可观测计数，便于确认节流后刷新频率和批量规模。
-      if (streamFlushCountRef.current % 5 === 0) {
-        console.debug('[TaskList:SSE]', {
-          events: streamEventCountRef.current,
-          flushes: streamFlushCountRef.current,
-          bufferedTasks: updatesByTaskId.size,
-        });
-      }
-    };
-
-    const scheduleFlush = (opts: { immediate?: boolean; forceRefresh?: boolean } = {}) => {
-      if (opts.immediate) {
-        if (streamFlushTimerRef.current) {
-          clearTimeout(streamFlushTimerRef.current);
-          streamFlushTimerRef.current = null;
-        }
-        flushBufferedUpdates({ forceRefresh: opts.forceRefresh });
-        return;
-      }
-
-      if (streamFlushTimerRef.current) return;
-      streamFlushTimerRef.current = setTimeout(() => {
-        streamFlushTimerRef.current = null;
-        flushBufferedUpdates({ forceRefresh: opts.forceRefresh });
-      }, STREAM_FLUSH_INTERVAL_MS);
-    };
-
-    for (const task of activeTasks) {
-      if (taskStreamUnsubsRef.current.has(task.id)) continue;
-
-      const unsubscribe = TaskPoolService.subscribeTask(task.id, {
-        onTask: (_nextTask, payload) => {
-          streamEventCountRef.current += 1;
-          streamBufferRef.current.set(payload.task.id, payload);
-          scheduleFlush();
-        },
-        onDone: (_nextTask, payload) => {
-          streamEventCountRef.current += 1;
-          streamBufferRef.current.set(payload.task.id, payload);
-          scheduleFlush({ immediate: true, forceRefresh: true });
-        },
-        onError: () => {
-          scheduleRefresh();
-        },
-      });
-
-      taskStreamUnsubsRef.current.set(task.id, unsubscribe);
-    }
-  }, [activeFilter, currentPage, tasks, loading, refreshing, updating, fetchTasks]);
 
   if (loading && tasks.length === 0) {
     return (

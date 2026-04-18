@@ -2,6 +2,13 @@ import { Task, TaskPageResult } from '@/types/task';
 import { api, getApiUrl } from '@/lib/api';
 import { buildQueryParams, parseApiPayload } from '@/lib/utils/api-utils';
 
+export type TaskListStreamPayload = {
+  page: TaskPageResult;
+  event?: string;
+  eventType?: string;
+  version?: number;
+};
+
 export type TaskStreamPayload = {
   task: Task;
   event?: string;
@@ -12,6 +19,18 @@ export type TaskStreamPayload = {
   logBytes?: number;
   mode?: 'snapshot' | 'delta' | string;
   version?: number;
+};
+
+type TaskListSubscriptionOptions = {
+  page?: number;
+  pageSize?: number;
+  status?: string;
+};
+
+type TaskListStreamHandlers = {
+  onTasks?: (page: TaskPageResult, payload: TaskListStreamPayload) => void;
+  onError?: (error: Error) => void;
+  onOpen?: () => void;
 };
 
 type TaskStreamHandlers = {
@@ -33,50 +52,63 @@ export class TaskPoolService {
   private static BASE_URL = '/api/admin/taskpool';
 
   /**
-   * Get tasks with pagination
+   * Subscribe task list updates from SSE endpoint.
    */
-  static async getTasks(page: number = 1, pageSize: number = 10, status?: string): Promise<TaskPageResult> {
-    try {
-      const qs = buildQueryParams({
-        page: String(page),
-        pageSize: String(pageSize),
-      });
-      if (status && status !== 'all') qs.set('status', status);
-
-      const response = await api.get(`${this.BASE_URL}/tasks?${qs.toString()}`);
-
-      if (response.success) {
-        const data = parseApiPayload<any>(response.data, {});
-
-        // 转换后端的下划线命名为前端的驼峰命名
-        const tasks = Array.isArray(data.tasks)
-          ? data.tasks.map((task: any) => this.normalizeTask(task))
-          : [];
-
-        const result = {
-          tasks,
-          total: typeof data.total === 'number' ? data.total : 0,
-          totalAll: typeof data.totalAll === 'number' ? data.totalAll : undefined,
-          page: typeof data.page === 'number' ? data.page : page,
-          pageSize: typeof data.pageSize === 'number' ? data.pageSize : pageSize,
-          totalPages: typeof data.totalPages === 'number' ? data.totalPages : 0
-        };
-
-        return result;
-      } else {
-        throw new Error(response.error || 'Failed to fetch tasks');
-      }
-    } catch (error) {
-      console.error('Error fetching tasks:', error);
-      // 返回空的默认结果
-      return {
-        tasks: [],
-        total: 0,
-        page,
-        pageSize,
-        totalPages: 0
-      };
+  static subscribeTaskList(
+    options: TaskListSubscriptionOptions = {},
+    handlers: TaskListStreamHandlers = {}
+  ): () => void {
+    if (typeof window === 'undefined' || typeof EventSource === 'undefined') {
+      handlers.onError?.(new Error('EventSource is not available'));
+      return () => {};
     }
+
+    const page = options.page ?? 1;
+    const pageSize = options.pageSize ?? 10;
+    const qs = buildQueryParams({
+      page: String(page),
+      pageSize: String(pageSize),
+    });
+    if (options.status && options.status !== 'all') {
+      qs.set('status', options.status);
+    }
+
+    const streamPath = `${this.BASE_URL}/tasks?${qs.toString()}`;
+    const streamUrl = getApiUrl(streamPath) || streamPath;
+    const source = new EventSource(streamUrl, { withCredentials: true });
+    let closed = false;
+
+    const onPayload = (event: MessageEvent) => {
+      const parsed = this.parseTaskListStreamPayload(event.data);
+      if (!parsed) return;
+
+      handlers.onTasks?.(parsed.page, { ...parsed, event: event.type });
+    };
+
+    source.onopen = () => {
+      if (closed) return;
+      handlers.onOpen?.();
+    };
+
+    source.addEventListener('snapshot', (event) => {
+      if (closed) return;
+      onPayload(event as MessageEvent);
+    });
+    source.addEventListener('tasks', (event) => {
+      if (closed) return;
+      onPayload(event as MessageEvent);
+    });
+    source.addEventListener('ping', () => {});
+
+    source.onerror = () => {
+      if (closed) return;
+      handlers.onError?.(new Error('Task list stream disconnected'));
+    };
+
+    return () => {
+      closed = true;
+      source.close();
+    };
   }
 
   /**
@@ -650,6 +682,47 @@ export class TaskPoolService {
         typeof (parsed as any).event_type === 'string' ? (parsed as any).event_type : undefined;
 
       return { task, eventType, log, logTail, logDelta, logBytes, mode, version };
+    } catch {
+      return null;
+    }
+  }
+
+  private static parseTaskListStreamPayload(raw: unknown): TaskListStreamPayload | null {
+    if (typeof raw !== 'string' || raw.trim() === '') return null;
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return null;
+
+      const pageCandidate =
+        (parsed as any).data && typeof (parsed as any).data === 'object'
+          ? (parsed as any).data
+          : parsed;
+
+      if (!pageCandidate || typeof pageCandidate !== 'object') return null;
+
+      const tasks = Array.isArray((pageCandidate as any).tasks)
+        ? (pageCandidate as any).tasks.map((task: any) => this.normalizeTask(task))
+        : [];
+
+      const page: TaskPageResult = {
+        tasks,
+        total: typeof (pageCandidate as any).total === 'number' ? (pageCandidate as any).total : 0,
+        totalAll:
+          typeof (pageCandidate as any).totalAll === 'number' ? (pageCandidate as any).totalAll : undefined,
+        page: typeof (pageCandidate as any).page === 'number' ? (pageCandidate as any).page : 1,
+        pageSize:
+          typeof (pageCandidate as any).pageSize === 'number' ? (pageCandidate as any).pageSize : 10,
+        totalPages:
+          typeof (pageCandidate as any).totalPages === 'number' ? (pageCandidate as any).totalPages : 0,
+      };
+
+      return {
+        page,
+        eventType:
+          typeof (parsed as any).event_type === 'string' ? (parsed as any).event_type : undefined,
+        version: typeof (parsed as any).v === 'number' ? (parsed as any).v : undefined,
+      };
     } catch {
       return null;
     }

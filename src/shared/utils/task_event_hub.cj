@@ -45,9 +45,11 @@ public class TaskEventHub {
 
     private let topicsMutex: Mutex = Mutex()
     private var topics: HashMap<Int64, TaskEventTopic>
+    private let listTopic: TaskEventTopic
 
     private init() {
         topics = HashMap<Int64, TaskEventTopic>()
+        listTopic = TaskEventTopic()
     }
 
     public static func getInstance(): TaskEventHub {
@@ -96,6 +98,36 @@ public class TaskEventHub {
         }
     }
 
+    public func currentListRevision(): Int64 {
+        listTopic.mutex.lock()
+        try {
+            listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
+            return listTopic.revision
+        } finally {
+            listTopic.mutex.unlock()
+        }
+    }
+
+    public func awaitListNext(lastRevision: Int64, timeoutMillis: Int64): TaskEventSnapshot {
+        listTopic.mutex.lock()
+        try {
+            listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
+            if (listTopic.revision != lastRevision) {
+                return TaskEventSnapshot(listTopic.revision, true, eventType: listTopic.lastEventType)
+            }
+
+            let waitMillis = if (timeoutMillis <= 0) { 1 } else { timeoutMillis }
+            let _ = listTopic.cond.waitUntil(
+                { => listTopic.revision != lastRevision },
+                timeout: Duration.millisecond * waitMillis
+            )
+            listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
+            return TaskEventSnapshot(listTopic.revision, listTopic.revision != lastRevision, eventType: listTopic.lastEventType)
+        } finally {
+            listTopic.mutex.unlock()
+        }
+    }
+
     public func publishTaskChanged(taskId: Int64): Unit {
         publish(taskId, "task_changed")
     }
@@ -134,6 +166,19 @@ public class TaskEventHub {
             topic.cond.notifyAll()
         } finally {
             topic.mutex.unlock()
+        }
+        publishList(eventType)
+    }
+
+    private func publishList(eventType: String): Unit {
+        listTopic.mutex.lock()
+        try {
+            listTopic.revision += 1
+            listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
+            listTopic.lastEventType = eventType
+            listTopic.cond.notifyAll()
+        } finally {
+            listTopic.mutex.unlock()
         }
     }
 

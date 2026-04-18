@@ -18,7 +18,7 @@ private func registerTaskPoolRoutesAt(router: App, basePath: String) {
 
     // ========== 任务管理API ==========
 
-    // 分页获取任务列表
+    // 任务列表 SSE 流（按筛选与分页聚合）
     taskpool.get("/tasks", { ctx =>
         TaskPoolController.getTasks(ctx)
     })
