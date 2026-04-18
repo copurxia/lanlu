@@ -235,7 +235,7 @@ public class MetadataPluginController {
                 ctx.json("{\"success\":0,\"error\":\"metadata plugin not found\"}")
                 return
             }
-            let previewTaskType = PluginTaskService.getRunnerTaskType(plugin)
+            let previewTaskType = PluginTaskService.getRunnerTaskType()
 
             // 预览/查询模式：直接跑具体插件任务，前端直接读取任务 output（不写库）
             let (oneshotOpt, extraParamsOpt) = splitParam(param)

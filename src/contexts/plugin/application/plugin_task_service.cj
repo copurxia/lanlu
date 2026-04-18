@@ -79,7 +79,7 @@ public class PluginTaskService {
         return isWasmEntry(plugin.entry)
     }
 
-    public static func getRunnerTaskType(plugin: PluginTaskData): String {
+    public static func getRunnerTaskType(): String {
         return "wasm_task"
     }
 

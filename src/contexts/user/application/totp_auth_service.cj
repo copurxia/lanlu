@@ -1,6 +1,5 @@
 package lanlu.contexts.user.application
 
-import std.io.{ByteBuffer, readToEnd}
 import std.time.*
 import stdx.encoding.json.stream.*
 import lanlu.contexts.user.infrastructure.persistence.*

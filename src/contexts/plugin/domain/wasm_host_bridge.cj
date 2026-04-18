@@ -214,25 +214,23 @@ public class WasmHostBridge {
         }
 
         let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, permissions, interactiveSelectEnabled)
-        var instance: Option<WasmEdgePluginInstance> = None
-        var inputAddr: Int32 = 0
 
         try {
             let created = WasmEdgePluginInstance(executionId, true)
-            let effectiveNamespace = if (pluginNamespace.trimAscii().size > 0) { pluginNamespace.trimAscii() } else { "_default" }
-            let runtimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), effectiveNamespace)
-            try { FileUtils.ensureDirectoryExists(Path(runtimeHostDir)) } catch (_: Exception) {}
-            created.initWasiPreopen("/plugin", runtimeHostDir)
-            created.loadValidateInstantiate(trimmedPath)
-            instance = Some(created)
-
-            try { let _ = created.executeI32_0("lanlu_plugin_result_len") } catch (_: Exception) {}
-            try { let _ = created.executeI32_0("lanlu_plugin_last_error") } catch (_: Exception) {}
-            try { let _ = created.executeI32_0("lanlu_plugin_last_error_len") } catch (_: Exception) {}
-
             let inputBytes = encodeUtf8(inputJson)
-            inputAddr = created.executeI32_1("lanlu_plugin_alloc", Int32(inputBytes.size))
+            var inputAddr: Int32 = 0
             try {
+                let effectiveNamespace = if (pluginNamespace.trimAscii().size > 0) { pluginNamespace.trimAscii() } else { "_default" }
+                let runtimeHostDir = FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), effectiveNamespace)
+                try { FileUtils.ensureDirectoryExists(Path(runtimeHostDir)) } catch (_: Exception) {}
+                created.initWasiPreopen("/plugin", runtimeHostDir)
+                created.loadValidateInstantiate(trimmedPath)
+
+                try { let _ = created.executeI32_0("lanlu_plugin_result_len") } catch (_: Exception) {}
+                try { let _ = created.executeI32_0("lanlu_plugin_last_error") } catch (_: Exception) {}
+                try { let _ = created.executeI32_0("lanlu_plugin_last_error_len") } catch (_: Exception) {}
+
+                inputAddr = created.executeI32_1("lanlu_plugin_alloc", Int32(inputBytes.size))
                 if (inputBytes.size > 0) {
                     created.writeMemory(UInt32(inputAddr), inputBytes)
                 }
@@ -264,15 +262,11 @@ public class WasmHostBridge {
                 if (inputAddr > 0) {
                     try { created.executeVoid_2("lanlu_plugin_free", inputAddr, Int32(inputBytes.size)) } catch (_: Exception) {}
                 }
+                try { created.destroy() } catch (_: Exception) {}
             }
         } catch (e: Exception) {
             return WasmExecutionResult(false, "", e.message)
         } finally {
-            match (instance) {
-                case Some(inst) =>
-                    try { inst.destroy() } catch (_: Exception) {}
-                case None => ()
-            }
             destroyExecutionState(executionId)
         }
     }
@@ -304,33 +298,31 @@ public class WasmHostBridge {
         }
 
         let executionId = createExecutionState(taskId, parentTaskId, pluginNamespace, permissions, interactiveSelectEnabled)
-        var instance: Option<WasmEdgePluginInstance> = None
-        var inputAddr: Int32 = 0
 
         try {
             let created = WasmEdgePluginInstance(executionId, enableWasi)
-            if (enableWasi) {
-                let effectiveNamespace = if (pluginNamespace.trimAscii().size > 0) { pluginNamespace.trimAscii() } else { "_default" }
-                let runtimeHostDir = if (wasiHostPath.trimAscii().size > 0) {
-                    wasiHostPath.trimAscii()
-                } else {
-                    FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), effectiveNamespace)
-                }
-                try { FileUtils.ensureDirectoryExists(Path(runtimeHostDir)) } catch (_: Exception) {}
-                let guest = if (wasiGuestPath.trimAscii().size > 0) { wasiGuestPath.trimAscii() } else { "/plugin" }
-                created.initWasiPreopen(guest, runtimeHostDir)
-            }
-            created.loadValidateInstantiate(trimmedPath)
-            instance = Some(created)
-
-            // Pre-warm zero-arg exports that are queried after plugin_run returns.
-            try { let _ = created.executeI32_0("lanlu_plugin_result_len") } catch (_: Exception) {}
-            try { let _ = created.executeI32_0("lanlu_plugin_last_error") } catch (_: Exception) {}
-            try { let _ = created.executeI32_0("lanlu_plugin_last_error_len") } catch (_: Exception) {}
-
             let inputBytes = encodeUtf8(inputJson)
-            inputAddr = created.executeI32_1("lanlu_plugin_alloc", Int32(inputBytes.size))
+            var inputAddr: Int32 = 0
             try {
+                if (enableWasi) {
+                    let effectiveNamespace = if (pluginNamespace.trimAscii().size > 0) { pluginNamespace.trimAscii() } else { "_default" }
+                    let runtimeHostDir = if (wasiHostPath.trimAscii().size > 0) {
+                        wasiHostPath.trimAscii()
+                    } else {
+                        FileUtils.joinPath(PluginPaths.getPluginRuntimeRoot(), effectiveNamespace)
+                    }
+                    try { FileUtils.ensureDirectoryExists(Path(runtimeHostDir)) } catch (_: Exception) {}
+                    let guest = if (wasiGuestPath.trimAscii().size > 0) { wasiGuestPath.trimAscii() } else { "/plugin" }
+                    created.initWasiPreopen(guest, runtimeHostDir)
+                }
+                created.loadValidateInstantiate(trimmedPath)
+
+                // Pre-warm zero-arg exports that are queried after plugin_run returns.
+                try { let _ = created.executeI32_0("lanlu_plugin_result_len") } catch (_: Exception) {}
+                try { let _ = created.executeI32_0("lanlu_plugin_last_error") } catch (_: Exception) {}
+                try { let _ = created.executeI32_0("lanlu_plugin_last_error_len") } catch (_: Exception) {}
+
+                inputAddr = created.executeI32_1("lanlu_plugin_alloc", Int32(inputBytes.size))
                 if (inputBytes.size > 0) {
                     created.writeMemory(UInt32(inputAddr), inputBytes)
                 }
@@ -361,15 +353,11 @@ public class WasmHostBridge {
                 if (inputAddr > 0) {
                     try { created.executeVoid_2("lanlu_plugin_free", inputAddr, Int32(inputBytes.size)) } catch (_: Exception) {}
                 }
+                try { created.destroy() } catch (_: Exception) {}
             }
         } catch (e: Exception) {
             return WasmExecutionResult(false, "", e.message)
         } finally {
-            match (instance) {
-                case Some(inst) =>
-                    try { inst.destroy() } catch (_: Exception) {}
-                case None => ()
-            }
             destroyExecutionState(executionId)
         }
     }
@@ -390,27 +378,24 @@ public class WasmHostBridge {
         }
 
         let executionId = createExecutionState(0, 0, "", "", false)
-        var instance: Option<WasmEdgePluginInstance> = None
 
         try {
             let created = WasmEdgePluginInstance(executionId, true)
-            created.loadValidateInstantiate(trimmedPath)
-            instance = Some(created)
-            let ptr = created.executeI32_0("lanlu_plugin_info")
-            let len = created.executeI32_0("lanlu_plugin_info_len")
-            if (ptr <= 0 || len <= 0) {
-                return (false, "", "plugin_info returned empty payload")
+            try {
+                created.loadValidateInstantiate(trimmedPath)
+                let ptr = created.executeI32_0("lanlu_plugin_info")
+                let len = created.executeI32_0("lanlu_plugin_info_len")
+                if (ptr <= 0 || len <= 0) {
+                    return (false, "", "plugin_info returned empty payload")
+                }
+                let json = decodeUtf8(created.readMemory(UInt32(ptr), UInt32(len)))
+                return (true, json, "")
+            } finally {
+                try { created.destroy() } catch (_: Exception) {}
             }
-            let json = decodeUtf8(created.readMemory(UInt32(ptr), UInt32(len)))
-            return (true, json, "")
         } catch (e: Exception) {
             return (false, "", e.message)
         } finally {
-            match (instance) {
-                case Some(inst) =>
-                    try { inst.destroy() } catch (_: Exception) {}
-                case None => ()
-            }
             destroyExecutionState(executionId)
         }
     }

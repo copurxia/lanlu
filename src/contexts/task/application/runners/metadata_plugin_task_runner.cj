@@ -80,7 +80,7 @@ public class MetadataPluginTaskRunner {
         // 生成 groupId 用于 KV store
         let groupId = "metadata_${taskId}_${DateTime.now().toUnixTimeStamp().toSeconds()}"
 
-        let pluginTaskType = PluginTaskService.getRunnerTaskType(plugin)
+        let pluginTaskType = PluginTaskService.getRunnerTaskType()
         TaskModel.updateTaskProgress(taskId, 10, "创建插件运行任务")
 
         let (oneshotOpt, extraParamsOpt) = splitParam(param)

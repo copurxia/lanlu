@@ -179,27 +179,6 @@ class WebauthnAuthenticateVerifyReq <: JsonDeserializable<WebauthnAuthenticateVe
     }
 }
 
-class WebauthnRevokeCredentialReq <: JsonDeserializable<WebauthnRevokeCredentialReq> {
-    var currentPassword: String = ""
-
-    public static func fromJson(r: JsonReader): WebauthnRevokeCredentialReq {
-        let out = WebauthnRevokeCredentialReq()
-        if (r.peek() != Some(BeginObject)) {
-            return out
-        }
-        r.startObject()
-        while (r.peek() != EndObject) {
-            let key = r.readName()
-            match (key) {
-                case "currentPassword" => out.currentPassword = r.readValue<String>()
-                case _ => r.skip()
-            }
-        }
-        r.endObject()
-        return out
-    }
-}
-
 class StoredRegistrationState <: JsonSerializable & JsonDeserializable<StoredRegistrationState> {
     var userId: Int64 = 0
     var challenge: String = ""
@@ -999,12 +978,6 @@ public class WebauthnController {
     }
 
     public static func revokeCredential(ctx: Ctx, userId: Int64): Unit {
-        let requestBody = ctx.bodyString()
-        let req = if (requestBody.trimAscii().size > 0) {
-            try { JsonCodec.decode<WebauthnRevokeCredentialReq>(requestBody) } catch (_: Exception) { WebauthnRevokeCredentialReq() }
-        } else {
-            WebauthnRevokeCredentialReq()
-        }
         if (!AuthSecurityHttpUtils.requireRecentStepUp(ctx, userId)) {
             return
         }

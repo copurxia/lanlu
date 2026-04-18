@@ -1,9 +1,7 @@
 package lanlu.contexts.user.infrastructure.persistence
 
-import std.collection.*
 import std.database.sql.*
 import lanlu.shared.config.*
-import lanlu.shared.utils.*
 
 public class UserTotpCredentialRow {
     public var id: Int64 = 0

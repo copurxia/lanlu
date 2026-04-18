@@ -67,7 +67,7 @@ public class DownloadUrlTaskRunner {
             // 生成 groupId 用于 KV store
             let groupId = "download_${taskId}_${DateTime.now().toUnixTimeStamp().toSeconds()}"
 
-            let runnerTaskType = PluginTaskService.getRunnerTaskType(plugin)
+            let runnerTaskType = PluginTaskService.getRunnerTaskType()
             let runnerLabel = "WASM"
             TaskModel.updateTaskProgress(taskId, 10, "创建 ${runnerLabel} 任务")
 

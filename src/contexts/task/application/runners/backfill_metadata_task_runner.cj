@@ -86,7 +86,7 @@ public class BackfillMetadataTaskRunner {
                             continue
                         }
 
-                        if (submitMetadataPluginChainTaskForTarget("tankoubon", autoTankId, namespaces, taskId, context)) {
+                        if (submitMetadataPluginChainTaskForTarget("tankoubon", autoTankId, namespaces, taskId)) {
                             submitted += 1
                             dispatchRequested = true
                             processedTanks.add(autoTankId)
@@ -97,7 +97,7 @@ public class BackfillMetadataTaskRunner {
                         continue
                     }
 
-                    if (submitMetadataPluginChainTaskForTarget("archive", archiveId, namespaces, taskId, context)) {
+                    if (submitMetadataPluginChainTaskForTarget("archive", archiveId, namespaces, taskId)) {
                         submitted += 1
                         dispatchRequested = true
                     } else {
@@ -191,7 +191,7 @@ public class BackfillMetadataTaskRunner {
         TaskRunnerOutput.fail(taskId, message)
     }
 
-    private static func submitMetadataPluginChainTaskForTarget(targetType: String, targetId: String, namespaces: Array<String>, taskId: Int64, context: TaskRunnerContext): Bool {
+    private static func submitMetadataPluginChainTaskForTarget(targetType: String, targetId: String, namespaces: Array<String>, taskId: Int64): Bool {
         let normalized = normalizeNamespaces(namespaces)
         if (normalized.size == 0) { return true }
 
@@ -201,7 +201,7 @@ public class BackfillMetadataTaskRunner {
             fallbackBuilder.add(normalized[i])
         }
         let fallback = fallbackBuilder.toArray()
-        return submitMetadataPluginTaskForTarget(targetType, targetId, firstNamespace, fallback, taskId, context)
+        return submitMetadataPluginTaskForTarget(targetType, targetId, firstNamespace, fallback, taskId)
     }
 
     private static func normalizeNamespaces(namespaces: Array<String>): Array<String> {
@@ -215,7 +215,7 @@ public class BackfillMetadataTaskRunner {
         return normalized.toArray()
     }
 
-    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, fallbackNamespaces: Array<String>, taskId: Int64, context: TaskRunnerContext): Bool {
+    private static func submitMetadataPluginTaskForTarget(targetType: String, targetId: String, namespace: String, fallbackNamespaces: Array<String>, taskId: Int64): Bool {
         try {
             let normalizedTargetType = targetType.trimAscii().toAsciiLower()
             let activeKey = "metadata_plugin:${normalizedTargetType}:${targetId}:${namespace.trimAscii().toAsciiLower()}"
