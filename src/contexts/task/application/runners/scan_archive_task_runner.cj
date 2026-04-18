@@ -223,6 +223,7 @@ public class ScanArchiveTaskRunner {
                 cachedMediaCount = mediaCount
                 cachedCoverEntry = coverEntry
             }
+            let resolvedCoverEntry = resolveThumbnailCoverEntry(filePath, archiveType, cachedCoverEntry)
 
             match (existingArchive) {
                 case Some(archive) =>
@@ -233,11 +234,11 @@ public class ScanArchiveTaskRunner {
                     }
 
                     if (archive.thumbhash.size == 0) {
-                        if (shouldSubmitThumbnailTask(archiveType, cachedCoverEntry, existingCoverAssetId: archive.cover_asset_id)) {
+                        if (shouldSubmitThumbnailTask(archiveType, resolvedCoverEntry, existingCoverAssetId: archive.cover_asset_id)) {
                             logger.debug("Thumbnail hash is empty, submitting thumbnail generation task for existing archive: ${archive.id}")
 
                             // 提交缩略图生成任务（异步）
-                            let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, cachedCoverEntry, notifier)
+                            let taskSubmitted = submitThumbnailTask(filePath, archive.id, archiveType, resolvedCoverEntry, notifier)
                             if (!taskSubmitted) {
                                 logger.error("Failed to submit thumbnail generation task for archive: ${archive.id}")
                             }
@@ -247,7 +248,7 @@ public class ScanArchiveTaskRunner {
                             return ProcessResultData(true, archive.id, "")
                         }
 
-                        logger.debug("Thumbnail hash is empty but local cover is not ready yet, deferring to metadata plugins",
+                        logger.debug("Thumbnail hash is empty but no local cover candidate is available, deferring to metadata plugins",
                             ("archive_id", archive.id), ("archive_type", archiveType))
                         submitArchiveMetadataTasks(archive.id, categoryInternalId, relativePath, dirFullPath, pluginNamespaces, notifier)
                         return ProcessResultData(true, archive.id, "")
@@ -293,14 +294,14 @@ public class ScanArchiveTaskRunner {
                 }
             }
 
-            if (shouldSubmitThumbnailTask(archiveType, cachedCoverEntry)) {
+            if (shouldSubmitThumbnailTask(archiveType, resolvedCoverEntry)) {
                 // 提交缩略图生成任务（异步）
-                let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, cachedCoverEntry, notifier)
+                let taskSubmitted = submitThumbnailTask(filePath, dbResult.archiveId, archiveType, resolvedCoverEntry, notifier)
                 if (!taskSubmitted) {
                     logger.error("Failed to submit thumbnail generation task for archive", [("archive_id", dbResult.archiveId)])
                 }
             } else {
-                logger.debug("Skip thumbnail generation until metadata plugin provides cover",
+                logger.debug("Skip thumbnail generation because no local cover candidate is available",
                     ("archive_id", dbResult.archiveId), ("archive_type", archiveType))
             }
 
@@ -349,6 +350,21 @@ public class ScanArchiveTaskRunner {
             return true
         }
         return existingCoverAssetId > 0
+    }
+
+    private static func resolveThumbnailCoverEntry(archivePath: String, archiveType: String, coverEntry: String): String {
+        let preferred = coverEntry.trimAscii()
+        if (archiveType.trimAscii() != "folder" || preferred.size > 0) {
+            return preferred
+        }
+
+        try {
+            let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+            let (entry, _) = handler.getFirstCoverEntry(archivePath)
+            return entry.trimAscii()
+        } catch (_: Exception) {
+            return ""
+        }
     }
 
     private static func submitArchiveMetadataTasks(archiveId: String, categoryInternalId: Int64, relativePath: String, dirFullPath: String, pluginNamespaces: Array<String>, notifier: TaskNotifier): Unit {

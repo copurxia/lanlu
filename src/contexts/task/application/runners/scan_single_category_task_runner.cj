@@ -228,12 +228,15 @@ public class ScanSingleCategoryTaskRunner {
                     // 已有缩略图，完全跳过
                     getLogger("scan_single_category").debug("Archive already exists with thumbnail, skipping: ${filePath}")
                     return false
-                } else if (shouldSubmitThumbnailTask(archiveType, coverEntry, archive.cover_asset_id)) {
+                }
+
+                let resolvedCoverEntry = resolveThumbnailCoverEntry(filePath, archiveType, coverEntry)
+                if (shouldSubmitThumbnailTask(archiveType, resolvedCoverEntry, archive.cover_asset_id)) {
                     // 档案存在但缺少缩略图，直接提交缩略图生成任务
                     getLogger("scan_single_category").debug("Archive exists but no thumbnail, submitting thumbnail task: ${filePath}")
-                    return submitThumbnailTaskDirectly(filePath, archive.id, archiveType, ctx, coverEntry)
+                    return submitThumbnailTaskDirectly(filePath, archive.id, archiveType, ctx, resolvedCoverEntry)
                 }
-                getLogger("scan_single_category").debug("Archive exists but local cover is not ready, creating scan_archive task: ${filePath}")
+                getLogger("scan_single_category").debug("Archive exists but no local cover candidate is available, creating scan_archive task: ${filePath}")
             case None =>
                 // 档案不存在，创建 scan_archive 任务进行完整处理
                 getLogger("scan_single_category").debug("Archive not found, creating scan_archive task: ${filePath}")
@@ -320,6 +323,21 @@ public class ScanSingleCategoryTaskRunner {
             return true
         }
         return existingCoverAssetId > 0
+    }
+
+    private static func resolveThumbnailCoverEntry(filePath: String, archiveType: String, coverEntry: String): String {
+        let preferred = coverEntry.trimAscii()
+        if (archiveType.trimAscii() != "folder" || preferred.size > 0) {
+            return preferred
+        }
+
+        try {
+            let handler = ArchiveHandlerFactory.getInstance().getHandlerByType(archiveType)
+            let (entry, _) = handler.getFirstCoverEntry(filePath)
+            return entry.trimAscii()
+        } catch (_: Exception) {
+            return ""
+        }
     }
 
     private static func submitThumbnailTaskDirectly(filePath: String, archiveId: String, archiveType: String, ctx: ScanContext, coverEntry: String): Bool {
