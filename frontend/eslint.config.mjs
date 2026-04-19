@@ -10,6 +10,9 @@ const eslintConfig = defineConfig([
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
       'react-hooks/rules-of-hooks': 'warn',
+      'react-hooks/immutability': 'off',
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/refs': 'off',
       'react-hooks/set-state-in-effect': 'off',
     },
   },

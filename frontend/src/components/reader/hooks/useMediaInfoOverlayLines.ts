@@ -1,4 +1,3 @@
-/* eslint-disable react-hooks/refs */
 import { useMemo, useRef } from 'react';
 import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
 import {

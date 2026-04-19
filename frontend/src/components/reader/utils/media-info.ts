@@ -46,7 +46,8 @@ export function getApproxResourceBytes(resourceUrl: string) {
   try {
     const entries = performance.getEntriesByName(resourceUrl) as PerformanceEntry[];
     const resourceEntries = entries.filter((entry) => entry.entryType === 'resource') as PerformanceResourceTiming[];
-    const latest = resourceEntries.sort((a, b) => a.startTime - b.startTime).at(-1);
+    const sortedEntries = resourceEntries.sort((a, b) => a.startTime - b.startTime);
+    const latest = sortedEntries[sortedEntries.length - 1];
     if (!latest) return null;
     const bytes = latest.transferSize || latest.encodedBodySize || latest.decodedBodySize;
     return bytes && bytes > 0 ? bytes : null;
@@ -61,7 +62,8 @@ export function getLatestResourceTiming(resourceUrl: string) {
   try {
     const entries = performance.getEntriesByName(resourceUrl) as PerformanceEntry[];
     const resourceEntries = entries.filter((entry) => entry.entryType === 'resource') as PerformanceResourceTiming[];
-    const latest = resourceEntries.sort((a, b) => a.startTime - b.startTime).at(-1);
+    const sortedEntries = resourceEntries.sort((a, b) => a.startTime - b.startTime);
+    const latest = sortedEntries[sortedEntries.length - 1];
     return latest || null;
   } catch {
     return null;
@@ -108,4 +110,3 @@ export function getLastPathSegment(url: string) {
     return parts?.[parts.length - 1] || url;
   }
 }
-
