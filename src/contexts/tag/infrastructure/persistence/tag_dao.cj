@@ -1503,6 +1503,95 @@ public class TagDao {
         return queried
     }
 
+    /**
+     * 批量根据翻译文本查找标签（使用已有连接）
+     * 返回 raw searchTerm -> 匹配标签列表 的映射。
+     */
+    public static func batchFindTagsByTranslationWithConn(conn: Connection, searchTerms: Array<String>): HashMap<String, ArrayList<String>> {
+        let result = HashMap<String, ArrayList<String>>()
+        if (searchTerms.size == 0) {
+            return result
+        }
+
+        let normalizedToRawTerms = HashMap<String, ArrayList<String>>()
+        let orderedNormalizedTerms = ArrayList<String>()
+        for (rawSearchTerm in searchTerms) {
+            let raw = rawSearchTerm.trimAscii()
+            if (raw.size == 0) {
+                continue
+            }
+            let normalized = normalizeTranslationSearchTerm(raw)
+            if (normalized.size == 0) {
+                continue
+            }
+
+            match (normalizedToRawTerms.get(normalized)) {
+                case Some(existing) =>
+                    var duplicated = false
+                    for (term in existing) {
+                        if (term == raw) {
+                            duplicated = true
+                            break
+                        }
+                    }
+                    if (!duplicated) {
+                        existing.add(raw)
+                    }
+                case None =>
+                    let terms = ArrayList<String>()
+                    terms.add(raw)
+                    normalizedToRawTerms[normalized] = terms
+                    orderedNormalizedTerms.add(normalized)
+            }
+        }
+
+        if (orderedNormalizedTerms.size == 0) {
+            return result
+        }
+
+        let cacheVersion = DerivedCacheUtils.getTagTranslationSearchVersion()
+        let normalizedMatches = HashMap<String, ArrayList<String>>()
+        let uncachedNormalizedTerms = ArrayList<String>()
+        for (normalized in orderedNormalizedTerms) {
+            let cacheKey = buildTranslationSearchCacheKey(cacheVersion, normalized)
+            match (readTranslationSearchCache(cacheKey)) {
+                case Some(cached) =>
+                    normalizedMatches[normalized] = cached
+                case None =>
+                    uncachedNormalizedTerms.add(normalized)
+            }
+        }
+
+        if (uncachedNormalizedTerms.size > 0) {
+            let queried = queryTagsByTranslationsWithConn(conn, uncachedNormalizedTerms.toArray())
+            for (normalized in uncachedNormalizedTerms) {
+                let matches = match (queried.get(normalized)) {
+                    case Some(found) => found
+                    case None => ArrayList<String>()
+                }
+                let cacheKey = buildTranslationSearchCacheKey(cacheVersion, normalized)
+                writeTranslationSearchCache(cacheKey, matches)
+                normalizedMatches[normalized] = matches
+            }
+        }
+
+        for (normalized in orderedNormalizedTerms) {
+            let matches = match (normalizedMatches.get(normalized)) {
+                case Some(found) => found
+                case None => ArrayList<String>()
+            }
+            match (normalizedToRawTerms.get(normalized)) {
+                case Some(rawTerms) =>
+                    for (raw in rawTerms) {
+                        result[raw] = matches
+                    }
+                case None => ()
+            }
+        }
+
+        return result
+    }
+
     public static func bumpTranslationSearchCacheVersion(): Int64 {
         return DerivedCacheUtils.bumpTagTranslationSearchVersion("tag_dao")
     }
@@ -1589,6 +1678,92 @@ public class TagDao {
         } catch (e: Exception) {
             getLogger("tag_dao").error("根据翻译查找标签失败", ("error", e.message), ("searchTerm", normalizedSearchTerm))
         }
+        return result
+    }
+
+    private static func queryTagsByTranslationsWithConn(conn: Connection, normalizedSearchTerms: Array<String>): HashMap<String, ArrayList<String>> {
+        let result = HashMap<String, ArrayList<String>>()
+        if (normalizedSearchTerms.size == 0) {
+            return result
+        }
+
+        let uniqueTerms = ArrayList<String>()
+        let seenTerms = HashMap<String, Bool>()
+        for (normalizedSearchTerm in normalizedSearchTerms) {
+            let normalized = normalizeTranslationSearchTerm(normalizedSearchTerm)
+            if (normalized.size == 0 || seenTerms.contains(normalized)) {
+                continue
+            }
+            seenTerms[normalized] = true
+            uniqueTerms.add(normalized)
+            result[normalized] = ArrayList<String>()
+        }
+
+        if (uniqueTerms.size == 0) {
+            return result
+        }
+
+        try {
+            let unaccentFunction = getUnaccentFunction(conn)
+            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+            let searchExpr = wrapSearchExpr("translations::text", unaccentFunction)
+            let subqueries = ArrayList<String>()
+            for (_term in uniqueTerms) {
+                subqueries.add("SELECT ? AS matched_term, namespace, name FROM tags WHERE ${searchExpr} ILIKE ${patternExpr} LIMIT 200")
+            }
+            let sql = String.join(subqueries.toArray(), delimiter: " UNION ALL ")
+            let stmt = conn.prepareStatement(sql)
+            try {
+                var index = 0
+                for (normalized in uniqueTerms) {
+                    stmt.set(index, normalized)
+                    stmt.set(index + 1, "%" + normalized + "%")
+                    index += 2
+                }
+                let rs = stmt.query()
+                try {
+                    let seenByTerm = HashMap<String, HashMap<String, Bool>>()
+                    while (rs.next()) {
+                        let matchedTerm = rs.getOrNull<String>(0) ?? ""
+                        let namespace = rs.getOrNull<String>(1) ?? ""
+                        let name = rs.getOrNull<String>(2) ?? ""
+                        let fullName = if (namespace.size > 0) { "${namespace}:${name}" } else { name }
+                        if (matchedTerm.size == 0 || fullName.size == 0) {
+                            continue
+                        }
+
+                        let seenForTerm = match (seenByTerm.get(matchedTerm)) {
+                            case Some(existing) => existing
+                            case None =>
+                                let created = HashMap<String, Bool>()
+                                seenByTerm[matchedTerm] = created
+                                created
+                        }
+                        if (seenForTerm.contains(fullName)) {
+                            continue
+                        }
+                        seenForTerm[fullName] = true
+
+                        match (result.get(matchedTerm)) {
+                            case Some(matches) => matches.add(fullName)
+                            case None =>
+                                let matches = ArrayList<String>()
+                                matches.add(fullName)
+                                result[matchedTerm] = matches
+                        }
+                    }
+                } finally {
+                    rs.close()
+                }
+            } finally {
+                stmt.close()
+            }
+        } catch (_: Exception) {
+            for (normalized in uniqueTerms) {
+                result[normalized] = queryTagsByTranslationWithConn(conn, normalized)
+            }
+        }
+
         return result
     }
 

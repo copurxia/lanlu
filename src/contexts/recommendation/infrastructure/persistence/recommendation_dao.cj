@@ -663,25 +663,32 @@ public class RecommendationDao {
             case None => return false
             case Some(conn) =>
                 try {
-                    let stmt = conn.prepareStatement("""
+                    let valueClauses = ArrayList<String>()
+                    for (_row in rows) {
+                        valueClauses.add("(?, ?, ?, ?, ?, ?, ?, ?)")
+                    }
+                    let sql = """
                         INSERT INTO recommendation_impressions (
                             user_id, session_key, scene, seed_entity_type, seed_entity_id,
                             item_type, item_id, position
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """)
+                        VALUES ${String.join(valueClauses.toArray(), delimiter: ", ")}
+                    """
+                    let stmt = conn.prepareStatement(sql)
                     try {
+                        var index = 0
                         for (row in rows) {
-                            stmt.set(0, row.userId)
-                            stmt.set(1, row.sessionKey)
-                            stmt.set(2, row.scene)
-                            stmt.set(3, row.seedEntityType)
-                            stmt.set(4, row.seedEntityId)
-                            stmt.set(5, row.itemType)
-                            stmt.set(6, row.itemId)
-                            stmt.set(7, row.position)
-                            let _ = stmt.update()
+                            stmt.set(index, row.userId)
+                            stmt.set(index + 1, row.sessionKey)
+                            stmt.set(index + 2, row.scene)
+                            stmt.set(index + 3, row.seedEntityType)
+                            stmt.set(index + 4, row.seedEntityId)
+                            stmt.set(index + 5, row.itemType)
+                            stmt.set(index + 6, row.itemId)
+                            stmt.set(index + 7, row.position)
+                            index += 8
                         }
+                        let _ = stmt.update()
                     } finally {
                         stmt.close()
                     }

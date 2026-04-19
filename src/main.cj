@@ -84,6 +84,7 @@ main(): Int64 {
     MigrationRegistry.register(V021_UserTokensSecurityMetadata())
     MigrationRegistry.register(V022_UserPasswordHashArgon2id())
     MigrationRegistry.register(V023_PluginHooksReplaceLoginFrom())
+    MigrationRegistry.register(V024_SearchAndRecommendationHotPathIndexes())
     ExtensionMigrationRegistry.register(X013_PgTrgmCurrentState())
     ExtensionMigrationRegistry.register(X013_UnaccentCurrentState())
     let migrationsOk = MigrationRunner.runPendingMigrations()
