@@ -100,8 +100,7 @@ export class TaskPollerErrorBoundary extends Component<
     this.state = { hasError: false, retryCount: 0 };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  static getDerivedStateFromError(_error: Error): Partial<TaskPollerErrorBoundaryState> {
+  static getDerivedStateFromError(): Partial<TaskPollerErrorBoundaryState> {
     return { hasError: true };
   }
 

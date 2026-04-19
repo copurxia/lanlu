@@ -30,7 +30,14 @@ function LoginForm() {
   const LOGIN_USERNAME_STORAGE_KEY = 'lanlu.login.username';
 
   const [mode, setMode] = useState<'account' | 'passkey'>('account');
-  const [username, setUsername] = useState('');
+  const [username, setUsername] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return window.localStorage.getItem(LOGIN_USERNAME_STORAGE_KEY) || '';
+    } catch {
+      return '';
+    }
+  });
   const [password, setPassword] = useState('');
   const [totpChallengeId, setTotpChallengeId] = useState('');
   const [totpCode, setTotpCode] = useState('');
@@ -50,16 +57,6 @@ function LoginForm() {
   // If login fails and the user refreshes, restore the last attempted username.
   useEffect(() => {
     setPasskeySupported(WebauthnAuthService.isSupported());
-  }, []);
-
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(LOGIN_USERNAME_STORAGE_KEY);
-      if (saved && !username) setUsername(saved);
-    } catch {
-      // Ignore storage access errors (private mode, disabled storage, etc).
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const isPendingTotp = (data: unknown): data is AuthLoginPendingTotp => {

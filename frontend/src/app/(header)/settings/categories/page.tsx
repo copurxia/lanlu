@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -88,11 +88,14 @@ export default function CategoriesSettingsPage() {
     }
   };
 
-  useEffect(() => {
+  const syncCategoriesForCurrentFilters = useEffectEvent(() => {
     if (isAuthenticated) {
       void loadCategories();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+
+  useEffect(() => {
+    syncCategoriesForCurrentFilters();
   }, [isAuthenticated, searchQuery, enabledFilter]);
 
   // Load metadata plugins

@@ -7,12 +7,12 @@ const eslintConfig = defineConfig([
   ...nextTs,
   globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts']),
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'error',
+    },
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
-      'react-hooks/rules-of-hooks': 'warn',
       'react-hooks/immutability': 'off',
-      'react-hooks/preserve-manual-memoization': 'off',
-      'react-hooks/refs': 'off',
       'react-hooks/set-state-in-effect': 'off',
     },
   },

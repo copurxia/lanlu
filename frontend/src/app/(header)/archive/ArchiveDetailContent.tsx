@@ -97,20 +97,23 @@ export function ArchiveDetailContent() {
     archiveId: id,
   });
 
+  const metadataTags = metadata?.tags;
+  const metadataPageCount = typeof metadata?.pagecount === 'number' ? metadata.pagecount : 0;
+  const metadataProgress = typeof metadata?.progress === 'number' ? metadata.progress : 0;
+  const metadataArcid = metadata?.arcid;
+
   const tags = useMemo(() => {
-    return Array.isArray(metadata?.tags)
-      ? metadata.tags.map((tag) => String(tag || '').trim()).filter(Boolean)
+    return Array.isArray(metadataTags)
+      ? metadataTags.map((tag) => String(tag || '').trim()).filter(Boolean)
       : [];
-  }, [metadata?.tags]);
+  }, [metadataTags]);
 
   const progressPercent = useMemo(() => {
-    const pagecount = typeof metadata?.pagecount === 'number' ? metadata.pagecount : 0;
-    const progress = typeof metadata?.progress === 'number' ? metadata.progress : 0;
-    if (!pagecount || !progress) return 0;
-    return Math.max(0, Math.min(100, Math.round((progress / pagecount) * 100)));
-  }, [metadata?.pagecount, metadata?.progress]);
+    if (!metadataPageCount || !metadataProgress) return 0;
+    return Math.max(0, Math.min(100, Math.round((metadataProgress / metadataPageCount) * 100)));
+  }, [metadataPageCount, metadataProgress]);
   const isTvArchive = useMemo(() => isTvArchiveMetadata(metadata), [metadata]);
-  const tvMetaSummary = useMemo(() => getTvMetaSummary(metadata?.tags), [metadata?.tags]);
+  const tvMetaSummary = useMemo(() => getTvMetaSummary(metadataTags), [metadataTags]);
 
   // metadata.tags can be translated by backend (via ?lang=).
   // Build a reverse map so hover/click can still target the canonical tag stored in DB.
@@ -195,7 +198,7 @@ export function ArchiveDetailContent() {
   }, [favoriteLoading, id, isFavorite, setIsFavorite]);
 
   useEffect(() => {
-    if (!metadata?.arcid) {
+    if (!metadataArcid) {
       setRelatedArchives([]);
       setRelatedLoading(false);
       return;
@@ -204,7 +207,7 @@ export function ArchiveDetailContent() {
     let cancelled = false;
     setRelatedLoading(true);
 
-    void RecommendationService.getArchiveRelated(metadata.arcid, { count: 12, lang: language })
+    void RecommendationService.getArchiveRelated(metadataArcid, { count: 12, lang: language })
       .then((items) => {
         if (!cancelled) {
           setRelatedArchives(items);
@@ -225,20 +228,20 @@ export function ArchiveDetailContent() {
     return () => {
       cancelled = true;
     };
-  }, [language, metadata?.arcid]);
+  }, [language, metadataArcid]);
 
   const trackRelatedInteraction = useCallback(async (
     interactionType: 'click' | 'open_reader' | 'favorite',
     itemType: RecommendationItemType,
     itemId: string
   ) => {
-    if (!metadata?.arcid) return;
+    if (!metadataArcid) return;
 
     try {
       await RecommendationService.recordInteraction({
         scene: 'archive_related',
         seed_entity_type: 'archive',
-        seed_entity_id: metadata.arcid,
+        seed_entity_id: metadataArcid,
         item_type: itemType,
         item_id: itemId,
         interaction_type: interactionType,
@@ -246,7 +249,7 @@ export function ArchiveDetailContent() {
     } catch (err) {
       logger.apiError(`track archive related ${interactionType}`, err);
     }
-  }, [metadata?.arcid]);
+  }, [metadataArcid]);
 
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);

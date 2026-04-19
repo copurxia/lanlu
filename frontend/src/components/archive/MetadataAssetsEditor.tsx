@@ -2,6 +2,7 @@
 
 import { Image as ImageIcon, ImagePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { RawImage } from '@/components/ui/raw-image';
 
 type Props = {
   t: (key: string) => string;
@@ -72,8 +73,7 @@ export function MetadataAssetsEditor({
       <div className="relative h-40 sm:h-44">
         <div className="absolute inset-0 group/backdrop">
           {backdropPreviewUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <RawImage
               src={backdropPreviewUrl}
               alt={t('archive.assetBackdropLabel')}
               className="absolute inset-0 h-full w-full object-cover"
@@ -106,8 +106,7 @@ export function MetadataAssetsEditor({
         <div className="absolute left-4 bottom-4 z-10 group/cover">
           <div className="h-28 w-20 sm:h-32 sm:w-24 rounded-lg border-2 border-white/80 bg-muted/40 shadow-xl overflow-hidden flex items-center justify-center">
             {coverPreviewUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
+              <RawImage
                 src={coverPreviewUrl}
                 alt={t('archive.assetCoverLabel')}
                 className="h-full w-full object-cover"
@@ -132,8 +131,7 @@ export function MetadataAssetsEditor({
 
         <div className="absolute left-28 sm:left-32 right-4 bottom-6 z-10 h-24 sm:h-28 px-3 flex items-center justify-center rounded-md group/clearlogo">
           {clearlogoPreviewUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+            <RawImage
               src={clearlogoPreviewUrl}
               alt={t('archive.assetClearlogoLabel')}
               className="max-h-16 sm:max-h-20 max-w-full object-contain"

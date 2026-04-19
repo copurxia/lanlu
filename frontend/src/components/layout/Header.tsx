@@ -23,6 +23,7 @@ import { useServerInfo } from '@/contexts/ServerInfoContext';
 import { Logo } from '@/components/brand/Logo';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { RawImage } from '@/components/ui/raw-image';
 
 function HeaderPageClearlogo({
   pathname,
@@ -81,8 +82,7 @@ function HeaderPageClearlogo({
 
   return (
     <span className="flex h-5 max-w-[110px] shrink-0 items-center sm:h-6 sm:max-w-[150px] md:h-7 md:max-w-none">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <RawImage
         src={pageClearlogoUrl}
         alt={pageClearlogoAlt || 'clearlogo'}
         className="h-full w-auto max-w-full object-contain"

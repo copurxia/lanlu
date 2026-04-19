@@ -1936,7 +1936,6 @@ function ReaderContent() {
       const pageIndex = lane.mediaPageIndex ?? -1;
       const page = pageIndex >= 0 ? pages[pageIndex] : undefined;
       const effectivePage = pageIndex >= 0 ? effectivePages[pageIndex] : undefined;
-      const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
       const snapshot = pageIndex >= 0 ? videoTimelineByPageIndex[pageIndex] : undefined;
       const sourceLabels = page ? buildSourceOptionLabels(page) : [];
       const sourceOptions = page?.sources?.map((_, sourceIndex) => ({
@@ -1952,15 +1951,11 @@ function ReaderContent() {
         : undefined;
       const activeSourceIndex = pageIndex >= 0 ? currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0 : 0;
       const activeSubtitleIndexes = pageIndex >= 0 ? currentSubtitleIndexByPageIndex[pageIndex] ?? [] : [];
-      const currentTime =
-        snapshot?.currentTime ??
-        (videoElement && Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0);
-      const duration =
-        snapshot?.duration ??
-        (videoElement && Number.isFinite(videoElement.duration) && videoElement.duration > 0 ? videoElement.duration : 0);
-      const isPlaying = snapshot ? !snapshot.paused : Boolean(videoElement && !videoElement.paused);
-      const isMuted = snapshot?.muted ?? Boolean(videoElement?.muted);
-      const volume = snapshot?.volume ?? (videoElement && Number.isFinite(videoElement.volume) ? videoElement.volume : 1);
+      const currentTime = snapshot?.currentTime ?? 0;
+      const duration = snapshot?.duration ?? 0;
+      const isPlaying = snapshot ? !snapshot.paused : false;
+      const isMuted = snapshot?.muted ?? false;
+      const volume = snapshot?.volume ?? 1;
       const buffered = snapshot?.buffered ?? 0;
       const max = duration > 0 ? duration : 1;
 
@@ -1980,6 +1975,7 @@ function ReaderContent() {
         step: 0.1,
         valueText: `${formatVideoClock(currentTime)}/${formatVideoClock(duration)}`,
         onChange: (nextValue: number) => {
+          const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
           if (!videoElement) return;
           const clamped = Math.max(0, Math.min(max, nextValue));
           videoElement.currentTime = clamped;
@@ -2006,6 +2002,7 @@ function ReaderContent() {
         onSourceChange: (nextSourceIndex: number) => handleChangePageSource(pageIndex, nextSourceIndex),
         onSubtitleChange: (nextSubtitleIndex: number) => handleChangePageSubtitle(pageIndex, nextSubtitleIndex),
         onTogglePlay: () => {
+          const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
           if (!videoElement) return;
           if (videoElement.paused) {
             void videoElement.play().catch(() => {});
@@ -2014,16 +2011,19 @@ function ReaderContent() {
           }
         },
         onSeekRelative: (deltaSeconds: number) => {
+          const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
           if (!videoElement) return;
           const current = Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0;
           const target = Math.max(0, Math.min(max, current + deltaSeconds));
           videoElement.currentTime = target;
         },
         onToggleMute: () => {
+          const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
           if (!videoElement) return;
           videoElement.muted = !videoElement.muted;
         },
         onVolumeChange: (nextVolume: number) => {
+          const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
           if (!videoElement) return;
           const target = Math.max(0, Math.min(1, nextVolume));
           videoElement.volume = target;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { TagService } from '@/lib/services/tag-service';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
+import { RawImage } from '@/components/ui/raw-image';
 
 interface TagItem {
   id: number;
@@ -136,12 +137,15 @@ export default function TagsSettingsPage() {
     }
   };
 
-  useEffect(() => {
+  const syncTagsForCurrentFilters = useEffectEvent(() => {
     if (isAuthenticated) {
       void loadTags();
       void loadNamespaces();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+
+  useEffect(() => {
+    syncTagsForCurrentFilters();
   }, [isAuthenticated, currentPage, searchQuery, selectedNamespace]);
 
   const handleCreateTag = async () => {
@@ -558,8 +562,7 @@ export default function TagsSettingsPage() {
                       title={t('settings.tagChangeIcon')}
                     >
                       {tag.iconAssetId ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
+                        <RawImage
                           src={`/api/assets/${tag.iconAssetId}`}
                           alt={`${tag.namespace}:${tag.name}`}
                           className="h-full w-full object-cover"
@@ -853,8 +856,7 @@ function TagDialog({
                   <div className="absolute -bottom-6 left-3">
                     <div className="h-12 w-12 rounded-md border-2 border-background bg-muted/30 overflow-hidden shadow-sm flex items-center justify-center">
                       {editingTag.iconAssetId ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
+                        <RawImage
                           src={`/api/assets/${editingTag.iconAssetId}`}
                           alt={`${editingTag.namespace}:${editingTag.name}`}
                           className="h-full w-full object-cover"

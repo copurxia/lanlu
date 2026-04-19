@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -147,18 +147,20 @@ export default function AuthSettingsPage() {
     setPasskeySupported(WebauthnAuthService.isSupported());
   }, []);
 
+  const syncAuthSecurityData = useEffectEvent(async () => {
+    if (!isAuthenticated) return;
+
+    try {
+      await refreshMe();
+    } catch {
+      // ignore
+    }
+
+    await Promise.all([loadTokens(), loadSessions(), loadPasskeys(), loadTotpStatus()]);
+  });
+
   useEffect(() => {
-    void (async () => {
-      if (isAuthenticated) {
-        try {
-          await refreshMe();
-        } catch {
-          // ignore
-        }
-        await Promise.all([loadTokens(), loadSessions(), loadPasskeys(), loadTotpStatus()]);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void syncAuthSecurityData();
   }, [isAuthenticated, passkeySupported]);
 
   const handleSave = async () => {
@@ -539,11 +541,14 @@ export default function AuthSettingsPage() {
   const [avatarPreview100El, setAvatarPreview100El] = useState<HTMLCanvasElement | null>(null);
   const [avatarPreview50El, setAvatarPreview50El] = useState<HTMLCanvasElement | null>(null);
 
-  useEffect(() => {
+  const syncAvatarPreviews = useEffectEvent(() => {
     if (avatarCanvasEl) renderAvatarPreview(avatarCanvasEl);
     if (avatarPreview100El) renderAvatarPreview(avatarPreview100El);
     if (avatarPreview50El) renderAvatarPreview(avatarPreview50El);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+
+  useEffect(() => {
+    syncAvatarPreviews();
   }, [avatarCanvasEl, avatarPreview100El, avatarPreview50El, avatarUrl, avatarZoom, avatarPan, avatarNaturalSize]);
 
   const exportAvatarAsFile = async (): Promise<File> => {

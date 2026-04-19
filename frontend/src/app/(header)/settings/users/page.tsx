@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -70,11 +70,14 @@ export default function UsersSettingsPage() {
     }
   };
 
-  useEffect(() => {
+  const syncUsersOnAuthChange = useEffectEvent(() => {
     if (isAuthenticated) {
       void loadUsers();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+
+  useEffect(() => {
+    syncUsersOnAuthChange();
   }, [isAuthenticated]);
 
   const handleCreateUser = async () => {

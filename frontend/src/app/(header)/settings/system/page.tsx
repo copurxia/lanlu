@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useEffectEvent, useRef } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { logger } from '@/lib/utils/logger';
 import { Button } from '@/components/ui/button';
@@ -65,6 +65,17 @@ export default function SystemSettingsPage() {
     showErrorRef.current = showError;
   }, [t, showError]);
 
+  function groupSettingsByCategory(settings: SystemSetting[]): SettingsByCategory {
+    const grouped: SettingsByCategory = {};
+    settings.forEach(setting => {
+      if (!grouped[setting.category]) {
+        grouped[setting.category] = [];
+      }
+      grouped[setting.category].push(setting);
+    });
+    return grouped;
+  }
+
   const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
@@ -88,24 +99,16 @@ export default function SystemSettingsPage() {
   // 使用防抖避免频繁调用
   const debouncedLoadSettings = useDebounceCallback(loadSettings, 300);
 
-  // 初始加载 - 只在 isAuthenticated 变化时执行一次
-  useEffect(() => {
+  const scheduleSettingsLoad = useEffectEvent(() => {
     if (typeof window !== 'undefined' && isAuthenticated) {
       debouncedLoadSettings();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated]);
+  });
 
-  const groupSettingsByCategory = (settings: SystemSetting[]): SettingsByCategory => {
-    const grouped: SettingsByCategory = {};
-    settings.forEach(setting => {
-      if (!grouped[setting.category]) {
-        grouped[setting.category] = [];
-      }
-      grouped[setting.category].push(setting);
-    });
-    return grouped;
-  };
+  // 初始加载 - 只在 isAuthenticated 变化时执行一次
+  useEffect(() => {
+    scheduleSettingsLoad();
+  }, [isAuthenticated]);
 
   const handleValueChange = (category: string, key: string, value: string) => {
     setSettings(prev => ({

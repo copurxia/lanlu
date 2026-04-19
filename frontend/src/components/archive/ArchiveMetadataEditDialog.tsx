@@ -8,6 +8,7 @@ import { TagInput } from '@/components/ui/tag-input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MetadataAssetsEditor } from '@/components/archive/MetadataAssetsEditor';
+import { RawImage } from '@/components/ui/raw-image';
 import type { Plugin } from '@/lib/services/plugin-service';
 export type { RpcSelectOption, RpcSelectRequest } from '@/types/metadata-plugin';
 import type { RpcSelectRequest } from '@/types/metadata-plugin';
@@ -266,10 +267,9 @@ export function ArchiveMetadataEditDialog({
                       className="w-full h-auto py-3 px-3 flex-col items-start gap-1 text-left whitespace-normal"
                       onClick={() => rpcSelect.onSelectIndex(opt.index)}
                     >
-                      <div className="flex w-full items-start gap-3">
-                        {opt.cover ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
+                        <div className="flex w-full items-start gap-3">
+                          {opt.cover ? (
+                          <RawImage
                             src={opt.cover}
                             alt={opt.label || `候选 ${opt.index + 1}`}
                             className="w-20 h-28 shrink-0 object-cover rounded border"

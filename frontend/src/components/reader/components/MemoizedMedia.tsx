@@ -1,6 +1,6 @@
-/* eslint-disable @next/next/no-img-element */
 import { memo, forwardRef } from 'react';
 import type React from 'react';
+import { RawImage } from '@/components/ui/raw-image';
 
 type ImgFetchPriority = 'high' | 'low' | 'auto';
 
@@ -14,7 +14,7 @@ export const MemoizedImage = memo(
     ref: React.ForwardedRef<HTMLImageElement>
   ) {
     return (
-      <img
+      <RawImage
         ref={ref}
         src={src}
         alt={alt}

@@ -503,8 +503,10 @@ function TankoubonDetailContent() {
   }, [language, tankoubonId, toCanonicalTag]);
 
   // Fetch archives in tankoubon
+  const currentTankoubonId = tankoubon?.tankoubon_id ?? null;
+
   const fetchArchives = useCallback(async () => {
-    if (!tankoubon?.tankoubon_id) {
+    if (!currentTankoubonId) {
       setArchives([]);
       return;
     }
@@ -512,7 +514,7 @@ function TankoubonDetailContent() {
     try {
       setArchivesLoading(true);
       const result = await ArchiveService.search({
-        tankoubon_id: tankoubon.tankoubon_id,
+        tankoubon_id: currentTankoubonId,
         sortby: 'tank_order',
         order: 'asc',
         page: 1,
@@ -529,7 +531,7 @@ function TankoubonDetailContent() {
     } finally {
       setArchivesLoading(false);
     }
-  }, [tankoubon?.tankoubon_id, language]);
+  }, [currentTankoubonId, language]);
 
   useEffect(() => {
     fetchTankoubon();
