@@ -103,7 +103,7 @@ function LibraryPageContent() {
         }
 
         const combined = [...archives, ...tankoubons].sort(
-          (a, b) => timeToMs((b as any).favoritetime) - timeToMs((a as any).favoritetime)
+          (a, b) => timeToMs(b.favoritetime) - timeToMs(a.favoritetime)
         );
 
         setFavoriteItems(combined);
@@ -335,7 +335,7 @@ function LibraryPageContent() {
                         <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
                         <Badge variant="secondary">{group.archives.length}</Badge>
                       </div>
-                      <ArchiveGrid archives={group.archives as any} />
+                      <ArchiveGrid archives={group.archives} />
                     </div>
                   ))}
                 </div>
@@ -373,7 +373,7 @@ function LibraryPageContent() {
                         <h3 className="text-base font-semibold md:text-lg">{group.label}</h3>
                         <Badge variant="secondary">{group.archives.length}</Badge>
                       </div>
-                      <ArchiveGrid archives={group.archives as any} />
+                      <ArchiveGrid archives={group.archives} />
                     </div>
                   ))}
                 </div>

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Check, Download, Heart, Pencil, RotateCcw, Trash2, X } from 'lucide-react';
 import { BatchEditDialog } from '@/components/archive/BatchEditDialog';
 import type { BatchEditPayload } from '@/components/archive/BatchEditDialog';
+type TranslationParams = Record<string, string | number | boolean | null | undefined>;
 
 export interface BatchActionBarItem {
   id: string;
@@ -40,7 +41,7 @@ interface HomeBatchActionBarProps {
   onReadStatus?: () => void;
   onDelete?: () => void;
   onApplyBatchEdit?: (payload: BatchEditPayload) => Promise<boolean>;
-  t: (key: string, ...args: any[]) => string;
+  t: (key: string, params?: TranslationParams) => string;
 }
 
 export function HomeBatchActionBar({

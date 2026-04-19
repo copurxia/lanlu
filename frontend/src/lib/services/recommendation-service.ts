@@ -24,11 +24,11 @@ function normalizeTagsText(source: unknown): string {
 }
 
 function normalizeArchiveItem(item: Archive): Archive {
-  const normalized = normalizeArchivePayload(item);
+  const normalized = normalizeArchivePayload(item) as Archive & { tags_text?: unknown };
   return {
     ...normalized,
-    description: String((normalized as any).description || '').trim(),
-    tags: normalizeTagsText((normalized as any).tags ?? (normalized as any).tags_text),
+    description: String(normalized.description || '').trim(),
+    tags: normalizeTagsText(normalized.tags ?? normalized.tags_text),
   };
 }
 
@@ -37,12 +37,12 @@ function normalizeMixedItems(items: unknown[]): Array<Archive | Tankoubon> {
     if (isArchiveItem(item)) {
       return normalizeArchiveItem(item);
     }
-    const tank = item as Tankoubon & { assets?: unknown; children?: unknown };
+    const tank = item as Tankoubon & { assets?: unknown; children?: unknown; tags_text?: unknown };
     return {
       ...tank,
-      title: String((tank as any).title || '').trim(),
-      description: String((tank as any).description || '').trim(),
-      tags: normalizeTagsText((tank as any).tags ?? (tank as any).tags_text),
+      title: String(tank.title || '').trim(),
+      description: String(tank.description || '').trim(),
+      tags: normalizeTagsText(tank.tags ?? tank.tags_text),
       children: Array.isArray(tank.children)
         ? tank.children.map((value) => String(value || '').trim()).filter(Boolean)
         : [],

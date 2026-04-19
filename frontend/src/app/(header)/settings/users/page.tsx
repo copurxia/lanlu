@@ -15,6 +15,7 @@ import type { ApiEnvelope, AdminUser } from '@/types/auth';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { useStepUpDialog } from '@/hooks/use-step-up-dialog';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 interface CreateUserForm {
   username: string;
@@ -57,14 +58,16 @@ export default function UsersSettingsPage() {
     return isAuthenticated && (user?.isAdmin === true);
   }, [isAuthenticated, user?.isAdmin]);
 
+  const getErrorMessage = (error: unknown, fallback: string) => extractApiError(error, fallback);
+
   const loadUsers = async () => {
     if (!isAuthenticated) return;
     setUsersLoading(true);
     try {
       const resp = await apiClient.get<ApiEnvelope<{ users: AdminUser[] }>>('/api/auth/admin/users');
       setUsers(resp.data.data.users || []);
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || 'Failed to load users');
+    } catch (e) {
+      showError(getErrorMessage(e, 'Failed to load users'));
     } finally {
       setUsersLoading(false);
     }
@@ -102,8 +105,8 @@ export default function UsersSettingsPage() {
         isAdmin: false,
       });
       await loadUsers();
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || 'Failed to create user');
+    } catch (e) {
+      showError(getErrorMessage(e, 'Failed to create user'));
     } finally {
       setLoading(false);
     }
@@ -117,8 +120,8 @@ export default function UsersSettingsPage() {
       });
       success(t('auth.userRoleUpdated'));
       await loadUsers();
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || 'Failed to update user role');
+    } catch (e) {
+      showError(getErrorMessage(e, 'Failed to update user role'));
     } finally {
       setLoading(false);
     }
@@ -140,8 +143,8 @@ export default function UsersSettingsPage() {
       await apiClient.delete(`/api/auth/admin/users/${userId}`);
       success(t('auth.userDeletedSuccess'));
       await loadUsers();
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || 'Failed to delete user');
+    } catch (e) {
+      showError(getErrorMessage(e, 'Failed to delete user'));
     } finally {
       setLoading(false);
     }
@@ -171,8 +174,8 @@ export default function UsersSettingsPage() {
       success(t('auth.passwordResetSuccess'));
       setResetPasswordUser(null);
       setResetPasswordForm({ newPassword: '', confirmPassword: '' });
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || 'Failed to reset password');
+    } catch (e) {
+      showError(getErrorMessage(e, 'Failed to reset password'));
     } finally {
       setLoading(false);
     }

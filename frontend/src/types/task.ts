@@ -11,7 +11,7 @@ export interface Task {
   activeKey?: string;
   taskType: string;
   pluginNamespace: string;
-  parameters: Record<string, any>;
+  parameters: Record<string, unknown>;
   result: string;
   createdAt: string;
   startedAt: string;

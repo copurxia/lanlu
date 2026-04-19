@@ -18,6 +18,7 @@ import { PluginService, type Plugin } from '@/lib/services/plugin-service';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { Checkbox } from '@/components/ui/checkbox';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 export default function CategoriesSettingsPage() {
   const { t } = useLanguage();
@@ -61,6 +62,8 @@ export default function CategoriesSettingsPage() {
     return isAuthenticated && user?.isAdmin === true;
   }, [isAuthenticated, user?.isAdmin]);
 
+  const getErrorMessage = (error: unknown, fallback: string) => extractApiError(error, fallback);
+
   // Load categories
   const loadCategories = async () => {
     if (!isAuthenticated) return;
@@ -81,8 +84,8 @@ export default function CategoriesSettingsPage() {
         filtered = filtered.filter(cat => cat.enabled === (enabledFilter === 'enabled'));
       }
       setCategories(filtered);
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryLoadFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryLoadFailed')));
     } finally {
       setCategoriesLoading(false);
     }
@@ -171,8 +174,8 @@ export default function CategoriesSettingsPage() {
       setCreateDialogOpen(false);
       await loadCategories();
       success(t('settings.categoryCreatedSuccess'));
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryCreateFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryCreateFailed')));
     } finally {
       setLoading(false);
     }
@@ -210,8 +213,8 @@ export default function CategoriesSettingsPage() {
       setEditingCategory(null);
       await loadCategories();
       success(t('settings.categoryUpdatedSuccess'));
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryUpdateFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryUpdateFailed')));
     } finally {
       setLoading(false);
     }
@@ -237,8 +240,8 @@ export default function CategoriesSettingsPage() {
       } else {
         showError(result.error || t('settings.categoryDeleteFailed'));
       }
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryDeleteFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryDeleteFailed')));
     } finally {
       setLoading(false);
     }
@@ -248,8 +251,8 @@ export default function CategoriesSettingsPage() {
     try {
       await CategoryService.updateCategory(catid, { enabled });
       await loadCategories();
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryUpdateFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryUpdateFailed')));
     }
   };
 
@@ -262,8 +265,8 @@ export default function CategoriesSettingsPage() {
       } else {
         showError(result.error || t('settings.categoryScanFailed'));
       }
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryScanFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryScanFailed')));
     } finally {
       setLoading(false);
     }
@@ -278,8 +281,8 @@ export default function CategoriesSettingsPage() {
       } else {
         showError(result.error || t('settings.categoryScanAllFailed'));
       }
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.categoryScanAllFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.categoryScanAllFailed')));
     } finally {
       setLoading(false);
     }

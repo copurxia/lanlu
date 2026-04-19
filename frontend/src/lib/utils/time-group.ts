@@ -3,9 +3,9 @@
  * 支持按今天、昨天、三天前、一周前、更早分组
  */
 
-export interface TimeGroup {
+export interface TimeGroup<T extends object = Record<string, unknown>> {
   label: string;
-  archives: any[];
+  archives: T[];
 }
 
 /**
@@ -15,7 +15,11 @@ export interface TimeGroup {
  * @param t 翻译函数
  * @returns 分组后的对象
  */
-export function groupArchivesByTime(archives: any[], timeField: string = 'last_read_time', t?: (key: string) => string): TimeGroup[] {
+export function groupArchivesByTime<T extends object>(
+  archives: T[],
+  timeField: string = 'last_read_time',
+  t?: (key: string) => string
+): TimeGroup<T>[] {
   // 使用用户的本地时间
   const now = new Date();
   // 获取今天的开始时间（本地时区00:00:00）
@@ -28,7 +32,7 @@ export function groupArchivesByTime(archives: any[], timeField: string = 'last_r
   const weekStart = new Date(todayStart.getTime() - 7 * 24 * 60 * 60 * 1000);
 
   // 初始化分组
-  const groups: { [key: string]: any[] } = {
+  const groups: Record<string, T[]> = {
     'today': [],
     'yesterday': [],
     'threeDaysAgo': [],
@@ -38,7 +42,7 @@ export function groupArchivesByTime(archives: any[], timeField: string = 'last_r
 
   // 分组逻辑
   archives.forEach(archive => {
-    const timeValue = archive[timeField];
+    const timeValue = (archive as Record<string, unknown>)[timeField];
     if (!timeValue) {
       groups['older'].push(archive);
       return;
@@ -79,7 +83,7 @@ export function groupArchivesByTime(archives: any[], timeField: string = 'last_r
   });
 
   // 转换为数组格式，只包含非空分组
-  const result: TimeGroup[] = [];
+  const result: TimeGroup<T>[] = [];
   
   // 使用翻译函数或默认中文标签
   const labelMap: { [K in keyof typeof groups]: string } = {

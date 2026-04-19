@@ -149,12 +149,12 @@ export function useArray<T>(initialValue: T[] = []) {
 /**
  * 表单状态管理 Hook
  */
-export function useForm<T extends Record<string, any>>(initialValues: T) {
+export function useForm<T extends Record<string, unknown>>(initialValues: T) {
   const [values, setValues] = useState<T>(initialValues);
   const [errors, setErrors] = useState<Partial<Record<keyof T, string>>>({});
   const [touched, setTouchedState] = useState<Partial<Record<keyof T, boolean>>>({});
 
-  const setValue = useCallback((name: keyof T, value: any) => {
+  const setValue = useCallback((name: keyof T, value: T[keyof T]) => {
     setValues(prev => ({ ...prev, [name]: value }));
   }, []);
 
@@ -174,8 +174,12 @@ export function useForm<T extends Record<string, any>>(initialValues: T) {
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    setValue(name as keyof T, value);
-  }, [setValue]);
+    if (!Object.prototype.hasOwnProperty.call(initialValues, name)) {
+      return;
+    }
+
+    setValue(name as keyof T, value as T[keyof T]);
+  }, [initialValues, setValue]);
 
   return {
     values,
@@ -259,7 +263,7 @@ export function useGridColumnCount() {
 /**
  * 防抖回调 Hook
  */
-export function useDebounceCallback<T extends (...args: any[]) => any>(
+export function useDebounceCallback<T extends (...args: unknown[]) => unknown>(
   callback: T,
   delay: number
 ): T {

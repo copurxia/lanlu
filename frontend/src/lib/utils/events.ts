@@ -1,31 +1,31 @@
 // 简单的事件系统，用于跨组件通信
-type EventCallback = (...args: any[]) => void;
+type EventCallback<TArgs extends unknown[] = unknown[]> = (...args: TArgs) => void;
 
 class EventEmitter {
-  private events: Record<string, EventCallback[]> = {};
+  private events: Record<string, Array<EventCallback<unknown[]>>> = {};
 
-  on(event: string, callback: EventCallback): void {
+  on<TArgs extends unknown[]>(event: string, callback: EventCallback<TArgs>): void {
     if (!this.events[event]) {
       this.events[event] = [];
     }
-    this.events[event].push(callback);
+    this.events[event].push(callback as EventCallback<unknown[]>);
   }
 
-  off(event: string, callback: EventCallback): void {
+  off<TArgs extends unknown[]>(event: string, callback: EventCallback<TArgs>): void {
     if (!this.events[event]) return;
 
-    const index = this.events[event].indexOf(callback);
+    const index = this.events[event].indexOf(callback as EventCallback<unknown[]>);
     if (index > -1) {
       this.events[event].splice(index, 1);
     }
   }
 
-  emit(event: string, ...args: any[]): void {
+  emit<TArgs extends unknown[]>(event: string, ...args: TArgs): void {
     if (!this.events[event]) return;
 
     this.events[event].forEach(callback => {
       try {
-        callback(...args);
+        (callback as EventCallback<TArgs>)(...args);
       } catch (error) {
         console.error(`Error in event callback for ${event}:`, error);
       }

@@ -12,7 +12,7 @@ import { ChannelFeedSkeleton, TweetFeedSkeleton } from '@/components/home/HomeFe
 import { ArchiveService } from '@/lib/services/archive-service';
 import { CategoryService, type Category } from '@/lib/services/category-service';
 import { RecommendationService } from '@/lib/services/recommendation-service';
-import { Archive } from '@/types/archive';
+import { Archive, type SearchParams } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 import { appEvents, AppEvents } from '@/lib/utils/events';
 import { ChevronRight, RefreshCw } from 'lucide-react';
@@ -36,16 +36,22 @@ import {
   normalizeHomeViewMode,
   normalizeSearchSortBy,
 } from '@/lib/utils/constants';
+import type { RecommendationItemType } from '@/types/recommendation';
 
 // In-memory cache so random recommendations don't change when navigating away and back.
 const randomArchivesCache = new Map<string, Array<Archive | Tankoubon>>();
 
-function isAbortLikeError(err: any) {
+function isAbortLikeError(err: unknown) {
+  if (typeof err !== 'object' || err === null) {
+    return false;
+  }
+
+  const record = err as { name?: unknown; code?: unknown; message?: unknown };
   return (
-    err?.name === 'AbortError' ||
-    err?.name === 'CanceledError' ||
-    err?.code === 'ERR_CANCELED' ||
-    err?.message === 'canceled'
+    record.name === 'AbortError' ||
+    record.name === 'CanceledError' ||
+    record.code === 'ERR_CANCELED' ||
+    record.message === 'canceled'
   );
 }
 
@@ -274,11 +280,13 @@ function HomePageContent() {
 
     try {
       setLoading(true);
-      const params: any = {
+      const params: SearchParams = {
         page: input.page + 1,
         pageSize,
         sortby: input.sortBy,
-        order: input.sortOrder
+        order: input.sortOrder,
+        groupby_tanks: input.groupByTanks,
+        lang: input.language,
       };
       if (input.searchQuery) params.filter = input.searchQuery;
       if (input.newonly) params.newonly = true;
@@ -287,8 +295,6 @@ function HomePageContent() {
       if (input.dateFrom) params.date_from = input.dateFrom;
       if (input.dateTo) params.date_to = input.dateTo;
       if (input.categoryId && input.categoryId !== 'all') params.category_id = input.categoryId;
-      params.groupby_tanks = input.groupByTanks;
-      params.lang = input.language;
 
       const result = await ArchiveService.search(params, { signal: controller.signal });
       if (requestId !== archivesRequestIdRef.current) return;
@@ -352,7 +358,7 @@ function HomePageContent() {
     }
   }, [categoryRowSize, language, randomKey]);
 
-  const trackDiscoverOpenReader = useCallback(async (itemType: any, itemId: string) => {
+  const trackDiscoverOpenReader = useCallback(async (itemType: RecommendationItemType, itemId: string) => {
     try {
       await RecommendationService.recordInteraction({ scene: 'discover', item_type: itemType, item_id: itemId, interaction_type: 'open_reader' });
     } catch (error) {
@@ -360,7 +366,7 @@ function HomePageContent() {
     }
   }, []);
 
-  const trackDiscoverFavorite = useCallback(async (itemType: any, itemId: string) => {
+  const trackDiscoverFavorite = useCallback(async (itemType: RecommendationItemType, itemId: string) => {
     try {
       await RecommendationService.recordInteraction({ scene: 'discover', item_type: itemType, item_id: itemId, interaction_type: 'favorite' });
     } catch (error) {
@@ -618,13 +624,13 @@ function HomePageContent() {
     const requestId = (categoryRowsRequestIdRef.current += 1);
     let cancelled = false;
     const loadCategoryRows = async () => {
-      setCategoryRowsLoading(true);
+        setCategoryRowsLoading(true);
       const rowData: Record<string, (Archive | Tankoubon)[]> = {};
       const categoryIds = enabledCategories.map((c) => String(c.id || '').trim()).filter(Boolean);
       try {
         for (const cid of categoryIds) rowData[cid] = [];
         if (categoryIds.length > 0) {
-          const params: any = {
+          const params: SearchParams = {
             page: 1, pageSize: categoryRowSize, sortby: sortBy, order: sortOrder,
             groupby_tanks: groupByTanks, lang: language, category_ids: categoryIds.join(','), aggregate_by: 'category',
           };

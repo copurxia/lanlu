@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { PluginService } from '@/lib/services/plugin-service';
 import { Download } from 'lucide-react';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 interface PluginInstallDialogProps {
   open: boolean;
@@ -49,8 +50,8 @@ export function PluginInstallDialog({
       setUrl('');
       setFile(null);
       onInstalled?.();
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || t('settings.pluginInstallFailed'));
+    } catch (e) {
+      setError(extractApiError(e, t('settings.pluginInstallFailed')));
     } finally {
       setInstalling(false);
     }
@@ -109,8 +110,8 @@ export function PluginInstallDialog({
       setUrl('');
       setFile(null);
       onInstalled?.();
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || t('settings.pluginUploadFailed'));
+    } catch (e) {
+      setError(extractApiError(e, t('settings.pluginUploadFailed')));
     } finally {
       setUploading(false);
     }

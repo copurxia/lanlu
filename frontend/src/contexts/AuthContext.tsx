@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useRef } from 'react';
 import type { AuthUser } from '@/types/auth';
 import { AuthService } from '@/lib/services/auth-service';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 type AuthUserStatus = 'anonymous' | 'loading' | 'resolved' | 'error';
 
@@ -65,13 +66,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(currentUser);
         setUserStatus('resolved');
         return currentUser;
-      } catch (e: any) {
-        if (e?.response?.status === 401 || e?.status === 401) {
+      } catch (e) {
+        const status =
+          typeof e === 'object' && e !== null && 'response' in e
+            ? Number((e as { response?: { status?: unknown } }).response?.status)
+            : Number((e as { status?: unknown })?.status);
+        if (status === 401) {
           clearAuthState();
           return null;
         }
         setUserStatus('error');
-        throw e;
+        throw new Error(extractApiError(e, 'Failed to fetch current user'));
       } finally {
         meRequestRef.current = null;
       }

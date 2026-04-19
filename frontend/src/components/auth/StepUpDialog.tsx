@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { StepUpAuthService, type StepUpOptions } from '@/lib/services/step-up-auth-service';
 import { WebauthnAuthService } from '@/lib/services/webauthn-auth-service';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 type StepUpMethod = 'password' | 'totp' | 'passkey';
 
@@ -52,8 +53,8 @@ export function StepUpDialog({ open, onOpenChange, onVerified }: StepUpDialogPro
         } else {
           setMethod('password');
         }
-      } catch (e: any) {
-        setError(e?.response?.data?.message || e?.message || 'Failed to load verification options');
+      } catch (e) {
+        setError(extractApiError(e, 'Failed to load verification options'));
       } finally {
         setLoading(false);
       }
@@ -75,8 +76,8 @@ export function StepUpDialog({ open, onOpenChange, onVerified }: StepUpDialogPro
         await WebauthnAuthService.verifyStepUpWithPasskey();
       }
       onVerified();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Verification failed');
+    } catch (e) {
+      setError(extractApiError(e, 'Verification failed'));
     } finally {
       setLoading(false);
     }

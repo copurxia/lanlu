@@ -14,6 +14,7 @@ import { getCoverAssetId } from '@/lib/utils/archive-assets'
 import { appEvents, AppEvents } from '@/lib/utils/events'
 import { logger } from '@/lib/utils/logger'
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata'
+import { extractApiError } from '@/lib/utils/api-utils'
 import {
   applyAssetPreviewValue,
   normalizeMetadataPluginChildren,
@@ -252,9 +253,9 @@ export function BaseMediaCardEditController({
           setEditAssetClearlogoId(normalizedAssetId)
           setEditClearlogo('')
         }
-      } catch (error: any) {
+      } catch (error) {
         logger.operationFailed('upload metadata asset from card', error, { id, slot, type })
-        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'))
+        showError(extractApiError(error, t('archive.assetUploadFailed')))
       } finally {
         setUploading(false)
         document.body.removeChild(input)
@@ -379,9 +380,9 @@ export function BaseMediaCardEditController({
 
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'))
       setMetadataPluginProgress(100)
-    } catch (error: any) {
+    } catch (error) {
       logger.operationFailed('run metadata plugin (card)', error, { id, type })
-      showError(error?.message || t('archive.metadataPluginFailed'))
+      showError(extractApiError(error, t('archive.metadataPluginFailed')))
     } finally {
       setIsMetadataPluginRunning(false)
       clearRpcSelectState()

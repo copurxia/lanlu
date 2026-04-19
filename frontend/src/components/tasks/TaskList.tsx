@@ -31,7 +31,10 @@ type AllowedFilter = (typeof ALLOWED_FILTERS)[number];
 const LOG_PREVIEW_RECENT_LINES = 80;
 const LOG_PREVIEW_LAST_LINE_MAX = 160;
 
-type TranslateFn = (key: string, options?: Record<string, any>) => string;
+type TranslateFn = (
+  key: string,
+  options?: Record<string, string | number | boolean | null | undefined>
+) => string;
 
 function normalizeFilter(value: string | null): AllowedFilter {
   if (!value) return 'all';
@@ -50,6 +53,37 @@ function formatTimestamp(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
   return date.toLocaleString();
+}
+
+function readTaskParamText(params: Record<string, unknown> | null, key: string): string | undefined {
+  if (!params) return undefined;
+
+  const value = params[key];
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return undefined;
+}
+
+function readTaskParamNumber(params: Record<string, unknown> | null, key: string): number | undefined {
+  if (!params) return undefined;
+
+  const value = params[key];
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
 }
 
 function getStatusIcon(status: string) {
@@ -144,6 +178,15 @@ const TaskCard = memo(function TaskCard({ task, t, onCancelTask, onRetryTask }: 
     }
     return TaskPoolService.parseTaskParameters(task.parameters);
   }, [task.parameters, task.taskType]);
+  const taskUrl = readTaskParamText(taskParams, 'url');
+  const taskFilename = readTaskParamText(taskParams, 'filename');
+  const taskFileSize = readTaskParamNumber(taskParams, 'filesize');
+  const taskTotalChunks = readTaskParamNumber(taskParams, 'total_chunks');
+  const taskChunkSize = readTaskParamNumber(taskParams, 'chunk_size');
+  const taskTitle = readTaskParamText(taskParams, 'title');
+  const taskTags = readTaskParamText(taskParams, 'tags');
+  const taskSummary = readTaskParamText(taskParams, 'summary');
+  const taskCategory = readTaskParamText(taskParams, 'category_id') ?? readTaskParamText(taskParams, 'categoryId');
 
   const statusAction = useMemo(() => {
     switch (task.status.toLowerCase()) {
@@ -308,49 +351,49 @@ const TaskCard = memo(function TaskCard({ task, t, onCancelTask, onRetryTask }: 
           <div className="text-sm border-t pt-3">
             <strong>{t('settings.taskManagement.taskDetails')}:</strong>
             <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-              {taskParams.url && (
+              {taskUrl && (
                 <div className="md:col-span-2 break-all">
-                  <strong>{t('settings.taskManagement.url')}:</strong> {taskParams.url}
+                  <strong>{t('settings.taskManagement.url')}:</strong> {taskUrl}
                 </div>
               )}
-              {taskParams.filename && (
+              {taskFilename && (
                 <div className="md:col-span-2">
-                  <strong>{t('settings.taskManagement.filename')}:</strong> {taskParams.filename}
+                  <strong>{t('settings.taskManagement.filename')}:</strong> {taskFilename}
                 </div>
               )}
-              {taskParams.filesize && (
+              {taskFileSize !== undefined && (
                 <div>
-                  <strong>{t('settings.taskManagement.fileSize')}:</strong> {TaskPoolService.formatFileSize(taskParams.filesize)}
+                  <strong>{t('settings.taskManagement.fileSize')}:</strong> {TaskPoolService.formatFileSize(taskFileSize)}
                 </div>
               )}
-              {taskParams.total_chunks && (
+              {taskTotalChunks !== undefined && (
                 <div>
-                  <strong>{t('settings.taskManagement.chunkCount')}:</strong> {taskParams.total_chunks}
+                  <strong>{t('settings.taskManagement.chunkCount')}:</strong> {taskTotalChunks}
                 </div>
               )}
-              {taskParams.chunk_size && (
+              {taskChunkSize !== undefined && (
                 <div>
-                  <strong>{t('settings.taskManagement.chunkSize')}:</strong> {TaskPoolService.formatFileSize(taskParams.chunk_size)}
+                  <strong>{t('settings.taskManagement.chunkSize')}:</strong> {TaskPoolService.formatFileSize(taskChunkSize)}
                 </div>
               )}
-              {taskParams.title && taskParams.title !== taskParams.filename && (
+              {taskTitle && taskTitle !== taskFilename && (
                 <div className="md:col-span-2">
-                  <strong>{t('settings.taskManagement.title')}:</strong> {taskParams.title}
+                  <strong>{t('settings.taskManagement.title')}:</strong> {taskTitle}
                 </div>
               )}
-              {taskParams.tags && (
+              {taskTags && (
                 <div className="md:col-span-2">
-                  <strong>{t('settings.taskManagement.tags')}:</strong> {taskParams.tags}
+                  <strong>{t('settings.taskManagement.tags')}:</strong> {taskTags}
                 </div>
               )}
-              {taskParams.summary && (
+              {taskSummary && (
                 <div className="md:col-span-2">
-                  <strong>{t('settings.taskManagement.summary')}:</strong> {taskParams.summary}
+                  <strong>{t('settings.taskManagement.summary')}:</strong> {taskSummary}
                 </div>
               )}
-              {(taskParams.category_id || taskParams.categoryId) && (
+              {taskCategory && (
                 <div className="md:col-span-2">
-                  <strong>{t('settings.taskManagement.category')}:</strong> {taskParams.category_id || taskParams.categoryId}
+                  <strong>{t('settings.taskManagement.category')}:</strong> {taskCategory}
                 </div>
               )}
             </div>

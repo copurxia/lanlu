@@ -25,6 +25,7 @@ import { getArchiveAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { applyAssetPreviewValue, parseMetadataPluginPreviewResult } from '@/lib/utils/metadata-plugin-preview';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { extractApiError } from '@/lib/utils/api-utils';
 import { getTvMetaSummary, isTvArchiveMetadata } from '@/lib/utils/tv-media';
 import { useArchiveMetadata } from './hooks/useArchiveMetadata';
 import { useArchivePreview } from './hooks/useArchivePreview';
@@ -405,9 +406,9 @@ export function ArchiveDetailContent() {
         }
 
         success(t('archive.assetUploadSuccess'));
-      } catch (error: any) {
+      } catch (error) {
         logger.operationFailed('upload archive metadata asset', error, { slot });
-        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'));
+        showError(extractApiError(error, t('archive.assetUploadFailed')));
       } finally {
         setUploading(false);
         document.body.removeChild(input);
@@ -600,9 +601,9 @@ export function ArchiveDetailContent() {
       }
       setMetadataPluginMessage(t('archive.metadataPluginCompleted'));
       setMetadataPluginProgress(100);
-    } catch (e: any) {
+    } catch (e) {
       logger.operationFailed('run metadata plugin', e);
-      showError(e?.message || t('archive.metadataPluginFailed'));
+      showError(extractApiError(e, t('archive.metadataPluginFailed')));
     } finally {
       setIsMetadataPluginRunning(false);
       setRpcSelectRequest(null);
@@ -664,9 +665,9 @@ export function ArchiveDetailContent() {
       await ArchiveService.deleteArchive(metadata.arcid);
       success('档案删除成功');
       router.push('/');
-    } catch (err: any) {
+    } catch (err) {
       logger.operationFailed('delete archive', err);
-      const errorMessage = err.response?.data?.error || err.message || '删除失败';
+      const errorMessage = extractApiError(err, '删除失败');
       showError(`删除失败: ${errorMessage}`);
     } finally {
       setDeleteLoading(false);

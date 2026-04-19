@@ -8,8 +8,8 @@ import type { BatchEditPayload } from '@/components/archive/BatchEditDialog';
 import { Archive } from '@/types/archive';
 import { Tankoubon } from '@/types/tankoubon';
 
-function isTankoubonItem(item: any): item is Tankoubon {
-  return item && 'tankoubon_id' in item;
+function isTankoubonItem(item: Archive | Tankoubon): item is Tankoubon {
+  return 'tankoubon_id' in item;
 }
 
 export interface UseHomeSelectionVisibleItems {
@@ -60,10 +60,10 @@ export function useHomeSelection(
         map.set(`archive:${item.arcid}`, item);
       }
     };
-    archives.forEach((item) => pushItem(item as Archive | Tankoubon));
-    randomArchives.forEach((item) => pushItem(item as Archive | Tankoubon));
+    archives.forEach((item) => pushItem(item));
+    randomArchives.forEach((item) => pushItem(item));
     Object.values(categoryRows).forEach((items) => {
-      items.forEach((item) => pushItem(item as Archive | Tankoubon));
+      items.forEach((item) => pushItem(item));
     });
     return map;
   }, [visibleItems]);

@@ -21,6 +21,20 @@ type LayoutWord = {
   meta?: unknown;
 };
 
+type D3CloudLayout = {
+  size: (value: [number, number]) => D3CloudLayout;
+  words: (value: LayoutWord[]) => D3CloudLayout;
+  padding: (value: number) => D3CloudLayout;
+  rotate: (value: () => number) => D3CloudLayout;
+  font: (value: string) => D3CloudLayout;
+  fontWeight: (value: () => number) => D3CloudLayout;
+  fontSize: (value: (word: LayoutWord) => number) => D3CloudLayout;
+  spiral: (value: string) => D3CloudLayout;
+  on: (event: 'end', handler: (result: LayoutWord[]) => void) => D3CloudLayout;
+  start: () => void;
+  stop: () => void;
+};
+
 type Props = {
   items: WordCloudItem[];
   onWordClick?: (meta: unknown) => void;
@@ -134,7 +148,7 @@ export function WordCloud({ items, onWordClick, className, ariaLabel, maxWords =
       if (cancelled) return;
 
       const scale = createFontScale(prepared.map((w) => w.weight), prepared.length, width, height);
-      const cloudFactory = mod.default as unknown as () => any;
+      const cloudFactory = mod.default as unknown as () => D3CloudLayout;
       const padding = prepared.length > 120 ? 0 : prepared.length > 70 ? 1 : 2;
 
       const nextLayout = cloudFactory()

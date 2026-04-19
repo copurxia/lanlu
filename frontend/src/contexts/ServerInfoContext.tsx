@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { ServerInfo } from '@/types/server';
 import { ArchiveService } from '@/lib/services/archive-service';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 interface ServerInfoContextType {
   serverInfo: ServerInfo | null;
@@ -27,8 +28,8 @@ export function ServerInfoProvider({ children }: { children: ReactNode }) {
       setError(null);
       const info = await ArchiveService.getServerInfo(options);
       setServerInfo(info);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch server info');
+    } catch (err) {
+      setError(extractApiError(err, 'Failed to fetch server info'));
       // 保持之前的 serverInfo 或使用默认值
     } finally {
       setLoading(false);

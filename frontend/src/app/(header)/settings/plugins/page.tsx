@@ -14,6 +14,7 @@ import { Package, Download, Search } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useConfirm } from '@/hooks/use-confirm';
 import { useToast } from '@/hooks/use-toast';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 const TYPE_ORDER = ['metadata', 'download', 'login', 'script'];
 
@@ -154,8 +155,8 @@ export default function SettingsPluginsPage() {
       await PluginService.deletePlugin(plugin.namespace);
       success(t('settings.pluginDeleteSuccess'));
       await fetchPlugins();
-    } catch (e: any) {
-      showError(e?.response?.data?.error || e?.message || t('settings.pluginDeleteFailed'));
+    } catch (e) {
+      showError(extractApiError(e, t('settings.pluginDeleteFailed')));
     }
   };
 
@@ -164,8 +165,8 @@ export default function SettingsPluginsPage() {
       await PluginService.updatePlugin(plugin.namespace);
       success(t('settings.pluginUpdateSuccess'));
       await fetchPlugins();
-    } catch (e: any) {
-      const msg = e?.response?.data?.error || e?.message || t('settings.pluginUpdateFailed');
+    } catch (e) {
+      const msg = extractApiError(e, t('settings.pluginUpdateFailed'));
 
       // If backend refused downgrade/invalid without force, offer a force retry.
       if (typeof msg === 'string' && msg.toLowerCase().includes('without force')) {
@@ -183,8 +184,8 @@ export default function SettingsPluginsPage() {
           success(t('settings.pluginUpdateSuccess'));
           await fetchPlugins();
           return;
-        } catch (e2: any) {
-          showError(e2?.response?.data?.error || e2?.message || t('settings.pluginUpdateFailed'));
+        } catch (e2) {
+          showError(extractApiError(e2, t('settings.pluginUpdateFailed')));
           return;
         }
       }
@@ -210,8 +211,8 @@ export default function SettingsPluginsPage() {
       } else {
         success(t('settings.pluginUpToDate'));
       }
-    } catch (e: any) {
-      showError(e?.response?.data?.error || e?.message || t('settings.pluginCheckUpdateFailed'));
+    } catch (e) {
+      showError(extractApiError(e, t('settings.pluginCheckUpdateFailed')));
     } finally {
       setCheckingNamespaces((prev) => ({ ...prev, [ns]: false }));
     }

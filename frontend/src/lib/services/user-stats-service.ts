@@ -1,7 +1,8 @@
 // 用户统计服务 - 统计数据来自 /api/user/stats，趋势来自 /api/user/trend，最近活动由 /api/search 计算
 import { apiClient } from '../api';
+import { ArchiveService } from './archive-service';
 import { Archive } from '@/types/archive';
-import { normalizeArchivePayload } from '@/lib/utils/archive-assets';
+import type { Tankoubon } from '@/types/tankoubon';
 
 export interface UserStats {
   favoriteCount: number;
@@ -20,18 +21,62 @@ export interface RecentActivity {
   recentFavorites: Archive[];
 }
 
-function isSuccessfulPayload(payload: any): boolean {
-  if (!payload || typeof payload !== 'object') return false;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object';
+}
+
+function isSuccessfulPayload(payload: unknown): payload is { code?: number; data?: unknown } {
+  if (!isRecord(payload)) return false;
   if (payload.code === 200) return true;
   return false;
 }
 
-function normalizeSearchArchives(payload: any): Archive[] {
-  const list = payload?.data;
-  if (!Array.isArray(list)) return [];
-  return list
-    .filter((item): item is Archive => Boolean(item) && typeof item === 'object' && 'arcid' in item)
-    .map((item) => normalizeArchivePayload(item));
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function normalizeUserStats(payload: unknown): UserStats {
+  if (!isRecord(payload)) {
+    return {
+      favoriteCount: 0,
+      readCount: 0,
+      totalPagesRead: 0,
+      totalArchives: 0,
+    };
+  }
+
+  return {
+    favoriteCount: toNumber(payload.favoriteCount),
+    readCount: toNumber(payload.readCount),
+    totalPagesRead: toNumber(payload.totalPagesRead),
+    totalArchives: toNumber(payload.totalArchives),
+  };
+}
+
+function normalizeReadingTrend(payload: unknown): ReadingTrendItem[] {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload
+    .filter(isRecord)
+    .map((item) => ({
+      date: typeof item.date === 'string' ? item.date : '',
+      count: toNumber(item.count),
+    }));
+}
+
+function isArchiveItem(item: Archive | Tankoubon): item is Archive {
+  return 'arcid' in item;
 }
 
 export class UserStatsService {
@@ -40,7 +85,7 @@ export class UserStatsService {
     try {
       const response = await apiClient.get('/api/user/stats');
       if (isSuccessfulPayload(response.data) && response.data?.data) {
-        return response.data.data;
+        return normalizeUserStats(response.data.data);
       }
       return {
         favoriteCount: 0,
@@ -66,8 +111,8 @@ export class UserStatsService {
       const response = await apiClient.get('/api/user/trend', {
         params: { days: safeDays }
       });
-      if (isSuccessfulPayload(response.data) && Array.isArray(response.data?.data)) {
-        return response.data.data as ReadingTrendItem[];
+      if (isSuccessfulPayload(response.data)) {
+        return normalizeReadingTrend(response.data.data);
       }
       return [];
     } catch (error) {
@@ -82,29 +127,25 @@ export class UserStatsService {
       const safeLimit = Math.max(1, Math.min(50, Math.trunc(limit || 5)));
 
       const [recentReadResp, favoritesResp] = await Promise.allSettled([
-        apiClient.get('/api/search', {
-          params: {
-            sortby: 'lastread',
-            order: 'desc',
-            page: 1,
-            pageSize: safeLimit,
-          },
+        ArchiveService.search({
+          sortby: 'lastread',
+          order: 'desc',
+          page: 1,
+          pageSize: safeLimit,
         }),
-        apiClient.get('/api/search', {
-          params: {
-            favoriteonly: true,
-            page: 1,
-            pageSize: Math.max(safeLimit * 4, 50),
-          },
+        ArchiveService.search({
+          favoriteonly: true,
+          page: 1,
+          pageSize: Math.max(safeLimit * 4, 50),
         }),
       ]);
 
       const recentRead = recentReadResp.status === 'fulfilled'
-        ? normalizeSearchArchives(recentReadResp.value.data).slice(0, safeLimit)
+        ? recentReadResp.value.data.filter(isArchiveItem).slice(0, safeLimit)
         : [];
 
       const recentFavoritesRaw = favoritesResp.status === 'fulfilled'
-        ? normalizeSearchArchives(favoritesResp.value.data)
+        ? favoritesResp.value.data.filter(isArchiveItem)
         : [];
       const recentFavorites = recentFavoritesRaw
         .slice()

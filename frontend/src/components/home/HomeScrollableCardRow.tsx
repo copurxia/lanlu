@@ -8,8 +8,8 @@ import { Archive } from '@/types/archive';
 import type { RecommendationItemType } from '@/types/recommendation';
 import { Tankoubon } from '@/types/tankoubon';
 
-export function isTankoubonItem(item: any): item is Tankoubon {
-  return item && 'tankoubon_id' in item;
+export function isTankoubonItem(item: Archive | Tankoubon): item is Tankoubon {
+  return 'tankoubon_id' in item;
 }
 
 const HomeScrollableTankoubonCard = memo(function HomeScrollableTankoubonCard({

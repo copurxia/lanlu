@@ -2,6 +2,7 @@
 
 import { apiClient } from '../api';
 import { ChunkedUploadService } from './chunked-upload-service';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 export interface Plugin {
   id: number;
@@ -18,7 +19,7 @@ export interface Plugin {
   installed: boolean;
   update_url: string;
   has_schema: boolean;
-  parameters: any[];
+  parameters: unknown[];
   created_at: string;
   updated_at: string;
 }
@@ -53,7 +54,12 @@ export class PluginService {
     } catch (error) {
       console.error('Failed to fetch plugins:', error);
       if (error && typeof error === 'object' && 'response' in error) {
-        const axiosError = error as any;
+        const axiosError = error as {
+          response?: {
+            status?: number;
+            data?: unknown;
+          };
+        };
         console.error('API响应错误:', axiosError.response?.status, axiosError.response?.data);
       } else if (error instanceof Error) {
         console.error('网络错误:', error.message);
@@ -119,7 +125,7 @@ export class PluginService {
       return response.data;
     } catch (error) {
       console.error('Failed to install plugin:', error);
-      throw error;
+      throw new Error(extractApiError(error, 'Failed to install plugin'));
     }
   }
 
@@ -175,7 +181,7 @@ export class PluginService {
       return response.data;
     } catch (error) {
       console.error('Failed to update plugin:', error);
-      throw error;
+      throw new Error(extractApiError(error, 'Failed to update plugin'));
     }
   }
 

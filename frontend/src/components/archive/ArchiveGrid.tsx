@@ -8,8 +8,16 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useGridRowCoverHeights } from '@/hooks/use-grid-row-cover-heights';
 
 // Type guard to check if an item is a Tankoubon
-function isTankoubon(item: any): item is Tankoubon {
-  return item && 'tankoubon_id' in item;
+type WindowWithIdleCallbacks = Window & {
+  cancelIdleCallback?: (handle: number) => void;
+  requestIdleCallback?: (
+    callback: () => void,
+    options?: { timeout?: number }
+  ) => number;
+};
+
+function isTankoubon(item: Archive | Tankoubon): item is Tankoubon {
+  return 'tankoubon_id' in item;
 }
 
 interface ArchiveGridProps {
@@ -65,11 +73,12 @@ export function ArchiveGrid({
       };
 
       // Prefer idle time so this doesn't compete with first paint / input.
-      if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-        const handle = (window as any).requestIdleCallback(run, { timeout: 2000 });
+      const idleWindow = typeof window !== 'undefined' ? (window as WindowWithIdleCallbacks) : null;
+      if (idleWindow?.requestIdleCallback) {
+        const handle = idleWindow.requestIdleCallback(run, { timeout: 2000 });
         return () => {
           cancelled = true;
-          (window as any).cancelIdleCallback?.(handle);
+          idleWindow.cancelIdleCallback?.(handle);
         };
       }
 

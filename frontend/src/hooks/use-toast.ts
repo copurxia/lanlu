@@ -1,36 +1,36 @@
-import { toast } from '@/lib/ui/feedback';
+import { toast, type ToastId, type ToastOptions, type ToastPromiseMessages } from '@/lib/ui/feedback';
 
 export const useToast = () => {
-  const success = (message: string, options?: any) => {
+  const success = (message: string, options?: ToastOptions) => {
     toast.success(message, options);
   };
 
-  const error = (message: string, options?: any) => {
+  const error = (message: string, options?: ToastOptions) => {
     toast.error(message, options);
   };
 
-  const info = (message: string, options?: any) => {
+  const info = (message: string, options?: ToastOptions) => {
     toast.info(message, options);
   };
 
-  const warning = (message: string, options?: any) => {
+  const warning = (message: string, options?: ToastOptions) => {
     toast.warning(message, options);
   };
 
-  const loading = (message: string, options?: any) => {
+  const loading = (message: string, options?: ToastOptions): ToastId => {
     return toast.loading(message, options);
   };
 
-  const dismiss = (toastId?: string | number) => {
+  const dismiss = (toastId?: ToastId) => {
     toast.dismiss(toastId);
   };
 
-  const promise = (promise: Promise<any>, messages: {
-    loading: string;
-    success: string | ((data: any) => string);
-    error: string | ((error: any) => string);
-  }) => {
-    toast.promise(promise, messages);
+  const promise = <T,>(
+    pendingPromise: Promise<T>,
+    messages: ToastPromiseMessages<T>,
+    options?: ToastOptions
+  ) => {
+    toast.promise(pendingPromise, messages, options);
   };
 
   return {

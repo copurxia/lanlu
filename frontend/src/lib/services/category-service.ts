@@ -41,6 +41,8 @@ export interface CategoryUpdateRequest {
 interface CategoryResponse {
   operation: string;
   data: Category | Category[];
+  error?: string;
+  message?: string;
   success: number;
 }
 
@@ -67,7 +69,7 @@ export class CategoryService {
       if (isSuccessResponse(response.data.success)) {
         return { success: true, category: normalizeArrayResponse(response.data.data)[0] };
       }
-      return { success: false, error: (response.data as any)?.error || (response.data as any)?.message || 'Failed to create category' };
+      return { success: false, error: response.data.error || response.data.message || 'Failed to create category' };
     } catch (error: unknown) {
       return { success: false, error: extractApiError(error, 'Failed to create category') };
     }

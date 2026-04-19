@@ -205,10 +205,13 @@ export function MobileMenuRenderer({
     
     // 如果是React元素，克隆并添加onClick
     if (React.isValidElement(element)) {
-      return React.cloneElement(element as React.ReactElement<any>, {
+      const trigger = element as React.ReactElement<{
+        onClick?: (event: React.MouseEvent) => void
+      }>
+      return React.cloneElement(trigger, {
         onClick: (e: React.MouseEvent) => {
           // 调用原有的onClick（如果存在）
-          const originalOnClick = (element as React.ReactElement<any>).props?.onClick
+          const originalOnClick = trigger.props?.onClick
           if (originalOnClick) {
             originalOnClick(e)
           }

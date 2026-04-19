@@ -25,18 +25,35 @@ export function parseMetadataPluginPreviewResult(rawResult: string | null | unde
     return { ok: false, parseFailed: true }
   }
 
-  let out: any
+  let out: unknown
   try {
     out = JSON.parse(rawResult)
   } catch {
     return { ok: false, parseFailed: true }
   }
 
-  if (!isSuccessResponse(out?.success)) {
-    return { ok: false, error: String(out?.error || '').trim() || undefined }
+  if (typeof out !== 'object' || out === null) {
+    return { ok: false, parseFailed: true }
   }
 
-  const data = out?.data || {}
+  const payload = out as {
+    success?: unknown
+    error?: unknown
+    data?: {
+      title?: unknown
+      description?: unknown
+      tags?: unknown
+      assets?: unknown
+      children?: unknown
+      pages?: unknown
+    }
+  }
+
+  if (!isSuccessResponse(payload.success)) {
+    return { ok: false, error: String(payload.error || '').trim() || undefined }
+  }
+
+  const data = payload.data || {}
   const tags = Array.isArray(data.tags)
     ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
     : []

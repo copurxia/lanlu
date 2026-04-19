@@ -1,4 +1,5 @@
 import { apiClient } from '@/lib/api';
+import { ArchiveService } from '@/lib/services/archive-service';
 import type { Tankoubon, TankoubonCreateRequest, TankoubonMetadata, TankoubonResponse } from '@/types/tankoubon';
 import type { MetadataUpdatePayload } from '@/types/archive';
 import { normalizeArchiveAssets } from '@/lib/utils/archive-assets';
@@ -8,20 +9,27 @@ import { normalizeTankoubonMetadata } from '@/lib/utils/metadata';
 export class TankoubonService {
   private static baseUrl = '/api/tankoubons';
 
+  private static isTankoubonItem(item: unknown): item is Tankoubon {
+    return item !== null && typeof item === 'object' && 'tankoubon_id' in item;
+  }
+
   private static normalizeResult(data: TankoubonResponse): Tankoubon[] {
     if (!data) return [];
-    const result = (data as any).result;
+    const result = data.result;
     if (!result) return [];
     const list = Array.isArray(result) ? result : [result];
-    return list.map((item) => ({
-      ...item,
-      title: String((item as any)?.title || '').trim(),
-      description: String((item as any)?.description || '').trim(),
-      children: Array.isArray((item as any)?.children)
-        ? (item as any).children.map((value: unknown) => String(value || '').trim()).filter(Boolean)
-        : [],
-      assets: normalizeArchiveAssets((item as any)?.assets),
-    }));
+    return list.map((item) => {
+      const normalizedItem = item as Tankoubon & { assets?: unknown; children?: unknown };
+      return {
+        ...normalizedItem,
+        title: String(normalizedItem.title || '').trim(),
+        description: String(normalizedItem.description || '').trim(),
+        children: Array.isArray(normalizedItem.children)
+          ? normalizedItem.children.map((value) => String(value || '').trim()).filter(Boolean)
+          : [],
+        assets: normalizeArchiveAssets(normalizedItem.assets),
+      };
+    });
   }
 
   /**
@@ -118,17 +126,15 @@ export class TankoubonService {
     page?: number;
     pageSize?: number;
   }): Promise<{ data: Tankoubon[] }> {
-    const response = await apiClient.get('/api/search', {
-      params: {
-        favorite_tankoubons_only: true,
-        groupby_tanks: true,
-        page: params?.page ?? 1,
-        pageSize: params?.pageSize ?? 1000
-      }
+    const response = await ArchiveService.search({
+      favorite_tankoubons_only: true,
+      groupby_tanks: true,
+      page: params?.page ?? 1,
+      pageSize: params?.pageSize ?? 1000
     });
 
     return {
-      data: response.data.data as unknown as Tankoubon[]
+      data: response.data.filter(this.isTankoubonItem)
     };
   }
 

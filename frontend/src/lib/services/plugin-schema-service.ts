@@ -1,19 +1,33 @@
 import { apiClient } from '../api';
 
 export type PluginParameterType = 'string' | 'int' | 'bool' | 'array';
+type PluginConfigMap = Record<string, unknown>;
+
+export interface PluginSchemaProperty {
+  default?: unknown;
+  name?: string;
+  title?: string;
+  type?: string;
+}
+
+export interface PluginSchemaDefinition {
+  type?: string;
+  properties?: Record<string, PluginSchemaProperty> | PluginSchemaProperty[];
+  required?: string[];
+}
 
 export interface PluginParameter {
   type: PluginParameterType;
   name?: string;
   desc: string;
-  default_value?: any;
-  value?: any;
+  default_value?: unknown;
+  value?: unknown;
 }
 
 export interface PluginSchemaResponse {
   has_schema: boolean;
   parameters?: PluginParameter[] | string;
-  parameters_schema?: string | any;
+  parameters_schema?: string | PluginSchemaDefinition;
   message?: string;
 }
 
@@ -33,6 +47,37 @@ export interface PluginConfigUpdateResponse {
   message: string;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true || value === 'true';
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function asSchemaDefinition(value: unknown): PluginSchemaDefinition {
+  return isRecord(value) ? (value as PluginSchemaDefinition) : {};
+}
+
+function getSchemaProperties(schema: PluginSchemaDefinition): PluginSchemaProperty[] {
+  if (Array.isArray(schema.properties)) {
+    return schema.properties;
+  }
+
+  if (!isRecord(schema.properties)) {
+    return [];
+  }
+
+  return Object.entries(schema.properties).map(([name, property]) => ({
+    name,
+    ...(isRecord(property) ? property : {}),
+  }));
+}
+
 export class PluginSchemaService {
   static async getPluginSchema(namespace: string): Promise<PluginSchemaResponse> {
     try {
@@ -47,25 +92,46 @@ export class PluginSchemaService {
       const response = await apiClient.get(`/api/admin/plugins/${namespace}/config`);
       const data = response.data;
 
-      let actualData = data;
-      if (data && typeof data === 'object' && data.data && typeof data.data === 'object') {
+      let actualData: unknown = data;
+      if (isRecord(data) && isRecord(data.data)) {
         actualData = data.data;
       }
 
       if (typeof actualData === 'string') {
-        const parsed = JSON.parse(actualData);
+        const parsed = JSON.parse(actualData) as unknown;
+        if (!isRecord(parsed)) {
+          return { has_schema: false, message: 'Invalid schema response' };
+        }
 
         return {
-          has_schema: parsed.has_schema === 'true' || parsed.has_schema === true,
-          parameters: parsed.parameters,
-          message: parsed.message
+          has_schema: asBoolean(parsed.has_schema),
+          parameters:
+            typeof parsed.parameters === 'string' || Array.isArray(parsed.parameters)
+              ? (parsed.parameters as PluginParameter[] | string)
+              : undefined,
+          parameters_schema:
+            typeof parsed.parameters_schema === 'string'
+              ? parsed.parameters_schema
+              : asSchemaDefinition(parsed.parameters_schema),
+          message: asString(parsed.message),
         };
       }
 
+      if (!isRecord(actualData)) {
+        return { has_schema: false, message: 'Invalid schema response' };
+      }
+
       return {
-        has_schema: actualData.has_schema === 'true' || actualData.has_schema === true,
-        parameters: actualData.parameters,
-        message: actualData.message
+        has_schema: asBoolean(actualData.has_schema),
+        parameters:
+          typeof actualData.parameters === 'string' || Array.isArray(actualData.parameters)
+            ? (actualData.parameters as PluginParameter[] | string)
+            : undefined,
+        parameters_schema:
+          typeof actualData.parameters_schema === 'string'
+            ? actualData.parameters_schema
+            : asSchemaDefinition(actualData.parameters_schema),
+        message: asString(actualData.message),
       };
     } catch (error) {
       console.error('Failed to fetch plugin schema:', error);
@@ -84,40 +150,37 @@ export class PluginSchemaService {
         };
       }
 
-      let schema;
-      if (typeof schemaResponse.parameters_schema === 'string') {
-        schema = JSON.parse(schemaResponse.parameters_schema || '{}');
-      } else {
-        schema = schemaResponse.parameters_schema || {};
-      }
-      const defaults: Record<string, any> = {};
+      const schema = this.parseSchema(schemaResponse.parameters_schema);
+      const defaults: PluginConfigMap = {};
 
-      if (schema.properties && Array.isArray(schema.properties)) {
-        schema.properties.forEach((property: any) => {
-          const key = property.name;
-          if (property.default !== undefined) {
-            defaults[key] = property.default;
-          } else {
-            switch (property.type) {
-              case 'string':
-                defaults[key] = '';
-                break;
-              case 'bool':
-              case 'boolean':
-                defaults[key] = false;
-                break;
-              case 'number':
-                defaults[key] = 0;
-                break;
-              case 'array':
-                defaults[key] = [];
-                break;
-              default:
-                defaults[key] = null;
-            }
-          }
-        });
-      }
+      getSchemaProperties(schema).forEach((property) => {
+        const key = property.name;
+        if (!key) return;
+
+        if (property.default !== undefined) {
+          defaults[key] = property.default;
+          return;
+        }
+
+        switch (property.type) {
+          case 'string':
+            defaults[key] = '';
+            break;
+          case 'bool':
+          case 'boolean':
+            defaults[key] = false;
+            break;
+          case 'number':
+            defaults[key] = 0;
+            break;
+          case 'array':
+            defaults[key] = [];
+            break;
+          default:
+            defaults[key] = null;
+            break;
+        }
+      });
 
       return {
         has_schema: true,
@@ -129,7 +192,10 @@ export class PluginSchemaService {
     }
   }
 
-  static async updatePluginConfigWithValidation(namespace: string, data: { parameters: any[] }): Promise<PluginConfigUpdateResponse> {
+  static async updatePluginConfigWithValidation(
+    namespace: string,
+    data: { parameters: PluginParameter[] }
+  ): Promise<PluginConfigUpdateResponse> {
     try {
       const requestBody = {
         parameters: JSON.stringify(data.parameters)
@@ -138,16 +204,23 @@ export class PluginSchemaService {
       const response = await apiClient.put(`/api/admin/plugins/${namespace}/config`, requestBody);
       const responseData = response.data;
       if (typeof responseData === 'string') {
-        const parsed = JSON.parse(responseData);
+        const parsed = JSON.parse(responseData) as unknown;
+        if (!isRecord(parsed)) {
+          return { success: false, message: 'Invalid response' };
+        }
         return {
           success: parsed.success === 'true',
-          message: parsed.message
+          message: asString(parsed.message) || ''
         };
       }
 
+      if (!isRecord(responseData)) {
+        return { success: false, message: 'Invalid response' };
+      }
+
       return {
-        success: responseData.success,
-        message: responseData.message
+        success: Boolean(responseData.success),
+        message: asString(responseData.message) || ''
       };
     } catch (error) {
       console.error('Failed to update plugin config:', error);
@@ -155,13 +228,13 @@ export class PluginSchemaService {
     }
   }
 
-  static parseSchema(schemaInput: string | any): any {
+  static parseSchema(schemaInput: unknown): PluginSchemaDefinition {
     try {
-      if (typeof schemaInput === 'object' && schemaInput !== null) {
-        return schemaInput;
+      if (isRecord(schemaInput)) {
+        return schemaInput as PluginSchemaDefinition;
       }
       if (typeof schemaInput === 'string') {
-        return JSON.parse(schemaInput);
+        return asSchemaDefinition(JSON.parse(schemaInput));
       }
       return {};
     } catch (error) {
@@ -170,36 +243,40 @@ export class PluginSchemaService {
     }
   }
 
-  static pluginSupportsSchema(plugin: any): boolean {
-    return plugin.has_schema || false;
+  static pluginSupportsSchema(plugin: { has_schema?: unknown }): boolean {
+    return Boolean(plugin.has_schema);
   }
 
-  static mergeConfigs(defaults: Record<string, any>, current: Record<string, any>): Record<string, any> {
+  static mergeConfigs(defaults: PluginConfigMap, current: PluginConfigMap): PluginConfigMap {
     return {
       ...defaults,
       ...current
     };
   }
 
-  static isValidSchema(schema: any): boolean {
-    return schema &&
-           typeof schema === 'object' &&
-           schema.type === 'object' &&
-           schema.properties &&
-           typeof schema.properties === 'object';
+  static isValidSchema(schema: unknown): boolean {
+    const parsed = this.parseSchema(schema);
+    return (
+      parsed.type === 'object' &&
+      parsed.properties !== undefined &&
+      typeof parsed.properties === 'object'
+    );
   }
 
-  static getSchemaFields(schema: any): Array<{name: string, title: string, type: string, required: boolean}> {
-    if (!this.isValidSchema(schema)) {
+  static getSchemaFields(schema: unknown): Array<{name: string, title: string, type: string, required: boolean}> {
+    const parsed = this.parseSchema(schema);
+    if (!this.isValidSchema(parsed)) {
       return [];
     }
 
-    const required = schema.required || [];
-    return Object.entries(schema.properties).map(([name, field]: [string, any]) => ({
-      name,
-      title: field.title || name,
-      type: field.type || 'string',
-      required: required.includes(name)
-    }));
+    const required = Array.isArray(parsed.required) ? parsed.required : [];
+    return getSchemaProperties(parsed)
+      .filter((field) => typeof field.name === 'string' && field.name.trim() !== '')
+      .map((field) => ({
+        name: field.name as string,
+        title: field.title || field.name || '',
+        type: field.type || 'string',
+        required: required.includes(field.name || '')
+      }));
   }
 }

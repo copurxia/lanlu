@@ -3,8 +3,13 @@
 import type { ConfirmOptions } from '@/lib/ui/feedback-runtime';
 import { getConfirmHandler } from '@/lib/ui/feedback-runtime';
 
-type ToastId = string | number;
-type ToastOptions = { id?: ToastId; [key: string]: unknown };
+export type ToastId = string | number;
+export type ToastOptions = { id?: ToastId; [key: string]: unknown };
+export type ToastPromiseMessages<T> = {
+  loading: string;
+  success: string | ((data: T) => string);
+  error: string | ((error: unknown) => string);
+};
 
 const FEEDBACK_HOST_ID = 'lanlu-feedback-host';
 
@@ -132,11 +137,7 @@ export const toast = {
   },
   promise<T>(
     promise: Promise<T>,
-    messages: {
-      loading: string;
-      success: string | ((data: T) => string);
-      error: string | ((error: unknown) => string);
-    },
+    messages: ToastPromiseMessages<T>,
     options?: ToastOptions
   ): ToastId {
     const toastId = options?.id ?? nextToastId();

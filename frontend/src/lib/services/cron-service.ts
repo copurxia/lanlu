@@ -1,5 +1,5 @@
 import { api } from '@/lib/api';
-import { parseApiPayload } from '@/lib/utils/api-utils';
+import { extractApiError, parseApiPayload } from '@/lib/utils/api-utils';
 
 /**
  * 定时任务类型
@@ -66,6 +66,48 @@ export interface ScheduledTaskInput {
   enabled?: boolean;
   priority?: number;
   timeoutSeconds?: number;
+}
+
+type CronRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is CronRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(record: CronRecord, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readNumber(record: CronRecord, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function readBoolean(record: CronRecord, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'boolean') {
+      return value;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -153,8 +195,8 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/task-types`);
       if (response.success) {
-        const data = parseApiPayload<any>(response.data, {});
-        const rawTypes = (data?.types ?? data) as any;
+        const data = parseApiPayload<CronRecord>(response.data, {});
+        const rawTypes = Array.isArray(data.types) ? data.types : Array.isArray(data) ? data : [];
         const values = Array.isArray(rawTypes) ? rawTypes.filter((t) => typeof t === 'string') : [];
         this.taskTypesCache = values.map((value) => ({ value }));
         return this.taskTypesCache;
@@ -174,16 +216,16 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/tasks?page=${page}&pageSize=${pageSize}`);
       if (response.success) {
-        const data = parseApiPayload<any>(response.data, {});
+        const data = parseApiPayload<CronRecord>(response.data, {});
         const tasks = Array.isArray(data.tasks)
-          ? data.tasks.map((task: any) => this.normalizeTask(task))
+          ? data.tasks.map((task) => this.normalizeTask(task))
           : [];
         return {
           tasks,
-          total: data.total ?? 0,
-          page: data.page ?? page,
-          pageSize: data.pageSize ?? pageSize,
-          totalPages: data.totalPages ?? 0,
+          total: readNumber(data, 'total') ?? 0,
+          page: readNumber(data, 'page') ?? page,
+          pageSize: readNumber(data, 'pageSize') ?? pageSize,
+          totalPages: readNumber(data, 'totalPages') ?? 0,
         };
       }
       throw new Error(response.error || 'Failed to fetch scheduled tasks');
@@ -200,7 +242,7 @@ export class CronService {
     try {
       const response = await api.get(`${this.BASE_URL}/tasks/${id}`);
       if (response.success) {
-        const data = parseApiPayload<any>(response.data, {});
+        const data = parseApiPayload<CronRecord>(response.data, {});
         return this.normalizeTask(data);
       }
       return null;
@@ -217,16 +259,16 @@ export class CronService {
     try {
       const response = await api.post(`${this.BASE_URL}/tasks`, input);
       if (response.success) {
-        const data = parseApiPayload<any>(response.data, {});
+        const data = parseApiPayload<CronRecord>(response.data, {});
         return {
           success: true,
           task: data.task ? this.normalizeTask(data.task) : undefined,
         };
       }
       return { success: false, error: response.error || 'Failed to create task' };
-    } catch (error: any) {
+    } catch (error) {
       console.error('Error creating scheduled task:', error);
-      return { success: false, error: error?.message || 'Failed to create task' };
+      return { success: false, error: extractApiError(error, 'Failed to create task') };
     }
   }
 
@@ -236,10 +278,14 @@ export class CronService {
   static async updateTask(id: number, input: Partial<ScheduledTaskInput>): Promise<{ success: boolean; error?: string }> {
     try {
       const response = await api.put(`${this.BASE_URL}/tasks/${id}`, input);
-      return { success: response.success === true, error: response.error };
-    } catch (error: any) {
+      if (response.success) {
+        return { success: true };
+      }
+
+      return { success: false, error: response.error || 'Failed to update task' };
+    } catch (error) {
       console.error('Error updating scheduled task:', error);
-      return { success: false, error: error?.message || 'Failed to update task' };
+      return { success: false, error: extractApiError(error, 'Failed to update task') };
     }
   }
 
@@ -298,29 +344,30 @@ export class CronService {
   /**
    * 标准化任务对象
    */
-  private static normalizeTask(task: any): ScheduledTask {
+  private static normalizeTask(task: unknown): ScheduledTask {
+    const record = isRecord(task) ? task : {};
     // 确保 taskParameters 是字符串
-    let taskParams = task.task_parameters ?? task.taskParameters ?? '';
+    let taskParams = record.task_parameters ?? record.taskParameters ?? '';
     if (typeof taskParams === 'object' && taskParams !== null) {
       taskParams = JSON.stringify(taskParams);
     }
 
     return {
-      id: task.id ?? 0,
-      name: task.name ?? '',
-      cronExpression: task.cron_expression ?? task.cronExpression ?? '',
-      taskType: task.task_type ?? task.taskType ?? '',
-      taskParameters: taskParams,
-      enabled: task.enabled ?? false,
-      priority: task.priority ?? 50,
-      timeoutSeconds: task.timeout_seconds ?? task.timeoutSeconds ?? 3600,
-      lastRunAt: task.last_run_at ?? task.lastRunAt ?? '',
-      lastRunSuccess: task.last_run_success ?? task.lastRunSuccess ?? false,
-      lastRunError: task.last_run_error ?? task.lastRunError ?? '',
-      nextRunAt: task.next_run_at ?? task.nextRunAt ?? '',
-      runCount: task.run_count ?? task.runCount ?? 0,
-      createdAt: task.created_at ?? task.createdAt ?? '',
-      updatedAt: task.updated_at ?? task.updatedAt ?? '',
+      id: readNumber(record, 'id') ?? 0,
+      name: readString(record, 'name') ?? '',
+      cronExpression: readString(record, 'cron_expression', 'cronExpression') ?? '',
+      taskType: readString(record, 'task_type', 'taskType') ?? '',
+      taskParameters: typeof taskParams === 'string' ? taskParams : '',
+      enabled: readBoolean(record, 'enabled') ?? false,
+      priority: readNumber(record, 'priority') ?? 50,
+      timeoutSeconds: readNumber(record, 'timeout_seconds', 'timeoutSeconds') ?? 3600,
+      lastRunAt: readString(record, 'last_run_at', 'lastRunAt') ?? '',
+      lastRunSuccess: readBoolean(record, 'last_run_success', 'lastRunSuccess') ?? false,
+      lastRunError: readString(record, 'last_run_error', 'lastRunError') ?? '',
+      nextRunAt: readString(record, 'next_run_at', 'nextRunAt') ?? '',
+      runCount: readNumber(record, 'run_count', 'runCount') ?? 0,
+      createdAt: readString(record, 'created_at', 'createdAt') ?? '',
+      updatedAt: readString(record, 'updated_at', 'updatedAt') ?? '',
     };
   }
 

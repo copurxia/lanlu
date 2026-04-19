@@ -4,13 +4,14 @@
  */
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+type LogContext = Record<string, unknown>;
 
 export interface LogEntry {
   level: LogLevel;
   message: string;
-  error?: Error | any;
+  error?: unknown;
   timestamp: string;
-  context?: Record<string, any>;
+  context?: LogContext;
 }
 
 /**
@@ -48,13 +49,27 @@ class Logger {
     this.minLevel = level;
   }
 
+  private formatUnknownError(error: unknown): string {
+    if (error instanceof Error) {
+      return error.stack || error.message;
+    }
+    if (typeof error === 'string') {
+      return error;
+    }
+    try {
+      return JSON.stringify(error);
+    } catch {
+      return String(error);
+    }
+  }
+
   /**
    * 格式化日志消息
    */
-  private formatMessage(level: LogLevel, message: string, error?: Error | any, context?: Record<string, any>): string {
+  private formatMessage(level: LogLevel, message: string, error?: unknown, context?: LogContext): string {
     const timestamp = new Date().toISOString();
     const contextStr = context ? ` ${JSON.stringify(context)}` : '';
-    const errorStr = error ? `\n${error instanceof Error ? error.stack : error}` : '';
+    const errorStr = error !== undefined ? `\n${this.formatUnknownError(error)}` : '';
 
     return `[${timestamp}] [${level.toUpperCase()}] ${message}${contextStr}${errorStr}`;
   }
@@ -78,7 +93,7 @@ class Logger {
   /**
    * 输出日志到控制台
    */
-  private consoleLog(level: LogLevel, message: string, error?: Error | any, context?: Record<string, any>): void {
+  private consoleLog(level: LogLevel, message: string, error?: unknown, context?: LogContext): void {
     if (!this.shouldLog(level)) return;
 
     const formattedMessage = this.formatMessage(level, message, error, context);
@@ -102,56 +117,56 @@ class Logger {
   /**
    * Debug 级别日志
    */
-  public debug(message: string, context?: Record<string, any>): void {
+  public debug(message: string, context?: LogContext): void {
     this.consoleLog('debug', message, undefined, context);
   }
 
   /**
    * Info 级别日志
    */
-  public info(message: string, context?: Record<string, any>): void {
+  public info(message: string, context?: LogContext): void {
     this.consoleLog('info', message, undefined, context);
   }
 
   /**
    * Warn 级别日志
    */
-  public warn(message: string, error?: Error | any, context?: Record<string, any>): void {
+  public warn(message: string, error?: unknown, context?: LogContext): void {
     this.consoleLog('warn', message, error, context);
   }
 
   /**
    * Error 级别日志
    */
-  public error(message: string, error?: Error | any, context?: Record<string, any>): void {
+  public error(message: string, error?: unknown, context?: LogContext): void {
     this.consoleLog('error', message, error, context);
   }
 
   /**
    * 记录 API 调用错误
    */
-  public apiError(endpoint: string, error: Error | any, context?: Record<string, any>): void {
+  public apiError(endpoint: string, error: unknown, context?: LogContext): void {
     this.error(`API Error: ${endpoint}`, error, { endpoint, ...context });
   }
 
   /**
    * 记录操作失败
    */
-  public operationFailed(operation: string, error: Error | any, context?: Record<string, any>): void {
+  public operationFailed(operation: string, error: unknown, context?: LogContext): void {
     this.error(`Operation failed: ${operation}`, error, { operation, ...context });
   }
 
   /**
    * 记录用户操作
    */
-  public userAction(action: string, context?: Record<string, any>): void {
+  public userAction(action: string, context?: LogContext): void {
     this.info(`User action: ${action}`, context);
   }
 
   /**
    * 记录应用程序事件
    */
-  public appEvent(event: string, context?: Record<string, any>): void {
+  public appEvent(event: string, context?: LogContext): void {
     this.info(`App event: ${event}`, context);
   }
 }
@@ -160,7 +175,7 @@ class Logger {
 export const logger = Logger.getInstance();
 
 // 导出便捷方法
-export const logDebug = (message: string, context?: Record<string, any>) => logger.debug(message, context);
-export const logInfo = (message: string, context?: Record<string, any>) => logger.info(message, context);
-export const logWarn = (message: string, error?: Error | any, context?: Record<string, any>) => logger.warn(message, error, context);
-export const logError = (message: string, error?: Error | any, context?: Record<string, any>) => logger.error(message, error, context);
+export const logDebug = (message: string, context?: LogContext) => logger.debug(message, context);
+export const logInfo = (message: string, context?: LogContext) => logger.info(message, context);
+export const logWarn = (message: string, error?: unknown, context?: LogContext) => logger.warn(message, error, context);
+export const logError = (message: string, error?: unknown, context?: LogContext) => logger.error(message, error, context);

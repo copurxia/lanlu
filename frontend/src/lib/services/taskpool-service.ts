@@ -45,6 +45,57 @@ type WaitTaskOptions = {
   onUpdate?: (task: Task, meta: { transport: 'sse'; log?: string; payload?: TaskStreamPayload }) => void;
 };
 
+type TaskRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is TaskRecord {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(record: TaskRecord, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readNumber(record: TaskRecord, ...keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return undefined;
+}
+
+function readRecord(record: TaskRecord, key: string): TaskRecord | undefined {
+  const value = record[key];
+  return isRecord(value) ? value : undefined;
+}
+
+function toTaskStatus(value: unknown): Task['status'] {
+  switch (value) {
+    case 'pending':
+    case 'running':
+    case 'waiting':
+    case 'completed':
+    case 'failed':
+    case 'stopped':
+      return value;
+    default:
+      return 'pending';
+  }
+}
+
 /**
  * TaskPool Service - 使用新的 TaskPool API
  */
@@ -114,27 +165,28 @@ export class TaskPoolService {
   /**
    * 标准化任务对象，将后端的下划线命名转换为前端的驼峰命名
    */
-  private static normalizeTask(task: any): Task {
+  private static normalizeTask(task: unknown): Task {
+    const record = isRecord(task) ? task : {};
     return {
-      id: task.id,
-      name: task.name,
-      status: task.status,
-      progress: task.progress,
-      message: task.message,
-      phase: task.phase || undefined,
-      waitingReason: task.waiting_reason || task.waitingReason || undefined,
-      activeKey: task.active_key || task.activeKey || undefined,
-      taskType: task.task_type || task.taskType,
-      pluginNamespace: task.plugin_namespace || task.pluginNamespace || '',
-      parameters: this.parseTaskParameters(task.parameters),
-      result: task.result || '',
-      createdAt: task.created_at || task.createdAt || '',
-      startedAt: task.started_at || task.startedAt || '',
-      completedAt: task.completed_at || task.completedAt || '',
-      priority: task.priority || 50,
-      groupId: task.group_id || task.groupId || '',
-      timeoutAt: task.timeout_at || task.timeoutAt || '',
-      triggerSource: task.trigger_source || task.triggerSource || ''
+      id: readNumber(record, 'id') ?? 0,
+      name: readString(record, 'name') ?? '',
+      status: toTaskStatus(record.status),
+      progress: readNumber(record, 'progress') ?? 0,
+      message: readString(record, 'message') ?? '',
+      phase: readString(record, 'phase'),
+      waitingReason: readString(record, 'waiting_reason', 'waitingReason'),
+      activeKey: readString(record, 'active_key', 'activeKey'),
+      taskType: readString(record, 'task_type', 'taskType') ?? '',
+      pluginNamespace: readString(record, 'plugin_namespace', 'pluginNamespace') ?? '',
+      parameters: this.parseTaskParameters(record.parameters),
+      result: readString(record, 'result') ?? '',
+      createdAt: readString(record, 'created_at', 'createdAt') ?? '',
+      startedAt: readString(record, 'started_at', 'startedAt') ?? '',
+      completedAt: readString(record, 'completed_at', 'completedAt') ?? '',
+      priority: readNumber(record, 'priority') ?? 50,
+      groupId: readString(record, 'group_id', 'groupId') ?? '',
+      timeoutAt: readString(record, 'timeout_at', 'timeoutAt') ?? '',
+      triggerSource: readString(record, 'trigger_source', 'triggerSource') ?? ''
     };
   }
 
@@ -146,7 +198,7 @@ export class TaskPoolService {
       const response = await api.get(`${this.BASE_URL}/${id}`);
 
       if (response.success) {
-        return this.normalizeTask(parseApiPayload<any>(response.data, {}));
+        return this.normalizeTask(parseApiPayload<TaskRecord>(response.data, {}));
       } else {
         throw new Error(response.error || 'Failed to fetch task');
       }
@@ -341,9 +393,10 @@ export class TaskPoolService {
       const response = await api.post(`${this.BASE_URL}/${id}/retry`);
 
       if (response.success) {
+        const data = parseApiPayload<TaskRecord>(response.data, {});
         return {
           success: true,
-          new_task_id: response.data?.new_task_id
+          new_task_id: readNumber(data, 'new_task_id')
         };
       } else {
         throw new Error(response.error || 'Failed to retry task');
@@ -551,16 +604,17 @@ export class TaskPoolService {
   /**
    * Parse task parameters JSON
    */
-  static parseTaskParameters(parameters: string | Record<string, any>): Record<string, any> {
+  static parseTaskParameters(parameters: unknown): Record<string, unknown> {
     try {
       // 如果是字符串，尝试解析为JSON
       if (typeof parameters === 'string') {
         if (parameters.trim() === '') return {};
-        return JSON.parse(parameters);
+        const parsed = JSON.parse(parameters) as unknown;
+        return isRecord(parsed) ? parsed : {};
       }
 
       // 如果已经是对象，直接返回
-      if (parameters && typeof parameters === 'object') {
+      if (isRecord(parameters)) {
         return parameters;
       }
 
@@ -643,43 +697,30 @@ export class TaskPoolService {
     if (typeof raw !== 'string' || raw.trim() === '') return null;
 
     try {
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return null;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isRecord(parsed)) return null;
 
-      const taskCandidate = (parsed as any).task ?? parsed;
-      if (!taskCandidate || typeof taskCandidate !== 'object') return null;
+      const taskCandidate = readRecord(parsed, 'task') ?? parsed;
+      if (!isRecord(taskCandidate)) return null;
 
       const task = this.normalizeTask(taskCandidate);
-      const stream = (parsed as any).stream;
-      const log = typeof (parsed as any).log === 'string' ? (parsed as any).log : undefined;
+      const stream = readRecord(parsed, 'stream');
+      const log = readString(parsed, 'log');
       const logTail =
-        typeof stream?.log_tail === 'string'
-          ? stream.log_tail
-          : typeof (parsed as any).log_tail === 'string'
-            ? (parsed as any).log_tail
-            : undefined;
+        readString(stream ?? {}, 'log_tail') ??
+        readString(parsed, 'log_tail');
       const logDelta =
-        typeof stream?.log_delta === 'string'
-          ? stream.log_delta
-          : typeof (parsed as any).log_delta === 'string'
-            ? (parsed as any).log_delta
-            : undefined;
+        readString(stream ?? {}, 'log_delta') ??
+        readString(parsed, 'log_delta');
       const logBytes =
-        typeof stream?.log_bytes === 'number'
-          ? stream.log_bytes
-          : typeof (parsed as any).log_bytes === 'number'
-            ? (parsed as any).log_bytes
-            : undefined;
+        readNumber(stream ?? {}, 'log_bytes') ??
+        readNumber(parsed, 'log_bytes');
       const mode =
-        typeof stream?.mode === 'string'
-          ? stream.mode
-          : typeof (parsed as any).mode === 'string'
-            ? (parsed as any).mode
-            : undefined;
-      const version = typeof (parsed as any).v === 'number' ? (parsed as any).v : undefined;
+        readString(stream ?? {}, 'mode') ??
+        readString(parsed, 'mode');
+      const version = readNumber(parsed, 'v');
 
-      const eventType =
-        typeof (parsed as any).event_type === 'string' ? (parsed as any).event_type : undefined;
+      const eventType = readString(parsed, 'event_type');
 
       return { task, eventType, log, logTail, logDelta, logBytes, mode, version };
     } catch {
@@ -691,37 +732,30 @@ export class TaskPoolService {
     if (typeof raw !== 'string' || raw.trim() === '') return null;
 
     try {
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return null;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isRecord(parsed)) return null;
 
-      const pageCandidate =
-        (parsed as any).data && typeof (parsed as any).data === 'object'
-          ? (parsed as any).data
-          : parsed;
+      const pageCandidate = readRecord(parsed, 'data') ?? parsed;
 
-      if (!pageCandidate || typeof pageCandidate !== 'object') return null;
+      if (!isRecord(pageCandidate)) return null;
 
-      const tasks = Array.isArray((pageCandidate as any).tasks)
-        ? (pageCandidate as any).tasks.map((task: any) => this.normalizeTask(task))
+      const tasks = Array.isArray(pageCandidate.tasks)
+        ? pageCandidate.tasks.map((task) => this.normalizeTask(task))
         : [];
 
       const page: TaskPageResult = {
         tasks,
-        total: typeof (pageCandidate as any).total === 'number' ? (pageCandidate as any).total : 0,
-        totalAll:
-          typeof (pageCandidate as any).totalAll === 'number' ? (pageCandidate as any).totalAll : undefined,
-        page: typeof (pageCandidate as any).page === 'number' ? (pageCandidate as any).page : 1,
-        pageSize:
-          typeof (pageCandidate as any).pageSize === 'number' ? (pageCandidate as any).pageSize : 10,
-        totalPages:
-          typeof (pageCandidate as any).totalPages === 'number' ? (pageCandidate as any).totalPages : 0,
+        total: readNumber(pageCandidate, 'total') ?? 0,
+        totalAll: readNumber(pageCandidate, 'totalAll'),
+        page: readNumber(pageCandidate, 'page') ?? 1,
+        pageSize: readNumber(pageCandidate, 'pageSize') ?? 10,
+        totalPages: readNumber(pageCandidate, 'totalPages') ?? 0,
       };
 
       return {
         page,
-        eventType:
-          typeof (parsed as any).event_type === 'string' ? (parsed as any).event_type : undefined,
-        version: typeof (parsed as any).v === 'number' ? (parsed as any).v : undefined,
+        eventType: readString(parsed, 'event_type'),
+        version: readNumber(parsed, 'v'),
       };
     } catch {
       return null;

@@ -1,7 +1,7 @@
 'use client';
 
 import type { ChangeEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   BookOpen,
@@ -33,6 +33,7 @@ import { getCoverAssetId } from '@/lib/utils/archive-assets';
 import { buildMetadataAssetInputs } from '@/lib/utils/metadata';
 import { logger } from '@/lib/utils/logger';
 import { buildReaderPath } from '@/lib/utils/reader';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 type HomeMediaItemType = 'archive' | 'tankoubon';
 
@@ -49,6 +50,11 @@ type RenderState = {
   toggleFavorite: () => Promise<void>;
   toggleSelected: (nextSelected?: boolean) => void;
 };
+
+type SyncedValue<T> = {
+  source: T;
+  value: T;
+} | null;
 
 type Props = {
   children: (state: RenderState) => ReactNode;
@@ -76,6 +82,10 @@ function toTagList(raw?: string): string[] {
     .filter(Boolean);
 }
 
+function resolveSyncedValue<T>(state: SyncedValue<T>, source: T): T {
+  return state !== null && Object.is(state.source, source) ? state.value : source;
+}
+
 export function HomeMediaItemMenu({
   children,
   description,
@@ -99,14 +109,18 @@ export function HomeMediaItemMenu({
   const { isAuthenticated, user } = useAuth();
   const { error: showError } = useToast();
   const { confirm } = useConfirmContext();
+  const baseDescription = description || '';
+  const baseTags = tags || '';
+  const baseFavorite = Boolean(initialFavorite);
+  const baseIsNew = Boolean(initialIsNew);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
-  const [displayTitle, setDisplayTitle] = useState(title);
-  const [displayDescription, setDisplayDescription] = useState(description || '');
-  const [displayTags, setDisplayTags] = useState(tags || '');
-  const [isFavorite, setIsFavorite] = useState(Boolean(initialFavorite));
-  const [isNew, setIsNew] = useState(Boolean(initialIsNew));
+  const [displayTitleState, setDisplayTitleState] = useState<SyncedValue<string>>(null);
+  const [displayDescriptionState, setDisplayDescriptionState] = useState<SyncedValue<string>>(null);
+  const [displayTagsState, setDisplayTagsState] = useState<SyncedValue<string>>(null);
+  const [favoriteState, setFavoriteState] = useState<SyncedValue<boolean>>(null);
+  const [isNewState, setIsNewState] = useState<SyncedValue<boolean>>(null);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [isNewStatusLoading, setIsNewStatusLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -124,6 +138,7 @@ export function HomeMediaItemMenu({
   const [coverUploading, setCoverUploading] = useState(false);
   const [backdropUploading, setBackdropUploading] = useState(false);
   const [clearlogoUploading, setClearlogoUploading] = useState(false);
+  const editMetadataRequestIdRef = useRef(0);
 
   const isAdmin = user?.isAdmin === true;
   const canEdit = isAuthenticated;
@@ -133,68 +148,11 @@ export function HomeMediaItemMenu({
     ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined)
     : detailPath;
   const menuActionDisabled = deleting || editSaving;
-
-  useEffect(() => {
-    setDisplayTitle(title);
-  }, [title]);
-
-  useEffect(() => {
-    setDisplayDescription(description || '');
-  }, [description]);
-
-  useEffect(() => {
-    setDisplayTags(tags || '');
-  }, [tags]);
-
-  useEffect(() => {
-    setIsFavorite(Boolean(initialFavorite));
-  }, [initialFavorite]);
-
-  useEffect(() => {
-    setIsNew(Boolean(initialIsNew));
-  }, [initialIsNew]);
-
-  useEffect(() => {
-    if (!editOpen || !canEdit) return;
-
-    const fallbackCoverId = typeof thumbnailAssetId === 'number' && Number.isFinite(thumbnailAssetId) && thumbnailAssetId > 0
-      ? String(Math.trunc(thumbnailAssetId))
-      : '';
-
-    setEditCover('');
-    setEditBackdrop('');
-    setEditClearlogo('');
-    setEditAssetCoverId(fallbackCoverId);
-    setEditAssetBackdropId('');
-    setEditAssetClearlogoId('');
-
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        if (type === 'archive') {
-          const meta = await ArchiveService.getMetadata(id);
-          if (cancelled) return;
-          setEditAssetCoverId(String(getCoverAssetId(meta) || ''));
-          setEditAssetBackdropId(String(meta.assets?.backdrop || ''));
-          setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''));
-          return;
-        }
-
-        const meta = await TankoubonService.getMetadata(id);
-        if (cancelled) return;
-        setEditAssetCoverId(String(getCoverAssetId(meta) || ''));
-        setEditAssetBackdropId(String(meta.assets?.backdrop || ''));
-        setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''));
-      } catch {
-        // Keep fallback asset ids when detail loading fails.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [canEdit, editOpen, id, thumbnailAssetId, type]);
+  const displayTitle = resolveSyncedValue(displayTitleState, title);
+  const displayDescription = resolveSyncedValue(displayDescriptionState, baseDescription);
+  const displayTags = resolveSyncedValue(displayTagsState, baseTags);
+  const isFavorite = resolveSyncedValue(favoriteState, baseFavorite);
+  const isNew = resolveSyncedValue(isNewState, baseIsNew);
 
   const emitRefresh = useCallback(() => {
     appEvents.emit(AppEvents.ARCHIVES_REFRESH);
@@ -219,14 +177,14 @@ export function HomeMediaItemMenu({
         ? await FavoriteService.setFavorite('archive', id, !isFavorite)
         : await FavoriteService.setFavorite('tankoubon', id, !isFavorite);
       if (success) {
-        setIsFavorite((current) => !current);
+        setFavoriteState({ source: baseFavorite, value: !isFavorite });
       }
     } catch (error) {
       logger.operationFailed('toggle favorite from home menu', error, { id, type });
     } finally {
       setFavoriteLoading(false);
     }
-  }, [favoriteLoading, id, isFavorite, type]);
+  }, [baseFavorite, favoriteLoading, id, isFavorite, type]);
 
   const handleContextMenuCapture = useCallback((event: ReactMouseEvent<HTMLElement>) => {
     event.preventDefault();
@@ -254,7 +212,7 @@ export function HomeMediaItemMenu({
       } else {
         await ArchiveService.setIsNew(id);
       }
-      setIsNew((current) => !current);
+      setIsNewState({ source: baseIsNew, value: !isNew });
       emitRefresh();
     } catch (error) {
       logger.operationFailed('toggle archive read status from home menu', error, { id });
@@ -262,7 +220,7 @@ export function HomeMediaItemMenu({
     } finally {
       setIsNewStatusLoading(false);
     }
-  }, [emitRefresh, id, isNew, isNewStatusLoading, showError, t, type]);
+  }, [baseIsNew, emitRefresh, id, isNew, isNewStatusLoading, showError, t, type]);
 
   const handleOpenEdit = useCallback(() => {
     if (!canEdit) {
@@ -284,7 +242,36 @@ export function HomeMediaItemMenu({
     setEditAssetBackdropId('');
     setEditAssetClearlogoId('');
     setEditOpen(true);
-  }, [canEdit, displayDescription, displayTags, displayTitle, showError, t, thumbnailAssetId]);
+
+    const requestId = ++editMetadataRequestIdRef.current;
+    void (async () => {
+      try {
+        if (type === 'archive') {
+          const meta = await ArchiveService.getMetadata(id);
+          if (editMetadataRequestIdRef.current !== requestId) return;
+          setEditAssetCoverId(String(getCoverAssetId(meta) || ''));
+          setEditAssetBackdropId(String(meta.assets?.backdrop || ''));
+          setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''));
+          return;
+        }
+
+        const meta = await TankoubonService.getMetadata(id);
+        if (editMetadataRequestIdRef.current !== requestId) return;
+        setEditAssetCoverId(String(getCoverAssetId(meta) || ''));
+        setEditAssetBackdropId(String(meta.assets?.backdrop || ''));
+        setEditAssetClearlogoId(String(meta.assets?.clearlogo || ''));
+      } catch {
+        // Keep fallback asset ids when detail loading fails.
+      }
+    })();
+  }, [canEdit, displayDescription, displayTags, displayTitle, id, showError, t, thumbnailAssetId, type]);
+
+  const handleEditOpenChange = useCallback((open: boolean) => {
+    setEditOpen(open);
+    if (!open) {
+      editMetadataRequestIdRef.current += 1;
+    }
+  }, []);
 
   const uploadMetadataAsset = useCallback((slot: 'cover' | 'backdrop' | 'clearlogo') => {
     if (!canEdit || editSaving) return;
@@ -350,9 +337,9 @@ export function HomeMediaItemMenu({
           setEditAssetClearlogoId(normalizedAssetId);
           setEditClearlogo('');
         }
-      } catch (error: any) {
+      } catch (error) {
         logger.operationFailed('upload metadata asset from home menu', error, { id, slot, type });
-        showError(error?.response?.data?.message || error?.message || t('archive.assetUploadFailed'));
+        showError(extractApiError(error, t('archive.assetUploadFailed')));
       } finally {
         setUploading(false);
         document.body.removeChild(input);
@@ -425,10 +412,10 @@ export function HomeMediaItemMenu({
         });
       }
 
-      if (nextTitle) setDisplayTitle(nextTitle);
-      setDisplayDescription(nextSummary);
-      setDisplayTags(nextTags.join(', '));
-      setEditOpen(false);
+      if (nextTitle) setDisplayTitleState({ source: title, value: nextTitle });
+      setDisplayDescriptionState({ source: baseDescription, value: nextSummary });
+      setDisplayTagsState({ source: baseTags, value: nextTags.join(', ') });
+      handleEditOpenChange(false);
       emitRefresh();
     } catch (error) {
       logger.operationFailed('save home menu edit', error, { id, type });
@@ -438,6 +425,8 @@ export function HomeMediaItemMenu({
     }
   }, [
     canEdit,
+    baseDescription,
+    baseTags,
     displayTitle,
     editAssetBackdropId,
     editAssetClearlogoId,
@@ -451,8 +440,10 @@ export function HomeMediaItemMenu({
     editTitle,
     emitRefresh,
     id,
+    handleEditOpenChange,
     showError,
     t,
+    title,
     type,
   ]);
 
@@ -587,7 +578,7 @@ export function HomeMediaItemMenu({
 
       <ArchiveMetadataEditDialog
         open={editOpen}
-        onOpenChange={setEditOpen}
+        onOpenChange={handleEditOpenChange}
         t={t}
         title={editTitle}
         onTitleChange={setEditTitle}

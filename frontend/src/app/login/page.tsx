@@ -18,6 +18,9 @@ import { LanguageButton } from '@/components/language/LanguageButton';
 import { ThemeButton } from '@/components/theme/theme-toggle';
 import { Logo } from '@/components/brand/Logo';
 import type { AuthLoginPendingTotp } from '@/types/auth';
+import { extractApiError } from '@/lib/utils/api-utils';
+
+type LoginMode = 'account' | 'passkey';
 
 function LoginForm() {
   const { t } = useLanguage();
@@ -29,7 +32,7 @@ function LoginForm() {
 
   const LOGIN_USERNAME_STORAGE_KEY = 'lanlu.login.username';
 
-  const [mode, setMode] = useState<'account' | 'passkey'>('account');
+  const [mode, setMode] = useState<LoginMode>('account');
   const [username, setUsername] = useState(() => {
     if (typeof window === 'undefined') return '';
     try {
@@ -88,13 +91,13 @@ function LoginForm() {
         // Ignore.
       }
       login(null, resp.data.user);
-    } catch (e: any) {
+    } catch (e) {
       try {
         window.localStorage.setItem(LOGIN_USERNAME_STORAGE_KEY, username.trim());
       } catch {
         // Ignore.
       }
-      setError(e?.response?.data?.message || e?.message || 'Login failed');
+      setError(extractApiError(e, 'Login failed'));
     } finally {
       setIsLoading(false);
     }
@@ -122,8 +125,8 @@ function LoginForm() {
       setTotpCode('');
       setRecoveryCode('');
       login(null, resp.data.user);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('auth.totpVerifyFailed'));
+    } catch (e) {
+      setError(extractApiError(e, t('auth.totpVerifyFailed')));
     } finally {
       setIsLoading(false);
     }
@@ -140,7 +143,7 @@ function LoginForm() {
         // Ignore.
       }
       login(null, resp.data.user);
-    } catch (e: any) {
+    } catch (e) {
       try {
         if (username.trim()) {
           window.localStorage.setItem(LOGIN_USERNAME_STORAGE_KEY, username.trim());
@@ -148,9 +151,15 @@ function LoginForm() {
       } catch {
         // Ignore.
       }
-      setError(e?.response?.data?.message || e?.message || t('auth.passkeyLoginFailed'));
+      setError(extractApiError(e, t('auth.passkeyLoginFailed')));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleModeChange = (value: string) => {
+    if (value === 'account' || value === 'passkey') {
+      setMode(value);
     }
   };
 
@@ -227,7 +236,7 @@ function LoginForm() {
           {/* Mobile: avoid the "card" backdrop (looks like an extra wrapper in dark mode). */}
           <Card className="border-none shadow-none bg-transparent lg:bg-card lg:border lg:shadow-xs">
             <CardContent className="pt-6 px-0 lg:px-6">
-              <Tabs value={mode} onValueChange={(v) => setMode(v as any)} className="w-full">
+              <Tabs value={mode} onValueChange={handleModeChange} className="w-full">
                 <TabsList className={`grid w-full mb-8 ${passkeySupported ? 'grid-cols-2' : 'grid-cols-1'}`}>
                   <TabsTrigger value="account" className="flex items-center gap-2">
                     <ShieldCheck className="h-4 w-4" />

@@ -5,7 +5,7 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-import { SystemSettingsApi } from '@/lib/services/system-settings-api';
+import { SystemSettingsApi, type SystemSetting } from '@/lib/services/system-settings-api';
 import { useToast } from '@/hooks/use-toast';
 
 export function StartupTaskSettings() {
@@ -17,17 +17,13 @@ export function StartupTaskSettings() {
   const [enableInitialDbCheck, setEnableInitialDbCheck] = useState(false);
   const [enableInitialPluginScan, setEnableInitialPluginScan] = useState(true);
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
   const loadSettings = async () => {
     setLoading(true);
     try {
       const settings = await SystemSettingsApi.getAllSettings();
-      const scanSetting = settings.find((s: any) => s.key === 'ENABLE_INITIAL_SCAN');
-      const dbCheckSetting = settings.find((s: any) => s.key === 'ENABLE_INITIAL_DB_CHECK');
-      const pluginScanSetting = settings.find((s: any) => s.key === 'ENABLE_INITIAL_PLUGIN_SCAN');
+      const scanSetting = settings.find((s: SystemSetting) => s.key === 'ENABLE_INITIAL_SCAN');
+      const dbCheckSetting = settings.find((s: SystemSetting) => s.key === 'ENABLE_INITIAL_DB_CHECK');
+      const pluginScanSetting = settings.find((s: SystemSetting) => s.key === 'ENABLE_INITIAL_PLUGIN_SCAN');
 
       setEnableInitialScan(scanSetting?.value === 'true');
       setEnableInitialDbCheck(dbCheckSetting?.value === 'true');
@@ -39,6 +35,10 @@ export function StartupTaskSettings() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    void loadSettings();
+  }, []);
 
   const handleToggleScan = async (checked: boolean) => {
     setSaving(true);

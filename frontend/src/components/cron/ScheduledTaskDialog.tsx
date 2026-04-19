@@ -63,40 +63,6 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
 
   const isEditing = taskId !== null;
 
-  // Load task data when editing
-  useEffect(() => {
-    if (open && taskId !== null) {
-      loadTask(taskId);
-    } else if (open && taskId === null) {
-      // Reset form for new task
-      resetForm();
-    }
-  }, [open, taskId]);
-
-  // Load task types (from backend) when dialog opens.
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    (async () => {
-      const types = await CronService.getTaskTypes();
-      if (!cancelled) setTaskTypes(types);
-    })();
-    return () => { cancelled = true; };
-  }, [open]);
-
-  // Keep select state in sync when editing/when task types arrive.
-  useEffect(() => {
-    if (!open) return;
-    const known = taskTypes.some((t) => t.value === taskType);
-    if (taskType && !known) {
-      setTaskTypeSelect(CronService.CUSTOM_TASK_TYPE_VALUE);
-      setCustomTaskType(taskType);
-    } else {
-      setTaskTypeSelect(taskType);
-      setCustomTaskType('');
-    }
-  }, [open, taskType, taskTypes]);
-
   const resetForm = () => {
     setName('');
     setCronExpression('');
@@ -135,6 +101,40 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
       setLoading(false);
     }
   };
+
+  // Load task data when editing
+  useEffect(() => {
+    if (open && taskId !== null) {
+      loadTask(taskId);
+    } else if (open && taskId === null) {
+      // Reset form for new task
+      resetForm();
+    }
+  }, [open, taskId]);
+
+  // Load task types (from backend) when dialog opens.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      const types = await CronService.getTaskTypes();
+      if (!cancelled) setTaskTypes(types);
+    })();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  // Keep select state in sync when editing/when task types arrive.
+  useEffect(() => {
+    if (!open) return;
+    const known = taskTypes.some((t) => t.value === taskType);
+    if (taskType && !known) {
+      setTaskTypeSelect(CronService.CUSTOM_TASK_TYPE_VALUE);
+      setCustomTaskType(taskType);
+    } else {
+      setTaskTypeSelect(taskType);
+      setCustomTaskType('');
+    }
+  }, [open, taskType, taskTypes]);
 
   const handleValidate = async () => {
     if (!cronExpression.trim()) return;
@@ -235,8 +235,8 @@ export function ScheduledTaskDialog({ open, taskId, onClose, onSaved }: Schedule
     try {
       const parsed = JSON.parse(raw);
       setTaskParameters(JSON.stringify(parsed, null, 2));
-    } catch (e: any) {
-      toastError(e?.message || t('settings.cronManagement.taskParametersInvalidJson'));
+    } catch (e) {
+      toastError(e instanceof Error ? e.message : t('settings.cronManagement.taskParametersInvalidJson'));
     }
   };
 

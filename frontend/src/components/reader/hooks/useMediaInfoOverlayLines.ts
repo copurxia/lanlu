@@ -104,7 +104,7 @@ export function useMediaInfoOverlayLines({
         bytes: getApproxResourceBytes(resourceUrl),
         transferSize: timing?.transferSize ?? null,
         duration: timing ? timing.responseEnd - timing.startTime : null,
-        protocol: (timing as any)?.nextHopProtocol ? String((timing as any).nextHopProtocol) : null,
+        protocol: timing?.nextHopProtocol ? String(timing.nextHopProtocol) : null,
         format: getImageFormatLabel(resourceUrl),
         resourceUrl,
       };
@@ -130,7 +130,7 @@ export function useMediaInfoOverlayLines({
         bufferedEnd,
         transferSize: timing?.transferSize ?? null,
         durationMs: timing ? timing.responseEnd - timing.startTime : null,
-        protocol: (timing as any)?.nextHopProtocol ? String((timing as any).nextHopProtocol) : null,
+        protocol: timing?.nextHopProtocol ? String(timing.nextHopProtocol) : null,
       };
     };
 

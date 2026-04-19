@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { TrendingUp } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, type TooltipContentProps, type TooltipValueType } from 'recharts';
 import { ReadingTrendItem } from '@/lib/services/user-stats-service';
 
 interface ReadingTrendChartProps {
@@ -50,15 +50,23 @@ export function ReadingTrendChart({ data, loading = false }: ReadingTrendChartPr
   // 计算平均阅读量
   const avgReads = data.length > 0 ? Math.round(totalReads / data.length * 10) / 10 : 0;
 
-  // 使用useMemo创建稳定的tooltip函数
-  const tooltipContent = (props: any) => {
-    const { active, payload, label } = props;
-    if (active && payload && payload.length) {
+  const formatTooltipValue = (value: TooltipValueType | undefined) => {
+    if (Array.isArray(value)) {
+      return value.join(' / ');
+    }
+
+    return value ?? '';
+  };
+
+  const tooltipContent = ({ active, payload, label }: TooltipContentProps<TooltipValueType, string | number>) => {
+    const firstPayloadItem = payload?.[0];
+
+    if (active && firstPayloadItem) {
       return (
         <div className="bg-background border border-border rounded-lg p-2 shadow-lg">
-          <p className="text-sm font-medium">{formatDate(label)}</p>
+          <p className="text-sm font-medium">{formatDate(String(label || ''))}</p>
           <p className="text-sm text-primary">
-            {t('dashboard.readCount')}: <span className="font-semibold">{payload[0].value}</span>
+            {t('dashboard.readCount')}: <span className="font-semibold">{formatTooltipValue(firstPayloadItem.value)}</span>
           </p>
         </div>
       );

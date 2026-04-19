@@ -1,8 +1,20 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig, AxiosResponse, AxiosError } from 'axios';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 export interface AuthRequestConfig extends InternalAxiosRequestConfig {
   skipAuthRedirect?: boolean;
 }
+
+export type ApiResponseData = Record<string, unknown>;
+export type ApiSuccessResult<T = ApiResponseData> = {
+  success: true;
+  data: T;
+};
+export type ApiFailureResult = {
+  success: false;
+  error: string;
+};
+export type ApiResult<T = ApiResponseData> = ApiSuccessResult<T> | ApiFailureResult;
 
 // 区分服务端和客户端的API配置
 const getApiConfig = () => {
@@ -49,7 +61,7 @@ function createRequestInterceptor(config: InternalAxiosRequestConfig): InternalA
  * 通用响应错误处理
  */
 function handleResponseError(error: AxiosError, logPrefix: string = 'API'): Promise<never> {
-  console.error(`${logPrefix} Error:`, (error.response?.data as any) || error.message);
+  console.error(`${logPrefix} Error:`, error.response?.data ?? error.message);
 
   const requestConfig = error.config as AuthRequestConfig | undefined;
   const sessionInvalid = error?.response?.headers?.['x-auth-session-invalid'] === '1';
@@ -97,62 +109,62 @@ export const getApiUrl = (path: string): string => `${baseURL}${path}`;
 
 // API wrapper functions
 export const api = {
-  get: async (url: string) => {
+  get: async <T = ApiResponseData>(url: string): Promise<ApiResult<T>> => {
     try {
-      const response = await apiClient.get(url);
+      const response = await apiClient.get<T>(url);
       return {
         success: true,
         data: response.data
       };
-    } catch (error: any) {
+    } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Request failed'
+        error: extractApiError(error, 'Request failed')
       };
     }
   },
 
-  post: async (url: string, data?: any) => {
+  post: async <T = ApiResponseData, TBody = unknown>(url: string, data?: TBody): Promise<ApiResult<T>> => {
     try {
-      const response = await apiClient.post(url, data);
+      const response = await apiClient.post<T>(url, data);
       return {
         success: true,
         data: response.data
       };
-    } catch (error: any) {
+    } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Request failed'
+        error: extractApiError(error, 'Request failed')
       };
     }
   },
 
-  put: async (url: string, data?: any) => {
+  put: async <T = ApiResponseData, TBody = unknown>(url: string, data?: TBody): Promise<ApiResult<T>> => {
     try {
-      const response = await apiClient.put(url, data);
+      const response = await apiClient.put<T>(url, data);
       return {
         success: true,
         data: response.data
       };
-    } catch (error: any) {
+    } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Request failed'
+        error: extractApiError(error, 'Request failed')
       };
     }
   },
 
-  delete: async (url: string) => {
+  delete: async <T = ApiResponseData>(url: string): Promise<ApiResult<T>> => {
     try {
-      const response = await apiClient.delete(url);
+      const response = await apiClient.delete<T>(url);
       return {
         success: true,
         data: response.data
       };
-    } catch (error: any) {
+    } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Request failed'
+        error: extractApiError(error, 'Request failed')
       };
     }
   }

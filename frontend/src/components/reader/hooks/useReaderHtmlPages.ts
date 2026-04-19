@@ -32,50 +32,8 @@ export function useReaderHtmlPages({
   const retryTimersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
   const mountedRef = useRef(true);
 
-  useEffect(() => {
-    htmlContentsRef.current = htmlContents;
-  }, [htmlContents]);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    const retryTimers = retryTimersRef.current;
-    return () => {
-      mountedRef.current = false;
-      retryTimers.forEach((timerId) => clearTimeout(timerId));
-      retryTimers.clear();
-    };
-  }, []);
-
-  useEffect(() => {
-    setHtmlContents({});
-    htmlContentsRef.current = {};
-    htmlLoadingRef.current.clear();
-    retryStateRef.current.clear();
-    retryTimersRef.current.forEach((timerId) => clearTimeout(timerId));
-    retryTimersRef.current.clear();
-  }, [id]);
-
-  useEffect(() => {
-    if (pages.length === 0) {
-      retryStateRef.current.clear();
-      retryTimersRef.current.forEach((timerId) => clearTimeout(timerId));
-      retryTimersRef.current.clear();
-      return;
-    }
-
-    retryStateRef.current.forEach((_, index) => {
-      if (index >= pages.length) retryStateRef.current.delete(index);
-    });
-    retryTimersRef.current.forEach((timerId, index) => {
-      if (index >= pages.length) {
-        clearTimeout(timerId);
-        retryTimersRef.current.delete(index);
-      }
-    });
-  }, [pages.length]);
-
   const loadHtmlPage = useCallback(
-    async (pageIndex: number) => {
+    async function loadHtmlPageInternal(pageIndex: number) {
       const page = pages[pageIndex];
       if (!page || page.type !== 'html') return;
       const pageArchiveId = ((page as { archiveId?: string }).archiveId || id || '').trim();
@@ -157,7 +115,7 @@ export function useReaderHtmlPages({
             retryTimersRef.current.delete(pageIndex);
             if (!mountedRef.current) return;
             if (htmlContentsRef.current[pageIndex]) return;
-            void loadHtmlPage(pageIndex);
+            void loadHtmlPageInternal(pageIndex);
           }, delayMs);
           retryTimersRef.current.set(pageIndex, timerId);
         }
@@ -167,6 +125,48 @@ export function useReaderHtmlPages({
     },
     [id, pages, onError]
   );
+
+  useEffect(() => {
+    htmlContentsRef.current = htmlContents;
+  }, [htmlContents]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const retryTimers = retryTimersRef.current;
+    return () => {
+      mountedRef.current = false;
+      retryTimers.forEach((timerId) => clearTimeout(timerId));
+      retryTimers.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    setHtmlContents({});
+    htmlContentsRef.current = {};
+    htmlLoadingRef.current.clear();
+    retryStateRef.current.clear();
+    retryTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+    retryTimersRef.current.clear();
+  }, [id]);
+
+  useEffect(() => {
+    if (pages.length === 0) {
+      retryStateRef.current.clear();
+      retryTimersRef.current.forEach((timerId) => clearTimeout(timerId));
+      retryTimersRef.current.clear();
+      return;
+    }
+
+    retryStateRef.current.forEach((_, index) => {
+      if (index >= pages.length) retryStateRef.current.delete(index);
+    });
+    retryTimersRef.current.forEach((timerId, index) => {
+      if (index >= pages.length) {
+        clearTimeout(timerId);
+        retryTimersRef.current.delete(index);
+      }
+    });
+  }, [pages.length]);
 
   return { htmlContents, loadHtmlPage } as const;
 }

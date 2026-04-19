@@ -217,10 +217,13 @@ const DialogTrigger: React.FC<{
   const { onOpenChange } = useDialogContext()
 
   if (asChild && React.isValidElement(children)) {
-    const child = children as React.ReactElement<any>
+    const child = children as React.ReactElement<{
+      className?: string
+      onClick?: React.MouseEventHandler<HTMLElement>
+    }>
     return React.cloneElement(child, {
       className: cn(child.props.className, className),
-      onClick: (e: any) => {
+      onClick: (e: React.MouseEvent<HTMLElement>) => {
         child.props.onClick?.(e)
         if (!e?.defaultPrevented) onOpenChange?.(true)
       },

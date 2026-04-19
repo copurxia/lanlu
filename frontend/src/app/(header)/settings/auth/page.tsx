@@ -23,6 +23,7 @@ import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { User } from 'lucide-react';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 export default function AuthSettingsPage() {
   const { t } = useLanguage();
@@ -91,14 +92,16 @@ export default function AuthSettingsPage() {
     [canChangeUsername, canChangePassword]
   );
 
+  const getErrorMessage = (error: unknown, fallback: string) => extractApiError(error, fallback);
+
   const loadTokens = async () => {
     if (!isAuthenticated) return;
     setTokensLoading(true);
     try {
       const resp = await AuthService.listTokens();
       setTokens(resp.data.tokens || []);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to load tokens');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to load tokens'));
     } finally {
       setTokensLoading(false);
     }
@@ -110,8 +113,8 @@ export default function AuthSettingsPage() {
     try {
       const resp = await AuthService.listSessions();
       setSessions(resp.data.sessions || []);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to load sessions');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to load sessions'));
     } finally {
       setSessionsLoading(false);
     }
@@ -123,8 +126,8 @@ export default function AuthSettingsPage() {
     try {
       const resp = await WebauthnAuthService.listCredentials();
       setPasskeys(resp.data.credentials || []);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('auth.passkeyLoadFailed'));
+    } catch (e) {
+      setError(getErrorMessage(e, t('auth.passkeyLoadFailed')));
     } finally {
       setPasskeysLoading(false);
     }
@@ -136,8 +139,8 @@ export default function AuthSettingsPage() {
     try {
       const resp = await TotpAuthService.getStatus();
       setTotpStatus(resp.data);
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || t('auth.totpStatusLoadFailed'));
+    } catch (e) {
+      setError(getErrorMessage(e, t('auth.totpStatusLoadFailed')));
     } finally {
       setTotpLoading(false);
     }
@@ -188,8 +191,8 @@ export default function AuthSettingsPage() {
 
       await refreshMe();
       setSuccessMsg(t('auth.credentialsUpdated'));
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to update credentials');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to update credentials'));
     } finally {
       setLoading(false);
     }
@@ -205,8 +208,8 @@ export default function AuthSettingsPage() {
       setNewTokenValue(resp.data.token.token || null);
       setNewTokenName('');
       await loadTokens();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to create token');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to create token'));
     } finally {
       setLoading(false);
     }
@@ -227,8 +230,8 @@ export default function AuthSettingsPage() {
     try {
       await AuthService.revokeToken(id);
       await loadTokens();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to revoke token');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to revoke token'));
     } finally {
       setLoading(false);
     }
@@ -254,8 +257,8 @@ export default function AuthSettingsPage() {
         return;
       }
       await loadSessions();
-    } catch (e: any) {
-      setError(e?.response?.data?.message || e?.message || 'Failed to revoke session');
+    } catch (e) {
+      setError(getErrorMessage(e, 'Failed to revoke session'));
     } finally {
       setLoading(false);
     }
@@ -278,8 +281,8 @@ export default function AuthSettingsPage() {
       await loadSessions();
       setSuccessMsg(t('auth.otherSessionsRevoked'));
       toastSuccess(t('auth.otherSessionsRevoked'));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.revokeOtherSessionsFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.revokeOtherSessionsFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -301,8 +304,8 @@ export default function AuthSettingsPage() {
       await loadPasskeys();
       setSuccessMsg(t('auth.passkeyRegistered'));
       toastSuccess(t('auth.passkeyRegistered'));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.passkeyRegisterFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.passkeyRegisterFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -330,8 +333,8 @@ export default function AuthSettingsPage() {
       await loadPasskeys();
       setSuccessMsg(t('auth.passkeyDeleted'));
       toastSuccess(t('auth.passkeyDeleted'));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.passkeyDeleteFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.passkeyDeleteFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -350,8 +353,8 @@ export default function AuthSettingsPage() {
       setTotpEnrollment(resp.data);
       setRecoveryCodes([]);
       setSuccessMsg(null);
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.totpEnrollStartFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.totpEnrollStartFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -375,8 +378,8 @@ export default function AuthSettingsPage() {
       await loadTotpStatus();
       setSuccessMsg(t('auth.totpEnabled'));
       toastSuccess(t('auth.totpEnabled'));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.totpConfirmFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.totpConfirmFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -407,8 +410,8 @@ export default function AuthSettingsPage() {
       await loadTotpStatus();
       setSuccessMsg(t('auth.totpRecoveryCodesRegenerated'));
       toastSuccess(t('auth.totpRecoveryCodesRegenerated'));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.totpRecoveryCodesRegenerateFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.totpRecoveryCodesRegenerateFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -430,8 +433,8 @@ export default function AuthSettingsPage() {
       await loadTotpStatus();
       setSuccessMsg(t('auth.totpDisabled'));
       toastSuccess(t('auth.totpDisabled'));
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || t('auth.totpDisableFailed');
+    } catch (e) {
+      const msg = getErrorMessage(e, t('auth.totpDisableFailed'));
       setError(msg);
       toastError(msg);
     } finally {
@@ -609,8 +612,8 @@ export default function AuthSettingsPage() {
       if (avatarUrl) URL.revokeObjectURL(avatarUrl);
       setAvatarUrl(null);
       setAvatarNaturalSize(null);
-    } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || 'Failed to upload avatar';
+    } catch (e) {
+      const msg = getErrorMessage(e, 'Failed to upload avatar');
       setError(msg);
       toastError(msg);
     } finally {

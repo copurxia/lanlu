@@ -13,10 +13,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tag, Plus, Search, Download, Upload, Edit2, Trash2, Image as ImageIcon, ImagePlus } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { TagService } from '@/lib/services/tag-service';
+import { TagService, type Tag as ServiceTag } from '@/lib/services/tag-service';
 import { useToast } from '@/hooks/use-toast';
 import { useConfirmContext } from '@/contexts/ConfirmProvider';
 import { RawImage } from '@/components/ui/raw-image';
+import { extractApiError } from '@/lib/utils/api-utils';
 
 interface TagItem {
   id: number;
@@ -49,6 +50,20 @@ interface EditTagForm {
   enText: string;
   enIntro: string;
   links: string;
+}
+
+function toTagItem(tag: ServiceTag): TagItem {
+  return {
+    id: tag.id,
+    namespace: tag.namespace,
+    name: tag.name,
+    translations: tag.translations,
+    links: tag.links,
+    iconAssetId: tag.iconAssetId,
+    backgroundAssetId: tag.backgroundAssetId,
+    createdAt: tag.created_at,
+    updatedAt: tag.updated_at,
+  };
 }
 
 export default function TagsSettingsPage() {
@@ -105,12 +120,14 @@ export default function TagsSettingsPage() {
     return isAuthenticated && user?.isAdmin === true;
   }, [isAuthenticated, user?.isAdmin]);
 
+  const getErrorMessage = (error: unknown, fallback: string) => extractApiError(error, fallback);
+
   // Load tags
   const loadTags = async () => {
     if (!isAuthenticated) return;
     setTagsLoading(true);
     try {
-      const params: any = {
+      const params: { limit: number; offset: number; q?: string; namespace?: string } = {
         limit: pageSize,
         offset: (currentPage - 1) * pageSize,
       };
@@ -120,8 +137,8 @@ export default function TagsSettingsPage() {
       const response = await TagService.list(params);
       setTags(response.items || []);
       setTotalTags(response.total || 0);
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.tagLoadFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.tagLoadFailed')));
     } finally {
       setTagsLoading(false);
     }
@@ -190,8 +207,8 @@ export default function TagsSettingsPage() {
       await loadTags();
       await loadNamespaces();
       success(t('settings.tagCreatedSuccess'));
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.tagCreateFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.tagCreateFailed')));
     } finally {
       setLoading(false);
     }
@@ -245,8 +262,8 @@ export default function TagsSettingsPage() {
       await loadTags();
       await loadNamespaces();
       success(t('settings.tagUpdatedSuccess'));
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.tagUpdateFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.tagUpdateFailed')));
     } finally {
       setLoading(false);
     }
@@ -268,8 +285,8 @@ export default function TagsSettingsPage() {
       await TagService.adminDelete(tagId);
       await loadTags();
       success(t('settings.tagDeletedSuccess'));
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.tagDeleteFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.tagDeleteFailed')));
     } finally {
       setLoading(false);
     }
@@ -297,11 +314,11 @@ export default function TagsSettingsPage() {
         // Keep the edit dialog preview in sync.
         const updated = await TagService.getById(tag.id);
         if (updated) {
-          setEditingTag((prev) => (prev && prev.id === tag.id ? ({ ...prev, ...updated } as any) : prev));
+          setEditingTag((prev) => (prev && prev.id === tag.id ? toTagItem(updated) : prev));
         }
         success(t('settings.tagIconUpdatedSuccess'));
-      } catch (err: any) {
-        showError(err?.response?.data?.message || err?.message || t('settings.tagIconUpdateFailed'));
+      } catch (err) {
+        showError(getErrorMessage(err, t('settings.tagIconUpdateFailed')));
       } finally {
         setIconUploadingTagId(null);
         document.body.removeChild(input);
@@ -333,11 +350,11 @@ export default function TagsSettingsPage() {
         // Keep the edit dialog preview in sync.
         const updated = await TagService.getById(tag.id);
         if (updated) {
-          setEditingTag((prev) => (prev && prev.id === tag.id ? ({ ...prev, ...updated } as any) : prev));
+          setEditingTag((prev) => (prev && prev.id === tag.id ? toTagItem(updated) : prev));
         }
         success(t('settings.tagBackgroundUpdatedSuccess'));
-      } catch (err: any) {
-        showError(err?.response?.data?.message || err?.message || t('settings.tagBackgroundUpdateFailed'));
+      } catch (err) {
+        showError(getErrorMessage(err, t('settings.tagBackgroundUpdateFailed')));
       } finally {
         setBackgroundUploadingTagId(null);
         document.body.removeChild(input);
@@ -361,8 +378,8 @@ export default function TagsSettingsPage() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       success(t('settings.tagExportSuccess'));
-    } catch (e: any) {
-      showError(e?.response?.data?.message || e?.message || t('settings.tagExportFailed'));
+    } catch (e) {
+      showError(getErrorMessage(e, t('settings.tagExportFailed')));
     }
   };
 
@@ -403,8 +420,8 @@ export default function TagsSettingsPage() {
         await loadTags();
         await loadNamespaces();
         success(t('settings.tagImportStarted', { job }));
-      } catch (e: any) {
-        showError(e?.response?.data?.message || e?.message || t('settings.tagImportFailed'));
+      } catch (e) {
+        showError(getErrorMessage(e, t('settings.tagImportFailed')));
       } finally {
         setLoading(false);
         // Remove the temporary input
@@ -713,7 +730,7 @@ export default function TagsSettingsPage() {
         }}
         mode="edit"
         form={editForm}
-        setForm={setEditForm as any}
+        setForm={setEditForm as React.Dispatch<React.SetStateAction<CreateTagForm | EditTagForm>>}
         editingTag={editingTag}
         iconUploading={!!editingTag && iconUploadingTagId === editingTag.id}
         backgroundUploading={!!editingTag && backgroundUploadingTagId === editingTag.id}

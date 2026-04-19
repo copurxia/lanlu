@@ -21,6 +21,17 @@ interface PluginConfigDialogProps {
   onConfigSaved?: () => void;
 }
 
+type PluginFormValue = string | number | boolean | string[] | null | undefined;
+
+function isPluginParameter(value: unknown): value is PluginParameter {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    'desc' in value
+  );
+}
+
 function hasConfiguredValue(value: unknown): boolean {
   if (value === undefined || value === null) return false;
   return typeof value !== 'string' || value !== '';
@@ -84,7 +95,21 @@ function parseArrayItems(value: unknown): string[] {
   );
 }
 
-function getInitialFieldValue(param: PluginParameter): any {
+function toTextFieldValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  return '';
+}
+
+function toIntegerFieldValue(value: unknown): string | number {
+  if (typeof value === 'number' || typeof value === 'string') {
+    return value;
+  }
+
+  return '';
+}
+
+function getInitialFieldValue(param: PluginParameter): PluginFormValue {
   const rawValue = hasConfiguredValue(param.value) ? param.value : param.default_value;
 
   switch (param.type) {
@@ -93,24 +118,24 @@ function getInitialFieldValue(param: PluginParameter): any {
     case 'array':
       return parseArrayItems(rawValue);
     case 'int':
-      return rawValue ?? '';
+      return toIntegerFieldValue(rawValue);
     case 'string':
     default:
-      return rawValue ?? '';
+      return toTextFieldValue(rawValue);
   }
 }
 
-function getPersistedFieldValue(param: PluginParameter, value: unknown): any {
+function getPersistedFieldValue(param: PluginParameter, value: PluginFormValue): unknown {
   switch (param.type) {
     case 'bool':
       return parseBooleanValue(value);
     case 'array':
       return parseArrayItems(value);
     case 'int':
-      return value !== undefined ? value : (param.default_value ?? '');
+      return value !== undefined ? toIntegerFieldValue(value) : toIntegerFieldValue(param.default_value);
     case 'string':
     default:
-      return value !== undefined ? value : (param.default_value ?? '');
+      return value !== undefined ? toTextFieldValue(value) : toTextFieldValue(param.default_value);
   }
 }
 
@@ -125,7 +150,7 @@ export function PluginConfigDialog({
   const { t } = useLanguage();
   const [saving, setSaving] = useState(false);
   const [parameters, setParameters] = useState<PluginParameter[]>([]);
-  const [formValues, setFormValues] = useState<Record<string, any>>({});
+  const [formValues, setFormValues] = useState<Record<string, PluginFormValue>>({});
   const [loadingSchema, setLoadingSchema] = useState(false);
   const [schemaError, setSchemaError] = useState<string>('');
 
@@ -143,7 +168,8 @@ export function PluginConfigDialog({
           let pluginParameters: PluginParameter[] = [];
           if (typeof schemaResponse.parameters === 'string') {
             try {
-              pluginParameters = JSON.parse(schemaResponse.parameters);
+              const parsed = JSON.parse(schemaResponse.parameters) as unknown;
+              pluginParameters = Array.isArray(parsed) ? parsed.filter(isPluginParameter) : [];
             } catch (e) {
               console.error('Failed to parse parameters JSON:', e);
             }
@@ -153,7 +179,7 @@ export function PluginConfigDialog({
 
           setParameters(pluginParameters);
 
-          const initialValues: Record<string, any> = {};
+          const initialValues: Record<string, PluginFormValue> = {};
           pluginParameters.forEach((param: PluginParameter, index: number) => {
             initialValues[`param${index}`] = getInitialFieldValue(param);
           });
@@ -213,7 +239,7 @@ export function PluginConfigDialog({
     onOpenChange(false);
   };
 
-  const handleFieldChange = (paramName: string, value: any) => {
+  const handleFieldChange = (paramName: string, value: PluginFormValue) => {
     setFormValues(prev => ({
       ...prev,
       [paramName]: value
@@ -258,20 +284,20 @@ export function PluginConfigDialog({
                             if (param.desc.includes('description') || param.desc.includes('comment')) {
                               return (
                                 <Textarea
-                                  value={value || ''}
+                                  value={toTextFieldValue(value)}
                                   onChange={(e) => handleFieldChange(paramName, e.target.value)}
                                   rows={2}
                                   className="resize-none"
-                                  placeholder={String(param.default_value || '')}
+                                  placeholder={toTextFieldValue(param.default_value)}
                                 />
                               );
                             }
                             return (
                               <Input
                                 type="text"
-                                value={value || ''}
+                                value={toTextFieldValue(value)}
                                 onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                placeholder={String(param.default_value || '')}
+                                placeholder={toTextFieldValue(param.default_value)}
                               />
                             );
 
@@ -279,9 +305,9 @@ export function PluginConfigDialog({
                             return (
                               <Input
                                 type="number"
-                                value={value ?? ''}
+                                value={toIntegerFieldValue(value)}
                                 onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                placeholder={String(param.default_value || '')}
+                                placeholder={toTextFieldValue(param.default_value)}
                               />
                             );
 
@@ -322,9 +348,9 @@ export function PluginConfigDialog({
                             return (
                               <Input
                                 type="text"
-                                value={value || ''}
+                                value={toTextFieldValue(value)}
                                 onChange={(e) => handleFieldChange(paramName, e.target.value)}
-                                placeholder={String(param.default_value || '')}
+                                placeholder={toTextFieldValue(param.default_value)}
                               />
                             );
                         }
