@@ -39,12 +39,14 @@ function MobileSubMenuItemRenderer({
       <button
         disabled={item.disabled}
         className={cn(
-          "w-full flex items-center justify-start h-auto py-2.5 px-2 rounded-md text-sm font-medium transition-colors",
-          "hover:bg-accent hover:text-accent-foreground",
-          "active:bg-accent active:text-accent-foreground",
-          "focus:outline-none",
-          item.disabled && "pointer-events-none opacity-50",
-          item.danger && "text-destructive hover:text-destructive active:text-destructive"
+          mobileMenuItemVariants({
+            variant: item.danger ? "danger" : "default",
+            disabled: item.disabled,
+          }),
+          "px-2 py-2.5 focus:outline-none",
+          item.danger
+            ? "active:bg-destructive/10 active:text-destructive"
+            : "active:bg-accent active:text-accent-foreground"
         )}
         onClick={() => setShowSubMenu(true)}
       >
@@ -81,12 +83,14 @@ function MobileSubMenuItemRenderer({
                     <button
                       disabled={child.disabled}
                       className={cn(
-                        "w-full flex items-center justify-start h-auto py-2.5 px-2 rounded-md text-sm font-medium transition-colors",
-                        "hover:bg-accent hover:text-accent-foreground",
-                        "active:bg-accent active:text-accent-foreground",
-                        "focus:outline-none",
-                        child.disabled && "pointer-events-none opacity-50",
-                        child.danger && "text-destructive hover:text-destructive active:text-destructive"
+                        mobileMenuItemVariants({
+                          variant: child.danger ? "danger" : "default",
+                          disabled: child.disabled,
+                        }),
+                        "px-2 py-2.5 focus:outline-none",
+                        child.danger
+                          ? "active:bg-destructive/10 active:text-destructive"
+                          : "active:bg-accent active:text-accent-foreground"
                       )}
                       onClick={() => {
                         if (child.onClick) {
@@ -146,12 +150,14 @@ function MobileMenuItemGroupRenderer({
             <button
               disabled={item.disabled}
               className={cn(
-                "w-full flex items-center justify-start h-auto py-2.5 px-2 rounded-md text-sm font-medium transition-colors",
-                "hover:bg-accent hover:text-accent-foreground",
-                "active:bg-accent active:text-accent-foreground",
-                "focus:outline-none",
-                item.disabled && "pointer-events-none opacity-50",
-                item.danger && "text-destructive hover:text-destructive active:text-destructive"
+                mobileMenuItemVariants({
+                  variant: item.danger ? "danger" : "default",
+                  disabled: item.disabled,
+                }),
+                "px-2 py-2.5 focus:outline-none",
+                item.danger
+                  ? "active:bg-destructive/10 active:text-destructive"
+                  : "active:bg-accent active:text-accent-foreground"
               )}
               onClick={() => {
                 if (item.onClick) {

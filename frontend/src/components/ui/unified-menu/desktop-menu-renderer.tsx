@@ -18,7 +18,6 @@ import {
   DropdownMenuShortcut,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils/utils"
-import { ChevronRight } from "lucide-react"
 import type { DesktopMenuRendererProps, MenuItem, MenuItemGroup } from "./unified-menu.types"
 import { menuItemVariants } from "./styles/menu-item-variants"
 
@@ -38,7 +37,13 @@ function SubMenuItemRenderer({
     <DropdownMenuSub>
       <DropdownMenuSubTrigger
         disabled={item.disabled}
-        className={cn(item.danger && "text-destructive focus:text-destructive")}
+        className={cn(
+          menuItemVariants({
+            variant: item.danger ? "danger" : "default",
+            disabled: item.disabled,
+          }),
+          "data-[state=open]:bg-accent"
+        )}
       >
         {item.icon && <item.icon className="mr-2 h-4 w-4" />}
         <span>{item.label}</span>
@@ -52,7 +57,10 @@ function SubMenuItemRenderer({
             ) : (
               <DropdownMenuItem
                 disabled={child.disabled}
-                className={cn(child.danger && "text-destructive focus:text-destructive")}
+                className={menuItemVariants({
+                  variant: child.danger ? "danger" : "default",
+                  disabled: child.disabled,
+                })}
                 onSelect={() => {
                   if (child.onClick) {
                     void child.onClick()
@@ -97,7 +105,10 @@ function MenuItemGroupRenderer({
           ) : (
             <DropdownMenuItem
               disabled={item.disabled}
-              className={cn(item.danger && "text-destructive focus:text-destructive")}
+              className={menuItemVariants({
+                variant: item.danger ? "danger" : "default",
+                disabled: item.disabled,
+              })}
               onSelect={() => {
                 if (item.onClick) {
                   void item.onClick()

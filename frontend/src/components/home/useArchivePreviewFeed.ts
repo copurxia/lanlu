@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-type UseArchivePreviewFeedOptions<TItem, TElement extends HTMLElement> = {
+type UseArchivePreviewFeedOptions<TItem> = {
   archiveId?: string;
   eager?: boolean;
   enabled?: boolean;
@@ -69,7 +69,7 @@ export function useArchivePreviewFeed<TItem, TElement extends HTMLElement = HTML
   loaderKey,
   loadItems,
   rootMargin = '320px 0px',
-}: UseArchivePreviewFeedOptions<TItem, TElement>) {
+}: UseArchivePreviewFeedOptions<TItem>) {
   const targetRef = useRef<TElement | null>(null);
   const [shouldLoad, setShouldLoad] = useState(Boolean(eager));
   const [items, setItems] = useState<TItem[]>([]);

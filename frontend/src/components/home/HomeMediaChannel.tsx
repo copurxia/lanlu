@@ -502,7 +502,16 @@ function HomeMediaChannelCard({
     loadItems: loadChannelPreviewSources,
     rootMargin: CHANNEL_PREVIEW_INTERSECTION_MARGIN,
   });
-  const previewSourceIdsKey = useMemo(() => previewSources.map((item) => item.id).join('|'), [previewSources]);
+  const previewGateSignature = useMemo(() => (
+    previewSources
+      .map((item) => `${item.id}:${item.mediaKind}:${item.src}:${item.posterSrc || ''}`)
+      .join('|')
+  ), [previewSources]);
+  const previewWarmupSources = useMemo(() => (
+    previewSources
+      .filter((item) => item.mediaKind !== 'video')
+      .map((item) => item.src)
+  ), [previewSources]);
 
   const handleMeasurePreview = useCallback((cacheKey: string, aspectRatio: number) => {
     const normalized = Number.isFinite(aspectRatio) && aspectRatio > 0
@@ -528,7 +537,7 @@ function HomeMediaChannelCard({
 
   useEffect(() => {
     setPreviewGateOpen(false);
-  }, [previewArchiveId, previewSourceIdsKey]);
+  }, [previewArchiveId, previewGateSignature]);
 
   useEffect(() => {
     let cancelled = false;
@@ -536,7 +545,7 @@ function HomeMediaChannelCard({
       cancelled = true;
     };
 
-    if (previewSources.length === 0) {
+    if (previewWarmupSources.length === 0) {
       setPreviewGateOpen(true);
       return () => {
         cancelled = true;
@@ -553,12 +562,7 @@ function HomeMediaChannelCard({
     };
 
     const timeoutId = window.setTimeout(openGate, CHANNEL_PREVIEW_INSERT_TIMEOUT_MS);
-    const preloadTasks = previewSources
-      .map((item) => {
-        if (item.mediaKind === 'video') return null;
-        return preloadChannelPreviewImage(item.src);
-      })
-      .filter((task): task is Promise<void> => task !== null);
+    const preloadTasks = previewWarmupSources.map((src) => preloadChannelPreviewImage(src));
 
     void Promise.all(preloadTasks)
       .then(openGate)
@@ -571,7 +575,7 @@ function HomeMediaChannelCard({
       cancelled = true;
       window.clearTimeout(timeoutId);
     };
-  }, [previewReady, previewSourceIdsKey, previewSources.length]);
+  }, [previewReady, previewWarmupSources]);
 
   return (
     <HomeMediaItemMenu
@@ -915,7 +919,7 @@ export const HomeMediaChannel = memo(function HomeMediaChannel({
 
   return (
     <div ref={containerRef} className="space-y-4">
-      {items.map((item, index) => {
+      {items.map((item) => {
         if (isTankoubonItem(item)) {
           return (
             <HomeTankoubonChannelRow
@@ -931,13 +935,13 @@ export const HomeMediaChannel = memo(function HomeMediaChannel({
         }
 
         return (
-            <HomeArchiveChannelRow
-              key={`archive:${item.arcid}`}
-              archive={item}
-              contentWidth={contentWidth}
-              selectionMode={selectionMode}
-              selected={selectedArchiveIds.has(item.arcid)}
-              onRequestEnterSelection={onRequestEnterSelection}
+          <HomeArchiveChannelRow
+            key={`archive:${item.arcid}`}
+            archive={item}
+            contentWidth={contentWidth}
+            selectionMode={selectionMode}
+            selected={selectedArchiveIds.has(item.arcid)}
+            onRequestEnterSelection={onRequestEnterSelection}
             onToggleArchiveSelect={onToggleArchiveSelect}
           />
         );

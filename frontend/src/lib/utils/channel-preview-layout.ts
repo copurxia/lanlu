@@ -282,8 +282,7 @@ function solveHeroSideLayout<T extends ChannelPreviewLayoutItem>(
 
     let low = MIN_TOP_HERO_HEIGHT;
     let high = upperBound;
-    let resolvedHeight = upperBound;
-    let resolved = maxEvaluation;
+    let resolvedEvaluation = maxEvaluation;
 
     for (let step = 0; step < BINARY_SEARCH_STEPS; step += 1) {
       const candidateHeight = (low + high) / 2;
@@ -294,8 +293,7 @@ function solveHeroSideLayout<T extends ChannelPreviewLayoutItem>(
       }
 
       const diff = evaluation.totalHeight - candidateHeight;
-      resolvedHeight = candidateHeight;
-      resolved = evaluation;
+      resolvedEvaluation = evaluation;
 
       if (Math.abs(diff) <= HEIGHT_TOLERANCE_PX) break;
       if (diff > 0) {
@@ -305,8 +303,7 @@ function solveHeroSideLayout<T extends ChannelPreviewLayoutItem>(
       }
     }
 
-    const finalEvaluation = evaluate(resolvedHeight);
-    if (!finalEvaluation) continue;
+    const finalEvaluation = resolvedEvaluation;
     if (finalEvaluation.totalHeight > CHANNEL_MAX_COLLAGE_HEIGHT + HEIGHT_TOLERANCE_PX) continue;
 
     const score =

@@ -208,6 +208,7 @@ function HomePageContent() {
     categoryRows,
   }), [archives, categoryRows, randomArchives]);
   const selection = useHomeSelection(visibleSelectionItems);
+  const { batchEditOpen, clearSelection, loadMetadataPlugins } = selection;
 
   // Derived filter values
   const effectiveCategoryId = searchQuery ? 'all' : categoryId;
@@ -468,9 +469,9 @@ function HomePageContent() {
 
   // Load metadata plugins when batch edit opens
   useEffect(() => {
-    if (!selection.batchEditOpen) return;
-    selection.loadMetadataPlugins();
-  }, [selection.batchEditOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!batchEditOpen) return;
+    loadMetadataPlugins();
+  }, [batchEditOpen, loadMetadataPlugins]);
 
   // Random recommendations for category-rows view
   useEffect(() => {
@@ -605,8 +606,13 @@ function HomePageContent() {
       setCategoryRowsLoading(false);
       return;
     }
+    if (categoriesLoading) {
+      setCategoryRowsLoading(true);
+      return;
+    }
     if (enabledCategories.length === 0) {
-      if (!categoriesLoading) setCategoryRowsLoading(false);
+      setCategoryRows({});
+      setCategoryRowsLoading(false);
       return;
     }
     const requestId = (categoryRowsRequestIdRef.current += 1);
@@ -643,7 +649,7 @@ function HomePageContent() {
     };
     loadCategoryRows();
     return () => { cancelled = true; };
-  }, [categoryRowSize, categoryRowsRefreshKey, dateFrom, dateTo, enabledCategories, favoriteonly, groupByTanks, language, newonly, showCategoryRowsView, sortBy, sortOrder, untaggedonly]);
+  }, [categoriesLoading, categoryRowSize, categoryRowsRefreshKey, dateFrom, dateTo, enabledCategories, favoriteonly, groupByTanks, language, newonly, showCategoryRowsView, sortBy, sortOrder, untaggedonly]);
 
   const buildCategoryUrl = useCallback((nextCategoryId: string) => {
     const params = new URLSearchParams();
@@ -663,13 +669,13 @@ function HomePageContent() {
 
   // Clear selection on filter/view change
   useEffect(() => {
-    selection.clearSelection();
-  }, [selection.clearSelection, categoryId, searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, homeViewMode]);
+    clearSelection();
+  }, [categoryId, clearSelection, searchQuery, sortBy, sortOrder, newonly, untaggedonly, favoriteonly, dateFrom, dateTo, groupByTanks, homeViewMode]);
 
   useEffect(() => {
     if (isContinuousFeed) return;
-    selection.clearSelection();
-  }, [selection.clearSelection, currentPage, isContinuousFeed]);
+    clearSelection();
+  }, [clearSelection, currentPage, isContinuousFeed]);
 
   // Scroll to top on page change
   useEffect(() => {
