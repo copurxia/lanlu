@@ -2675,6 +2675,7 @@ function ReaderContent() {
 	          totalHeight={webtoonVirtualization.totalHeight}
 	          imagesLoading={imageLoading.imagesLoading}
 	          loadedImages={imageLoading.loadedImages}
+            doubleTapZoom={doubleTapZoom}
             webtoonZoom={webtoonZoom}
 	          htmlContents={htmlContents}
           webtoonPageElementRefs={webtoonPageElementRefs}

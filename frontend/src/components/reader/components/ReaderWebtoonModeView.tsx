@@ -47,6 +47,7 @@ export function ReaderWebtoonModeView({
   totalHeight,
   imagesLoading,
   loadedImages,
+  doubleTapZoom,
   webtoonZoom,
   htmlContents,
   webtoonPageElementRefs,
@@ -89,6 +90,7 @@ export function ReaderWebtoonModeView({
   totalHeight: number;
   imagesLoading: Set<number>;
   loadedImages: Set<number>;
+  doubleTapZoom: boolean;
   webtoonZoom: ReaderWebtoonZoomState | null;
   htmlContents: Record<number, string>;
   webtoonPageElementRefs: React.MutableRefObject<(HTMLDivElement | null)[]>;
@@ -307,7 +309,7 @@ export function ReaderWebtoonModeView({
                                 ? `${webtoonZoom.originX}% ${webtoonZoom.originY}%`
                                 : '50% 50%',
 	                            transition: 'transform 0.18s ease-out',
-	                            cursor: isZoomedImage ? 'zoom-out' : 'zoom-in',
+	                            cursor: doubleTapZoom ? (isZoomedImage ? 'zoom-out' : 'zoom-in') : 'default',
                               willChange: isZoomedImage ? 'transform' : undefined,
 	                          }}
 	                          onLoad={(e) => {
