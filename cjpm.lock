@@ -2,7 +2,7 @@ version = 0
 
 [requires]
   ignite = {git = "https://gitcode.com/copur/ignite-cangjie.git", commitId = "66b50c86db73b0125e4940da9fa0f221bfb3cb3b", branch = "stdx"}
-  jinguissl = {git = "https://atomgit.com/cinyu/jinguiSSL", commitId = "46fb5994816c07413dfddba2fd4f6822ff1346fd"}
+  jinguissl = {git = "https://atomgit.com/cinyu/jinguiSSL", commitId = "4d7875db5cd2ee1030aa973bf62a10bf8de5d05b"}
   opengauss = {git = "https://gitcode.com/copur/opengauss-driver.git", commitId = "faa031286906108a2bb53b52e68e4bbe71be9827", branch = "master", output-type = "static"}
   cjdotenv = {git = "https://gitcode.com/copur/cjdotenv.git", commitId = "cc1619b3d6677aa6a2d6ad359666d107f3b7ae26", branch = "master"}
   ahash = {git = "https://gitcode.com/copur/ahash.git", commitId = "9dceb7d65f2bbe78de7c8c28d0e43774f2ecfd11", branch = "master"}
@@ -13,5 +13,5 @@ version = 0
   cjpminfo = {git = "https://github.com/ystyle/cjpminfo.git", commitId = "ba8d9662e4ce2e69bacb300f427224cd75aa55f2", tag = "master"}
   brotli_middleware = {git = "https://gitcode.com/copur/brotli_middleware.git", commitId = "1c4d0eebbefe66f2fb360f935ecbcee86df95654", branch = "stdx"}
   wasmedge_ffi = {git = "https://gitcode.com/copur/wasmedge_ffi.git", commitId = "7c23c33910c87f19d9ff0a87a0cbde7c6bf5f906", branch = "main"}
-  webauthn_cj = {git = "https://gitcode.com/copur/webauthn.git", commitId = "9f30841de49084ce71d371871b101e66c59bfa9a", branch = "main"}
   totp_cj = {git = "https://gitcode.com/copur/totp-cj.git", commitId = "2fa0a8fac5632115add414c653dfe0718906ff8b", branch = "main"}
+  webauthn_cj = {git = "https://gitcode.com/copur/webauthn.git", commitId = "ce99c8954833cf54ea9bf345f47ad74d39d6e483", branch = "main"}
