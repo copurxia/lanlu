@@ -680,71 +680,20 @@ public class AssetUploadController {
                     getLogger("asset_upload").warn("Final file size validation failed", ("error", e.message))
                 }
 
-                let handoff = kvStore.insertIfAbsent(kvGroupId, "handoff", "1", UPLOAD_KV_TTL_SECONDS)
-                if (!handoff) {
-                    ResponseView.successJson(ctx, "{}", "Chunk uploaded successfully")
-                    return
-                }
-
-                let filename = parseField(task.parameters, "filename")
-                let categoryId = parseField(task.parameters, "category_id")
-                let targetType = parseField(task.parameters, "target_type")
-                let targetId = parseField(task.parameters, "target_id")
-                let overwrite = parseField(task.parameters, "overwrite")
-                let uploadUserId = parseField(task.parameters, "upload_user_id")
-                let contentType = parseField(task.parameters, "content_type")
-
-                let out = ByteBuffer()
-                let w = JsonWriter(out)
-                w.startObject()
-                w.writeName("upload_task_id").writeValue(taskIdInt.toString())
-                w.writeName("filename").writeValue(filename)
-                w.writeName("file_size").writeValue(fileSize.toString())
-                w.writeName("category_id").writeValue(categoryId)
-                w.writeName("target_type").writeValue(targetType)
-                w.writeName("target_id").writeValue(targetId)
-                w.writeName("overwrite").writeValue(overwrite)
-                w.writeName("upload_user_id").writeValue(uploadUserId)
-                w.writeName("content_type").writeValue(contentType)
-                w.writeName("chunk_dir").writeValue(uploadDir.toString())
-                w.writeName("final_part_path").writeValue(partPath.toString())
-                w.endObject()
-                w.flush()
-                let paramsJson = String.fromUtf8(readToEnd(out))
-
-                let _ = TaskDao.updateTaskParameters(taskIdInt, paramsJson)
-                let groupId = "asset_upload:${taskIdStr}"
-                let processTask = TaskModel.createTaskWithOptions(
-                    "处理上传资源",
-                    "asset_upload_process",
-                    paramsJson,
-                    5,
-                    groupId,
-                    "asset_upload"
+                let handoffHandled = UploadHandoffService.completeAssetUpload(
+                    taskIdInt,
+                    task.parameters,
+                    fileSize,
+                    uploadDir.toString(),
+                    partPath.toString(),
+                    kvGroupId,
+                    kvStore,
+                    UPLOAD_KV_TTL_SECONDS
                 )
-                if (processTask.id <= 0) {
-                    TaskIO.appendLog(taskIdInt, "all chunks uploaded; failed to create asset_upload_process, waiting for timeout cleanup")
-                    let _ = TaskDao.extendTimeoutAndUpdateProgress(
-                        taskIdInt,
-                        UPLOAD_IDLE_TIMEOUT_SECONDS,
-                        70,
-                        "分片上传完成，等待处理任务"
-                    )
+                if (!handoffHandled) {
                     ResponseView.successJson(ctx, "{}", "Chunk uploaded successfully")
                     return
                 }
-                TaskPoolService.getInstance().notifyTaskAvailable()
-                TaskIO.appendLog(taskIdInt, "all chunks uploaded; spawned asset_upload_process=${processTask.id}")
-
-                let resultOut = ByteBuffer()
-                let resultWriter = JsonWriter(resultOut)
-                resultWriter.startObject()
-                resultWriter.writeName("success").writeValue(1)
-                resultWriter.writeName("process_task_id").writeValue(processTask.id)
-                resultWriter.endObject()
-                resultWriter.flush()
-                TaskIO.writeOutput(taskIdInt, String.fromUtf8(readToEnd(resultOut)))
-                TaskModel.completeTask(taskIdInt, "asset_upload completed")
             }
 
             ResponseView.successJson(ctx, "{}", "Chunk uploaded successfully")
@@ -1022,30 +971,6 @@ public class AssetUploadController {
         w.endObject()
         w.flush()
         return String.fromUtf8(readToEnd(out))
-    }
-
-    private static func parseField(parameters: String, key: String): String {
-        let trimmed = parameters.trimAscii()
-        if (trimmed.size == 0) {
-            return ""
-        }
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let r = JsonReader(buf)
-            if (r.peek() != Some(BeginObject)) { return "" }
-            r.startObject()
-            while (r.peek() != EndObject) {
-                let k = r.readName()
-                if (k == key) {
-                    return r.readValue<String>().trimAscii()
-                } else {
-                    r.skip()
-                }
-            }
-            r.endObject()
-        } catch (_: Exception) {}
-        return ""
     }
 
     private static func createTempDirectories(): Unit {

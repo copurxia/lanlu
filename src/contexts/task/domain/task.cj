@@ -29,17 +29,16 @@ public class Task {
     public var groupId: String
     public var timeoutAt: String
     public var triggerSource: String
-    public var waitForTaskId: Int64  // 条件驱动：等待指定任务完成后才能执行
+    public var waitForTaskId: Int64 // 条件驱动：等待指定任务完成后才能执行
     public var phase: String
     public var waitingReason: String
     public var activeKey: String
 
-    public init(id: Int64, name: String, status: String, progress: Int32, message: String,
-                taskType!: String = "", pluginNamespace!: String = "", parameters!: String = "",
-                result!: String = "", createdAt!: String = "", startedAt!: String = "",
-                completedAt!: String = "", priority!: Int32 = 50, groupId!: String = "",
-                timeoutAt!: String = "", triggerSource!: String = "", waitForTaskId!: Int64 = 0,
-                phase!: String = "", waitingReason!: String = "", activeKey!: String = "") {
+    public init(id: Int64, name: String, status: String, progress: Int32, message: String, taskType!: String = "",
+        pluginNamespace!: String = "", parameters!: String = "", result!: String = "", createdAt!: String = "",
+        startedAt!: String = "", completedAt!: String = "", priority!: Int32 = 50, groupId!: String = "",
+        timeoutAt!: String = "", triggerSource!: String = "", waitForTaskId!: Int64 = 0, phase!: String = "",
+        waitingReason!: String = "", activeKey!: String = "") {
         this.id = id
         this.name = name
         this.status = status
@@ -101,7 +100,6 @@ public class Task {
         w.flush()
         return String.fromUtf8(readToEnd(out))
     }
-
 }
 
 /**
@@ -127,7 +125,7 @@ public class TaskPageResult {
         this.total = total
         this.page = page
         this.pageSize = pageSize
-        this.totalPages = (total + pageSize - 1) / pageSize  // 向上取整
+        this.totalPages = (total + pageSize - 1) / pageSize // 向上取整
     }
 
     /**
@@ -210,7 +208,7 @@ public class TaskModel {
         let taskListSize = taskList.size
         var tasks = Array<Task>()
         if (taskListSize > 0) {
-            tasks = Array<Task>(taskListSize, { _ => Task(0, "", "", 0, "") })
+            tasks = Array<Task>(taskListSize, {_ => Task(0, "", "", 0, "")})
             for (i in 0..taskListSize) {
                 tasks[i] = taskList[i]
             }
@@ -232,16 +230,28 @@ public class TaskModel {
         let currentTime = getCurrentTimeString()
 
         let task = Task(
-            0, name, "pending", 0, "任务已创建",
-            taskType: taskType, pluginNamespace: "", parameters: "",
-            result: "", createdAt: currentTime, startedAt: "", completedAt: "",
-            priority: 50, groupId: "", timeoutAt: "", triggerSource: "manual"
+            0,
+            name,
+            "pending",
+            0,
+            "任务已创建",
+            taskType: taskType,
+            pluginNamespace: "",
+            parameters: "",
+            result: "",
+            createdAt: currentTime,
+            startedAt: "",
+            completedAt: "",
+            priority: 50,
+            groupId: "",
+            timeoutAt: "",
+            triggerSource: "manual"
         )
 
         let data = convertToTaskData(task)
         let success = TaskDao.createTaskData(data)
         if (success) {
-            task.id = data.id  // 设置数据库返回的自增ID
+            task.id = data.id // 设置数据库返回的自增ID
             logger.debug("创建任务成功", [("id", data.id.toString()), ("name", name)])
         } else {
             logger.error("创建任务失败", ("name", name))
@@ -254,18 +264,31 @@ public class TaskModel {
      * 创建带参数的任务
      */
     public static func createTaskWithOptions(name: String, taskType: String, parameters: String, priority: Int32,
-                                             groupId: String, triggerSource: String, activeKey!: String = ""): Task {
+        groupId: String, triggerSource: String, activeKey!: String = ""): Task {
         let logger = getLogger("task_model")
         let currentTime = getCurrentTimeString()
 
         let timeoutAt = ""
 
         let task = Task(
-            0, name, "pending", 0, "任务已创建",
-            taskType: taskType, pluginNamespace: "", parameters: parameters,
-            result: "", createdAt: currentTime, startedAt: "", completedAt: "",
-            priority: priority, groupId: groupId, timeoutAt: timeoutAt, triggerSource: triggerSource,
-            phase: "queued", activeKey: activeKey
+            0,
+            name,
+            "pending",
+            0,
+            "任务已创建",
+            taskType: taskType,
+            pluginNamespace: "",
+            parameters: parameters,
+            result: "",
+            createdAt: currentTime,
+            startedAt: "",
+            completedAt: "",
+            priority: priority,
+            groupId: groupId,
+            timeoutAt: timeoutAt,
+            triggerSource: triggerSource,
+            phase: "queued",
+            activeKey: activeKey
         )
 
         let data = convertToTaskData(task)
@@ -310,20 +333,42 @@ public class TaskModel {
             case Some(id) =>
                 logger.debug("创建完整任务成功", ("id", id.toString()), ("name", name))
                 return Task(
-                    id, name, "running", progress, message,
-                    taskType: taskType, pluginNamespace: "", parameters: parameters,
-                    result: "", createdAt: currentTime, startedAt: "",
-                    completedAt: "", priority: 50, groupId: "",
-                    timeoutAt: "", triggerSource: "manual"
+                    id,
+                    name,
+                    "running",
+                    progress,
+                    message,
+                    taskType: taskType,
+                    pluginNamespace: "",
+                    parameters: parameters,
+                    result: "",
+                    createdAt: currentTime,
+                    startedAt: "",
+                    completedAt: "",
+                    priority: 50,
+                    groupId: "",
+                    timeoutAt: "",
+                    triggerSource: "manual"
                 )
             case None =>
                 logger.error("创建完整任务失败", ("name", name))
                 return Task(
-                    0, name, "failed", 0, "创建任务失败",
-                    taskType: taskType, pluginNamespace: "", parameters: "",
-                    result: "", createdAt: currentTime, startedAt: "",
-                    completedAt: "", priority: 50, groupId: "",
-                    timeoutAt: "", triggerSource: "manual"
+                    0,
+                    name,
+                    "failed",
+                    0,
+                    "创建任务失败",
+                    taskType: taskType,
+                    pluginNamespace: "",
+                    parameters: "",
+                    result: "",
+                    createdAt: currentTime,
+                    startedAt: "",
+                    completedAt: "",
+                    priority: 50,
+                    groupId: "",
+                    timeoutAt: "",
+                    triggerSource: "manual"
                 )
         }
     }
@@ -387,7 +432,8 @@ public class TaskModel {
     /**
      * 将任务显式标记为等待态。
      */
-    public static func markTaskWaiting(id: Int64, message: String, progress!: Int32 = 0, waitingReason!: String = "", phase!: String = "waiting"): Bool {
+    public static func markTaskWaiting(id: Int64, message: String, progress!: Int32 = 0, waitingReason!: String = "",
+        phase!: String = "waiting"): Bool {
         let logger = getLogger("task_model")
         let success = TaskDao.updateTaskWaitingState(id, message, progress, phase, waitingReason)
         if (success) {
@@ -425,6 +471,33 @@ public class TaskModel {
     }
 
     /**
+     * 完成任务并保留显式阶段，用于两阶段任务协议的阶段终态。
+     */
+    public static func completeTaskWithPhase(id: Int64, result: String, phase: String): Bool {
+        let logger = getLogger("task_model")
+        let data = TaskDao.getTaskDataById(id)
+        if (data.id == 0) {
+            logger.error("任务不存在，无法完成", ("id", id.toString()))
+            return false
+        }
+
+        data.status = "completed"
+        data.progress = 100
+        data.message = "任务完成"
+        data.result = result
+        data.completedAt = getCurrentTimeString()
+        data.phase = phase
+
+        let success = TaskDao.updateTaskData(data)
+        if (success) {
+            logger.debug("完成任务成功", ("id", id), ("phase", phase))
+        } else {
+            logger.error("完成任务失败", ("id", id), ("phase", phase))
+        }
+        return success
+    }
+
+    /**
      * 任务失败
      */
     public static func failTask(id: Int64, errorMessage: String): Bool {
@@ -451,15 +524,28 @@ public class TaskModel {
     /**
      * TaskData转换为Task
      */
-      private static func convertToTask(data: TaskData): Task {
+    private static func convertToTask(data: TaskData): Task {
         return Task(
-            data.id, data.name, data.status, data.progress, data.message,
-            taskType: data.taskType, pluginNamespace: data.pluginNamespace,
-            parameters: data.parameters, result: data.result,
-            createdAt: data.createdAt, startedAt: data.startedAt, completedAt: data.completedAt,
-            priority: data.priority, groupId: data.groupId, timeoutAt: data.timeoutAt,
-            triggerSource: data.triggerSource, waitForTaskId: data.waitForTaskId,
-            phase: data.phase, waitingReason: data.waitingReason, activeKey: data.activeKey
+            data.id,
+            data.name,
+            data.status,
+            data.progress,
+            data.message,
+            taskType: data.taskType,
+            pluginNamespace: data.pluginNamespace,
+            parameters: data.parameters,
+            result: data.result,
+            createdAt: data.createdAt,
+            startedAt: data.startedAt,
+            completedAt: data.completedAt,
+            priority: data.priority,
+            groupId: data.groupId,
+            timeoutAt: data.timeoutAt,
+            triggerSource: data.triggerSource,
+            waitForTaskId: data.waitForTaskId,
+            phase: data.phase,
+            waitingReason: data.waitingReason,
+            activeKey: data.activeKey
         )
     }
 
@@ -522,19 +608,27 @@ public class TaskModel {
         if (success) {
             logger.info("创建等待任务成功", ("id", data.id.toString()), ("wait_for", waitForTaskId.toString()))
             return Task(
-                data.id, name, "waiting", 0, "等待依赖任务完成",
-                taskType: taskType, parameters: parameters,
-                createdAt: currentTime, priority: 50, groupId: groupId,
-                triggerSource: triggerSource, waitForTaskId: waitForTaskId,
-                phase: "awaiting_dependency", waitingReason: "task_dependency", activeKey: activeKey
+                data.id,
+                name,
+                "waiting",
+                0,
+                "等待依赖任务完成",
+                taskType: taskType,
+                parameters: parameters,
+                createdAt: currentTime,
+                priority: 50,
+                groupId: groupId,
+                triggerSource: triggerSource,
+                waitForTaskId: waitForTaskId,
+                phase: "awaiting_dependency",
+                waitingReason: "task_dependency",
+                activeKey: activeKey
             )
         } else {
             logger.error("创建等待任务失败", ("name", name))
             return Task(0, name, "failed", 0, "创建任务失败", taskType: taskType)
         }
     }
-
-
 
     /**
      * 获取当前时间字符串
