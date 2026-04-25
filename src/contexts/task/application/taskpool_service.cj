@@ -42,6 +42,10 @@ public class TaskPoolService {
         return coordinator.start()
     }
 
+    public func stop(): Unit {
+        coordinator.stop()
+    }
+
     public func notifyTaskAvailable(): Unit {
         coordinator.notifyTaskAvailable()
     }

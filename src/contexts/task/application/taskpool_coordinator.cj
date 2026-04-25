@@ -16,13 +16,12 @@ public class TaskPoolCoordinator {
     private static let orphanReconcileIntervalMillis: Int64 = 60000
     private static let orphanMinRunningAgeMillis: Int64 = 120000
 
-    private let eventMutex: Mutex
-    private let eventCond: Condition
-    private var events: ArrayList<TaskPoolEvent>
+    private let mailbox: TaskPoolMailbox
 
     private let lifecycleMutex: Mutex
     private var isRunning: Bool
     private var loopStarted: Bool
+    private var shutdownRequested: Bool
 
     private var maxWorkers: Int32
     private var currentWorkers: Int32
@@ -35,15 +34,12 @@ public class TaskPoolCoordinator {
     private var executor: Option<TaskWorkerExecutor>
 
     public init() {
-        eventMutex = Mutex()
-        eventMutex.lock()
-        eventCond = eventMutex.condition()
-        eventMutex.unlock()
-        events = ArrayList<TaskPoolEvent>()
+        mailbox = TaskPoolMailbox()
 
         lifecycleMutex = Mutex()
         isRunning = false
         loopStarted = false
+        shutdownRequested = false
 
         maxWorkers = 2
         currentWorkers = 0
@@ -56,9 +52,9 @@ public class TaskPoolCoordinator {
         executor = Option<TaskWorkerExecutor>.None
         executor = Some(TaskWorkerExecutor(
             pipeline,
-            { result: TaskWorkerResult => this.enqueue(TaskPoolEvent.workerFinished(result.taskId, result.workerId)) },
-            { => this.enqueue(TaskPoolEvent.taskAvailable()) },
-            { => this.enqueue(TaskPoolEvent.taskAvailable()) }
+            { result: TaskWorkerResult => this.enqueue(TaskPoolEvent.WorkerFinished(result.taskId, result.workerId)) },
+            { => this.enqueue(TaskPoolEvent.TaskAvailable) },
+            { => this.enqueue(TaskPoolEvent.TaskAvailable) }
         ))
         loadMaxWorkersConfig()
     }
@@ -70,6 +66,7 @@ public class TaskPoolCoordinator {
             return true
         }
         isRunning = true
+        shutdownRequested = false
         let shouldStartLoop = !loopStarted
         if (shouldStartLoop) {
             loopStarted = true
@@ -84,8 +81,19 @@ public class TaskPoolCoordinator {
 
         let logger = getLogger("taskpool")
         logger.debug("TaskPool starting", ("max_workers", maxWorkers.toString()))
-        enqueue(TaskPoolEvent.start())
+        enqueue(TaskPoolEvent.Start)
         return true
+    }
+
+    public func stop(): Unit {
+        lifecycleMutex.lock()
+        if (!isRunning) {
+            lifecycleMutex.unlock()
+            return
+        }
+        isRunning = false
+        lifecycleMutex.unlock()
+        enqueue(TaskPoolEvent.Shutdown)
     }
 
     public func isServiceRunning(): Bool {
@@ -99,14 +107,14 @@ public class TaskPoolCoordinator {
         if (!isServiceRunning()) {
             return
         }
-        enqueue(TaskPoolEvent.taskAvailable())
+        enqueue(TaskPoolEvent.TaskAvailable)
     }
 
     public func safetyTick(): Unit {
         if (!isServiceRunning()) {
             return
         }
-        enqueue(TaskPoolEvent.safetyTick())
+        enqueue(TaskPoolEvent.SafetyTick)
     }
 
     public func reloadMaxWorkersConfig(): Unit {
@@ -114,7 +122,7 @@ public class TaskPoolCoordinator {
             loadMaxWorkersConfig()
             return
         }
-        enqueue(TaskPoolEvent.reloadMaxWorkersConfig())
+        enqueue(TaskPoolEvent.ReloadMaxWorkersConfig)
     }
 
     public func supportedTaskTypes(): Array<String> {
@@ -122,48 +130,64 @@ public class TaskPoolCoordinator {
     }
 
     private func enqueue(event: TaskPoolEvent): Unit {
-        eventMutex.lock()
-        events.add(event)
-        eventCond.notifyAll()
-        eventMutex.unlock()
+        mailbox.put(event)
     }
 
     private func runEventLoop(): Unit {
         while (true) {
-            let event = takeEvent()
-            handleEvent(event)
+            let shouldContinue = handleEvent(mailbox.take())
+            if (!shouldContinue) {
+                markLoopStopped()
+                return
+            }
         }
     }
 
-    private func takeEvent(): TaskPoolEvent {
-        eventMutex.lock()
-        try {
-            let _ = eventCond.waitUntil({ => events.size > 0 })
-            return events.remove(at: 0)
-        } finally {
-            eventMutex.unlock()
-        }
+    private func markLoopStopped(): Unit {
+        lifecycleMutex.lock()
+        loopStarted = false
+        lifecycleMutex.unlock()
     }
 
-    private func handleEvent(event: TaskPoolEvent): Unit {
-        match (event.eventType) {
-            case "start" =>
+    private func handleEvent(event: TaskPoolEvent): Bool {
+        match (event) {
+            case Start =>
                 dispatchUntilFull()
-            case "task_available" =>
+                return true
+            case TaskAvailable =>
                 dispatchUntilFull()
-            case "safety_tick" =>
+                return true
+            case SafetyTick =>
                 reconcileOrphanedRunningTasks()
                 dispatchUntilFull()
-            case "worker_finished" =>
-                handleWorkerFinished(event.taskId, event.workerId)
+                return true
+            case WorkerFinished(taskId, workerId) =>
+                handleWorkerFinished(taskId, workerId)
+                if (shutdownRequested && currentWorkers == 0) {
+                    getLogger("taskpool").debug("TaskPool coordinator stopped after workers drained")
+                    return false
+                }
                 dispatchUntilFull()
-            case "reload_max_workers_config" =>
+                return true
+            case ReloadMaxWorkersConfig =>
                 reloadMaxWorkersConfigNow()
                 dispatchUntilFull()
-            case "reconcile_requested" =>
+                return true
+            case ReconcileRequested =>
                 reconcileOrphanedRunningTasks()
                 dispatchUntilFull()
-            case _ => ()
+                return true
+            case Shutdown =>
+                shutdownRequested = true
+                if (currentWorkers == 0) {
+                    getLogger("taskpool").debug("TaskPool coordinator stopped")
+                    return false
+                }
+                getLogger("taskpool").debug(
+                    "TaskPool coordinator waiting for workers before stop",
+                    ("current_workers", currentWorkers.toString())
+                )
+                return true
         }
     }
 
@@ -239,13 +263,44 @@ public class TaskPoolCoordinator {
     }
 
     private func handleWorkerFinished(taskId: Int64, workerId: Int32): Unit {
-        if (taskId > 0) {
-            let _ = activeWorkers.remove(taskId)
+        let logger = getLogger("taskpool")
+        if (taskId <= 0) {
+            logger.warn("TaskPool worker finished with invalid task id", ("worker", workerId.toString()))
+            return
         }
+
+        match (activeWorkers.get(taskId)) {
+            case Some(activeWorkerId) =>
+                if (activeWorkerId != workerId) {
+                    logger.warn(
+                        "Ignore stale TaskPool worker completion",
+                        ("worker", workerId.toString()),
+                        ("active_worker", activeWorkerId.toString()),
+                        ("task_id", taskId.toString())
+                    )
+                    return
+                }
+                let _ = activeWorkers.remove(taskId)
+            case None =>
+                logger.warn(
+                    "Ignore duplicate or unknown TaskPool worker completion",
+                    ("worker", workerId.toString()),
+                    ("task_id", taskId.toString()),
+                    ("current_workers", currentWorkers.toString())
+                )
+                return
+        }
+
         if (currentWorkers > 0) {
             currentWorkers -= 1
+        } else {
+            logger.warn(
+                "TaskPool worker accounting underflow avoided",
+                ("worker", workerId.toString()),
+                ("task_id", taskId.toString())
+            )
         }
-        getLogger("taskpool").debug(
+        logger.debug(
             "TaskPool worker released",
             ("worker", workerId.toString()),
             ("task_id", taskId.toString()),
@@ -334,7 +389,7 @@ public class TaskPoolCoordinator {
                 ("wait_for_status", completedTask.status)
             )
         }
-        enqueue(TaskPoolEvent.taskAvailable())
+        enqueue(TaskPoolEvent.TaskAvailable)
     }
 
     private func shouldRunOrphanReconcile(): Bool {
