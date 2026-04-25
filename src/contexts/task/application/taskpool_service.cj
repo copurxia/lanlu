@@ -46,6 +46,10 @@ public class TaskPoolService {
         coordinator.stop()
     }
 
+    public func isCoordinatorLoopAlive(): Bool {
+        return coordinator.isCoordinatorLoopAlive()
+    }
+
     public func notifyTaskAvailable(): Unit {
         coordinator.notifyTaskAvailable()
     }

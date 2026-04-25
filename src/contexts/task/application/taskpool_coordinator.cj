@@ -22,12 +22,14 @@ public class TaskPoolCoordinator {
     private var isRunning: Bool
     private var loopStarted: Bool
     private var shutdownRequested: Bool
+    private var loopFuture: Option<Future<Unit>>
 
     private var maxWorkers: Int32
     private var currentWorkers: Int32
     private var workerSeq: Int32
     private var activeWorkers: HashMap<Int64, Int32>
     private var lastOrphanReconcileAtMs: Int64
+    private var claimInProgress: Bool
 
     private let registry: TaskRunnerRegistry
     private let pipeline: TaskExecutionPipeline
@@ -40,12 +42,14 @@ public class TaskPoolCoordinator {
         isRunning = false
         loopStarted = false
         shutdownRequested = false
+        loopFuture = Option<Future<Unit>>.None
 
         maxWorkers = 2
         currentWorkers = 0
         workerSeq = 0
         activeWorkers = HashMap<Int64, Int32>()
         lastOrphanReconcileAtMs = 0
+        claimInProgress = false
 
         registry = TaskRunnerRegistry()
         pipeline = TaskExecutionPipeline(registry)
@@ -74,9 +78,12 @@ public class TaskPoolCoordinator {
         lifecycleMutex.unlock()
 
         if (shouldStartLoop) {
-            spawn {
+            let future = spawn {
                 runEventLoop()
             }
+            lifecycleMutex.lock()
+            loopFuture = Some(future)
+            lifecycleMutex.unlock()
         }
 
         let logger = getLogger("taskpool")
@@ -101,6 +108,24 @@ public class TaskPoolCoordinator {
         let running = isRunning
         lifecycleMutex.unlock()
         return running
+    }
+
+    public func isCoordinatorLoopAlive(): Bool {
+        lifecycleMutex.lock()
+        let futureOpt = loopFuture
+        lifecycleMutex.unlock()
+        match (futureOpt) {
+            case Some(future) =>
+                try {
+                    match (future.tryGet()) {
+                        case Some(_) => return false
+                        case None => return true
+                    }
+                } catch (_: Exception) {
+                    return false
+                }
+            case None => return false
+        }
     }
 
     public func notifyTaskAvailable(): Unit {
@@ -146,6 +171,7 @@ public class TaskPoolCoordinator {
     private func markLoopStopped(): Unit {
         lifecycleMutex.lock()
         loopStarted = false
+        loopFuture = Option<Future<Unit>>.None
         lifecycleMutex.unlock()
     }
 
@@ -161,9 +187,17 @@ public class TaskPoolCoordinator {
                 reconcileOrphanedRunningTasks()
                 dispatchUntilFull()
                 return true
+            case ClaimCompleted(tasks) =>
+                handleClaimCompleted(tasks)
+                if (shutdownRequested && currentWorkers == 0 && !claimInProgress) {
+                    getLogger("taskpool").debug("TaskPool coordinator stopped after claim drained")
+                    return false
+                }
+                dispatchUntilFull()
+                return true
             case WorkerFinished(taskId, workerId) =>
                 handleWorkerFinished(taskId, workerId)
-                if (shutdownRequested && currentWorkers == 0) {
+                if (shutdownRequested && currentWorkers == 0 && !claimInProgress) {
                     getLogger("taskpool").debug("TaskPool coordinator stopped after workers drained")
                     return false
                 }
@@ -179,12 +213,12 @@ public class TaskPoolCoordinator {
                 return true
             case Shutdown =>
                 shutdownRequested = true
-                if (currentWorkers == 0) {
+                if (currentWorkers == 0 && !claimInProgress) {
                     getLogger("taskpool").debug("TaskPool coordinator stopped")
                     return false
                 }
                 getLogger("taskpool").debug(
-                    "TaskPool coordinator waiting for workers before stop",
+                    "TaskPool coordinator waiting for claim or workers before stop",
                     ("current_workers", currentWorkers.toString())
                 )
                 return true
@@ -215,50 +249,55 @@ public class TaskPoolCoordinator {
     }
 
     private func dispatchUntilFull(): Unit {
-        let logger = getLogger("taskpool")
         if (!isServiceRunning()) {
             return
         }
+        if (claimInProgress) {
+            return
+        }
+        let available = maxWorkers - currentWorkers
+        if (available <= 0) {
+            return
+        }
+        claimInProgress = true
+        spawn {
+            let tasks = TaskDao.claimPendingTasks(available)
+            this.enqueue(TaskPoolEvent.ClaimCompleted(tasks))
+        }
+    }
+
+    private func handleClaimCompleted(tasks: ArrayList<TaskData>): Unit {
+        claimInProgress = false
+        if (tasks.size == 0) {
+            return
+        }
+        let logger = getLogger("taskpool")
         let workerExecutor = match (executor) {
             case Some(e) => e
             case None => return
         }
 
-        reconcileOrphanedRunningTasks()
+        logger.debug(
+            "TaskPool dispatch claimed tasks",
+            ("current_workers", currentWorkers.toString()),
+            ("available_slots", (maxWorkers - currentWorkers).toString()),
+            ("claimed_count", tasks.size.toString())
+        )
 
-        while (isServiceRunning()) {
-            let available = maxWorkers - currentWorkers
-            if (available <= 0) {
-                return
+        for (task in tasks) {
+            if (activeWorkers.contains(task.id)) {
+                logger.error(
+                    "double-claim detected: task already has an active worker, skip re-dispatch",
+                    ("task_id", task.id.toString()),
+                    ("task_type", task.taskType)
+                )
+                continue
             }
-
-            let tasks = TaskDao.claimPendingTasks(available)
-            if (tasks.size == 0) {
-                return
-            }
-
-            logger.debug(
-                "TaskPool dispatch claimed tasks",
-                ("current_workers", currentWorkers.toString()),
-                ("available_slots", available.toString()),
-                ("claimed_count", tasks.size.toString())
-            )
-
-            for (task in tasks) {
-                if (activeWorkers.contains(task.id)) {
-                    logger.error(
-                        "double-claim detected: task already has an active worker, skip re-dispatch",
-                        ("task_id", task.id.toString()),
-                        ("task_type", task.taskType)
-                    )
-                    continue
-                }
-                currentWorkers += 1
-                let workerId = workerSeq
-                workerSeq += 1
-                activeWorkers[task.id] = workerId
-                workerExecutor.start(task, workerId)
-            }
+            currentWorkers += 1
+            let workerId = workerSeq
+            workerSeq += 1
+            activeWorkers[task.id] = workerId
+            workerExecutor.start(task, workerId)
         }
     }
 

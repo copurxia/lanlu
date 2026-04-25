@@ -2,6 +2,7 @@ package lanlu.contexts.task.application
 
 import std.collection.*
 import std.sync.*
+import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
 
 /**
@@ -11,6 +12,7 @@ public enum TaskPoolEvent {
     Start
     | TaskAvailable
     | SafetyTick
+    | ClaimCompleted(ArrayList<TaskData>)
     | WorkerFinished(Int64, Int32)
     | ReloadMaxWorkersConfig
     | ReconcileRequested
@@ -28,24 +30,37 @@ public class TaskPoolMailbox {
 
     private let mutex: Mutex
     private let cond: Condition
-    private var events: ArrayList<TaskPoolEvent>
+    private var events: ArrayQueue<TaskPoolEvent>
+    private var queuedCount: Int64
+    private var hasQueuedTaskAvailable: Bool
 
     public init() {
         mutex = Mutex()
         mutex.lock()
         cond = mutex.condition()
         mutex.unlock()
-        events = ArrayList<TaskPoolEvent>()
+        events = ArrayQueue<TaskPoolEvent>()
+        queuedCount = 0
+        hasQueuedTaskAvailable = false
     }
 
     public func put(event: TaskPoolEvent): Unit {
         mutex.lock()
         try {
+            match (event) {
+                case TaskAvailable =>
+                    if (hasQueuedTaskAvailable) {
+                        return
+                    }
+                    hasQueuedTaskAvailable = true
+                case _ => ()
+            }
             events.add(event)
-            if (Int64(events.size) > TaskPoolMailbox.pressureThreshold) {
+            queuedCount += 1
+            if (queuedCount > TaskPoolMailbox.pressureThreshold) {
                 getLogger("taskpool").warn(
                     "TaskPool mailbox pressure threshold exceeded",
-                    ("queued_events", events.size.toString())
+                    ("queued_events", queuedCount.toString())
                 )
             }
             cond.notifyAll()
@@ -57,8 +72,40 @@ public class TaskPoolMailbox {
     public func take(): TaskPoolEvent {
         mutex.lock()
         try {
-            let _ = cond.waitUntil({ => events.size > 0 })
-            return events.remove(at: 0)
+            while (true) {
+                let _ = cond.waitUntil({ => queuedCount > 0 })
+                match (events.remove()) {
+                    case Some(Start) =>
+                        queuedCount -= 1
+                        return Start
+                    case Some(TaskAvailable) =>
+                        queuedCount -= 1
+                        hasQueuedTaskAvailable = false
+                        return TaskAvailable
+                    case Some(SafetyTick) =>
+                        queuedCount -= 1
+                        return SafetyTick
+                    case Some(ClaimCompleted(tasks)) =>
+                        queuedCount -= 1
+                        return ClaimCompleted(tasks)
+                    case Some(WorkerFinished(taskId, workerId)) =>
+                        queuedCount -= 1
+                        return WorkerFinished(taskId, workerId)
+                    case Some(ReloadMaxWorkersConfig) =>
+                        queuedCount -= 1
+                        return ReloadMaxWorkersConfig
+                    case Some(ReconcileRequested) =>
+                        queuedCount -= 1
+                        return ReconcileRequested
+                    case Some(Shutdown) =>
+                        queuedCount -= 1
+                        return Shutdown
+                    case None =>
+                        queuedCount = 0
+                        hasQueuedTaskAvailable = false
+                }
+            }
+            throw Exception("TaskPool mailbox take loop exited unexpectedly")
         } finally {
             mutex.unlock()
         }
