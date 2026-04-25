@@ -22,12 +22,19 @@ export type DownloadEntry = {
   createdAt: number;
   updatedAt: number;
 
-  status: "exists" | "queued" | "running" | "completed" | "failed" | "stopped";
+  status: "exists" | "queued" | "running" | "waiting" | "completed" | "failed" | "stopped";
   error?: string;
+  phase?: string;
+  waitingReason?: string;
 
   downloadTaskId?: number;
+  downloadCompleted?: boolean;
   downloadProgress?: number;
   downloadMessage?: string;
+
+  callbackTaskId?: number;
+  callbackProgress?: number;
+  callbackMessage?: string;
 
   scanTaskId?: number;
   scanProgress?: number;
@@ -62,9 +69,15 @@ export const useDownloadQueueStore = create<QueueState>()(
           tabId: entry.tabId,
           status: entry.status,
           error: entry.error,
+          phase: entry.phase,
+          waitingReason: entry.waitingReason,
           downloadTaskId: entry.downloadTaskId,
+          downloadCompleted: entry.downloadCompleted,
           downloadProgress: entry.downloadProgress,
           downloadMessage: entry.downloadMessage,
+          callbackTaskId: entry.callbackTaskId,
+          callbackProgress: entry.callbackProgress,
+          callbackMessage: entry.callbackMessage,
           scanTaskId: entry.scanTaskId,
           scanProgress: entry.scanProgress,
           scanMessage: entry.scanMessage,

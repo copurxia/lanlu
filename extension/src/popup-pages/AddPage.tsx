@@ -524,12 +524,12 @@ export default function AddPage({ navigate }: AddPageProps) {
                     <div className="text-[11px] text-red-600">{e.error || "失败"}</div>
                   ) : e.status === "completed" ? (
                     <div className="text-[11px] text-green-700">完成</div>
+                  ) : e.status === "waiting" ? (
+                    <div className="text-[11px] text-amber-600">等待中</div>
                   ) : (
                     <div className="text-[11px] text-muted-foreground">
-                      {typeof e.scanProgress === "number"
-                        ? `扫描 ${e.scanProgress}%`
-                        : typeof e.downloadProgress === "number"
-                        ? `${e.downloadProgress}%`
+                      {typeof e.downloadProgress === "number"
+                        ? `下载中 ${e.downloadProgress}%`
                         : "排队中"}
                     </div>
                   )}

@@ -148,8 +148,14 @@ async function writeQueueEntry(entryId, patch) {
     const now = Date.now();
     const entries = parsed.state.entries.map((e) => {
       if (e.id === entryId) {
-        changed = true;
-        return { ...e, ...patch, updatedAt: now };
+        const next = { ...e };
+        for (const [key, value] of Object.entries(patch)) {
+          if (next[key] !== value) {
+            next[key] = value;
+            changed = true;
+          }
+        }
+        return changed ? { ...next, updatedAt: now } : e;
       }
       return e;
     });
@@ -188,6 +194,7 @@ function statusFromEntry(entry) {
   switch (entry.status) {
     case "queued":
     case "running":
+    case "waiting":
       return STATUS.DOWNLOADING;
     case "completed":
     case "exists":
@@ -240,6 +247,8 @@ function normalizeStatus(raw) {
       return "queued";
     case "running":
       return "running";
+    case "waiting":
+      return "waiting";
     case "completed":
       return "completed";
     case "failed":
@@ -251,6 +260,10 @@ function normalizeStatus(raw) {
   }
 }
 
+function isEntryActiveStatus(status) {
+  return status === "queued" || status === "running" || status === "waiting";
+}
+
 function parseScanTaskIdFromDownloadResult(raw) {
   if (!raw) return null;
   try {
@@ -258,6 +271,42 @@ function parseScanTaskIdFromDownloadResult(raw) {
     if (typeof obj.task_id === "number" && Number.isFinite(obj.task_id)) return obj.task_id;
     if (typeof obj.task_id === "string") {
       const trimmed = obj.task_id.trim();
+      if (!trimmed) return null;
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCallbackTaskIdFromDownloadResult(raw) {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    const rawId = obj.callback_task_id;
+    if (typeof rawId === "number" && Number.isFinite(rawId)) return rawId;
+    if (typeof rawId === "string") {
+      const trimmed = rawId.trim();
+      if (!trimmed) return null;
+      const parsed = Number.parseInt(trimmed, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function parseScanTaskIdFromCallbackResult(raw) {
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    const rawId = obj.scan_task_id;
+    if (typeof rawId === "number" && Number.isFinite(rawId)) return rawId;
+    if (typeof rawId === "string") {
+      const trimmed = rawId.trim();
       if (!trimmed) return null;
       const parsed = Number.parseInt(trimmed, 10);
       return Number.isFinite(parsed) ? parsed : null;
@@ -318,6 +367,43 @@ function getTaskResultString(task) {
   return typeof task.result === "string" ? task.result : "";
 }
 
+function getTaskMessage(task) {
+  if (!isRecord(task)) return "";
+  return typeof task.message === "string" ? task.message : "";
+}
+
+function getTaskPhase(task) {
+  if (!isRecord(task)) return "";
+  return typeof task.phase === "string" ? task.phase : "";
+}
+
+function getTaskWaitingReason(task) {
+  if (!isRecord(task)) return "";
+  if (typeof task.waiting_reason === "string") return task.waiting_reason;
+  if (typeof task.waitingReason === "string") return task.waitingReason;
+  return "";
+}
+
+function getTaskProgress(task) {
+  if (!isRecord(task)) return 0;
+  return clampProgress(task.progress);
+}
+
+function latestLogLine(text) {
+  if (typeof text !== "string" || !text) return "";
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i].trim();
+    if (/^fetching\b/i.test(line)) continue;
+    if (line) return line.length > 120 ? `${line.slice(0, 120)}...` : line;
+  }
+  return "";
+}
+
+function taskDisplayMessage(task, logTail, logDelta) {
+  return getTaskMessage(task) || latestLogLine(logTail) || latestLogLine(logDelta);
+}
+
 async function readTaskDetail(taskId) {
   const auth = await getAuth();
   if (!auth) return null;
@@ -340,6 +426,36 @@ async function resolveScanTaskIdFromTask(task) {
     const detail = await readTaskDetail(task.id);
     if (!detail) continue;
     const parsed = parseScanTaskIdFromDownloadResult(getTaskResultString(detail));
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+async function resolveCallbackTaskIdFromTask(task) {
+  const direct = parseCallbackTaskIdFromDownloadResult(getTaskResultString(task));
+  if (direct) return direct;
+  if (typeof task.id !== "number") return null;
+
+  for (const delayMs of [200, 700]) {
+    await sleepMs(delayMs);
+    const detail = await readTaskDetail(task.id);
+    if (!detail) continue;
+    const parsed = parseCallbackTaskIdFromDownloadResult(getTaskResultString(detail));
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+async function resolveScanTaskIdFromCallbackTask(task) {
+  const direct = parseScanTaskIdFromCallbackResult(getTaskResultString(task));
+  if (direct) return direct;
+  if (typeof task.id !== "number") return null;
+
+  for (const delayMs of [200, 700]) {
+    await sleepMs(delayMs);
+    const detail = await readTaskDetail(task.id);
+    if (!detail) continue;
+    const parsed = parseScanTaskIdFromCallbackResult(getTaskResultString(detail));
     if (parsed) return parsed;
   }
   return null;
@@ -518,7 +634,7 @@ async function updateBadgeForActiveTab() {
 
 // --- SSE Task Sync (runs in background service worker) ---
 
-const sseConnections = new Map(); // key: `${entryId}:${kind}:${taskId}` -> EventSource
+const sseConnections = new Map(); // key: `${entryId}:${kind}:${taskId}` -> { close: () => void }
 const sseRetryTimers = new Map(); // key: `${entryId}:${kind}:${taskId}` -> timeout id
 const autoCloseHandledEntries = new Set();
 
@@ -589,9 +705,9 @@ function scheduleSseRetry(key) {
 }
 
 function closeAllSseConnections() {
-  for (const [key, source] of sseConnections) {
+  for (const [key, connection] of sseConnections) {
     try {
-      source.close();
+      connection.close();
     } catch {}
   }
   sseConnections.clear();
@@ -606,6 +722,8 @@ function createSseConnection(auth, entryId, taskId, kind) {
   const key = buildStreamKey(entryId, kind, taskId);
   clearSseRetryTimer(key);
   let doneReceived = false;
+  let closed = false;
+  const controller = new AbortController();
 
   // Close existing connection if any
   const existing = sseConnections.get(key);
@@ -616,67 +734,111 @@ function createSseConnection(auth, entryId, taskId, kind) {
     sseConnections.delete(key);
   }
 
-  // Use EventSource with token in URL (EventSource doesn't support custom headers)
-  const url = `${auth.serverUrl}/api/admin/taskpool/${taskId}/stream?token=${encodeURIComponent(auth.token)}`;
-  const source = new EventSource(url);
-
-  source.onopen = () => {
-    clearSseRetryTimer(key);
-    console.log(`[SSE] Connected: ${key}`);
+  const close = () => {
+    closed = true;
+    controller.abort();
   };
 
-  source.addEventListener("snapshot", (event) => {
-    void handleSseEvent(entryId, kind, event).catch((e) => {
-      console.warn(`[SSE] snapshot handler failed: ${key}`, e);
-    });
-  });
+  // Use fetch so the extension can authenticate with the same Authorization header
+  // accepted by the main server middleware.
+  const url = `${auth.serverUrl}/api/admin/taskpool/${taskId}/stream`;
+  const connection = { close };
+  sseConnections.set(key, connection);
 
-  source.addEventListener("task", (event) => {
-    void handleSseEvent(entryId, kind, event).catch((e) => {
-      console.warn(`[SSE] task handler failed: ${key}`, e);
-    });
-  });
+  void (async () => {
+    try {
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${auth.token}`,
+        },
+        signal: controller.signal,
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.body) throw new Error("SSE response body is empty");
+      clearSseRetryTimer(key);
+      console.log(`[SSE] Connected: ${key}`);
 
-  source.addEventListener("done", (event) => {
-    doneReceived = true;
-    void (async () => {
-      try {
-        await handleSseEvent(entryId, kind, event);
-      } catch (e) {
-        console.warn(`[SSE] done handler failed: ${key}`, e);
-      } finally {
-        // Close connection after done
-        source.close();
+      await readSseStream(resp.body, async (sseEvent) => {
+        if (closed) return;
+        if (sseEvent.event === "ping") return;
+        if (sseEvent.event === "snapshot" || sseEvent.event === "task") {
+          await handleSseEvent(entryId, kind, sseEvent);
+          return;
+        }
+        if (sseEvent.event === "done") {
+          doneReceived = true;
+          try {
+            await handleSseEvent(entryId, kind, sseEvent);
+          } finally {
+            close();
+            sseConnections.delete(key);
+            clearSseRetryTimer(key);
+            console.log(`[SSE] Done, closed: ${key}`);
+            await syncSseSubscriptions();
+          }
+        }
+      });
+    } catch (err) {
+      if (closed || controller.signal.aborted) return;
+      if (doneReceived) {
         sseConnections.delete(key);
         clearSseRetryTimer(key);
-        console.log(`[SSE] Done, closed: ${key}`);
-        // Re-sync to handle scan task if needed
-        await syncSseSubscriptions();
+        console.log(`[SSE] Ignored error after done: ${key}`);
+        return;
       }
-    })();
-  });
-
-  source.addEventListener("ping", () => {
-    // Keep-alive, no-op
-  });
-
-  source.onerror = (err) => {
-    if (doneReceived) {
-      source.close();
+      console.warn(`[SSE] Error: ${key}`, err);
       sseConnections.delete(key);
-      clearSseRetryTimer(key);
-      console.log(`[SSE] Ignored error after done: ${key}`);
-      return;
+      scheduleSseRetry(key);
     }
-    console.warn(`[SSE] Error: ${key}`, err);
-    source.close();
-    sseConnections.delete(key);
-    scheduleSseRetry(key);
+  })();
+
+  console.log(`[SSE] Created: ${key}`);
+  return connection;
+}
+
+async function readSseStream(body, onEvent) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const parseEvent = (raw) => {
+    const lines = raw.split(/\r?\n/);
+    let event = "message";
+    const data = [];
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      const sep = line.indexOf(":");
+      const field = sep >= 0 ? line.slice(0, sep) : line;
+      const value = sep >= 0 ? line.slice(sep + 1).replace(/^ /, "") : "";
+      if (field === "event") event = value || "message";
+      if (field === "data") data.push(value);
+    }
+    if (data.length === 0) return null;
+    return { event, data: data.join("\n") };
   };
 
-  sseConnections.set(key, source);
-  console.log(`[SSE] Created: ${key}`);
-  return source;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.search(/\r?\n\r?\n/);
+    while (boundary >= 0) {
+      const raw = buffer.slice(0, boundary);
+      const match = buffer.slice(boundary).match(/^\r?\n\r?\n/);
+      buffer = buffer.slice(boundary + (match ? match[0].length : 2));
+      const event = parseEvent(raw);
+      if (event) await onEvent(event);
+      boundary = buffer.search(/\r?\n\r?\n/);
+    }
+  }
+
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    const event = parseEvent(buffer);
+    if (event) await onEvent(event);
+  }
 }
 
 async function handleSseEvent(entryId, kind, event) {
@@ -699,36 +861,78 @@ async function handleSseEvent(entryId, kind, event) {
   const logTail = stream && typeof stream.log_tail === "string" ? stream.log_tail : null;
 
   const status = normalizeStatus(task.status);
+  const phase = getTaskPhase(task);
+  const waitingReason = getTaskWaitingReason(task);
 
   if (kind === "download") {
     const downloadProgress = clampProgress(task.progress);
-    const downloadMessage = task.message || logDelta || logTail || "";
+    const downloadMessage = taskDisplayMessage(task, logTail, logDelta);
     const patch = {
       status,
+      phase,
+      waitingReason,
+      downloadCompleted: task.status === "completed",
       downloadProgress,
       downloadMessage,
       error: status === "failed" ? downloadMessage || "任务失败" : undefined,
     };
 
+    if (!patch.callbackTaskId && (task.status === "waiting" || task.status === "completed")) {
+      const callbackTaskId = await resolveCallbackTaskIdFromTask(task);
+      if (callbackTaskId) {
+        patch.callbackTaskId = callbackTaskId;
+      }
+    }
+
     if (task.status === "completed") {
+      patch.status = "completed";
+      patch.downloadCompleted = true;
+      patch.downloadProgress = 100;
+      patch.downloadMessage = downloadMessage || "下载完成";
       const scanTaskId = await resolveScanTaskIdFromTask(task);
       if (scanTaskId) {
         patch.scanTaskId = scanTaskId;
-        patch.status = "running";
       } else {
         console.warn(`[SSE] Download completed but no scanTaskId found: ${task.id}`);
       }
     }
     await writeQueueEntry(entryId, patch);
+    if (task.status === "completed") {
+      await maybeAutoCloseTabForEntry(entryId);
+    }
+  } else if (kind === "callback") {
+    const callbackProgress = clampProgress(task.progress);
+    const callbackMessage = taskDisplayMessage(task, logTail, logDelta);
+    const patch = {
+      status: status === "failed" ? "failed" : "completed",
+      phase,
+      waitingReason,
+      callbackProgress,
+      callbackMessage,
+      error: status === "failed" ? callbackMessage || "后处理失败" : undefined,
+    };
+
+    if (task.status === "completed") {
+      const scanTaskId = await resolveScanTaskIdFromCallbackTask(task);
+      if (scanTaskId) {
+        patch.scanTaskId = scanTaskId;
+        patch.status = "completed";
+      } else {
+        patch.callbackMessage = callbackMessage || "后处理完成，等待扫描任务";
+      }
+    }
+    await writeQueueEntry(entryId, patch);
   } else if (kind === "scan") {
     const scanProgress = clampProgress(task.progress);
-    const scanMessage = task.message || logDelta || logTail || "";
+    const scanMessage = taskDisplayMessage(task, logTail, logDelta);
     const archiveId = task.status === "completed" ? await resolveArchiveIdFromTask(task) : null;
 
     const patch = {
+      phase,
+      waitingReason,
       scanProgress,
       scanMessage,
-      status: status === "queued" ? "running" : status,
+      status: status === "failed" ? "failed" : "completed",
       error: status === "failed" ? scanMessage || "扫描失败" : undefined,
     };
     if (archiveId) {
@@ -743,6 +947,99 @@ async function handleSseEvent(entryId, kind, event) {
   }
 }
 
+async function hydrateEntryFromTaskDetails(entry) {
+  if (!entry || !entry.id) return entry;
+  let next = entry;
+
+  if (typeof next.downloadTaskId === "number" && next.downloadTaskId > 0) {
+    const detail = await readTaskDetail(next.downloadTaskId);
+    if (detail) {
+      const status = normalizeStatus(detail.status);
+      const patch = {
+        status,
+        phase: getTaskPhase(detail),
+        waitingReason: getTaskWaitingReason(detail),
+        downloadCompleted: detail.status === "completed",
+        downloadProgress: getTaskProgress(detail),
+        downloadMessage: taskDisplayMessage(detail, "", ""),
+        error: status === "failed" ? getTaskMessage(detail) || "任务失败" : undefined,
+      };
+
+      if (!next.scanTaskId && detail.status === "completed") {
+        const scanTaskId = await resolveScanTaskIdFromTask(detail);
+        if (scanTaskId) {
+          patch.scanTaskId = scanTaskId;
+        } else {
+          patch.downloadMessage = patch.downloadMessage || "下载完成，等待后续任务";
+        }
+      }
+      if (!next.callbackTaskId && (detail.status === "waiting" || detail.status === "completed")) {
+        const callbackTaskId = await resolveCallbackTaskIdFromTask(detail);
+        if (callbackTaskId) {
+          patch.callbackTaskId = callbackTaskId;
+        }
+      }
+
+      await writeQueueEntry(next.id, patch);
+      next = { ...next, ...patch };
+    }
+  }
+
+  if (next.downloadCompleted && !next.scanTaskId && typeof next.callbackTaskId === "number" && next.callbackTaskId > 0) {
+    const detail = await readTaskDetail(next.callbackTaskId);
+    if (detail) {
+      const status = normalizeStatus(detail.status);
+      const patch = {
+        status: status === "failed" ? "failed" : "completed",
+        phase: getTaskPhase(detail),
+        waitingReason: getTaskWaitingReason(detail),
+        callbackProgress: getTaskProgress(detail),
+        callbackMessage: taskDisplayMessage(detail, "", ""),
+        error: status === "failed" ? getTaskMessage(detail) || "后处理失败" : undefined,
+      };
+
+      if (detail.status === "completed") {
+        const scanTaskId = await resolveScanTaskIdFromCallbackTask(detail);
+        if (scanTaskId) {
+          patch.scanTaskId = scanTaskId;
+          patch.status = "completed";
+        } else {
+          patch.callbackMessage = patch.callbackMessage || "后处理完成，等待扫描任务";
+        }
+      }
+
+      await writeQueueEntry(next.id, patch);
+      next = { ...next, ...patch };
+    }
+  }
+
+  if (typeof next.scanTaskId === "number" && next.scanTaskId > 0) {
+    const detail = await readTaskDetail(next.scanTaskId);
+    if (detail) {
+      const status = normalizeStatus(detail.status);
+      const archiveId = detail.status === "completed" ? await resolveArchiveIdFromTask(detail) : null;
+      const patch = {
+        status: status === "failed" ? "failed" : "completed",
+        phase: getTaskPhase(detail),
+        waitingReason: getTaskWaitingReason(detail),
+        scanProgress: getTaskProgress(detail),
+        scanMessage: taskDisplayMessage(detail, "", ""),
+        error: status === "failed" ? getTaskMessage(detail) || "扫描失败" : undefined,
+      };
+      if (archiveId) {
+        patch.archiveId = archiveId;
+      }
+      await writeQueueEntry(next.id, patch);
+      next = { ...next, ...patch };
+      if (detail.status === "completed") {
+        await maybeAutoCloseTabForEntry(next.id);
+      }
+    }
+  }
+
+  return next;
+}
+
 async function syncSseSubscriptions() {
   const auth = await getAuth();
   if (!auth) {
@@ -754,8 +1051,11 @@ async function syncSseSubscriptions() {
   const expectedKeys = new Set();
 
   // Determine which SSE connections we need
-  for (const entry of entries) {
-    const statusActive = entry.status === "queued" || entry.status === "running";
+  for (const rawEntry of entries) {
+    const entry = isEntryActiveStatus(rawEntry && rawEntry.status)
+      ? await hydrateEntryFromTaskDetails(rawEntry)
+      : rawEntry;
+    const statusActive = isEntryActiveStatus(entry.status);
     const hasDownloadTask = typeof entry.downloadTaskId === "number" && entry.downloadTaskId > 0;
     const hasScanTask = typeof entry.scanTaskId === "number" && entry.scanTaskId > 0;
     // Once scan task exists, download has already finished; don't keep re-subscribing download SSE.
@@ -783,9 +1083,9 @@ async function syncSseSubscriptions() {
   }
 
   // Close connections that are no longer needed
-  for (const [key, source] of sseConnections) {
+  for (const [key, connection] of sseConnections) {
     if (!expectedKeys.has(key)) {
-      source.close();
+      connection.close();
       sseConnections.delete(key);
       clearSseRetryTimer(key);
       console.log(`[SSE] Closed (no longer needed): ${key}`);

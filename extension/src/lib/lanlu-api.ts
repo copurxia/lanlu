@@ -43,9 +43,12 @@ export type TaskPoolTask = {
   id: number;
   name: string;
   task_type: string;
-  status: "pending" | "running" | "completed" | "failed" | "stopped" | string;
+  status: "pending" | "running" | "waiting" | "completed" | "failed" | "stopped" | string;
   progress: number;
   message: string;
+  phase?: string;
+  waiting_reason?: string;
+  active_key?: string;
   plugin_namespace: string;
   parameters: string;
   result: string;
@@ -75,6 +78,11 @@ type TaskStreamHandlers = {
   onDone?: (payload: TaskStreamPayload) => void;
   onError?: (error: Error) => void;
   onClose?: () => void;
+};
+
+type ParsedSseEvent = {
+  event: string;
+  data: string;
 };
 
 function normalizeSuccess(raw: unknown): boolean {
@@ -174,13 +182,11 @@ export function subscribeTaskStream(
   handlers: TaskStreamHandlers = {}
 ): () => void {
   let closed = false;
+  const controller = new AbortController();
 
-  // 使用 EventSource（Chrome Extension Service Worker 支持）
-  // 通过 URL 参数传递 token，因为 EventSource 不支持自定义 headers
-  const url = `${auth.serverUrl}/api/admin/taskpool/${id}/stream?token=${encodeURIComponent(auth.token)}`;
-  const source = new EventSource(url);
+  const url = `${auth.serverUrl}/api/admin/taskpool/${id}/stream`;
 
-  const emitPayload = (event: MessageEvent, forceDone: boolean = false): void => {
+  const emitPayload = (event: ParsedSseEvent, forceDone: boolean = false): void => {
     const rawData = event.data;
     if (!rawData) return;
     let parsed: unknown;
@@ -197,7 +203,7 @@ export function subscribeTaskStream(
 
     const payload: TaskStreamPayload = {
       task: taskCandidate,
-      event: event.type,
+      event: event.event,
       version: typeof parsed.v === "number" ? parsed.v : undefined,
       log: typeof parsed.log === "string" ? parsed.log : undefined,
       logTail:
@@ -232,43 +238,90 @@ export function subscribeTaskStream(
     }
   };
 
-  source.onopen = () => {
-    if (closed) return;
-    handlers.onOpen?.();
-  };
+  void (async () => {
+    try {
+      const resp = await fetch(url, {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${auth.token}`,
+        },
+        signal: controller.signal,
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      if (!resp.body) throw new Error("SSE response body is empty");
+      if (closed) return;
+      handlers.onOpen?.();
 
-  source.addEventListener("snapshot", (event) => {
-    if (closed) return;
-    emitPayload(event as MessageEvent, false);
-  });
-
-  source.addEventListener("task", (event) => {
-    if (closed) return;
-    emitPayload(event as MessageEvent, false);
-  });
-
-  source.addEventListener("done", (event) => {
-    if (closed) return;
-    emitPayload(event as MessageEvent, true);
-  });
-
-  source.addEventListener("ping", () => {
-    // Keep-alive, no-op
-  });
-
-  source.onerror = () => {
-    if (closed) return;
-    handlers.onError?.(new Error(`SSE connection error: ${id}`));
-  };
+      await readSseStream(resp.body, (event) => {
+        if (closed) return;
+        if (event.event === "ping") return;
+        if (event.event === "snapshot" || event.event === "task") {
+          emitPayload(event, false);
+        } else if (event.event === "done") {
+          emitPayload(event, true);
+          closed = true;
+          controller.abort();
+        }
+      });
+    } catch (error) {
+      if (closed || controller.signal.aborted) return;
+      handlers.onError?.(error instanceof Error ? error : new Error(`SSE connection error: ${id}`));
+    } finally {
+      handlers.onClose?.();
+    }
+  })();
 
   return () => {
     closed = true;
-    source.close();
+    controller.abort();
   };
 }
 
 function isTerminalStatus(status: string): boolean {
   return status === "completed" || status === "failed" || status === "stopped";
+}
+
+async function readSseStream(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (event: ParsedSseEvent) => void
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const flushEvent = (raw: string): void => {
+    const lines = raw.split(/\r?\n/);
+    let event = "message";
+    const data: string[] = [];
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      const sep = line.indexOf(":");
+      const field = sep >= 0 ? line.slice(0, sep) : line;
+      const value = sep >= 0 ? line.slice(sep + 1).replace(/^ /, "") : "";
+      if (field === "event") event = value || "message";
+      if (field === "data") data.push(value);
+    }
+    if (data.length > 0) {
+      onEvent({ event, data: data.join("\n") });
+    }
+  };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = buffer.search(/\r?\n\r?\n/);
+    while (boundary >= 0) {
+      const raw = buffer.slice(0, boundary);
+      const match = buffer.slice(boundary).match(/^\r?\n\r?\n/);
+      buffer = buffer.slice(boundary + (match?.[0].length ?? 2));
+      flushEvent(raw);
+      boundary = buffer.search(/\r?\n\r?\n/);
+    }
+  }
+  buffer += decoder.decode();
+  if (buffer.trim()) flushEvent(buffer);
 }
 
 export async function enqueueDownloadUrl(

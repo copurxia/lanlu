@@ -27,6 +27,8 @@ function statusLabel(status: string): string {
       return "排队中"
     case "running":
       return "进行中"
+    case "waiting":
+      return "等待中"
     case "completed":
       return "完成"
     case "failed":
@@ -36,6 +38,15 @@ function statusLabel(status: string): string {
     default:
       return status
   }
+}
+
+function phaseLabel(phase?: string, waitingReason?: string): string {
+  if (phase === "awaiting_dependency" || waitingReason === "task_dependency") return "等待依赖任务"
+  if (phase === "executing") return "执行中"
+  if (phase === "completed") return "已完成"
+  if (phase === "failed") return "失败"
+  if (phase === "stopped") return "已停止"
+  return phase || waitingReason || ""
 }
 
 export default function TasksPage({ navigate }: TasksPageProps) {
@@ -88,8 +99,8 @@ export default function TasksPage({ navigate }: TasksPageProps) {
           <div className="max-h-[480px] overflow-y-auto">
             {entries.map((e) => {
               const downloadP = typeof e.downloadProgress === "number" ? e.downloadProgress : null
-              const scanP = typeof e.scanProgress === "number" ? e.scanProgress : null
-              const activeP = scanP ?? downloadP
+              const activeP = downloadP
+              const stage = phaseLabel(e.phase, e.waitingReason)
 
               return (
                 <div key={e.id} className="px-3 py-3 border-b last:border-b-0 space-y-2">
@@ -108,27 +119,34 @@ export default function TasksPage({ navigate }: TasksPageProps) {
                   </div>
 
                   <div className="flex items-center justify-between">
-                    <div className="text-[11px] text-muted-foreground">{statusLabel(e.status)}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {statusLabel(e.status)}
+                      {stage ? ` · ${stage}` : ""}
+                    </div>
                     <div className="text-[11px] text-muted-foreground">{formatTime(e.createdAt)}</div>
                   </div>
 
                   {activeP != null && (
-                    <ErrorBoundary
-                      fallback={
-                        <div className="h-2 w-full rounded bg-muted">
-                          <div className="h-2 rounded bg-primary" style={{ width: `${activeP}%` }} />
-                        </div>
-                      }
-                    >
-                      <ProgressBar
-                        progress={activeP}
-                        label={
-                          scanP != null
-                            ? `扫描 ${scanP}% ${e.scanMessage || ""}`.trim()
-                            : `下载 ${downloadP ?? 0}% ${e.downloadMessage || ""}`.trim()
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                        <span>进度</span>
+                        <span>{activeP}%</span>
+                      </div>
+                      <ErrorBoundary
+                        fallback={
+                          <div className="h-2 w-full rounded bg-muted">
+                            <div className="h-2 rounded bg-primary" style={{ width: `${activeP}%` }} />
+                          </div>
                         }
-                      />
-                    </ErrorBoundary>
+                      >
+                        <ProgressBar progress={activeP} />
+                      </ErrorBoundary>
+                      {(e.downloadMessage || e.waitingReason) && (
+                        <div className="text-[11px] text-muted-foreground">
+                          <strong>最新日志:</strong> {e.downloadMessage || e.waitingReason}
+                        </div>
+                      )}
+                    </div>
                   )}
 
                   {e.error ? <div className="text-[11px] text-red-600">错误：{e.error}</div> : null}

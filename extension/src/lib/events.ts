@@ -18,10 +18,15 @@ export type TaskEventData = {
     message?: string;
     error?: string;
     archiveId?: string;
+    phase?: string;
+    waitingReason?: string;
     downloadTaskId?: number;
+    callbackTaskId?: number;
     scanTaskId?: number;
     downloadProgress?: number;
     downloadMessage?: string;
+    callbackProgress?: number;
+    callbackMessage?: string;
     scanProgress?: number;
     scanMessage?: string;
   };
