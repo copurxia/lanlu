@@ -10,6 +10,7 @@ import lanlu.contexts.system.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import rocksdb_ffi.OptimisticRocksDb
 import rocksdb_ffi.OptimisticRocksDbOptions
+import rocksdb_ffi.RocksDbCompression
 import rocksdb_ffi.RocksDbTxn
 
 private class LocalKvBootstrapConfig {
@@ -60,7 +61,7 @@ public interface LocalKVTransactionalStore {
     func isConflictError(error: String): Bool
 }
 
-public interface LocalKVTransaction {
+public interface LocalKVTransaction <: Resource {
     func get(key: String): (Bool, Option<String>, String)
     func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String)
     func put(key: String, value: String): (Bool, String)
@@ -68,6 +69,20 @@ public interface LocalKVTransaction {
     func commit(): (Bool, String)
     func rollback(): (Bool, String)
     func close(): Unit
+}
+
+private class LocalKVKeys {
+    public static func compose(namespace: String, key: String): String {
+        return "${namespace}:${key}"
+    }
+
+    public static func stripNamespace(storageKey: String, namespace: String): Option<String> {
+        let namespacePrefix = "${namespace}:"
+        if (storageKey.startsWith(namespacePrefix) && storageKey.size >= namespacePrefix.size) {
+            return Some(storageKey[namespacePrefix.size..storageKey.size])
+        }
+        return None
+    }
 }
 
 public class RocksDbLocalKVStore <: LocalKVStore {
@@ -83,8 +98,14 @@ public class RocksDbLocalKVStore <: LocalKVStore {
     }
 
     public func get(namespace: String, key: String): Option<String> {
-        let (ok, valueOpt, _) = db.get(composeKey(namespace, key))
+        let (ok, valueOpt, err) = db.get(LocalKVKeys.compose(namespace, key))
         if (!ok) {
+            logger.warn(
+                "RocksDB get failed",
+                ("namespace", namespace),
+                ("key", key),
+                ("error", err)
+            )
             return None
         }
         return valueOpt
@@ -96,19 +117,19 @@ public class RocksDbLocalKVStore <: LocalKVStore {
         }
 
         let t0 = DateTime.now().toUnixTimeStamp().toMilliseconds()
-        let fullKeys = Array<String>(keys.size, { i => composeKey(namespace, keys[i]) })
+        let fullKeys = Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])})
         let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
-        
+
         logger.debug(
             "[KV] RocksDb multiGet calling",
             ("namespace", namespace),
             ("key_count", keys.size.toString()),
             ("compose_ms", (t1 - t0).toString())
         )
-        
+
         let (ok, values, err) = db.multiGet(fullKeys)
         let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
-        
+
         if (!ok) {
             logger.warn(
                 "[KV] RocksDb multiGet failed",
@@ -117,10 +138,10 @@ public class RocksDbLocalKVStore <: LocalKVStore {
                 ("rocksdb_ms", (t2 - t1).toString()),
                 ("error", err)
             )
-            return Array<Option<String>>(keys.size, { _ => None })
+            return Array<Option<String>>(keys.size, {_ => None})
         }
-        
-        let foundCount = values.filter({ v => v.isSome() }).size
+
+        let foundCount = values.filter({v => v.isSome()}).size
         logger.debug(
             "[KV] RocksDb multiGet completed",
             ("namespace", namespace),
@@ -129,12 +150,20 @@ public class RocksDbLocalKVStore <: LocalKVStore {
             ("rocksdb_ms", (t2 - t1).toString()),
             ("total_ms", (t2 - t0).toString())
         )
-        
+
         return values
     }
 
     public func put(namespace: String, key: String, value: String): Bool {
-        let (ok, _) = db.put(composeKey(namespace, key), value)
+        let (ok, err) = db.put(LocalKVKeys.compose(namespace, key), value)
+        if (!ok) {
+            logger.warn(
+                "RocksDB put failed",
+                ("namespace", namespace),
+                ("key", key),
+                ("error", err)
+            )
+        }
         return ok
     }
 
@@ -143,15 +172,31 @@ public class RocksDbLocalKVStore <: LocalKVStore {
             return true
         }
 
-        let fullEntries = Array<(String, String)>(entries.size, { i =>
-            (composeKey(namespace, entries[i][0]), entries[i][1])
+        let fullEntries = Array<(String, String)>(entries.size, {
+            i => (LocalKVKeys.compose(namespace, entries[i][0]), entries[i][1])
         })
-        let (ok, _) = db.writeBatch(fullEntries, [], [], [])
+        let (ok, err) = db.writeBatch(fullEntries, [], [], [])
+        if (!ok) {
+            logger.warn(
+                "RocksDB putMany failed",
+                ("namespace", namespace),
+                ("entry_count", entries.size.toString()),
+                ("error", err)
+            )
+        }
         return ok
     }
 
     public func delete(namespace: String, key: String): Bool {
-        let (ok, _) = db.delete(composeKey(namespace, key))
+        let (ok, err) = db.delete(LocalKVKeys.compose(namespace, key))
+        if (!ok) {
+            logger.warn(
+                "RocksDB delete failed",
+                ("namespace", namespace),
+                ("key", key),
+                ("error", err)
+            )
+        }
         return ok
     }
 
@@ -160,35 +205,54 @@ public class RocksDbLocalKVStore <: LocalKVStore {
             return true
         }
 
-        let fullKeys = Array<String>(keys.size, { i => composeKey(namespace, keys[i]) })
-        let (ok, _) = db.deleteMany(fullKeys)
+        let fullKeys = Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])})
+        let (ok, err) = db.deleteMany(fullKeys)
+        if (!ok) {
+            logger.warn(
+                "RocksDB deleteMany failed",
+                ("namespace", namespace),
+                ("key_count", keys.size.toString()),
+                ("error", err)
+            )
+        }
         return ok
     }
 
     public func deleteRange(namespace: String, startKey: String, endKey: String): Bool {
-        let (ok, _) = db.deleteRange(composeKey(namespace, startKey), composeKey(namespace, endKey))
+        let (ok, err) = db.deleteRange(LocalKVKeys.compose(namespace, startKey), LocalKVKeys.compose(namespace, endKey))
+        if (!ok) {
+            logger.warn(
+                "RocksDB deleteRange failed",
+                ("namespace", namespace),
+                ("start_key", startKey),
+                ("end_key", endKey),
+                ("error", err)
+            )
+        }
         return ok
     }
 
     public func scan(namespace: String, keyPrefix: String): Array<(String, String)> {
-        let namespacePrefix = "${namespace}:"
-        let fullPrefix = composeKey(namespace, keyPrefix)
-        let (ok, pairs, _) = db.scanByPrefix(fullPrefix)
+        let fullPrefix = LocalKVKeys.compose(namespace, keyPrefix)
+        let (ok, pairs, err) = db.scanByPrefix(fullPrefix)
         if (!ok) {
+            logger.warn(
+                "RocksDB scan failed",
+                ("namespace", namespace),
+                ("key_prefix", keyPrefix),
+                ("error", err)
+            )
             return []
         }
 
         let entries = ArrayList<(String, String)>()
         for ((key, value) in pairs) {
-            if (key.startsWith(namespacePrefix) && key.size >= namespacePrefix.size) {
-                entries.add((key[namespacePrefix.size..key.size], value))
+            match (LocalKVKeys.stripNamespace(key, namespace)) {
+                case Some(localKey) => entries.add((localKey, value))
+                case None => ()
             }
         }
         return entries.toArray()
-    }
-
-    private func composeKey(namespace: String, key: String): String {
-        return "${namespace}:${key}"
     }
 }
 
@@ -222,19 +286,19 @@ private class RocksDbNamespaceTransaction <: LocalKVTransaction {
     }
 
     public func get(key: String): (Bool, Option<String>, String) {
-        return txn.get(composeKey(key))
+        return txn.get(LocalKVKeys.compose(namespace, key))
     }
 
     public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
-        return txn.multiGet(Array<String>(keys.size, { i => composeKey(keys[i]) }))
+        return txn.multiGet(Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])}))
     }
 
     public func put(key: String, value: String): (Bool, String) {
-        return txn.put(composeKey(key), value)
+        return txn.put(LocalKVKeys.compose(namespace, key), value)
     }
 
     public func delete(key: String): (Bool, String) {
-        return txn.delete(composeKey(key))
+        return txn.delete(LocalKVKeys.compose(namespace, key))
     }
 
     public func commit(): (Bool, String) {
@@ -249,8 +313,8 @@ private class RocksDbNamespaceTransaction <: LocalKVTransaction {
         txn.close()
     }
 
-    private func composeKey(key: String): String {
-        return "${namespace}:${key}"
+    public func isClosed(): Bool {
+        return txn.isClosed()
     }
 }
 
@@ -276,30 +340,48 @@ public class LocalKVService {
 
     public static func initializeFromSettings(): Bool {
         mutex.lock()
-        if (initialized) {
-            let ready = !store.isNone()
-            mutex.unlock()
-            return ready
-        }
+        try {
+            if (initialized) {
+                return !store.isNone()
+            }
 
-        initialized = true
-        let bootstrapConfig = resolveBootstrapConfig()
-        let dbPath = FileUtils.joinPath(bootstrapConfig.cachePath, "rocksdb")
-        FileUtils.ensureDirectoryExists(Path(dbPath))
-        let dbOptions = OptimisticRocksDbOptions(
-            bootstrapConfig.kvMemoryMb,
-            bootstrapConfig.blockCacheMb,
-            bootstrapConfig.maxWriteBufferNumber,
-            bootstrapConfig.maxOpenFiles,
-            bootstrapConfig.maxBackgroundJobs,
-            bootstrapConfig.allowMmapReads,
-            mapCompressionType(bootstrapConfig.compression)
-        )
+            initialized = true
+            let bootstrapConfig = resolveBootstrapConfig()
+            let dbPath = FileUtils.joinPath(bootstrapConfig.cachePath, "rocksdb")
+            FileUtils.ensureDirectoryExists(Path(dbPath))
+            let dbOptions = OptimisticRocksDbOptions(
+                bootstrapConfig.kvMemoryMb,
+                bootstrapConfig.blockCacheMb,
+                bootstrapConfig.maxWriteBufferNumber,
+                bootstrapConfig.maxOpenFiles,
+                bootstrapConfig.maxBackgroundJobs,
+                bootstrapConfig.allowMmapReads,
+                mapCompressionType(bootstrapConfig.compression)
+            )
 
-        let (ok, dbOpt, err) = OptimisticRocksDb.openOptimistic(dbPath, dbOptions)
-        if (!ok) {
-            logger.warn(
-                "Failed to initialize RocksDB local KV; falling back to no-cache mode",
+            let (ok, dbOpt, err) = OptimisticRocksDb.openOptimistic(dbPath, dbOptions)
+            if (!ok) {
+                logger.warn(
+                    "Failed to initialize RocksDB local KV; falling back to no-cache mode",
+                    ("path", dbPath),
+                    ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()),
+                    ("block_cache_mb", bootstrapConfig.blockCacheMb.toString()),
+                    ("max_write_buffer_number", bootstrapConfig.maxWriteBufferNumber.toString()),
+                    ("max_open_files", bootstrapConfig.maxOpenFiles.toString()),
+                    ("max_background_jobs", bootstrapConfig.maxBackgroundJobs.toString()),
+                    ("allow_mmap_reads", bootstrapConfig.allowMmapReads.toString()),
+                    ("compression", bootstrapConfig.compression),
+                    ("error", err)
+                )
+                store = Option<LocalKVStore>.None
+                return false
+            }
+
+            let db = dbOpt.getOrThrow()
+            store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(db))
+            transactionalStore = Option<LocalKVTransactionalStore>.Some(RocksDbTransactionalStore(db))
+            logger.info(
+                "Initialized RocksDB local KV",
                 ("path", dbPath),
                 ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()),
                 ("block_cache_mb", bootstrapConfig.blockCacheMb.toString()),
@@ -307,44 +389,30 @@ public class LocalKVService {
                 ("max_open_files", bootstrapConfig.maxOpenFiles.toString()),
                 ("max_background_jobs", bootstrapConfig.maxBackgroundJobs.toString()),
                 ("allow_mmap_reads", bootstrapConfig.allowMmapReads.toString()),
-                ("compression", bootstrapConfig.compression),
-                ("error", err)
+                ("compression", bootstrapConfig.compression)
             )
-            store = Option<LocalKVStore>.None
+            return true
+        } finally {
             mutex.unlock()
-            return false
         }
-
-        let db = dbOpt.getOrThrow()
-        store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(db))
-        transactionalStore = Option<LocalKVTransactionalStore>.Some(RocksDbTransactionalStore(db))
-        logger.info(
-            "Initialized RocksDB local KV",
-            ("path", dbPath),
-            ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()),
-            ("block_cache_mb", bootstrapConfig.blockCacheMb.toString()),
-            ("max_write_buffer_number", bootstrapConfig.maxWriteBufferNumber.toString()),
-            ("max_open_files", bootstrapConfig.maxOpenFiles.toString()),
-            ("max_background_jobs", bootstrapConfig.maxBackgroundJobs.toString()),
-            ("allow_mmap_reads", bootstrapConfig.allowMmapReads.toString()),
-            ("compression", bootstrapConfig.compression)
-        )
-        mutex.unlock()
-        return true
     }
 
     public static func getStore(): Option<LocalKVStore> {
         mutex.lock()
-        let res = store
-        mutex.unlock()
-        return res
+        try {
+            return store
+        } finally {
+            mutex.unlock()
+        }
     }
 
     public static func getTransactionalStore(): Option<LocalKVTransactionalStore> {
         mutex.lock()
-        let res = transactionalStore
-        mutex.unlock()
-        return res
+        try {
+            return transactionalStore
+        } finally {
+            mutex.unlock()
+        }
     }
 
     private static func resolveBootstrapConfig(): LocalKvBootstrapConfig {
@@ -352,9 +420,11 @@ public class LocalKVService {
         let cachePath = resolveBootstrapCachePath(fallbackCachePath)
         let kvMemoryMb = clampKvMemoryMb(resolveBootstrapInt32("ROCKSDB_KV_MEMORY_MB", defaultKvMemoryMb))
         let blockCacheMb = clampBlockCacheMb(resolveBootstrapInt32("ROCKSDB_BLOCK_CACHE_MB", defaultBlockCacheMb))
-        let maxWriteBufferNumber = clampMaxWriteBufferNumber(resolveBootstrapInt32("ROCKSDB_MAX_WRITE_BUFFER_NUMBER", defaultMaxWriteBufferNumber))
+        let maxWriteBufferNumber = clampMaxWriteBufferNumber(
+            resolveBootstrapInt32("ROCKSDB_MAX_WRITE_BUFFER_NUMBER", defaultMaxWriteBufferNumber))
         let maxOpenFiles = clampMaxOpenFiles(resolveBootstrapInt32("ROCKSDB_MAX_OPEN_FILES", defaultMaxOpenFiles))
-        let maxBackgroundJobs = clampMaxBackgroundJobs(resolveBootstrapInt32("ROCKSDB_MAX_BACKGROUND_JOBS", defaultMaxBackgroundJobs))
+        let maxBackgroundJobs = clampMaxBackgroundJobs(
+            resolveBootstrapInt32("ROCKSDB_MAX_BACKGROUND_JOBS", defaultMaxBackgroundJobs))
         let allowMmapReads = resolveBootstrapBoolean("ROCKSDB_ALLOW_MMAP_READS", defaultAllowMmapReads)
         let compression = normalizeCompression(resolveBootstrapString("ROCKSDB_COMPRESSION", defaultCompression))
         return LocalKvBootstrapConfig(
@@ -412,7 +482,11 @@ public class LocalKVService {
 
     private static func normalizeCachePath(path: String): String {
         let trimmed = path.trimAscii()
-        return if (trimmed.size > 0) { trimmed } else { defaultCachePath }
+        return if (trimmed.size > 0) {
+            trimmed
+        } else {
+            defaultCachePath
+        }
     }
 
     private static func clampKvMemoryMb(value: Int32): Int32 {
@@ -509,16 +583,16 @@ public class LocalKVService {
         }
     }
 
-    private static func mapCompressionType(compression: String): Int32 {
+    private static func mapCompressionType(compression: String): RocksDbCompression {
         match (compression) {
-            case "snappy" => return 1
-            case "zlib" => return 2
-            case "bz2" => return 3
-            case "lz4" => return 4
-            case "lz4hc" => return 5
-            case "xpress" => return 6
-            case "zstd" => return 7
-            case _ => return 0
+            case "snappy" => return RocksDbCompression.Snappy
+            case "zlib" => return RocksDbCompression.Zlib
+            case "bz2" => return RocksDbCompression.Bz2
+            case "lz4" => return RocksDbCompression.Lz4
+            case "lz4hc" => return RocksDbCompression.Lz4hc
+            case "xpress" => return RocksDbCompression.Xpress
+            case "zstd" => return RocksDbCompression.Zstd
+            case _ => return RocksDbCompression.NoCompression
         }
     }
 }

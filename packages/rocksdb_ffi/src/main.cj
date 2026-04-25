@@ -2,6 +2,102 @@ package rocksdb_ffi
 
 import std.collection.*
 
+public enum RocksDbCompression {
+    | NoCompression
+    | Snappy
+    | Zlib
+    | Bz2
+    | Lz4
+    | Lz4hc
+    | Xpress
+    | Zstd
+
+    public func toNative(): Int32 {
+        match (this) {
+            case NoCompression => return ROCKSDB_NO_COMPRESSION
+            case Snappy => return ROCKSDB_SNAPPY_COMPRESSION
+            case Zlib => return ROCKSDB_ZLIB_COMPRESSION
+            case Bz2 => return ROCKSDB_BZ2_COMPRESSION
+            case Lz4 => return ROCKSDB_LZ4_COMPRESSION
+            case Lz4hc => return ROCKSDB_LZ4HC_COMPRESSION
+            case Xpress => return ROCKSDB_XPRESS_COMPRESSION
+            case Zstd => return ROCKSDB_ZSTD_COMPRESSION
+        }
+    }
+
+    public static func fromNative(value: Int32): RocksDbCompression {
+        if (value == ROCKSDB_SNAPPY_COMPRESSION) {
+            return Snappy
+        }
+        if (value == ROCKSDB_ZLIB_COMPRESSION) {
+            return Zlib
+        }
+        if (value == ROCKSDB_BZ2_COMPRESSION) {
+            return Bz2
+        }
+        if (value == ROCKSDB_LZ4_COMPRESSION) {
+            return Lz4
+        }
+        if (value == ROCKSDB_LZ4HC_COMPRESSION) {
+            return Lz4hc
+        }
+        if (value == ROCKSDB_XPRESS_COMPRESSION) {
+            return Xpress
+        }
+        if (value == ROCKSDB_ZSTD_COMPRESSION) {
+            return Zstd
+        }
+        return NoCompression
+    }
+}
+
+public enum RocksDbErrorKind {
+    | NotFound
+    | Conflict
+    | Closed
+    | FfiFailure
+    | DecodeFailure
+}
+
+public class RocksDbError {
+    public let kind: RocksDbErrorKind
+    public let message: String
+
+    public init(kind: RocksDbErrorKind, message: String) {
+        this.kind = kind
+        this.message = message
+    }
+}
+
+public class RocksDbResult<T> {
+    public let ok: Bool
+    public let value: Option<T>
+    public let error: Option<RocksDbError>
+
+    public init(ok: Bool, value: Option<T>, error: Option<RocksDbError>) {
+        this.ok = ok
+        this.value = value
+        this.error = error
+    }
+}
+
+public func classifyRocksDbError(error: String): RocksDbErrorKind {
+    let normalized = error.toAsciiLower()
+    if (normalized.size == 0) {
+        return RocksDbErrorKind.FfiFailure
+    }
+    if (normalized.contains("notfound") || normalized.contains("not found")) {
+        return RocksDbErrorKind.NotFound
+    }
+    if (normalized.contains("closed")) {
+        return RocksDbErrorKind.Closed
+    }
+    if (OptimisticRocksDb.isConflictError(error)) {
+        return RocksDbErrorKind.Conflict
+    }
+    return RocksDbErrorKind.FfiFailure
+}
+
 public class OptimisticRocksDbOptions {
     public let kvMemoryMb: Int32
     public let blockCacheMb: Int32
@@ -9,7 +105,25 @@ public class OptimisticRocksDbOptions {
     public let maxOpenFiles: Int32
     public let maxBackgroundJobs: Int32
     public let allowMmapReads: Bool
-    public let compressionType: Int32
+    public let compression: RocksDbCompression
+
+    public init(
+        kvMemoryMb: Int32,
+        blockCacheMb: Int32,
+        maxWriteBufferNumber: Int32,
+        maxOpenFiles: Int32,
+        maxBackgroundJobs: Int32,
+        allowMmapReads: Bool,
+        compression: RocksDbCompression
+    ) {
+        this.kvMemoryMb = kvMemoryMb
+        this.blockCacheMb = blockCacheMb
+        this.maxWriteBufferNumber = maxWriteBufferNumber
+        this.maxOpenFiles = maxOpenFiles
+        this.maxBackgroundJobs = maxBackgroundJobs
+        this.allowMmapReads = allowMmapReads
+        this.compression = compression
+    }
 
     public init(
         kvMemoryMb: Int32,
@@ -20,13 +134,15 @@ public class OptimisticRocksDbOptions {
         allowMmapReads: Bool,
         compressionType: Int32
     ) {
-        this.kvMemoryMb = kvMemoryMb
-        this.blockCacheMb = blockCacheMb
-        this.maxWriteBufferNumber = maxWriteBufferNumber
-        this.maxOpenFiles = maxOpenFiles
-        this.maxBackgroundJobs = maxBackgroundJobs
-        this.allowMmapReads = allowMmapReads
-        this.compressionType = compressionType
+        this(
+            kvMemoryMb,
+            blockCacheMb,
+            maxWriteBufferNumber,
+            maxOpenFiles,
+            maxBackgroundJobs,
+            allowMmapReads,
+            RocksDbCompression.fromNative(compressionType)
+        )
     }
 }
 
@@ -188,7 +304,7 @@ public class RocksDb {
             return (true, None, "")
         }
 
-        let out = Array<UInt8>(Int64(valueLen), { i => unsafe { (valuePtr + i).read() } })
+        let out = Array<UInt8>(Int64(valueLen), {i => unsafe { (valuePtr + i).read() }})
         unsafe { rocksdb_free(CPointer<Unit>(valuePtr)) }
         return (true, Some(String.fromUtf8(out)), "")
     }
@@ -201,11 +317,11 @@ public class RocksDb {
             return (true, [], "")
         }
 
-        let keyPtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
-        let keyLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let valuePtrs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
-        let valueLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let errs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
+        let keyPtrs = Array<CString>(keys.size, {_ => CString(CPointer<UInt8>())})
+        let keyLens = Array<UIntNative>(keys.size, {_ => UIntNative(0)})
+        let valuePtrs = Array<CPointer<UInt8>>(keys.size, {_ => CPointer<UInt8>()})
+        let valueLens = Array<UIntNative>(keys.size, {_ => UIntNative(0)})
+        let errs = Array<CPointer<UInt8>>(keys.size, {_ => CPointer<UInt8>()})
 
         for (i in 0..keys.size) {
             let rawKey = unsafe { LibC.mallocCString(keys[i]) }
@@ -624,7 +740,7 @@ public class RocksDb {
         if (ptr.isNull() || length == 0) {
             return ""
         }
-        let out = Array<UInt8>(Int64(length), { i => unsafe { (ptr + i).read() } })
+        let out = Array<UInt8>(Int64(length), {i => unsafe { (ptr + i).read() }})
         return String.fromUtf8(out)
     }
 
@@ -638,8 +754,8 @@ public class RocksDb {
         while (pos >= 0) {
             if (bytes[pos] < 255u8) {
                 let upperBoundPos = pos
-                let out = Array<UInt8>(Int64(upperBoundPos + 1), { i =>
-                    if (i == upperBoundPos) {
+                let out = Array<UInt8>(Int64(upperBoundPos + 1), {
+                    i => if (i == upperBoundPos) {
                         bytes[i] + 1u8
                     } else {
                         bytes[i]
@@ -653,7 +769,7 @@ public class RocksDb {
     }
 }
 
-public class RocksDbTxn {
+public class RocksDbTxn <: Resource {
     private let txn: CPointer<rocksdb_transaction_t>
     private let readOptions: CPointer<rocksdb_readoptions_t>
     private var closed: Bool = false
@@ -698,7 +814,7 @@ public class RocksDbTxn {
             return (true, None, "")
         }
 
-        let out = Array<UInt8>(Int64(valueLen), { i => unsafe { (valuePtr + i).read() } })
+        let out = Array<UInt8>(Int64(valueLen), {i => unsafe { (valuePtr + i).read() }})
         unsafe { rocksdb_free(CPointer<Unit>(valuePtr)) }
         return (true, Some(String.fromUtf8(out)), "")
     }
@@ -711,11 +827,11 @@ public class RocksDbTxn {
             return (true, [], "")
         }
 
-        let keyPtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
-        let keyLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let valuePtrs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
-        let valueLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let errs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
+        let keyPtrs = Array<CString>(keys.size, {_ => CString(CPointer<UInt8>())})
+        let keyLens = Array<UIntNative>(keys.size, {_ => UIntNative(0)})
+        let valuePtrs = Array<CPointer<UInt8>>(keys.size, {_ => CPointer<UInt8>()})
+        let valueLens = Array<UIntNative>(keys.size, {_ => UIntNative(0)})
+        let errs = Array<CPointer<UInt8>>(keys.size, {_ => CPointer<UInt8>()})
 
         for (i in 0..keys.size) {
             let rawKey = unsafe { LibC.mallocCString(keys[i]) }
@@ -865,6 +981,10 @@ public class RocksDbTxn {
         unsafe { rocksdb_transaction_destroy(txn) }
     }
 
+    public func isClosed(): Bool {
+        return closed
+    }
+
     private static func takeOwnedCString(raw: CPointer<UInt8>): String {
         let text = unsafe { CString(raw).toString() }
         unsafe { rocksdb_free(CPointer<Unit>(raw)) }
@@ -875,7 +995,7 @@ public class RocksDbTxn {
         if (ptr.isNull() || length == 0) {
             return ""
         }
-        let out = Array<UInt8>(Int64(length), { i => unsafe { (ptr + i).read() } })
+        let out = Array<UInt8>(Int64(length), {i => unsafe { (ptr + i).read() }})
         return String.fromUtf8(out)
     }
 }
@@ -910,13 +1030,14 @@ public class OptimisticRocksDb {
         this.writeOptions = writeOptions
     }
 
-    public static func openOptimistic(path: String, dbOptions: OptimisticRocksDbOptions): (Bool, Option<OptimisticRocksDb>, String) {
+    public static func openOptimistic(path: String, dbOptions: OptimisticRocksDbOptions): (Bool, Option<OptimisticRocksDb>,
+        String) {
         let normalizedKvMemoryMb = normalizeKvMemoryMb(dbOptions.kvMemoryMb)
         let normalizedBlockCacheMb = normalizeBlockCacheMb(dbOptions.blockCacheMb)
         let normalizedMaxWriteBufferNumber = normalizeMaxWriteBufferNumber(dbOptions.maxWriteBufferNumber)
         let normalizedMaxOpenFiles = normalizeMaxOpenFiles(dbOptions.maxOpenFiles)
         let normalizedMaxBackgroundJobs = normalizeMaxBackgroundJobs(dbOptions.maxBackgroundJobs)
-        let normalizedCompressionType = normalizeCompressionType(dbOptions.compressionType)
+        let normalizedCompressionType = normalizeCompressionType(dbOptions.compression)
         let writeBufferSizeBytes = mbToBytes(normalizedKvMemoryMb)
         let dbWriteBufferSizeBytes = writeBufferSizeBytes * dbWriteBufferMultiplier
         let blockCacheSizeBytes = mbToBytes(normalizedBlockCacheMb)
@@ -953,7 +1074,11 @@ public class OptimisticRocksDb {
             rocksdb_options_set_max_background_jobs(options, normalizedMaxBackgroundJobs)
             rocksdb_options_set_keep_log_file_num(options, 2)
             rocksdb_options_set_use_fsync(options, 0u8)
-            rocksdb_options_set_allow_mmap_reads(options, if (dbOptions.allowMmapReads) { 1u8 } else { 0u8 })
+            rocksdb_options_set_allow_mmap_reads(options, if (dbOptions.allowMmapReads) {
+                1u8
+            } else {
+                0u8
+            })
             rocksdb_options_set_bytes_per_sync(options, 0u64)
             rocksdb_block_based_options_set_no_block_cache(tableOptions, 0u8)
             rocksdb_block_based_options_set_block_cache(tableOptions, blockCache)
@@ -1046,16 +1171,8 @@ public class OptimisticRocksDb {
         return maxBackgroundJobs
     }
 
-    private static func normalizeCompressionType(compressionType: Int32): Int32 {
-        if (compressionType == ROCKSDB_NO_COMPRESSION) { return ROCKSDB_NO_COMPRESSION }
-        if (compressionType == ROCKSDB_SNAPPY_COMPRESSION) { return ROCKSDB_SNAPPY_COMPRESSION }
-        if (compressionType == ROCKSDB_ZLIB_COMPRESSION) { return ROCKSDB_ZLIB_COMPRESSION }
-        if (compressionType == ROCKSDB_BZ2_COMPRESSION) { return ROCKSDB_BZ2_COMPRESSION }
-        if (compressionType == ROCKSDB_LZ4_COMPRESSION) { return ROCKSDB_LZ4_COMPRESSION }
-        if (compressionType == ROCKSDB_LZ4HC_COMPRESSION) { return ROCKSDB_LZ4HC_COMPRESSION }
-        if (compressionType == ROCKSDB_XPRESS_COMPRESSION) { return ROCKSDB_XPRESS_COMPRESSION }
-        if (compressionType == ROCKSDB_ZSTD_COMPRESSION) { return ROCKSDB_ZSTD_COMPRESSION }
-        return ROCKSDB_NO_COMPRESSION
+    private static func normalizeCompressionType(compression: RocksDbCompression): Int32 {
+        return compression.toNative()
     }
 
     public func get(key: String): (Bool, Option<String>, String) {
@@ -1089,7 +1206,7 @@ public class OptimisticRocksDb {
             return (true, None, "")
         }
 
-        let out = Array<UInt8>(Int64(valueLen), { i => unsafe { (valuePtr + i).read() } })
+        let out = Array<UInt8>(Int64(valueLen), {i => unsafe { (valuePtr + i).read() }})
         unsafe { rocksdb_free(CPointer<Unit>(valuePtr)) }
         return (true, Some(String.fromUtf8(out)), "")
     }
@@ -1102,11 +1219,11 @@ public class OptimisticRocksDb {
             return (true, [], "")
         }
 
-        let keyPtrs = Array<CString>(keys.size, { _ => CString(CPointer<UInt8>()) })
-        let keyLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let valuePtrs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
-        let valueLens = Array<UIntNative>(keys.size, { _ => UIntNative(0) })
-        let errs = Array<CPointer<UInt8>>(keys.size, { _ => CPointer<UInt8>() })
+        let keyPtrs = Array<CString>(keys.size, {_ => CString(CPointer<UInt8>())})
+        let keyLens = Array<UIntNative>(keys.size, {_ => UIntNative(0)})
+        let valuePtrs = Array<CPointer<UInt8>>(keys.size, {_ => CPointer<UInt8>()})
+        let valueLens = Array<UIntNative>(keys.size, {_ => UIntNative(0)})
+        let errs = Array<CPointer<UInt8>>(keys.size, {_ => CPointer<UInt8>()})
 
         for (i in 0..keys.size) {
             let rawKey = unsafe { LibC.mallocCString(keys[i]) }
@@ -1486,10 +1603,19 @@ public class OptimisticRocksDb {
 
     public static func isConflictError(error: String): Bool {
         let normalized = error.toAsciiLower()
-        return normalized.contains("conflict")
-            || normalized.contains("busy")
-            || normalized.contains("try again")
-            || normalized.contains("timed out")
+        if (normalized.contains("conflict")) {
+            return true
+        }
+        if (normalized.contains("busy")) {
+            return true
+        }
+        if (normalized.contains("try again")) {
+            return true
+        }
+        if (normalized.contains("timed out")) {
+            return true
+        }
+        return false
     }
 
     public func close(): Unit {
@@ -1529,7 +1655,7 @@ public class OptimisticRocksDb {
         if (ptr.isNull() || length == 0) {
             return ""
         }
-        let out = Array<UInt8>(Int64(length), { i => unsafe { (ptr + i).read() } })
+        let out = Array<UInt8>(Int64(length), {i => unsafe { (ptr + i).read() }})
         return String.fromUtf8(out)
     }
 
@@ -1543,7 +1669,7 @@ public class OptimisticRocksDb {
         if (ptr.isNull() || length == 0) {
             return ""
         }
-        let out = Array<UInt8>(Int64(length), { i => unsafe { (ptr + i).read() } })
+        let out = Array<UInt8>(Int64(length), {i => unsafe { (ptr + i).read() }})
         return String.fromUtf8(out)
     }
 
@@ -1557,8 +1683,8 @@ public class OptimisticRocksDb {
         while (pos >= 0) {
             if (bytes[pos] < 255u8) {
                 let upperBoundPos = pos
-                let out = Array<UInt8>(Int64(upperBoundPos + 1), { i =>
-                    if (i == upperBoundPos) {
+                let out = Array<UInt8>(Int64(upperBoundPos + 1), {
+                    i => if (i == upperBoundPos) {
                         bytes[i] + 1u8
                     } else {
                         bytes[i]

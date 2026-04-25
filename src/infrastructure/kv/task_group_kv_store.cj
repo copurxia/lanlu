@@ -4,61 +4,17 @@ import std.sync.*
 import std.collection.*
 import std.convert.*
 import std.time.*
-import std.io.{ByteBuffer, readToEnd}
-import stdx.encoding.json.stream.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.TaskDao
 import lanlu.shared.utils.*
 
-private class TaskGroupKVRecord {
-    public var value: String = ""
-    public var createdAt: Int64 = 0
-    public var ttlSeconds: Int64 = 0
-}
-
-private class TaskGroupKVRecordCodec {
-    public static func encode(record: TaskGroupKVRecord): String {
-        let out = ByteBuffer()
-        let w = JsonWriter(out)
-        w.startObject()
-        w.writeName("value").writeValue(record.value)
-        w.writeName("created_at").writeValue(record.createdAt)
-        w.writeName("ttl_seconds").writeValue(record.ttlSeconds)
-        w.endObject()
-        w.flush()
-        return String.fromUtf8(readToEnd(out))
+private class TaskGroupKVKeys {
+    public static func groupPrefix(groupId: String): String {
+        return "${groupId}:"
     }
 
-    public static func decode(payload: String): Option<TaskGroupKVRecord> {
-        let trimmed = payload.trimAscii()
-        if (trimmed.size == 0) {
-            return None
-        }
-
-        try {
-            var buf = ByteBuffer()
-            unsafe { buf.write(trimmed.rawData()) }
-            let reader = JsonReader(buf)
-            if (reader.peek() != Some(BeginObject)) {
-                return None
-            }
-
-            let record = TaskGroupKVRecord()
-            reader.startObject()
-            while (reader.peek() != EndObject) {
-                let name = reader.readName()
-                match (name) {
-                    case "value" => record.value = reader.readValue<String>()
-                    case "created_at" => record.createdAt = reader.readValue<Int64>()
-                    case "ttl_seconds" => record.ttlSeconds = reader.readValue<Int64>()
-                    case _ => reader.skip()
-                }
-            }
-            reader.endObject()
-            return Some(record)
-        } catch (_: Exception) {
-            return None
-        }
+    public static func storageKey(groupId: String, key: String): String {
+        return "${groupId}:${key}"
     }
 }
 
@@ -85,15 +41,16 @@ public class TaskGroupKVStore <: TaskKVStore {
 
     public static func getInstance(): TaskGroupKVStore {
         instanceMutex.lock()
-        match (instance) {
-            case Some(s) =>
-                instanceMutex.unlock()
-                return s
-            case None =>
-                let s = TaskGroupKVStore()
-                instance = Some(s)
-                instanceMutex.unlock()
-                return s
+        try {
+            match (instance) {
+                case Some(s) => return s
+                case None =>
+                    let s = TaskGroupKVStore()
+                    instance = Some(s)
+                    return s
+            }
+        } finally {
+            instanceMutex.unlock()
         }
     }
 
@@ -104,11 +61,14 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
 
         refCountMutex.lock()
-        match (groupRefCounts.get(normalizedGroupId)) {
-            case Some(count) => groupRefCounts[normalizedGroupId] = count + 1
-            case None => groupRefCounts[normalizedGroupId] = 1
+        try {
+            match (groupRefCounts.get(normalizedGroupId)) {
+                case Some(count) => groupRefCounts[normalizedGroupId] = count + 1
+                case None => groupRefCounts[normalizedGroupId] = 1
+            }
+        } finally {
+            refCountMutex.unlock()
         }
-        refCountMutex.unlock()
     }
 
     public func releaseGroup(groupId: String): Unit {
@@ -119,17 +79,20 @@ public class TaskGroupKVStore <: TaskKVStore {
 
         var shouldDeleteGroup = false
         refCountMutex.lock()
-        match (groupRefCounts.get(normalizedGroupId)) {
-            case Some(count) =>
-                if (count <= 1) {
-                    groupRefCounts.remove(normalizedGroupId)
-                    shouldDeleteGroup = true
-                } else {
-                    groupRefCounts[normalizedGroupId] = count - 1
-                }
-            case None => ()
+        try {
+            match (groupRefCounts.get(normalizedGroupId)) {
+                case Some(count) =>
+                    if (count <= 1) {
+                        groupRefCounts.remove(normalizedGroupId)
+                        shouldDeleteGroup = true
+                    } else {
+                        groupRefCounts[normalizedGroupId] = count - 1
+                    }
+                case None => ()
+            }
+        } finally {
+            refCountMutex.unlock()
         }
-        refCountMutex.unlock()
 
         if (shouldDeleteGroup && !TaskDao.existsNonTerminalTasksByGroupId(normalizedGroupId)) {
             deleteGroup(normalizedGroupId)
@@ -160,7 +123,7 @@ public class TaskGroupKVStore <: TaskKVStore {
         if (normalizedGroupId.size == 0 || normalizedKey.size == 0) {
             return false
         }
-        return deleteNormalizedKey(buildStorageKey(normalizedGroupId, normalizedKey))
+        return deleteNormalizedKey(TaskGroupKVKeys.storageKey(normalizedGroupId, normalizedKey))
     }
 
     public func deleteGroup(groupId: String): Unit {
@@ -169,7 +132,7 @@ public class TaskGroupKVStore <: TaskKVStore {
             return
         }
 
-        let prefix = buildGroupPrefix(normalizedGroupId)
+        let prefix = TaskGroupKVKeys.groupPrefix(normalizedGroupId)
         let deleted = deleteGroupEntriesNormalized(prefix)
         if (!deleted) {
             logger.warn("task kv group delete failed", ("group_id", normalizedGroupId))
@@ -202,7 +165,8 @@ public class TaskGroupKVStore <: TaskKVStore {
         while (i < keys.size) {
             let normalizedKey = normalizeKey(keys[i])
             if (normalizedKey.size > 0) {
-                entries.add((buildStorageKey(normalizedGroupId, normalizedKey), encodeRecord(values[i], ttlSeconds)))
+                entries.add(
+                    (TaskGroupKVKeys.storageKey(normalizedGroupId, normalizedKey), encodeRecord(values[i], ttlSeconds)))
             }
             i += 1
         }
@@ -222,7 +186,8 @@ public class TaskGroupKVStore <: TaskKVStore {
                 while (attempt < maxTxnRetries) {
                     let (txnOk, txnOpt, txnErr) = txStore.beginTransaction(namespace)
                     if (!txnOk || txnOpt.isNone()) {
-                        logger.warn("task kv transaction begin failed", [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
+                        logger.warn("task kv transaction begin failed",
+                            [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
                         break
                     }
                     let txn = txnOpt.getOrThrow()
@@ -232,10 +197,12 @@ public class TaskGroupKVStore <: TaskKVStore {
                                 let _ = txn.rollback()
                                 return false
                             case None =>
-                                let putResult = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedKey, value, ttlSeconds)
+                                let putResult = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedKey, value,
+                                    ttlSeconds)
                                 if (!putResult[0]) {
                                     let _ = txn.rollback()
-                                    logger.warn("task kv transaction put failed", [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", putResult[1])])
+                                    logger.warn("task kv transaction put failed",
+                                        [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", putResult[1])])
                                     return false
                                 }
                                 let commitResult = txn.commit()
@@ -244,15 +211,23 @@ public class TaskGroupKVStore <: TaskKVStore {
                                 }
                                 let _ = txn.rollback()
                                 if (!txStore.isConflictError(commitResult[1])) {
-                                    logger.warn("task kv transaction commit failed", [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", commitResult[1])])
+                                    logger.warn("task kv transaction commit failed",
+                                        [("group_id", normalizedGroupId), ("key", normalizedKey),
+                                            ("error", commitResult[1])])
                                     return false
                                 }
                         }
                     } finally {
-                        txn.close()
+                        closeTransaction(txn)
                     }
                     attempt += 1
                 }
+                logger.warn(
+                    "task kv transaction retries exhausted; falling back to non-transactional insertIfAbsent",
+                    ("group_id", normalizedGroupId),
+                    ("key", normalizedKey),
+                    ("attempts", attempt.toString())
+                )
             case None => ()
         }
 
@@ -275,28 +250,30 @@ public class TaskGroupKVStore <: TaskKVStore {
                 while (attempt < maxTxnRetries) {
                     let (txnOk, txnOpt, txnErr) = txStore.beginTransaction(namespace)
                     if (!txnOk || txnOpt.isNone()) {
-                        logger.warn("task kv transaction begin failed", [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
+                        logger.warn("task kv transaction begin failed",
+                            [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
                         break
                     }
                     let txn = txnOpt.getOrThrow()
                     try {
                         var currentValue: Int64 = 0
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedKey)) {
-                            case Some(record) =>
-                                try {
-                                    currentValue = Int64.parse(record.value)
-                                } catch (_: Exception) {
-                                    let _ = txn.rollback()
-                                    return -1
-                                }
+                            case Some(record) => try {
+                                currentValue = Int64.parse(record.value)
+                            } catch (_: Exception) {
+                                let _ = txn.rollback()
+                                return -1
+                            }
                             case None => currentValue = 0
                         }
 
                         let nextValue = currentValue + delta
-                        let putResult = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedKey, nextValue.toString(), ttlSeconds)
+                        let putResult = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedKey,
+                            nextValue.toString(), ttlSeconds)
                         if (!putResult[0]) {
                             let _ = txn.rollback()
-                            logger.warn("task kv transaction put failed", [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", putResult[1])])
+                            logger.warn("task kv transaction put failed",
+                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", putResult[1])])
                             return -1
                         }
                         let commitResult = txn.commit()
@@ -305,25 +282,31 @@ public class TaskGroupKVStore <: TaskKVStore {
                         }
                         let _ = txn.rollback()
                         if (!txStore.isConflictError(commitResult[1])) {
-                            logger.warn("task kv transaction commit failed", [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", commitResult[1])])
+                            logger.warn("task kv transaction commit failed",
+                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", commitResult[1])])
                             return -1
                         }
                     } finally {
-                        txn.close()
+                        closeTransaction(txn)
                     }
                     attempt += 1
                 }
+                logger.warn(
+                    "task kv transaction retries exhausted; falling back to non-transactional increment",
+                    ("group_id", normalizedGroupId),
+                    ("key", normalizedKey),
+                    ("attempts", attempt.toString())
+                )
             case None => ()
         }
 
         var currentValue: Int64 = 0
         match (getRecordNormalized(normalizedGroupId, normalizedKey)) {
-            case Some(record) =>
-                try {
-                    currentValue = Int64.parse(record.value)
-                } catch (_: Exception) {
-                    return -1
-                }
+            case Some(record) => try {
+                currentValue = Int64.parse(record.value)
+            } catch (_: Exception) {
+                return -1
+            }
             case None => currentValue = 0
         }
 
@@ -358,19 +341,22 @@ public class TaskGroupKVStore <: TaskKVStore {
                 while (attempt < maxTxnRetries) {
                     let (txnOk, txnOpt, txnErr) = txStore.beginTransaction(namespace)
                     if (!txnOk || txnOpt.isNone()) {
-                        logger.warn("task kv upload transaction begin failed", [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", txnErr)])
+                        logger.warn("task kv upload transaction begin failed",
+                            [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", txnErr)])
                         break
                     }
                     let txn = txnOpt.getOrThrow()
                     try {
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedChunkKey)) {
-                            case Some(_) =>
-                                result.inserted = false
+                            case Some(_) => result.inserted = false
                             case None =>
-                                let putChunk = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedChunkKey, "1", ttlSeconds)
+                                let putChunk = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedChunkKey, "1",
+                                    ttlSeconds)
                                 if (!putChunk[0]) {
                                     let _ = txn.rollback()
-                                    logger.warn("task kv upload transaction chunk put failed", [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", putChunk[1])])
+                                    logger.warn("task kv upload transaction chunk put failed",
+                                        [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
+                                            ("error", putChunk[1])])
                                     return result
                                 }
                                 result.inserted = true
@@ -378,46 +364,57 @@ public class TaskGroupKVStore <: TaskKVStore {
 
                         var currentValue: Int64 = 0
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, "uploaded_count")) {
-                            case Some(record) =>
-                                try {
-                                    currentValue = Int64.parse(record.value)
-                                } catch (_: Exception) {
-                                    currentValue = 0
-                                }
+                            case Some(record) => try {
+                                currentValue = Int64.parse(record.value)
+                            } catch (_: Exception) {
+                                currentValue = 0
+                            }
                             case None => currentValue = 0
                         }
 
-                        result.uploadedChunkCount = if (result.inserted) { currentValue + 1 } else { currentValue }
+                        result.uploadedChunkCount = if (result.inserted) {
+                            currentValue + 1
+                        } else {
+                            currentValue
+                        }
                         result.writtenOffset = newOffset
 
-                        let putUploaded = putRecordNormalizedToTxn(txn, normalizedGroupId, "uploaded_count", result.uploadedChunkCount.toString(), ttlSeconds)
+                        let putUploaded = putRecordNormalizedToTxn(txn, normalizedGroupId, "uploaded_count",
+                            result.uploadedChunkCount.toString(), ttlSeconds)
                         if (!putUploaded[0]) {
                             let _ = txn.rollback()
-                            logger.warn("task kv upload transaction uploaded_count put failed", [("group_id", normalizedGroupId), ("error", putUploaded[1])])
+                            logger.warn("task kv upload transaction uploaded_count put failed",
+                                [("group_id", normalizedGroupId), ("error", putUploaded[1])])
                             return result
                         }
 
-                        let putOffset = putRecordNormalizedToTxn(txn, normalizedGroupId, "written_offset", newOffset.toString(), ttlSeconds)
+                        let putOffset = putRecordNormalizedToTxn(txn, normalizedGroupId, "written_offset",
+                            newOffset.toString(), ttlSeconds)
                         if (!putOffset[0]) {
                             let _ = txn.rollback()
-                            logger.warn("task kv upload transaction written_offset put failed", [("group_id", normalizedGroupId), ("error", putOffset[1])])
+                            logger.warn("task kv upload transaction written_offset put failed",
+                                [("group_id", normalizedGroupId), ("error", putOffset[1])])
                             return result
                         }
 
                         if (shouldUpdateProgress) {
-                            let putProgress = putRecordNormalizedToTxn(txn, normalizedGroupId, "last_reported_progress", uploadedProgress.toString(), ttlSeconds)
+                            let putProgress = putRecordNormalizedToTxn(txn, normalizedGroupId, "last_reported_progress",
+                                uploadedProgress.toString(), ttlSeconds)
                             if (!putProgress[0]) {
                                 let _ = txn.rollback()
-                                logger.warn("task kv upload transaction progress put failed", [("group_id", normalizedGroupId), ("error", putProgress[1])])
+                                logger.warn("task kv upload transaction progress put failed",
+                                    [("group_id", normalizedGroupId), ("error", putProgress[1])])
                                 return result
                             }
                             result.updatedProgress = true
                         }
                         if (shouldUpdateTimeoutTs) {
-                            let putTimeout = putRecordNormalizedToTxn(txn, normalizedGroupId, "last_timeout_extend_ts", nowTs.toString(), ttlSeconds)
+                            let putTimeout = putRecordNormalizedToTxn(txn, normalizedGroupId, "last_timeout_extend_ts",
+                                nowTs.toString(), ttlSeconds)
                             if (!putTimeout[0]) {
                                 let _ = txn.rollback()
-                                logger.warn("task kv upload transaction timeout put failed", [("group_id", normalizedGroupId), ("error", putTimeout[1])])
+                                logger.warn("task kv upload transaction timeout put failed",
+                                    [("group_id", normalizedGroupId), ("error", putTimeout[1])])
                                 return result
                             }
                             result.updatedTimeoutTs = true
@@ -440,20 +437,27 @@ public class TaskGroupKVStore <: TaskKVStore {
 
                         let _ = txn.rollback()
                         if (!txStore.isConflictError(commitResult[1])) {
-                            logger.warn("task kv upload transaction commit failed", [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", commitResult[1])])
+                            logger.warn("task kv upload transaction commit failed",
+                                [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
+                                    ("error", commitResult[1])])
                             return result
                         }
                     } finally {
-                        txn.close()
+                        closeTransaction(txn)
                     }
                     attempt += 1
                 }
+                logger.warn(
+                    "task kv upload transaction retries exhausted; falling back to non-transactional commit",
+                    ("group_id", normalizedGroupId),
+                    ("chunk_key", normalizedChunkKey),
+                    ("attempts", attempt.toString())
+                )
             case None => ()
         }
 
         match (getRecordNormalized(normalizedGroupId, normalizedChunkKey)) {
-            case Some(_) =>
-                result.inserted = false
+            case Some(_) => result.inserted = false
             case None =>
                 if (putRecordNormalized(normalizedGroupId, normalizedChunkKey, "1", ttlSeconds)) {
                     result.inserted = true
@@ -463,24 +467,23 @@ public class TaskGroupKVStore <: TaskKVStore {
         if (result.inserted) {
             var currentValue: Int64 = 0
             match (getRecordNormalized(normalizedGroupId, "uploaded_count")) {
-                case Some(record) =>
-                    try {
-                        currentValue = Int64.parse(record.value)
-                    } catch (_: Exception) {
-                        currentValue = 0
-                    }
+                case Some(record) => try {
+                    currentValue = Int64.parse(record.value)
+                } catch (_: Exception) {
+                    currentValue = 0
+                }
                 case None => currentValue = 0
             }
             result.uploadedChunkCount = currentValue + 1
-            let _ = putRecordNormalized(normalizedGroupId, "uploaded_count", result.uploadedChunkCount.toString(), ttlSeconds)
+            let _ = putRecordNormalized(normalizedGroupId, "uploaded_count", result.uploadedChunkCount.toString(),
+                ttlSeconds)
         } else {
             match (getRecordNormalized(normalizedGroupId, "uploaded_count")) {
-                case Some(record) =>
-                    try {
-                        result.uploadedChunkCount = Int64.parse(record.value)
-                    } catch (_: Exception) {
-                        result.uploadedChunkCount = 0
-                    }
+                case Some(record) => try {
+                    result.uploadedChunkCount = Int64.parse(record.value)
+                } catch (_: Exception) {
+                    result.uploadedChunkCount = 0
+                }
                 case None => result.uploadedChunkCount = 0
             }
         }
@@ -498,7 +501,8 @@ public class TaskGroupKVStore <: TaskKVStore {
                 ["uploaded_count", "written_offset"]
             },
             if (shouldUpdateProgress && shouldUpdateTimeoutTs) {
-                [result.uploadedChunkCount.toString(), newOffset.toString(), uploadedProgress.toString(), nowTs.toString()]
+                [result.uploadedChunkCount.toString(), newOffset.toString(), uploadedProgress.toString(),
+                    nowTs.toString()]
             } else if (shouldUpdateProgress) {
                 [result.uploadedChunkCount.toString(), newOffset.toString(), uploadedProgress.toString()]
             } else if (shouldUpdateTimeoutTs) {
@@ -537,7 +541,7 @@ public class TaskGroupKVStore <: TaskKVStore {
             return []
         }
 
-        let prefix = buildGroupPrefix(normalizedGroupId)
+        let prefix = TaskGroupKVKeys.groupPrefix(normalizedGroupId)
         let entries = scanGroupEntriesNormalized(normalizedGroupId)
         let keys = ArrayList<String>()
         for ((storageKey, payload) in entries) {
@@ -546,13 +550,13 @@ public class TaskGroupKVStore <: TaskKVStore {
             }
 
             let key = storageKey[prefix.size..storageKey.size]
-            match (TaskGroupKVRecordCodec.decode(payload)) {
+            match (KvTtlRecordCodec.decode(payload)) {
                 case Some(record) =>
                     if (!isExpired(record)) {
                         keys.add(key)
                     }
-                case None =>
-                    logger.warn("task kv record decode failed during key scan", ("group_id", normalizedGroupId), ("key", key))
+                case None => logger.warn("task kv record decode failed during key scan", ("group_id", normalizedGroupId),
+                    ("key", key))
             }
         }
         return keys.toArray()
@@ -560,7 +564,7 @@ public class TaskGroupKVStore <: TaskKVStore {
 
     /**
      * 批量读取同一 group 内的多个 key
-     * 
+     *
      * 优化说明：
      * - 一次 multiGet
      * - 6次独立读 → 1次批量读，RocksDB I/O 减少83%
@@ -572,12 +576,12 @@ public class TaskGroupKVStore <: TaskKVStore {
     public func getMulti(groupId: String, keys: Array<String>): Array<Option<String>> {
         let normalizedGroupId = normalizeGroupId(groupId)
         if (normalizedGroupId.size == 0 || keys.size == 0) {
-            return Array<Option<String>>(keys.size, { _ => None })
+            return Array<Option<String>>(keys.size, {_ => None})
         }
 
         let t0 = DateTime.now().toUnixTimeStamp().toMilliseconds()
-        let storageKeys = Array<String>(keys.size, { i =>
-            buildStorageKey(normalizedGroupId, normalizeKey(keys[i]))
+        let storageKeys = Array<String>(keys.size, {
+            i => TaskGroupKVKeys.storageKey(normalizedGroupId, normalizeKey(keys[i]))
         })
 
         let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
@@ -588,20 +592,20 @@ public class TaskGroupKVStore <: TaskKVStore {
                 let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
                 let rawValues = store.multiGet(namespace, storageKeys)
                 let t3 = DateTime.now().toUnixTimeStamp().toMilliseconds()
-                let results = Array<Option<String>>(rawValues.size, { i =>
-                    match (rawValues[i]) {
-                        case Some(payload) =>
-                            match (TaskGroupKVRecordCodec.decode(payload)) {
-                                case Some(record) =>
-                                    if (isExpired(record)) {
-                                        None
-                                    } else {
-                                        Some(record.value)
-                                    }
-                                case None =>
-                                    logger.warn("task kv record decode failed during multiGet", ("group_id", normalizedGroupId), ("key", keys[i]))
+                let results = Array<Option<String>>(rawValues.size, {
+                    i => match (rawValues[i]) {
+                        case Some(payload) => match (KvTtlRecordCodec.decode(payload)) {
+                            case Some(record) =>
+                                if (isExpired(record)) {
                                     None
-                            }
+                                } else {
+                                    Some(record.value)
+                                }
+                            case None =>
+                                logger.warn("task kv record decode failed during multiGet",
+                                    ("group_id", normalizedGroupId), ("key", keys[i]))
+                                None
+                        }
                         case None => None
                     }
                 })
@@ -618,7 +622,7 @@ public class TaskGroupKVStore <: TaskKVStore {
                 return results
             case None =>
                 logger.warn("task kv unavailable because LocalKVService is not ready")
-                return Array<Option<String>>(keys.size, { _ => None })
+                return Array<Option<String>>(keys.size, {_ => None})
         }
     }
 
@@ -629,24 +633,22 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
     }
 
-    private func getRecordNormalized(groupId: String, key: String): Option<TaskGroupKVRecord> {
+    private func getRecordNormalized(groupId: String, key: String): Option<KvTtlRecord> {
         let storeOpt = LocalKVService.getStore()
         match (storeOpt) {
-            case Some(store) =>
-                match (store.get(namespace, buildStorageKey(groupId, key))) {
-                    case Some(payload) =>
-                        match (TaskGroupKVRecordCodec.decode(payload)) {
-                            case Some(record) =>
-                                if (isExpired(record)) {
-                                    return None
-                                }
-                                return Some(record)
-                            case None =>
-                                logger.warn("task kv record decode failed", ("group_id", groupId), ("key", key))
-                                return None
+            case Some(store) => match (store.get(namespace, TaskGroupKVKeys.storageKey(groupId, key))) {
+                case Some(payload) => match (KvTtlRecordCodec.decode(payload)) {
+                    case Some(record) =>
+                        if (isExpired(record)) {
+                            return None
                         }
-                    case None => return None
+                        return Some(record)
+                    case None =>
+                        logger.warn("task kv record decode failed", ("group_id", groupId), ("key", key))
+                        return None
                 }
+                case None => return None
+            }
             case None =>
                 logger.warn("task kv unavailable because LocalKVService is not ready")
                 return None
@@ -655,7 +657,7 @@ public class TaskGroupKVStore <: TaskKVStore {
 
     private func putRecordNormalized(groupId: String, key: String, value: String, ttlSeconds: Int64): Bool {
         let encodedRecord = encodeRecord(value, ttlSeconds)
-        return putEncodedRecord(buildStorageKey(groupId, key), encodedRecord)
+        return putEncodedRecord(TaskGroupKVKeys.storageKey(groupId, key), encodedRecord)
     }
 
     private func putEncodedRecord(storageKey: String, encodedRecord: String): Bool {
@@ -695,7 +697,7 @@ public class TaskGroupKVStore <: TaskKVStore {
     private func scanGroupEntriesNormalized(groupId: String): Array<(String, String)> {
         let storeOpt = LocalKVService.getStore()
         match (storeOpt) {
-            case Some(store) => return store.scan(namespace, buildGroupPrefix(groupId))
+            case Some(store) => return store.scan(namespace, TaskGroupKVKeys.groupPrefix(groupId))
             case None =>
                 logger.warn("task kv unavailable because LocalKVService is not ready")
                 return []
@@ -705,17 +707,16 @@ public class TaskGroupKVStore <: TaskKVStore {
     private func deleteGroupEntriesNormalized(groupPrefix: String): Bool {
         let storeOpt = LocalKVService.getStore()
         match (storeOpt) {
-            case Some(store) =>
-                match (nextPrefixUpperBound(groupPrefix)) {
-                    case Some(endKey) => return store.deleteRange(namespace, groupPrefix, endKey)
-                    case None =>
-                        let entries = store.scan(namespace, groupPrefix)
-                        if (entries.size == 0) {
-                            return true
-                        }
-                        let keys = Array<String>(entries.size, { i => entries[i][0] })
-                        return store.deleteMany(namespace, keys)
-                }
+            case Some(store) => match (nextPrefixUpperBound(groupPrefix)) {
+                case Some(endKey) => return store.deleteRange(namespace, groupPrefix, endKey)
+                case None =>
+                    let entries = store.scan(namespace, groupPrefix)
+                    if (entries.size == 0) {
+                        return true
+                    }
+                    let keys = Array<String>(entries.size, {i => entries[i][0]})
+                    return store.deleteMany(namespace, keys)
+            }
             case None =>
                 logger.warn("task kv unavailable because LocalKVService is not ready")
                 return false
@@ -730,14 +731,6 @@ public class TaskGroupKVStore <: TaskKVStore {
         return key.trimAscii()
     }
 
-    private static func buildGroupPrefix(groupId: String): String {
-        return "${groupId}:"
-    }
-
-    private static func buildStorageKey(groupId: String, key: String): String {
-        return "${groupId}:${key}"
-    }
-
     private static func nextPrefixUpperBound(prefix: String): Option<String> {
         let bytes = prefix.toArray()
         if (bytes.size == 0) {
@@ -748,8 +741,8 @@ public class TaskGroupKVStore <: TaskKVStore {
         while (pos >= 0) {
             if (bytes[pos] < 255u8) {
                 let upperBoundPos = pos
-                let out = Array<UInt8>(Int64(upperBoundPos + 1), { i =>
-                    if (i == upperBoundPos) {
+                let out = Array<UInt8>(Int64(upperBoundPos + 1), {
+                    i => if (i == upperBoundPos) {
                         bytes[i] + 1u8
                     } else {
                         bytes[i]
@@ -762,40 +755,35 @@ public class TaskGroupKVStore <: TaskKVStore {
         return None
     }
 
-    private static func nowSeconds(): Int64 {
-        return DateTime.now().toUnixTimeStamp().toSeconds()
-    }
-
     private static func encodeRecord(value: String, ttlSeconds: Int64): String {
-        let record = TaskGroupKVRecord()
-        record.value = value
-        record.createdAt = nowSeconds()
-        record.ttlSeconds = ttlSeconds
-        return TaskGroupKVRecordCodec.encode(record)
+        return KvTtlRecords.encode(value, ttlSeconds)
     }
 
-    private static func isExpired(record: TaskGroupKVRecord): Bool {
-        return record.ttlSeconds > 0 && (nowSeconds() - record.createdAt) > record.ttlSeconds
+    private static func isExpired(record: KvTtlRecord): Bool {
+        return KvTtlRecords.isExpired(record)
     }
 
-    private func getRecordNormalizedFromTxn(txn: LocalKVTransaction, groupId: String, key: String): Option<TaskGroupKVRecord> {
-        let (ok, valueOpt, err) = txn.get(buildStorageKey(groupId, key))
+    private static func closeTransaction(txn: LocalKVTransaction): Unit {
+        txn.close()
+    }
+
+    private func getRecordNormalizedFromTxn(txn: LocalKVTransaction, groupId: String, key: String): Option<KvTtlRecord> {
+        let (ok, valueOpt, err) = txn.get(TaskGroupKVKeys.storageKey(groupId, key))
         if (!ok) {
             logger.warn("task kv transaction get failed", [("group_id", groupId), ("key", key), ("error", err)])
             return None
         }
         match (valueOpt) {
-            case Some(payload) =>
-                match (TaskGroupKVRecordCodec.decode(payload)) {
-                    case Some(record) =>
-                        if (isExpired(record)) {
-                            return None
-                        }
-                        return Some(record)
-                    case None =>
-                        logger.warn("task kv transaction decode failed", [("group_id", groupId), ("key", key)])
+            case Some(payload) => match (KvTtlRecordCodec.decode(payload)) {
+                case Some(record) =>
+                    if (isExpired(record)) {
                         return None
-                }
+                    }
+                    return Some(record)
+                case None =>
+                    logger.warn("task kv transaction decode failed", [("group_id", groupId), ("key", key)])
+                    return None
+            }
             case None => return None
         }
     }
@@ -807,7 +795,7 @@ public class TaskGroupKVStore <: TaskKVStore {
         value: String,
         ttlSeconds: Int64
     ): (Bool, String) {
-        return txn.put(buildStorageKey(groupId, key), encodeRecord(value, ttlSeconds))
+        return txn.put(TaskGroupKVKeys.storageKey(groupId, key), encodeRecord(value, ttlSeconds))
     }
 }
 
