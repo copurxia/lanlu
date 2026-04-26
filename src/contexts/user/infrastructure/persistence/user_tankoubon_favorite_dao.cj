@@ -259,51 +259,26 @@ public class UserTankoubonFavoriteDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    var inClause = ""
-                    for (i in 0..tankoubonIds.size) {
-                        if (i > 0) {
-                            inClause += ","
+        let _ = DatabaseConfig.withPooledConnection<Bool>("user_tankoubon_favorite_dao", "批量检查 Tankoubon 收藏状态失败", false, { conn =>
+            DatabaseConfig.withStatement<Bool>(conn, """
+                SELECT t.tankoubon_id
+                FROM user_tankoubon_favorites utf
+                JOIN tankoubons t ON t.id = utf.tankoubon_id
+                WHERE utf.user_id = ? AND t.tankoubon_id = ANY(?::text[])
+            """, { stmt =>
+                stmt.set(0, userId)
+                DatabaseConfig.setTextArray(stmt, 1, tankoubonIds)
+                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
+                    while (rs.next()) {
+                        let tid = rs.getOrNull<String>(0) ?? ""
+                        if (tid.size > 0) {
+                            result[tid] = true
                         }
-                        inClause += "?"
                     }
-
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id
-                        FROM user_tankoubon_favorites utf
-                        JOIN tankoubons t ON t.id = utf.tankoubon_id
-                        WHERE utf.user_id = ? AND t.tankoubon_id IN (${inClause})
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        for (i in 0..tankoubonIds.size) {
-                            stmt.set(i + 1, tankoubonIds[i])
-                        }
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                if (tid.size > 0) {
-                                    result[tid] = true
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    // ignore
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
-        }
+                    return true
+                })
+            })
+        })
 
         return result
     }
@@ -318,52 +293,27 @@ public class UserTankoubonFavoriteDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    var inClause = ""
-                    for (i in 0..tankoubonIds.size) {
-                        if (i > 0) {
-                            inClause += ","
+        let _ = DatabaseConfig.withPooledConnection<Bool>("user_tankoubon_favorite_dao", "批量获取 Tankoubon 收藏时间失败", false, { conn =>
+            DatabaseConfig.withStatement<Bool>(conn, """
+                SELECT t.tankoubon_id, COALESCE(CAST(EXTRACT(EPOCH FROM utf.created_at) AS BIGINT), 0) as unix_timestamp
+                FROM user_tankoubon_favorites utf
+                JOIN tankoubons t ON t.id = utf.tankoubon_id
+                WHERE utf.user_id = ? AND t.tankoubon_id = ANY(?::text[])
+            """, { stmt =>
+                stmt.set(0, userId)
+                DatabaseConfig.setTextArray(stmt, 1, tankoubonIds)
+                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
+                    while (rs.next()) {
+                        let tid = rs.getOrNull<String>(0) ?? ""
+                        let unixTimestamp = rs.getOrNull<Int64>(1) ?? 0
+                        if (tid.size > 0) {
+                            result[tid] = unixTimestamp
                         }
-                        inClause += "?"
                     }
-
-                    let stmt = conn.prepareStatement("""
-                        SELECT t.tankoubon_id, COALESCE(CAST(EXTRACT(EPOCH FROM utf.created_at) AS BIGINT), 0) as unix_timestamp
-                        FROM user_tankoubon_favorites utf
-                        JOIN tankoubons t ON t.id = utf.tankoubon_id
-                        WHERE utf.user_id = ? AND t.tankoubon_id IN (${inClause})
-                    """)
-                    try {
-                        stmt.set(0, userId)
-                        for (i in 0..tankoubonIds.size) {
-                            stmt.set(i + 1, tankoubonIds[i])
-                        }
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let tid = rs.getOrNull<String>(0) ?? ""
-                                let unixTimestamp = rs.getOrNull<Int64>(1) ?? 0
-                                if (tid.size > 0) {
-                                    result[tid] = unixTimestamp
-                                }
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-                } catch (_: Exception) {
-                    // ignore
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None => ()
-        }
+                    return true
+                })
+            })
+        })
 
         return result
     }

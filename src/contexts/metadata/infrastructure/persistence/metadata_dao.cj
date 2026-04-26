@@ -249,25 +249,6 @@ public class MetadataDao {
         return 0
     }
 
-    private static func getMetadataIdForPage(conn: Connection, parentArchiveId: String, entryPath: String): Int64 {
-        let stmt = conn.prepareStatement("SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ? AND entry_path = ? LIMIT 1")
-        try {
-            stmt.set(0, parentArchiveId)
-            stmt.set(1, entryPath)
-            let rs = stmt.query()
-            try {
-                if (rs.next()) {
-                    return rs.getOrNull<Int64>(0) ?? 0
-                }
-            } finally {
-                rs.close()
-            }
-        } finally {
-            stmt.close()
-        }
-        return 0
-    }
-
     public static func getMetadataObject(entityType: String, entityId: String): Option<MetadataObjectData> {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
@@ -438,78 +419,43 @@ public class MetadataDao {
         }
         let normalizedTags = TagDao.normalizeTags(tags)
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    let metadataId = getMetadataIdForRoot(conn, normalizedType, normalizedId)
-                    if (metadataId <= 0) {
-                        return false
+        return DatabaseConfig.withTransaction("metadata_dao", "replaceMetadataTags failed", { conn =>
+            let metadataId = getMetadataIdForRoot(conn, normalizedType, normalizedId)
+            if (metadataId <= 0) {
+                return false
+            }
+
+            if (!TagDao.ensureTagDictionaryEntriesWithConnection(conn, normalizedTags)) {
+                return false
+            }
+
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_tags WHERE metadata_id = ?", { stmt =>
+                stmt.set(0, metadataId)
+            })
+
+            let seen = HashSet<String>()
+            return DatabaseConfig.withStatement<Bool>(conn, """
+                INSERT INTO metadata_tags (metadata_id, tag)
+                SELECT ?, ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_tags WHERE metadata_id = ? AND tag = ?
+                )
+            """, { ins =>
+                for (rawTag in normalizedTags) {
+                    let tag = rawTag.trimAscii()
+                    if (tag.size == 0 || seen.contains(tag)) {
+                        continue
                     }
-
-                    try {
-                        let begin = conn.prepareStatement("BEGIN")
-                        try { begin.update() } finally { begin.close() }
-                    } catch (_: Exception) {}
-
-                    if (!TagDao.ensureTagDictionaryEntriesWithConnection(conn, normalizedTags)) {
-                        try {
-                            let rb = conn.prepareStatement("ROLLBACK")
-                            try { rb.update() } finally { rb.close() }
-                        } catch (_: Exception) {}
-                        return false
-                    }
-
-                    let del = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id = ?")
-                    try {
-                        del.set(0, metadataId)
-                        del.update()
-                    } finally {
-                        del.close()
-                    }
-
-                    let seen = HashSet<String>()
-                    for (rawTag in normalizedTags) {
-                        let tag = rawTag.trimAscii()
-                        if (tag.size == 0 || seen.contains(tag)) {
-                            continue
-                        }
-                        seen.add(tag)
-                        let ins = conn.prepareStatement("""
-                            INSERT INTO metadata_tags (metadata_id, tag)
-                            SELECT ?, ?
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM metadata_tags WHERE metadata_id = ? AND tag = ?
-                            )
-                        """)
-                        try {
-                            ins.set(0, metadataId)
-                            ins.set(1, tag)
-                            ins.set(2, metadataId)
-                            ins.set(3, tag)
-                            ins.update()
-                        } finally {
-                            ins.close()
-                        }
-                    }
-
-                    try {
-                        let commit = conn.prepareStatement("COMMIT")
-                        try { commit.update() } finally { commit.close() }
-                    } catch (_: Exception) {}
-                    return true
-                } catch (e: Exception) {
-                    try {
-                        let rb = conn.prepareStatement("ROLLBACK")
-                        try { rb.update() } finally { rb.close() }
-                    } catch (_: Exception) {}
-                    logger.error("replaceMetadataTags failed", ("entityType", normalizedType), ("entityId", normalizedId), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    seen.add(tag)
+                    ins.set(0, metadataId)
+                    ins.set(1, tag)
+                    ins.set(2, metadataId)
+                    ins.set(3, tag)
+                    ins.update()
                 }
-        }
+                return true
+            })
+        })
     }
 
     public static func replaceMetadataAssets(entityType: String, entityId: String, assets: Array<MetadataAssetData>): Bool {
@@ -519,83 +465,55 @@ public class MetadataDao {
             return false
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    let metadataId = getMetadataIdForRoot(conn, normalizedType, normalizedId)
-                    if (metadataId <= 0) {
-                        return false
+        return DatabaseConfig.withTransaction("metadata_dao", "replaceMetadataAssets failed", { conn =>
+            let metadataId = getMetadataIdForRoot(conn, normalizedType, normalizedId)
+            if (metadataId <= 0) {
+                return false
+            }
+
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_assets WHERE metadata_id = ?", { stmt =>
+                stmt.set(0, metadataId)
+            })
+
+            let seen = HashSet<String>()
+            let updateAsset = conn.prepareStatement("""
+                UPDATE metadata_assets
+                SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE metadata_id = ? AND slot = ?
+            """)
+            let insertAsset = conn.prepareStatement("""
+                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                SELECT ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = ?
+                )
+            """)
+            try {
+                for (asset in assets) {
+                    let slot = asset.slot.trimAscii().toAsciiLower()
+                    if (slot.size == 0 || asset.asset_id <= 0 || seen.contains(slot)) {
+                        continue
                     }
-
-                    try {
-                        let begin = conn.prepareStatement("BEGIN")
-                        try { begin.update() } finally { begin.close() }
-                    } catch (_: Exception) {}
-
-                    let del = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id = ?")
-                    try {
-                        del.set(0, metadataId)
-                        del.update()
-                    } finally {
-                        del.close()
+                    seen.add(slot)
+                    updateAsset.set(0, asset.asset_id)
+                    updateAsset.set(1, metadataId)
+                    updateAsset.set(2, slot)
+                    let updated = updateAsset.update()
+                    if (updated.rowCount <= 0) {
+                        insertAsset.set(0, metadataId)
+                        insertAsset.set(1, slot)
+                        insertAsset.set(2, asset.asset_id)
+                        insertAsset.set(3, metadataId)
+                        insertAsset.set(4, slot)
+                        insertAsset.update()
                     }
-
-                    let seen = HashSet<String>()
-                    for (asset in assets) {
-                        let slot = asset.slot.trimAscii().toAsciiLower()
-                        if (slot.size == 0 || asset.asset_id <= 0 || seen.contains(slot)) {
-                            continue
-                        }
-                        seen.add(slot)
-                        let updateAsset = conn.prepareStatement("""
-                            UPDATE metadata_assets
-                            SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
-                            WHERE metadata_id = ? AND slot = ?
-                        """)
-                        let insertAsset = conn.prepareStatement("""
-                            INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                            SELECT ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = ?
-                            )
-                        """)
-                        try {
-                            updateAsset.set(0, asset.asset_id)
-                            updateAsset.set(1, metadataId)
-                            updateAsset.set(2, slot)
-                            let updated = updateAsset.update()
-                            if (updated.rowCount <= 0) {
-                                insertAsset.set(0, metadataId)
-                                insertAsset.set(1, slot)
-                                insertAsset.set(2, asset.asset_id)
-                                insertAsset.set(3, metadataId)
-                                insertAsset.set(4, slot)
-                                insertAsset.update()
-                            }
-                        } finally {
-                            updateAsset.close()
-                            insertAsset.close()
-                        }
-                    }
-
-                    try {
-                        let commit = conn.prepareStatement("COMMIT")
-                        try { commit.update() } finally { commit.close() }
-                    } catch (_: Exception) {}
-                    return true
-                } catch (e: Exception) {
-                    try {
-                        let rb = conn.prepareStatement("ROLLBACK")
-                        try { rb.update() } finally { rb.close() }
-                    } catch (_: Exception) {}
-                    logger.error("replaceMetadataAssets failed", ("entityType", normalizedType), ("entityId", normalizedId), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
-        }
+                return true
+            } finally {
+                updateAsset.close()
+                insertAsset.close()
+            }
+        })
     }
 
     public static func setMetadataAssetId(entityType: String, entityId: String, slot: String, assetId: Int64): Bool {
@@ -861,191 +779,172 @@ public class MetadataDao {
             return true
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    try {
-                        let begin = conn.prepareStatement("BEGIN")
-                        try { begin.update() } finally { begin.close() }
-                    } catch (_: Exception) {}
-
-                    for (item in items) {
-                        let safeEntryPath = normalizePageEntryPath(item.entry_path, item.page_number)
-                        let entityId = buildPageEntityId(normalizedParent, safeEntryPath)
-                        let existingId = getMetadataIdForPage(conn, normalizedParent, safeEntryPath)
-                        if (existingId > 0) {
-                            let stmt = conn.prepareStatement("""
-                                UPDATE metadata_objects
-                                SET entity_id = ?,
-                                    title = ?,
-                                    description = ?,
-                                    order_index = ?,
-                                    page_number = ?,
-                                    entry_path = ?,
-                                    extra_data = jsonb_set(
-                                        jsonb_set(COALESCE(CAST(? AS JSONB), '{}'::jsonb), '{hidden_in_files}', to_jsonb(CAST(? AS BOOLEAN)), true),
-                                        '{thumbhash}', to_jsonb(CAST(? AS TEXT)), true
-                                    ),
-                                    release_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), release_at),
-                                    source_namespace = ?,
-                                    updated_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
-                                WHERE id = ?
-                            """)
-                            try {
-                                stmt.set(0, entityId)
-                                stmt.set(1, item.title)
-                                stmt.set(2, item.description)
-                                stmt.set(3, item.sort_index)
-                                stmt.set(4, item.page_number)
-                                stmt.set(5, safeEntryPath)
-                                stmt.set(6, item.extra_data)
-                                stmt.set(7, item.hidden_in_files)
-                                stmt.set(8, item.thumbhash)
-                                stmt.set(9, item.release_at)
-                                stmt.set(10, sourceNamespace)
-                                stmt.set(11, item.updated_at)
-                                stmt.set(12, existingId)
-                                stmt.update()
-                            } finally {
-                                stmt.close()
-                            }
-                        } else {
-                            let stmt = conn.prepareStatement("""
-                                INSERT INTO metadata_objects (
-                                    entity_type, entity_id, parent_entity_type, parent_entity_id,
-                                    title, description, volume_no, order_index, page_number, entry_path,
-                                    extra_data, source_namespace, release_at, created_at, updated_at
-                                ) VALUES (
-                                    'page', ?, 'archive', ?,
-                                    ?, ?, 0, ?, ?, ?,
-                                    jsonb_set(
-                                        jsonb_set(COALESCE(CAST(? AS JSONB), '{}'::jsonb), '{hidden_in_files}', to_jsonb(CAST(? AS BOOLEAN)), true),
-                                        '{thumbhash}', to_jsonb(CAST(? AS TEXT)), true
-                                    ),
-                                    ?,
-                                    CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP),
-                                    COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP),
-                                    COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
-                                )
-                            """)
-                            try {
-                                stmt.set(0, entityId)
-                                stmt.set(1, normalizedParent)
-                                stmt.set(2, item.title)
-                                stmt.set(3, item.description)
-                                stmt.set(4, item.sort_index)
-                                stmt.set(5, item.page_number)
-                                stmt.set(6, safeEntryPath)
-                                stmt.set(7, item.extra_data)
-                                stmt.set(8, item.hidden_in_files)
-                                stmt.set(9, item.thumbhash)
-                                stmt.set(10, sourceNamespace)
-                                stmt.set(11, item.release_at)
-                                stmt.set(12, item.created_at)
-                                stmt.set(13, item.updated_at)
-                                stmt.update()
-                            } finally {
-                                stmt.close()
-                            }
+        return DatabaseConfig.withTransaction("metadata_dao", "upsertPageMetadataBatch failed", { conn =>
+            let selectPage = conn.prepareStatement("SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ? AND entry_path = ? LIMIT 1")
+            let updatePage = conn.prepareStatement("""
+                UPDATE metadata_objects
+                SET entity_id = ?,
+                    title = ?,
+                    description = ?,
+                    order_index = ?,
+                    page_number = ?,
+                    entry_path = ?,
+                    extra_data = jsonb_set(
+                        jsonb_set(COALESCE(CAST(? AS JSONB), '{}'::jsonb), '{hidden_in_files}', to_jsonb(CAST(? AS BOOLEAN)), true),
+                        '{thumbhash}', to_jsonb(CAST(? AS TEXT)), true
+                    ),
+                    release_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), release_at),
+                    source_namespace = ?,
+                    updated_at = COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
+                WHERE id = ?
+            """)
+            let insertPage = conn.prepareStatement("""
+                INSERT INTO metadata_objects (
+                    entity_type, entity_id, parent_entity_type, parent_entity_id,
+                    title, description, volume_no, order_index, page_number, entry_path,
+                    extra_data, source_namespace, release_at, created_at, updated_at
+                ) VALUES (
+                    'page', ?, 'archive', ?,
+                    ?, ?, 0, ?, ?, ?,
+                    jsonb_set(
+                        jsonb_set(COALESCE(CAST(? AS JSONB), '{}'::jsonb), '{hidden_in_files}', to_jsonb(CAST(? AS BOOLEAN)), true),
+                        '{thumbhash}', to_jsonb(CAST(? AS TEXT)), true
+                    ),
+                    ?,
+                    CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP),
+                    COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP),
+                    COALESCE(CAST(NULLIF(TRIM(CAST(? AS TEXT)), '') AS TIMESTAMP), CURRENT_TIMESTAMP)
+                )
+            """)
+            let updateThumb = conn.prepareStatement("""
+                UPDATE metadata_assets
+                SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE metadata_id = ? AND slot = 'thumb'
+            """)
+            let insertThumb = conn.prepareStatement("""
+                INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
+                SELECT ?, 'thumb', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = 'thumb'
+                )
+            """)
+            let deleteThumb = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id = ? AND slot = 'thumb'")
+            let deleteAttachments = conn.prepareStatement("DELETE FROM metadata_page_assets WHERE metadata_id = ?")
+            let insertAttachment = conn.prepareStatement("""
+                INSERT INTO metadata_page_assets (
+                    metadata_id, slot, asset_id, name, mime_type, kind, language, order_index, created_at, updated_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+            """)
+            try {
+                for (item in items) {
+                    let safeEntryPath = normalizePageEntryPath(item.entry_path, item.page_number)
+                    let entityId = buildPageEntityId(normalizedParent, safeEntryPath)
+                    selectPage.set(0, normalizedParent)
+                    selectPage.set(1, safeEntryPath)
+                    var metadataId = DatabaseConfig.withQueryResult<Int64>(selectPage, { rs =>
+                        if (rs.next()) {
+                            return rs.getOrNull<Int64>(0) ?? 0
                         }
+                        return 0
+                    })
 
-                        let metadataId = getMetadataIdForPage(conn, normalizedParent, safeEntryPath)
-                        if (metadataId > 0) {
-                            if (item.thumb_asset_id > 0) {
-                                let updateThumb = conn.prepareStatement("""
-                                    UPDATE metadata_assets
-                                    SET asset_id = ?, updated_at = CURRENT_TIMESTAMP
-                                    WHERE metadata_id = ? AND slot = 'thumb'
-                                """)
-                                let insertThumb = conn.prepareStatement("""
-                                    INSERT INTO metadata_assets (metadata_id, slot, asset_id, created_at, updated_at)
-                                    SELECT ?, 'thumb', ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                                    WHERE NOT EXISTS (
-                                        SELECT 1 FROM metadata_assets WHERE metadata_id = ? AND slot = 'thumb'
-                                    )
-                                """)
-                                try {
-                                    updateThumb.set(0, item.thumb_asset_id)
-                                    updateThumb.set(1, metadataId)
-                                    let updated = updateThumb.update()
-                                    if (updated.rowCount <= 0) {
-                                        insertThumb.set(0, metadataId)
-                                        insertThumb.set(1, item.thumb_asset_id)
-                                        insertThumb.set(2, metadataId)
-                                        insertThumb.update()
-                                    }
-                                } finally {
-                                    updateThumb.close()
-                                    insertThumb.close()
-                                }
-                            } else {
-                                let deleteThumb = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id = ? AND slot = 'thumb'")
-                                try {
-                                    deleteThumb.set(0, metadataId)
-                                    deleteThumb.update()
-                                } finally {
-                                    deleteThumb.close()
-                                }
+                    if (metadataId > 0) {
+                        updatePage.set(0, entityId)
+                        updatePage.set(1, item.title)
+                        updatePage.set(2, item.description)
+                        updatePage.set(3, item.sort_index)
+                        updatePage.set(4, item.page_number)
+                        updatePage.set(5, safeEntryPath)
+                        updatePage.set(6, item.extra_data)
+                        updatePage.set(7, item.hidden_in_files)
+                        updatePage.set(8, item.thumbhash)
+                        updatePage.set(9, item.release_at)
+                        updatePage.set(10, sourceNamespace)
+                        updatePage.set(11, item.updated_at)
+                        updatePage.set(12, metadataId)
+                        updatePage.update()
+                    } else {
+                        insertPage.set(0, entityId)
+                        insertPage.set(1, normalizedParent)
+                        insertPage.set(2, item.title)
+                        insertPage.set(3, item.description)
+                        insertPage.set(4, item.sort_index)
+                        insertPage.set(5, item.page_number)
+                        insertPage.set(6, safeEntryPath)
+                        insertPage.set(7, item.extra_data)
+                        insertPage.set(8, item.hidden_in_files)
+                        insertPage.set(9, item.thumbhash)
+                        insertPage.set(10, sourceNamespace)
+                        insertPage.set(11, item.release_at)
+                        insertPage.set(12, item.created_at)
+                        insertPage.set(13, item.updated_at)
+                        insertPage.update()
+
+                        selectPage.set(0, normalizedParent)
+                        selectPage.set(1, safeEntryPath)
+                        metadataId = DatabaseConfig.withQueryResult<Int64>(selectPage, { rs =>
+                            if (rs.next()) {
+                                return rs.getOrNull<Int64>(0) ?? 0
                             }
-
-                            if (item.attachments_provided) {
-                                let deleteAttachments = conn.prepareStatement("DELETE FROM metadata_page_assets WHERE metadata_id = ?")
-                                try {
-                                    deleteAttachments.set(0, metadataId)
-                                    deleteAttachments.update()
-                                } finally {
-                                    deleteAttachments.close()
-                                }
-
-                                for (attachment in item.attachments) {
-                                    let slot = attachment.slot.trimAscii().toAsciiLower()
-                                    let name = attachment.name.trimAscii()
-                                    if (slot.size == 0 || name.size == 0 || attachment.asset_id <= 0) {
-                                        continue
-                                    }
-                                    let insertAttachment = conn.prepareStatement("""
-                                        INSERT INTO metadata_page_assets (
-                                            metadata_id, slot, asset_id, name, mime_type, kind, language, order_index, created_at, updated_at
-                                        ) VALUES (
-                                            ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                                        )
-                                    """)
-                                    try {
-                                        insertAttachment.set(0, metadataId)
-                                        insertAttachment.set(1, slot)
-                                        insertAttachment.set(2, attachment.asset_id)
-                                        insertAttachment.set(3, name)
-                                        insertAttachment.set(4, attachment.mime_type.trimAscii())
-                                        insertAttachment.set(5, attachment.kind.trimAscii().toAsciiLower())
-                                        insertAttachment.set(6, attachment.language.trimAscii().toAsciiLower())
-                                        insertAttachment.set(7, attachment.order_index)
-                                        insertAttachment.update()
-                                    } finally {
-                                        insertAttachment.close()
-                                    }
-                                }
-                            }
-                        }
+                            return 0
+                        })
                     }
 
-                    try {
-                        let commit = conn.prepareStatement("COMMIT")
-                        try { commit.update() } finally { commit.close() }
-                    } catch (_: Exception) {}
-                    return true
-                } catch (e: Exception) {
-                    try {
-                        let rb = conn.prepareStatement("ROLLBACK")
-                        try { rb.update() } finally { rb.close() }
-                    } catch (_: Exception) {}
-                    logger.error("upsertPageMetadataBatch failed", ("archiveId", normalizedParent), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    if (metadataId <= 0) {
+                        continue
+                    }
+
+                    if (item.thumb_asset_id > 0) {
+                        updateThumb.set(0, item.thumb_asset_id)
+                        updateThumb.set(1, metadataId)
+                        let updated = updateThumb.update()
+                        if (updated.rowCount <= 0) {
+                            insertThumb.set(0, metadataId)
+                            insertThumb.set(1, item.thumb_asset_id)
+                            insertThumb.set(2, metadataId)
+                            insertThumb.update()
+                        }
+                    } else {
+                        deleteThumb.set(0, metadataId)
+                        deleteThumb.update()
+                    }
+
+                    if (item.attachments_provided) {
+                        deleteAttachments.set(0, metadataId)
+                        deleteAttachments.update()
+
+                        for (attachment in item.attachments) {
+                            let slot = attachment.slot.trimAscii().toAsciiLower()
+                            let name = attachment.name.trimAscii()
+                            if (slot.size == 0 || name.size == 0 || attachment.asset_id <= 0) {
+                                continue
+                            }
+                            insertAttachment.set(0, metadataId)
+                            insertAttachment.set(1, slot)
+                            insertAttachment.set(2, attachment.asset_id)
+                            insertAttachment.set(3, name)
+                            insertAttachment.set(4, attachment.mime_type.trimAscii())
+                            insertAttachment.set(5, attachment.kind.trimAscii().toAsciiLower())
+                            insertAttachment.set(6, attachment.language.trimAscii().toAsciiLower())
+                            insertAttachment.set(7, attachment.order_index)
+                            insertAttachment.update()
+                        }
+                    }
                 }
-        }
+                return true
+            } finally {
+                try { selectPage.close() } catch (_: Exception) {}
+                try { updatePage.close() } catch (_: Exception) {}
+                try { insertPage.close() } catch (_: Exception) {}
+                try { updateThumb.close() } catch (_: Exception) {}
+                try { insertThumb.close() } catch (_: Exception) {}
+                try { deleteThumb.close() } catch (_: Exception) {}
+                try { deleteAttachments.close() } catch (_: Exception) {}
+                try { insertAttachment.close() } catch (_: Exception) {}
+            }
+        })
     }
 
     public static func getPageThumbAssetId(parentArchiveId: String, pageNumber: Int32): Int64 {
@@ -1096,56 +995,18 @@ public class MetadataDao {
         if (normalizedParent.size == 0) {
             return false
         }
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    try {
-                        let begin = conn.prepareStatement("BEGIN")
-                        try { begin.update() } finally { begin.close() }
-                    } catch (_: Exception) {}
-
-                    let deleteAssets = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?)")
-                    try {
-                        deleteAssets.set(0, normalizedParent)
-                        deleteAssets.update()
-                    } finally {
-                        deleteAssets.close()
-                    }
-
-                    let deleteTags = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?)")
-                    try {
-                        deleteTags.set(0, normalizedParent)
-                        deleteTags.update()
-                    } finally {
-                        deleteTags.close()
-                    }
-
-                    let deleteRows = conn.prepareStatement("DELETE FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?")
-                    try {
-                        deleteRows.set(0, normalizedParent)
-                        deleteRows.update()
-                    } finally {
-                        deleteRows.close()
-                    }
-
-                    try {
-                        let commit = conn.prepareStatement("COMMIT")
-                        try { commit.update() } finally { commit.close() }
-                    } catch (_: Exception) {}
-                    return true
-                } catch (e: Exception) {
-                    try {
-                        let rb = conn.prepareStatement("ROLLBACK")
-                        try { rb.update() } finally { rb.close() }
-                    } catch (_: Exception) {}
-                    logger.error("deletePageMetadata failed", ("archiveId", normalizedParent), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-        }
+        return DatabaseConfig.withTransaction("metadata_dao", "deletePageMetadata failed", { conn =>
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?)", { stmt =>
+                stmt.set(0, normalizedParent)
+            })
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?)", { stmt =>
+                stmt.set(0, normalizedParent)
+            })
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_objects WHERE entity_type = 'page' AND parent_entity_type = 'archive' AND parent_entity_id = ?", { stmt =>
+                stmt.set(0, normalizedParent)
+            })
+            return true
+        })
     }
 
     public static func deleteEntity(entityType: String, entityId: String): Bool {
@@ -1154,59 +1015,21 @@ public class MetadataDao {
         if (normalizedType.size == 0 || normalizedId.size == 0) {
             return false
         }
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case None => return false
-            case Some(conn) =>
-                try {
-                    try {
-                        let begin = conn.prepareStatement("BEGIN")
-                        try { begin.update() } finally { begin.close() }
-                    } catch (_: Exception) {}
-
-                    let deleteAssets = conn.prepareStatement("DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = ? AND entity_id = ?)")
-                    try {
-                        deleteAssets.set(0, normalizedType)
-                        deleteAssets.set(1, normalizedId)
-                        deleteAssets.update()
-                    } finally {
-                        deleteAssets.close()
-                    }
-
-                    let deleteTags = conn.prepareStatement("DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = ? AND entity_id = ?)")
-                    try {
-                        deleteTags.set(0, normalizedType)
-                        deleteTags.set(1, normalizedId)
-                        deleteTags.update()
-                    } finally {
-                        deleteTags.close()
-                    }
-
-                    let deleteRows = conn.prepareStatement("DELETE FROM metadata_objects WHERE entity_type = ? AND entity_id = ?")
-                    try {
-                        deleteRows.set(0, normalizedType)
-                        deleteRows.set(1, normalizedId)
-                        deleteRows.update()
-                    } finally {
-                        deleteRows.close()
-                    }
-
-                    try {
-                        let commit = conn.prepareStatement("COMMIT")
-                        try { commit.update() } finally { commit.close() }
-                    } catch (_: Exception) {}
-                    return true
-                } catch (e: Exception) {
-                    try {
-                        let rb = conn.prepareStatement("ROLLBACK")
-                        try { rb.update() } finally { rb.close() }
-                    } catch (_: Exception) {}
-                    logger.error("deleteEntity failed", ("entityType", normalizedType), ("entityId", normalizedId), ("error", e.message))
-                    return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-        }
+        return DatabaseConfig.withTransaction("metadata_dao", "deleteEntity failed", { conn =>
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_assets WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = ? AND entity_id = ?)", { stmt =>
+                stmt.set(0, normalizedType)
+                stmt.set(1, normalizedId)
+            })
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_tags WHERE metadata_id IN (SELECT id FROM metadata_objects WHERE entity_type = ? AND entity_id = ?)", { stmt =>
+                stmt.set(0, normalizedType)
+                stmt.set(1, normalizedId)
+            })
+            DatabaseConfig.executeOnConnection(conn, "DELETE FROM metadata_objects WHERE entity_type = ? AND entity_id = ?", { stmt =>
+                stmt.set(0, normalizedType)
+                stmt.set(1, normalizedId)
+            })
+            return true
+        })
     }
 
     public static func getTankoubonChildren(tankoubonId: String): Array<MetadataChildData> {

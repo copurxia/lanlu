@@ -305,68 +305,30 @@ public class UserArchiveStatusDao {
             return result
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    // 构建 IN 子句的占位符
-                    var inClause = ""
-                    for (i in 0..archiveIds.size) {
-                        if (i > 0) {
-                            inClause += ","
-                        }
-                        inClause += "?"
+        let ok = DatabaseConfig.withPooledConnection<Bool>("user_archive_status_dao", "批量获取用户归档状态失败", false, { conn =>
+            DatabaseConfig.withStatement<Bool>(conn, """
+                SELECT archive_id, is_new, progress
+                FROM user_archive_status
+                WHERE user_id = ? AND archive_id = ANY(?::bigint[])
+            """, { stmt =>
+                stmt.set(0, userId)
+                DatabaseConfig.setInt64Array(stmt, 1, archiveIds)
+                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
+                    while (rs.next()) {
+                        let archiveId = rs.getOrNull<Int64>(0) ?? 0
+                        let isNew = rs.getOrNull<Bool>(1) ?? true
+                        result[archiveId] = isNew
                     }
+                    return true
+                })
+            })
+        })
 
-                    let sql = """
-                        SELECT archive_id, is_new, progress
-                        FROM user_archive_status
-                        WHERE user_id = ? AND archive_id IN (${inClause})
-                    """
-
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        stmt.set(0, userId)
-                        var idx = 1
-                        for (archiveId in archiveIds) {
-                            stmt.set(idx, archiveId)
-                            idx = idx + 1
-                        }
-
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let archiveId = rs.getOrNull<Int64>(0) ?? 0
-                                let isNew = rs.getOrNull<Bool>(1) ?? true
-                                result[archiveId] = isNew
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-
-                    // 对于没有记录的归档，默认为新
-                    for (archiveId in archiveIds) {
-                        if (!result.contains(archiveId)) {
-                            result[archiveId] = true
-                        }
-                    }
-                } catch (_: Exception) {
-                    // 出错时，所有归档默认为新
-                    for (archiveId in archiveIds) {
-                        result[archiveId] = true
-                    }
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                // 无法连接时，所有归档默认为新
-                for (archiveId in archiveIds) {
-                    result[archiveId] = true
-                }
+        // 对于没有记录或查询失败的归档，默认为新
+        for (archiveId in archiveIds) {
+            if (!ok || !result.contains(archiveId)) {
+                result[archiveId] = true
+            }
         }
 
         return result
@@ -384,76 +346,36 @@ public class UserArchiveStatusDao {
             return (progressMap, lastReadTimeMap)
         }
 
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    // 构建 IN 子句的占位符
-                    var inClause = ""
-                    for (i in 0..archiveIds.size) {
-                        if (i > 0) {
-                            inClause += ","
-                        }
-                        inClause += "?"
+        let ok = DatabaseConfig.withPooledConnection<Bool>("user_archive_status_dao", "批量获取用户归档进度失败", false, { conn =>
+            DatabaseConfig.withStatement<Bool>(conn, """
+                SELECT archive_id, progress, COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0) as unix_timestamp
+                FROM user_archive_status
+                WHERE user_id = ? AND archive_id = ANY(?::bigint[])
+            """, { stmt =>
+                stmt.set(0, userId)
+                DatabaseConfig.setInt64Array(stmt, 1, archiveIds)
+                DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
+                    while (rs.next()) {
+                        let archiveId = rs.getOrNull<Int64>(0) ?? 0
+                        let progress = rs.getOrNull<Int32>(1) ?? 0
+                        let timestamp = rs.getOrNull<Int64>(2) ?? 0
+
+                        progressMap[archiveId] = progress
+                        lastReadTimeMap[archiveId] = timestamp
                     }
+                    return true
+                })
+            })
+        })
 
-                    let sql = """
-                        SELECT archive_id, progress, COALESCE(CAST(EXTRACT(EPOCH FROM updated_at) AS BIGINT), 0) as unix_timestamp
-                        FROM user_archive_status
-                        WHERE user_id = ? AND archive_id IN (${inClause})
-                    """
-
-                    let stmt = conn.prepareStatement(sql)
-                    try {
-                        stmt.set(0, userId)
-                        var idx = 1
-                        for (archiveId in archiveIds) {
-                            stmt.set(idx, archiveId)
-                            idx = idx + 1
-                        }
-
-                        let rs = stmt.query()
-                        try {
-                            while (rs.next()) {
-                                let archiveId = rs.getOrNull<Int64>(0) ?? 0
-                                let progress = rs.getOrNull<Int32>(1) ?? 0
-                                let timestamp = rs.getOrNull<Int64>(2) ?? 0
-
-                                progressMap[archiveId] = progress
-                                lastReadTimeMap[archiveId] = timestamp
-                            }
-                        } finally {
-                            rs.close()
-                        }
-                    } finally {
-                        stmt.close()
-                    }
-
-                    // 对于没有记录的归档，设置默认值
-                    for (archiveId in archiveIds) {
-                        if (!progressMap.contains(archiveId)) {
-                            progressMap[archiveId] = 0
-                        }
-                        if (!lastReadTimeMap.contains(archiveId)) {
-                            lastReadTimeMap[archiveId] = 0
-                        }
-                    }
-                } catch (_: Exception) {
-                    // 出错时，设置默认值
-                    for (archiveId in archiveIds) {
-                        progressMap[archiveId] = 0
-                        lastReadTimeMap[archiveId] = 0
-                    }
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
-                }
-            case None =>
-                // 无法连接时，设置默认值
-                for (archiveId in archiveIds) {
-                    progressMap[archiveId] = 0
-                    lastReadTimeMap[archiveId] = 0
-                }
+        // 对于没有记录或查询失败的归档，设置默认值
+        for (archiveId in archiveIds) {
+            if (!ok || !progressMap.contains(archiveId)) {
+                progressMap[archiveId] = 0
+            }
+            if (!ok || !lastReadTimeMap.contains(archiveId)) {
+                lastReadTimeMap[archiveId] = 0
+            }
         }
 
         return (progressMap, lastReadTimeMap)

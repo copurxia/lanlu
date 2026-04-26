@@ -146,36 +146,24 @@ public class ArchiveDao {
     }
 
     private static func extensionInstalled(conn: Connection, extensionName: String): Bool {
-        let stmt = conn.prepareStatement("SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1")
         try {
+            return DatabaseConfig.withStatement<Bool>(conn, "SELECT 1 FROM pg_extension WHERE extname = ? LIMIT 1", { stmt =>
             stmt.set(0, extensionName)
-            let rs = stmt.query()
-            try {
-                return rs.next()
-            } finally {
-                rs.close()
-            }
+                DatabaseConfig.withQueryResult<Bool>(stmt, { rs => rs.next() })
+            })
         } catch (_: Exception) {
             return false
-        } finally {
-            stmt.close()
         }
     }
 
     private static func functionExists(conn: Connection, functionName: String): Bool {
-        let stmt = conn.prepareStatement("SELECT 1 FROM pg_proc WHERE proname = ? LIMIT 1")
         try {
+            return DatabaseConfig.withStatement<Bool>(conn, "SELECT 1 FROM pg_proc WHERE proname = ? LIMIT 1", { stmt =>
             stmt.set(0, functionName)
-            let rs = stmt.query()
-            try {
-                return rs.next()
-            } finally {
-                rs.close()
-            }
+                DatabaseConfig.withQueryResult<Bool>(stmt, { rs => rs.next() })
+            })
         } catch (_: Exception) {
             return false
-        } finally {
-            stmt.close()
         }
     }
 

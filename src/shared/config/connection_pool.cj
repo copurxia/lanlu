@@ -5,6 +5,7 @@ import std.sync.*
 import std.env.getVariable
 import std.convert.*
 import lanlu.shared.utils.*
+import opengauss.sqlpool.{PooledDatasource as OgPooledDatasource, PoolConfig as OgPoolConfig}
 
 /**
  * 连接池配置
@@ -41,6 +42,16 @@ public class PoolConfig {
     }
 }
 
+public class ConnectionPoolStats {
+    public var open: Int64 = 0
+    public var idle: Int64 = 0
+    public var inUse: Int64 = 0
+    public var broken: Int64 = 0
+    public var closed: Int64 = 0
+
+    public init() {}
+}
+
 /**
  * 数据库连接池
  * 基于标准库 PooledDatasource 的封装
@@ -54,7 +65,7 @@ public class ConnectionPool {
     private var config: PoolConfig = PoolConfig()
 
     // 标准库连接池
-    private var pooledDs: Option<PooledDatasource> = None
+    private var pooledDs: Option<OgPooledDatasource> = None
     private var isInitialized: Bool = false
 
     private init() {}
@@ -92,19 +103,18 @@ public class ConnectionPool {
             case Some(drv) =>
                 let connStr = DatabaseConfig.getConnectionString()
                 let ds = drv.open(connStr)
-                let pool = PooledDatasource(ds)
-
-                // 配置连接池参数
-                pool.maxSize = config.maxConnections
-                // 0 means no max-idle cap for this pool implementation.
-                pool.maxIdleSize = 0
-                pool.connectionTimeout = Duration.millisecond * config.connectionTimeoutMs
-                pool.idleTimeout = Duration.millisecond * config.idleTimeoutMs
-                pool.maxLifeTime = Duration.millisecond * config.maxLifeTimeMs
-                pool.keepaliveTime = Duration.millisecond * config.keepaliveTimeMs
+                let poolConfig = OgPoolConfig(
+                    0,
+                    config.maxConnections,
+                    Duration.millisecond * config.idleTimeoutMs,
+                    Duration.millisecond * config.maxLifeTimeMs,
+                    Duration.millisecond * config.keepaliveTimeMs
+                )
+                let pool = OgPooledDatasource(ds, poolConfig)
 
                 pooledDs = Some(pool)
                 isInitialized = true
+                let _ = healthCheck()
                 logger.info("连接池初始化完成")
                 return true
             case None =>
@@ -122,6 +132,11 @@ public class ConnectionPool {
             case Some(pool) =>
                 try {
                     let conn = pool.connect()
+                    if (conn.state != ConnectionState.Connected) {
+                        try { conn.close() } catch (_: Exception) {}
+                        logger.warn("获取到不可用连接，已丢弃")
+                        return None
+                    }
                     return Some(conn)
                 } catch (e: Exception) {
                     logger.error("获取连接失败: ${e.message}")
@@ -140,6 +155,7 @@ public class ConnectionPool {
         let logger = getLogger("connection_pool")
         match (pooledDs) {
             case Some(pool) =>
+                pool.closeAllConn()
                 pool.close()
                 pooledDs = None
                 isInitialized = false
@@ -155,6 +171,42 @@ public class ConnectionPool {
         match (pooledDs) {
             case Some(pool) => pool.isClosed()
             case None => true
+        }
+    }
+
+    public func stats(): ConnectionPoolStats {
+        let stats = ConnectionPoolStats()
+        match (pooledDs) {
+            case Some(pool) =>
+                stats.open = pool.openConns
+                stats.idle = pool.idleConns
+                stats.inUse = pool.usedConn
+                stats.broken = pool.brokenConns
+                stats.closed = pool.closedConns
+            case None => ()
+        }
+        return stats
+    }
+
+    public func healthCheck(): Bool {
+        let connOpt = getConnection()
+        match (connOpt) {
+            case Some(rawConn) =>
+                try {
+                    var ok = false
+                    try (conn = rawConn) {
+                        ok = DatabaseConfig.withStatement<Bool>(conn, "SELECT 1", { stmt =>
+                            DatabaseConfig.withQueryResult<Bool>(stmt, { rs =>
+                                return rs.next()
+                            })
+                        })
+                    }
+                    return ok
+                } catch (e: Exception) {
+                    getLogger("connection_pool").warn("连接池健康检查失败", ("error", e.message))
+                    return false
+                }
+            case None => return false
         }
     }
 }

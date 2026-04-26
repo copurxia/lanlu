@@ -1153,30 +1153,29 @@ public class TagDao {
      * 获取所有命名空间
      */
     public static func listNamespaces(): Array<String> {
-        var list: ArrayList<String> = ArrayList<String>()
-        let connOpt = DatabaseConfig.getPooledConnection()
-        match (connOpt) {
-            case Some(rawConn) =>
-                try (conn = rawConn) {
-                    let rawStmt = conn.prepareStatement("SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace")
-                    try (stmt = rawStmt) {
-                        let rawRs = stmt.query()
-                        try (rs = rawRs) {
+        return DatabaseConfig.withPooledConnection<Array<String>>(
+            "tag_dao",
+            "获取命名空间列表失败",
+            Array<String>(),
+            { conn =>
+                DatabaseConfig.withStatement<Array<String>>(
+                    conn,
+                    "SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace",
+                    { stmt =>
+                        DatabaseConfig.withQueryResult<Array<String>>(stmt, { rs =>
+                            var list: ArrayList<String> = ArrayList<String>()
                             while (rs.next()) {
                                 let ns = rs.getOrNull<String>(0) ?? ""
                                 if (ns.size > 0) {
                                     list.add(ns)
                                 }
                             }
-                        }
+                            return list.toArray()
+                        })
                     }
-                } catch (e: Exception) {
-                    getLogger("tag_dao").error("获取命名空间列表失败", ("error", e.message))
-                }
-            case None =>
-                ()
-        }
-        return list.toArray()
+                )
+            }
+        )
     }
 
     /**
