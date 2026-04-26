@@ -330,7 +330,7 @@ public class DatabaseConfig {
 
     /**
      * 在同一连接和同一 PreparedStatement 上重复执行一批绑定。
-     * 这是项目侧 batch 封装，先降低连接获取和 Statement 准备开销；驱动层 pipeline 可在后续替换内部实现。
+     * 这是项目侧 batch 封装，降低连接获取和 Statement 准备开销。
      */
     public static func executeBatch(
         loggerName: String,
@@ -406,12 +406,12 @@ public class DatabaseConfig {
 
     public static func setJsonb(stmt: Statement, index: Int, json: String): Unit {
         let normalized = json.trimAscii()
-        stmt.set(index, if (normalized.size > 0) { normalized } else { "{}" })
+        stmt.set(index, PgJsonb(if (normalized.size > 0) { normalized } else { "{}" }))
     }
 
     public static func setJsonbArray(stmt: Statement, index: Int, json: String): Unit {
         let normalized = json.trimAscii()
-        stmt.set(index, if (normalized.size > 0) { normalized } else { "[]" })
+        stmt.set(index, PgJsonb(if (normalized.size > 0) { normalized } else { "[]" }))
     }
 
     public static func setTextArray(stmt: Statement, index: Int, values: Array<String>): Unit {
