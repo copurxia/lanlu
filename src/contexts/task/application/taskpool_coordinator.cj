@@ -64,26 +64,27 @@ public class TaskPoolCoordinator {
     }
 
     public func start(): Bool {
-        lifecycleMutex.lock()
-        if (isRunning) {
-            lifecycleMutex.unlock()
-            return true
+        let shouldStartLoop = synchronized(lifecycleMutex) {
+            if (isRunning) {
+                false
+            } else {
+                isRunning = true
+                shutdownRequested = false
+                let shouldStart = !loopStarted
+                if (shouldStart) {
+                    loopStarted = true
+                }
+                shouldStart
+            }
         }
-        isRunning = true
-        shutdownRequested = false
-        let shouldStartLoop = !loopStarted
-        if (shouldStartLoop) {
-            loopStarted = true
-        }
-        lifecycleMutex.unlock()
 
         if (shouldStartLoop) {
             let future = spawn {
                 runEventLoop()
             }
-            lifecycleMutex.lock()
-            loopFuture = Some(future)
-            lifecycleMutex.unlock()
+            synchronized(lifecycleMutex) {
+                loopFuture = Some(future)
+            }
         }
 
         let logger = getLogger("taskpool")
@@ -93,27 +94,30 @@ public class TaskPoolCoordinator {
     }
 
     public func stop(): Unit {
-        lifecycleMutex.lock()
-        if (!isRunning) {
-            lifecycleMutex.unlock()
+        let shouldStop = synchronized(lifecycleMutex) {
+            if (!isRunning) {
+                false
+            } else {
+                isRunning = false
+                true
+            }
+        }
+        if (!shouldStop) {
             return
         }
-        isRunning = false
-        lifecycleMutex.unlock()
         enqueue(TaskPoolEvent.Shutdown)
     }
 
     public func isServiceRunning(): Bool {
-        lifecycleMutex.lock()
-        let running = isRunning
-        lifecycleMutex.unlock()
-        return running
+        return synchronized(lifecycleMutex) {
+            isRunning
+        }
     }
 
     public func isCoordinatorLoopAlive(): Bool {
-        lifecycleMutex.lock()
-        let futureOpt = loopFuture
-        lifecycleMutex.unlock()
+        let futureOpt = synchronized(lifecycleMutex) {
+            loopFuture
+        }
         match (futureOpt) {
             case Some(future) =>
                 try {
@@ -169,10 +173,10 @@ public class TaskPoolCoordinator {
     }
 
     private func markLoopStopped(): Unit {
-        lifecycleMutex.lock()
-        loopStarted = false
-        loopFuture = Option<Future<Unit>>.None
-        lifecycleMutex.unlock()
+        synchronized(lifecycleMutex) {
+            loopStarted = false
+            loopFuture = Option<Future<Unit>>.None
+        }
     }
 
     private func handleEvent(event: TaskPoolEvent): Bool {

@@ -13,6 +13,21 @@ import lanlu.shared.utils.*
  * - convert cover into AVIF asset
  * - cleanup old assets
  */
+public class PluginAssetInstallData {
+    public let assetId: Int64
+    public let thumbhash: String
+
+    public init(assetId: Int64, thumbhash: String) {
+        this.assetId = assetId
+        this.thumbhash = thumbhash
+    }
+}
+
+public enum PluginAssetInstallResult {
+    | Ok(PluginAssetInstallData)
+    | Err(String)
+}
+
 public class PluginCoverUtils {
     private static let runtimeFileWaitAttempts: Int64 = 10
     private static let runtimeFileWaitIntervalMs: Int64 = 120
@@ -179,12 +194,16 @@ public class PluginCoverUtils {
 
     /**
      * Convert plugin cache cover to AVIF asset.
-     * Returns: (ok, assetId, thumbhash, error)
      */
-    public static func installCoverAssetFromPluginPath(coverPath: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String, String) {
+    public static func installCoverAssetFromPluginPath(
+        coverPath: String,
+        pluginNamespace: String,
+        assetKind: String,
+        originalName: String
+    ): PluginAssetInstallResult {
         let (sourcePath, resolveErr) = resolvePluginCoverPath(coverPath, pluginNamespace)
         if (sourcePath.size == 0) {
-            return (false, 0, "", resolveErr)
+            return PluginAssetInstallResult.Err(resolveErr)
         }
 
         let cacheRoot = SystemSettingsService.getPath("CACHE_PATH")
@@ -197,13 +216,13 @@ public class PluginCoverUtils {
             FileUtils.ensureDirectoryExists(Path(tempDir))
             FileUtils.ensureDirectoryExists(Path(assetPath))
         } catch (e: Exception) {
-            return (false, 0, "", "failed to prepare temp/asset directory: ${e.message}")
+            return PluginAssetInstallResult.Err("failed to prepare temp/asset directory: ${e.message}")
         }
 
         let (convertResult, thumbHash) = ArchiveUtils.convertImageToAvifWithThumbHash(sourcePath, tempAvifPath, tempDir)
         if (!convertResult.success) {
             try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
-            return (false, 0, "", "cover conversion failed: ${convertResult.error}")
+            return PluginAssetInstallResult.Err("cover conversion failed: ${convertResult.error}")
         }
 
         let avifSize = try { Int64(FileInfo(Path(tempAvifPath)).size) } catch (_: Exception) { 0 }
@@ -215,24 +234,28 @@ public class PluginCoverUtils {
                 } catch (e: Exception) {
                     let _ = AssetDao.deleteById(assetId)
                     try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
-                    return (false, 0, "", "failed to move cover asset file: ${e.message}")
+                    return PluginAssetInstallResult.Err("failed to move cover asset file: ${e.message}")
                 }
                 try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
-                return (true, assetId, thumbHash, "")
+                return PluginAssetInstallResult.Ok(PluginAssetInstallData(assetId, thumbHash))
             case None =>
                 try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
-                return (false, 0, "", "failed to create asset record")
+                return PluginAssetInstallResult.Err("failed to create asset record")
         }
     }
 
     /**
      * Copy plugin runtime file into asset storage without conversion.
-     * Returns: (ok, assetId, error)
      */
-    public static func installRawAssetFromPluginPath(path: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String) {
+    public static func installRawAssetFromPluginPath(
+        path: String,
+        pluginNamespace: String,
+        assetKind: String,
+        originalName: String
+    ): PluginAssetInstallResult {
         let (sourcePath, resolveErr) = resolvePluginRuntimePath(path, pluginNamespace)
         if (sourcePath.size == 0) {
-            return (false, 0, resolveErr)
+            return PluginAssetInstallResult.Err(resolveErr)
         }
 
         let ext = inferExtensionFromPath(sourcePath)
@@ -248,7 +271,7 @@ public class PluginCoverUtils {
         try {
             FileUtils.ensureDirectoryExists(Path(assetRoot))
         } catch (e: Exception) {
-            return (false, 0, "failed to prepare asset directory: ${e.message}")
+            return PluginAssetInstallResult.Err("failed to prepare asset directory: ${e.message}")
         }
 
         match (AssetDao.create(None, assetKind, safeOriginalName, contentType, ext, sourceSize, "")) {
@@ -256,13 +279,13 @@ public class PluginCoverUtils {
                 let finalPath = FileUtils.joinPath(assetRoot, "${assetId}.${ext}")
                 try {
                     copy(Path(sourcePath), to: Path(finalPath), overwrite: true)
-                    return (true, assetId, "")
+                    return PluginAssetInstallResult.Ok(PluginAssetInstallData(assetId, ""))
                 } catch (e: Exception) {
                     let _ = AssetDao.deleteById(assetId)
-                    return (false, 0, "failed to copy plugin asset file: ${e.message}")
+                    return PluginAssetInstallResult.Err("failed to copy plugin asset file: ${e.message}")
                 }
             case None =>
-                return (false, 0, "failed to create asset record")
+                return PluginAssetInstallResult.Err("failed to create asset record")
         }
     }
 

@@ -920,17 +920,17 @@ public class WasmTaskRunner {
             "${safeOwnerId}_${normalizedKey}.avif"
         }
 
-        let (okInstall, newAssetId, _, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
-            value,
-            namespace,
-            assetKind,
-            outputName
-        )
-        if (okInstall && newAssetId > 0) {
-            return newAssetId.toString()
+        match (PluginTaskService.installCoverAssetFromPluginPath(value, namespace, assetKind, outputName)) {
+            case PluginAssetInstallResult.Ok(data) =>
+                if (data.assetId > 0) {
+                    return data.assetId.toString()
+                }
+            case PluginAssetInstallResult.Err(err) =>
+                TaskIO.appendLog(taskId, "WARN: preview asset install failed owner=${safeOwnerId} key=${normalizedKey} namespace=${namespace} error=${err}")
+                return ""
         }
 
-        TaskIO.appendLog(taskId, "WARN: preview asset install failed owner=${safeOwnerId} key=${normalizedKey} namespace=${namespace} error=${installErr}")
+        TaskIO.appendLog(taskId, "WARN: preview asset install failed owner=${safeOwnerId} key=${normalizedKey} namespace=${namespace} error=invalid asset id")
         return ""
     }
 

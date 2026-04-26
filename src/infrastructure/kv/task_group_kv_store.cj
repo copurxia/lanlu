@@ -40,17 +40,14 @@ public class TaskGroupKVStore <: TaskKVStore {
     }
 
     public static func getInstance(): TaskGroupKVStore {
-        instanceMutex.lock()
-        try {
+        return synchronized(instanceMutex) {
             match (instance) {
-                case Some(s) => return s
+                case Some(s) => s
                 case None =>
                     let s = TaskGroupKVStore()
                     instance = Some(s)
-                    return s
+                    s
             }
-        } finally {
-            instanceMutex.unlock()
         }
     }
 
@@ -60,14 +57,11 @@ public class TaskGroupKVStore <: TaskKVStore {
             return
         }
 
-        refCountMutex.lock()
-        try {
+        synchronized(refCountMutex) {
             match (groupRefCounts.get(normalizedGroupId)) {
                 case Some(count) => groupRefCounts[normalizedGroupId] = count + 1
                 case None => groupRefCounts[normalizedGroupId] = 1
             }
-        } finally {
-            refCountMutex.unlock()
         }
     }
 
@@ -78,8 +72,7 @@ public class TaskGroupKVStore <: TaskKVStore {
         }
 
         var shouldDeleteGroup = false
-        refCountMutex.lock()
-        try {
+        synchronized(refCountMutex) {
             match (groupRefCounts.get(normalizedGroupId)) {
                 case Some(count) =>
                     if (count <= 1) {
@@ -90,8 +83,6 @@ public class TaskGroupKVStore <: TaskKVStore {
                     }
                 case None => ()
             }
-        } finally {
-            refCountMutex.unlock()
         }
 
         if (shouldDeleteGroup && !TaskDao.existsNonTerminalTasksByGroupId(normalizedGroupId)) {
@@ -138,11 +129,8 @@ public class TaskGroupKVStore <: TaskKVStore {
             logger.warn("task kv group delete failed", ("group_id", normalizedGroupId))
         }
 
-        refCountMutex.lock()
-        try {
+        synchronized(refCountMutex) {
             groupRefCounts.remove(normalizedGroupId)
-        } finally {
-            refCountMutex.unlock()
         }
     }
 
@@ -606,11 +594,8 @@ public class TaskGroupKVStore <: TaskKVStore {
             return false
         }
 
-        refCountMutex.lock()
-        try {
-            return groupRefCounts.contains(normalizedGroupId)
-        } finally {
-            refCountMutex.unlock()
+        return synchronized(refCountMutex) {
+            groupRefCounts.contains(normalizedGroupId)
         }
     }
 

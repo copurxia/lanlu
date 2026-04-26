@@ -1104,16 +1104,16 @@ public class MetadataPatchService {
             "${archiveId}_${key}.avif"
         }
 
-        let (okInstall, newAssetId, newThumbhash, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
-            value,
-            pluginNamespace,
-            assetKind,
-            outputName
-        )
-        if (!(okInstall && newAssetId > 0)) {
-            logWarn(taskId, "failed to install archive ${key} from plugin result archive=${archiveId}: ${installErr}")
-            return
+        let installResult = PluginTaskService.installCoverAssetFromPluginPath(value, pluginNamespace, assetKind, outputName)
+        let installed = match (installResult) {
+            case PluginAssetInstallResult.Ok(data) => data
+            case PluginAssetInstallResult.Err(err) =>
+                logWarn(taskId, "failed to install archive ${key} from plugin result archive=${archiveId}: ${err}")
+                return
         }
+        let newAssetId = installed.assetId
+        let newThumbhash = installed.thumbhash
+        if (newAssetId <= 0) { return }
 
         let updated = MetadataDao.setMetadataAssetId("archive", archiveId, key, newAssetId)
         if (updated) {
@@ -1184,16 +1184,15 @@ public class MetadataPatchService {
             "${tankoubonId}_${key}.avif"
         }
 
-        let (okInstall, newAssetId, _, installErr) = PluginTaskService.installCoverAssetFromPluginPath(
-            value,
-            pluginNamespace,
-            assetKind,
-            outputName
-        )
-        if (!(okInstall && newAssetId > 0)) {
-            logWarn(taskId, "failed to install tankoubon ${key} from plugin result tankoubon=${tankoubonId}: ${installErr}")
-            return
+        let installResult = PluginTaskService.installCoverAssetFromPluginPath(value, pluginNamespace, assetKind, outputName)
+        let installed = match (installResult) {
+            case PluginAssetInstallResult.Ok(data) => data
+            case PluginAssetInstallResult.Err(err) =>
+                logWarn(taskId, "failed to install tankoubon ${key} from plugin result tankoubon=${tankoubonId}: ${err}")
+                return
         }
+        let newAssetId = installed.assetId
+        if (newAssetId <= 0) { return }
 
         let updated = MetadataDao.setMetadataAssetId("tankoubon", tankoubonId, key, newAssetId)
         if (updated) {
@@ -1423,21 +1422,23 @@ public class MetadataPatchService {
                     } else {
                         DateTime.now().toUnixTimeStamp().toMilliseconds().toString()
                     }
-                    let (okThumb, newThumbAssetId, newThumbHash, thumbErr) = PluginTaskService.installCoverAssetFromPluginPath(
+                    match (PluginTaskService.installCoverAssetFromPluginPath(
                         patchThumb,
                         pluginNamespace,
                         "page_thumb",
                         "${archiveId}_${pageToken}.avif"
-                    )
-                    if (okThumb && newThumbAssetId > 0) {
-                        item.thumb_asset_id = newThumbAssetId
-                        item.thumbhash = newThumbHash
-                        cleanupNewAssetIds.add(newThumbAssetId)
-                        if (oldThumbAssetId > 0 && oldThumbAssetId != newThumbAssetId) {
-                            deleteOldAssetIds.add(oldThumbAssetId)
-                        }
-                    } else {
-                        logWarn(taskId, "failed to install page thumb from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}): ${thumbErr}")
+                    )) {
+                        case PluginAssetInstallResult.Ok(data) =>
+                            if (data.assetId > 0) {
+                                item.thumb_asset_id = data.assetId
+                                item.thumbhash = data.thumbhash
+                                cleanupNewAssetIds.add(data.assetId)
+                                if (oldThumbAssetId > 0 && oldThumbAssetId != data.assetId) {
+                                    deleteOldAssetIds.add(oldThumbAssetId)
+                                }
+                            }
+                        case PluginAssetInstallResult.Err(err) =>
+                            logWarn(taskId, "failed to install page thumb from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}): ${err}")
                     }
                 } else {
                     logWarn(taskId, "skip page thumb patch without metadata namespace archive=${archiveId}, path=${entryPath}")
@@ -1496,18 +1497,19 @@ public class MetadataPatchService {
                         } else {
                             "${archiveId}_${pageToken}_${slot}"
                         }
-                        let (okAttachment, newAttachmentAssetId, attachmentErr) = PluginTaskService.installRawAssetFromPluginPath(
+                        match (PluginTaskService.installRawAssetFromPluginPath(
                             attachmentPath,
                             pluginNamespace,
                             "page_attachment_${slot}",
                             outputName
-                        )
-                        if (okAttachment && newAttachmentAssetId > 0) {
-                            resolvedAssetId = newAttachmentAssetId
-                            cleanupNewAssetIds.add(newAttachmentAssetId)
-                        } else {
-                            logWarn(taskId, "failed to install page attachment from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}, name=${name}): ${attachmentErr}")
-                            continue
+                        )) {
+                            case PluginAssetInstallResult.Ok(data) =>
+                                if (data.assetId <= 0) { continue }
+                                resolvedAssetId = data.assetId
+                                cleanupNewAssetIds.add(data.assetId)
+                            case PluginAssetInstallResult.Err(err) =>
+                                logWarn(taskId, "failed to install page attachment from plugin result (archive=${archiveId}, page=${item.page_number.toString()}, path=${entryPath}, name=${name}): ${err}")
+                                continue
                         }
                     }
 

@@ -85,11 +85,21 @@ public class PluginTaskService {
         return "wasm_task"
     }
 
-    public static func installCoverAssetFromPluginPath(coverPath: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String, String) {
+    public static func installCoverAssetFromPluginPath(
+        coverPath: String,
+        pluginNamespace: String,
+        assetKind: String,
+        originalName: String
+    ): PluginAssetInstallResult {
         return PluginCoverUtils.installCoverAssetFromPluginPath(coverPath, pluginNamespace, assetKind, originalName)
     }
 
-    public static func installRawAssetFromPluginPath(path: String, pluginNamespace: String, assetKind: String, originalName: String): (Bool, Int64, String) {
+    public static func installRawAssetFromPluginPath(
+        path: String,
+        pluginNamespace: String,
+        assetKind: String,
+        originalName: String
+    ): PluginAssetInstallResult {
         return PluginCoverUtils.installRawAssetFromPluginPath(path, pluginNamespace, assetKind, originalName)
     }
 

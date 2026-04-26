@@ -53,78 +53,64 @@ public class TaskEventHub {
     }
 
     public static func getInstance(): TaskEventHub {
-        instanceMutex.lock()
-        match (instance) {
-            case Some(s) =>
-                instanceMutex.unlock()
-                return s
-            case None =>
-                let hub = TaskEventHub()
-                instance = Some(hub)
-                instanceMutex.unlock()
-                return hub
+        return synchronized(instanceMutex) {
+            match (instance) {
+                case Some(s) => s
+                case None =>
+                    let hub = TaskEventHub()
+                    instance = Some(hub)
+                    hub
+            }
         }
     }
 
     public func currentRevision(taskId: Int64): Int64 {
         let topic = getOrCreateTopic(taskId)
-        topic.mutex.lock()
-        try {
+        return synchronized(topic.mutex) {
             topic.lastTouchedMillis = TaskEventHub.nowMillis()
-            return topic.revision
-        } finally {
-            topic.mutex.unlock()
+            topic.revision
         }
     }
 
     public func awaitNext(taskId: Int64, lastRevision: Int64, timeoutMillis: Int64): TaskEventSnapshot {
         let topic = getOrCreateTopic(taskId)
-        topic.mutex.lock()
-        try {
+        return synchronized(topic.mutex) {
             topic.lastTouchedMillis = TaskEventHub.nowMillis()
             if (topic.revision != lastRevision) {
-                return TaskEventSnapshot(topic.revision, true, eventType: topic.lastEventType)
+                TaskEventSnapshot(topic.revision, true, eventType: topic.lastEventType)
+            } else {
+                let waitMillis = if (timeoutMillis <= 0) { 1 } else { timeoutMillis }
+                let _ = topic.cond.waitUntil(
+                    { => topic.revision != lastRevision },
+                    timeout: Duration.millisecond * waitMillis
+                )
+                topic.lastTouchedMillis = TaskEventHub.nowMillis()
+                TaskEventSnapshot(topic.revision, topic.revision != lastRevision, eventType: topic.lastEventType)
             }
-
-            let waitMillis = if (timeoutMillis <= 0) { 1 } else { timeoutMillis }
-            let _ = topic.cond.waitUntil(
-                { => topic.revision != lastRevision },
-                timeout: Duration.millisecond * waitMillis
-            )
-            topic.lastTouchedMillis = TaskEventHub.nowMillis()
-            return TaskEventSnapshot(topic.revision, topic.revision != lastRevision, eventType: topic.lastEventType)
-        } finally {
-            topic.mutex.unlock()
         }
     }
 
     public func currentListRevision(): Int64 {
-        listTopic.mutex.lock()
-        try {
+        return synchronized(listTopic.mutex) {
             listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
-            return listTopic.revision
-        } finally {
-            listTopic.mutex.unlock()
+            listTopic.revision
         }
     }
 
     public func awaitListNext(lastRevision: Int64, timeoutMillis: Int64): TaskEventSnapshot {
-        listTopic.mutex.lock()
-        try {
+        return synchronized(listTopic.mutex) {
             listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
             if (listTopic.revision != lastRevision) {
-                return TaskEventSnapshot(listTopic.revision, true, eventType: listTopic.lastEventType)
+                TaskEventSnapshot(listTopic.revision, true, eventType: listTopic.lastEventType)
+            } else {
+                let waitMillis = if (timeoutMillis <= 0) { 1 } else { timeoutMillis }
+                let _ = listTopic.cond.waitUntil(
+                    { => listTopic.revision != lastRevision },
+                    timeout: Duration.millisecond * waitMillis
+                )
+                listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
+                TaskEventSnapshot(listTopic.revision, listTopic.revision != lastRevision, eventType: listTopic.lastEventType)
             }
-
-            let waitMillis = if (timeoutMillis <= 0) { 1 } else { timeoutMillis }
-            let _ = listTopic.cond.waitUntil(
-                { => listTopic.revision != lastRevision },
-                timeout: Duration.millisecond * waitMillis
-            )
-            listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
-            return TaskEventSnapshot(listTopic.revision, listTopic.revision != lastRevision, eventType: listTopic.lastEventType)
-        } finally {
-            listTopic.mutex.unlock()
         }
     }
 
@@ -158,43 +144,34 @@ public class TaskEventHub {
 
     private func publish(taskId: Int64, eventType: String): Unit {
         let topic = getOrCreateTopic(taskId)
-        topic.mutex.lock()
-        try {
+        synchronized(topic.mutex) {
             topic.revision += 1
             topic.lastTouchedMillis = TaskEventHub.nowMillis()
             topic.lastEventType = eventType
             topic.cond.notifyAll()
-        } finally {
-            topic.mutex.unlock()
         }
         publishList(eventType)
     }
 
     private func publishList(eventType: String): Unit {
-        listTopic.mutex.lock()
-        try {
+        synchronized(listTopic.mutex) {
             listTopic.revision += 1
             listTopic.lastTouchedMillis = TaskEventHub.nowMillis()
             listTopic.lastEventType = eventType
             listTopic.cond.notifyAll()
-        } finally {
-            listTopic.mutex.unlock()
         }
     }
 
     private func getOrCreateTopic(taskId: Int64): TaskEventTopic {
-        topicsMutex.lock()
-        try {
+        return synchronized(topicsMutex) {
             pruneExpiredTopicsLocked()
             match (topics.get(taskId)) {
-                case Some(topic) => return topic
+                case Some(topic) => topic
                 case None =>
                     let topic = TaskEventTopic()
                     topics[taskId] = topic
-                    return topic
+                    topic
             }
-        } finally {
-            topicsMutex.unlock()
         }
     }
 

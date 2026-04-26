@@ -11,6 +11,23 @@ import vips_ffi.*
  * libvips handles decoding/resizing/cropping, and libavif encodes the final
  * RGBA pixels to AVIF so alpha is preserved for transparent PNG inputs.
  */
+public class RgbaPixelsData {
+    public let pixels: Array<UInt8>
+    public let width: Int32
+    public let height: Int32
+
+    public init(pixels: Array<UInt8>, width: Int32, height: Int32) {
+        this.pixels = pixels
+        this.width = width
+        this.height = height
+    }
+}
+
+public enum ImageConvertResult<T> {
+    | Ok(T)
+    | Err(String)
+}
+
 public class VipsConvertUtils {
     private static let initMutex: Mutex = Mutex()
     private static var initDone: Bool = false
@@ -56,7 +73,7 @@ public class VipsConvertUtils {
         VipsApi.unref(img)
     }
 
-    private static func normalizeToRgbaU8(img: VipsImagePtr): (Bool, VipsImagePtr, String) {
+    private static func normalizeToRgbaU8(img: VipsImagePtr): ImageConvertResult<VipsImagePtr> {
         // Best-effort normalize for hashing:
         // - colourspace -> sRGB
         // - cast -> UCHAR (8-bit)
@@ -69,21 +86,21 @@ public class VipsConvertUtils {
         let csRc = VipsApi.colourspaceSRgb(img, CPointer<VipsImagePtr>(inout srgb))
         if (csRc != 0 || srgb.isNull()) {
             let err = takeVipsError()
-            return (false, CPointer<VipsImage>(), "libvips colourspace failed: ${err}")
+            return ImageConvertResult<VipsImagePtr>.Err("libvips colourspace failed: ${err}")
         }
 
         let castRc = VipsApi.castUChar(srgb, CPointer<VipsImagePtr>(inout u8))
         if (castRc != 0 || u8.isNull()) {
             let err = takeVipsError()
             unref(srgb)
-            return (false, CPointer<VipsImage>(), "libvips cast_uchar failed: ${err}")
+            return ImageConvertResult<VipsImagePtr>.Err("libvips cast_uchar failed: ${err}")
         }
 
         let bands = VipsApi.imageBands(u8)
         if (bands == 4) {
             // Caller takes ownership of u8; keep srgb alive until u8 created.
             unref(srgb)
-            return (true, u8, "")
+            return ImageConvertResult<VipsImagePtr>.Ok(u8)
         }
 
         if (bands == 3) {
@@ -92,9 +109,9 @@ public class VipsConvertUtils {
             unref(srgb)
             if (alphaRc != 0 || rgba.isNull()) {
                 let err = takeVipsError()
-                return (false, CPointer<VipsImage>(), "libvips add alpha failed: ${err}")
+                return ImageConvertResult<VipsImagePtr>.Err("libvips add alpha failed: ${err}")
             }
-            return (true, rgba, "")
+            return ImageConvertResult<VipsImagePtr>.Ok(rgba)
         }
 
         if (bands == 2) {
@@ -107,7 +124,7 @@ public class VipsConvertUtils {
                 let err = takeVipsError()
                 unref(u8)
                 unref(srgb)
-                return (false, CPointer<VipsImage>(), "libvips extract grey band failed: ${err}")
+                return ImageConvertResult<VipsImagePtr>.Err("libvips extract grey band failed: ${err}")
             }
 
             let alphaRc = VipsApi.extractBand(u8, CPointer<VipsImagePtr>(inout alpha), 1)
@@ -116,7 +133,7 @@ public class VipsConvertUtils {
                 unref(grey)
                 unref(u8)
                 unref(srgb)
-                return (false, CPointer<VipsImage>(), "libvips extract alpha band failed: ${err}")
+                return ImageConvertResult<VipsImagePtr>.Err("libvips extract alpha band failed: ${err}")
             }
 
             let arr = unsafe { LibC.malloc<VipsImagePtr>(count: 4) }
@@ -134,9 +151,9 @@ public class VipsConvertUtils {
             unref(srgb)
             if (joinRc != 0 || rgba.isNull()) {
                 let err = takeVipsError()
-                return (false, CPointer<VipsImage>(), "libvips bandjoin grey+alpha->rgba failed: ${err}")
+                return ImageConvertResult<VipsImagePtr>.Err("libvips bandjoin grey+alpha->rgba failed: ${err}")
             }
-            return (true, rgba, "")
+            return ImageConvertResult<VipsImagePtr>.Ok(rgba)
         }
 
         if (bands == 1) {
@@ -153,34 +170,37 @@ public class VipsConvertUtils {
             unref(srgb)
             if (joinRc != 0 || rgb.isNull()) {
                 let err = takeVipsError()
-                return (false, CPointer<VipsImage>(), "libvips bandjoin grey->rgb failed: ${err}")
+                return ImageConvertResult<VipsImagePtr>.Err("libvips bandjoin grey->rgb failed: ${err}")
             }
             let alphaRc = VipsApi.bandjoinConstAlpha255(rgb, CPointer<VipsImagePtr>(inout rgba))
             unref(rgb)
             if (alphaRc != 0 || rgba.isNull()) {
                 let err = takeVipsError()
-                return (false, CPointer<VipsImage>(), "libvips add alpha failed: ${err}")
+                return ImageConvertResult<VipsImagePtr>.Err("libvips add alpha failed: ${err}")
             }
-            return (true, rgba, "")
+            return ImageConvertResult<VipsImagePtr>.Ok(rgba)
         }
 
         // Unknown band count.
         unref(u8)
         unref(srgb)
-        return (false, CPointer<VipsImage>(), "libvips unsupported bands for rgba normalization: ${bands}")
+        return ImageConvertResult<VipsImagePtr>.Err("libvips unsupported bands for rgba normalization: ${bands}")
     }
 
-    private static func extractRgbaPixelsFromImage(img: VipsImagePtr): (Bool, Array<UInt8>, Int32, Int32, String) {
-        let (okNorm, rgbaImg, normErr) = normalizeToRgbaU8(img)
-        if (!okNorm || rgbaImg.isNull()) {
-            return (false, Array<UInt8>(), 0i32, 0i32, normErr)
+    private static func extractRgbaPixelsFromImage(img: VipsImagePtr): ImageConvertResult<RgbaPixelsData> {
+        let rgbaImg = match (normalizeToRgbaU8(img)) {
+            case ImageConvertResult<VipsImagePtr>.Ok(value) => value
+            case ImageConvertResult<VipsImagePtr>.Err(err) => return ImageConvertResult<RgbaPixelsData>.Err(err)
+        }
+        if (rgbaImg.isNull()) {
+            return ImageConvertResult<RgbaPixelsData>.Err("libvips rgba normalization returned null image")
         }
 
         let w = VipsApi.imageWidth(rgbaImg)
         let h = VipsApi.imageHeight(rgbaImg)
         if (w <= 0 || h <= 0) {
             unref(rgbaImg)
-            return (false, Array<UInt8>(), 0i32, 0i32, "libvips invalid rgba dimensions: ${w}x${h}")
+            return ImageConvertResult<RgbaPixelsData>.Err("libvips invalid rgba dimensions: ${w}x${h}")
         }
 
         var size: UIntNative = 0
@@ -188,19 +208,19 @@ public class VipsConvertUtils {
         unref(rgbaImg)
         if (mem.isNull() || size == 0) {
             let err = takeVipsError()
-            return (false, Array<UInt8>(), 0i32, 0i32, "libvips write_to_memory failed: ${err}")
+            return ImageConvertResult<RgbaPixelsData>.Err("libvips write_to_memory failed: ${err}")
         }
 
         let n = Int64(size)
         let expected = Int64(w) * Int64(h) * 4
         if (n != expected) {
             VipsApi.free(mem)
-            return (false, Array<UInt8>(), 0i32, 0i32, "libvips rgba buffer size mismatch: ${n} != ${expected}")
+            return ImageConvertResult<RgbaPixelsData>.Err("libvips rgba buffer size mismatch: ${n} != ${expected}")
         }
         let maxPixelBytes: Int64 = 64 * 1024 * 1024
         if (n > maxPixelBytes) {
             VipsApi.free(mem)
-            return (false, Array<UInt8>(), 0i32, 0i32, "libvips image too large: ${n} bytes exceeds ${maxPixelBytes} limit")
+            return ImageConvertResult<RgbaPixelsData>.Err("libvips image too large: ${n} bytes exceeds ${maxPixelBytes} limit")
         }
         var pixels = Array<UInt8>(n, repeat: 0u8)
         try {
@@ -217,29 +237,29 @@ public class VipsConvertUtils {
             VipsApi.free(mem)
         }
 
-        return (true, pixels, w, h, "")
+        return ImageConvertResult<RgbaPixelsData>.Ok(RgbaPixelsData(pixels, w, h))
     }
 
-    private static func hashRgbaPixelsFromImage(img: VipsImagePtr): (Bool, String, String) {
-        let (okPixels, pixels, _, _, err) = extractRgbaPixelsFromImage(img)
-        if (!okPixels) {
-            return (false, "", err)
+    private static func hashRgbaPixelsFromImage(img: VipsImagePtr): ImageConvertResult<String> {
+        let rgba = match (extractRgbaPixelsFromImage(img)) {
+            case ImageConvertResult<RgbaPixelsData>.Ok(value) => value
+            case ImageConvertResult<RgbaPixelsData>.Err(err) => return ImageConvertResult<String>.Err(err)
         }
 
-        let hash = ThumbHashUtils.calculateThumbHashFromRgbaPixels(pixels)
-        return (true, hash, "")
+        let hash = ThumbHashUtils.calculateThumbHashFromRgbaPixels(rgba.pixels)
+        return ImageConvertResult<String>.Ok(hash)
     }
 
-    private static func encodeAvifFromImage(img: VipsImagePtr, outputPath: String): (Bool, String) {
-        let (okPixels, pixels, w, h, err) = extractRgbaPixelsFromImage(img)
-        if (!okPixels) {
-            return (false, err)
+    private static func encodeAvifFromImage(img: VipsImagePtr, outputPath: String): ImageConvertResult<Unit> {
+        let rgba = match (extractRgbaPixelsFromImage(img)) {
+            case ImageConvertResult<RgbaPixelsData>.Ok(value) => value
+            case ImageConvertResult<RgbaPixelsData>.Err(err) => return ImageConvertResult<Unit>.Err(err)
         }
 
-        if (!AvifEncoder.encodeRGBAFile(UInt32(w), UInt32(h), pixels, outputPath)) {
-            return (false, "libavif encode failed")
+        if (!AvifEncoder.encodeRGBAFile(UInt32(rgba.width), UInt32(rgba.height), rgba.pixels, outputPath)) {
+            return ImageConvertResult<Unit>.Err("libavif encode failed")
         }
-        return (true, "")
+        return ImageConvertResult<Unit>.Ok(())
     }
 
     /**
@@ -305,11 +325,10 @@ public class VipsConvertUtils {
                 return Some(Array<UInt8>())
             }
 
-            let (okPixels, pixels, _, _, _) = extractRgbaPixelsFromImage(cropImg)
-            if (!okPixels) {
-                return Some(Array<UInt8>())
+            match (extractRgbaPixelsFromImage(cropImg)) {
+                case ImageConvertResult<RgbaPixelsData>.Ok(data) => return Some(data.pixels)
+                case ImageConvertResult<RgbaPixelsData>.Err(_) => return Some(Array<UInt8>())
             }
-            return Some(pixels)
         } catch (_: Exception) {
             return Some(Array<UInt8>())
         } finally {
@@ -359,12 +378,14 @@ public class VipsConvertUtils {
                 }
             }
 
-            let (okPixels, pixels, w, h, _) = extractRgbaPixelsFromImage(outImg)
-            unref(outImg)
-            if (!okPixels) {
-                return Some((Array<UInt8>(), 0i32, 0i32))
+            let pixelsData = match (extractRgbaPixelsFromImage(outImg)) {
+                case ImageConvertResult<RgbaPixelsData>.Ok(data) => data
+                case ImageConvertResult<RgbaPixelsData>.Err(_) =>
+                    unref(outImg)
+                    return Some((Array<UInt8>(), 0i32, 0i32))
             }
-            return Some((pixels, w, h))
+            unref(outImg)
+            return Some((pixelsData.pixels, pixelsData.width, pixelsData.height))
         } catch (_: Exception) {
             unref(outImg)
             return Some((Array<UInt8>(), 0i32, 0i32))
@@ -462,9 +483,9 @@ public class VipsConvertUtils {
                 cropImg
             }
 
-            let (okEncode, encodeErr) = encodeAvifFromImage(finalImg, outputPath)
-            if (!okEncode) {
-                return Some(ProcessResultData(false, "", encodeErr))
+            match (encodeAvifFromImage(finalImg, outputPath)) {
+                case ImageConvertResult<Unit>.Ok(_) => ()
+                case ImageConvertResult<Unit>.Err(err) => return Some(ProcessResultData(false, "", err))
             }
 
             return Some(ProcessResultData(true, outputPath, ""))
@@ -563,20 +584,23 @@ public class VipsConvertUtils {
             }
 
             // Compute thumbhash before writing, from the final pixels.
-            let (okHash, thumbHash, hashErr) = hashRgbaPixelsFromImage(finalImg)
-            if (!okHash) {
-                // Soft-fail: still write AVIF so caller can fall back to old hash path if needed.
-                // Keep hashErr in ProcessResultData.error for debugging.
-                let (okEncode, encodeErr) = encodeAvifFromImage(finalImg, outputPath)
-                if (!okEncode) {
-                    return Some((ProcessResultData(false, "", encodeErr), ""))
+            var thumbHash = ""
+            var hashErr = ""
+            match (hashRgbaPixelsFromImage(finalImg)) {
+                case ImageConvertResult<String>.Ok(value) => thumbHash = value
+                case ImageConvertResult<String>.Err(err) => hashErr = err
+            }
+            if (thumbHash.size == 0) {
+                match (encodeAvifFromImage(finalImg, outputPath)) {
+                    case ImageConvertResult<Unit>.Ok(_) => ()
+                    case ImageConvertResult<Unit>.Err(err) => return Some((ProcessResultData(false, "", err), ""))
                 }
                 return Some((ProcessResultData(true, outputPath, "thumbhash compute failed: ${hashErr}"), ""))
             }
 
-            let (okEncode, encodeErr) = encodeAvifFromImage(finalImg, outputPath)
-            if (!okEncode) {
-                return Some((ProcessResultData(false, "", encodeErr), ""))
+            match (encodeAvifFromImage(finalImg, outputPath)) {
+                case ImageConvertResult<Unit>.Ok(_) => ()
+                case ImageConvertResult<Unit>.Err(err) => return Some((ProcessResultData(false, "", err), ""))
             }
 
             return Some((ProcessResultData(true, outputPath, ""), thumbHash))
@@ -654,9 +678,9 @@ public class VipsConvertUtils {
                 return Some(ProcessResultData(false, "", "libvips crop failed: ${err}"))
             }
 
-            let (okEncode, encodeErr) = encodeAvifFromImage(cropImg, outputPath)
-            if (!okEncode) {
-                return Some(ProcessResultData(false, "", encodeErr))
+            match (encodeAvifFromImage(cropImg, outputPath)) {
+                case ImageConvertResult<Unit>.Ok(_) => ()
+                case ImageConvertResult<Unit>.Err(err) => return Some(ProcessResultData(false, "", err))
             }
 
             return Some(ProcessResultData(true, outputPath, ""))
@@ -729,12 +753,17 @@ public class VipsConvertUtils {
                 return Some((ProcessResultData(false, "", "libvips crop failed: ${err}"), ""))
             }
 
-            let (okHash, thumbHash, hashErr) = hashRgbaPixelsFromImage(cropImg)
-            let (okEncode, encodeErr) = encodeAvifFromImage(cropImg, outputPath)
-            if (!okEncode) {
-                return Some((ProcessResultData(false, "", encodeErr), ""))
+            var thumbHash = ""
+            var hashErr = ""
+            match (hashRgbaPixelsFromImage(cropImg)) {
+                case ImageConvertResult<String>.Ok(value) => thumbHash = value
+                case ImageConvertResult<String>.Err(err) => hashErr = err
             }
-            if (!okHash) {
+            match (encodeAvifFromImage(cropImg, outputPath)) {
+                case ImageConvertResult<Unit>.Ok(_) => ()
+                case ImageConvertResult<Unit>.Err(err) => return Some((ProcessResultData(false, "", err), ""))
+            }
+            if (thumbHash.size == 0) {
                 return Some((ProcessResultData(true, outputPath, "thumbhash compute failed: ${hashErr}"), ""))
             }
             return Some((ProcessResultData(true, outputPath, ""), thumbHash))
