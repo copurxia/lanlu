@@ -279,14 +279,6 @@ public class RocksDb {
         return UIntNative(memoryMb) * UIntNative(1024) * UIntNative(1024)
     }
 
-    public func get(key: String): (Bool, Option<String>, String) {
-        match (getResult(key)) {
-            case RocksDbOperationResult<String>.Ok(value) => return (true, Some(value), "")
-            case RocksDbOperationResult<String>.NotFound => return (true, None, "")
-            case RocksDbOperationResult<String>.Err(error) => return (false, None, error.message)
-        }
-    }
-
     public func getResult(key: String): RocksDbOperationResult<String> {
         if (closed) {
             return RocksDbOperationResult<String>.Err(RocksDbError(RocksDbErrorKind.Closed, "rocksdb is closed"))
@@ -324,7 +316,7 @@ public class RocksDb {
         return RocksDbOperationResult<String>.Ok(String.fromUtf8(out))
     }
 
-    public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
+    private func multiGetTuple(keys: Array<String>): (Bool, Array<Option<String>>, String) {
         if (closed) {
             return (false, [], "rocksdb is closed")
         }
@@ -398,7 +390,15 @@ public class RocksDb {
         }
     }
 
-    public func put(key: String, value: String): (Bool, String) {
+    public func multiGetResult(keys: Array<String>): RocksDbOperationResult<Array<Option<String>>> {
+        let (ok, values, err) = multiGetTuple(keys)
+        if (ok) {
+            return RocksDbOperationResult<Array<Option<String>>>.Ok(values)
+        }
+        return RocksDbOperationResult<Array<Option<String>>>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func putTuple(key: String, value: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb is closed")
         }
@@ -429,6 +429,14 @@ public class RocksDb {
             }
         }
         return (true, "")
+    }
+
+    public func putResult(key: String, value: String): RocksDbOperationResult<Unit> {
+        let (ok, err) = putTuple(key, value)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
     }
 
     public func merge(key: String, value: String): (Bool, String) {
@@ -464,7 +472,7 @@ public class RocksDb {
         return (true, "")
     }
 
-    public func delete(key: String): (Bool, String) {
+    private func deleteTuple(key: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb is closed")
         }
@@ -492,15 +500,23 @@ public class RocksDb {
         return (true, "")
     }
 
-    public func deleteRange(startKey: String, endKey: String): (Bool, String) {
-        return writeBatch([], [], [(startKey, endKey)], [])
+    public func deleteResult(key: String): RocksDbOperationResult<Unit> {
+        let (ok, err) = deleteTuple(key)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
     }
 
-    public func deleteMany(keys: Array<String>): (Bool, String) {
-        return writeBatch([], keys, [], [])
+    public func deleteRangeResult(startKey: String, endKey: String): RocksDbOperationResult<Unit> {
+        return writeBatchResult([], [], [(startKey, endKey)], [])
     }
 
-    public func writeBatch(
+    public func deleteManyResult(keys: Array<String>): RocksDbOperationResult<Unit> {
+        return writeBatchResult([], keys, [], [])
+    }
+
+    private func writeBatchTuple(
         puts: Array<(String, String)>,
         deletes: Array<String>,
         deleteRanges: Array<(String, String)>,
@@ -609,7 +625,20 @@ public class RocksDb {
         }
     }
 
-    public func scanByPrefix(prefix: String): (Bool, Array<(String, String)>, String) {
+    public func writeBatchResult(
+        puts: Array<(String, String)>,
+        deletes: Array<String>,
+        deleteRanges: Array<(String, String)>,
+        merges: Array<(String, String)>
+    ): RocksDbOperationResult<Unit> {
+        let (ok, err) = writeBatchTuple(puts, deletes, deleteRanges, merges)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func scanByPrefixTuple(prefix: String): (Bool, Array<(String, String)>, String) {
         if (closed) {
             return (false, [], "rocksdb is closed")
         }
@@ -720,6 +749,14 @@ public class RocksDb {
         }
     }
 
+    public func scanByPrefixResult(prefix: String): RocksDbOperationResult<Array<(String, String)>> {
+        let (ok, pairs, err) = scanByPrefixTuple(prefix)
+        if (ok) {
+            return RocksDbOperationResult<Array<(String, String)>>.Ok(pairs)
+        }
+        return RocksDbOperationResult<Array<(String, String)>>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
     public func close(): Unit {
         if (closed) {
             return
@@ -798,9 +835,9 @@ public class RocksDbTxn <: Resource {
         return RocksDbTxn(txn, readOptions)
     }
 
-    public func get(key: String): (Bool, Option<String>, String) {
+    public func getResult(key: String): RocksDbOperationResult<String> {
         if (closed) {
-            return (false, None, "rocksdb transaction is closed")
+            return RocksDbOperationResult<String>.Err(RocksDbError(RocksDbErrorKind.Closed, "rocksdb transaction is closed"))
         }
 
         var valueLen: UIntNative = 0
@@ -823,18 +860,19 @@ public class RocksDbTxn <: Resource {
         }
 
         if (!errPtr.isNull()) {
-            return (false, None, takeOwnedCString(errPtr))
+            let error = takeOwnedCString(errPtr)
+            return RocksDbOperationResult<String>.Err(RocksDbError(classifyRocksDbError(error), error))
         }
         if (valuePtr.isNull()) {
-            return (true, None, "")
+            return RocksDbOperationResult<String>.NotFound
         }
 
         let out = Array<UInt8>(Int64(valueLen), {i => unsafe { (valuePtr + i).read() }})
         unsafe { rocksdb_free(CPointer<Unit>(valuePtr)) }
-        return (true, Some(String.fromUtf8(out)), "")
+        return RocksDbOperationResult<String>.Ok(String.fromUtf8(out))
     }
 
-    public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
+    private func multiGetTuple(keys: Array<String>): (Bool, Array<Option<String>>, String) {
         if (closed) {
             return (false, [], "rocksdb transaction is closed")
         }
@@ -907,7 +945,15 @@ public class RocksDbTxn <: Resource {
         }
     }
 
-    public func put(key: String, value: String): (Bool, String) {
+    public func multiGetResult(keys: Array<String>): RocksDbOperationResult<Array<Option<String>>> {
+        let (ok, values, err) = multiGetTuple(keys)
+        if (ok) {
+            return RocksDbOperationResult<Array<Option<String>>>.Ok(values)
+        }
+        return RocksDbOperationResult<Array<Option<String>>>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func putTuple(key: String, value: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb transaction is closed")
         }
@@ -938,7 +984,15 @@ public class RocksDbTxn <: Resource {
         return (true, "")
     }
 
-    public func delete(key: String): (Bool, String) {
+    public func putResult(key: String, value: String): RocksDbOperationResult<Unit> {
+        let (ok, err) = putTuple(key, value)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func deleteTuple(key: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb transaction is closed")
         }
@@ -964,7 +1018,15 @@ public class RocksDbTxn <: Resource {
         return (true, "")
     }
 
-    public func commit(): (Bool, String) {
+    public func deleteResult(key: String): RocksDbOperationResult<Unit> {
+        let (ok, err) = deleteTuple(key)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func commitTuple(): (Bool, String) {
         if (closed) {
             return (false, "rocksdb transaction is closed")
         }
@@ -976,7 +1038,15 @@ public class RocksDbTxn <: Resource {
         return (true, "")
     }
 
-    public func rollback(): (Bool, String) {
+    public func commitResult(): RocksDbOperationResult<Unit> {
+        let (ok, err) = commitTuple()
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func rollbackTuple(): (Bool, String) {
         if (closed) {
             return (false, "rocksdb transaction is closed")
         }
@@ -986,6 +1056,14 @@ public class RocksDbTxn <: Resource {
             return (false, takeOwnedCString(errPtr))
         }
         return (true, "")
+    }
+
+    public func rollbackResult(): RocksDbOperationResult<Unit> {
+        let (ok, err) = rollbackTuple()
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
     }
 
     public func close(): Unit {
@@ -1190,14 +1268,6 @@ public class OptimisticRocksDb {
         return compression.toNative()
     }
 
-    public func get(key: String): (Bool, Option<String>, String) {
-        match (getResult(key)) {
-            case RocksDbOperationResult<String>.Ok(value) => return (true, Some(value), "")
-            case RocksDbOperationResult<String>.NotFound => return (true, None, "")
-            case RocksDbOperationResult<String>.Err(error) => return (false, None, error.message)
-        }
-    }
-
     public func getResult(key: String): RocksDbOperationResult<String> {
         if (closed) {
             return RocksDbOperationResult<String>.Err(RocksDbError(RocksDbErrorKind.Closed, "rocksdb optimistic db is closed"))
@@ -1235,7 +1305,7 @@ public class OptimisticRocksDb {
         return RocksDbOperationResult<String>.Ok(String.fromUtf8(out))
     }
 
-    public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
+    private func multiGetTuple(keys: Array<String>): (Bool, Array<Option<String>>, String) {
         if (closed) {
             return (false, [], "rocksdb optimistic db is closed")
         }
@@ -1309,7 +1379,15 @@ public class OptimisticRocksDb {
         }
     }
 
-    public func put(key: String, value: String): (Bool, String) {
+    public func multiGetResult(keys: Array<String>): RocksDbOperationResult<Array<Option<String>>> {
+        let (ok, values, err) = multiGetTuple(keys)
+        if (ok) {
+            return RocksDbOperationResult<Array<Option<String>>>.Ok(values)
+        }
+        return RocksDbOperationResult<Array<Option<String>>>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func putTuple(key: String, value: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb optimistic db is closed")
         }
@@ -1341,7 +1419,15 @@ public class OptimisticRocksDb {
         return (true, "")
     }
 
-    public func delete(key: String): (Bool, String) {
+    public func putResult(key: String, value: String): RocksDbOperationResult<Unit> {
+        let (ok, err) = putTuple(key, value)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func deleteTuple(key: String): (Bool, String) {
         if (closed) {
             return (false, "rocksdb optimistic db is closed")
         }
@@ -1368,7 +1454,15 @@ public class OptimisticRocksDb {
         return (true, "")
     }
 
-    public func writeBatch(
+    public func deleteResult(key: String): RocksDbOperationResult<Unit> {
+        let (ok, err) = deleteTuple(key)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func writeBatchTuple(
         puts: Array<(String, String)>,
         deletes: Array<String>,
         deleteRanges: Array<(String, String)>,
@@ -1477,15 +1571,28 @@ public class OptimisticRocksDb {
         }
     }
 
-    public func deleteRange(startKey: String, endKey: String): (Bool, String) {
-        return writeBatch([], [], [(startKey, endKey)], [])
+    public func writeBatchResult(
+        puts: Array<(String, String)>,
+        deletes: Array<String>,
+        deleteRanges: Array<(String, String)>,
+        merges: Array<(String, String)>
+    ): RocksDbOperationResult<Unit> {
+        let (ok, err) = writeBatchTuple(puts, deletes, deleteRanges, merges)
+        if (ok) {
+            return RocksDbOperationResult<Unit>.Ok(())
+        }
+        return RocksDbOperationResult<Unit>.Err(RocksDbError(classifyRocksDbError(err), err))
     }
 
-    public func deleteMany(keys: Array<String>): (Bool, String) {
-        return writeBatch([], keys, [], [])
+    public func deleteRangeResult(startKey: String, endKey: String): RocksDbOperationResult<Unit> {
+        return writeBatchResult([], [], [(startKey, endKey)], [])
     }
 
-    public func scanByPrefix(prefix: String): (Bool, Array<(String, String)>, String) {
+    public func deleteManyResult(keys: Array<String>): RocksDbOperationResult<Unit> {
+        return writeBatchResult([], keys, [], [])
+    }
+
+    private func scanByPrefixTuple(prefix: String): (Bool, Array<(String, String)>, String) {
         if (closed) {
             return (false, [], "rocksdb optimistic db is closed")
         }
@@ -1596,7 +1703,15 @@ public class OptimisticRocksDb {
         }
     }
 
-    public func beginTransaction(): (Bool, Option<RocksDbTxn>, String) {
+    public func scanByPrefixResult(prefix: String): RocksDbOperationResult<Array<(String, String)>> {
+        let (ok, pairs, err) = scanByPrefixTuple(prefix)
+        if (ok) {
+            return RocksDbOperationResult<Array<(String, String)>>.Ok(pairs)
+        }
+        return RocksDbOperationResult<Array<(String, String)>>.Err(RocksDbError(classifyRocksDbError(err), err))
+    }
+
+    private func beginTransactionTuple(): (Bool, Option<RocksDbTxn>, String) {
         if (closed) {
             return (false, None, "rocksdb optimistic db is closed")
         }
@@ -1622,6 +1737,18 @@ public class OptimisticRocksDb {
             return (true, Some(RocksDbTxn.wrap(txn, readOptions)), "")
         } finally {
             unsafe { rocksdb_optimistictransaction_options_destroy(txnOptions) }
+        }
+    }
+
+    public func beginTransactionResult(): RocksDbOperationResult<RocksDbTxn> {
+        let (ok, txnOpt, err) = beginTransactionTuple()
+        if (!ok) {
+            return RocksDbOperationResult<RocksDbTxn>.Err(RocksDbError(classifyRocksDbError(err), err))
+        }
+        match (txnOpt) {
+            case Some(txn) => return RocksDbOperationResult<RocksDbTxn>.Ok(txn)
+            case None => return RocksDbOperationResult<RocksDbTxn>.Err(
+                RocksDbError(RocksDbErrorKind.FfiFailure, "rocksdb transaction begin returned no transaction"))
         }
     }
 

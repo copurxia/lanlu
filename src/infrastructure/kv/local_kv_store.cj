@@ -48,13 +48,21 @@ private class LocalKvBootstrapConfig {
 public interface LocalKVStore {
     func isAvailable(): Bool
     func get(namespace: String, key: String): Option<String>
+    func getResult(namespace: String, key: String): LocalKVResult<String>
     func multiGet(namespace: String, keys: Array<String>): Array<Option<String>>
+    func multiGetResult(namespace: String, keys: Array<String>): LocalKVResult<Array<Option<String>>>
     func put(namespace: String, key: String, value: String): Bool
+    func putResult(namespace: String, key: String, value: String): LocalKVResult<Unit>
     func putMany(namespace: String, entries: Array<(String, String)>): Bool
+    func putManyResult(namespace: String, entries: Array<(String, String)>): LocalKVResult<Unit>
     func delete(namespace: String, key: String): Bool
+    func deleteResult(namespace: String, key: String): LocalKVResult<Unit>
     func deleteMany(namespace: String, keys: Array<String>): Bool
+    func deleteManyResult(namespace: String, keys: Array<String>): LocalKVResult<Unit>
     func deleteRange(namespace: String, startKey: String, endKey: String): Bool
+    func deleteRangeResult(namespace: String, startKey: String, endKey: String): LocalKVResult<Unit>
     func scan(namespace: String, keyPrefix: String): Array<(String, String)>
+    func scanResult(namespace: String, keyPrefix: String): LocalKVResult<Array<(String, String)>>
 }
 
 public enum LocalKVResult<T> {
@@ -71,17 +79,17 @@ public enum LocalKVResult<T> {
 }
 
 public interface LocalKVTransactionalStore {
-    func beginTransaction(namespace: String): (Bool, Option<LocalKVTransaction>, String)
+    func beginTransactionResult(namespace: String): LocalKVResult<LocalKVTransaction>
     func isConflictError(error: String): Bool
 }
 
 public interface LocalKVTransaction <: Resource {
-    func get(key: String): (Bool, Option<String>, String)
-    func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String)
-    func put(key: String, value: String): (Bool, String)
-    func delete(key: String): (Bool, String)
-    func commit(): (Bool, String)
-    func rollback(): (Bool, String)
+    func getResult(key: String): LocalKVResult<String>
+    func multiGetResult(keys: Array<String>): LocalKVResult<Array<Option<String>>>
+    func putResult(key: String, value: String): LocalKVResult<Unit>
+    func deleteResult(key: String): LocalKVResult<Unit>
+    func commitResult(): LocalKVResult<Unit>
+    func rollbackResult(): LocalKVResult<Unit>
     func close(): Unit
 }
 
@@ -150,122 +158,188 @@ public class RocksDbLocalKVStore <: LocalKVStore {
             ("compose_ms", (t1 - t0).toString())
         )
 
-        let (ok, values, err) = db.multiGet(fullKeys)
+        let result = db.multiGetResult(fullKeys)
         let t2 = DateTime.now().toUnixTimeStamp().toMilliseconds()
 
-        if (!ok) {
-            logger.warn(
-                "[KV] RocksDb multiGet failed",
-                ("namespace", namespace),
-                ("key_count", keys.size.toString()),
-                ("rocksdb_ms", (t2 - t1).toString()),
-                ("error", err)
-            )
-            return Array<Option<String>>(keys.size, {_ => None})
+        match (result) {
+            case RocksDbOperationResult<Array<Option<String>>>.Ok(values) =>
+                let foundCount = values.filter({v => v.isSome()}).size
+                logger.debug(
+                    "[KV] RocksDb multiGet completed",
+                    ("namespace", namespace),
+                    ("key_count", keys.size.toString()),
+                    ("found_count", foundCount.toString()),
+                    ("rocksdb_ms", (t2 - t1).toString()),
+                    ("total_ms", (t2 - t0).toString())
+                )
+                return values
+            case RocksDbOperationResult<Array<Option<String>>>.Err(error) =>
+                logger.warn(
+                    "[KV] RocksDb multiGet failed",
+                    ("namespace", namespace),
+                    ("key_count", keys.size.toString()),
+                    ("rocksdb_ms", (t2 - t1).toString()),
+                    ("error", error.message)
+                )
+                return Array<Option<String>>(keys.size, {_ => None})
+            case RocksDbOperationResult<Array<Option<String>>>.NotFound =>
+                return Array<Option<String>>(keys.size, {_ => None})
         }
+    }
 
-        let foundCount = values.filter({v => v.isSome()}).size
-        logger.debug(
-            "[KV] RocksDb multiGet completed",
-            ("namespace", namespace),
-            ("key_count", keys.size.toString()),
-            ("found_count", foundCount.toString()),
-            ("rocksdb_ms", (t2 - t1).toString()),
-            ("total_ms", (t2 - t0).toString())
-        )
-
-        return values
+    public func multiGetResult(namespace: String, keys: Array<String>): LocalKVResult<Array<Option<String>>> {
+        if (keys.size == 0) {
+            return LocalKVResult<Array<Option<String>>>.Ok([])
+        }
+        let fullKeys = Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])})
+        match (db.multiGetResult(fullKeys)) {
+            case RocksDbOperationResult<Array<Option<String>>>.Ok(values) => return LocalKVResult<Array<Option<String>>>.Ok(values)
+            case RocksDbOperationResult<Array<Option<String>>>.NotFound => return LocalKVResult<Array<Option<String>>>.NotFound
+            case RocksDbOperationResult<Array<Option<String>>>.Err(error) => return LocalKVResult<Array<Option<String>>>.Err(error.message)
+        }
     }
 
     public func put(namespace: String, key: String, value: String): Bool {
-        let (ok, err) = db.put(LocalKVKeys.compose(namespace, key), value)
-        if (!ok) {
-            logger.warn(
-                "RocksDB put failed",
-                ("namespace", namespace),
-                ("key", key),
-                ("error", err)
-            )
+        match (putResult(namespace, key, value)) {
+            case LocalKVResult<Unit>.Ok(_) => return true
+            case LocalKVResult<Unit>.Err(err) =>
+                logger.warn(
+                    "RocksDB put failed",
+                    ("namespace", namespace),
+                    ("key", key),
+                    ("error", err)
+                )
+                return false
+            case LocalKVResult<Unit>.NotFound => return false
         }
-        return ok
+    }
+
+    public func putResult(namespace: String, key: String, value: String): LocalKVResult<Unit> {
+        match (db.putResult(LocalKVKeys.compose(namespace, key), value)) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
     public func putMany(namespace: String, entries: Array<(String, String)>): Bool {
+        match (putManyResult(namespace, entries)) {
+            case LocalKVResult<Unit>.Ok(_) => return true
+            case LocalKVResult<Unit>.Err(err) =>
+                logger.warn(
+                    "RocksDB putMany failed",
+                    ("namespace", namespace),
+                    ("entry_count", entries.size.toString()),
+                    ("error", err)
+                )
+                return false
+            case LocalKVResult<Unit>.NotFound => return false
+        }
+    }
+
+    public func putManyResult(namespace: String, entries: Array<(String, String)>): LocalKVResult<Unit> {
         if (entries.size == 0) {
-            return true
+            return LocalKVResult<Unit>.Ok(())
         }
 
         let fullEntries = Array<(String, String)>(entries.size, {
             i => (LocalKVKeys.compose(namespace, entries[i][0]), entries[i][1])
         })
-        let (ok, err) = db.writeBatch(fullEntries, [], [], [])
-        if (!ok) {
-            logger.warn(
-                "RocksDB putMany failed",
-                ("namespace", namespace),
-                ("entry_count", entries.size.toString()),
-                ("error", err)
-            )
+        match (db.writeBatchResult(fullEntries, [], [], [])) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
         }
-        return ok
     }
 
     public func delete(namespace: String, key: String): Bool {
-        let (ok, err) = db.delete(LocalKVKeys.compose(namespace, key))
-        if (!ok) {
-            logger.warn(
-                "RocksDB delete failed",
-                ("namespace", namespace),
-                ("key", key),
-                ("error", err)
-            )
+        match (deleteResult(namespace, key)) {
+            case LocalKVResult<Unit>.Ok(_) => return true
+            case LocalKVResult<Unit>.Err(err) =>
+                logger.warn(
+                    "RocksDB delete failed",
+                    ("namespace", namespace),
+                    ("key", key),
+                    ("error", err)
+                )
+                return false
+            case LocalKVResult<Unit>.NotFound => return false
         }
-        return ok
+    }
+
+    public func deleteResult(namespace: String, key: String): LocalKVResult<Unit> {
+        match (db.deleteResult(LocalKVKeys.compose(namespace, key))) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
     public func deleteMany(namespace: String, keys: Array<String>): Bool {
+        match (deleteManyResult(namespace, keys)) {
+            case LocalKVResult<Unit>.Ok(_) => return true
+            case LocalKVResult<Unit>.Err(err) =>
+                logger.warn(
+                    "RocksDB deleteMany failed",
+                    ("namespace", namespace),
+                    ("key_count", keys.size.toString()),
+                    ("error", err)
+                )
+                return false
+            case LocalKVResult<Unit>.NotFound => return false
+        }
+    }
+
+    public func deleteManyResult(namespace: String, keys: Array<String>): LocalKVResult<Unit> {
         if (keys.size == 0) {
-            return true
+            return LocalKVResult<Unit>.Ok(())
         }
 
         let fullKeys = Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])})
-        let (ok, err) = db.deleteMany(fullKeys)
-        if (!ok) {
-            logger.warn(
-                "RocksDB deleteMany failed",
-                ("namespace", namespace),
-                ("key_count", keys.size.toString()),
-                ("error", err)
-            )
+        match (db.deleteManyResult(fullKeys)) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
         }
-        return ok
     }
 
     public func deleteRange(namespace: String, startKey: String, endKey: String): Bool {
-        let (ok, err) = db.deleteRange(LocalKVKeys.compose(namespace, startKey), LocalKVKeys.compose(namespace, endKey))
-        if (!ok) {
-            logger.warn(
-                "RocksDB deleteRange failed",
-                ("namespace", namespace),
-                ("start_key", startKey),
-                ("end_key", endKey),
-                ("error", err)
-            )
+        match (deleteRangeResult(namespace, startKey, endKey)) {
+            case LocalKVResult<Unit>.Ok(_) => return true
+            case LocalKVResult<Unit>.Err(err) =>
+                logger.warn(
+                    "RocksDB deleteRange failed",
+                    ("namespace", namespace),
+                    ("start_key", startKey),
+                    ("end_key", endKey),
+                    ("error", err)
+                )
+                return false
+            case LocalKVResult<Unit>.NotFound => return false
         }
-        return ok
+    }
+
+    public func deleteRangeResult(namespace: String, startKey: String, endKey: String): LocalKVResult<Unit> {
+        match (db.deleteRangeResult(LocalKVKeys.compose(namespace, startKey), LocalKVKeys.compose(namespace, endKey))) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
     public func scan(namespace: String, keyPrefix: String): Array<(String, String)> {
         let fullPrefix = LocalKVKeys.compose(namespace, keyPrefix)
-        let (ok, pairs, err) = db.scanByPrefix(fullPrefix)
-        if (!ok) {
-            logger.warn(
-                "RocksDB scan failed",
-                ("namespace", namespace),
-                ("key_prefix", keyPrefix),
-                ("error", err)
-            )
-            return []
+        let pairs = match (db.scanByPrefixResult(fullPrefix)) {
+            case RocksDbOperationResult<Array<(String, String)>>.Ok(items) => items
+            case RocksDbOperationResult<Array<(String, String)>>.Err(error) =>
+                logger.warn(
+                    "RocksDB scan failed",
+                    ("namespace", namespace),
+                    ("key_prefix", keyPrefix),
+                    ("error", error.message)
+                )
+                return []
+            case RocksDbOperationResult<Array<(String, String)>>.NotFound => return []
         }
 
         let entries = ArrayList<(String, String)>()
@@ -277,6 +351,23 @@ public class RocksDbLocalKVStore <: LocalKVStore {
         }
         return entries.toArray()
     }
+
+    public func scanResult(namespace: String, keyPrefix: String): LocalKVResult<Array<(String, String)>> {
+        let fullPrefix = LocalKVKeys.compose(namespace, keyPrefix)
+        match (db.scanByPrefixResult(fullPrefix)) {
+            case RocksDbOperationResult<Array<(String, String)>>.Ok(pairs) =>
+                let entries = ArrayList<(String, String)>()
+                for ((key, value) in pairs) {
+                    match (LocalKVKeys.stripNamespace(key, namespace)) {
+                        case Some(localKey) => entries.add((localKey, value))
+                        case None => ()
+                    }
+                }
+                return LocalKVResult<Array<(String, String)>>.Ok(entries.toArray())
+            case RocksDbOperationResult<Array<(String, String)>>.NotFound => return LocalKVResult<Array<(String, String)>>.NotFound
+            case RocksDbOperationResult<Array<(String, String)>>.Err(error) => return LocalKVResult<Array<(String, String)>>.Err(error.message)
+        }
+    }
 }
 
 public class RocksDbTransactionalStore <: LocalKVTransactionalStore {
@@ -286,15 +377,12 @@ public class RocksDbTransactionalStore <: LocalKVTransactionalStore {
         this.db = db
     }
 
-    public func beginTransaction(namespace: String): (Bool, Option<LocalKVTransaction>, String) {
-        let (ok, txnOpt, err) = db.beginTransaction()
-        if (!ok) {
-            return (false, None, err)
+    public func beginTransactionResult(namespace: String): LocalKVResult<LocalKVTransaction> {
+        match (db.beginTransactionResult()) {
+            case RocksDbOperationResult<RocksDbTxn>.Ok(txn) => return LocalKVResult<LocalKVTransaction>.Ok(RocksDbNamespaceTransaction(namespace, txn))
+            case RocksDbOperationResult<RocksDbTxn>.NotFound => return LocalKVResult<LocalKVTransaction>.NotFound
+            case RocksDbOperationResult<RocksDbTxn>.Err(error) => return LocalKVResult<LocalKVTransaction>.Err(error.message)
         }
-        if (let Some(txn) <- txnOpt) {
-            return (true, Some(RocksDbNamespaceTransaction(namespace, txn)), "")
-        }
-        return (false, None, "rocksdb transaction begin returned no transaction")
     }
 
     public func isConflictError(error: String): Bool {
@@ -311,28 +399,52 @@ private class RocksDbNamespaceTransaction <: LocalKVTransaction {
         this.txn = txn
     }
 
-    public func get(key: String): (Bool, Option<String>, String) {
-        return txn.get(LocalKVKeys.compose(namespace, key))
+    public func getResult(key: String): LocalKVResult<String> {
+        match (txn.getResult(LocalKVKeys.compose(namespace, key))) {
+            case RocksDbOperationResult<String>.Ok(value) => return LocalKVResult<String>.Ok(value)
+            case RocksDbOperationResult<String>.NotFound => return LocalKVResult<String>.NotFound
+            case RocksDbOperationResult<String>.Err(error) => return LocalKVResult<String>.Err(error.message)
+        }
     }
 
-    public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
-        return txn.multiGet(Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])}))
+    public func multiGetResult(keys: Array<String>): LocalKVResult<Array<Option<String>>> {
+        match (txn.multiGetResult(Array<String>(keys.size, {i => LocalKVKeys.compose(namespace, keys[i])}))) {
+            case RocksDbOperationResult<Array<Option<String>>>.Ok(values) => return LocalKVResult<Array<Option<String>>>.Ok(values)
+            case RocksDbOperationResult<Array<Option<String>>>.NotFound => return LocalKVResult<Array<Option<String>>>.NotFound
+            case RocksDbOperationResult<Array<Option<String>>>.Err(error) => return LocalKVResult<Array<Option<String>>>.Err(error.message)
+        }
     }
 
-    public func put(key: String, value: String): (Bool, String) {
-        return txn.put(LocalKVKeys.compose(namespace, key), value)
+    public func putResult(key: String, value: String): LocalKVResult<Unit> {
+        match (txn.putResult(LocalKVKeys.compose(namespace, key), value)) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
-    public func delete(key: String): (Bool, String) {
-        return txn.delete(LocalKVKeys.compose(namespace, key))
+    public func deleteResult(key: String): LocalKVResult<Unit> {
+        match (txn.deleteResult(LocalKVKeys.compose(namespace, key))) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
-    public func commit(): (Bool, String) {
-        return txn.commit()
+    public func commitResult(): LocalKVResult<Unit> {
+        match (txn.commitResult()) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
-    public func rollback(): (Bool, String) {
-        return txn.rollback()
+    public func rollbackResult(): LocalKVResult<Unit> {
+        match (txn.rollbackResult()) {
+            case RocksDbOperationResult<Unit>.Ok(_) => return LocalKVResult<Unit>.Ok(())
+            case RocksDbOperationResult<Unit>.NotFound => return LocalKVResult<Unit>.NotFound
+            case RocksDbOperationResult<Unit>.Err(error) => return LocalKVResult<Unit>.Err(error.message)
+        }
     }
 
     public func close(): Unit {

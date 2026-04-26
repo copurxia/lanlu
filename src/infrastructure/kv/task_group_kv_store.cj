@@ -184,40 +184,54 @@ public class TaskGroupKVStore <: TaskKVStore {
             case Some(txStore) =>
                 var attempt: Int64 = 0
                 while (attempt < maxTxnRetries) {
-                    let (txnOk, txnOpt, txnErr) = txStore.beginTransaction(namespace)
-                    if (!txnOk || txnOpt.isNone()) {
-                        logger.warn("task kv transaction begin failed",
-                            [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
-                        break
-                    }
-                    let txn = match (txnOpt) {
-                        case Some(value) => value
-                        case None => return false
+                    let txn = match (txStore.beginTransactionResult(namespace)) {
+                        case LocalKVResult<LocalKVTransaction>.Ok(value) => value
+                        case LocalKVResult<LocalKVTransaction>.Err(err) =>
+                            logger.warn("task kv transaction begin failed",
+                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", err)])
+                            break
+                        case LocalKVResult<LocalKVTransaction>.NotFound =>
+                            logger.warn("task kv transaction begin failed",
+                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", "not found")])
+                            break
                     }
                     try {
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedKey)) {
                             case Some(_) =>
-                                let _ = txn.rollback()
+                                rollbackTransactionQuietly(txn)
                                 return false
                             case None =>
                                 let putResult = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedKey, value,
                                     ttlSeconds)
-                                if (!putResult[0]) {
-                                    let _ = txn.rollback()
-                                    logger.warn("task kv transaction put failed",
-                                        [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", putResult[1])])
-                                    return false
+                                match (putResult) {
+                                    case LocalKVResult<Unit>.Ok(_) => ()
+                                    case LocalKVResult<Unit>.Err(err) =>
+                                        rollbackTransactionQuietly(txn)
+                                        logger.warn("task kv transaction put failed",
+                                            [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", err)])
+                                        return false
+                                    case LocalKVResult<Unit>.NotFound =>
+                                        rollbackTransactionQuietly(txn)
+                                        logger.warn("task kv transaction put failed",
+                                            [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", "not found")])
+                                        return false
                                 }
-                                let commitResult = txn.commit()
-                                if (commitResult[0]) {
-                                    return true
-                                }
-                                let _ = txn.rollback()
-                                if (!txStore.isConflictError(commitResult[1])) {
-                                    logger.warn("task kv transaction commit failed",
-                                        [("group_id", normalizedGroupId), ("key", normalizedKey),
-                                            ("error", commitResult[1])])
-                                    return false
+                                match (txn.commitResult()) {
+                                    case LocalKVResult<Unit>.Ok(_) => return true
+                                    case LocalKVResult<Unit>.Err(err) =>
+                                        rollbackTransactionQuietly(txn)
+                                        if (!txStore.isConflictError(err)) {
+                                            logger.warn("task kv transaction commit failed",
+                                                [("group_id", normalizedGroupId), ("key", normalizedKey),
+                                                    ("error", err)])
+                                            return false
+                                        }
+                                    case LocalKVResult<Unit>.NotFound =>
+                                        rollbackTransactionQuietly(txn)
+                                        logger.warn("task kv transaction commit failed",
+                                            [("group_id", normalizedGroupId), ("key", normalizedKey),
+                                                ("error", "not found")])
+                                        return false
                                 }
                         }
                     } finally {
@@ -251,15 +265,16 @@ public class TaskGroupKVStore <: TaskKVStore {
             case Some(txStore) =>
                 var attempt: Int64 = 0
                 while (attempt < maxTxnRetries) {
-                    let (txnOk, txnOpt, txnErr) = txStore.beginTransaction(namespace)
-                    if (!txnOk || txnOpt.isNone()) {
-                        logger.warn("task kv transaction begin failed",
-                            [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
-                        break
-                    }
-                    let txn = match (txnOpt) {
-                        case Some(value) => value
-                        case None => return -1
+                    let txn = match (txStore.beginTransactionResult(namespace)) {
+                        case LocalKVResult<LocalKVTransaction>.Ok(value) => value
+                        case LocalKVResult<LocalKVTransaction>.Err(err) =>
+                            logger.warn("task kv transaction begin failed",
+                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", err)])
+                            break
+                        case LocalKVResult<LocalKVTransaction>.NotFound =>
+                            logger.warn("task kv transaction begin failed",
+                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", "not found")])
+                            break
                     }
                     try {
                         var currentValue: Int64 = 0
@@ -267,7 +282,7 @@ public class TaskGroupKVStore <: TaskKVStore {
                             case Some(record) => try {
                                 currentValue = Int64.parse(record.value)
                             } catch (_: Exception) {
-                                let _ = txn.rollback()
+                                rollbackTransactionQuietly(txn)
                                 return -1
                             }
                             case None => currentValue = 0
@@ -276,21 +291,33 @@ public class TaskGroupKVStore <: TaskKVStore {
                         let nextValue = currentValue + delta
                         let putResult = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedKey,
                             nextValue.toString(), ttlSeconds)
-                        if (!putResult[0]) {
-                            let _ = txn.rollback()
-                            logger.warn("task kv transaction put failed",
-                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", putResult[1])])
-                            return -1
+                        match (putResult) {
+                            case LocalKVResult<Unit>.Ok(_) => ()
+                            case LocalKVResult<Unit>.Err(err) =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv transaction put failed",
+                                    [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", err)])
+                                return -1
+                            case LocalKVResult<Unit>.NotFound =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv transaction put failed",
+                                    [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", "not found")])
+                                return -1
                         }
-                        let commitResult = txn.commit()
-                        if (commitResult[0]) {
-                            return nextValue
-                        }
-                        let _ = txn.rollback()
-                        if (!txStore.isConflictError(commitResult[1])) {
-                            logger.warn("task kv transaction commit failed",
-                                [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", commitResult[1])])
-                            return -1
+                        match (txn.commitResult()) {
+                            case LocalKVResult<Unit>.Ok(_) => return nextValue
+                            case LocalKVResult<Unit>.Err(err) =>
+                                rollbackTransactionQuietly(txn)
+                                if (!txStore.isConflictError(err)) {
+                                    logger.warn("task kv transaction commit failed",
+                                        [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", err)])
+                                    return -1
+                                }
+                            case LocalKVResult<Unit>.NotFound =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv transaction commit failed",
+                                    [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", "not found")])
+                                return -1
                         }
                     } finally {
                         closeTransaction(txn)
@@ -345,15 +372,16 @@ public class TaskGroupKVStore <: TaskKVStore {
                 let t0 = DateTime.now().toUnixTimeStamp().toMilliseconds()
                 var attempt: Int64 = 0
                 while (attempt < maxTxnRetries) {
-                    let (txnOk, txnOpt, txnErr) = txStore.beginTransaction(namespace)
-                    if (!txnOk || txnOpt.isNone()) {
-                        logger.warn("task kv upload transaction begin failed",
-                            [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", txnErr)])
-                        break
-                    }
-                    let txn = match (txnOpt) {
-                        case Some(value) => value
-                        case None => return result
+                    let txn = match (txStore.beginTransactionResult(namespace)) {
+                        case LocalKVResult<LocalKVTransaction>.Ok(value) => value
+                        case LocalKVResult<LocalKVTransaction>.Err(err) =>
+                            logger.warn("task kv upload transaction begin failed",
+                                [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", err)])
+                            break
+                        case LocalKVResult<LocalKVTransaction>.NotFound =>
+                            logger.warn("task kv upload transaction begin failed",
+                                [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", "not found")])
+                            break
                     }
                     try {
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedChunkKey)) {
@@ -361,12 +389,20 @@ public class TaskGroupKVStore <: TaskKVStore {
                             case None =>
                                 let putChunk = putRecordNormalizedToTxn(txn, normalizedGroupId, normalizedChunkKey, "1",
                                     ttlSeconds)
-                                if (!putChunk[0]) {
-                                    let _ = txn.rollback()
-                                    logger.warn("task kv upload transaction chunk put failed",
-                                        [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
-                                            ("error", putChunk[1])])
-                                    return result
+                                match (putChunk) {
+                                    case LocalKVResult<Unit>.Ok(_) => ()
+                                    case LocalKVResult<Unit>.Err(err) =>
+                                        rollbackTransactionQuietly(txn)
+                                        logger.warn("task kv upload transaction chunk put failed",
+                                            [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
+                                                ("error", err)])
+                                        return result
+                                    case LocalKVResult<Unit>.NotFound =>
+                                        rollbackTransactionQuietly(txn)
+                                        logger.warn("task kv upload transaction chunk put failed",
+                                            [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
+                                                ("error", "not found")])
+                                        return result
                                 }
                                 result.inserted = true
                         }
@@ -390,66 +426,100 @@ public class TaskGroupKVStore <: TaskKVStore {
 
                         let putUploaded = putRecordNormalizedToTxn(txn, normalizedGroupId, "uploaded_count",
                             result.uploadedChunkCount.toString(), ttlSeconds)
-                        if (!putUploaded[0]) {
-                            let _ = txn.rollback()
-                            logger.warn("task kv upload transaction uploaded_count put failed",
-                                [("group_id", normalizedGroupId), ("error", putUploaded[1])])
-                            return result
+                        match (putUploaded) {
+                            case LocalKVResult<Unit>.Ok(_) => ()
+                            case LocalKVResult<Unit>.Err(err) =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv upload transaction uploaded_count put failed",
+                                    [("group_id", normalizedGroupId), ("error", err)])
+                                return result
+                            case LocalKVResult<Unit>.NotFound =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv upload transaction uploaded_count put failed",
+                                    [("group_id", normalizedGroupId), ("error", "not found")])
+                                return result
                         }
 
                         let putOffset = putRecordNormalizedToTxn(txn, normalizedGroupId, "written_offset",
                             newOffset.toString(), ttlSeconds)
-                        if (!putOffset[0]) {
-                            let _ = txn.rollback()
-                            logger.warn("task kv upload transaction written_offset put failed",
-                                [("group_id", normalizedGroupId), ("error", putOffset[1])])
-                            return result
+                        match (putOffset) {
+                            case LocalKVResult<Unit>.Ok(_) => ()
+                            case LocalKVResult<Unit>.Err(err) =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv upload transaction written_offset put failed",
+                                    [("group_id", normalizedGroupId), ("error", err)])
+                                return result
+                            case LocalKVResult<Unit>.NotFound =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv upload transaction written_offset put failed",
+                                    [("group_id", normalizedGroupId), ("error", "not found")])
+                                return result
                         }
 
                         if (shouldUpdateProgress) {
                             let putProgress = putRecordNormalizedToTxn(txn, normalizedGroupId, "last_reported_progress",
                                 uploadedProgress.toString(), ttlSeconds)
-                            if (!putProgress[0]) {
-                                let _ = txn.rollback()
-                                logger.warn("task kv upload transaction progress put failed",
-                                    [("group_id", normalizedGroupId), ("error", putProgress[1])])
-                                return result
+                            match (putProgress) {
+                                case LocalKVResult<Unit>.Ok(_) => ()
+                                case LocalKVResult<Unit>.Err(err) =>
+                                    rollbackTransactionQuietly(txn)
+                                    logger.warn("task kv upload transaction progress put failed",
+                                        [("group_id", normalizedGroupId), ("error", err)])
+                                    return result
+                                case LocalKVResult<Unit>.NotFound =>
+                                    rollbackTransactionQuietly(txn)
+                                    logger.warn("task kv upload transaction progress put failed",
+                                        [("group_id", normalizedGroupId), ("error", "not found")])
+                                    return result
                             }
                             result.updatedProgress = true
                         }
                         if (shouldUpdateTimeoutTs) {
                             let putTimeout = putRecordNormalizedToTxn(txn, normalizedGroupId, "last_timeout_extend_ts",
                                 nowTs.toString(), ttlSeconds)
-                            if (!putTimeout[0]) {
-                                let _ = txn.rollback()
-                                logger.warn("task kv upload transaction timeout put failed",
-                                    [("group_id", normalizedGroupId), ("error", putTimeout[1])])
-                                return result
+                            match (putTimeout) {
+                                case LocalKVResult<Unit>.Ok(_) => ()
+                                case LocalKVResult<Unit>.Err(err) =>
+                                    rollbackTransactionQuietly(txn)
+                                    logger.warn("task kv upload transaction timeout put failed",
+                                        [("group_id", normalizedGroupId), ("error", err)])
+                                    return result
+                                case LocalKVResult<Unit>.NotFound =>
+                                    rollbackTransactionQuietly(txn)
+                                    logger.warn("task kv upload transaction timeout put failed",
+                                        [("group_id", normalizedGroupId), ("error", "not found")])
+                                    return result
                             }
                             result.updatedTimeoutTs = true
                         }
 
-                        let commitResult = txn.commit()
-                        if (commitResult[0]) {
-                            let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
-                            logger.debug(
-                                "[KV] commitUploadChunk completed",
-                                ("group_id", normalizedGroupId),
-                                ("chunk_key", normalizedChunkKey),
-                                ("inserted", result.inserted.toString()),
-                                ("uploaded_count", result.uploadedChunkCount.toString()),
-                                ("attempt", (attempt + 1).toString()),
-                                ("txn_ms", (t1 - t0).toString())
-                            )
-                            return result
-                        }
-
-                        let _ = txn.rollback()
-                        if (!txStore.isConflictError(commitResult[1])) {
-                            logger.warn("task kv upload transaction commit failed",
-                                [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
-                                    ("error", commitResult[1])])
-                            return result
+                        match (txn.commitResult()) {
+                            case LocalKVResult<Unit>.Ok(_) =>
+                                let t1 = DateTime.now().toUnixTimeStamp().toMilliseconds()
+                                logger.debug(
+                                    "[KV] commitUploadChunk completed",
+                                    ("group_id", normalizedGroupId),
+                                    ("chunk_key", normalizedChunkKey),
+                                    ("inserted", result.inserted.toString()),
+                                    ("uploaded_count", result.uploadedChunkCount.toString()),
+                                    ("attempt", (attempt + 1).toString()),
+                                    ("txn_ms", (t1 - t0).toString())
+                                )
+                                return result
+                            case LocalKVResult<Unit>.Err(err) =>
+                                rollbackTransactionQuietly(txn)
+                                if (!txStore.isConflictError(err)) {
+                                    logger.warn("task kv upload transaction commit failed",
+                                        [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
+                                            ("error", err)])
+                                    return result
+                                }
+                            case LocalKVResult<Unit>.NotFound =>
+                                rollbackTransactionQuietly(txn)
+                                logger.warn("task kv upload transaction commit failed",
+                                    [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey),
+                                        ("error", "not found")])
+                                return result
                         }
                     } finally {
                         closeTransaction(txn)
@@ -776,14 +846,13 @@ public class TaskGroupKVStore <: TaskKVStore {
         txn.close()
     }
 
+    private static func rollbackTransactionQuietly(txn: LocalKVTransaction): Unit {
+        let _ = txn.rollbackResult()
+    }
+
     private func getRecordNormalizedFromTxn(txn: LocalKVTransaction, groupId: String, key: String): Option<KvTtlRecord> {
-        let (ok, valueOpt, err) = txn.get(TaskGroupKVKeys.storageKey(groupId, key))
-        if (!ok) {
-            logger.warn("task kv transaction get failed", [("group_id", groupId), ("key", key), ("error", err)])
-            return None
-        }
-        match (valueOpt) {
-            case Some(payload) => match (KvTtlRecordCodec.decode(payload)) {
+        match (txn.getResult(TaskGroupKVKeys.storageKey(groupId, key))) {
+            case LocalKVResult<String>.Ok(payload) => match (KvTtlRecordCodec.decode(payload)) {
                 case Some(record) =>
                     if (isExpired(record)) {
                         return None
@@ -793,7 +862,10 @@ public class TaskGroupKVStore <: TaskKVStore {
                     logger.warn("task kv transaction decode failed", [("group_id", groupId), ("key", key)])
                     return None
             }
-            case None => return None
+            case LocalKVResult<String>.NotFound => return None
+            case LocalKVResult<String>.Err(err) =>
+                logger.warn("task kv transaction get failed", [("group_id", groupId), ("key", key), ("error", err)])
+                return None
         }
     }
 
@@ -803,8 +875,8 @@ public class TaskGroupKVStore <: TaskKVStore {
         key: String,
         value: String,
         ttlSeconds: Int64
-    ): (Bool, String) {
-        return txn.put(TaskGroupKVKeys.storageKey(groupId, key), encodeRecord(value, ttlSeconds))
+    ): LocalKVResult<Unit> {
+        return txn.putResult(TaskGroupKVKeys.storageKey(groupId, key), encodeRecord(value, ttlSeconds))
     }
 }
 

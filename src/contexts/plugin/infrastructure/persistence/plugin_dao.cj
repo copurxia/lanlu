@@ -1,6 +1,7 @@
 package lanlu.contexts.plugin.infrastructure.persistence
 
 import std.database.sql.*
+import lanlu.contexts.plugin.domain.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -31,6 +32,15 @@ public class PluginData {
     public var update_url: String = ""            // 插件更新地址
     public var created_at: String = ""
     public var updated_at: String = ""
+
+    public mut prop pluginType: PluginType {
+        get() {
+            PluginType.fromDb(plugin_type)
+        }
+        set(value) {
+            plugin_type = value.toDb()
+        }
+    }
 
     }
 

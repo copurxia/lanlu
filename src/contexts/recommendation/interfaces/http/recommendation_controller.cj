@@ -7,6 +7,7 @@ import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 import lanlu.contexts.user.infrastructure.persistence.*
 import lanlu.infrastructure.middleware.*
+import lanlu.shared.utils.*
 import lanlu.shared.views.*
 import std.collection.*
 import std.convert.*
@@ -287,6 +288,7 @@ public class RecommendationController {
     }
 
     public static func getRecommendations(ctx: Ctx): Unit {
+        CacheUtils.setNoCacheHeaders(ctx)
         let scene = (ctx.query("scene") ?? "").trimAscii().toAsciiLower()
         let count = parsePositiveInt32(ctx.query("count") ?? "", 12i32)
         let archiveId = (ctx.query("archive_id") ?? "").trimAscii()

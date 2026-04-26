@@ -2,6 +2,7 @@ package lanlu.contexts.recommendation.infrastructure.persistence
 
 import std.collection.*
 import std.database.sql.*
+import lanlu.contexts.recommendation.domain.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 
@@ -57,6 +58,24 @@ public class RecommendationImpressionWriteRow {
     public var itemType: String = ""
     public var itemId: String = ""
     public var position: Int32 = 0
+
+    public mut prop seedType: RecommendationItemType {
+        get() {
+            RecommendationItemType.fromDb(seedEntityType)
+        }
+        set(value) {
+            seedEntityType = value.toDb()
+        }
+    }
+
+    public mut prop recommendationItemType: RecommendationItemType {
+        get() {
+            RecommendationItemType.fromDb(itemType)
+        }
+        set(value) {
+            itemType = value.toDb()
+        }
+    }
 
     public init() {}
 }

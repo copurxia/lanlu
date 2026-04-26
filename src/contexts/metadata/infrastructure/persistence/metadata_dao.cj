@@ -4,6 +4,7 @@ import std.collection.*
 import std.database.sql.*
 import std.io.ByteBuffer
 import stdx.encoding.json.stream.*
+import lanlu.contexts.metadata.domain.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
@@ -39,6 +40,24 @@ public class MetadataObjectData {
     public var updated_at: String = ""
     public var tags: Array<String> = Array<String>()
     public var assets: Array<MetadataAssetData> = Array<MetadataAssetData>()
+
+    public mut prop entityType: MetadataEntityType {
+        get() {
+            MetadataEntityType.fromDb(entity_type)
+        }
+        set(value) {
+            entity_type = value.toDb()
+        }
+    }
+
+    public mut prop parentEntityType: MetadataEntityType {
+        get() {
+            MetadataEntityType.fromDb(parent_entity_type)
+        }
+        set(value) {
+            parent_entity_type = value.toDb()
+        }
+    }
 }
 
 public class MetadataChildData {
@@ -46,6 +65,15 @@ public class MetadataChildData {
     public var entity_id: String = ""
     public var volume_no: Int32 = 0
     public var order_index: Int32 = 0
+
+    public mut prop entityType: MetadataEntityType {
+        get() {
+            MetadataEntityType.fromDb(entity_type)
+        }
+        set(value) {
+            entity_type = value.toDb()
+        }
+    }
 }
 
 public class MetadataDao {

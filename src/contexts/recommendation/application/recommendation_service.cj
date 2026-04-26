@@ -1,8 +1,10 @@
 package lanlu.contexts.recommendation.application
 
 import std.collection.*
+import std.random.*
 import std.sort.*
 import lanlu.contexts.archive.infrastructure.persistence.*
+import lanlu.contexts.recommendation.domain.*
 import lanlu.contexts.recommendation.infrastructure.persistence.*
 import lanlu.contexts.tankoubon.infrastructure.persistence.*
 
@@ -13,6 +15,24 @@ public class RecommendationResultItem {
     public var seedEntityType: String = ""
     public var seedEntityId: String = ""
 
+    public mut prop recommendationItemType: RecommendationItemType {
+        get() {
+            RecommendationItemType.fromDb(itemType)
+        }
+        set(value) {
+            itemType = value.toDb()
+        }
+    }
+
+    public mut prop seedType: RecommendationItemType {
+        get() {
+            RecommendationItemType.fromDb(seedEntityType)
+        }
+        set(value) {
+            seedEntityType = value.toDb()
+        }
+    }
+
     public init() {}
 }
 
@@ -22,6 +42,15 @@ private class RecommendationScoredItem {
     public var score: Float64 = 0.0
     public var categoryId: Int64 = 0
     public var tags: String = ""
+
+    public mut prop recommendationItemType: RecommendationItemType {
+        get() {
+            RecommendationItemType.fromDb(itemType)
+        }
+        set(value) {
+            itemType = value.toDb()
+        }
+    }
 
     public init() {}
 }
@@ -182,6 +211,28 @@ public class RecommendationService {
         let selected = ArrayList<RecommendationScoredItem>()
         fillDiverseTop(items, selected, count, scene)
         return selected.toArray()
+    }
+
+    private static func takeInCurrentOrder(items: ArrayList<RecommendationScoredItem>, count: Int32): Array<RecommendationScoredItem> {
+        let selected = ArrayList<RecommendationScoredItem>()
+        for (item in items) {
+            if (Int32(selected.size) >= count) { break }
+            selected.add(item)
+        }
+        return selected.toArray()
+    }
+
+    private static func shuffleScoredItems(items: ArrayList<RecommendationScoredItem>): Unit {
+        if (items.size <= 1) { return }
+        let rng = Random()
+        var i = items.size - 1
+        while (i > 0) {
+            let j = rng.nextInt64(i + 1)
+            let tmp = items[i]
+            items[i] = items[j]
+            items[j] = tmp
+            i -= 1
+        }
     }
 
     private static func fillDiverseTop(
@@ -346,6 +397,8 @@ public class RecommendationService {
                 recentTankIds,
                 categoryId
             )
+            shuffleScoredItems(freshRanked)
+            return buildResultItems(takeInCurrentOrder(freshRanked, safeCount), "", "")
         }
 
         return buildResultItems(selectDiverseTop(freshRanked, safeCount, "discover"), "", "")

@@ -5,6 +5,7 @@ import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import stdx.log.*
 import lanlu.shared.utils.*
+import lanlu.contexts.asset.domain.*
 
 public class AssetRow {
     public var id: Int64 = 0
@@ -16,6 +17,15 @@ public class AssetRow {
     public var byteSize: Int64 = 0
     public var thumbhash: String = ""
     public var createdAt: String = ""
+
+    public mut prop assetKind: AssetKind {
+        get() {
+            AssetKind.fromDb(kind)
+        }
+        set(value) {
+            kind = value.toDb()
+        }
+    }
 
     public init() {}
 }
@@ -32,14 +42,15 @@ public class AssetDao {
     ): Option<Int64> {
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
+            case Some(rawConn) =>
+                var result: Option<Int64> = None
+                try (conn = rawConn) {
+                    let rawStmt = conn.prepareStatement("""
                         INSERT INTO assets (owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         RETURNING id
                     """)
-                    try {
+                    try (stmt = rawStmt) {
                         match (ownerUserId) {
                             case Some(uid) => stmt.set(0, uid)
                             case None => stmt.setNull(0)
@@ -50,25 +61,19 @@ public class AssetDao {
                         stmt.set(4, fileExt)
                         stmt.set(5, byteSize)
                         stmt.set(6, thumbhash)
-                        let rs = stmt.query()
-                        try {
+                        let rawRs = stmt.query()
+                        try (rs = rawRs) {
                             if (rs.next()) {
                                 let id = rs.getOrNull<Int64>(0) ?? 0
-                                if (id > 0) { return Some(id) }
+                                if (id > 0) { result = Some(id) }
                             }
-                        } finally {
-                            rs.close()
                         }
-                        return None
-                    } finally {
-                        stmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("asset_dao").error("create asset failed", ("error", e.message))
                     return None
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
+                return result
             case None =>
                 getLogger("asset_dao").error("cannot connect to database")
                 return None
@@ -79,17 +84,18 @@ public class AssetDao {
         if (id <= 0) { return AssetRow() }
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("""
+            case Some(rawConn) =>
+                var result = AssetRow()
+                try (conn = rawConn) {
+                    let rawStmt = conn.prepareStatement("""
                         SELECT id, owner_user_id, kind, original_filename, content_type, file_ext, byte_size, thumbhash, created_at
                         FROM assets
                         WHERE id = ?
                     """)
-                    try {
+                    try (stmt = rawStmt) {
                         stmt.set(0, id)
-                        let rs = stmt.query()
-                        try {
+                        let rawRs = stmt.query()
+                        try (rs = rawRs) {
                             if (rs.next()) {
                                 let row = AssetRow()
                                 row.id = rs.getOrNull<Int64>(0) ?? 0
@@ -101,21 +107,15 @@ public class AssetDao {
                                 row.byteSize = rs.getOrNull<Int64>(6) ?? 0
                                 row.thumbhash = rs.getOrNull<String>(7) ?? ""
                                 row.createdAt = rs.getOrNull<String>(8) ?? ""
-                                return row
+                                result = row
                             }
-                            return AssetRow()
-                        } finally {
-                            rs.close()
                         }
-                    } finally {
-                        stmt.close()
                     }
                 } catch (e: Exception) {
                     getLogger("asset_dao").error("get asset failed", ("error", e.message))
                     return AssetRow()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
+                return result
             case None =>
                 getLogger("asset_dao").error("cannot connect to database")
                 return AssetRow()
@@ -126,23 +126,21 @@ public class AssetDao {
         if (id <= 0) { return false }
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("UPDATE assets SET thumbhash = ? WHERE id = ?")
-                    try {
+            case Some(rawConn) =>
+                var result = false
+                try (conn = rawConn) {
+                    let rawStmt = conn.prepareStatement("UPDATE assets SET thumbhash = ? WHERE id = ?")
+                    try (stmt = rawStmt) {
                         stmt.set(0, thumbhash)
                         stmt.set(1, id)
                         stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
+                        result = true
                     }
                 } catch (e: Exception) {
                     getLogger("asset_dao").error("update thumbhash failed", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
+                return result
             case None =>
                 getLogger("asset_dao").error("cannot connect to database")
                 return false
@@ -153,22 +151,20 @@ public class AssetDao {
         if (id <= 0) { return true }
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
-            case Some(conn) =>
-                try {
-                    let stmt = conn.prepareStatement("DELETE FROM assets WHERE id = ?")
-                    try {
+            case Some(rawConn) =>
+                var result = false
+                try (conn = rawConn) {
+                    let rawStmt = conn.prepareStatement("DELETE FROM assets WHERE id = ?")
+                    try (stmt = rawStmt) {
                         stmt.set(0, id)
                         stmt.update()
-                        return true
-                    } finally {
-                        stmt.close()
+                        result = true
                     }
                 } catch (e: Exception) {
                     getLogger("asset_dao").error("delete asset failed", ("error", e.message))
                     return false
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
+                return result
             case None =>
                 getLogger("asset_dao").error("cannot connect to database")
                 return false
