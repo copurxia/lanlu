@@ -244,7 +244,7 @@ public class ArchivePackageIndexStore {
         listEntriesWithTitle: (String) -> Array<(String, String)>,
         fingerprint: ArchivePackageFingerprint
     ): Option<ArchivePackageIndex> {
-        if (archiveType == ArchiveTypes.ARCHIVE && ZipPackageIndexBuilder.canHandle(actualPath)) {
+        if (ArchiveType.fromDb(archiveType).toDb() == ArchiveTypes.ARCHIVE && ZipPackageIndexBuilder.canHandle(actualPath)) {
             match (ZipPackageIndexBuilder.build(actualPath, fingerprint, cacheVersion)) {
                 case Some(index) => return Some(index)
                 case None =>
@@ -314,7 +314,7 @@ public class ArchivePackageIndexStore {
     }
 
     private static func detectEntryKind(archiveType: String, entryName: String): String {
-        if (archiveType == ArchiveTypes.EPUB) {
+        if (ArchiveType.fromDb(archiveType).toDb() == ArchiveTypes.EPUB) {
             return "html"
         }
         if (ArchiveUtils.isImageFile(entryName)) {
@@ -330,13 +330,13 @@ public class ArchivePackageIndexStore {
     }
 
     private static func shouldUsePersistentCache(archiveType: String, actualPath: String): Bool {
-        if (archiveType == ArchiveTypes.FOLDER) {
+        if (ArchiveType.fromDb(archiveType).toDb() == ArchiveTypes.FOLDER) {
             return false
         }
         try {
             return !FileInfo(Path(actualPath)).isDirectory()
         } catch (_: Exception) {
-            return archiveType != ArchiveTypes.FOLDER
+            return ArchiveType.fromDb(archiveType).toDb() != ArchiveTypes.FOLDER
         }
     }
 

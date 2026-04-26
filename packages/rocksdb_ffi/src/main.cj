@@ -81,6 +81,12 @@ public class RocksDbResult<T> {
     }
 }
 
+public enum RocksDbOperationResult<T> {
+    | Ok(T)
+    | NotFound
+    | Err(RocksDbError)
+}
+
 public func classifyRocksDbError(error: String): RocksDbErrorKind {
     let normalized = error.toAsciiLower()
     if (normalized.size == 0) {
@@ -274,8 +280,16 @@ public class RocksDb {
     }
 
     public func get(key: String): (Bool, Option<String>, String) {
+        match (getResult(key)) {
+            case RocksDbOperationResult<String>.Ok(value) => return (true, Some(value), "")
+            case RocksDbOperationResult<String>.NotFound => return (true, None, "")
+            case RocksDbOperationResult<String>.Err(error) => return (false, None, error.message)
+        }
+    }
+
+    public func getResult(key: String): RocksDbOperationResult<String> {
         if (closed) {
-            return (false, None, "rocksdb is closed")
+            return RocksDbOperationResult<String>.Err(RocksDbError(RocksDbErrorKind.Closed, "rocksdb is closed"))
         }
 
         var valueLen: UIntNative = 0
@@ -298,15 +312,16 @@ public class RocksDb {
         }
 
         if (!errPtr.isNull()) {
-            return (false, None, takeOwnedCString(errPtr))
+            let error = takeOwnedCString(errPtr)
+            return RocksDbOperationResult<String>.Err(RocksDbError(classifyRocksDbError(error), error))
         }
         if (valuePtr.isNull()) {
-            return (true, None, "")
+            return RocksDbOperationResult<String>.NotFound
         }
 
         let out = Array<UInt8>(Int64(valueLen), {i => unsafe { (valuePtr + i).read() }})
         unsafe { rocksdb_free(CPointer<Unit>(valuePtr)) }
-        return (true, Some(String.fromUtf8(out)), "")
+        return RocksDbOperationResult<String>.Ok(String.fromUtf8(out))
     }
 
     public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {
@@ -1176,8 +1191,16 @@ public class OptimisticRocksDb {
     }
 
     public func get(key: String): (Bool, Option<String>, String) {
+        match (getResult(key)) {
+            case RocksDbOperationResult<String>.Ok(value) => return (true, Some(value), "")
+            case RocksDbOperationResult<String>.NotFound => return (true, None, "")
+            case RocksDbOperationResult<String>.Err(error) => return (false, None, error.message)
+        }
+    }
+
+    public func getResult(key: String): RocksDbOperationResult<String> {
         if (closed) {
-            return (false, None, "rocksdb optimistic db is closed")
+            return RocksDbOperationResult<String>.Err(RocksDbError(RocksDbErrorKind.Closed, "rocksdb optimistic db is closed"))
         }
 
         var valueLen: UIntNative = 0
@@ -1200,15 +1223,16 @@ public class OptimisticRocksDb {
         }
 
         if (!errPtr.isNull()) {
-            return (false, None, takeOwnedCString(errPtr))
+            let error = takeOwnedCString(errPtr)
+            return RocksDbOperationResult<String>.Err(RocksDbError(classifyRocksDbError(error), error))
         }
         if (valuePtr.isNull()) {
-            return (true, None, "")
+            return RocksDbOperationResult<String>.NotFound
         }
 
         let out = Array<UInt8>(Int64(valueLen), {i => unsafe { (valuePtr + i).read() }})
         unsafe { rocksdb_free(CPointer<Unit>(valuePtr)) }
-        return (true, Some(String.fromUtf8(out)), "")
+        return RocksDbOperationResult<String>.Ok(String.fromUtf8(out))
     }
 
     public func multiGet(keys: Array<String>): (Bool, Array<Option<String>>, String) {

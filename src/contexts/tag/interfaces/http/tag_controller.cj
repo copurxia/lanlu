@@ -11,6 +11,7 @@ import std.convert.*
 import std.fs.*
 import std.io.*
 import stdx.encoding.json.stream.*
+import lanlu.contexts.task.*
 import lanlu.contexts.task.application.*
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.task.infrastructure.persistence.*
@@ -363,14 +364,13 @@ public class TagController {
             return
         }
 
-        // Validate tag exists
-        let tagOpt = TagDao.getById(id)
-        if (tagOpt.isNone()) {
-            ctx.status(404)
-            ResponseView.errorJson(ctx, "tag not found", 404)
-            return
+        let tag = match (TagDao.getById(id)) {
+            case Some(value) => value
+            case None =>
+                ctx.status(404)
+                ResponseView.errorJson(ctx, "tag not found", 404)
+                return
         }
-        let tag = tagOpt.getOrThrow()
 
         let cacheRoot = SystemSettingsService.getPath("CACHE_PATH")
         let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
@@ -467,14 +467,13 @@ public class TagController {
             return
         }
 
-        // Validate tag exists
-        let tagOpt = TagDao.getById(id)
-        if (tagOpt.isNone()) {
-            ctx.status(404)
-            ResponseView.errorJson(ctx, "tag not found", 404)
-            return
+        let tag = match (TagDao.getById(id)) {
+            case Some(value) => value
+            case None =>
+                ctx.status(404)
+                ResponseView.errorJson(ctx, "tag not found", 404)
+                return
         }
-        let tag = tagOpt.getOrThrow()
 
         let cacheRoot = SystemSettingsService.getPath("CACHE_PATH")
         let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
@@ -916,7 +915,7 @@ public class TagController {
             }
 
             TaskDao.updateTaskParameters(taskId, jsonFile.toString())
-            TaskDao.updateTaskStatus(taskId, "pending", "文件已上传，等待导入", 0)
+            TaskDao.updateTaskStatus(taskId, TaskStatus.Pending, "文件已上传，等待导入", 0)
             TaskIO.appendLog(taskId, "enqueued tag_import")
             TaskPoolService.getInstance().notifyTaskAvailable()
 
@@ -1207,7 +1206,7 @@ public class TagController {
             }
 
             TaskIO.appendLog(jobId, "completed upload file=${jsonFile.toString()} size=${size.toString()}")
-            TaskDao.updateTaskStatus(jobId, "pending", "文件已上传，等待导入", 0)
+            TaskDao.updateTaskStatus(jobId, TaskStatus.Pending, "文件已上传，等待导入", 0)
             TaskPoolService.getInstance().notifyTaskAvailable()
 
             let data = "{\"success\":1,\"job\":${jobId.toString()},\"operation\":\"tag_import\"}"

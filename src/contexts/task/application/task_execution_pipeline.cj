@@ -1,6 +1,7 @@
 package lanlu.contexts.task.application
 
 import stdx.log.*
+import lanlu.contexts.task.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
@@ -85,6 +86,6 @@ public class TaskExecutionPipeline {
     }
 
     private static func isTerminalStatus(status: String): Bool {
-        return status == "completed" || status == "failed" || status == "stopped"
+        return TaskStatus.fromDb(status).isTerminal()
     }
 }

@@ -5,10 +5,11 @@ func kvTtlRecordCodecRoundTripTest() {
     let encoded = KvTtlRecords.encode("value-1", 60)
     let decoded = KvTtlRecordCodec.decode(encoded)
     @Assert(decoded.isSome())
-    let record = decoded.getOrThrow()
-    @Expect(record.value, "value-1")
-    @Expect(record.ttlSeconds, 60)
-    @Expect(record.createdAt > 0)
+    if (let Some(record) <- decoded) {
+        @Expect(record.value, "value-1")
+        @Expect(record.ttlSeconds, 60)
+        @Expect(record.createdAt > 0)
+    }
 }
 
 @Test

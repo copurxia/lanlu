@@ -44,13 +44,13 @@ public class TagAssetConsumeTaskRunner {
             return
         }
 
-        let tagOpt = TagDao.getById(targetId)
-        if (tagOpt.isNone()) {
-            TaskRunnerUtils.cleanupStagingAssetInRoot(context.paths.assetPath, stagingAssetId, "")
-            TaskRunnerUtils.fail(taskId, "tag not found")
-            return
+        let tag = match (TagDao.getById(targetId)) {
+            case Some(value) => value
+            case None =>
+                TaskRunnerUtils.cleanupStagingAssetInRoot(context.paths.assetPath, stagingAssetId, "")
+                TaskRunnerUtils.fail(taskId, "tag not found")
+                return
         }
-        let tag = tagOpt.getOrThrow()
 
         let staging = AssetDao.getById(stagingAssetId)
         if (staging.id <= 0) {

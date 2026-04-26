@@ -9,6 +9,7 @@ import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import stdx.log.*
+import lanlu.contexts.task.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.task.application.*
@@ -672,7 +673,7 @@ public class AssetUploadController {
                             ("expected", fileSize.toString()),
                             ("actual", finalSize.toString())
                         )
-                        TaskDao.updateTaskStatus(taskIdInt, "failed", "文件大小校验失败", 70)
+                        TaskDao.updateTaskStatus(taskIdInt, TaskStatus.Failed, "文件大小校验失败", 70)
                         ResponseView.successJson(ctx, "{}", "Chunk uploaded but final validation failed")
                         return
                     }
@@ -724,8 +725,8 @@ public class AssetUploadController {
             }
 
             let task = TaskDao.getTaskDataById(taskId)
-            if (task.id > 0 && task.status != "completed" && task.status != "failed" && task.status != "stopped") {
-                let _ = TaskDao.updateTaskStatus(taskId, "failed", "上传已取消", task.progress)
+            if (task.id > 0 && !task.taskStatus.isTerminal()) {
+                let _ = TaskDao.updateTaskStatus(taskId, TaskStatus.Failed, "上传已取消", task.progress)
                 TaskIO.appendLog(taskId, "upload canceled by client")
             }
 

@@ -31,6 +31,15 @@ public class Archive {
     public var last_read_time: String = ""
     public var progress: Int32 = 0
 
+    public mut prop archiveType: ArchiveType {
+        get() {
+            ArchiveType.fromDb(archive_type)
+        }
+        set(value) {
+            archive_type = value.toDb()
+        }
+    }
+
     /**
      * 获取文件扩展名
      */

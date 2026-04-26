@@ -212,24 +212,15 @@ public class CategoryController {
     public static func updateCategory(ctx: Ctx) {
         let catid = ctx.paramsOpt("id") ?? ""
 
-        // 先获取现有分类
         let existingOpt = CategoryDao.getCategoryById(catid)
-        match (existingOpt) {
-            case None =>
-                ctx.status(404)
-                ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
-                return
-            case Some(_) => ()
-        }
-        let existing = existingOpt.getOrThrow()
-
-        try {
-            let body = ctx.bodyString()
-            var name = existing.name
-            var scanPath = existing.scanPath
-            var description = existing.description
-            var icon = existing.icon
-            var sortOrder = existing.sortOrder
+        if (let Some(existing) <- existingOpt) {
+            try {
+                let body = ctx.bodyString()
+                var name = existing.name
+                var scanPath = existing.scanPath
+                var description = existing.description
+                var icon = existing.icon
+                var sortOrder = existing.sortOrder
             var enabled = existing.enabled
             var plugins = existing.plugins
 
@@ -286,6 +277,11 @@ public class CategoryController {
             w.endObject()
             w.flush()
             ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
+        }
+        } else {
+            ctx.status(404)
+            ctx.json("{\"success\":0,\"error\":\"Category not found\"}")
+            return
         }
     }
 

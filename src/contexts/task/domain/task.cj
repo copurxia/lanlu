@@ -1,5 +1,6 @@
 package lanlu.contexts.task.domain
 
+import lanlu.contexts.task.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -33,6 +34,15 @@ public class Task {
     public var phase: String
     public var waitingReason: String
     public var activeKey: String
+
+    public mut prop taskStatus: TaskStatus {
+        get() {
+            TaskStatus.fromDb(status)
+        }
+        set(value) {
+            status = value.toDb()
+        }
+    }
 
     public init(id: Int64, name: String, status: String, progress: Int32, message: String, taskType!: String = "",
         pluginNamespace!: String = "", parameters!: String = "", result!: String = "", createdAt!: String = "",
@@ -232,7 +242,7 @@ public class TaskModel {
         let task = Task(
             0,
             name,
-            "pending",
+            TaskStatus.Pending.toDb(),
             0,
             "任务已创建",
             taskType: taskType,
@@ -273,7 +283,7 @@ public class TaskModel {
         let task = Task(
             0,
             name,
-            "pending",
+            TaskStatus.Pending.toDb(),
             0,
             "任务已创建",
             taskType: taskType,
@@ -321,7 +331,7 @@ public class TaskModel {
         let idOpt = TaskDao.createTaskDataFull(
             name,
             taskType,
-            "running",
+            TaskStatus.Running.toDb(),
             progress,
             message,
             parameters,
@@ -335,7 +345,7 @@ public class TaskModel {
                 return Task(
                     id,
                     name,
-                    "running",
+                    TaskStatus.Running.toDb(),
                     progress,
                     message,
                     taskType: taskType,
@@ -355,7 +365,7 @@ public class TaskModel {
                 return Task(
                     0,
                     name,
-                    "failed",
+                    TaskStatus.Failed.toDb(),
                     0,
                     "创建任务失败",
                     taskType: taskType,
@@ -378,7 +388,7 @@ public class TaskModel {
      */
     public static func startTask(id: Int64): Bool {
         let logger = getLogger("task_model")
-        let success = TaskDao.updateTaskStatus(id, "running", "任务已启动", 0)
+        let success = TaskDao.updateTaskStatus(id, TaskStatus.Running, "任务已启动", 0)
         if (success) {
             logger.debug("启动任务成功", ("id", id.toString()))
         } else {
@@ -392,7 +402,7 @@ public class TaskModel {
      */
     public static func stopTask(id: Int64): Bool {
         let logger = getLogger("task_model")
-        let success = TaskDao.updateTaskStatus(id, "stopped", "任务已停止", 0)
+        let success = TaskDao.updateTaskStatus(id, TaskStatus.Stopped, "任务已停止", 0)
         if (success) {
             logger.debug("停止任务成功", ("id", id.toString()))
         } else {
@@ -455,7 +465,7 @@ public class TaskModel {
             return false
         }
 
-        data.status = "completed"
+        data.status = TaskStatus.Completed.toDb()
         data.progress = 100
         data.message = "任务完成"
         data.result = result
@@ -481,7 +491,7 @@ public class TaskModel {
             return false
         }
 
-        data.status = "completed"
+        data.status = TaskStatus.Completed.toDb()
         data.progress = 100
         data.message = "任务完成"
         data.result = result
@@ -508,7 +518,7 @@ public class TaskModel {
             return false
         }
 
-        data.status = "failed"
+        data.status = TaskStatus.Failed.toDb()
         data.message = errorMessage
         data.completedAt = getCurrentTimeString()
 
@@ -610,7 +620,7 @@ public class TaskModel {
             return Task(
                 data.id,
                 name,
-                "waiting",
+                TaskStatus.Waiting.toDb(),
                 0,
                 "等待依赖任务完成",
                 taskType: taskType,
@@ -626,7 +636,7 @@ public class TaskModel {
             )
         } else {
             logger.error("创建等待任务失败", ("name", name))
-            return Task(0, name, "failed", 0, "创建任务失败", taskType: taskType)
+            return Task(0, name, TaskStatus.Failed.toDb(), 0, "创建任务失败", taskType: taskType)
         }
     }
 

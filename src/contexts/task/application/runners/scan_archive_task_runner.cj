@@ -193,13 +193,12 @@ public class ScanArchiveTaskRunner {
         try {
             // 首先检查是否有 handler 能处理该路径
             let handlerOpt = resolveHandler(filePath, config.archiveType)
-            match (handlerOpt) {
+            let handler = match (handlerOpt) {
+                case Some(value) => value
                 case None =>
                     logger.debug("No handler can handle this path, skipping: ${filePath}")
                     return ProcessResultData(true, "", "")  // 返回成功但无 archiveId，表示跳过
-                case Some(_) => ()
             }
-            let handler = handlerOpt.getOrThrow()
             let archiveType = handler.getType()
 
             if (config.categoryId.size == 0) {

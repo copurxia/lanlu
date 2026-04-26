@@ -15,7 +15,13 @@ import lanlu.shared.views.*
 public class AssetController {
     // GET /api/assets/{id}
     public static func getAsset(ctx: Ctx): Unit {
-        let idStr = ctx.paramsOpt("id").getOrThrow()
+        let idStr = match (ctx.paramsOpt("id")) {
+            case Some(value) => value
+            case None =>
+                ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
+                ResponseView.json(ctx, ApiResponse<String>(400, "invalid asset id", None))
+                return
+        }
         let id = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
         if (id <= 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)

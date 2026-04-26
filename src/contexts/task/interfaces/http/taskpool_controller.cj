@@ -4,6 +4,7 @@ import ignite.*
 import std.convert.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
+import lanlu.contexts.task.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.task.application.*
@@ -234,15 +235,14 @@ public class TaskPoolController {
             return
         }
 
-        // 只能取消 pending 或 running 状态的任务
-        if (task.status != "pending" && task.status != "running" && task.status != "waiting") {
+        if (!task.taskStatus.isCancellable()) {
             ctx.status(400)
             ctx.json("{\"error\":\"Task cannot be cancelled (status: ${task.status})\"}")
             return
         }
 
         // 更新任务状态为 stopped
-        let success = TaskDao.updateTaskStatus(taskId, "stopped", "Task cancelled by user", 0)
+        let success = TaskDao.updateTaskStatus(taskId, TaskStatus.Stopped, "Task cancelled by user", 0)
         if (success) {
             ctx.json("{\"success\":1,\"message\":\"Task cancelled successfully\"}")
         } else {
@@ -271,8 +271,7 @@ public class TaskPoolController {
             return
         }
 
-        // 只能重试 failed 或 stopped 状态的任务
-        if (task.status != "failed" && task.status != "stopped") {
+        if (!task.taskStatus.isRetryable()) {
             ctx.status(400)
             ctx.json("{\"error\":\"Task cannot be retried (status: ${task.status})\"}")
             return
@@ -584,11 +583,11 @@ public class TaskPoolController {
     }
 
     private static func isTerminalStatus(status: String): Bool {
-        return status == "completed" || status == "failed" || status == "stopped"
+        return TaskStatus.fromDb(status).isTerminal()
     }
 
     private static func isValidTaskStatus(status: String): Bool {
-        return status == "pending" || status == "running" || status == "waiting" || status == "completed" || status == "failed" || status == "stopped"
+        return TaskStatus.isValidDbValue(status)
     }
 
     private static func buildTaskListStreamData(page: Int32, pageSize: Int32, status: String, eventType: String): String {
@@ -649,7 +648,7 @@ public class TaskPoolController {
         }
 
         if (task.taskType == "upload" || task.taskType == "asset_upload") {
-            if (task.status == "pending" && task.progress >= 70) {
+            if (task.taskStatus.isPending() && task.progress >= 70) {
                 return "queued_for_processing"
             }
             if (!isTerminalStatus(task.status)) {

@@ -1,6 +1,7 @@
 package lanlu.contexts.task.infrastructure.persistence
 
 import std.database.sql.*
+import lanlu.contexts.task.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
 import std.collection.*
@@ -31,6 +32,15 @@ public class TaskData {
     public var waitingReason: String = ""
     public var activeKey: String = ""
 
+    public mut prop taskStatus: TaskStatus {
+        get() {
+            TaskStatus.fromDb(status)
+        }
+        set(value) {
+            status = value.toDb()
+        }
+    }
+
     public init() {}
 }
 
@@ -40,15 +50,11 @@ public class TaskData {
  */
 public class TaskDao {
     private static func defaultPhaseForStatus(status: String): String {
-        match (status) {
-            case "pending" => return "queued"
-            case "running" => return "executing"
-            case "waiting" => return "waiting"
-            case "completed" => return "completed"
-            case "failed" => return "failed"
-            case "stopped" => return "stopped"
-            case _ => return ""
-        }
+        return TaskStatus.defaultPhaseForDbValue(status)
+    }
+
+    public static func updateTaskStatus(id: Int64, status: TaskStatus, message: String, progress: Int32): Bool {
+        return updateTaskStatus(id, status.toDb(), message, progress)
     }
 
     // 注意：表创建已由迁移系统处理，createTable() 方法已移除

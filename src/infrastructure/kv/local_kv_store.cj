@@ -11,6 +11,7 @@ import lanlu.shared.utils.*
 import rocksdb_ffi.OptimisticRocksDb
 import rocksdb_ffi.OptimisticRocksDbOptions
 import rocksdb_ffi.RocksDbCompression
+import rocksdb_ffi.RocksDbOperationResult
 import rocksdb_ffi.RocksDbTxn
 
 private class LocalKvBootstrapConfig {
@@ -56,6 +57,19 @@ public interface LocalKVStore {
     func scan(namespace: String, keyPrefix: String): Array<(String, String)>
 }
 
+public enum LocalKVResult<T> {
+    | Ok(T)
+    | NotFound
+    | Err(String)
+
+    public func isOk(): Bool {
+        match (this) {
+            case Ok(_) => return true
+            case _ => return false
+        }
+    }
+}
+
 public interface LocalKVTransactionalStore {
     func beginTransaction(namespace: String): (Bool, Option<LocalKVTransaction>, String)
     func isConflictError(error: String): Bool
@@ -98,17 +112,26 @@ public class RocksDbLocalKVStore <: LocalKVStore {
     }
 
     public func get(namespace: String, key: String): Option<String> {
-        let (ok, valueOpt, err) = db.get(LocalKVKeys.compose(namespace, key))
-        if (!ok) {
-            logger.warn(
-                "RocksDB get failed",
-                ("namespace", namespace),
-                ("key", key),
-                ("error", err)
-            )
-            return None
+        match (getResult(namespace, key)) {
+            case Ok(value) => return Some(value)
+            case NotFound => return None
+            case Err(_) => return None
         }
-        return valueOpt
+    }
+
+    public func getResult(namespace: String, key: String): LocalKVResult<String> {
+        match (db.getResult(LocalKVKeys.compose(namespace, key))) {
+            case RocksDbOperationResult<String>.Ok(value) => return LocalKVResult<String>.Ok(value)
+            case RocksDbOperationResult<String>.NotFound => return LocalKVResult<String>.NotFound
+            case RocksDbOperationResult<String>.Err(error) =>
+                logger.warn(
+                    "RocksDB get failed",
+                    ("namespace", namespace),
+                    ("key", key),
+                    ("error", error.message)
+                )
+                return LocalKVResult<String>.Err(error.message)
+        }
     }
 
     public func multiGet(namespace: String, keys: Array<String>): Array<Option<String>> {
@@ -265,10 +288,13 @@ public class RocksDbTransactionalStore <: LocalKVTransactionalStore {
 
     public func beginTransaction(namespace: String): (Bool, Option<LocalKVTransaction>, String) {
         let (ok, txnOpt, err) = db.beginTransaction()
-        if (!ok || txnOpt.isNone()) {
-            return (ok, None, err)
+        if (!ok) {
+            return (false, None, err)
         }
-        return (true, Some(RocksDbNamespaceTransaction(namespace, txnOpt.getOrThrow())), "")
+        if (let Some(txn) <- txnOpt) {
+            return (true, Some(RocksDbNamespaceTransaction(namespace, txn)), "")
+        }
+        return (false, None, "rocksdb transaction begin returned no transaction")
     }
 
     public func isConflictError(error: String): Bool {
@@ -339,8 +365,7 @@ public class LocalKVService {
     private static var transactionalStore: Option<LocalKVTransactionalStore> = Option<LocalKVTransactionalStore>.None
 
     public static func initializeFromSettings(): Bool {
-        mutex.lock()
-        try {
+        return synchronized(mutex) {
             if (initialized) {
                 return !store.isNone()
             }
@@ -377,41 +402,39 @@ public class LocalKVService {
                 return false
             }
 
-            let db = dbOpt.getOrThrow()
-            store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(db))
-            transactionalStore = Option<LocalKVTransactionalStore>.Some(RocksDbTransactionalStore(db))
-            logger.info(
-                "Initialized RocksDB local KV",
-                ("path", dbPath),
-                ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()),
-                ("block_cache_mb", bootstrapConfig.blockCacheMb.toString()),
-                ("max_write_buffer_number", bootstrapConfig.maxWriteBufferNumber.toString()),
-                ("max_open_files", bootstrapConfig.maxOpenFiles.toString()),
-                ("max_background_jobs", bootstrapConfig.maxBackgroundJobs.toString()),
-                ("allow_mmap_reads", bootstrapConfig.allowMmapReads.toString()),
-                ("compression", bootstrapConfig.compression)
-            )
-            return true
-        } finally {
-            mutex.unlock()
+            if (let Some(db) <- dbOpt) {
+                store = Option<LocalKVStore>.Some(RocksDbLocalKVStore(db))
+                transactionalStore = Option<LocalKVTransactionalStore>.Some(RocksDbTransactionalStore(db))
+                logger.info(
+                    "Initialized RocksDB local KV",
+                    ("path", dbPath),
+                    ("kv_memory_mb", bootstrapConfig.kvMemoryMb.toString()),
+                    ("block_cache_mb", bootstrapConfig.blockCacheMb.toString()),
+                    ("max_write_buffer_number", bootstrapConfig.maxWriteBufferNumber.toString()),
+                    ("max_open_files", bootstrapConfig.maxOpenFiles.toString()),
+                    ("max_background_jobs", bootstrapConfig.maxBackgroundJobs.toString()),
+                    ("allow_mmap_reads", bootstrapConfig.allowMmapReads.toString()),
+                    ("compression", bootstrapConfig.compression)
+                )
+                return true
+            }
+
+            logger.warn("RocksDB local KV opened successfully but returned no handle", ("path", dbPath))
+            store = Option<LocalKVStore>.None
+            transactionalStore = Option<LocalKVTransactionalStore>.None
+            return false
         }
     }
 
     public static func getStore(): Option<LocalKVStore> {
-        mutex.lock()
-        try {
+        return synchronized(mutex) {
             return store
-        } finally {
-            mutex.unlock()
         }
     }
 
     public static func getTransactionalStore(): Option<LocalKVTransactionalStore> {
-        mutex.lock()
-        try {
+        return synchronized(mutex) {
             return transactionalStore
-        } finally {
-            mutex.unlock()
         }
     }
 

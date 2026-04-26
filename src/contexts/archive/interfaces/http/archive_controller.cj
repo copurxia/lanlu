@@ -136,9 +136,7 @@ public class ArchiveController {
     }
 
     private static func resolveArchiveFileType(archiveType: String, href: String): String {
-        if (archiveType == ArchiveTypes.EPUB) {
-            return "html"
-        }
+        if (ArchiveType.fromDb(archiveType).defaultFileType() == "html") { return "html" }
         if (ArchiveUtils.isVideoFile(href)) {
             return "video"
         }
@@ -292,7 +290,7 @@ public class ArchiveController {
 
     // GET /api/archives/{id}/metadata
     public static func getMetadata(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id").getOrThrow()
+        let id = ctx.paramsOpt("id") ?? ""
         let lang = (ctx.query("lang") ?? "").trimAscii()
         let includePagesRaw = (ctx.query("include_pages") ?? "").trimAscii().toAsciiLower()
         let includePages = includePagesRaw == "1" || includePagesRaw == "true"
@@ -348,7 +346,7 @@ public class ArchiveController {
 
     // GET /api/archives/{id}/tankoubons
     public static func getTankoubonsForArchive(ctx: Ctx): Unit {
-        let arcid = ctx.paramsOpt("id").getOrThrow()
+        let arcid = ctx.paramsOpt("id") ?? ""
         if (arcid.size == 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
             ResponseView.json(ctx, "{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
@@ -388,7 +386,7 @@ public class ArchiveController {
     
     // PUT /api/archives/{id}/metadata
     public static func updateMetadata(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id").getOrThrow()
+        let id = ctx.paramsOpt("id") ?? ""
         let requestBody = ctx.bodyString().trimAscii()
 
         if (id.size == 0) {
@@ -435,7 +433,7 @@ public class ArchiveController {
     
     // GET /api/archives/{id}/files
     public static func getFiles(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id").getOrThrow()
+        let id = ctx.paramsOpt("id") ?? ""
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -518,7 +516,7 @@ public class ArchiveController {
             let entry = entriesWithTitle[i]
             let href = entry[0]
             let rawTitle = entry[1]
-            let fileType = if (archive.archive_type == ArchiveTypes.EPUB) {
+            let fileType = if (ArchiveType.fromDb(archive.archive_type).defaultFileType() == "html") {
                 "html"
             } else {
                 resolveArchiveFileType(archive.archive_type, href)
@@ -747,7 +745,7 @@ public class ArchiveController {
         // 检查管理员权限
         match (AuthMiddleware.requireAdmin(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id").getOrThrow()
+                let id = ctx.paramsOpt("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
@@ -868,7 +866,7 @@ public class ArchiveController {
     private static let PAGE_STREAM_CHUNK_SIZE: Int64 = 256 * 1024
 
     public static func downloadArchive(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id").getOrThrow()
+        let id = ctx.paramsOpt("id") ?? ""
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -990,7 +988,7 @@ public class ArchiveController {
 
     // GET /api/archives/{id}/page?path=...
     public static func getPage(ctx: Ctx): Unit {
-        let id = ctx.paramsOpt("id").getOrThrow()
+        let id = ctx.paramsOpt("id") ?? ""
 
         // 检查ID是否为空
         if (id.size == 0) {
@@ -1559,7 +1557,7 @@ public class ArchiveController {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id").getOrThrow()
+                let id = ctx.paramsOpt("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
@@ -1610,7 +1608,7 @@ public class ArchiveController {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id").getOrThrow()
+                let id = ctx.paramsOpt("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
@@ -1660,8 +1658,8 @@ public class ArchiveController {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id").getOrThrow()
-                let pageParam = ctx.paramsOpt("page").getOrThrow()
+                let id = ctx.paramsOpt("id") ?? ""
+                let pageParam = ctx.paramsOpt("page") ?? ""
 
                 // 检查ID和页数参数
                 if (id.size == 0) {
@@ -1736,7 +1734,7 @@ public class ArchiveController {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id").getOrThrow()
+                let id = ctx.paramsOpt("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {
@@ -1786,7 +1784,7 @@ public class ArchiveController {
         // 获取用户ID
         match (AuthMiddleware.requireUser(ctx)) {
             case Some(userId) =>
-                let id = ctx.paramsOpt("id").getOrThrow()
+                let id = ctx.paramsOpt("id") ?? ""
 
                 // 检查ID是否为空
                 if (id.size == 0) {

@@ -190,7 +190,10 @@ public class TaskGroupKVStore <: TaskKVStore {
                             [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
                         break
                     }
-                    let txn = txnOpt.getOrThrow()
+                    let txn = match (txnOpt) {
+                        case Some(value) => value
+                        case None => return false
+                    }
                     try {
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedKey)) {
                             case Some(_) =>
@@ -254,7 +257,10 @@ public class TaskGroupKVStore <: TaskKVStore {
                             [("group_id", normalizedGroupId), ("key", normalizedKey), ("error", txnErr)])
                         break
                     }
-                    let txn = txnOpt.getOrThrow()
+                    let txn = match (txnOpt) {
+                        case Some(value) => value
+                        case None => return -1
+                    }
                     try {
                         var currentValue: Int64 = 0
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedKey)) {
@@ -345,7 +351,10 @@ public class TaskGroupKVStore <: TaskKVStore {
                             [("group_id", normalizedGroupId), ("chunk_key", normalizedChunkKey), ("error", txnErr)])
                         break
                     }
-                    let txn = txnOpt.getOrThrow()
+                    let txn = match (txnOpt) {
+                        case Some(value) => value
+                        case None => return result
+                    }
                     try {
                         match (getRecordNormalizedFromTxn(txn, normalizedGroupId, normalizedChunkKey)) {
                             case Some(_) => result.inserted = false

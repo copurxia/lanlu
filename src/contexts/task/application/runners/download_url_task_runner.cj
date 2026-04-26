@@ -55,12 +55,12 @@ public class DownloadUrlTaskRunner {
             TaskIO.appendLog(taskId, "url=${url}")
             TaskModel.updateTaskProgress(taskId, 5, "匹配下载插件")
 
-            let pluginOpt = findMatchingDownloadPlugin(url)
-            if (pluginOpt.isNone()) {
-                fail(taskId, "No download plugin matches provided url")
-                return
+            let plugin = match (findMatchingDownloadPlugin(url)) {
+                case Some(value) => value
+                case None =>
+                    fail(taskId, "No download plugin matches provided url")
+                    return
             }
-            let plugin = pluginOpt.getOrThrow()
             TaskDao.updateTaskPluginNamespace(taskId, plugin.namespace)
             TaskIO.appendLog(taskId, "matched plugin=${plugin.namespace}")
 
@@ -235,8 +235,7 @@ public class DownloadUrlTaskRunner {
             }
         }
 
-        if (disabledMatch.isSome()) {
-            let plugin = disabledMatch.getOrThrow()
+        if (let Some(plugin) <- disabledMatch) {
             logger.warn("匹配到禁用的下载插件，自动启用", ("namespace", plugin.namespace))
             plugin.enabled = true
             let enabled = PluginTaskService.setEnabled(plugin.namespace, true)

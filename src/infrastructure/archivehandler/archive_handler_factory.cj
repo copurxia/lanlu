@@ -57,7 +57,10 @@ public class ArchiveHandlerFactory {
             case Some(handler) => return handler
             case None =>
                 // 默认返回压缩包处理器
-                return typeMap.get(ArchiveTypes.ARCHIVE).getOrThrow()
+                match (typeMap.get(ArchiveTypes.ARCHIVE)) {
+                    case Some(defaultHandler) => return defaultHandler
+                    case None => return handlers[handlers.size - 1]
+                }
         }
     }
 

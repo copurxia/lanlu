@@ -7,6 +7,7 @@ import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.log.*
 import stdx.encoding.json.stream.*
+import lanlu.contexts.task.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
@@ -42,7 +43,7 @@ public class DownloadUrlCallbackRunner {
         let pluginTask = TaskDao.getTaskDataById(pluginTaskId)
         let pluginOutput = TaskIO.readOutput(pluginTaskId)
 
-        if (pluginTask.status != "completed") {
+        if (!pluginTask.taskStatus.isCompleted()) {
             let errMsg =
                 if (pluginTask.message.trimAscii().size > 0) { pluginTask.message } else { "Plugin task failed" }
             // 将失败写回父任务，避免前端卡在 waiting
@@ -84,7 +85,7 @@ public class DownloadUrlCallbackRunner {
             return
         }
 
-        let pluginRelativePath = downloadedPluginRelativePaths.get(0).getOrThrow()
+        let pluginRelativePath = downloadedPluginRelativePaths.get(0) ?? ""
         if (pluginRelativePath.size == 0) {
             let errMsg = "Plugin returned invalid relative_path"
             TaskModel.failTask(downloadTaskId, errMsg)

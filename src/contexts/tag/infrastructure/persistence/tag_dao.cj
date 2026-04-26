@@ -1153,35 +1153,30 @@ public class TagDao {
      * 获取所有命名空间
      */
     public static func listNamespaces(): Array<String> {
+        var list: ArrayList<String> = ArrayList<String>()
         let connOpt = DatabaseConfig.getPooledConnection()
         match (connOpt) {
-            case Some(conn) =>
-                
-                try {
-                    let stmt = conn.prepareStatement("SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace")
-                    let rs = stmt.query()
-                    var list: ArrayList<String> = ArrayList<String>()
-                    try {
-                        while (rs.next()) {
-                            let ns = rs.getOrNull<String>(0) ?? ""
-                            if (ns.size > 0) {
-                                list.add(ns)
+            case Some(rawConn) =>
+                try (conn = rawConn) {
+                    let rawStmt = conn.prepareStatement("SELECT DISTINCT namespace FROM tags WHERE namespace != '' ORDER BY namespace")
+                    try (stmt = rawStmt) {
+                        let rawRs = stmt.query()
+                        try (rs = rawRs) {
+                            while (rs.next()) {
+                                let ns = rs.getOrNull<String>(0) ?? ""
+                                if (ns.size > 0) {
+                                    list.add(ns)
+                                }
                             }
                         }
-                    } finally {
-                        rs.close()
-                        stmt.close()
                     }
-                    return list.toArray()
                 } catch (e: Exception) {
                     getLogger("tag_dao").error("获取命名空间列表失败", ("error", e.message))
-                    return Array<String>()
-                } finally {
-                    try { conn.close() } catch (_: Exception) {}
                 }
             case None =>
-                return Array<String>()
+                ()
         }
+        return list.toArray()
     }
 
     /**

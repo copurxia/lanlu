@@ -3,6 +3,7 @@ package lanlu.contexts.task.application
 import std.sync.*
 import std.convert.*
 import std.fs.*
+import lanlu.contexts.task.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
@@ -25,16 +26,14 @@ public class TaskPoolService {
     }
 
     public static func getInstance(): TaskPoolService {
-        instanceMutex.lock()
-        match (instance) {
-            case Some(s) =>
-                instanceMutex.unlock()
-                return s
-            case None =>
-                let s = TaskPoolService()
-                instance = Some(s)
-                instanceMutex.unlock()
-                return s
+        return synchronized(instanceMutex) {
+            match (instance) {
+                case Some(s) => s
+                case None =>
+                    let s = TaskPoolService()
+                    instance = Some(s)
+                    s
+            }
         }
     }
 
@@ -98,7 +97,7 @@ public class TaskPoolService {
                         let task = TaskDao.getTaskDataById(taskId)
                         let shouldCleanup = if (task.id == 0) {
                             true
-                        } else if (task.status == "completed" || task.status == "failed" || task.status == "stopped") {
+                        } else if (task.taskStatus.isTerminal()) {
                             true
                         } else {
                             false
