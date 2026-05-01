@@ -13,7 +13,11 @@ import {
 } from 'react-native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useNavigation} from '@react-navigation/native';
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import {
+  CalendarDays,
   ChevronRight,
   Grid2X2,
   List,
@@ -69,6 +73,7 @@ type HomeRow = {
   category?: Category;
   items: MediaItem[];
 };
+type DatePickerTarget = 'from' | 'to';
 
 function viewModeLabel(mode: HomeViewMode, t: ReturnType<typeof useI18n>['t']) {
   switch (mode) {
@@ -106,6 +111,30 @@ function resolveSmartFilterDate(value?: string): string {
   return normalized;
 }
 
+function parseDateInput(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+  return date;
+}
+
+function formatDateInput(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function smartFilterName(filter: SmartFilter, language: string): string {
   if (language !== 'zh') {
     const translated = filter.translations?.[language]?.text?.trim();
@@ -141,7 +170,16 @@ export function HomeScreen() {
   const [untaggedOnly, setUntaggedOnly] = useState(false);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [groupByTanks, setGroupByTanks] = useState(true);
+  const [draftSortby, setDraftSortby] = useState('created_at');
+  const [draftSortOrder, setDraftSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [draftDateFrom, setDraftDateFrom] = useState('');
+  const [draftDateTo, setDraftDateTo] = useState('');
+  const [draftNewOnly, setDraftNewOnly] = useState(false);
+  const [draftUntaggedOnly, setDraftUntaggedOnly] = useState(false);
+  const [draftFavoriteOnly, setDraftFavoriteOnly] = useState(false);
+  const [draftGroupByTanks, setDraftGroupByTanks] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [datePickerTarget, setDatePickerTarget] = useState<DatePickerTarget | null>(null);
   const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [activeSmartFilterId, setActiveSmartFilterId] = useState<number | null>(null);
@@ -454,11 +492,38 @@ export function HomeScreen() {
   }
 
   function applyFilters() {
+    setSortby(draftSortby);
+    setSortOrder(draftSortOrder);
+    setDateFrom(draftDateFrom.trim());
+    setDateTo(draftDateTo.trim());
+    setNewOnly(draftNewOnly);
+    setUntaggedOnly(draftUntaggedOnly);
+    setFavoriteOnly(draftFavoriteOnly);
+    setGroupByTanks(draftGroupByTanks);
     setFiltersOpen(false);
+    setDatePickerTarget(null);
     setItems([]);
     setPage(1);
     setTotal(0);
     setSearchVersion(version => version + 1);
+  }
+
+  function openFilters() {
+    setDraftSortby(sortby);
+    setDraftSortOrder(sortOrder);
+    setDraftDateFrom(dateFrom);
+    setDraftDateTo(dateTo);
+    setDraftNewOnly(newOnly);
+    setDraftUntaggedOnly(untaggedOnly);
+    setDraftFavoriteOnly(favoriteOnly);
+    setDraftGroupByTanks(groupByTanks);
+    setDatePickerTarget(null);
+    setFiltersOpen(true);
+  }
+
+  function closeFilters() {
+    setDatePickerTarget(null);
+    setFiltersOpen(false);
   }
 
   function resetFilters() {
@@ -470,11 +535,37 @@ export function HomeScreen() {
     setUntaggedOnly(false);
     setFavoriteOnly(false);
     setGroupByTanks(true);
+    setDraftSortby('created_at');
+    setDraftSortOrder('desc');
+    setDraftDateFrom('');
+    setDraftDateTo('');
+    setDraftNewOnly(false);
+    setDraftUntaggedOnly(false);
+    setDraftFavoriteOnly(false);
+    setDraftGroupByTanks(true);
     setFiltersOpen(false);
+    setDatePickerTarget(null);
     setItems([]);
     setPage(1);
     setTotal(0);
     setSearchVersion(version => version + 1);
+  }
+
+  function onDatePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
+    const target = datePickerTarget;
+    setDatePickerTarget(null);
+    if (event.type === 'dismissed' || !selectedDate || !target) return;
+    const nextValue = formatDateInput(selectedDate);
+    if (target === 'from') {
+      setDraftDateFrom(nextValue);
+    } else {
+      setDraftDateTo(nextValue);
+    }
+  }
+
+  function datePickerValue(target: DatePickerTarget): Date {
+    const draftValue = target === 'from' ? draftDateFrom : draftDateTo;
+    return parseDateInput(draftValue) || new Date();
   }
 
   function cycleViewMode() {
@@ -679,7 +770,7 @@ export function HomeScreen() {
         <TouchableOpacity
           accessibilityLabel={t('common.filter')}
           accessibilityRole="button"
-          onPress={() => setFiltersOpen(true)}
+          onPress={openFilters}
           style={[styles.searchButton, hasAdvancedFilters && styles.filterButtonActive]}>
           <SlidersHorizontal color={hasAdvancedFilters ? colors.primary : colors.text} size={18} />
         </TouchableOpacity>
@@ -805,7 +896,7 @@ export function HomeScreen() {
 
       <Modal
         animationType="slide"
-        onRequestClose={() => setFiltersOpen(false)}
+        onRequestClose={closeFilters}
         transparent
         visible={filtersOpen}>
         <View style={styles.modalBackdrop}>
@@ -815,7 +906,7 @@ export function HomeScreen() {
               <TouchableOpacity
                 accessibilityLabel={t('common.close')}
                 accessibilityRole="button"
-                onPress={() => setFiltersOpen(false)}
+                onPress={closeFilters}
                 style={styles.sheetCloseButton}>
                 <X color={colors.textMuted} size={18} />
               </TouchableOpacity>
@@ -835,9 +926,9 @@ export function HomeScreen() {
                 <TouchableOpacity
                   accessibilityRole="button"
                   key={value}
-                  onPress={() => setSortby(value)}
-                  style={[styles.sheetChip, sortby === value && styles.sortChipActive]}>
-                  <Text style={[styles.sortChipText, sortby === value && styles.sortChipTextActive]}>
+                  onPress={() => setDraftSortby(value)}
+                  style={[styles.sheetChip, draftSortby === value && styles.sortChipActive]}>
+                  <Text style={[styles.sortChipText, draftSortby === value && styles.sortChipTextActive]}>
                     {label}
                   </Text>
                 </TouchableOpacity>
@@ -853,9 +944,9 @@ export function HomeScreen() {
                 <TouchableOpacity
                   accessibilityRole="button"
                   key={value}
-                  onPress={() => setSortOrder(value as 'asc' | 'desc')}
-                  style={[styles.sheetChip, sortOrder === value && styles.sortChipActive]}>
-                  <Text style={[styles.sortChipText, sortOrder === value && styles.sortChipTextActive]}>
+                  onPress={() => setDraftSortOrder(value as 'asc' | 'desc')}
+                  style={[styles.sheetChip, draftSortOrder === value && styles.sortChipActive]}>
+                  <Text style={[styles.sortChipText, draftSortOrder === value && styles.sortChipTextActive]}>
                     {label}
                   </Text>
                 </TouchableOpacity>
@@ -865,31 +956,51 @@ export function HomeScreen() {
             <View style={styles.dateRow}>
               <View style={styles.dateField}>
                 <Text style={styles.fieldLabel}>{t('search.dateFrom')}</Text>
-                <TextInput
-                  autoCapitalize="none"
-                  onChangeText={setDateFrom}
-                  placeholder="YYYY-MM-DD"
-                  style={styles.sheetInput}
-                  value={dateFrom}
-                />
+                <View style={styles.dateInputRow}>
+                  <TextInput
+                    autoCapitalize="none"
+                    keyboardType="numbers-and-punctuation"
+                    onChangeText={setDraftDateFrom}
+                    placeholder="YYYY-MM-DD"
+                    style={styles.dateInput}
+                    value={draftDateFrom}
+                  />
+                  <TouchableOpacity
+                    accessibilityLabel={t('search.dateFrom')}
+                    accessibilityRole="button"
+                    onPress={() => setDatePickerTarget('from')}
+                    style={styles.datePickerButton}>
+                    <CalendarDays color={colors.textMuted} size={18} />
+                  </TouchableOpacity>
+                </View>
               </View>
               <View style={styles.dateField}>
                 <Text style={styles.fieldLabel}>{t('search.dateTo')}</Text>
-                <TextInput
-                  autoCapitalize="none"
-                  onChangeText={setDateTo}
-                  placeholder="YYYY-MM-DD"
-                  style={styles.sheetInput}
-                  value={dateTo}
-                />
+                <View style={styles.dateInputRow}>
+                  <TextInput
+                    autoCapitalize="none"
+                    keyboardType="numbers-and-punctuation"
+                    onChangeText={setDraftDateTo}
+                    placeholder="YYYY-MM-DD"
+                    style={styles.dateInput}
+                    value={draftDateTo}
+                  />
+                  <TouchableOpacity
+                    accessibilityLabel={t('search.dateTo')}
+                    accessibilityRole="button"
+                    onPress={() => setDatePickerTarget('to')}
+                    style={styles.datePickerButton}>
+                    <CalendarDays color={colors.textMuted} size={18} />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
 
             <View style={styles.switchList}>
-              <FilterSwitch label={t('search.newOnly')} value={newOnly} onValueChange={setNewOnly} />
-              <FilterSwitch label={t('search.untaggedOnly')} value={untaggedOnly} onValueChange={setUntaggedOnly} />
-              <FilterSwitch label={t('search.favoriteOnly')} value={favoriteOnly} onValueChange={setFavoriteOnly} />
-              <FilterSwitch label={t('search.groupByTanks')} value={groupByTanks} onValueChange={setGroupByTanks} />
+              <FilterSwitch label={t('search.newOnly')} value={draftNewOnly} onValueChange={setDraftNewOnly} />
+              <FilterSwitch label={t('search.untaggedOnly')} value={draftUntaggedOnly} onValueChange={setDraftUntaggedOnly} />
+              <FilterSwitch label={t('search.favoriteOnly')} value={draftFavoriteOnly} onValueChange={setDraftFavoriteOnly} />
+              <FilterSwitch label={t('search.groupByTanks')} value={draftGroupByTanks} onValueChange={setDraftGroupByTanks} />
             </View>
 
             <View style={styles.sheetActions}>
@@ -900,6 +1011,14 @@ export function HomeScreen() {
                 <Text style={styles.primaryActionText}>{t('common.filter')}</Text>
               </TouchableOpacity>
             </View>
+            {datePickerTarget ? (
+              <DateTimePicker
+                display="default"
+                mode="date"
+                onChange={onDatePickerChange}
+                value={datePickerValue(datePickerTarget)}
+              />
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -1229,15 +1348,30 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.xs,
   },
-  sheetInput: {
+  dateInputRow: {
+    alignItems: 'center',
     backgroundColor: colors.surfaceMuted,
     borderColor: colors.border,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    minHeight: 40,
+    overflow: 'hidden',
+  },
+  dateInput: {
     color: colors.text,
+    flex: 1,
     fontSize: 14,
     paddingHorizontal: 10,
-    paddingVertical: 9,
+    paddingVertical: 8,
+  },
+  datePickerButton: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    borderLeftColor: colors.border,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
+    width: 40,
   },
   switchList: {
     borderColor: colors.border,
