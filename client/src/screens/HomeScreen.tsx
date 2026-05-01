@@ -75,6 +75,7 @@ type HomeRow = {
   items: MediaItem[];
 };
 type DatePickerTarget = 'from' | 'to';
+type HomeViewSurface = 'archive-feed-continuous' | 'archive-feed-paged' | 'home-category-rows';
 
 function viewModeLabel(mode: HomeViewMode, t: ReturnType<typeof useI18n>['t']) {
   switch (mode) {
@@ -150,6 +151,12 @@ function buildExactTagSearchQuery(tag: string) {
   return query.endsWith('$') ? query : `${query}$`;
 }
 
+function resolveHomeViewSurface(mode: HomeViewMode, isRowsLanding: boolean): HomeViewSurface {
+  if (mode === 'category-rows' && isRowsLanding) return 'home-category-rows';
+  if (mode === 'masonry' || mode === 'tweet' || mode === 'channel') return 'archive-feed-continuous';
+  return 'archive-feed-paged';
+}
+
 export function HomeScreen() {
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
@@ -196,7 +203,8 @@ export function HomeScreen() {
   const hasAdvancedFilters = Boolean(
     dateFrom || dateTo || newOnly || untaggedOnly || favoriteOnly || !groupByTanks,
   );
-  const showRows = viewMode === 'category-rows' && !submittedFilter && !selectedCategory && !hasAdvancedFilters;
+  const isRowsLanding = !submittedFilter && !selectedCategory && !hasAdvancedFilters;
+  const showRows = viewMode === 'category-rows' && isRowsLanding;
 
   const openItem = useCallback(
     (item: MediaItem) => {
@@ -579,22 +587,28 @@ export function HomeScreen() {
   function cycleViewMode() {
     const currentIndex = VIEW_MODES.indexOf(viewMode);
     const next = VIEW_MODES[(currentIndex + 1) % VIEW_MODES.length];
+    const previousSurface = resolveHomeViewSurface(viewMode, isRowsLanding);
+    const nextSurface = resolveHomeViewSurface(next, isRowsLanding);
+    if (previousSurface !== nextSurface) {
+      setItems([]);
+      setTotal(0);
+      setLoading(nextSurface !== 'home-category-rows');
+      setSearchVersion(version => version + 1);
+    }
     setViewMode(next);
     saveHomeViewMode(next).catch(err => console.warn('Failed to save view mode:', err));
-    setItems([]);
     setPage(1);
   }
 
   function openCategory(category: Category) {
-    const nextMode: HomeViewMode = 'masonry';
     setSelectedCategory(category);
     setActiveSmartFilterId(null);
     setSubmittedFilter('');
     setFilter('');
-    setViewMode(nextMode);
-    saveHomeViewMode(nextMode).catch(err => console.warn('Failed to save view mode:', err));
     setItems([]);
+    setTotal(0);
     setPage(1);
+    setLoading(true);
   }
 
   function showAll() {
