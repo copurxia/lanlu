@@ -15,8 +15,18 @@ import {
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {ChevronLeft, Settings as SettingsIcon} from 'lucide-react-native';
-import Video from 'react-native-video';
+import {
+  BookOpen,
+  ChevronLeft,
+  FastForward,
+  Pause,
+  Play,
+  Rewind,
+  Settings as SettingsIcon,
+  Volume2,
+  VolumeX,
+} from 'lucide-react-native';
+import {VLCPlayer} from 'react-native-vlc-media-player';
 import {WebView} from 'react-native-webview';
 
 import {buildAuthorizedImageSource, buildAuthorizedUri, extractApiError} from '../api/client';
@@ -33,6 +43,7 @@ import {
   ReaderSettings,
   saveReaderSettings,
 } from '../storage/preferences';
+import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
 import type {PageInfo, PageSourceInfo} from '../types/api';
@@ -55,6 +66,23 @@ type ReaderItem = {
   progressPage: number;
 };
 
+type VlcPlayerRef = {
+  seek: (position: number) => void;
+};
+
+type MediaPlaybackState = {
+  currentTime: number;
+  duration: number;
+  position: number;
+  paused: boolean;
+  muted: boolean;
+  volume: number;
+};
+
+type ReaderLane =
+  | {id: 'book'; kind: 'book'; label: string}
+  | {id: string; kind: 'video' | 'audio'; label: string; page: ReaderPage};
+
 const READING_MODES: ReaderSettings['readingMode'][] = [
   'single-ltr',
   'single-rtl',
@@ -62,17 +90,29 @@ const READING_MODES: ReaderSettings['readingMode'][] = [
   'webtoon',
 ];
 
-function modeLabel(mode: ReaderSettings['readingMode']) {
+function modeLabelKey(mode: ReaderSettings['readingMode']) {
   switch (mode) {
     case 'single-ltr':
-      return 'LTR';
+      return 'reader.modeLtr';
     case 'single-rtl':
-      return 'RTL';
+      return 'reader.modeRtl';
     case 'single-ttb':
-      return 'Top';
+      return 'reader.modeTtb';
     case 'webtoon':
-      return 'Webtoon';
+      return 'reader.modeWebtoon';
   }
+}
+
+function normalizeMediaSeconds(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return value > 10000 ? value / 1000 : value;
+}
+
+function formatMediaTime(seconds: number) {
+  const safe = Math.max(0, Math.floor(seconds));
+  const minutes = Math.floor(safe / 60);
+  const rest = safe % 60;
+  return `${minutes}:${String(rest).padStart(2, '0')}`;
 }
 
 function nextReadingMode(mode: ReaderSettings['readingMode']) {
@@ -81,11 +121,13 @@ function nextReadingMode(mode: ReaderSettings['readingMode']) {
 }
 
 export function ReaderScreen({route, navigation}: Props) {
+  const {t} = useI18n();
   const {archiveId, initialPage = 1} = route.params;
   const {width, height} = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ReaderItem>>(null);
   const webtoonRef = useRef<ScrollView>(null);
+  const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const lastSavedPage = useRef(0);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -97,6 +139,8 @@ export function ReaderScreen({route, navigation}: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [chromeVisible, setChromeVisible] = useState(true);
+  const [activeLaneId, setActiveLaneId] = useState<string>('book');
+  const [mediaStateByPage, setMediaStateByPage] = useState<Record<number, MediaPlaybackState>>({});
 
   const hydratePage = useCallback(
     async (page: PageInfo, index: number): Promise<ReaderPage> => {
@@ -259,6 +303,52 @@ export function ReaderScreen({route, navigation}: Props) {
     setSourceIndexByPage(value => ({...value, [index]: next}));
   }
 
+  const getMediaState = useCallback(
+    (pageNumber: number): MediaPlaybackState =>
+      mediaStateByPage[pageNumber] || {
+        currentTime: 0,
+        duration: 0,
+        position: 0,
+        paused: false,
+        muted: false,
+        volume: 1,
+      },
+    [mediaStateByPage],
+  );
+
+  const setMediaState = useCallback(
+    (pageNumber: number, patch: Partial<MediaPlaybackState>) => {
+      setMediaStateByPage(current => {
+        const previous =
+          current[pageNumber] || {
+            currentTime: 0,
+            duration: 0,
+            position: 0,
+            paused: false,
+            muted: false,
+            volume: 1,
+          };
+        return {
+          ...current,
+          [pageNumber]: {
+            ...previous,
+            ...patch,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  function seekMedia(page: ReaderPage, seconds: number) {
+    const state = getMediaState(page.pageNumber);
+    const duration = Math.max(1, state.duration);
+    const nextTime = Math.max(0, Math.min(duration, seconds));
+    const position = Math.max(0, Math.min(1, nextTime / duration));
+    vlcRefs.current[page.pageNumber]?.seek(position);
+    setMediaState(page.pageNumber, {currentTime: nextTime, position});
+  }
+
   useEffect(() => {
     if (!pages.length) return;
     Promise.all(pages.map((page, index) => hydratePage(page, index)))
@@ -267,14 +357,14 @@ export function ReaderScreen({route, navigation}: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceIndexByPage]);
 
-  if (loading) return <ScreenState loading title="Loading reader" />;
+  if (loading) return <ScreenState loading title={t('reader.loading')} />;
 
   if (error) {
     return (
       <ScreenState
-        title="Could not load reader"
+        title={t('reader.loadFailed')}
         message={error}
-        actionLabel="Retry"
+        actionLabel={t('common.retry')}
         onAction={() => load().catch(err => console.warn('Failed to load reader:', err))}
       />
     );
@@ -283,9 +373,9 @@ export function ReaderScreen({route, navigation}: Props) {
   if (!pages.length) {
     return (
       <ScreenState
-        title="No readable pages"
-        message="This archive has no pages available for the mobile reader."
-        actionLabel="Back"
+        title={t('reader.noPages')}
+        message={t('reader.noPagesMessage')}
+        actionLabel={t('reader.back')}
         onAction={() => navigation.goBack()}
       />
     );
@@ -297,25 +387,62 @@ export function ReaderScreen({route, navigation}: Props) {
       ? [styles.webtoonPage, {width}]
       : [styles.mediaPage, {width: pageWidth, height: pageHeight || height}];
     if (page.effectiveType === 'video' || page.effectiveType === 'audio') {
+      const mediaState = getMediaState(page.pageNumber);
+      const mediaOptions = page.headers?.Authorization
+        ? [`:http-header=Authorization: ${page.headers.Authorization}`, '']
+        : undefined;
       return (
         <View style={frameStyle}>
-          <Video
-            controls
-            paused={false}
+          <VLCPlayer
+            ref={ref => {
+              vlcRefs.current[page.pageNumber] = ref as VlcPlayerRef | null;
+            }}
+            autoplay
+            paused={mediaState.paused}
+            muted={mediaState.muted}
+            volume={Math.round(Math.max(0, Math.min(1, mediaState.volume)) * 100)}
             resizeMode="contain"
-            source={{uri: page.uri || '', headers: page.headers}}
+            source={
+              {
+                uri: page.uri || '',
+                isNetwork: Boolean(page.uri?.startsWith('http')),
+                initType: 2,
+                initOptions: ['--network-caching=600', ''],
+                mediaOptions,
+              } as never
+            }
             style={page.effectiveType === 'audio' ? styles.audioStage : styles.pageImage}
+            onEnd={() => setMediaState(page.pageNumber, {paused: true})}
             onError={err => {
               setFailedPages(current => ({
                 ...current,
                 [page.pageNumber]: JSON.stringify(err),
               }));
             }}
+            onLoad={event => {
+              setMediaState(page.pageNumber, {
+                duration: normalizeMediaSeconds(event.duration),
+              });
+            }}
+            onPaused={() => setMediaState(page.pageNumber, {paused: true})}
+            onPlaying={event => {
+              setMediaState(page.pageNumber, {
+                duration: normalizeMediaSeconds(event.duration),
+                paused: false,
+              });
+            }}
+            onProgress={event => {
+              setMediaState(page.pageNumber, {
+                currentTime: normalizeMediaSeconds(event.currentTime),
+                duration: normalizeMediaSeconds(event.duration),
+                position: Math.max(0, Math.min(1, event.position || 0)),
+              });
+            }}
           />
           {page.effectiveType === 'audio' ? (
-            <Text style={styles.audioTitle}>{page.title || page.resolvedPath || `Audio ${page.pageNumber}`}</Text>
+            <Text style={styles.audioTitle}>{page.title || page.resolvedPath || `${t('reader.audio')} ${page.pageNumber}`}</Text>
           ) : null}
-          {commonError ? <ErrorOverlay title="Media failed to load" message={commonError} /> : null}
+          {commonError ? <ErrorOverlay title={t('reader.mediaFailed')} message={commonError} /> : null}
         </View>
       );
     }
@@ -333,7 +460,7 @@ export function ReaderScreen({route, navigation}: Props) {
               }));
             }}
           />
-          {commonError ? <ErrorOverlay title="HTML failed to load" message={commonError} /> : null}
+          {commonError ? <ErrorOverlay title={t('reader.htmlFailed')} message={commonError} /> : null}
         </View>
       );
     }
@@ -343,7 +470,7 @@ export function ReaderScreen({route, navigation}: Props) {
         {page.imageSource ? (
           <>
             {!loadedPages[page.pageNumber] && !commonError ? (
-              <Text style={styles.loadingText}>Loading page {page.pageNumber}...</Text>
+              <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
             ) : null}
             <Image
               onError={event => {
@@ -361,19 +488,34 @@ export function ReaderScreen({route, navigation}: Props) {
               ]}
             />
             {commonError ? (
-              <ErrorOverlay title="Page failed to load" message={`${commonError}\n${page.resolvedPath || page.uri || ''}`} />
+              <ErrorOverlay title={t('reader.pageFailed')} message={`${commonError}\n${page.resolvedPath || page.uri || ''}`} />
             ) : null}
           </>
         ) : (
-          <ErrorOverlay title="No readable image source" message={page.id} />
+          <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
         )}
       </View>
     );
   };
 
-  const current = pages[Math.max(0, currentPage - 1)];
   const horizontal = settings.readingMode === 'single-ltr' || settings.readingMode === 'single-rtl';
   const pageFrameHeight = height;
+  const activeReaderItem = readerItems[currentItemIndex];
+  const lanes: ReaderLane[] = [
+    ...(activeReaderItem?.pages || [])
+      .filter(page => page.effectiveType === 'video' || page.effectiveType === 'audio')
+      .map((page, index) => ({
+        id: `${page.effectiveType}-${page.pageNumber}`,
+        kind: page.effectiveType as 'video' | 'audio',
+        label:
+          page.effectiveType === 'audio'
+            ? `${t('reader.audio')}${activeReaderItem.pages.length > 1 ? ` ${index + 1}` : ''}`
+            : `${t('reader.video')}${activeReaderItem.pages.length > 1 ? ` ${index + 1}` : ''}`,
+        page,
+      })),
+    {id: 'book', kind: 'book', label: t('reader.book')},
+  ];
+  const activeLane = lanes.find(lane => lane.id === activeLaneId) || lanes[0];
 
   const renderItem = ({item}: ListRenderItemInfo<ReaderItem>) => {
     const spreadPageWidth = item.pages.length > 1 ? width / 2 : width;
@@ -446,7 +588,7 @@ export function ReaderScreen({route, navigation}: Props) {
               <ChevronLeft color={colors.white} size={24} />
             </TouchableOpacity>
             <TouchableOpacity onPress={cycleMode} style={styles.modeButton}>
-              <Text style={styles.modeText}>{modeLabel(settings.readingMode)}</Text>
+              <Text style={styles.modeText}>{t(modeLabelKey(settings.readingMode))}</Text>
               <Text style={styles.progress}>{currentPage} / {pages.length}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.iconButton}>
@@ -454,35 +596,77 @@ export function ReaderScreen({route, navigation}: Props) {
             </TouchableOpacity>
           </View>
           <View style={[styles.bottomBar, {paddingBottom: insets.bottom + 10}]}>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              onPress={event => {
-                const laneWidth = Math.max(1, width - 28);
-                const x = event.nativeEvent.locationX;
-                const next = Math.round((x / laneWidth) * Math.max(1, pages.length - 1)) + 1;
-                goToPage(next);
-              }}
-              style={styles.progressLane}>
-              <View style={styles.progressTrack}>
-                <View
-                  style={[
-                    styles.progressFill,
-                    {width: `${Math.max(2, (currentPage / Math.max(1, pages.length)) * 100)}%`},
-                  ]}
-                />
+            <View style={styles.laneShell}>
+              <View style={styles.laneTabs}>
+                {lanes.map(lane => (
+                  <TouchableOpacity
+                    accessibilityLabel={lane.label}
+                    accessibilityRole="button"
+                    key={lane.id}
+                    onPress={() => setActiveLaneId(lane.id)}
+                    style={[styles.laneTab, activeLane.id === lane.id && styles.laneTabActive]}>
+                    {lane.kind === 'book' ? (
+                      <BookOpen color={activeLane.id === lane.id ? colors.black : colors.white} size={16} />
+                    ) : lane.kind === 'audio' ? (
+                      <Volume2 color={activeLane.id === lane.id ? colors.black : colors.white} size={16} />
+                    ) : (
+                      <Play color={activeLane.id === lane.id ? colors.black : colors.white} size={15} />
+                    )}
+                  </TouchableOpacity>
+                ))}
               </View>
-              {current?.sources && current.sources.length > 1 ? (
+
+              {activeLane.kind === 'book' ? (
                 <TouchableOpacity
-                  onPress={() => changeSource(current, 1)}
-                  style={styles.sourceButton}>
-                  <Text style={styles.sourceButtonText}>
-                    Source {(sourceIndexByPage[current.pageNumber - 1] ?? current.defaultSourceIndex ?? 0) + 1}/{current.sources.length}
-                  </Text>
+                  activeOpacity={0.9}
+                  onPress={event => {
+                    const laneWidth = Math.max(1, width - 92);
+                    const x = event.nativeEvent.locationX;
+                    const next = Math.round((x / laneWidth) * Math.max(1, pages.length - 1)) + 1;
+                    goToPage(next);
+                  }}
+                  style={styles.laneContent}>
+                  <View style={styles.progressTrack}>
+                    <View
+                      style={[
+                        styles.progressFill,
+                        {width: `${Math.max(2, (currentPage / Math.max(1, pages.length)) * 100)}%`},
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.progressCaption}>{currentPage} / {pages.length}</Text>
                 </TouchableOpacity>
               ) : (
-                <Text style={styles.progressCaption}>{currentPage} / {pages.length}</Text>
+                <MediaLaneControls
+                  label={activeLane.label}
+                  page={activeLane.page}
+                  state={getMediaState(activeLane.page.pageNumber)}
+                  sourceIndex={sourceIndexByPage[activeLane.page.pageNumber - 1] ?? activeLane.page.defaultSourceIndex ?? 0}
+                  t={t}
+                  onChangeSource={() => changeSource(activeLane.page, 1)}
+                  onSeek={seconds => seekMedia(activeLane.page, seconds)}
+                  onSeekRelative={seconds =>
+                    seekMedia(activeLane.page, getMediaState(activeLane.page.pageNumber).currentTime + seconds)
+                  }
+                  onToggleMute={() =>
+                    setMediaState(activeLane.page.pageNumber, {
+                      muted: !getMediaState(activeLane.page.pageNumber).muted,
+                    })
+                  }
+                  onTogglePlay={() =>
+                    setMediaState(activeLane.page.pageNumber, {
+                      paused: !getMediaState(activeLane.page.pageNumber).paused,
+                    })
+                  }
+                  onVolumeStep={delta =>
+                    setMediaState(activeLane.page.pageNumber, {
+                      muted: false,
+                      volume: Math.max(0, Math.min(1, getMediaState(activeLane.page.pageNumber).volume + delta)),
+                    })
+                  }
+                />
               )}
-            </TouchableOpacity>
+            </View>
           </View>
         </>
       ) : null}
@@ -490,6 +674,7 @@ export function ReaderScreen({route, navigation}: Props) {
       <ReaderSettingsModal
         open={settingsOpen}
         settings={settings}
+        t={t}
         onClose={() => setSettingsOpen(false)}
         onPatch={patchSettings}
       />
@@ -506,14 +691,120 @@ function ErrorOverlay({title, message}: {title: string; message: string}) {
   );
 }
 
+function MediaLaneControls({
+  label,
+  page,
+  state,
+  sourceIndex,
+  t,
+  onChangeSource,
+  onSeek,
+  onSeekRelative,
+  onToggleMute,
+  onTogglePlay,
+  onVolumeStep,
+}: {
+  label: string;
+  page: ReaderPage;
+  state: MediaPlaybackState;
+  sourceIndex: number;
+  t: ReturnType<typeof useI18n>['t'];
+  onChangeSource: () => void;
+  onSeek: (seconds: number) => void;
+  onSeekRelative: (seconds: number) => void;
+  onToggleMute: () => void;
+  onTogglePlay: () => void;
+  onVolumeStep: (delta: number) => void;
+}) {
+  const sourceCount = page.sources?.length || 0;
+  const duration = Math.max(0, state.duration);
+  const position = duration > 0 ? state.currentTime / duration : state.position;
+  const [timelineWidth, setTimelineWidth] = useState(1);
+  return (
+    <View style={styles.mediaLane}>
+      <TouchableOpacity
+        accessibilityLabel={state.paused ? t('reader.play') : t('reader.pause')}
+        accessibilityRole="button"
+        onPress={onTogglePlay}
+        style={styles.mediaIconButton}>
+        {state.paused ? (
+          <Play color={colors.white} size={16} />
+        ) : (
+          <Pause color={colors.white} size={16} />
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityLabel={t('reader.seekBack')}
+        accessibilityRole="button"
+        onPress={() => onSeekRelative(-5)}
+        style={styles.mediaIconButton}>
+        <Rewind color={colors.white} size={16} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityLabel={t('reader.seekForward')}
+        accessibilityRole="button"
+        onPress={() => onSeekRelative(5)}
+        style={styles.mediaIconButton}>
+        <FastForward color={colors.white} size={16} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onLayout={event => setTimelineWidth(Math.max(1, event.nativeEvent.layout.width))}
+        onPress={event => {
+          onSeek((event.nativeEvent.locationX / timelineWidth) * Math.max(1, duration));
+        }}
+        style={styles.mediaTimeline}>
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              {width: `${Math.max(2, Math.max(0, Math.min(1, position)) * 100)}%`},
+            ]}
+          />
+        </View>
+        <Text style={styles.mediaTime} numberOfLines={1}>
+          {label} {formatMediaTime(state.currentTime)} / {formatMediaTime(duration)}
+        </Text>
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityLabel={state.muted ? t('reader.unmute') : t('reader.mute')}
+        accessibilityRole="button"
+        onPress={onToggleMute}
+        style={styles.mediaIconButton}>
+        {state.muted ? (
+          <VolumeX color={colors.white} size={16} />
+        ) : (
+          <Volume2 color={colors.white} size={16} />
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityLabel={t('reader.volume')}
+        accessibilityRole="button"
+        onPress={() => onVolumeStep(state.volume >= 1 ? -0.25 : 0.25)}
+        style={styles.volumePill}>
+        <Text style={styles.sourceButtonText}>{Math.round(state.volume * 100)}</Text>
+      </TouchableOpacity>
+      {sourceCount > 1 ? (
+        <TouchableOpacity onPress={onChangeSource} style={styles.sourceButton}>
+          <Text style={styles.sourceButtonText}>
+            {t('reader.source', {current: sourceIndex + 1, total: sourceCount})}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 function ReaderSettingsModal({
   open,
   settings,
+  t,
   onClose,
   onPatch,
 }: {
   open: boolean;
   settings: ReaderSettings;
+  t: ReturnType<typeof useI18n>['t'];
   onClose: () => void;
   onPatch: (patch: Partial<ReaderSettings>) => void;
 }) {
@@ -522,7 +813,7 @@ function ReaderSettingsModal({
       <View style={styles.modalBackdrop}>
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>Reader settings</Text>
+          <Text style={styles.sheetTitle}>{t('reader.settings')}</Text>
           <View style={styles.modeGrid}>
             {READING_MODES.map(mode => (
               <TouchableOpacity
@@ -530,27 +821,30 @@ function ReaderSettingsModal({
                 onPress={() => onPatch({readingMode: mode})}
                 style={[styles.modeChoice, settings.readingMode === mode && styles.modeChoiceActive]}>
                 <Text style={[styles.modeChoiceText, settings.readingMode === mode && styles.modeChoiceTextActive]}>
-                  {modeLabel(mode)}
+                  {t(modeLabelKey(mode))}
                 </Text>
               </TouchableOpacity>
             ))}
           </View>
           <ScrollView style={styles.settingList}>
             <ReaderSettingToggle
-              label="Double page"
+              label={t('reader.doublePage')}
               active={settings.doublePage}
               disabled={settings.readingMode === 'webtoon'}
+              t={t}
               onPress={() => onPatch({doublePage: !settings.doublePage})}
             />
             <ReaderSettingToggle
-              label="Split cover"
+              label={t('reader.splitCover')}
               active={settings.splitCover}
               disabled={!settings.doublePage || settings.readingMode === 'webtoon'}
+              t={t}
               onPress={() => onPatch({splitCover: !settings.splitCover})}
             />
             <ReaderSettingToggle
-              label="Auto play"
+              label={t('reader.autoPlay')}
               active={settings.autoPlay}
+              t={t}
               onPress={() => onPatch({autoPlay: !settings.autoPlay})}
             />
             <TouchableOpacity
@@ -558,42 +852,48 @@ function ReaderSettingsModal({
                 onPatch({autoPlayInterval: settings.autoPlayInterval >= 10 ? 1 : settings.autoPlayInterval + 1})
               }
               style={styles.settingRow}>
-              <Text style={styles.settingLabel}>Page interval</Text>
+              <Text style={styles.settingLabel}>{t('reader.pageInterval')}</Text>
               <Text style={styles.settingState}>{settings.autoPlayInterval}s</Text>
             </TouchableOpacity>
             <ReaderSettingToggle
-              label="Tap turn page"
+              label={t('reader.tapTurnPage')}
               active={settings.tapTurnPage}
+              t={t}
               onPress={() => onPatch({tapTurnPage: !settings.tapTurnPage})}
             />
             <ReaderSettingToggle
-              label="Auto hide controls"
+              label={t('reader.autoHide')}
               active={settings.autoHide}
+              t={t}
               onPress={() => onPatch({autoHide: !settings.autoHide})}
             />
             <ReaderSettingToggle
-              label="Media info"
+              label={t('reader.mediaInfo')}
               active={settings.mediaInfo}
+              t={t}
               onPress={() => onPatch({mediaInfo: !settings.mediaInfo})}
             />
             <ReaderSettingToggle
-              label="Long page"
+              label={t('reader.longPage')}
               active={settings.longPage}
+              t={t}
               onPress={() => onPatch({longPage: !settings.longPage})}
             />
             <ReaderSettingToggle
-              label="Double tap zoom"
+              label={t('reader.doubleTapZoom')}
               active={settings.doubleTapZoom}
+              t={t}
               onPress={() => onPatch({doubleTapZoom: !settings.doubleTapZoom})}
             />
             <ReaderSettingToggle
-              label="Seamless next"
+              label={t('reader.seamlessNext')}
               active={settings.seamlessNext}
+              t={t}
               onPress={() => onPatch({seamlessNext: !settings.seamlessNext})}
             />
           </ScrollView>
           <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>Close</Text>
+            <Text style={styles.closeButtonText}>{t('common.close')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -605,11 +905,13 @@ function ReaderSettingToggle({
   label,
   active,
   disabled,
+  t,
   onPress,
 }: {
   label: string;
   active: boolean;
   disabled?: boolean;
+  t: ReturnType<typeof useI18n>['t'];
   onPress: () => void;
 }) {
   return (
@@ -625,7 +927,7 @@ function ReaderSettingToggle({
         {label}
       </Text>
       <Text style={[styles.settingState, active && styles.settingLabelActive]}>
-        {active ? 'On' : 'Off'}
+        {active ? t('reader.on') : t('reader.off')}
       </Text>
     </TouchableOpacity>
   );
@@ -761,6 +1063,74 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     position: 'absolute',
     right: 0,
+  },
+  laneShell: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.48)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 48,
+    padding: 6,
+    width: '100%',
+  },
+  laneTabs: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  laneTab: {
+    alignItems: 'center',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  laneTabActive: {
+    backgroundColor: colors.white,
+    borderColor: colors.white,
+  },
+  laneContent: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 5,
+    minHeight: 36,
+    justifyContent: 'center',
+  },
+  mediaLane: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
+    minWidth: 0,
+  },
+  mediaIconButton: {
+    alignItems: 'center',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  mediaTimeline: {
+    flex: 1,
+    gap: 5,
+    justifyContent: 'center',
+    minWidth: 0,
+  },
+  mediaTime: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  volumePill: {
+    alignItems: 'center',
+    borderRadius: 999,
+    justifyContent: 'center',
+    minWidth: 28,
+    paddingHorizontal: 4,
   },
   progressLane: {
     alignItems: 'center',

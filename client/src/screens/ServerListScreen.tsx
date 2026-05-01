@@ -9,9 +9,10 @@ import {
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {useFocusEffect} from '@react-navigation/native';
+import {Pencil, Plus, Trash2} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
-import {FluentButton, FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
+import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
@@ -51,11 +52,13 @@ export function ServerListScreen({navigation}: Props) {
           <FluentTitle>Lanlu</FluentTitle>
           <FluentCaption>{t('server.choose')}</FluentCaption>
         </View>
-        <FluentButton
-          label={t('common.add')}
-          variant="primary"
+        <TouchableOpacity
+          accessibilityLabel={t('server.add')}
+          accessibilityRole="button"
           onPress={() => navigation.navigate('AddServer', {})}
-        />
+          style={styles.addButton}>
+          <Plus color={colors.white} size={20} />
+        </TouchableOpacity>
       </View>
 
       <FlatList
@@ -66,12 +69,13 @@ export function ServerListScreen({navigation}: Props) {
           <FluentCard style={styles.empty}>
             <Text style={styles.emptyTitle}>{t('server.noServers')}</Text>
             <FluentCaption>{t('server.addFirst')}</FluentCaption>
-            <FluentButton
-              label={t('server.add')}
-              variant="primary"
-              style={styles.emptyButton}
+            <TouchableOpacity
+              accessibilityRole="button"
               onPress={() => navigation.navigate('AddServer', {})}
-            />
+              style={styles.emptyButton}>
+              <Plus color={colors.white} size={18} />
+              <Text style={styles.emptyButtonText}>{t('server.add')}</Text>
+            </TouchableOpacity>
           </FluentCard>
         }
         renderItem={({item}) => (
@@ -95,16 +99,20 @@ export function ServerListScreen({navigation}: Props) {
                 ) : null}
               </View>
               <View style={styles.serverActions}>
-                <FluentButton
-                  label={t('common.edit')}
-                  variant="ghost"
+                <TouchableOpacity
+                  accessibilityLabel={t('common.edit')}
+                  accessibilityRole="button"
                   onPress={() => navigation.navigate('AddServer', {server: item})}
-                />
-                <FluentButton
-                  label={t('common.delete')}
-                  variant="ghost"
+                  style={styles.iconAction}>
+                  <Pencil color={colors.textMuted} size={18} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  accessibilityLabel={t('common.delete')}
+                  accessibilityRole="button"
                   onPress={() => confirmDelete(item)}
-                />
+                  style={[styles.iconAction, styles.deleteAction]}>
+                  <Trash2 color={colors.danger} size={18} />
+                </TouchableOpacity>
               </View>
             </FluentCard>
           </TouchableOpacity>
@@ -129,6 +137,14 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: spacing.xs,
   },
+  addButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 20,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
   list: {
     flexGrow: 1,
     gap: spacing.md,
@@ -145,12 +161,27 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   emptyButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: spacing.xs,
     marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+  },
+  emptyButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '800',
   },
   serverCard: {
+    alignItems: 'center',
+    flexDirection: 'row',
     gap: spacing.md,
   },
   serverMain: {
+    flex: 1,
     gap: spacing.xs,
   },
   serverName: {
@@ -167,7 +198,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   serverActions: {
+    alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'flex-end',
+    gap: spacing.xs,
+  },
+  iconAction: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  deleteAction: {
+    backgroundColor: '#fff5f5',
   },
 });

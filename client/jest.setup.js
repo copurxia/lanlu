@@ -78,8 +78,15 @@ jest.mock('@d11/react-native-fast-image', () => {
   return FastImage;
 });
 
-jest.mock('react-native-video', () => {
+jest.mock('react-native-vlc-media-player', () => {
   const React = require('react');
   const {View} = require('react-native');
-  return props => React.createElement(View, props);
+  const VLCPlayer = React.forwardRef((props, ref) => {
+    React.useImperativeHandle(ref, () => ({
+      seek: jest.fn(),
+      stopPlayer: jest.fn(),
+    }));
+    return React.createElement(View, props);
+  });
+  return {VLCPlayer, VlCPlayerView: VLCPlayer};
 });
