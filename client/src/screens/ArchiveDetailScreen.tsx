@@ -27,7 +27,7 @@ import type {RootStackParamList} from '../navigation/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'ArchiveDetail'>;
 
 export function ArchiveDetailScreen({route, navigation}: Props) {
-  const {t} = useI18n();
+  const {language, t} = useI18n();
   const insets = useSafeAreaInsets();
   const {archiveId, archive} = route.params;
   const [metadata, setMetadata] = useState<ArchiveMetadata | null>(null);
@@ -40,7 +40,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
     setLoading(true);
     setError('');
     try {
-      const result = await fetchArchiveMetadata(archiveId);
+      const result = await fetchArchiveMetadata(archiveId, language);
       setMetadata(result);
       setFavorite(Boolean(result.isfavorite));
       const sourcePath = assetPath(archiveCoverAsset(result) || archiveCoverAsset(archive));
@@ -50,7 +50,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
     } finally {
       setLoading(false);
     }
-  }, [archive, archiveId]);
+  }, [archive, archiveId, language]);
 
   useEffect(() => {
     load().catch(err => console.warn('Failed to load archive:', err));

@@ -1,6 +1,6 @@
 import React, {useState} from 'react';
 import {Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {FileText, LogOut, RotateCcw, Share2, Trash2} from 'lucide-react-native';
+import {Check, FileText, Languages, LogOut, RotateCcw, Share2, Trash2} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
   runOnJS,
@@ -16,7 +16,7 @@ import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
 import {colors, spacing} from '../theme/colors';
 
 export function SettingsScreen() {
-  const {t} = useI18n();
+  const {languagePreference, setLanguagePreference, t} = useI18n();
   const {activeServer, user, showServerList, signOut} = useAuth();
   const insets = useSafeAreaInsets();
   const [diagnosticLog, setDiagnosticLog] = useState('');
@@ -119,6 +119,28 @@ export function SettingsScreen() {
       </FluentCard>
 
       <FluentCard style={styles.section}>
+        <FluentTitle>{t('settings.language')}</FluentTitle>
+        <FluentCaption>{t('settings.languageDescription')}</FluentCaption>
+        <View style={styles.actionList}>
+          <LanguageActionRow
+            active={languagePreference === 'system'}
+            label={t('settings.languageSystem')}
+            onPress={() => setLanguagePreference('system')}
+          />
+          <LanguageActionRow
+            active={languagePreference === 'zh'}
+            label={t('settings.languageChinese')}
+            onPress={() => setLanguagePreference('zh')}
+          />
+          <LanguageActionRow
+            active={languagePreference === 'en'}
+            label={t('settings.languageEnglish')}
+            onPress={() => setLanguagePreference('en')}
+          />
+        </View>
+      </FluentCard>
+
+      <FluentCard style={styles.section}>
         <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
         <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
         <View style={styles.actionList}>
@@ -173,6 +195,35 @@ export function SettingsScreen() {
         </Animated.View>
       </Modal>
     </View>
+  );
+}
+
+function LanguageActionRow({
+  active,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.actionRow}>
+      <View style={styles.languageIcon}>
+        <Languages color={active ? colors.primary : colors.textMuted} size={18} />
+      </View>
+      <Text style={[styles.actionLabel, active && styles.actionLabelActive]}>{label}</Text>
+      {active ? (
+        <View style={styles.checkIcon}>
+          <Check color={colors.white} size={15} />
+        </View>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
@@ -248,6 +299,23 @@ const styles = StyleSheet.create({
   },
   actionLabelDanger: {
     color: colors.danger,
+  },
+  actionLabelActive: {
+    color: colors.primary,
+  },
+  languageIcon: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    width: 28,
+  },
+  checkIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 13,
+    height: 26,
+    justifyContent: 'center',
+    width: 26,
   },
   iconAction: {
     alignItems: 'center',

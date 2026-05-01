@@ -1,8 +1,11 @@
-import React, {createContext, useContext, useMemo, useState} from 'react';
+import React, {createContext, useContext, useEffect, useMemo, useState} from 'react';
 import {NativeModules, Platform} from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-type Language = 'en' | 'zh';
+export type Language = 'en' | 'zh';
+export type LanguagePreference = 'system' | Language;
 type Params = Record<string, string | number>;
+const LANGUAGE_STORAGE_KEY = 'app-language';
 
 const messages = {
   en: {
@@ -104,6 +107,11 @@ const messages = {
     'settings.server': 'Server',
     'settings.client': 'Client',
     'settings.clientDescription': 'Switch to another saved server, or clear this server session.',
+    'settings.language': 'Language',
+    'settings.languageDescription': 'Choose the display language used by the mobile client and translated metadata.',
+    'settings.languageSystem': 'Follow system',
+    'settings.languageEnglish': 'English',
+    'settings.languageChinese': '简体中文',
     'settings.signOut': 'Sign out',
     'settings.signOutTitle': 'Sign out',
     'settings.signOutMessage': 'Clear the session for this server?',
@@ -275,6 +283,11 @@ const messages = {
     'settings.server': '服务器',
     'settings.client': '客户端',
     'settings.clientDescription': '切换到其他已保存服务器，或清除此服务器会话。',
+    'settings.language': '语言',
+    'settings.languageDescription': '选择移动客户端和元数据翻译使用的显示语言。',
+    'settings.languageSystem': '跟随系统',
+    'settings.languageEnglish': 'English',
+    'settings.languageChinese': '简体中文',
     'settings.signOut': '退出登录',
     'settings.signOutTitle': '退出登录',
     'settings.signOutMessage': '清除此服务器会话？',
@@ -361,6 +374,11 @@ function detectLanguage(): Language {
   return String(locale || '').toLowerCase().startsWith('zh') ? 'zh' : 'en';
 }
 
+function normalizeLanguagePreference(value?: string | null): LanguagePreference | null {
+  if (value === 'system') return 'system';
+  return value === 'en' || value === 'zh' ? value : null;
+}
+
 function format(template: string, params?: Params) {
   if (!params) return template;
   return template.replace(/\{(\w+)\}/g, (_, key: string) =>
@@ -370,20 +388,40 @@ function format(template: string, params?: Params) {
 
 const I18nContext = createContext<{
   language: Language;
-  setLanguage: (language: Language) => void;
+  languagePreference: LanguagePreference;
+  setLanguagePreference: (preference: LanguagePreference) => void;
   t: (key: MessageKey, params?: Params) => string;
 } | null>(null);
 
 export function I18nProvider({children}: {children: React.ReactNode}) {
-  const [language, setLanguage] = useState<Language>(() => detectLanguage());
+  const [systemLanguage] = useState<Language>(() => detectLanguage());
+  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>('system');
+  const language = languagePreference === 'system' ? systemLanguage : languagePreference;
+  useEffect(() => {
+    let cancelled = false;
+    AsyncStorage.getItem(LANGUAGE_STORAGE_KEY)
+      .then(value => {
+        const stored = normalizeLanguagePreference(value);
+        if (!cancelled && stored) setLanguagePreferenceState(stored);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const value = useMemo(
     () => ({
       language,
-      setLanguage,
+      languagePreference,
+      setLanguagePreference: (nextPreference: LanguagePreference) => {
+        setLanguagePreferenceState(nextPreference);
+        AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, nextPreference).catch(() => undefined);
+      },
       t: (key: MessageKey, params?: Params) =>
         format(messages[language][key] || messages.en[key] || key, params),
     }),
-    [language],
+    [language, languagePreference],
   );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

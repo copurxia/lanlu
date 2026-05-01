@@ -259,9 +259,10 @@ export async function fetchFavoriteTankoubons(): Promise<Tankoubon[]> {
   return result.data.filter(isTankoubon);
 }
 
-export async function fetchArchiveMetadata(id: string): Promise<ArchiveMetadata> {
+export async function fetchArchiveMetadata(id: string, lang?: string): Promise<ArchiveMetadata> {
   const response = await apiClient.get<ArchiveMetadata>(
     `/api/archives/${encodeURIComponent(id)}/metadata`,
+    {params: {lang: lang || undefined}},
   );
   return response.data;
 }
