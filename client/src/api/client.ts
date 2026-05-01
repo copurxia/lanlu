@@ -86,6 +86,7 @@ export async function buildAuthorizedUri(path: string) {
   const token = await getStoredToken(server?.id);
   return {
     uri,
+    token: token || undefined,
     headers: token ? {Authorization: `Bearer ${token}`} : undefined,
   };
 }

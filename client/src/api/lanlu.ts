@@ -174,6 +174,51 @@ export async function fetchArchiveFiles(id: string): Promise<PageInfo[]> {
   return pages.map((page, index) => normalizePageInfo(id, page, index));
 }
 
+function responseBodyPreview(data: unknown): string | undefined {
+  if (typeof data === 'string') {
+    return data.slice(0, 300);
+  }
+  if (data instanceof ArrayBuffer) {
+    const bytes = new Uint8Array(data).slice(0, 300);
+    return Array.from(bytes)
+      .map(byte => (byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'))
+      .join('');
+  }
+  if (data && typeof data === 'object' && 'byteLength' in data) {
+    const bytes = new Uint8Array(data as ArrayBufferLike).slice(0, 300);
+    return Array.from(bytes)
+      .map(byte => (byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : '.'))
+      .join('');
+  }
+  if (data === undefined || data === null) {
+    return undefined;
+  }
+  try {
+    return JSON.stringify(data).slice(0, 300);
+  } catch {
+    return String(data).slice(0, 300);
+  }
+}
+
+export async function probeMediaPage(pathOrUrl: string, range = 'bytes=0-0') {
+  const response = await apiClient.get(pathOrUrl, {
+    headers: {Range: range},
+    responseType: 'arraybuffer',
+    timeout: 10000,
+    validateStatus: status => status >= 200 && status < 600,
+  });
+  const headers = response.headers || {};
+  return {
+    status: response.status,
+    requestedRange: range,
+    contentType: headers['content-type'],
+    contentLength: headers['content-length'],
+    contentRange: headers['content-range'],
+    acceptRanges: headers['accept-ranges'],
+    bodyPreview: responseBodyPreview(response.data),
+  };
+}
+
 export async function setArchiveFavorite(
   archive: Archive | ArchiveMetadata,
   favorite: boolean,

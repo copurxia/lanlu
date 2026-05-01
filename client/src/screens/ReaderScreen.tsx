@@ -34,6 +34,7 @@ import {
   fetchArchiveFiles,
   getPageDefaultSource,
   pagePath,
+  probeMediaPage,
   updateArchiveProgress,
 } from '../api/lanlu';
 import {ScreenState} from '../components/ScreenState';
@@ -43,6 +44,8 @@ import {
   ReaderSettings,
   saveReaderSettings,
 } from '../storage/preferences';
+import {appendDiagnosticLog} from '../storage/diagnostics';
+import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
@@ -55,7 +58,9 @@ type ReaderPage = PageInfo & {
   activeSource?: PageSourceInfo | null;
   imageSource?: ImageSourcePropType;
   uri?: string;
+  vlcUri?: string;
   headers?: Record<string, string>;
+  token?: string;
   resolvedPath?: string;
   effectiveType: 'image' | 'video' | 'audio' | 'html';
 };
@@ -120,6 +125,20 @@ function nextReadingMode(mode: ReaderSettings['readingMode']) {
   return READING_MODES[(index + 1) % READING_MODES.length];
 }
 
+function buildVlcMediaOptions(page: ReaderPage) {
+  if (page.vlcUri) {
+    return [':http-reconnect', ''];
+  }
+  return [
+    ...(page.headers?.Authorization
+      ? [`:http-header=Authorization: ${page.headers.Authorization}`]
+      : []),
+    ...(page.token ? [`:http-header=Cookie: auth_token=${page.token}`] : []),
+    ':http-reconnect',
+    '',
+  ];
+}
+
 export function ReaderScreen({route, navigation}: Props) {
   const {t} = useI18n();
   const {archiveId, initialPage = 1} = route.params;
@@ -128,6 +147,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const listRef = useRef<FlatList<ReaderItem>>(null);
   const webtoonRef = useRef<ScrollView>(null);
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
+  const mediaProbeKeys = useRef<Set<string>>(new Set());
   const lastSavedPage = useRef(0);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -153,7 +173,11 @@ export function ReaderScreen({route, navigation}: Props) {
       const effectiveType = source?.type || page.type || 'image';
       const path = source?.path || page.path || '';
       const url = source?.url?.startsWith('/api/') ? source.url : pagePath(archiveId, {...page, defaultSource: source || undefined});
-      const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined};
+      const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
+      const vlcUri =
+        authorized.uri && (effectiveType === 'video' || effectiveType === 'audio')
+          ? await createProxiedMediaUrl(authorized.uri, authorized.headers)
+          : undefined;
       return {
         ...page,
         pageNumber: index + 1,
@@ -161,7 +185,9 @@ export function ReaderScreen({route, navigation}: Props) {
         resolvedPath: path,
         effectiveType,
         uri: authorized.uri,
+        vlcUri,
         headers: authorized.headers,
+        token: authorized.token,
         imageSource: effectiveType === 'image' && authorized.uri ? await buildAuthorizedImageSource(url) : undefined,
       };
     },
@@ -244,6 +270,15 @@ export function ReaderScreen({route, navigation}: Props) {
     );
     return Math.max(0, index);
   }, [currentPage, readerItems]);
+
+  const activeReaderItem = readerItems[currentItemIndex];
+  const activeMediaPages = useMemo(
+    () =>
+      (activeReaderItem?.pages || []).filter(
+        page => page.uri && (page.effectiveType === 'video' || page.effectiveType === 'audio'),
+      ),
+    [activeReaderItem],
+  );
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const onViewableItemsChanged = useRef(
@@ -357,6 +392,86 @@ export function ReaderScreen({route, navigation}: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceIndexByPage]);
 
+  useEffect(() => {
+    activeMediaPages.forEach(page => {
+      const mediaOptions = buildVlcMediaOptions(page);
+      appendDiagnosticLog('media.active', {
+        archiveId,
+        page: page.pageNumber,
+        type: page.effectiveType,
+        uri: page.uri,
+        vlcUri: page.vlcUri,
+        path: page.resolvedPath,
+        currentPage,
+        hasAuthorization: Boolean(page.headers?.Authorization),
+        hasCookieToken: Boolean(page.token),
+        mediaOptions,
+      }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+
+      const probeKey = `${page.pageNumber}:${page.uri}`;
+      if (mediaProbeKeys.current.has(probeKey)) return;
+      mediaProbeKeys.current.add(probeKey);
+      appendDiagnosticLog('media.probe.start', {
+        archiveId,
+        page: page.pageNumber,
+        type: page.effectiveType,
+        uri: page.uri,
+        path: page.resolvedPath,
+        range: 'bytes=0-0',
+        hasAuthorization: Boolean(page.headers?.Authorization),
+      }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      probeMediaPage(page.uri || '')
+        .then(async result => {
+          await appendDiagnosticLog('media.probe', {
+            archiveId,
+            page: page.pageNumber,
+            type: page.effectiveType,
+            uri: page.uri,
+            vlcUri: page.vlcUri,
+            path: page.resolvedPath,
+            ...result,
+          });
+          if (result.status >= 500) {
+            const fallbackRange = 'bytes=0-1023';
+            await appendDiagnosticLog('media.probe.start', {
+              archiveId,
+              page: page.pageNumber,
+              type: page.effectiveType,
+              uri: page.uri,
+              vlcUri: page.vlcUri,
+              path: page.resolvedPath,
+              range: fallbackRange,
+              hasAuthorization: Boolean(page.headers?.Authorization),
+            });
+            const fallbackResult = await probeMediaPage(page.uri || '', fallbackRange);
+            await appendDiagnosticLog('media.probe', {
+              archiveId,
+              page: page.pageNumber,
+              type: page.effectiveType,
+              uri: page.uri,
+              path: page.resolvedPath,
+              ...fallbackResult,
+            });
+          }
+        })
+        .catch(err => {
+          const response = (err as {response?: {status?: number; headers?: unknown}}).response;
+          return appendDiagnosticLog('media.probe.error', {
+            archiveId,
+            page: page.pageNumber,
+            type: page.effectiveType,
+            uri: page.uri,
+            vlcUri: page.vlcUri,
+            path: page.resolvedPath,
+            message: extractApiError(err),
+            status: response?.status,
+            headers: response?.headers,
+          });
+        })
+        .catch(reason => console.warn('Failed to write diagnostic log:', reason));
+    });
+  }, [activeMediaPages, archiveId, currentPage]);
+
   if (loading) return <ScreenState loading title={t('reader.loading')} />;
 
   if (error) {
@@ -381,16 +496,29 @@ export function ReaderScreen({route, navigation}: Props) {
     );
   }
 
-  const renderMedia = (page: ReaderPage, pageWidth: number, pageHeight?: number, webtoon = false) => {
+  const renderMedia = (
+    page: ReaderPage,
+    pageWidth: number,
+    pageHeight?: number,
+    webtoon = false,
+    mediaActive = true,
+  ) => {
     const commonError = failedPages[page.pageNumber];
     const frameStyle = webtoon
       ? [styles.webtoonPage, {width}]
       : [styles.mediaPage, {width: pageWidth, height: pageHeight || height}];
     if (page.effectiveType === 'video' || page.effectiveType === 'audio') {
       const mediaState = getMediaState(page.pageNumber);
-      const mediaOptions = page.headers?.Authorization
-        ? [`:http-header=Authorization: ${page.headers.Authorization}`, '']
-        : undefined;
+      const mediaOptions = buildVlcMediaOptions(page);
+      if (!mediaActive) {
+        return (
+          <View style={frameStyle}>
+            <Text style={styles.loadingText}>
+              {page.effectiveType === 'audio' ? t('reader.audio') : t('reader.video')}
+            </Text>
+          </View>
+        );
+      }
       return (
         <View style={frameStyle}>
           <VLCPlayer
@@ -398,34 +526,77 @@ export function ReaderScreen({route, navigation}: Props) {
               vlcRefs.current[page.pageNumber] = ref as VlcPlayerRef | null;
             }}
             autoplay
+            acceptInvalidCertificates
             paused={mediaState.paused}
             muted={mediaState.muted}
             volume={Math.round(Math.max(0, Math.min(1, mediaState.volume)) * 100)}
             resizeMode="contain"
             source={
               {
-                uri: page.uri || '',
-                isNetwork: Boolean(page.uri?.startsWith('http')),
+                uri: page.vlcUri || page.uri || '',
+                isNetwork: Boolean((page.vlcUri || page.uri)?.startsWith('http')),
                 initType: 2,
                 initOptions: ['--network-caching=600', ''],
                 mediaOptions,
               } as never
             }
             style={page.effectiveType === 'audio' ? styles.audioStage : styles.pageImage}
-            onEnd={() => setMediaState(page.pageNumber, {paused: true})}
+            onBuffering={event => {
+              appendDiagnosticLog('vlc.buffering', {
+                archiveId,
+                page: page.pageNumber,
+                type: page.effectiveType,
+                event,
+              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+            }}
+            onEnd={() => {
+              setMediaState(page.pageNumber, {paused: true});
+              appendDiagnosticLog('vlc.end', {
+                archiveId,
+                page: page.pageNumber,
+                type: page.effectiveType,
+              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+            }}
             onError={err => {
+              appendDiagnosticLog('vlc.error', {
+                archiveId,
+                page: page.pageNumber,
+                type: page.effectiveType,
+                uri: page.uri,
+                vlcUri: page.vlcUri,
+                path: page.resolvedPath,
+                hasAuthorization: Boolean(page.headers?.Authorization),
+                hasCookieToken: Boolean(page.token),
+                mediaOptions,
+                event: err,
+              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setFailedPages(current => ({
                 ...current,
                 [page.pageNumber]: JSON.stringify(err),
               }));
             }}
             onLoad={event => {
+              appendDiagnosticLog('vlc.load', {
+                archiveId,
+                page: page.pageNumber,
+                type: page.effectiveType,
+                uri: page.uri,
+                vlcUri: page.vlcUri,
+                path: page.resolvedPath,
+                duration: event.duration,
+              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
                 duration: normalizeMediaSeconds(event.duration),
               });
             }}
             onPaused={() => setMediaState(page.pageNumber, {paused: true})}
             onPlaying={event => {
+              appendDiagnosticLog('vlc.playing', {
+                archiveId,
+                page: page.pageNumber,
+                type: page.effectiveType,
+                duration: event.duration,
+              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
                 duration: normalizeMediaSeconds(event.duration),
                 paused: false,
@@ -500,7 +671,6 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const horizontal = settings.readingMode === 'single-ltr' || settings.readingMode === 'single-rtl';
   const pageFrameHeight = height;
-  const activeReaderItem = readerItems[currentItemIndex];
   const lanes: ReaderLane[] = [
     ...(activeReaderItem?.pages || [])
       .filter(page => page.effectiveType === 'video' || page.effectiveType === 'audio')
@@ -519,6 +689,7 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const renderItem = ({item}: ListRenderItemInfo<ReaderItem>) => {
     const spreadPageWidth = item.pages.length > 1 ? width / 2 : width;
+    const mediaActive = item.pages.some(page => page.pageNumber === currentPage);
     return (
       <TouchableOpacity
         activeOpacity={1}
@@ -527,7 +698,7 @@ export function ReaderScreen({route, navigation}: Props) {
         <View style={styles.spread}>
           {item.pages.map(page => (
             <View key={`${item.key}:${page.pageNumber}`} style={{width: spreadPageWidth, height: pageFrameHeight}}>
-              {renderMedia(page, spreadPageWidth, pageFrameHeight)}
+              {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
             </View>
           ))}
         </View>
@@ -546,14 +717,17 @@ export function ReaderScreen({route, navigation}: Props) {
           }}
           scrollEventThrottle={100}
           contentContainerStyle={styles.webtoonContent}>
-          {pages.map(page => (
+          {pages.map(page => {
+            const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
+            return (
             <TouchableOpacity
               activeOpacity={1}
               key={`${page.pageNumber}:${page.uri}`}
               onPress={() => setChromeVisible(visible => !visible)}>
-              {renderMedia(page, width, undefined, true)}
+              {renderMedia(page, width, undefined, true, mediaActive)}
             </TouchableOpacity>
-          ))}
+          );
+          })}
         </ScrollView>
       ) : (
         <FlatList
