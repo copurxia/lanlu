@@ -43,6 +43,22 @@ export type TagSuggestion = {
   display: string;
 };
 
+export type SmartFilter = {
+  id: number;
+  name: string;
+  translations?: Record<string, {text?: string; intro?: string}>;
+  icon?: string;
+  query?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc' | string;
+  date_from?: string;
+  date_to?: string;
+  newonly?: boolean;
+  untaggedonly?: boolean;
+  enabled?: boolean;
+  sort_order_num?: number;
+};
+
 export async function login(params: {
   username: string;
   password: string;
@@ -153,6 +169,14 @@ export async function fetchTagAutocomplete(
   return Array.isArray(response.data?.data?.suggestions)
     ? response.data.data.suggestions
     : [];
+}
+
+export async function fetchSmartFilters(): Promise<SmartFilter[]> {
+  const response = await apiClient.get<{
+    data?: {items?: SmartFilter[]};
+  }>('/api/smart_filters');
+  const items = response.data?.data?.items;
+  return Array.isArray(items) ? items.filter(item => item.enabled !== false) : [];
 }
 
 export async function fetchCategories(): Promise<Category[]> {

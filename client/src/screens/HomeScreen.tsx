@@ -29,10 +29,12 @@ import {extractApiError} from '../api/client';
 import {
   fetchCategories,
   fetchDiscover,
+  fetchSmartFilters,
   fetchTagAutocomplete,
   isTankoubon,
   mediaItemId,
   searchArchives,
+  type SmartFilter,
   type TagSuggestion,
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
@@ -92,6 +94,32 @@ function ViewModeIcon({mode}: {mode: HomeViewMode}) {
   return <Rows3 {...props} />;
 }
 
+function resolveSmartFilterDate(value?: string): string {
+  const normalized = String(value || '').trim();
+  if (!normalized) return '';
+  const relativeDays = Number.parseInt(normalized, 10);
+  if (!Number.isNaN(relativeDays) && String(relativeDays) === normalized) {
+    const date = new Date();
+    date.setDate(date.getDate() + relativeDays);
+    return date.toISOString().split('T')[0] || '';
+  }
+  return normalized;
+}
+
+function smartFilterName(filter: SmartFilter, language: string): string {
+  if (language !== 'zh') {
+    const translated = filter.translations?.[language]?.text?.trim();
+    if (translated) return translated;
+  }
+  return filter.name;
+}
+
+function buildExactTagSearchQuery(tag: string) {
+  const query = String(tag || '').trim();
+  if (!query) return '';
+  return query.endsWith('$') ? query : `${query}$`;
+}
+
 export function HomeScreen() {
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
@@ -99,6 +127,7 @@ export function HomeScreen() {
   const [items, setItems] = useState<MediaItem[]>([]);
   const [randomItems, setRandomItems] = useState<MediaItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [smartFilters, setSmartFilters] = useState<SmartFilter[]>([]);
   const [categoryRows, setCategoryRows] = useState<Record<string, MediaItem[]>>({});
   const [filter, setFilter] = useState('');
   const [submittedFilter, setSubmittedFilter] = useState('');
@@ -115,6 +144,7 @@ export function HomeScreen() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [activeSmartFilterId, setActiveSmartFilterId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -326,6 +356,24 @@ export function HomeScreen() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchCategories(), fetchSmartFilters()])
+      .then(([nextCategories, nextSmartFilters]) => {
+        if (cancelled) return;
+        setCategories(nextCategories.filter(category => category.enabled !== false));
+        setSmartFilters(nextSmartFilters);
+      })
+      .catch(chipError => {
+        appendDiagnosticLog('home.chips.load.error', {
+          message: chipError instanceof Error ? chipError.message : String(chipError),
+        }).catch(() => undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     load(1, 'replace').catch(err => console.warn('Failed to load home:', err));
   }, [load, searchVersion]);
 
@@ -441,6 +489,7 @@ export function HomeScreen() {
   function openCategory(category: Category) {
     const nextMode: HomeViewMode = 'masonry';
     setSelectedCategory(category);
+    setActiveSmartFilterId(null);
     setSubmittedFilter('');
     setFilter('');
     setViewMode(nextMode);
@@ -449,10 +498,66 @@ export function HomeScreen() {
     setPage(1);
   }
 
-  function clearCategory() {
+  function showAll() {
+    setActiveSmartFilterId(null);
     setSelectedCategory(null);
+    setFilter('');
+    setSubmittedFilter('');
+    setSortby('created_at');
+    setSortOrder('desc');
+    setDateFrom('');
+    setDateTo('');
+    setNewOnly(false);
+    setUntaggedOnly(false);
+    setFavoriteOnly(false);
+    setGroupByTanks(true);
     setItems([]);
     setPage(1);
+    setTotal(0);
+    setSearchVersion(version => version + 1);
+  }
+
+  function applySmartFilter(filterItem: SmartFilter) {
+    setActiveSmartFilterId(filterItem.id);
+    setSelectedCategory(null);
+    const nextQuery = String(filterItem.query || '').trim();
+    setFilter(nextQuery);
+    setSubmittedFilter(nextQuery);
+    const nextSort = String(filterItem.sort_by || '').trim();
+    setSortby(nextSort && nextSort !== '_default' ? nextSort : 'created_at');
+    setSortOrder(filterItem.sort_order === 'asc' ? 'asc' : 'desc');
+    setDateFrom(resolveSmartFilterDate(filterItem.date_from));
+    setDateTo(resolveSmartFilterDate(filterItem.date_to));
+    setNewOnly(Boolean(filterItem.newonly));
+    setUntaggedOnly(Boolean(filterItem.untaggedonly));
+    setFavoriteOnly(false);
+    setGroupByTanks(true);
+    setItems([]);
+    setPage(1);
+    setTotal(0);
+    setSearchVersion(version => version + 1);
+  }
+
+  function applyTagSearch(tag: string) {
+    const nextQuery = buildExactTagSearchQuery(tag);
+    if (!nextQuery) return;
+    setActiveSmartFilterId(null);
+    setSelectedCategory(null);
+    setFilter(nextQuery);
+    setSubmittedFilter(nextQuery);
+    setSortby('relevance');
+    setSortOrder('desc');
+    setDateFrom('');
+    setDateTo('');
+    setNewOnly(false);
+    setUntaggedOnly(false);
+    setFavoriteOnly(false);
+    setGroupByTanks(true);
+    setItems([]);
+    setPage(1);
+    setTotal(0);
+    setLoading(true);
+    setSearchVersion(version => version + 1);
   }
 
   function loadMore() {
@@ -530,6 +635,7 @@ export function HomeScreen() {
               key={mediaItemId(item)}
               variant="row"
               onPress={() => openItem(item)}
+              onTagPress={applyTagSearch}
             />
           ))}
         </ScrollView>
@@ -604,27 +710,37 @@ export function HomeScreen() {
       ) : null}
 
       <View style={styles.sortRow}>
-        {selectedCategory ? (
-          <TouchableOpacity onPress={clearCategory} style={styles.categoryChip}>
-            <Text numberOfLines={1} style={styles.categoryChipText}>
-              {selectedCategory.icon ? `${selectedCategory.icon} ` : ''}{selectedCategory.name}
-            </Text>
-            <Text style={styles.categoryChipClear}>x</Text>
-          </TouchableOpacity>
-        ) : null}
-        {['created_at', 'lastread', 'release_at', 'updated_at'].map(option => (
+        <TouchableOpacity
+          onPress={showAll}
+          style={[
+            styles.sortChip,
+            !selectedCategory && activeSmartFilterId === null && !submittedFilter && !hasAdvancedFilters && styles.sortChipActive,
+          ]}>
+          <Text
+            style={[
+              styles.sortChipText,
+              !selectedCategory && activeSmartFilterId === null && !submittedFilter && !hasAdvancedFilters && styles.sortChipTextActive,
+            ]}>
+            {t('common.all')}
+          </Text>
+        </TouchableOpacity>
+        {smartFilters.map(filterItem => (
           <TouchableOpacity
-            key={option}
-            onPress={() => setSortby(option)}
-            style={[styles.sortChip, sortby === option && styles.sortChipActive]}>
-            <Text style={[styles.sortChipText, sortby === option && styles.sortChipTextActive]}>
-              {option === 'created_at'
-                ? t('home.created')
-                : option === 'lastread'
-                  ? t('home.lastRead')
-                  : option === 'release_at'
-                    ? t('home.release')
-                    : t('home.updated')}
+            key={`smart:${filterItem.id}`}
+            onPress={() => applySmartFilter(filterItem)}
+            style={[styles.sortChip, activeSmartFilterId === filterItem.id && styles.sortChipActive]}>
+            <Text style={[styles.sortChipText, activeSmartFilterId === filterItem.id && styles.sortChipTextActive]}>
+              {filterItem.icon ? `${filterItem.icon} ` : ''}{smartFilterName(filterItem, language)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        {categories.map(category => (
+          <TouchableOpacity
+            key={`category:${category.catid || category.id}`}
+            onPress={() => openCategory(category)}
+            style={[styles.sortChip, selectedCategory?.catid === category.catid && styles.sortChipActive]}>
+            <Text style={[styles.sortChipText, selectedCategory?.catid === category.catid && styles.sortChipTextActive]}>
+              {category.icon ? `${category.icon} ` : ''}{category.name}
             </Text>
           </TouchableOpacity>
         ))}
@@ -659,7 +775,12 @@ export function HomeScreen() {
           onEndReachedThreshold={0.5}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
           renderItem={({item}) => (
-            <ArchiveCard archive={item} variant={itemVariant} onPress={() => openItem(item)} />
+            <ArchiveCard
+              archive={item}
+              variant={itemVariant}
+              onPress={() => openItem(item)}
+              onTagPress={applyTagSearch}
+            />
           )}
           ListEmptyComponent={
             loading ? (

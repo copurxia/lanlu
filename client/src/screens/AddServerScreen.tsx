@@ -1,10 +1,11 @@
 import React, {useState} from 'react';
-import {KeyboardAvoidingView, Platform, StyleSheet, Text, View} from 'react-native';
+import {KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {Save, Wifi} from 'lucide-react-native';
 
 import {testServer} from '../api/lanlu';
 import {useAuth} from '../auth/AuthContext';
-import {FluentButton, FluentCard, FluentTextField, FluentTitle} from '../components/fluent';
+import {FluentCard, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
@@ -78,13 +79,28 @@ export function AddServerScreen({route, navigation}: Props) {
         {message ? <Text style={styles.message}>{message}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         <View style={styles.actions}>
-          <FluentButton label={t('common.test')} disabled={busy} onPress={test} />
-          <FluentButton
-            label={busy ? t('common.saving') : t('common.save')}
+          <TouchableOpacity
+            accessibilityLabel={t('common.test')}
+            accessibilityRole="button"
+            activeOpacity={0.78}
             disabled={busy}
-            variant="primary"
+            onPress={test}
+            style={[styles.secondaryButton, busy && styles.buttonDisabled]}>
+            <Wifi color={colors.textMuted} size={16} />
+            <Text style={styles.secondaryButtonText}>{t('common.test')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityLabel={busy ? t('common.saving') : t('common.save')}
+            accessibilityRole="button"
+            activeOpacity={0.82}
+            disabled={busy}
             onPress={save}
-          />
+            style={[styles.primaryButton, busy && styles.buttonDisabled]}>
+            <Save color={colors.white} size={16} />
+            <Text style={styles.primaryButtonText}>
+              {busy ? t('common.saving') : t('common.save')}
+            </Text>
+          </TouchableOpacity>
         </View>
       </FluentCard>
     </KeyboardAvoidingView>
@@ -95,15 +111,56 @@ const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.background,
     flex: 1,
+    justifyContent: 'center',
     padding: spacing.lg,
   },
   card: {
-    gap: spacing.lg,
+    alignSelf: 'center',
+    gap: spacing.md,
+    maxWidth: 460,
+    width: '100%',
   },
   actions: {
+    alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
     justifyContent: 'flex-end',
+    marginTop: spacing.sm,
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    height: 40,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  primaryButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  secondaryButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    height: 40,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  secondaryButtonText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  buttonDisabled: {
+    opacity: 0.62,
   },
   message: {
     color: colors.success,

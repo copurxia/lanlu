@@ -7,6 +7,7 @@ type Params = Record<string, string | number>;
 const messages = {
   en: {
     'common.add': 'Add',
+    'common.all': 'All',
     'common.archive': 'Archive',
     'common.cancel': 'Cancel',
     'common.close': 'Close',
@@ -43,6 +44,8 @@ const messages = {
     'home.titleSort': 'Title',
     'home.pageCount': 'Page count',
     'home.random': 'Random recommendations',
+    'home.smartFilters': 'Smart filters',
+    'home.categories': 'Categories',
     'home.loading': 'Loading home',
     'home.loadingRecommendations': 'Loading recommendations',
     'home.loadFailed': 'Could not load home',
@@ -160,6 +163,7 @@ const messages = {
   },
   zh: {
     'common.add': '添加',
+    'common.all': '全部',
     'common.archive': '归档',
     'common.cancel': '取消',
     'common.close': '关闭',
@@ -196,6 +200,8 @@ const messages = {
     'home.titleSort': '标题',
     'home.pageCount': '页数',
     'home.random': '随机推荐',
+    'home.smartFilters': '智能分类',
+    'home.categories': '分类',
     'home.loading': '正在加载首页',
     'home.loadingRecommendations': '正在加载推荐',
     'home.loadFailed': '首页加载失败',

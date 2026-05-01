@@ -1,5 +1,8 @@
 import React, {useEffect, useState} from 'react';
 import {
+  Modal,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -26,14 +29,32 @@ type Props = {
   onPress: () => void;
   variant?: 'grid' | 'list' | 'tweet' | 'channel' | 'row';
   onChanged?: () => void;
+  onTagPress?: (tag: string) => void;
 };
 
-export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Props) {
+function parseTags(rawTags: unknown): string[] {
+  if (Array.isArray(rawTags)) {
+    return rawTags.map(tag => String(tag).trim()).filter(Boolean);
+  }
+  if (!rawTags) return [];
+  return String(rawTags)
+    .split(',')
+    .map(tag => tag.trim())
+    .filter(Boolean);
+}
+
+function stripNamespace(tag: string) {
+  const index = tag.indexOf(':');
+  return index > 0 ? tag.slice(index + 1) : tag;
+}
+
+export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTagPress}: Props) {
   const {t} = useI18n();
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<FastImageSource | null>(null);
   const [imageError, setImageError] = useState('');
   const [favorite, setFavorite] = useState(Boolean(archive.isfavorite));
+  const [tagsOpen, setTagsOpen] = useState(false);
   const itemWidth =
     variant === 'row'
       ? 136
@@ -42,6 +63,7 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
         : width - spacing.lg * 2;
   const title = mediaItemTitle(archive);
   const isCollection = isTankoubon(archive);
+  const allTags = parseTags((archive as Archive).tags);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,85 +109,136 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
   }
 
   return (
-    <TouchableOpacity
-      style={[
-        styles.card,
-        {width: itemWidth},
-        variant !== 'grid' && variant !== 'row' && styles.fullWidthCard,
-        variant === 'list' && styles.listCard,
-        variant === 'tweet' && styles.tweetCard,
-        variant === 'channel' && styles.channelCard,
-      ]}
-      onPress={onPress}
-      activeOpacity={0.82}>
-      <View
+    <>
+      <TouchableOpacity
         style={[
-          styles.coverWrap,
-          variant === 'list' && styles.listCover,
-          variant === 'tweet' && styles.tweetCover,
-          variant === 'channel' && styles.channelCover,
-        ]}>
-        {imageSource ? (
-          <FastImage
-            source={{
-              ...imageSource,
-              cache: FastImage.cacheControl.web,
-              priority: FastImage.priority.normal,
-            }}
-            style={styles.cover}
-            resizeMode={FastImage.resizeMode.cover}
-            onError={event => {
-              const message = event.nativeEvent.error || 'Image failed to load';
-              setImageError(message);
-              console.warn('Cover failed to load:', mediaItemId(archive), message);
-            }}
-          />
-        ) : (
-          <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
-          </View>
-        )}
-        {imageError ? (
-          <View style={styles.placeholderOverlay}>
-            <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
-          </View>
-        ) : null}
-        {!isCollection && archive.isnew ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>NEW</Text>
-          </View>
-        ) : null}
-        {isCollection ? (
-          <View style={styles.collectionBadge}>
-            <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
-          </View>
-        ) : null}
-      </View>
-      <View style={styles.body}>
-        <Text numberOfLines={2} style={styles.title}>
-          {title}
-        </Text>
-        <Text numberOfLines={1} style={styles.meta}>
-          {progressLabel}
-        </Text>
-        {(variant === 'tweet' || variant === 'channel') && archive.description ? (
-          <Text numberOfLines={3} style={styles.description}>
-            {archive.description}
+          styles.card,
+          {width: itemWidth},
+          variant !== 'grid' && variant !== 'row' && styles.fullWidthCard,
+          variant === 'list' && styles.listCard,
+          variant === 'tweet' && styles.tweetCard,
+          variant === 'channel' && styles.channelCard,
+        ]}
+        onPress={onPress}
+        onLongPress={() => {
+          if (allTags.length > 0) {
+            setTagsOpen(true);
+          }
+        }}
+        delayLongPress={650}
+        activeOpacity={0.82}>
+        <View
+          style={[
+            styles.coverWrap,
+            variant === 'list' && styles.listCover,
+            variant === 'tweet' && styles.tweetCover,
+            variant === 'channel' && styles.channelCover,
+          ]}>
+          {imageSource ? (
+            <FastImage
+              source={{
+                ...imageSource,
+                cache: FastImage.cacheControl.web,
+                priority: FastImage.priority.normal,
+              }}
+              style={styles.cover}
+              resizeMode={FastImage.resizeMode.cover}
+              onError={event => {
+                const message = event.nativeEvent.error || 'Image failed to load';
+                setImageError(message);
+                console.warn('Cover failed to load:', mediaItemId(archive), message);
+              }}
+            />
+          ) : (
+            <View style={styles.placeholder}>
+              <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
+            </View>
+          )}
+          {imageError ? (
+            <View style={styles.placeholderOverlay}>
+              <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
+            </View>
+          ) : null}
+          {!isCollection && archive.isnew ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>NEW</Text>
+            </View>
+          ) : null}
+          {isCollection ? (
+            <View style={styles.collectionBadge}>
+              <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
+            </View>
+          ) : null}
+        </View>
+        <View style={styles.body}>
+          <Text numberOfLines={2} style={styles.title}>
+            {title}
           </Text>
-        ) : null}
-      </View>
-      {!isCollection ? (
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
-          onPress={toggleFavorite}
-          style={styles.favoriteButton}>
-          <Text style={[styles.favoriteText, favorite && styles.favoriteActive]}>
-            {favorite ? '★' : '☆'}
+          <Text numberOfLines={1} style={styles.meta}>
+            {progressLabel}
           </Text>
-        </TouchableOpacity>
-      ) : null}
-    </TouchableOpacity>
+          {(variant === 'tweet' || variant === 'channel') && archive.description ? (
+            <Text numberOfLines={3} style={styles.description}>
+              {archive.description}
+            </Text>
+          ) : null}
+        </View>
+        {!isCollection ? (
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
+            onPress={toggleFavorite}
+            style={styles.favoriteButton}>
+            <Text style={[styles.favoriteText, favorite && styles.favoriteActive]}>
+              {favorite ? '★' : '☆'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </TouchableOpacity>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setTagsOpen(false)}
+        transparent
+        visible={tagsOpen}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setTagsOpen(false)}>
+          <Pressable style={styles.tagSheet}>
+            <View style={styles.tagSheetHeader}>
+              <View style={styles.tagSheetTitleWrap}>
+                <Text style={styles.tagSheetTitle}>{t('archive.tags')}</Text>
+                <Text numberOfLines={1} style={styles.tagSheetSubtitle}>{title}</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityLabel={t('common.close')}
+                accessibilityRole="button"
+                onPress={() => setTagsOpen(false)}
+                style={styles.closeButton}>
+                <Text style={styles.closeButtonText}>x</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView contentContainerStyle={styles.tagList}>
+              {allTags.map(tag => (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  key={tag}
+                  onPress={() => {
+                    setTagsOpen(false);
+                    onTagPress?.(tag);
+                  }}
+                  style={styles.tagChip}>
+                  <Text numberOfLines={1} style={styles.tagText}>{stripNamespace(tag)}</Text>
+                  {tag.includes(':') ? (
+                    <Text numberOfLines={1} style={styles.tagNamespace}>
+                      {tag.slice(0, tag.indexOf(':'))}
+                    </Text>
+                  ) : null}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   );
 }
 
@@ -285,5 +358,78 @@ const styles = StyleSheet.create({
   },
   favoriteActive: {
     color: '#f2a900',
+  },
+  modalBackdrop: {
+    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  tagSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    maxHeight: '62%',
+    padding: spacing.lg,
+  },
+  tagSheetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
+  tagSheetTitleWrap: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  tagSheetTitle: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  tagSheetSubtitle: {
+    color: colors.textMuted,
+    fontSize: 12,
+  },
+  closeButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  closeButtonText: {
+    color: colors.text,
+    fontSize: 18,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  tagList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  tagChip: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    maxWidth: '100%',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 7,
+  },
+  tagText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  tagNamespace: {
+    color: colors.textMuted,
+    fontSize: 10,
+    marginTop: 1,
   },
 });
