@@ -1,6 +1,5 @@
 import React, {useEffect, useState} from 'react';
 import {
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -9,6 +8,7 @@ import {
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -80,11 +80,15 @@ export function ArchiveCard({
         : width - spacing.lg * 2;
   const title = mediaItemTitle(archive);
   const isCollection = isTankoubon(archive);
+  const itemId = mediaItemId(archive);
+  const gradientId = `archive-card-preview-${itemId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const allTags = parseTags((archive as Archive).tags);
+  const maxPreviewTags = archive.description ? 5 : 8;
   const visibleTags = allTags.filter(tag => {
     const lowered = tag.toLowerCase();
     return !lowered.includes('source') && !stripNamespace(lowered).includes('source');
   });
+  const previewTags = visibleTags.slice(0, maxPreviewTags);
 
   useEffect(() => {
     tagProgress.value = withTiming(tagsOpen ? 1 : 0, {duration: 160});
@@ -159,22 +163,22 @@ export function ArchiveCard({
   }
 
   function showTags() {
-    if (visibleTags.length > 0) {
+    if (visibleTags.length > 0 || archive.description?.trim()) {
       setTagsOpen(true);
     }
   }
 
   const cardGesture = Gesture.Exclusive(
     Gesture.LongPress()
-      .minDuration(650)
+      .minDuration(450)
       .onBegin(() => {
         pressed.value = 1;
       })
-      .onFinalize((_event, success) => {
+      .onStart(() => {
+        runOnJS(showTags)();
+      })
+      .onFinalize(() => {
         pressed.value = 0;
-        if (success) {
-          runOnJS(showTags)();
-        }
       }),
     Gesture.Tap().onEnd(() => {
       runOnJS(handleCardPress)();
@@ -213,7 +217,7 @@ export function ArchiveCard({
                 onError={event => {
                   const message = event.nativeEvent.error || 'Image failed to load';
                   setImageError(message);
-                  console.warn('Cover failed to load:', mediaItemId(archive), message);
+                  console.warn('Cover failed to load:', itemId, message);
                 }}
               />
             ) : (
@@ -236,31 +240,52 @@ export function ArchiveCard({
                 <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
               </View>
             ) : null}
-            {visibleTags.length > 0 ? (
+            {visibleTags.length > 0 || archive.description ? (
               <Animated.View
                 pointerEvents={tagsOpen ? 'auto' : 'none'}
                 style={[styles.tagOverlay, tagOverlayStyle]}>
-                <View style={styles.tagFadeTop} />
+                <Svg height="100%" pointerEvents="none" style={styles.gradientOverlay} width="100%">
+                  <Defs>
+                    <LinearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+                      <Stop offset="0" stopColor="#000000" stopOpacity="0" />
+                      <Stop offset="0.38" stopColor="#000000" stopOpacity="0.18" />
+                      <Stop offset="0.68" stopColor="#000000" stopOpacity="0.52" />
+                      <Stop offset="1" stopColor="#000000" stopOpacity="0.78" />
+                    </LinearGradient>
+                  </Defs>
+                  <Rect fill={`url(#${gradientId})`} height="100%" width="100%" x="0" y="0" />
+                </Svg>
                 <View style={styles.tagOverlayContent}>
-                  <ScrollView
-                    contentContainerStyle={styles.tagList}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}>
-                    {visibleTags.map(tag => (
-                      <TouchableOpacity
-                        accessibilityRole="button"
-                        key={tag}
-                        onPress={() => {
-                          setTagsOpen(false);
-                          onTagPress?.(tag);
-                        }}
-                        style={styles.tagChip}>
-                        <Text numberOfLines={1} style={styles.tagText}>
-                          {stripNamespace(tag)}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
+                  {previewTags.length > 0 ? (
+                    <View style={[styles.tagList, archive.description ? styles.tagListWithDescription : styles.tagListTall]}>
+                      {previewTags.map(tag => (
+                        <TouchableOpacity
+                          accessibilityRole="button"
+                          key={tag}
+                          onPress={() => {
+                            setTagsOpen(false);
+                            onTagPress?.(tag);
+                          }}
+                          style={styles.tagChip}>
+                          <Text numberOfLines={1} style={styles.tagText}>
+                            {stripNamespace(tag)}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                      {visibleTags.length > previewTags.length ? (
+                        <View style={styles.tagChip}>
+                          <Text numberOfLines={1} style={styles.tagText}>
+                            +{visibleTags.length - previewTags.length}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  {archive.description ? (
+                    <Text numberOfLines={3} style={styles.previewDescription}>
+                      {archive.description}
+                    </Text>
+                  ) : null}
                 </View>
               </Animated.View>
             ) : null}
@@ -414,38 +439,55 @@ const styles = StyleSheet.create({
   tagOverlay: {
     bottom: 0,
     left: 0,
-    minHeight: 92,
-    overflow: 'hidden',
     position: 'absolute',
     right: 0,
+    top: 0,
   },
-  tagFadeTop: {
-    backgroundColor: 'rgba(0, 0, 0, 0.18)',
-    flex: 1,
+  gradientOverlay: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   tagOverlayContent: {
-    backgroundColor: 'rgba(0, 0, 0, 0.58)',
-    paddingBottom: 36,
-    paddingHorizontal: spacing.sm,
-    paddingTop: spacing.sm,
+    bottom: 0,
+    gap: 7,
+    left: 0,
+    paddingBottom: 28,
+    paddingHorizontal: 12,
+    paddingTop: 18,
+    position: 'absolute',
+    right: 0,
   },
   tagList: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: spacing.sm,
+    flexWrap: 'wrap',
+    gap: 5,
+    overflow: 'hidden',
+  },
+  tagListTall: {
+    maxHeight: 74,
+  },
+  tagListWithDescription: {
+    maxHeight: 50,
   },
   tagChip: {
     backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderColor: 'rgba(255, 255, 255, 0.22)',
-    borderRadius: 4,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 3,
     maxWidth: 140,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
   tagText: {
     color: colors.white,
     fontSize: 11,
-    fontWeight: '700',
+    lineHeight: 15,
+  },
+  previewDescription: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 11,
+    lineHeight: 15,
   },
 });
