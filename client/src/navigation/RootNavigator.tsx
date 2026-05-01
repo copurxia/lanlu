@@ -118,7 +118,7 @@ export function RootNavigator() {
             <Stack.Screen
               name="AddServer"
               component={AddServerScreen}
-              options={{title: t('settings.server')}}
+              options={{headerShown: false}}
             />
           </>
         )}
