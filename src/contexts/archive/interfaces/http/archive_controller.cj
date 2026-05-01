@@ -1127,7 +1127,27 @@ public class ArchiveController {
         // 支持 HTTP Range（仅单区间），用于视频拖动/断点播放
         let rangeHeader = (ctx.header("Range") ?? "").trimAscii()
         let (rangeState, rangeStart, rangeEnd) = parseRangeHeader(rangeHeader, fileSize)
+        logger.info(
+            "serve page request",
+            ("arcid", id),
+            ("entry_path", path),
+            ("archive_type", archiveType),
+            ("content_type", contentType),
+            ("file_size", fileSize.toString()),
+            ("range_header", rangeHeader),
+            ("has_authorization", if ((ctx.header("Authorization") ?? "").trimAscii().size > 0) { "true" } else { "false" }),
+            ("has_auth_cookie", if ((ctx.header("Cookie") ?? "").contains("auth_token=")) { "true" } else { "false" }),
+            ("user_agent", ctx.header("User-Agent") ?? "")
+        )
         if (rangeState < 0) {
+            logger.warn(
+                "serve page invalid range",
+                ("arcid", id),
+                ("entry_path", path),
+                ("archive_type", archiveType),
+                ("range_header", rangeHeader),
+                ("file_size", fileSize.toString())
+            )
             reader.close()
             sendRangeNotSatisfiable(ctx, fileSize)
             return
@@ -1160,6 +1180,15 @@ public class ArchiveController {
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
         ctx.status(HttpStatusCode.STATUS_OK)
+        logger.info(
+            "serve page response",
+            ("arcid", arcid),
+            ("entry_path", entryPath),
+            ("archive_type", archiveType),
+            ("status", "200"),
+            ("content_type", contentType),
+            ("range", "none")
+        )
 
         let writer = ctx.writer()
 
@@ -1231,6 +1260,7 @@ public class ArchiveController {
         archiveType: String
     ): Unit {
         let rangeExpr = "bytes ${rangeStart}-${rangeEnd}/${fileSize}"
+        let rangeLength = rangeEnd - rangeStart + 1
 
         // 先跳过前置字节；EntryReader 不一定支持 seek，这里用读取丢弃实现
         if (!skipReaderBytes(reader, rangeStart)) {
@@ -1239,17 +1269,62 @@ public class ArchiveController {
             return
         }
 
+        // 小 Range（尤其播放器常用的 bytes=0-0 探测）直接读完整后发送。
+        // 这样响应有明确 Content-Length，且避免一字节响应走 writer 流式路径时被框架当作异常。
+        var eagerBody: Option<Array<Byte>> = None
+        if (rangeLength <= PAGE_STREAM_CHUNK_SIZE) {
+            eagerBody = readExactReaderBytes(reader, rangeLength)
+            if (eagerBody.isNone()) {
+                reader.close()
+                sendRangeNotSatisfiable(ctx, fileSize)
+                return
+            }
+        }
+
         // 设置响应头（在获取 writer 之前）
         ctx.setHeader("Content-Type", contentType)
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
         ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
+        ctx.setHeader("Content-Length", "${rangeLength}")
         ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
+        logger.info(
+            "serve page response",
+            ("arcid", arcid),
+            ("entry_path", entryPath),
+            ("archive_type", archiveType),
+            ("status", "206"),
+            ("content_type", contentType),
+            ("range", rangeExpr),
+            ("content_length", "${rangeLength}")
+        )
+
+        match (eagerBody) {
+            case Some(body) =>
+                try {
+                    ctx.send(body)
+                } finally {
+                    try {
+                        reader.close()
+                    } catch (e: Exception) {
+                        logger.warn(
+                            "failed to close entry reader",
+                            ("arcid", arcid),
+                            ("entry_path", entryPath),
+                            ("archive_type", archiveType),
+                            ("range", rangeExpr),
+                            ("error", e.message)
+                        )
+                    }
+                }
+                return
+            case None => ()
+        }
 
         let writer = ctx.writer()
 
-        var remaining = rangeEnd - rangeStart + 1
+        var remaining = rangeLength
         let chunkBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
         try {
             while (remaining > 0) {
@@ -1316,6 +1391,34 @@ public class ArchiveController {
                 )
             }
         }
+    }
+
+    /**
+     * 精确读取指定字节数。用于小 Range 响应，避免 writer 流式路径处理极小响应。
+     */
+    private static func readExactReaderBytes(reader: EntryReader, byteCount: Int64): Option<Array<Byte>> {
+        if (byteCount < 0 || byteCount > PAGE_STREAM_CHUNK_SIZE) {
+            return None
+        }
+        if (byteCount == 0) {
+            return Some(Array<Byte>(0, {_ => 0}))
+        }
+
+        let out = Array<Byte>(byteCount, {_ => 0})
+        var offset: Int64 = 0
+        while (offset < byteCount) {
+            let remaining = byteCount - offset
+            let tmp = Array<Byte>(remaining, {_ => 0})
+            let bytesRead = reader.read(tmp)
+            if (bytesRead <= 0) {
+                return None
+            }
+            for (i in 0..bytesRead) {
+                out[offset + i] = tmp[i]
+            }
+            offset += bytesRead
+        }
+        return Some(out)
     }
 
     /**
@@ -1449,6 +1552,12 @@ public class ArchiveController {
         if (fileSize >= 0) {
             ctx.setHeader("Content-Range", "bytes */${fileSize}")
         }
+        ctx.setHeader("Content-Length", "0")
+        logger.warn(
+            "serve page response",
+            ("status", "416"),
+            ("file_size", fileSize.toString())
+        )
         ctx.sendString("")
     }
 
