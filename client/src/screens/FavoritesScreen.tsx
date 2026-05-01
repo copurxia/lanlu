@@ -80,7 +80,15 @@ export function FavoritesScreen() {
     (item: MediaItem) => {
       if (isTankoubon(item)) {
         const firstArchive = item.children?.[0];
-        if (firstArchive) navigation.navigate('Reader', {archiveId: firstArchive, initialPage: 1});
+        if (firstArchive) {
+          navigation.navigate('Reader', {
+            archiveId: firstArchive,
+            initialPage: 1,
+            tankoubonId: item.tankoubon_id,
+            children: item.children,
+            childIndex: 0,
+          });
+        }
         return;
       }
       navigation.navigate('ArchiveDetail', {archiveId: item.arcid, archive: item});

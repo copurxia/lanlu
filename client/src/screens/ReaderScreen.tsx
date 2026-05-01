@@ -159,6 +159,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const lastSavedPage = useRef(0);
+  const settingsHydratedRef = useRef(false);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
@@ -227,13 +228,11 @@ export function ReaderScreen({route, navigation}: Props) {
         fetchArchiveFiles(archiveId),
       ]);
       setSettings(storedSettings);
+      settingsHydratedRef.current = true;
       const hydrated = await Promise.all(files.map(hydratePage));
       setPages(hydrated);
       const startIndex = Math.max(0, Math.min(initialPage - 1, hydrated.length - 1));
       setCurrentPage(startIndex + 1);
-      requestAnimationFrame(() => {
-        listRef.current?.scrollToIndex({index: startIndex, animated: false});
-      });
     } catch (err) {
       setError(extractApiError(err));
     } finally {
@@ -246,6 +245,7 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [load]);
 
   useEffect(() => {
+    if (!settingsHydratedRef.current) return;
     saveReaderSettings(settings).catch(err =>
       console.warn('Failed to save reader settings:', err),
     );

@@ -160,6 +160,12 @@ const messages = {
     'reader.source': 'Source {current}/{total}',
     'reader.seekBack': 'Back 5s',
     'reader.seekForward': 'Forward 5s',
+    'reader.pageInfo': 'Page',
+    'reader.modeInfo': 'Mode',
+    'reader.archiveInfo': 'Archive',
+    'reader.fileInfo': 'File',
+    'reader.typeInfo': 'Type',
+    'reader.settingsInfo': 'Settings',
   },
   zh: {
     'common.add': '添加',
@@ -316,6 +322,12 @@ const messages = {
     'reader.source': '源 {current}/{total}',
     'reader.seekBack': '后退 5 秒',
     'reader.seekForward': '前进 5 秒',
+    'reader.pageInfo': '页面',
+    'reader.modeInfo': '模式',
+    'reader.archiveInfo': '归档',
+    'reader.fileInfo': '文件',
+    'reader.typeInfo': '类型',
+    'reader.settingsInfo': '设置',
   },
 } as const;
 

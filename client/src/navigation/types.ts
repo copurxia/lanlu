@@ -7,7 +7,13 @@ export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
   ArchiveDetail: {archiveId: string; archive?: Archive};
-  Reader: {archiveId: string; initialPage?: number};
+  Reader: {
+    archiveId: string;
+    initialPage?: number;
+    tankoubonId?: string;
+    children?: string[];
+    childIndex?: number;
+  };
 };
 
 export type MainTabParamList = {
