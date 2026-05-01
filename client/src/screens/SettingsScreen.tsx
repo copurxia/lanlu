@@ -10,7 +10,11 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import {useAuth} from '../auth/AuthContext';
-import {ModalBackdrop, ScreenRoot} from '../components/SafeAreaSurface';
+import {
+  ModalBackdrop,
+  ScreenRoot,
+  screenSafeAreaPadding,
+} from '../components/SafeAreaSurface';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
@@ -72,82 +76,86 @@ export function SettingsScreen() {
   }
 
   return (
-    <ScreenRoot style={styles.screen}>
-      <FluentCard style={styles.section}>
-        <FluentTitle>{t('settings.account')}</FluentTitle>
-        <View style={styles.row}>
-          <Text style={styles.label}>{t('settings.user')}</Text>
-          <Text style={styles.value}>{user?.username || t('common.unknown')}</Text>
-        </View>
-        <View style={styles.row}>
-          <Text style={styles.label}>{t('settings.server')}</Text>
-          <Text style={styles.value}>{activeServer?.name || 'Lanlu'}</Text>
-          <FluentCaption>{activeServer?.baseUrl || ''}</FluentCaption>
-        </View>
-      </FluentCard>
+    <ScreenRoot padded={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        showsVerticalScrollIndicator={false}>
+        <FluentCard style={styles.section}>
+          <FluentTitle>{t('settings.account')}</FluentTitle>
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('settings.user')}</Text>
+            <Text style={styles.value}>{user?.username || t('common.unknown')}</Text>
+          </View>
+          <View style={styles.row}>
+            <Text style={styles.label}>{t('settings.server')}</Text>
+            <Text style={styles.value}>{activeServer?.name || 'Lanlu'}</Text>
+            <FluentCaption>{activeServer?.baseUrl || ''}</FluentCaption>
+          </View>
+        </FluentCard>
 
-      <FluentCard style={styles.section}>
-        <FluentTitle>{t('settings.client')}</FluentTitle>
-        <FluentCaption>
-          {t('settings.clientDescription')}
-        </FluentCaption>
-        <View style={styles.actionList}>
-          <SettingsActionRow
-            icon={<RotateCcw color={colors.textMuted} size={18} />}
-            label={t('auth.switchServer')}
-            onPress={() => {
-              showServerList().catch(error =>
-                console.warn('Failed to switch server:', error),
-              );
-            }}
-          />
-          <SettingsActionRow
-            danger
-            icon={<LogOut color={colors.danger} size={18} />}
-            label={t('settings.signOut')}
-            onPress={confirmSignOut}
-          />
-        </View>
-      </FluentCard>
+        <FluentCard style={styles.section}>
+          <FluentTitle>{t('settings.client')}</FluentTitle>
+          <FluentCaption>
+            {t('settings.clientDescription')}
+          </FluentCaption>
+          <View style={styles.actionList}>
+            <SettingsActionRow
+              icon={<RotateCcw color={colors.textMuted} size={18} />}
+              label={t('auth.switchServer')}
+              onPress={() => {
+                showServerList().catch(error =>
+                  console.warn('Failed to switch server:', error),
+                );
+              }}
+            />
+            <SettingsActionRow
+              danger
+              icon={<LogOut color={colors.danger} size={18} />}
+              label={t('settings.signOut')}
+              onPress={confirmSignOut}
+            />
+          </View>
+        </FluentCard>
 
-      <FluentCard style={styles.section}>
-        <FluentTitle>{t('settings.language')}</FluentTitle>
-        <FluentCaption>{t('settings.languageDescription')}</FluentCaption>
-        <View style={styles.actionList}>
-          <LanguageActionRow
-            active={languagePreference === 'system'}
-            label={t('settings.languageSystem')}
-            onPress={() => setLanguagePreference('system')}
-          />
-          <LanguageActionRow
-            active={languagePreference === 'zh'}
-            label={t('settings.languageChinese')}
-            onPress={() => setLanguagePreference('zh')}
-          />
-          <LanguageActionRow
-            active={languagePreference === 'en'}
-            label={t('settings.languageEnglish')}
-            onPress={() => setLanguagePreference('en')}
-          />
-        </View>
-      </FluentCard>
+        <FluentCard style={styles.section}>
+          <FluentTitle>{t('settings.language')}</FluentTitle>
+          <FluentCaption>{t('settings.languageDescription')}</FluentCaption>
+          <View style={styles.actionList}>
+            <LanguageActionRow
+              active={languagePreference === 'system'}
+              label={t('settings.languageSystem')}
+              onPress={() => setLanguagePreference('system')}
+            />
+            <LanguageActionRow
+              active={languagePreference === 'zh'}
+              label={t('settings.languageChinese')}
+              onPress={() => setLanguagePreference('zh')}
+            />
+            <LanguageActionRow
+              active={languagePreference === 'en'}
+              label={t('settings.languageEnglish')}
+              onPress={() => setLanguagePreference('en')}
+            />
+          </View>
+        </FluentCard>
 
-      <FluentCard style={styles.section}>
-        <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
-        <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
-        <View style={styles.actionList}>
-          <SettingsActionRow
-            icon={<FileText color={colors.textMuted} size={18} />}
-            label={t('settings.viewLogs')}
-            onPress={openDiagnostics}
-          />
-          <SettingsActionRow
-            icon={<Share2 color={colors.textMuted} size={18} />}
-            label={t('settings.shareLogs')}
-            onPress={shareDiagnostics}
-          />
-        </View>
-      </FluentCard>
+        <FluentCard style={styles.section}>
+          <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
+          <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
+          <View style={styles.actionList}>
+            <SettingsActionRow
+              icon={<FileText color={colors.textMuted} size={18} />}
+              label={t('settings.viewLogs')}
+              onPress={openDiagnostics}
+            />
+            <SettingsActionRow
+              icon={<Share2 color={colors.textMuted} size={18} />}
+              label={t('settings.shareLogs')}
+              onPress={shareDiagnostics}
+            />
+          </View>
+        </FluentCard>
+      </ScrollView>
 
       <Modal
         animationType="fade"
@@ -244,7 +252,7 @@ function SettingsActionRow({
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  content: {
     gap: spacing.md,
   },
   section: {
