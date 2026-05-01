@@ -174,7 +174,7 @@ function buildVlcMediaOptions(page: ReaderPage) {
 
 export function ReaderScreen({route, navigation}: Props) {
   const {t} = useI18n();
-  const {archiveId, initialPage = 1} = route.params;
+  const {archiveId, initialPage = 1, children, childIndex, tankoubonId} = route.params;
   const {width, height} = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ReaderItem>>(null);
@@ -182,6 +182,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const vlcSessions = useRef<Record<number, {target?: number; playable: boolean; ignoredProgress: number}>>({});
   const vlcSourceKeys = useRef<Record<number, string>>({});
+  const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const lastSavedPage = useRef(0);
   const settingsHydratedRef = useRef(false);
@@ -226,10 +227,6 @@ export function ReaderScreen({route, navigation}: Props) {
       const path = source?.path || page.path || '';
       const url = source?.url?.startsWith('/api/') ? source.url : pagePath(archiveId, {...page, defaultSource: source || undefined});
       const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
-      const vlcUri =
-        authorized.uri && (effectiveType === 'video' || effectiveType === 'audio')
-          ? await createProxiedMediaUrl(authorized.uri, authorized.headers)
-          : undefined;
       return {
         ...page,
         pageNumber: index + 1,
@@ -237,7 +234,6 @@ export function ReaderScreen({route, navigation}: Props) {
         resolvedPath: path,
         effectiveType,
         uri: authorized.uri,
-        vlcUri,
         headers: authorized.headers,
         token: authorized.token,
         imageSource: effectiveType === 'image' && authorized.uri ? await buildAuthorizedImageSource(url) : undefined,
@@ -249,6 +245,9 @@ export function ReaderScreen({route, navigation}: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
+    mediaProxyKeys.current.clear();
+    vlcSourceKeys.current = {};
+    vlcSessions.current = {};
     try {
       const [storedSettings, files] = await Promise.all([
         loadReaderSettings(),
@@ -266,6 +265,43 @@ export function ReaderScreen({route, navigation}: Props) {
       setLoading(false);
     }
   }, [archiveId, hydratePage, initialPage]);
+
+  const ensureMediaProxy = useCallback(
+    (page: ReaderPage) => {
+      if (!page.uri || page.vlcUri || (page.effectiveType !== 'video' && page.effectiveType !== 'audio')) return;
+      const key = `${archiveId}:${page.pageNumber}:${page.uri}:${page.headers?.Authorization || ''}`;
+      if (mediaProxyKeys.current.has(key)) return;
+      mediaProxyKeys.current.add(key);
+      createProxiedMediaUrl(page.uri, page.headers)
+        .then(vlcUri => {
+          if (!vlcUri) return;
+          setPages(current =>
+            current.map(item =>
+              item.pageNumber === page.pageNumber && item.uri === page.uri
+                ? {...item, vlcUri}
+                : item,
+            ),
+          );
+          appendDiagnosticLog('media.proxy.ready', {
+            archiveId,
+            page: page.pageNumber,
+            type: page.effectiveType,
+            uri: page.uri,
+            vlcUri,
+          }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+        })
+        .catch(err => {
+          appendDiagnosticLog('media.proxy.error', {
+            archiveId,
+            page: page.pageNumber,
+            type: page.effectiveType,
+            uri: page.uri,
+            message: extractApiError(err),
+          }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+        });
+    },
+    [archiveId],
+  );
 
   useEffect(() => {
     load().catch(err => console.warn('Failed to load reader:', err));
@@ -330,6 +366,17 @@ export function ReaderScreen({route, navigation}: Props) {
       ),
     [activeReaderItem],
   );
+  const nearbyMediaPages = useMemo(
+    () =>
+      pages.filter(
+        page =>
+          page.uri &&
+          !page.vlcUri &&
+          Math.abs(page.pageNumber - currentPage) <= 1 &&
+          (page.effectiveType === 'video' || page.effectiveType === 'audio'),
+      ),
+    [currentPage, pages],
+  );
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const onViewableItemsChanged = useRef(
@@ -341,9 +388,30 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const activePage = pages[currentPage - 1];
 
+  const goToNextArchive = useCallback(() => {
+    const archiveChildren = Array.isArray(children) ? children.filter(Boolean) : [];
+    if (!settings.seamlessNext || archiveChildren.length <= 1) return false;
+    const currentChildIndex =
+      typeof childIndex === 'number'
+        ? childIndex
+        : archiveChildren.findIndex(childArchiveId => childArchiveId === archiveId);
+    const nextIndex = currentChildIndex + 1;
+    const nextArchiveId = archiveChildren[nextIndex];
+    if (!nextArchiveId) return false;
+    navigation.replace('Reader', {
+      archiveId: nextArchiveId,
+      initialPage: 1,
+      tankoubonId,
+      children: archiveChildren,
+      childIndex: nextIndex,
+    });
+    return true;
+  }, [archiveId, childIndex, children, navigation, settings.seamlessNext, tankoubonId]);
+
   const goToPage = useCallback(
     (page: number) => {
       if (!pages.length) return;
+      if (page > pages.length && goToNextArchive()) return;
       const next = Math.max(1, Math.min(page, pages.length));
       setCurrentPage(next);
       if (settings.readingMode === 'webtoon') {
@@ -358,20 +426,14 @@ export function ReaderScreen({route, navigation}: Props) {
       );
       listRef.current?.scrollToIndex({index: Math.max(0, itemIndex), animated: true});
     },
-    [height, pages.length, readerItems, settings.readingMode],
+    [goToNextArchive, height, pages.length, readerItems, settings.readingMode],
   );
 
   useEffect(() => {
     if (!settings.autoPlay || settings.readingMode === 'webtoon') return;
-    const timer = setInterval(() => {
-      setCurrentPage(page => {
-        const next = Math.min(page + 1, pages.length);
-        goToPage(next);
-        return next;
-      });
-    }, settings.autoPlayInterval * 1000);
+    const timer = setInterval(() => goToPage(currentPage + 1), settings.autoPlayInterval * 1000);
     return () => clearInterval(timer);
-  }, [goToPage, pages.length, settings.autoPlay, settings.autoPlayInterval, settings.readingMode]);
+  }, [currentPage, goToPage, settings.autoPlay, settings.autoPlayInterval, settings.readingMode]);
 
   useEffect(() => {
     if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
@@ -501,11 +563,16 @@ export function ReaderScreen({route, navigation}: Props) {
 
   useEffect(() => {
     if (!pages.length) return;
+    mediaProxyKeys.current.clear();
     Promise.all(pages.map((page, index) => hydratePage(page, index)))
       .then(setPages)
       .catch(err => console.warn('Failed to switch reader source:', err));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sourceIndexByPage]);
+
+  useEffect(() => {
+    nearbyMediaPages.forEach(ensureMediaProxy);
+  }, [ensureMediaProxy, nearbyMediaPages]);
 
   useEffect(() => {
     activeMediaPages.forEach(page => {
@@ -626,6 +693,7 @@ export function ReaderScreen({route, navigation}: Props) {
       const mediaState = getMediaState(page.pageNumber);
       const mediaOptions = buildVlcMediaOptions(page);
       const mediaUri = page.vlcUri || page.uri || '';
+      const waitingForProxy = Boolean(page.headers?.Authorization && !page.vlcUri);
       if (vlcSourceKeys.current[page.pageNumber] !== mediaUri) {
         vlcSourceKeys.current[page.pageNumber] = mediaUri;
         vlcSessions.current[page.pageNumber] = {
@@ -639,6 +707,13 @@ export function ReaderScreen({route, navigation}: Props) {
             <Text style={styles.loadingText}>
               {page.effectiveType === 'audio' ? t('reader.audio') : t('reader.video')}
             </Text>
+          </View>
+        );
+      }
+      if (waitingForProxy) {
+        return (
+          <View style={frameStyle}>
+            <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
           </View>
         );
       }
