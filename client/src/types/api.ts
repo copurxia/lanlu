@@ -43,6 +43,19 @@ export type Tankoubon = {
   pagecount?: number;
 };
 
+export type TankoubonMetadata = {
+  tankoubon_id: string;
+  title?: string;
+  description?: string;
+  tags?: string[];
+  assets?: ArchiveAssets;
+  children?: string[];
+  archive_count?: number;
+  pagecount?: number;
+  progress?: number;
+  isfavorite?: boolean;
+};
+
 export type MediaItem = Archive | Tankoubon;
 
 export type Category = {

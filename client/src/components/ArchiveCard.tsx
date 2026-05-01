@@ -32,6 +32,8 @@ import type {Archive, MediaItem} from '../types/api';
 type Props = {
   archive: MediaItem;
   onPress: () => void;
+  onOpenDetail?: () => void;
+  onOpenReader?: () => void;
   variant?: 'grid' | 'list' | 'tweet' | 'channel' | 'row';
   onChanged?: () => void;
   onTagPress?: (tag: string) => void;
@@ -53,7 +55,15 @@ function stripNamespace(tag: string) {
   return index > 0 ? tag.slice(index + 1) : tag;
 }
 
-export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTagPress}: Props) {
+export function ArchiveCard({
+  archive,
+  onPress,
+  onOpenDetail,
+  onOpenReader,
+  variant = 'grid',
+  onChanged,
+  onTagPress,
+}: Props) {
   const {t} = useI18n();
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<FastImageSource | null>(null);
@@ -137,7 +147,15 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
       setTagsOpen(false);
       return;
     }
-    onPress();
+    (onOpenReader || onPress)();
+  }
+
+  function handleBodyPress() {
+    if (tagsOpen) {
+      setTagsOpen(false);
+      return;
+    }
+    (onOpenDetail || onPress)();
   }
 
   function showTags() {
@@ -164,90 +182,91 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
   );
 
   return (
-    <GestureDetector gesture={cardGesture}>
-      <Animated.View
-        style={[
-          styles.card,
-          {width: itemWidth},
-          variant !== 'grid' && variant !== 'row' && styles.fullWidthCard,
-          variant === 'list' && styles.listCard,
-          variant === 'tweet' && styles.tweetCard,
-          variant === 'channel' && styles.channelCard,
-          cardAnimatedStyle,
-        ]}
-      >
-        <View
-          style={[
-            styles.coverWrap,
-            variant === 'list' && styles.listCover,
-            variant === 'tweet' && styles.tweetCover,
-            variant === 'channel' && styles.channelCover,
-          ]}>
-          {imageSource ? (
-            <FastImage
-              source={{
-                ...imageSource,
-                cache: FastImage.cacheControl.web,
-                priority: FastImage.priority.normal,
-              }}
-              style={styles.cover}
-              resizeMode={FastImage.resizeMode.cover}
-              onError={event => {
-                const message = event.nativeEvent.error || 'Image failed to load';
-                setImageError(message);
-                console.warn('Cover failed to load:', mediaItemId(archive), message);
-              }}
-            />
-          ) : (
-            <View style={styles.placeholder}>
-              <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
-            </View>
-          )}
-          {imageError ? (
-            <View style={styles.placeholderOverlay}>
-              <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
-            </View>
-          ) : null}
-          {!isCollection && archive.isnew ? (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>NEW</Text>
-            </View>
-          ) : null}
-          {isCollection ? (
-            <View style={styles.collectionBadge}>
-              <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
-            </View>
-          ) : null}
-          {visibleTags.length > 0 ? (
-            <Animated.View
-              pointerEvents={tagsOpen ? 'auto' : 'none'}
-              style={[styles.tagOverlay, tagOverlayStyle]}>
-              <View style={styles.tagFadeTop} />
-              <View style={styles.tagOverlayContent}>
-                <ScrollView
-                  contentContainerStyle={styles.tagList}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}>
-                  {visibleTags.map(tag => (
-                    <TouchableOpacity
-                      accessibilityRole="button"
-                      key={tag}
-                      onPress={() => {
-                        setTagsOpen(false);
-                        onTagPress?.(tag);
-                      }}
-                      style={styles.tagChip}>
-                      <Text numberOfLines={1} style={styles.tagText}>
-                        {stripNamespace(tag)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
+    <Animated.View
+      style={[
+        styles.card,
+        {width: itemWidth},
+        variant !== 'grid' && variant !== 'row' && styles.fullWidthCard,
+        variant === 'list' && styles.listCard,
+        variant === 'tweet' && styles.tweetCard,
+        variant === 'channel' && styles.channelCard,
+        cardAnimatedStyle,
+      ]}
+    >
+        <GestureDetector gesture={cardGesture}>
+          <Animated.View
+            style={[
+              styles.coverWrap,
+              variant === 'list' && styles.listCover,
+              variant === 'tweet' && styles.tweetCover,
+              variant === 'channel' && styles.channelCover,
+            ]}>
+            {imageSource ? (
+              <FastImage
+                source={{
+                  ...imageSource,
+                  cache: FastImage.cacheControl.web,
+                  priority: FastImage.priority.normal,
+                }}
+                style={styles.cover}
+                resizeMode={FastImage.resizeMode.cover}
+                onError={event => {
+                  const message = event.nativeEvent.error || 'Image failed to load';
+                  setImageError(message);
+                  console.warn('Cover failed to load:', mediaItemId(archive), message);
+                }}
+              />
+            ) : (
+              <View style={styles.placeholder}>
+                <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
               </View>
-            </Animated.View>
-          ) : null}
-        </View>
-        <View style={styles.body}>
+            )}
+            {imageError ? (
+              <View style={styles.placeholderOverlay}>
+                <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
+              </View>
+            ) : null}
+            {!isCollection && archive.isnew ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>NEW</Text>
+              </View>
+            ) : null}
+            {isCollection ? (
+              <View style={styles.collectionBadge}>
+                <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
+              </View>
+            ) : null}
+            {visibleTags.length > 0 ? (
+              <Animated.View
+                pointerEvents={tagsOpen ? 'auto' : 'none'}
+                style={[styles.tagOverlay, tagOverlayStyle]}>
+                <View style={styles.tagFadeTop} />
+                <View style={styles.tagOverlayContent}>
+                  <ScrollView
+                    contentContainerStyle={styles.tagList}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}>
+                    {visibleTags.map(tag => (
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        key={tag}
+                        onPress={() => {
+                          setTagsOpen(false);
+                          onTagPress?.(tag);
+                        }}
+                        style={styles.tagChip}>
+                        <Text numberOfLines={1} style={styles.tagText}>
+                          {stripNamespace(tag)}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </View>
+              </Animated.View>
+            ) : null}
+          </Animated.View>
+        </GestureDetector>
+        <TouchableOpacity activeOpacity={0.78} onPress={handleBodyPress} style={styles.body}>
           <Text numberOfLines={2} style={styles.title}>
             {title}
           </Text>
@@ -259,7 +278,7 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
               {archive.description}
             </Text>
           ) : null}
-        </View>
+        </TouchableOpacity>
         {!isCollection ? (
           <TouchableOpacity
             accessibilityRole="button"
@@ -271,8 +290,7 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
             </Text>
           </TouchableOpacity>
         ) : null}
-      </Animated.View>
-    </GestureDetector>
+    </Animated.View>
   );
 }
 

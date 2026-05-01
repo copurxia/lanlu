@@ -15,6 +15,7 @@ import {LoginScreen} from '../screens/LoginScreen';
 import {ReaderScreen} from '../screens/ReaderScreen';
 import {ServerListScreen} from '../screens/ServerListScreen';
 import {SettingsScreen} from '../screens/SettingsScreen';
+import {TankoubonDetailScreen} from '../screens/TankoubonDetailScreen';
 import {useI18n} from '../i18n';
 import {colors} from '../theme/colors';
 import type {MainTabParamList, RootStackParamList} from './types';
@@ -101,6 +102,11 @@ export function RootNavigator() {
             <Stack.Screen
               name="ArchiveDetail"
               component={ArchiveDetailScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="TankoubonDetail"
+              component={TankoubonDetailScreen}
               options={{headerShown: false}}
             />
             <Stack.Screen

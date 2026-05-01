@@ -12,6 +12,7 @@ import type {
   PageSourceInfo,
   SearchResponse,
   Tankoubon,
+  TankoubonMetadata,
 } from '../types/api';
 import axios from 'axios';
 import {appendDiagnosticLog} from '../storage/diagnostics';
@@ -238,6 +239,14 @@ export async function fetchTankoubonsForArchive(archiveId: string): Promise<Tank
   );
   const data = Array.isArray(response.data) ? response.data : response.data.data || [];
   return data.map(item => normalizeMediaItem(item) as Tankoubon).filter(isTankoubon);
+}
+
+export async function fetchTankoubonMetadata(id: string, lang?: string): Promise<TankoubonMetadata> {
+  const response = await apiClient.get<TankoubonMetadata>(
+    `/api/tankoubons/${encodeURIComponent(id)}/metadata`,
+    {params: {lang: lang || undefined}},
+  );
+  return response.data;
 }
 
 function getRecommendationSessionKey(): string {

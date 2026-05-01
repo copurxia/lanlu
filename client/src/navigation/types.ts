@@ -1,4 +1,4 @@
-import type {Archive} from '../types/api';
+import type {Archive, Tankoubon} from '../types/api';
 import type {LanluServer} from '../storage/servers';
 
 export type RootStackParamList = {
@@ -7,6 +7,7 @@ export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
   ArchiveDetail: {archiveId: string; archive?: Archive};
+  TankoubonDetail: {tankoubonId: string; tankoubon?: Tankoubon};
   Reader: {
     archiveId: string;
     initialPage?: number;

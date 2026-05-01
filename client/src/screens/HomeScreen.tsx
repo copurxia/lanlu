@@ -206,7 +206,7 @@ export function HomeScreen() {
   const isRowsLanding = !submittedFilter && !selectedCategory && !hasAdvancedFilters;
   const showRows = viewMode === 'category-rows' && isRowsLanding;
 
-  const openItem = useCallback(
+  const openReader = useCallback(
     (item: MediaItem) => {
       if (isTankoubon(item)) {
         const firstArchive = item.children?.[0];
@@ -219,6 +219,23 @@ export function HomeScreen() {
             childIndex: 0,
           });
         }
+        return;
+      }
+      const pagecount = Number(item.pagecount || 0);
+      const progress = Number(item.progress || 0);
+      const initialPage = progress > 0 ? Math.min(progress, pagecount || progress) : 1;
+      navigation.navigate('Reader', {archiveId: item.arcid, initialPage});
+    },
+    [navigation],
+  );
+
+  const openDetail = useCallback(
+    (item: MediaItem) => {
+      if (isTankoubon(item)) {
+        navigation.navigate('TankoubonDetail', {
+          tankoubonId: item.tankoubon_id,
+          tankoubon: item,
+        });
         return;
       }
       navigation.navigate('ArchiveDetail', {archiveId: item.arcid, archive: item});
@@ -748,7 +765,9 @@ export function HomeScreen() {
               archive={item}
               key={mediaItemId(item)}
               variant="row"
-              onPress={() => openItem(item)}
+              onOpenDetail={() => openDetail(item)}
+              onOpenReader={() => openReader(item)}
+              onPress={() => openReader(item)}
               onTagPress={applyTagSearch}
             />
           ))}
@@ -903,15 +922,17 @@ export function HomeScreen() {
                 item={item}
                 mode={itemVariant}
                 onChanged={refresh}
-                onDetailPress={() => openItem(item)}
-                onPress={() => openItem(item)}
+                onDetailPress={() => openDetail(item)}
+                onPress={() => openReader(item)}
                 onTagPress={applyTagSearch}
               />
             ) : (
               <ArchiveCard
                 archive={item}
                 variant={itemVariant}
-                onPress={() => openItem(item)}
+                onOpenDetail={() => openDetail(item)}
+                onOpenReader={() => openReader(item)}
+                onPress={() => openReader(item)}
                 onTagPress={applyTagSearch}
               />
             )
