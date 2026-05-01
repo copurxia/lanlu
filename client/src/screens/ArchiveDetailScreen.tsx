@@ -9,14 +9,18 @@ import {
   View,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {ArrowLeft, Heart} from 'lucide-react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {buildAuthorizedImageSource, extractApiError} from '../api/client';
 import {
+  archiveCoverAsset,
   assetPath,
   fetchArchiveMetadata,
   setArchiveFavorite,
 } from '../api/lanlu';
 import {ScreenState} from '../components/ScreenState';
+import {useI18n} from '../i18n';
 import {colors} from '../theme/colors';
 import type {ArchiveMetadata} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
@@ -24,6 +28,8 @@ import type {RootStackParamList} from '../navigation/types';
 type Props = NativeStackScreenProps<RootStackParamList, 'ArchiveDetail'>;
 
 export function ArchiveDetailScreen({route, navigation}: Props) {
+  const {t} = useI18n();
+  const insets = useSafeAreaInsets();
   const {archiveId, archive} = route.params;
   const [metadata, setMetadata] = useState<ArchiveMetadata | null>(null);
   const [cover, setCover] = useState<ImageSourcePropType | null>(null);
@@ -38,17 +44,14 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
       const result = await fetchArchiveMetadata(archiveId);
       setMetadata(result);
       setFavorite(Boolean(result.isfavorite));
-      const sourcePath = assetPath(result.assets?.cover || archive?.assets?.cover);
+      const sourcePath = assetPath(archiveCoverAsset(result) || archiveCoverAsset(archive));
       setCover(sourcePath ? await buildAuthorizedImageSource(sourcePath) : null);
-      navigation.setOptions({
-        title: result.title || archive?.title || 'Archive',
-      });
     } catch (err) {
       setError(extractApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [archive?.assets?.cover, archive?.title, archiveId, navigation]);
+  }, [archive, archiveId]);
 
   useEffect(() => {
     load().catch(err => console.warn('Failed to load archive:', err));
@@ -82,15 +85,15 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   }
 
   if (loading && !metadata && !archive) {
-    return <ScreenState loading title="Loading archive" />;
+    return <ScreenState loading title={t('archive.loading')} />;
   }
 
   if (error && !metadata && !archive) {
     return (
       <ScreenState
-        title="Could not load archive"
+        title={t('archive.loadFailed')}
         message={error}
-        actionLabel="Retry"
+        actionLabel={t('common.retry')}
         onAction={() => {
           load().catch(err => console.warn('Failed to load archive:', err));
         }}
@@ -103,14 +106,30 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const resumePage = progress > 0 ? Math.min(progress, pagecount || progress) : 1;
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.content, {paddingTop: insets.top + 12}]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        onPress={() => navigation.goBack()}
+        style={styles.backButton}>
+        <ArrowLeft color={colors.text} size={22} />
+      </TouchableOpacity>
+
       <View style={styles.hero}>
         <View style={styles.coverFrame}>
           {cover ? (
-            <Image source={cover} resizeMode="cover" style={styles.cover} />
+            <Image
+              source={cover}
+              resizeMode="cover"
+              style={styles.cover}
+              onError={event =>
+                console.warn('Archive detail cover failed:', archiveId, event.nativeEvent.error)
+              }
+            />
           ) : (
             <View style={styles.coverPlaceholder}>
-              <Text style={styles.coverPlaceholderText}>No Cover</Text>
+              <Text style={styles.coverPlaceholderText}>{t('common.noCover')}</Text>
             </View>
           )}
         </View>
@@ -119,17 +138,19 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
             {merged.title || merged.filename || archiveId}
           </Text>
           <Text style={styles.meta}>
-            {pagecount ? `${pagecount} pages` : 'Unknown page count'}
+            {pagecount ? t('common.pages', {count: pagecount}) : t('archive.unknownPages')}
           </Text>
           {progress > 0 ? (
-            <Text style={styles.meta}>Progress: {resumePage} / {pagecount}</Text>
+            <Text style={styles.meta}>
+              {t('archive.progress', {page: resumePage, total: pagecount})}
+            </Text>
           ) : null}
         </View>
       </View>
 
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <View style={styles.actions}>
+      <View style={styles.actionRow}>
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={() =>
@@ -139,31 +160,32 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
             })
           }>
           <Text style={styles.primaryButtonText}>
-            {progress > 0 ? 'Continue Reading' : 'Start Reading'}
+            {progress > 0 ? t('archive.continue') : t('archive.start')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigation.navigate('Reader', {archiveId, initialPage: 1})}>
-          <Text style={styles.secondaryButtonText}>First Page</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryButton} onPress={toggleFavorite}>
-          <Text style={styles.secondaryButtonText}>
-            {favorite ? 'Favorited' : 'Favorite'}
-          </Text>
+          accessibilityRole="button"
+          accessibilityLabel={favorite ? t('common.favorited') : t('common.favorite')}
+          style={[styles.favoriteIconButton, favorite && styles.favoriteIconButtonActive]}
+          onPress={toggleFavorite}>
+          <Heart
+            color={favorite ? colors.white : colors.primary}
+            fill={favorite ? colors.white : 'transparent'}
+            size={22}
+          />
         </TouchableOpacity>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Description</Text>
+        <Text style={styles.sectionTitle}>{t('archive.description')}</Text>
         <Text style={styles.description}>
-          {merged.description?.trim() || 'No description.'}
+          {merged.description?.trim() || t('archive.noDescription')}
         </Text>
       </View>
 
       {merged.tags?.length ? (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Tags</Text>
+          <Text style={styles.sectionTitle}>{t('archive.tags')}</Text>
           <View style={styles.tags}>
             {merged.tags.map(tag => (
               <View key={tag} style={styles.tag}>
@@ -184,6 +206,17 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
+  },
+  backButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 40,
+    justifyContent: 'center',
+    marginBottom: 14,
+    width: 40,
   },
   hero: {
     flexDirection: 'row',
@@ -227,7 +260,9 @@ const styles = StyleSheet.create({
     color: colors.danger,
     marginTop: 14,
   },
-  actions: {
+  actionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
     gap: 10,
     marginTop: 20,
   },
@@ -235,6 +270,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.primary,
     borderRadius: 8,
+    flex: 1,
     paddingVertical: 13,
   },
   primaryButtonText: {
@@ -242,18 +278,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
-  secondaryButton: {
+  favoriteIconButton: {
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderColor: colors.border,
     borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 12,
+    height: 48,
+    justifyContent: 'center',
+    width: 52,
   },
-  secondaryButtonText: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '700',
+  favoriteIconButtonActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
   section: {
     marginTop: 24,

@@ -3,16 +3,18 @@ import {Alert, StyleSheet, Text, View} from 'react-native';
 
 import {useAuth} from '../auth/AuthContext';
 import {FluentButton, FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
+import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 
 export function SettingsScreen() {
+  const {t} = useI18n();
   const {activeServer, user, showServerList, signOut} = useAuth();
 
   function confirmSignOut() {
-    Alert.alert('Sign out', 'Clear the session for this server?', [
-      {text: 'Cancel', style: 'cancel'},
+    Alert.alert(t('settings.signOutTitle'), t('settings.signOutMessage'), [
+      {text: t('common.cancel'), style: 'cancel'},
       {
-        text: 'Sign out',
+        text: t('settings.signOut'),
         style: 'destructive',
         onPress: () => {
           signOut().catch(error => console.warn('Failed to sign out:', error));
@@ -24,33 +26,33 @@ export function SettingsScreen() {
   return (
     <View style={styles.screen}>
       <FluentCard style={styles.section}>
-        <FluentTitle>Account</FluentTitle>
+        <FluentTitle>{t('settings.account')}</FluentTitle>
         <View style={styles.row}>
-          <Text style={styles.label}>User</Text>
-          <Text style={styles.value}>{user?.username || 'Unknown'}</Text>
+          <Text style={styles.label}>{t('settings.user')}</Text>
+          <Text style={styles.value}>{user?.username || t('common.unknown')}</Text>
         </View>
         <View style={styles.row}>
-          <Text style={styles.label}>Server</Text>
+          <Text style={styles.label}>{t('settings.server')}</Text>
           <Text style={styles.value}>{activeServer?.name || 'Lanlu'}</Text>
           <FluentCaption>{activeServer?.baseUrl || ''}</FluentCaption>
         </View>
       </FluentCard>
 
       <FluentCard style={styles.section}>
-        <FluentTitle>Client</FluentTitle>
+        <FluentTitle>{t('settings.client')}</FluentTitle>
         <FluentCaption>
-          Switch to another saved server, or clear this server session.
+          {t('settings.clientDescription')}
         </FluentCaption>
         <View style={styles.actions}>
           <FluentButton
-            label="Switch server"
+            label={t('auth.switchServer')}
             onPress={() => {
               showServerList().catch(error =>
                 console.warn('Failed to switch server:', error),
               );
             }}
           />
-          <FluentButton label="Sign out" variant="danger" onPress={confirmSignOut} />
+          <FluentButton label={t('settings.signOut')} variant="danger" onPress={confirmSignOut} />
         </View>
       </FluentCard>
     </View>

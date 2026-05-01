@@ -10,9 +10,11 @@ import {
 import {extractApiError} from '../api/client';
 import {useAuth} from '../auth/AuthContext';
 import {FluentButton, FluentCard, FluentTextField, FluentTitle} from '../components/fluent';
+import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 
 export function LoginScreen() {
+  const {t} = useI18n();
   const {activeServer, signIn, showServerList} = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -21,7 +23,7 @@ export function LoginScreen() {
 
   async function submit() {
     if (!username.trim() || !password) {
-      setError('Username and password are required.');
+      setError(t('auth.credentialsRequired'));
       return;
     }
     setSubmitting(true);
@@ -29,7 +31,7 @@ export function LoginScreen() {
     try {
       await signIn({username, password});
     } catch (err) {
-      setError(extractApiError(err, 'Login failed'));
+      setError(extractApiError(err, t('auth.loginFailed')));
     } finally {
       setSubmitting(false);
     }
@@ -40,8 +42,8 @@ export function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={styles.screen}>
       <FluentCard style={styles.panel}>
-        <FluentTitle>Sign in</FluentTitle>
-        <Text style={styles.serverName}>{activeServer?.name || 'Lanlu server'}</Text>
+        <FluentTitle>{t('auth.signIn')}</FluentTitle>
+        <Text style={styles.serverName}>{activeServer?.name || t('auth.lanluServer')}</Text>
         <Text numberOfLines={1} style={styles.serverUrl}>
           {activeServer?.baseUrl || ''}
         </Text>
@@ -49,14 +51,14 @@ export function LoginScreen() {
         <FluentTextField
           autoCapitalize="none"
           autoCorrect={false}
-          label="Username"
+          label={t('auth.username')}
           onChangeText={setUsername}
           placeholder="admin"
           value={username}
         />
 
         <FluentTextField
-          label="Password"
+          label={t('auth.password')}
           onChangeText={setPassword}
           placeholder="Password"
           secureTextEntry
@@ -67,7 +69,7 @@ export function LoginScreen() {
 
         <View style={styles.actions}>
           <FluentButton
-            label="Switch server"
+            label={t('auth.switchServer')}
             onPress={() => {
               showServerList().catch(reason =>
                 console.warn('Failed to switch server:', reason),
@@ -76,7 +78,7 @@ export function LoginScreen() {
           />
           <FluentButton
             disabled={submitting}
-            label={submitting ? 'Signing in...' : 'Sign in'}
+            label={submitting ? t('auth.signingIn') : t('auth.signIn')}
             onPress={submit}
             variant="primary"
           />

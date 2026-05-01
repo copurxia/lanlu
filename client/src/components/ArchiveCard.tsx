@@ -13,10 +13,12 @@ import {
   assetPath,
   isTankoubon,
   mediaItemCoverAsset,
+  mediaItemId,
   mediaItemTitle,
   setArchiveFavorite,
 } from '../api/lanlu';
 import {buildAuthorizedImageSource, extractApiError} from '../api/client';
+import {useI18n} from '../i18n';
 import {colors, radius, spacing} from '../theme/colors';
 import type {Archive, MediaItem} from '../types/api';
 
@@ -28,8 +30,10 @@ type Props = {
 };
 
 export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Props) {
+  const {t} = useI18n();
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<ImageSourcePropType | null>(null);
+  const [imageError, setImageError] = useState('');
   const [favorite, setFavorite] = useState(Boolean(archive.isfavorite));
   const itemWidth =
     variant === 'row'
@@ -50,6 +54,7 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
       }
       const source = await buildAuthorizedImageSource(path);
       if (!cancelled) {
+        setImageError('');
         setImageSource(source);
       }
     }
@@ -62,10 +67,10 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
   const pagecount = Number(archive.pagecount || 0);
   const progress = Number(archive.progress || 0);
   const progressLabel = isCollection
-    ? `${archive.children?.length || 0} archives`
+    ? t('common.archives', {count: archive.children?.length || 0})
     : pagecount > 0 && progress > 0
       ? `${Math.min(progress, pagecount)} / ${pagecount}`
-      : `${pagecount || 0} pages`;
+      : t('common.pages', {count: pagecount || 0});
 
   async function toggleFavorite() {
     if (isCollection) {
@@ -102,12 +107,26 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
           variant === 'channel' && styles.channelCover,
         ]}>
         {imageSource ? (
-          <Image source={imageSource} style={styles.cover} resizeMode="cover" />
+          <Image
+            source={imageSource}
+            style={styles.cover}
+            resizeMode="cover"
+            onError={event => {
+              const message = event.nativeEvent.error || 'Image failed to load';
+              setImageError(message);
+              console.warn('Cover failed to load:', mediaItemId(archive), message);
+            }}
+          />
         ) : (
           <View style={styles.placeholder}>
-            <Text style={styles.placeholderText}>No Cover</Text>
+            <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
           </View>
         )}
+        {imageError ? (
+          <View style={styles.placeholderOverlay}>
+            <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
+          </View>
+        ) : null}
         {!isCollection && archive.isnew ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>NEW</Text>
@@ -115,7 +134,7 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
         ) : null}
         {isCollection ? (
           <View style={styles.collectionBadge}>
-            <Text style={styles.badgeText}>COLLECTION</Text>
+            <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
           </View>
         ) : null}
       </View>
@@ -195,6 +214,16 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  placeholderOverlay: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    bottom: 0,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
   },
   badge: {
     backgroundColor: colors.primary,

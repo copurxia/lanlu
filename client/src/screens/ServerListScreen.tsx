@@ -12,6 +12,7 @@ import {useFocusEffect} from '@react-navigation/native';
 
 import {useAuth} from '../auth/AuthContext';
 import {FluentButton, FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
+import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
 import type {LanluServer} from '../storage/servers';
@@ -19,6 +20,7 @@ import type {LanluServer} from '../storage/servers';
 type Props = NativeStackScreenProps<RootStackParamList, 'ServerList'>;
 
 export function ServerListScreen({navigation}: Props) {
+  const {t} = useI18n();
   const {servers, reloadServers, selectServer, deleteServer} = useAuth();
 
   useFocusEffect(
@@ -28,10 +30,10 @@ export function ServerListScreen({navigation}: Props) {
   );
 
   function confirmDelete(server: LanluServer) {
-    Alert.alert('Delete server', `Remove ${server.name}?`, [
-      {text: 'Cancel', style: 'cancel'},
+    Alert.alert(t('server.deleteTitle'), t('server.deleteMessage', {name: server.name}), [
+      {text: t('common.cancel'), style: 'cancel'},
       {
-        text: 'Delete',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: () => {
           deleteServer(server.id).catch(error =>
@@ -47,10 +49,10 @@ export function ServerListScreen({navigation}: Props) {
       <View style={styles.header}>
         <View style={styles.headerText}>
           <FluentTitle>Lanlu</FluentTitle>
-          <FluentCaption>Choose a server to open your library.</FluentCaption>
+          <FluentCaption>{t('server.choose')}</FluentCaption>
         </View>
         <FluentButton
-          label="Add"
+          label={t('common.add')}
           variant="primary"
           onPress={() => navigation.navigate('AddServer', {})}
         />
@@ -62,10 +64,10 @@ export function ServerListScreen({navigation}: Props) {
         keyExtractor={item => item.id}
         ListEmptyComponent={
           <FluentCard style={styles.empty}>
-            <Text style={styles.emptyTitle}>No servers yet</Text>
-            <FluentCaption>Add your first Lanlu server to continue.</FluentCaption>
+            <Text style={styles.emptyTitle}>{t('server.noServers')}</Text>
+            <FluentCaption>{t('server.addFirst')}</FluentCaption>
             <FluentButton
-              label="Add server"
+              label={t('server.add')}
               variant="primary"
               style={styles.emptyButton}
               onPress={() => navigation.navigate('AddServer', {})}
@@ -88,18 +90,18 @@ export function ServerListScreen({navigation}: Props) {
                 </Text>
                 {item.lastUsedAt ? (
                   <Text style={styles.lastUsed}>
-                    Last used {new Date(item.lastUsedAt).toLocaleString()}
+                    {t('server.lastUsed', {time: new Date(item.lastUsedAt).toLocaleString()})}
                   </Text>
                 ) : null}
               </View>
               <View style={styles.serverActions}>
                 <FluentButton
-                  label="Edit"
+                  label={t('common.edit')}
                   variant="ghost"
                   onPress={() => navigation.navigate('AddServer', {server: item})}
                 />
                 <FluentButton
-                  label="Delete"
+                  label={t('common.delete')}
                   variant="ghost"
                   onPress={() => confirmDelete(item)}
                 />

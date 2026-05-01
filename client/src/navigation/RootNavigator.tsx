@@ -14,6 +14,7 @@ import {LoginScreen} from '../screens/LoginScreen';
 import {ReaderScreen} from '../screens/ReaderScreen';
 import {ServerListScreen} from '../screens/ServerListScreen';
 import {SettingsScreen} from '../screens/SettingsScreen';
+import {useI18n} from '../i18n';
 import {colors} from '../theme/colors';
 import type {MainTabParamList, RootStackParamList} from './types';
 
@@ -33,6 +34,7 @@ function SettingsTabIcon({color, size}: {color: string; size: number}) {
 }
 
 function MainTabs() {
+  const {t} = useI18n();
   return (
     <Tabs.Navigator
       screenOptions={{
@@ -44,8 +46,8 @@ function MainTabs() {
         name="Home"
         component={HomeScreen}
         options={{
-          title: 'Home',
-          tabBarLabel: 'Home',
+          title: t('tabs.home'),
+          tabBarLabel: t('tabs.home'),
           tabBarIcon: HomeTabIcon,
         }}
       />
@@ -53,8 +55,8 @@ function MainTabs() {
         name="Favorites"
         component={FavoritesScreen}
         options={{
-          title: 'Favorites',
-          tabBarLabel: 'Favorites',
+          title: t('tabs.favorites'),
+          tabBarLabel: t('tabs.favorites'),
           tabBarIcon: FavoritesTabIcon,
         }}
       />
@@ -62,8 +64,8 @@ function MainTabs() {
         name="Settings"
         component={SettingsScreen}
         options={{
-          title: 'Settings',
-          tabBarLabel: 'Settings',
+          title: t('tabs.settings'),
+          tabBarLabel: t('tabs.settings'),
           tabBarIcon: SettingsTabIcon,
         }}
       />
@@ -73,9 +75,10 @@ function MainTabs() {
 
 export function RootNavigator() {
   const {status} = useAuth();
+  const {t} = useI18n();
 
   if (status === 'booting') {
-    return <ScreenState loading title="Loading Lanlu" />;
+    return <ScreenState loading title={t('common.loading')} />;
   }
 
   return (
@@ -91,7 +94,7 @@ export function RootNavigator() {
             <Stack.Screen
               name="ArchiveDetail"
               component={ArchiveDetailScreen}
-              options={{title: 'Archive'}}
+              options={{headerShown: false}}
             />
             <Stack.Screen
               name="Reader"
@@ -115,7 +118,7 @@ export function RootNavigator() {
             <Stack.Screen
               name="AddServer"
               component={AddServerScreen}
-              options={{title: 'Server'}}
+              options={{title: t('settings.server')}}
             />
           </>
         )}

@@ -284,13 +284,27 @@ export function mediaItemTitle(item: MediaItem): string {
 }
 
 export function mediaItemCoverAsset(item: MediaItem): number | undefined {
-  return item.assets?.cover || item.assets?.clearlogo || item.assets?.backdrop;
+  return (
+    readAssetId(item.assets, 'cover') ||
+    readAssetId(item.assets, 'clearlogo') ||
+    readAssetId(item.assets, 'backdrop')
+  );
+}
+
+export function archiveCoverAsset(item?: {assets?: unknown} | null): number | undefined {
+  if (!item) return undefined;
+  return (
+    readAssetId(item.assets, 'cover') ||
+    readAssetId(item.assets, 'clearlogo') ||
+    readAssetId(item.assets, 'backdrop')
+  );
 }
 
 function normalizeMediaItem(raw: MediaItem): MediaItem {
   if (isTankoubon(raw)) {
     return {
       ...raw,
+      assets: normalizeAssets(raw.assets),
       title: String(raw.title || '').trim(),
       description: String(raw.description || '').trim(),
       children: Array.isArray(raw.children)
@@ -300,7 +314,65 @@ function normalizeMediaItem(raw: MediaItem): MediaItem {
   }
   return {
     ...raw,
+    assets: normalizeAssets(raw.assets),
     title: String(raw.title || '').trim(),
     description: String(raw.description || '').trim(),
   };
+}
+
+function toPositiveAssetId(value: unknown): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const id = Math.trunc(typeof value === 'number' ? value : Number(value));
+  return Number.isFinite(id) && id > 0 ? id : undefined;
+}
+
+function normalizeAssetValue(value: unknown): number | undefined {
+  const direct = toPositiveAssetId(value);
+  if (direct !== undefined) return direct;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const row = value as Record<string, unknown>;
+    for (const key of ['value', 'path', 'id', 'asset_id', 'assetId']) {
+      const nested = normalizeAssetValue(row[key]);
+      if (nested !== undefined) return nested;
+    }
+  }
+  return undefined;
+}
+
+function readAssetId(rawAssets: unknown, wantedKey: string): number | undefined {
+  const wanted = wantedKey.trim().toLowerCase();
+  if (!wanted) return undefined;
+
+  if (Array.isArray(rawAssets)) {
+    for (const item of rawAssets) {
+      if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+      const row = item as Record<string, unknown>;
+      const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
+      if (itemKey !== wanted) continue;
+      const value = normalizeAssetValue(row.value ?? row.path ?? row.id ?? row.asset_id ?? row.assetId);
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  }
+
+  if (rawAssets && typeof rawAssets === 'object') {
+    const assets = rawAssets as Record<string, unknown>;
+    const direct = normalizeAssetValue(assets[wanted]);
+    if (direct !== undefined) return direct;
+    for (const [key, value] of Object.entries(assets)) {
+      if (key.trim().toLowerCase() !== wanted) continue;
+      const id = normalizeAssetValue(value);
+      if (id !== undefined) return id;
+    }
+  }
+  return undefined;
+}
+
+function normalizeAssets(rawAssets: unknown): Record<string, number> | undefined {
+  const out: Record<string, number> = {};
+  for (const key of ['cover', 'clearlogo', 'backdrop']) {
+    const id = readAssetId(rawAssets, key);
+    if (id !== undefined) out[key] = id;
+  }
+  return Object.keys(out).length ? out : undefined;
 }

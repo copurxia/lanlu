@@ -30,6 +30,7 @@ import {
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
+import {useI18n} from '../i18n';
 import {
   DEFAULT_HOME_VIEW_MODE,
   HomeViewMode,
@@ -59,18 +60,18 @@ type HomeRow = {
   items: MediaItem[];
 };
 
-function viewModeLabel(mode: HomeViewMode) {
+function viewModeLabel(mode: HomeViewMode, t: ReturnType<typeof useI18n>['t']) {
   switch (mode) {
     case 'category-rows':
-      return 'Rows';
+      return t('home.rows');
     case 'masonry':
-      return 'Grid';
+      return t('home.grid');
     case 'list':
-      return 'List';
+      return t('home.list');
     case 'tweet':
-      return 'Feed';
+      return t('home.feed');
     case 'channel':
-      return 'Channel';
+      return t('home.channel');
   }
 }
 
@@ -84,6 +85,7 @@ function ViewModeIcon({mode}: {mode: HomeViewMode}) {
 }
 
 export function HomeScreen() {
+  const {t} = useI18n();
   const navigation = useNavigation<Nav>();
   const [viewMode, setViewMode] = useState<HomeViewMode>(DEFAULT_HOME_VIEW_MODE);
   const [items, setItems] = useState<MediaItem[]>([]);
@@ -291,7 +293,7 @@ export function HomeScreen() {
   const homeRows = useMemo<HomeRow[]>(() => {
     const rows: HomeRow[] = [];
     if (randomItems.length) {
-      rows.push({key: 'discover', title: 'Random recommendations', items: randomItems});
+      rows.push({key: 'discover', title: t('home.random'), items: randomItems});
     }
     for (const category of categories) {
       const itemsForCategory =
@@ -307,18 +309,18 @@ export function HomeScreen() {
       });
     }
     return rows;
-  }, [categories, categoryRows, randomItems]);
+  }, [categories, categoryRows, randomItems, t]);
 
   if (loading && !refreshing && !items.length && !showRows) {
-    return <ScreenState loading title="Loading home" />;
+    return <ScreenState loading title={t('home.loading')} />;
   }
 
   if (error && !items.length && !showRows) {
     return (
       <ScreenState
-        title="Could not load home"
+        title={t('home.loadFailed')}
         message={error}
-        actionLabel="Retry"
+        actionLabel={t('common.retry')}
         onAction={() => load(1, 'replace').catch(() => undefined)}
       />
     );
@@ -335,7 +337,7 @@ export function HomeScreen() {
               accessibilityRole="button"
               onPress={() => openCategory(row.category as Category)}
               style={styles.viewMoreButton}>
-              <Text style={styles.viewMoreText}>More</Text>
+              <Text style={styles.viewMoreText}>{t('common.more')}</Text>
               <ChevronRight color={colors.textMuted} size={16} />
             </TouchableOpacity>
           ) : null}
@@ -365,7 +367,7 @@ export function HomeScreen() {
             ))}
           </View>
         ) : (
-          <Text style={styles.emptyRowText}>No archives</Text>
+          <Text style={styles.emptyRowText}>{t('home.noArchives')}</Text>
         )}
       </View>
     );
@@ -379,14 +381,14 @@ export function HomeScreen() {
           autoCorrect={false}
           onChangeText={setFilter}
           onSubmitEditing={submitSearch}
-          placeholder="Search"
+          placeholder={t('common.search')}
           returnKeyType="search"
           style={styles.searchInput}
           value={filter}
         />
         <TouchableOpacity onPress={cycleViewMode} style={styles.modeButton}>
           <ViewModeIcon mode={viewMode} />
-          <Text style={styles.modeButtonText}>{viewModeLabel(viewMode)}</Text>
+          <Text style={styles.modeButtonText}>{viewModeLabel(viewMode, t)}</Text>
         </TouchableOpacity>
       </View>
 
@@ -406,12 +408,12 @@ export function HomeScreen() {
             style={[styles.sortChip, sortby === option && styles.sortChipActive]}>
             <Text style={[styles.sortChipText, sortby === option && styles.sortChipTextActive]}>
               {option === 'created_at'
-                ? 'Created'
+                ? t('home.created')
                 : option === 'lastread'
-                  ? 'Last read'
+                  ? t('home.lastRead')
                   : option === 'release_at'
-                    ? 'Release'
-                    : 'Updated'}
+                    ? t('home.release')
+                    : t('home.updated')}
             </Text>
           </TouchableOpacity>
         ))}
@@ -424,11 +426,11 @@ export function HomeScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
           contentContainerStyle={styles.rowsContent}>
           {loading && !randomItems.length ? (
-            <ScreenState loading title="Loading recommendations" />
+            <ScreenState loading title={t('home.loadingRecommendations')} />
           ) : null}
           {homeRows.map(renderRow)}
           {!loading && homeRows.length === 0 ? (
-            <ScreenState title="No categories" message="Use another view to browse all archives." />
+            <ScreenState title={t('home.noCategories')} message={t('home.useAnotherView')} />
           ) : null}
         </ScrollView>
       ) : (
@@ -448,9 +450,9 @@ export function HomeScreen() {
           renderItem={({item}) => (
             <ArchiveCard archive={item} variant={itemVariant} onPress={() => openItem(item)} />
           )}
-          ListEmptyComponent={<ScreenState title="No archives" message="Try another search." />}
+          ListEmptyComponent={<ScreenState title={t('home.noArchives')} message={t('home.tryAnotherSearch')} />}
           ListFooterComponent={
-            loadingMore ? <Text style={styles.footerText}>Loading more...</Text> : null
+            loadingMore ? <Text style={styles.footerText}>{t('common.loading')}</Text> : null
           }
         />
       )}
