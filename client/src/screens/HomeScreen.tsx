@@ -43,6 +43,7 @@ import {
   type TagSuggestion,
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
+import {HomeFeedCard} from '../components/HomeFeedCard';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {appendDiagnosticLog} from '../storage/diagnostics';
@@ -75,7 +76,7 @@ type HomeRow = {
   items: MediaItem[];
 };
 type DatePickerTarget = 'from' | 'to';
-type HomeViewSurface = 'archive-feed-continuous' | 'archive-feed-paged' | 'home-category-rows';
+type HomeViewSurface = 'archive-feed' | 'home-category-rows';
 
 function viewModeLabel(mode: HomeViewMode, t: ReturnType<typeof useI18n>['t']) {
   switch (mode) {
@@ -153,8 +154,7 @@ function buildExactTagSearchQuery(tag: string) {
 
 function resolveHomeViewSurface(mode: HomeViewMode, isRowsLanding: boolean): HomeViewSurface {
   if (mode === 'category-rows' && isRowsLanding) return 'home-category-rows';
-  if (mode === 'masonry' || mode === 'tweet' || mode === 'channel') return 'archive-feed-continuous';
-  return 'archive-feed-paged';
+  return 'archive-feed';
 }
 
 export function HomeScreen() {
@@ -684,6 +684,7 @@ export function HomeScreen() {
     if (viewMode === 'channel') return 'channel';
     return 'grid';
   }, [viewMode]);
+  const listLayoutKey = itemVariant === 'grid' ? 'columns:2' : 'columns:1';
 
   const homeRows = useMemo<HomeRow[]>(() => {
     const rows: HomeRow[] = [];
@@ -888,7 +889,8 @@ export function HomeScreen() {
             items.length === 0 && styles.emptyList,
           ]}
           data={items}
-          key={`${viewMode}:${itemVariant}`}
+          extraData={itemVariant}
+          key={listLayoutKey}
           keyExtractor={item => mediaItemId(item)}
           numColumns={itemVariant === 'grid' ? 2 : 1}
           columnWrapperStyle={itemVariant === 'grid' ? styles.column : undefined}
@@ -896,12 +898,23 @@ export function HomeScreen() {
           onEndReachedThreshold={0.5}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
           renderItem={({item}) => (
-            <ArchiveCard
-              archive={item}
-              variant={itemVariant}
-              onPress={() => openItem(item)}
-              onTagPress={applyTagSearch}
-            />
+            itemVariant === 'tweet' || itemVariant === 'channel' ? (
+              <HomeFeedCard
+                item={item}
+                mode={itemVariant}
+                onChanged={refresh}
+                onDetailPress={() => openItem(item)}
+                onPress={() => openItem(item)}
+                onTagPress={applyTagSearch}
+              />
+            ) : (
+              <ArchiveCard
+                archive={item}
+                variant={itemVariant}
+                onPress={() => openItem(item)}
+                onTagPress={applyTagSearch}
+              />
+            )
           )}
           ListEmptyComponent={
             loading ? (

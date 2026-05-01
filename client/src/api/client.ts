@@ -64,6 +64,9 @@ export function extractApiError(error: unknown, fallback = 'Request failed') {
 }
 
 export async function buildApiUrl(path: string): Promise<string> {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
   const server = await getActiveServer();
   if (!server) {
     return path;
@@ -75,7 +78,8 @@ export async function buildAuthorizedImageSource(path: string) {
   const uri = await buildApiUrl(path);
   const server = await getActiveServer();
   const token = await getStoredToken(server?.id);
-  return token
+  const shouldAttachAuth = !/^https?:\/\//i.test(path) || Boolean(server?.baseUrl && uri.startsWith(server.baseUrl));
+  return token && shouldAttachAuth
     ? {uri, headers: {Authorization: `Bearer ${token}`}}
     : {uri};
 }
@@ -84,9 +88,10 @@ export async function buildAuthorizedUri(path: string) {
   const uri = await buildApiUrl(path);
   const server = await getActiveServer();
   const token = await getStoredToken(server?.id);
+  const shouldAttachAuth = !/^https?:\/\//i.test(path) || Boolean(server?.baseUrl && uri.startsWith(server.baseUrl));
   return {
     uri,
     token: token || undefined,
-    headers: token ? {Authorization: `Bearer ${token}`} : undefined,
+    headers: token && shouldAttachAuth ? {Authorization: `Bearer ${token}`} : undefined,
   };
 }
