@@ -17,6 +17,11 @@ import {
   ViewToken,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {
+  FlashList,
+  type FlashListRef,
+  type ListRenderItemInfo as FlashListRenderItemInfo,
+} from '@shopify/flash-list';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
@@ -155,7 +160,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const {width, height} = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ReaderItem>>(null);
-  const webtoonRef = useRef<ScrollView>(null);
+  const webtoonRef = useRef<FlashListRef<ReaderPage>>(null);
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const lastSavedPage = useRef(0);
@@ -318,7 +323,10 @@ export function ReaderScreen({route, navigation}: Props) {
       const next = Math.max(1, Math.min(page, pages.length));
       setCurrentPage(next);
       if (settings.readingMode === 'webtoon') {
-        webtoonRef.current?.scrollTo({y: (next - 1) * height * 0.86, animated: true});
+        webtoonRef.current?.scrollToOffset({
+          animated: true,
+          offset: (next - 1) * height,
+        });
         return;
       }
       const itemIndex = readerItems.findIndex(item =>
@@ -735,6 +743,15 @@ export function ReaderScreen({route, navigation}: Props) {
     );
   };
 
+  const renderWebtoonItem = ({item}: FlashListRenderItemInfo<ReaderPage>) => {
+    const mediaActive = Math.abs(item.pageNumber - currentPage) <= 1;
+    return (
+      <ReaderTapSurface onTap={toggleChrome} style={styles.webtoonItem}>
+        {renderMedia(item, width, settings.longPage ? undefined : height, true, mediaActive)}
+      </ReaderTapSurface>
+    );
+  };
+
   return (
     <View style={styles.screen}>
       <StatusBar
@@ -743,23 +760,29 @@ export function ReaderScreen({route, navigation}: Props) {
         translucent
       />
       {settings.readingMode === 'webtoon' ? (
-        <ScrollView
-          ref={webtoonRef}
+        <FlashList
+          data={pages}
+          drawDistance={height * 1.5}
+          extraData={{
+            currentPage,
+            failedPages,
+            loadedPages,
+            longPage: settings.longPage,
+          }}
+          key={`webtoon:${settings.longPage ? 'long' : 'paged'}`}
+          keyExtractor={page => `${page.pageNumber}:${page.uri || page.id}`}
           onScroll={event => {
-            const approx = Math.floor(event.nativeEvent.contentOffset.y / Math.max(1, height * 0.86)) + 1;
+            const approx =
+              Math.floor(event.nativeEvent.contentOffset.y / Math.max(1, height * 0.86)) + 1;
             setCurrentPage(Math.max(1, Math.min(approx, pages.length)));
           }}
+          ref={webtoonRef}
+          renderItem={renderWebtoonItem}
           scrollEventThrottle={100}
-          contentContainerStyle={styles.webtoonContent}>
-          {pages.map(page => {
-            const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
-            return (
-            <ReaderTapSurface onTap={toggleChrome} key={`${page.pageNumber}:${page.uri}`}>
-              {renderMedia(page, width, undefined, true, mediaActive)}
-            </ReaderTapSurface>
-          );
-          })}
-        </ScrollView>
+          showsVerticalScrollIndicator={false}
+          style={styles.webtoonList}
+          contentContainerStyle={styles.webtoonContent}
+        />
       ) : (
         <FlatList
           data={readerItems}
@@ -1185,9 +1208,17 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   webtoonContent: {
-    alignItems: 'center',
     backgroundColor: colors.black,
     paddingBottom: 24,
+  },
+  webtoonList: {
+    backgroundColor: colors.black,
+    flex: 1,
+  },
+  webtoonItem: {
+    alignItems: 'center',
+    backgroundColor: colors.black,
+    width: '100%',
   },
   webtoonPage: {
     alignItems: 'center',
