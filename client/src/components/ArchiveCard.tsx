@@ -1,13 +1,12 @@
 import React, {useEffect, useState} from 'react';
 import {
-  Image,
-  ImageSourcePropType,
   StyleSheet,
   Text,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 
 import {
   assetPath,
@@ -32,7 +31,7 @@ type Props = {
 export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Props) {
   const {t} = useI18n();
   const {width} = useWindowDimensions();
-  const [imageSource, setImageSource] = useState<ImageSourcePropType | null>(null);
+  const [imageSource, setImageSource] = useState<FastImageSource | null>(null);
   const [imageError, setImageError] = useState('');
   const [favorite, setFavorite] = useState(Boolean(archive.isfavorite));
   const itemWidth =
@@ -107,10 +106,14 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Pro
           variant === 'channel' && styles.channelCover,
         ]}>
         {imageSource ? (
-          <Image
-            source={imageSource}
+          <FastImage
+            source={{
+              ...imageSource,
+              cache: FastImage.cacheControl.web,
+              priority: FastImage.priority.normal,
+            }}
             style={styles.cover}
-            resizeMode="cover"
+            resizeMode={FastImage.resizeMode.cover}
             onError={event => {
               const message = event.nativeEvent.error || 'Image failed to load';
               setImageError(message);

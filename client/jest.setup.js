@@ -46,6 +46,38 @@ jest.mock('react-native-webview', () => {
   return {WebView: props => React.createElement(View, props)};
 });
 
+jest.mock('@d11/react-native-fast-image', () => {
+  const React = require('react');
+  const {Image} = require('react-native');
+  const FastImage = props => React.createElement(Image, props);
+
+  FastImage.resizeMode = {
+    contain: 'contain',
+    cover: 'cover',
+    stretch: 'stretch',
+    center: 'center',
+  };
+  FastImage.priority = {
+    low: 'low',
+    normal: 'normal',
+    high: 'high',
+  };
+  FastImage.cacheControl = {
+    immutable: 'immutable',
+    web: 'web',
+    cacheOnly: 'cacheOnly',
+  };
+  FastImage.transition = {
+    fade: 'fade',
+    none: 'none',
+  };
+  FastImage.preload = jest.fn();
+  FastImage.clearMemoryCache = jest.fn(() => Promise.resolve());
+  FastImage.clearDiskCache = jest.fn(() => Promise.resolve());
+
+  return FastImage;
+});
+
 jest.mock('react-native-video', () => {
   const React = require('react');
   const {View} = require('react-native');

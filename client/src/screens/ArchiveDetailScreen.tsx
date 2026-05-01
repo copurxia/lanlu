@@ -1,13 +1,12 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
-  Image,
-  ImageSourcePropType,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {ArrowLeft, Heart} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -32,7 +31,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const insets = useSafeAreaInsets();
   const {archiveId, archive} = route.params;
   const [metadata, setMetadata] = useState<ArchiveMetadata | null>(null);
-  const [cover, setCover] = useState<ImageSourcePropType | null>(null);
+  const [cover, setCover] = useState<FastImageSource | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [favorite, setFavorite] = useState(Boolean(archive?.isfavorite));
@@ -119,9 +118,13 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
       <View style={styles.hero}>
         <View style={styles.coverFrame}>
           {cover ? (
-            <Image
-              source={cover}
-              resizeMode="cover"
+            <FastImage
+              source={{
+                ...cover,
+                cache: FastImage.cacheControl.web,
+                priority: FastImage.priority.high,
+              }}
+              resizeMode={FastImage.resizeMode.cover}
               style={styles.cover}
               onError={event =>
                 console.warn('Archive detail cover failed:', archiveId, event.nativeEvent.error)
