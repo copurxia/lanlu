@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -18,6 +18,7 @@ import {
   MessageCircle,
   MessageSquareText,
   Rows3,
+  Search,
 } from 'lucide-react-native';
 
 import {extractApiError} from '../api/client';
@@ -31,6 +32,7 @@ import {
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
+import {appendDiagnosticLog} from '../storage/diagnostics';
 import {
   DEFAULT_HOME_VIEW_MODE,
   HomeViewMode,
@@ -94,6 +96,7 @@ export function HomeScreen() {
   const [categoryRows, setCategoryRows] = useState<Record<string, MediaItem[]>>({});
   const [filter, setFilter] = useState('');
   const [submittedFilter, setSubmittedFilter] = useState('');
+  const [searchVersion, setSearchVersion] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [sortby, setSortby] = useState('created_at');
   const [page, setPage] = useState(1);
@@ -102,6 +105,7 @@ export function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const requestIdRef = useRef(0);
 
   const showRows = viewMode === 'category-rows' && !submittedFilter && !selectedCategory;
 
@@ -121,25 +125,51 @@ export function HomeScreen() {
 
   const loadFeed = useCallback(
     async (nextPage: number, mode: 'replace' | 'append') => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const activeFilter = submittedFilter.trim();
+      const params = {
+        filter: activeFilter,
+        page: nextPage,
+        pageSize: PAGE_SIZE,
+        sortby: activeFilter && sortby === 'created_at' ? 'relevance' : sortby,
+        order: 'desc' as const,
+        groupby_tanks: true,
+        category_id: selectedCategory?.catid,
+      };
       if (mode === 'append') setLoadingMore(true);
       else if (!refreshing) setLoading(true);
       setError('');
       try {
-        const result = await searchArchives({
-          filter: submittedFilter,
-          page: nextPage,
-          pageSize: PAGE_SIZE,
-          sortby,
-          order: 'desc',
-          groupby_tanks: true,
-          category_id: selectedCategory?.catid,
-        });
+        await appendDiagnosticLog('home.feed.start', {requestId, mode, params});
+        const result = await searchArchives(params);
+        if (requestId !== requestIdRef.current) {
+          await appendDiagnosticLog('home.feed.stale', {
+            requestId,
+            activeRequestId: requestIdRef.current,
+            dataCount: result.data.length,
+          });
+          return;
+        }
         setTotal(result.recordsFiltered || result.recordsTotal || 0);
         setPage(nextPage);
         setItems(current => (mode === 'append' ? [...current, ...result.data] : result.data));
+        await appendDiagnosticLog('home.feed.done', {
+          requestId,
+          mode,
+          dataCount: result.data.length,
+          recordsFiltered: result.recordsFiltered,
+          recordsTotal: result.recordsTotal,
+        });
       } catch (err) {
+        if (requestId !== requestIdRef.current) return;
+        await appendDiagnosticLog('home.feed.error', {
+          requestId,
+          message: err instanceof Error ? err.message : String(err),
+        });
         setError(extractApiError(err));
       } finally {
+        if (requestId !== requestIdRef.current) return;
         setLoading(false);
         setRefreshing(false);
         setLoadingMore(false);
@@ -149,6 +179,8 @@ export function HomeScreen() {
   );
 
   const loadRows = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError('');
     try {
@@ -156,6 +188,7 @@ export function HomeScreen() {
         fetchCategories(),
         fetchDiscover(ROW_SIZE).catch(() => []),
       ]);
+      if (requestId !== requestIdRef.current) return;
       const enabled = cats.filter(category => category.enabled !== false);
       setCategories(enabled);
       setRandomItems(discover);
@@ -180,6 +213,7 @@ export function HomeScreen() {
             category_ids: categoryIds.join(','),
             aggregate_by: 'category',
           });
+          if (requestId !== requestIdRef.current) return;
           for (const group of result.groups || []) {
             if (!group.category_id) continue;
             rows[group.category_id] = group.data || [];
@@ -205,6 +239,7 @@ export function HomeScreen() {
               return {category, items: result.data};
             }),
           );
+          if (requestId !== requestIdRef.current) return;
           for (const result of fallbackResults) {
             if (result.status !== 'fulfilled') continue;
             const {category, items: rowItems} = result.value;
@@ -217,8 +252,10 @@ export function HomeScreen() {
         setCategoryRows({});
       }
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(extractApiError(err));
     } finally {
+      if (requestId !== requestIdRef.current) return;
       setLoading(false);
       setRefreshing(false);
     }
@@ -240,7 +277,7 @@ export function HomeScreen() {
 
   useEffect(() => {
     load(1, 'replace').catch(err => console.warn('Failed to load home:', err));
-  }, [load]);
+  }, [load, searchVersion]);
 
   const refresh = useCallback(() => {
     setRefreshing(true);
@@ -248,8 +285,24 @@ export function HomeScreen() {
   }, [load]);
 
   function submitSearch() {
-    setSubmittedFilter(filter.trim());
+    const nextFilter = filter.trim();
+    requestIdRef.current += 1;
+    appendDiagnosticLog('home.search.submit', {
+      filter: nextFilter,
+      previousFilter: submittedFilter,
+      sortby,
+      viewMode,
+      selectedCategory: selectedCategory?.catid,
+      nextRequestSeed: requestIdRef.current,
+    }).catch(logError => console.warn('Failed to log search submit:', logError));
+    setItems([]);
+    setPage(1);
+    setTotal(0);
+    setError('');
+    setLoading(Boolean(nextFilter));
+    setSubmittedFilter(nextFilter);
     setSelectedCategory(null);
+    setSearchVersion(version => version + 1);
   }
 
   function cycleViewMode() {
@@ -311,7 +364,7 @@ export function HomeScreen() {
     return rows;
   }, [categories, categoryRows, randomItems, t]);
 
-  if (loading && !refreshing && !items.length && !showRows) {
+  if (loading && !refreshing && !items.length && !showRows && !submittedFilter) {
     return <ScreenState loading title={t('home.loading')} />;
   }
 
@@ -386,6 +439,13 @@ export function HomeScreen() {
           style={styles.searchInput}
           value={filter}
         />
+        <TouchableOpacity
+          accessibilityLabel={t('common.search')}
+          accessibilityRole="button"
+          onPress={submitSearch}
+          style={styles.searchButton}>
+          <Search color={colors.text} size={18} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={cycleViewMode} style={styles.modeButton}>
           <ViewModeIcon mode={viewMode} />
           <Text style={styles.modeButtonText}>{viewModeLabel(viewMode, t)}</Text>
@@ -450,7 +510,13 @@ export function HomeScreen() {
           renderItem={({item}) => (
             <ArchiveCard archive={item} variant={itemVariant} onPress={() => openItem(item)} />
           )}
-          ListEmptyComponent={<ScreenState title={t('home.noArchives')} message={t('home.tryAnotherSearch')} />}
+          ListEmptyComponent={
+            loading ? (
+              <ScreenState loading title={t('home.loading')} />
+            ) : (
+              <ScreenState title={t('home.noArchives')} message={t('home.tryAnotherSearch')} />
+            )
+          }
           ListFooterComponent={
             loadingMore ? <Text style={styles.footerText}>{t('common.loading')}</Text> : null
           }
@@ -483,6 +549,16 @@ const styles = StyleSheet.create({
     fontSize: 15,
     paddingHorizontal: 12,
     paddingVertical: 10,
+  },
+  searchButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
   },
   modeButton: {
     alignItems: 'center',

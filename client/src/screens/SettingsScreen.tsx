@@ -1,8 +1,9 @@
 import React, {useState} from 'react';
-import {Alert, Modal, ScrollView, Share, StyleSheet, Text, View} from 'react-native';
+import {Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {FileText, LogOut, RotateCcw, Share2, Trash2} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
-import {FluentButton, FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
+import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
 import {colors, spacing} from '../theme/colors';
@@ -65,8 +66,9 @@ export function SettingsScreen() {
         <FluentCaption>
           {t('settings.clientDescription')}
         </FluentCaption>
-        <View style={styles.actions}>
-          <FluentButton
+        <View style={styles.actionList}>
+          <SettingsActionRow
+            icon={<RotateCcw color={colors.textMuted} size={18} />}
             label={t('auth.switchServer')}
             onPress={() => {
               showServerList().catch(error =>
@@ -74,16 +76,29 @@ export function SettingsScreen() {
               );
             }}
           />
-          <FluentButton label={t('settings.signOut')} variant="danger" onPress={confirmSignOut} />
+          <SettingsActionRow
+            danger
+            icon={<LogOut color={colors.danger} size={18} />}
+            label={t('settings.signOut')}
+            onPress={confirmSignOut}
+          />
         </View>
       </FluentCard>
 
       <FluentCard style={styles.section}>
         <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
         <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
-        <View style={styles.actions}>
-          <FluentButton label={t('settings.viewLogs')} onPress={openDiagnostics} />
-          <FluentButton label={t('settings.shareLogs')} onPress={shareDiagnostics} />
+        <View style={styles.actionList}>
+          <SettingsActionRow
+            icon={<FileText color={colors.textMuted} size={18} />}
+            label={t('settings.viewLogs')}
+            onPress={openDiagnostics}
+          />
+          <SettingsActionRow
+            icon={<Share2 color={colors.textMuted} size={18} />}
+            label={t('settings.shareLogs')}
+            onPress={shareDiagnostics}
+          />
         </View>
       </FluentCard>
 
@@ -98,15 +113,56 @@ export function SettingsScreen() {
             <ScrollView style={styles.logBox}>
               <Text selectable style={styles.logText}>{diagnosticLog}</Text>
             </ScrollView>
-            <View style={styles.actions}>
-              <FluentButton label={t('settings.clearLogs')} variant="danger" onPress={clearDiagnostics} />
-              <FluentButton label={t('settings.shareLogs')} onPress={shareDiagnostics} />
-              <FluentButton label={t('common.close')} variant="primary" onPress={() => setDiagnosticsOpen(false)} />
+            <View style={styles.sheetActions}>
+              <TouchableOpacity
+                accessibilityLabel={t('settings.clearLogs')}
+                accessibilityRole="button"
+                onPress={clearDiagnostics}
+                style={[styles.iconAction, styles.deleteAction]}>
+                <Trash2 color={colors.danger} size={18} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityLabel={t('settings.shareLogs')}
+                accessibilityRole="button"
+                onPress={shareDiagnostics}
+                style={styles.iconAction}>
+                <Share2 color={colors.textMuted} size={18} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={() => setDiagnosticsOpen(false)}
+                style={styles.closePill}>
+                <Text style={styles.closePillText}>{t('common.close')}</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
     </View>
+  );
+}
+
+function SettingsActionRow({
+  danger,
+  icon,
+  label,
+  onPress,
+}: {
+  danger?: boolean;
+  icon: React.ReactNode;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.actionRow}>
+      <Text style={[styles.actionLabel, danger && styles.actionLabelDanger]}>{label}</Text>
+      <View style={[styles.iconAction, danger && styles.deleteAction]}>{icon}</View>
+    </TouchableOpacity>
   );
 }
 
@@ -134,12 +190,62 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
-  actions: {
+  actionList: {
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  actionRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    gap: spacing.md,
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+  },
+  actionLabel: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  actionLabelDanger: {
+    color: colors.danger,
+  },
+  iconAction: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  deleteAction: {
+    backgroundColor: '#fff5f5',
+  },
+  sheetActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
     gap: spacing.sm,
     justifyContent: 'flex-end',
-    marginTop: spacing.sm,
+  },
+  closePill: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  closePillText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '800',
   },
   modalBackdrop: {
     backgroundColor: 'rgba(0,0,0,0.38)',

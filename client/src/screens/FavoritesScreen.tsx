@@ -23,6 +23,7 @@ import {
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
+import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {Archive, MediaItem} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
@@ -30,6 +31,7 @@ import type {RootStackParamList} from '../navigation/types';
 type Tab = 'favorites' | 'history';
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 type Section = {title: string; data: MediaItem[]};
+type TFunction = ReturnType<typeof useI18n>['t'];
 
 function timeValue(item: MediaItem, tab: Tab): number {
   const raw = tab === 'favorites' ? item.favoritetime : (item as Archive).lastreadtime;
@@ -41,7 +43,7 @@ function timeValue(item: MediaItem, tab: Tab): number {
   return 0;
 }
 
-function groupByTime(items: MediaItem[], tab: Tab): Section[] {
+function groupByTime(items: MediaItem[], tab: Tab, t: TFunction): Section[] {
   const groups = new Map<string, MediaItem[]>();
   const now = new Date();
   const today = now.toDateString();
@@ -50,11 +52,11 @@ function groupByTime(items: MediaItem[], tab: Tab): Section[] {
     const ms = timeValue(item, tab);
     const date = ms ? new Date(ms) : null;
     const label = !date
-      ? 'Earlier'
+      ? t('favorites.earlier')
       : date.toDateString() === today
-        ? 'Today'
+        ? t('favorites.today')
         : date.toDateString() === yesterday
-          ? 'Yesterday'
+          ? t('favorites.yesterday')
           : date.toLocaleDateString();
     const current = groups.get(label) || [];
     current.push(item);
@@ -65,6 +67,7 @@ function groupByTime(items: MediaItem[], tab: Tab): Section[] {
 
 export function FavoritesScreen() {
   const navigation = useNavigation<Nav>();
+  const {t} = useI18n();
   const [tab, setTab] = useState<Tab>('favorites');
   const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]);
   const [historyItems, setHistoryItems] = useState<MediaItem[]>([]);
@@ -149,10 +152,10 @@ export function FavoritesScreen() {
     return items.filter(item => mediaItemTitle(item).toLowerCase().includes(normalized));
   }, [favoriteItems, historyItems, query, tab]);
 
-  const sections = useMemo(() => groupByTime(filteredItems, tab), [filteredItems, tab]);
+  const sections = useMemo(() => groupByTime(filteredItems, tab, t), [filteredItems, t, tab]);
 
   if (loading && !refreshing && filteredItems.length === 0) {
-    return <ScreenState loading title="Loading library" />;
+    return <ScreenState loading title={t('favorites.loading')} />;
   }
 
   return (
@@ -164,7 +167,7 @@ export function FavoritesScreen() {
             style={[styles.tab, tab === 'favorites' && styles.tabActive]}>
             <Heart color={tab === 'favorites' ? colors.primary : colors.textMuted} size={16} />
             <Text style={[styles.tabText, tab === 'favorites' && styles.tabTextActive]}>
-              Favorites
+              {t('favorites.favorites')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -172,7 +175,7 @@ export function FavoritesScreen() {
             style={[styles.tab, tab === 'history' && styles.tabActive]}>
             <BookOpen color={tab === 'history' ? colors.primary : colors.textMuted} size={16} />
             <Text style={[styles.tabText, tab === 'history' && styles.tabTextActive]}>
-              History
+              {t('favorites.history')}
             </Text>
           </TouchableOpacity>
         </View>
@@ -180,7 +183,7 @@ export function FavoritesScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           onChangeText={setQuery}
-          placeholder="Search"
+          placeholder={t('favorites.searchPlaceholder')}
           style={styles.searchInput}
           value={query}
         />
@@ -214,8 +217,8 @@ export function FavoritesScreen() {
         sections={sections}
         ListEmptyComponent={
           <ScreenState
-            title={tab === 'favorites' ? 'No favorites' : 'No reading history'}
-            message={query ? 'Try another search.' : 'Items will appear here as you use Lanlu.'}
+            title={tab === 'favorites' ? t('favorites.noFavorites') : t('favorites.noHistory')}
+            message={query ? t('favorites.tryAnotherSearch') : t('favorites.emptyHint')}
           />
         }
       />

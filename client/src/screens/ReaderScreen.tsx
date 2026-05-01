@@ -7,6 +7,7 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
+  StatusBar,
   Text,
   TouchableOpacity,
   useWindowDimensions,
@@ -708,6 +709,11 @@ export function ReaderScreen({route, navigation}: Props) {
 
   return (
     <View style={styles.screen}>
+      <StatusBar
+        backgroundColor="transparent"
+        barStyle="light-content"
+        translucent
+      />
       {settings.readingMode === 'webtoon' ? (
         <ScrollView
           ref={webtoonRef}

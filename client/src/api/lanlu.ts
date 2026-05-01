@@ -14,6 +14,7 @@ import type {
   Tankoubon,
 } from '../types/api';
 import axios from 'axios';
+import {appendDiagnosticLog} from '../storage/diagnostics';
 
 let recommendationSessionKey: string | null = null;
 
@@ -68,38 +69,63 @@ export async function testServer(baseUrl: string): Promise<void> {
 export async function searchArchives(
   params: SearchArchivesParams,
 ): Promise<SearchResponse> {
-  const response = await apiClient.get<SearchResponse>('/api/search', {
-    params: {
-      page: params.page || 1,
-      pageSize: params.pageSize || 24,
-      filter: params.filter || undefined,
-      sortby: params.sortby || 'created_at',
-      order: params.order || 'desc',
-      favoriteonly: params.favoriteonly || undefined,
-      favorite_tankoubons_only: params.favorite_tankoubons_only || undefined,
-      newonly: params.newonly || undefined,
-      untaggedonly: params.untaggedonly || undefined,
-      groupby_tanks: params.groupby_tanks,
-      category_id: params.category_id || undefined,
-      category_ids: params.category_ids || undefined,
-      aggregate_by: params.aggregate_by || undefined,
-      lang: params.lang || undefined,
-    },
-  });
-  const payload = response.data;
-  return {
-    ...payload,
-    data: Array.isArray(payload.data) ? payload.data.map(normalizeMediaItem) : [],
-    groups: Array.isArray(payload.groups)
-      ? payload.groups.map(group => ({
-          ...group,
-          category_id: String(group.category_id || '').trim(),
-          data: Array.isArray(group.data)
-            ? group.data.map(normalizeMediaItem)
-            : [],
-        }))
-      : undefined,
+  const requestParams = {
+    page: params.page || 1,
+    pageSize: params.pageSize || 24,
+    filter: params.filter || undefined,
+    sortby: params.sortby || 'created_at',
+    order: params.order || 'desc',
+    favoriteonly: params.favoriteonly || undefined,
+    favorite_tankoubons_only: params.favorite_tankoubons_only || undefined,
+    newonly: params.newonly || undefined,
+    untaggedonly: params.untaggedonly || undefined,
+    groupby_tanks: params.groupby_tanks,
+    category_id: params.category_id || undefined,
+    category_ids: params.category_ids || undefined,
+    aggregate_by: params.aggregate_by || undefined,
+    lang: params.lang || undefined,
   };
+  const startedAt = Date.now();
+  await appendDiagnosticLog('search.request', {params: requestParams});
+  try {
+    const response = await apiClient.get<SearchResponse>('/api/search', {
+      params: requestParams,
+    });
+    const payload = response.data;
+    const normalized = {
+      ...payload,
+      data: Array.isArray(payload.data) ? payload.data.map(normalizeMediaItem) : [],
+      groups: Array.isArray(payload.groups)
+        ? payload.groups.map(group => ({
+            ...group,
+            category_id: String(group.category_id || '').trim(),
+            data: Array.isArray(group.data)
+              ? group.data.map(normalizeMediaItem)
+              : [],
+          }))
+        : undefined,
+    };
+    await appendDiagnosticLog('search.response', {
+      durationMs: Date.now() - startedAt,
+      status: response.status,
+      params: requestParams,
+      dataCount: normalized.data.length,
+      groupCount: normalized.groups?.length || 0,
+      recordsFiltered: normalized.recordsFiltered,
+      recordsTotal: normalized.recordsTotal,
+      firstIds: normalized.data.slice(0, 5).map(mediaItemId),
+    });
+    return normalized;
+  } catch (error) {
+    await appendDiagnosticLog('search.error', {
+      durationMs: Date.now() - startedAt,
+      params: requestParams,
+      status: axios.isAxiosError(error) ? error.response?.status : undefined,
+      message: error instanceof Error ? error.message : String(error),
+      response: axios.isAxiosError(error) ? error.response?.data : undefined,
+    });
+    throw error;
+  }
 }
 
 export async function fetchCategories(): Promise<Category[]> {
