@@ -709,7 +709,11 @@ export function HomeScreen() {
         </View>
       ) : null}
 
-      <View style={styles.sortRow}>
+      <ScrollView
+        contentContainerStyle={styles.sortRowContent}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.sortRow}>
         <TouchableOpacity
           onPress={showAll}
           style={[
@@ -729,8 +733,10 @@ export function HomeScreen() {
             key={`smart:${filterItem.id}`}
             onPress={() => applySmartFilter(filterItem)}
             style={[styles.sortChip, activeSmartFilterId === filterItem.id && styles.sortChipActive]}>
-            <Text style={[styles.sortChipText, activeSmartFilterId === filterItem.id && styles.sortChipTextActive]}>
-              {filterItem.icon ? `${filterItem.icon} ` : ''}{smartFilterName(filterItem, language)}
+            <Text
+              numberOfLines={1}
+              style={[styles.sortChipText, activeSmartFilterId === filterItem.id && styles.sortChipTextActive]}>
+              {smartFilterName(filterItem, language)}
             </Text>
           </TouchableOpacity>
         ))}
@@ -739,12 +745,14 @@ export function HomeScreen() {
             key={`category:${category.catid || category.id}`}
             onPress={() => openCategory(category)}
             style={[styles.sortChip, selectedCategory?.catid === category.catid && styles.sortChipActive]}>
-            <Text style={[styles.sortChipText, selectedCategory?.catid === category.catid && styles.sortChipTextActive]}>
+            <Text
+              numberOfLines={1}
+              style={[styles.sortChipText, selectedCategory?.catid === category.catid && styles.sortChipTextActive]}>
               {category.icon ? `${category.icon} ` : ''}{category.name}
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}
 
@@ -976,11 +984,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   sortRow: {
+    flexGrow: 0,
+    minHeight: 42,
+    paddingBottom: spacing.xs,
+  },
+  sortRowContent: {
+    alignItems: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.sm,
+    minHeight: 38,
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
   },
   categoryChip: {
     alignItems: 'center',
@@ -1010,8 +1023,11 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: 'center',
+    maxWidth: 180,
+    minHeight: 32,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 7,
   },
   sortChipActive: {
     backgroundColor: colors.primaryMuted,
@@ -1021,6 +1037,8 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
+    lineHeight: 16,
+    maxWidth: 160,
   },
   sortChipTextActive: {
     color: colors.primary,
@@ -1066,18 +1084,18 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
   },
   rowsContent: {
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xl,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.lg,
   },
   rowSection: {
-    marginBottom: spacing.xl,
+    marginBottom: spacing.md,
   },
   rowHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
     paddingHorizontal: spacing.lg,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
   },
   sectionIcon: {
     fontSize: 18,
