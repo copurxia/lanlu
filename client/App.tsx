@@ -1,5 +1,6 @@
 import React from 'react';
-import {StatusBar, useColorScheme} from 'react-native';
+import {StatusBar, StyleSheet, useColorScheme} from 'react-native';
+import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 
 import {AuthProvider} from './src/auth/AuthContext';
@@ -11,19 +12,27 @@ function App() {
   const isDarkMode = useColorScheme() === 'dark';
 
   return (
-    <SafeAreaProvider>
-      <StatusBar
-        backgroundColor={colors.background}
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        translucent={false}
-      />
-      <I18nProvider>
-        <AuthProvider>
-          <RootNavigator />
-        </AuthProvider>
-      </I18nProvider>
-    </SafeAreaProvider>
+    <GestureHandlerRootView style={styles.root}>
+      <SafeAreaProvider>
+        <StatusBar
+          backgroundColor={colors.background}
+          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          translucent={false}
+        />
+        <I18nProvider>
+          <AuthProvider>
+            <RootNavigator />
+          </AuthProvider>
+        </I18nProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+});
 
 export default App;

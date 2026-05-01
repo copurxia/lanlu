@@ -2,6 +2,7 @@ import React from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {enableScreens} from 'react-native-screens';
 import {Heart, Home, Settings} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
@@ -20,6 +21,8 @@ import type {MainTabParamList, RootStackParamList} from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator<MainTabParamList>();
+
+enableScreens(true);
 
 function HomeTabIcon({color, size}: {color: string; size: number}) {
   return <Home color={color} size={size} />;
@@ -83,7 +86,11 @@ export function RootNavigator() {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator>
+      <Stack.Navigator
+        screenOptions={{
+          animation: 'slide_from_right',
+          contentStyle: {backgroundColor: colors.background},
+        }}>
         {status === 'authenticated' ? (
           <>
             <Stack.Screen

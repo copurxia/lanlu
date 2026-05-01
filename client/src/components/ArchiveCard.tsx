@@ -1,7 +1,5 @@
 import React, {useEffect, useState} from 'react';
 import {
-  Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +8,13 @@ import {
   View,
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import {
   assetPath,
@@ -55,6 +60,8 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
   const [imageError, setImageError] = useState('');
   const [favorite, setFavorite] = useState(Boolean(archive.isfavorite));
   const [tagsOpen, setTagsOpen] = useState(false);
+  const pressed = useSharedValue(0);
+  const tagProgress = useSharedValue(0);
   const itemWidth =
     variant === 'row'
       ? 136
@@ -64,6 +71,23 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
   const title = mediaItemTitle(archive);
   const isCollection = isTankoubon(archive);
   const allTags = parseTags((archive as Archive).tags);
+  const visibleTags = allTags.filter(tag => {
+    const lowered = tag.toLowerCase();
+    return !lowered.includes('source') && !stripNamespace(lowered).includes('source');
+  });
+
+  useEffect(() => {
+    tagProgress.value = withTiming(tagsOpen ? 1 : 0, {duration: 160});
+  }, [tagProgress, tagsOpen]);
+
+  const cardAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{scale: withTiming(pressed.value ? 0.985 : 1, {duration: 120})}],
+  }));
+
+  const tagOverlayStyle = useAnimatedStyle(() => ({
+    opacity: tagProgress.value,
+    transform: [{translateY: (1 - tagProgress.value) * 10}],
+  }));
 
   useEffect(() => {
     let cancelled = false;
@@ -108,9 +132,40 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
     }
   }
 
+  function handleCardPress() {
+    if (tagsOpen) {
+      setTagsOpen(false);
+      return;
+    }
+    onPress();
+  }
+
+  function showTags() {
+    if (visibleTags.length > 0) {
+      setTagsOpen(true);
+    }
+  }
+
+  const cardGesture = Gesture.Exclusive(
+    Gesture.LongPress()
+      .minDuration(650)
+      .onBegin(() => {
+        pressed.value = 1;
+      })
+      .onFinalize((_event, success) => {
+        pressed.value = 0;
+        if (success) {
+          runOnJS(showTags)();
+        }
+      }),
+    Gesture.Tap().onEnd(() => {
+      runOnJS(handleCardPress)();
+    }),
+  );
+
   return (
-    <>
-      <TouchableOpacity
+    <GestureDetector gesture={cardGesture}>
+      <Animated.View
         style={[
           styles.card,
           {width: itemWidth},
@@ -118,15 +173,9 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
           variant === 'list' && styles.listCard,
           variant === 'tweet' && styles.tweetCard,
           variant === 'channel' && styles.channelCard,
+          cardAnimatedStyle,
         ]}
-        onPress={onPress}
-        onLongPress={() => {
-          if (allTags.length > 0) {
-            setTagsOpen(true);
-          }
-        }}
-        delayLongPress={650}
-        activeOpacity={0.82}>
+      >
         <View
           style={[
             styles.coverWrap,
@@ -169,6 +218,34 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
               <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
             </View>
           ) : null}
+          {visibleTags.length > 0 ? (
+            <Animated.View
+              pointerEvents={tagsOpen ? 'auto' : 'none'}
+              style={[styles.tagOverlay, tagOverlayStyle]}>
+              <View style={styles.tagFadeTop} />
+              <View style={styles.tagOverlayContent}>
+                <ScrollView
+                  contentContainerStyle={styles.tagList}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}>
+                  {visibleTags.map(tag => (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      key={tag}
+                      onPress={() => {
+                        setTagsOpen(false);
+                        onTagPress?.(tag);
+                      }}
+                      style={styles.tagChip}>
+                      <Text numberOfLines={1} style={styles.tagText}>
+                        {stripNamespace(tag)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </Animated.View>
+          ) : null}
         </View>
         <View style={styles.body}>
           <Text numberOfLines={2} style={styles.title}>
@@ -194,51 +271,8 @@ export function ArchiveCard({archive, onPress, variant = 'grid', onChanged, onTa
             </Text>
           </TouchableOpacity>
         ) : null}
-      </TouchableOpacity>
-
-      <Modal
-        animationType="fade"
-        onRequestClose={() => setTagsOpen(false)}
-        transparent
-        visible={tagsOpen}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setTagsOpen(false)}>
-          <Pressable style={styles.tagSheet}>
-            <View style={styles.tagSheetHeader}>
-              <View style={styles.tagSheetTitleWrap}>
-                <Text style={styles.tagSheetTitle}>{t('archive.tags')}</Text>
-                <Text numberOfLines={1} style={styles.tagSheetSubtitle}>{title}</Text>
-              </View>
-              <TouchableOpacity
-                accessibilityLabel={t('common.close')}
-                accessibilityRole="button"
-                onPress={() => setTagsOpen(false)}
-                style={styles.closeButton}>
-                <Text style={styles.closeButtonText}>x</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView contentContainerStyle={styles.tagList}>
-              {allTags.map(tag => (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  key={tag}
-                  onPress={() => {
-                    setTagsOpen(false);
-                    onTagPress?.(tag);
-                  }}
-                  style={styles.tagChip}>
-                  <Text numberOfLines={1} style={styles.tagText}>{stripNamespace(tag)}</Text>
-                  {tag.includes(':') ? (
-                    <Text numberOfLines={1} style={styles.tagNamespace}>
-                      {tag.slice(0, tag.indexOf(':'))}
-                    </Text>
-                  ) : null}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    </>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -359,77 +393,41 @@ const styles = StyleSheet.create({
   favoriteActive: {
     color: '#f2a900',
   },
-  modalBackdrop: {
-    backgroundColor: 'rgba(0, 0, 0, 0.28)',
+  tagOverlay: {
+    bottom: 0,
+    left: 0,
+    minHeight: 92,
+    overflow: 'hidden',
+    position: 'absolute',
+    right: 0,
+  },
+  tagFadeTop: {
+    backgroundColor: 'rgba(0, 0, 0, 0.18)',
     flex: 1,
-    justifyContent: 'flex-end',
   },
-  tagSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    maxHeight: '62%',
-    padding: spacing.lg,
-  },
-  tagSheetHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginBottom: spacing.md,
-  },
-  tagSheetTitleWrap: {
-    flex: 1,
-    gap: 2,
-    minWidth: 0,
-  },
-  tagSheetTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  tagSheetSubtitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  closeButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 32,
-    justifyContent: 'center',
-    width: 32,
-  },
-  closeButtonText: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 20,
+  tagOverlayContent: {
+    backgroundColor: 'rgba(0, 0, 0, 0.58)',
+    paddingBottom: 36,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.sm,
   },
   tagList: {
+    alignItems: 'center',
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: spacing.sm,
-    paddingBottom: spacing.sm,
   },
   tagChip: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.16)',
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    borderRadius: 4,
     borderWidth: StyleSheet.hairlineWidth,
-    maxWidth: '100%',
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 7,
+    maxWidth: 140,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
   },
   tagText: {
-    color: colors.text,
-    fontSize: 13,
+    color: colors.white,
+    fontSize: 11,
     fontWeight: '700',
-  },
-  tagNamespace: {
-    color: colors.textMuted,
-    fontSize: 10,
-    marginTop: 1,
   },
 });

@@ -1,6 +1,13 @@
 import React, {useState} from 'react';
 import {Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {FileText, LogOut, RotateCcw, Share2, Trash2} from 'lucide-react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import {useAuth} from '../auth/AuthContext';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
@@ -11,8 +18,16 @@ import {colors, spacing} from '../theme/colors';
 export function SettingsScreen() {
   const {t} = useI18n();
   const {activeServer, user, showServerList, signOut} = useAuth();
+  const insets = useSafeAreaInsets();
   const [diagnosticLog, setDiagnosticLog] = useState('');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const diagnosticsProgress = useSharedValue(0);
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: diagnosticsProgress.value,
+  }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{translateY: (1 - diagnosticsProgress.value) * 28}],
+  }));
 
   function confirmSignOut() {
     Alert.alert(t('settings.signOutTitle'), t('settings.signOutMessage'), [
@@ -31,6 +46,15 @@ export function SettingsScreen() {
     const log = await getDiagnosticLog();
     setDiagnosticLog(log || t('settings.diagnosticsEmpty'));
     setDiagnosticsOpen(true);
+    diagnosticsProgress.value = withTiming(1, {duration: 160});
+  }
+
+  function closeDiagnostics() {
+    diagnosticsProgress.value = withTiming(0, {duration: 130}, finished => {
+      if (finished) {
+        runOnJS(setDiagnosticsOpen)(false);
+      }
+    });
   }
 
   async function shareDiagnostics() {
@@ -103,12 +127,12 @@ export function SettingsScreen() {
       </FluentCard>
 
       <Modal
-        animationType="slide"
-        onRequestClose={() => setDiagnosticsOpen(false)}
+        animationType="fade"
+        onRequestClose={closeDiagnostics}
         transparent
         visible={diagnosticsOpen}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.logSheet}>
+        <Animated.View style={[styles.modalBackdrop, backdropStyle]}>
+          <Animated.View style={[styles.logSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}, sheetStyle]}>
             <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
             <ScrollView style={styles.logBox}>
               <Text selectable style={styles.logText}>{diagnosticLog}</Text>
@@ -130,13 +154,13 @@ export function SettingsScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 accessibilityRole="button"
-                onPress={() => setDiagnosticsOpen(false)}
+                onPress={closeDiagnostics}
                 style={styles.closePill}>
                 <Text style={styles.closePillText}>{t('common.close')}</Text>
               </TouchableOpacity>
             </View>
-          </View>
-        </View>
+          </Animated.View>
+        </Animated.View>
       </Modal>
     </View>
   );

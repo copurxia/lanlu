@@ -7,15 +7,24 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
+  StyleProp,
   StatusBar,
   Text,
   TouchableOpacity,
   useWindowDimensions,
   View,
+  ViewStyle,
   ViewToken,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import {
   BookOpen,
   ChevronLeft,
@@ -162,6 +171,20 @@ export function ReaderScreen({route, navigation}: Props) {
   const [chromeVisible, setChromeVisible] = useState(true);
   const [activeLaneId, setActiveLaneId] = useState<string>('book');
   const [mediaStateByPage, setMediaStateByPage] = useState<Record<number, MediaPlaybackState>>({});
+  const chromeProgress = useSharedValue(chromeVisible ? 1 : 0);
+  useEffect(() => {
+    chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {duration: 160});
+  }, [chromeProgress, chromeVisible]);
+
+  const topBarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: chromeProgress.value,
+    transform: [{translateY: (chromeProgress.value - 1) * 16}],
+  }));
+
+  const bottomBarAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: chromeProgress.value,
+    transform: [{translateY: (1 - chromeProgress.value) * 18}],
+  }));
 
   const hydratePage = useCallback(
     async (page: PageInfo, index: number): Promise<ReaderPage> => {
@@ -383,6 +406,10 @@ export function ReaderScreen({route, navigation}: Props) {
     const position = Math.max(0, Math.min(1, nextTime / duration));
     vlcRefs.current[page.pageNumber]?.seek(position);
     setMediaState(page.pageNumber, {currentTime: nextTime, position});
+  }
+
+  function toggleChrome() {
+    setChromeVisible(visible => !visible);
   }
 
   useEffect(() => {
@@ -623,8 +650,12 @@ export function ReaderScreen({route, navigation}: Props) {
       return (
         <View style={frameStyle}>
           <WebView
+            allowsBackForwardNavigationGestures
+            androidLayerType="hardware"
+            overScrollMode="never"
             source={{uri: page.uri || '', headers: page.headers}}
             style={styles.webView}
+            containerStyle={styles.webViewContainer}
             onError={event => {
               setFailedPages(current => ({
                 ...current,
@@ -692,10 +723,7 @@ export function ReaderScreen({route, navigation}: Props) {
     const spreadPageWidth = item.pages.length > 1 ? width / 2 : width;
     const mediaActive = item.pages.some(page => page.pageNumber === currentPage);
     return (
-      <TouchableOpacity
-        activeOpacity={1}
-        onPress={() => setChromeVisible(visible => !visible)}
-        style={[styles.page, {width, height: pageFrameHeight}]}>
+      <ReaderTapSurface onTap={toggleChrome} style={[styles.page, {width, height: pageFrameHeight}]}>
         <View style={styles.spread}>
           {item.pages.map(page => (
             <View key={`${item.key}:${page.pageNumber}`} style={{width: spreadPageWidth, height: pageFrameHeight}}>
@@ -703,7 +731,7 @@ export function ReaderScreen({route, navigation}: Props) {
             </View>
           ))}
         </View>
-      </TouchableOpacity>
+      </ReaderTapSurface>
     );
   };
 
@@ -726,12 +754,9 @@ export function ReaderScreen({route, navigation}: Props) {
           {pages.map(page => {
             const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
             return (
-            <TouchableOpacity
-              activeOpacity={1}
-              key={`${page.pageNumber}:${page.uri}`}
-              onPress={() => setChromeVisible(visible => !visible)}>
+            <ReaderTapSurface onTap={toggleChrome} key={`${page.pageNumber}:${page.uri}`}>
               {renderMedia(page, width, undefined, true, mediaActive)}
-            </TouchableOpacity>
+            </ReaderTapSurface>
           );
           })}
         </ScrollView>
@@ -761,9 +786,9 @@ export function ReaderScreen({route, navigation}: Props) {
         />
       )}
 
-      {chromeVisible ? (
-        <>
-          <View style={[styles.topBar, {paddingTop: insets.top + 8}]}>
+      <Animated.View
+        pointerEvents={chromeVisible ? 'auto' : 'none'}
+        style={[styles.topBar, {paddingTop: insets.top + 8}, topBarAnimatedStyle]}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
               <ChevronLeft color={colors.white} size={24} />
             </TouchableOpacity>
@@ -774,8 +799,10 @@ export function ReaderScreen({route, navigation}: Props) {
             <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.iconButton}>
               <SettingsIcon color={colors.white} size={21} />
             </TouchableOpacity>
-          </View>
-          <View style={[styles.bottomBar, {paddingBottom: insets.bottom + 10}]}>
+      </Animated.View>
+      <Animated.View
+        pointerEvents={chromeVisible ? 'auto' : 'none'}
+        style={[styles.bottomBar, {paddingBottom: insets.bottom + 10}, bottomBarAnimatedStyle]}>
             <View style={styles.laneShell}>
               <View style={styles.laneTabs}>
                 {lanes.map(lane => (
@@ -847,9 +874,7 @@ export function ReaderScreen({route, navigation}: Props) {
                 />
               )}
             </View>
-          </View>
-        </>
-      ) : null}
+      </Animated.View>
 
       <ReaderSettingsModal
         open={settingsOpen}
@@ -868,6 +893,26 @@ function ErrorOverlay({title, message}: {title: string; message: string}) {
       <Text style={styles.imageErrorTitle}>{title}</Text>
       <Text style={styles.imageErrorText}>{message}</Text>
     </View>
+  );
+}
+
+function ReaderTapSurface({
+  children,
+  onTap,
+  style,
+}: {
+  children: React.ReactNode;
+  onTap: () => void;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const gesture = Gesture.Tap().onEnd(() => {
+    runOnJS(onTap)();
+  });
+
+  return (
+    <GestureDetector gesture={gesture}>
+      <Animated.View style={style}>{children}</Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -1158,6 +1203,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     height: '100%',
     width: '100%',
+  },
+  webViewContainer: {
+    backgroundColor: colors.white,
   },
   audioStage: {
     height: 84,
