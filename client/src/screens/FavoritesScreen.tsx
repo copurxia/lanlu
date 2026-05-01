@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BookOpen, Heart} from 'lucide-react-native';
 
 import {extractApiError} from '../api/client';
@@ -68,6 +69,7 @@ function groupByTime(items: MediaItem[], tab: Tab, t: TFunction): Section[] {
 export function FavoritesScreen() {
   const navigation = useNavigation<Nav>();
   const {t} = useI18n();
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('favorites');
   const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]);
   const [historyItems, setHistoryItems] = useState<MediaItem[]>([]);
@@ -167,7 +169,7 @@ export function FavoritesScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, {paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
       <View style={styles.header}>
         <View style={styles.tabs}>
           <TouchableOpacity

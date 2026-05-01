@@ -1779,7 +1779,7 @@ function ReaderSettingsModal({
   onPatch: (patch: Partial<ReaderSettings>) => void;
 }) {
   return (
-    <Modal animationType="slide" onRequestClose={onClose} transparent visible={open}>
+    <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible={open}>
       <View style={styles.modalBackdrop}>
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />

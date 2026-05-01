@@ -1,6 +1,7 @@
 import React, {useState} from 'react';
 import {KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Save, Wifi} from 'lucide-react-native';
 
 import {testServer} from '../api/lanlu';
@@ -15,6 +16,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AddServer'>;
 
 export function AddServerScreen({route, navigation}: Props) {
   const {t} = useI18n();
+  const insets = useSafeAreaInsets();
   const editing = route.params?.server;
   const {saveServer, selectServer} = useAuth();
   const [name, setName] = useState(editing?.name || '');
@@ -63,7 +65,15 @@ export function AddServerScreen({route, navigation}: Props) {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.screen}>
+      style={[
+        styles.screen,
+        {
+          paddingTop: Math.max(insets.top, spacing.lg),
+          paddingBottom: Math.max(insets.bottom, spacing.lg),
+          paddingLeft: Math.max(insets.left, spacing.lg),
+          paddingRight: Math.max(insets.right, spacing.lg),
+        },
+      ]}>
       <FluentCard style={styles.card}>
         <FluentTitle>{editing ? t('server.edit') : t('server.add')}</FluentTitle>
         <FluentTextField label={t('server.name')} value={name} onChangeText={setName} />

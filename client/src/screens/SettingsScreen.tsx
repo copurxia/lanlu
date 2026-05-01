@@ -71,7 +71,16 @@ export function SettingsScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <View
+      style={[
+        styles.screen,
+        {
+          paddingTop: insets.top + spacing.lg,
+          paddingLeft: Math.max(insets.left, spacing.lg),
+          paddingRight: Math.max(insets.right, spacing.lg),
+          paddingBottom: Math.max(insets.bottom, spacing.lg),
+        },
+      ]}>
       <FluentCard style={styles.section}>
         <FluentTitle>{t('settings.account')}</FluentTitle>
         <View style={styles.row}>
@@ -129,6 +138,7 @@ export function SettingsScreen() {
       <Modal
         animationType="fade"
         onRequestClose={closeDiagnostics}
+        statusBarTranslucent
         transparent
         visible={diagnosticsOpen}>
         <Animated.View style={[styles.modalBackdrop, backdropStyle]}>

@@ -15,9 +15,9 @@ function App() {
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar
-          backgroundColor={colors.background}
+          backgroundColor="transparent"
           barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-          translucent={false}
+          translucent
         />
         <I18nProvider>
           <AuthProvider>
@@ -31,6 +31,7 @@ function App() {
 
 const styles = StyleSheet.create({
   root: {
+    backgroundColor: colors.background,
     flex: 1,
   },
 });

@@ -16,6 +16,7 @@ import {useNavigation} from '@react-navigation/native';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   CalendarDays,
   ChevronRight,
@@ -152,6 +153,7 @@ function buildExactTagSearchQuery(tag: string) {
 export function HomeScreen() {
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const [viewMode, setViewMode] = useState<HomeViewMode>(DEFAULT_HOME_VIEW_MODE);
   const [items, setItems] = useState<MediaItem[]>([]);
   const [randomItems, setRandomItems] = useState<MediaItem[]>([]);
@@ -754,7 +756,7 @@ export function HomeScreen() {
   };
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, {paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
       <View style={styles.toolbar}>
         <TextInput
           autoCapitalize="none"
@@ -903,10 +905,11 @@ export function HomeScreen() {
       <Modal
         animationType="slide"
         onRequestClose={closeFilters}
+        statusBarTranslucent
         transparent
         visible={filtersOpen}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.filterSheet}>
+          <View style={[styles.filterSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}]}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{t('common.filter')}</Text>
               <TouchableOpacity

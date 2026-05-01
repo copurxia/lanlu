@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {useFocusEffect} from '@react-navigation/native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Pencil, Plus, Trash2} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
@@ -23,6 +24,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ServerList'>;
 export function ServerListScreen({navigation}: Props) {
   const {t} = useI18n();
   const {servers, reloadServers, selectServer, deleteServer} = useAuth();
+  const insets = useSafeAreaInsets();
 
   useFocusEffect(
     useCallback(() => {
@@ -46,7 +48,7 @@ export function ServerListScreen({navigation}: Props) {
   }
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, {paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <FluentTitle>Lanlu</FluentTitle>
