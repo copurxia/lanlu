@@ -2,12 +2,13 @@ import React from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {Library, Settings} from 'lucide-react-native';
+import {Heart, Home, Settings} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
 import {AddServerScreen} from '../screens/AddServerScreen';
 import {ArchiveDetailScreen} from '../screens/ArchiveDetailScreen';
+import {FavoritesScreen} from '../screens/FavoritesScreen';
 import {HomeScreen} from '../screens/HomeScreen';
 import {LoginScreen} from '../screens/LoginScreen';
 import {ReaderScreen} from '../screens/ReaderScreen';
@@ -19,8 +20,12 @@ import type {MainTabParamList, RootStackParamList} from './types';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator<MainTabParamList>();
 
-function LibraryTabIcon({color, size}: {color: string; size: number}) {
-  return <Library color={color} size={size} />;
+function HomeTabIcon({color, size}: {color: string; size: number}) {
+  return <Home color={color} size={size} />;
+}
+
+function FavoritesTabIcon({color, size}: {color: string; size: number}) {
+  return <Heart color={color} size={size} />;
 }
 
 function SettingsTabIcon({color, size}: {color: string; size: number}) {
@@ -31,8 +36,7 @@ function MainTabs() {
   return (
     <Tabs.Navigator
       screenOptions={{
-        headerStyle: {backgroundColor: colors.surface},
-        headerTitleStyle: {color: colors.text, fontWeight: '700'},
+        headerShown: false,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
       }}>
@@ -40,9 +44,18 @@ function MainTabs() {
         name="Home"
         component={HomeScreen}
         options={{
-          title: 'Library',
-          tabBarLabel: 'Library',
-          tabBarIcon: LibraryTabIcon,
+          title: 'Home',
+          tabBarLabel: 'Home',
+          tabBarIcon: HomeTabIcon,
+        }}
+      />
+      <Tabs.Screen
+        name="Favorites"
+        component={FavoritesScreen}
+        options={{
+          title: 'Favorites',
+          tabBarLabel: 'Favorites',
+          tabBarIcon: FavoritesTabIcon,
         }}
       />
       <Tabs.Screen

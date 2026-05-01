@@ -31,8 +31,42 @@ export type Archive = {
   assets?: ArchiveAssets;
 };
 
+export type Tankoubon = {
+  tankoubon_id: string;
+  title: string;
+  description?: string;
+  children?: string[];
+  assets?: ArchiveAssets;
+  isfavorite?: boolean;
+  favoritetime?: string;
+  progress?: number;
+  pagecount?: number;
+};
+
+export type MediaItem = Archive | Tankoubon;
+
+export type Category = {
+  id: number;
+  catid: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  sort_order?: number;
+  enabled?: boolean;
+  archive_count?: number;
+  cover_asset_id?: number;
+};
+
+export type SearchGroup = {
+  category_id?: string;
+  data: MediaItem[];
+  recordsFiltered?: number;
+  recordsTotal?: number;
+};
+
 export type SearchResponse = {
-  data: Archive[];
+  data: MediaItem[];
+  groups?: SearchGroup[];
   draw: number;
   recordsFiltered: number;
   recordsTotal: number;
@@ -70,7 +104,19 @@ export type PageInfo = {
     description?: string;
     thumb_asset_id?: number;
     thumb?: string;
+    attachments?: MetadataPageAttachment[];
+    release_at?: string;
   };
+};
+
+export type MetadataPageAttachment = {
+  slot: string;
+  name: string;
+  asset_id: number;
+  mime_type?: string;
+  kind?: string;
+  language?: string;
+  order_index?: number;
 };
 
 export type PageSourceInfo = {

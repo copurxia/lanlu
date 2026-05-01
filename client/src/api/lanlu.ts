@@ -5,12 +5,17 @@ import type {
   ArchiveFilesResponse,
   ArchiveMetadata,
   AuthUser,
+  Category,
   LoginResponse,
+  MediaItem,
   PageInfo,
   PageSourceInfo,
   SearchResponse,
+  Tankoubon,
 } from '../types/api';
 import axios from 'axios';
+
+let recommendationSessionKey: string | null = null;
 
 export type SearchArchivesParams = {
   filter?: string;
@@ -19,6 +24,14 @@ export type SearchArchivesParams = {
   sortby?: string;
   order?: 'asc' | 'desc';
   favoriteonly?: boolean;
+  favorite_tankoubons_only?: boolean;
+  newonly?: boolean;
+  untaggedonly?: boolean;
+  groupby_tanks?: boolean;
+  category_id?: string;
+  category_ids?: string;
+  aggregate_by?: string;
+  lang?: string;
 };
 
 export async function login(params: {
@@ -63,9 +76,83 @@ export async function searchArchives(
       sortby: params.sortby || 'created_at',
       order: params.order || 'desc',
       favoriteonly: params.favoriteonly || undefined,
+      favorite_tankoubons_only: params.favorite_tankoubons_only || undefined,
+      newonly: params.newonly || undefined,
+      untaggedonly: params.untaggedonly || undefined,
+      groupby_tanks: params.groupby_tanks,
+      category_id: params.category_id || undefined,
+      category_ids: params.category_ids || undefined,
+      aggregate_by: params.aggregate_by || undefined,
+      lang: params.lang || undefined,
     },
   });
-  return response.data;
+  const payload = response.data;
+  return {
+    ...payload,
+    data: Array.isArray(payload.data) ? payload.data.map(normalizeMediaItem) : [],
+    groups: Array.isArray(payload.groups)
+      ? payload.groups.map(group => ({
+          ...group,
+          category_id: String(group.category_id || '').trim(),
+          data: Array.isArray(group.data)
+            ? group.data.map(normalizeMediaItem)
+            : [],
+        }))
+      : undefined,
+  };
+}
+
+export async function fetchCategories(): Promise<Category[]> {
+  const response = await apiClient.get<{
+    success?: number;
+    data?: Category | Category[];
+  }>('/api/categories');
+  const data = response.data?.data;
+  return (Array.isArray(data) ? data : data ? [data] : [])
+    .map(category => ({
+      ...category,
+      catid: String(category.catid || category.id || '').trim(),
+      name: String(category.name || '').trim(),
+      enabled: category.enabled !== false,
+      sort_order: Number(category.sort_order || 0),
+    }))
+    .sort((a, b) => {
+      if ((a.sort_order || 0) !== (b.sort_order || 0)) {
+        return (a.sort_order || 0) - (b.sort_order || 0);
+      }
+      return a.name.localeCompare(b.name);
+    });
+}
+
+export async function fetchDiscover(count = 12): Promise<MediaItem[]> {
+  const response = await apiClient.get<MediaItem[] | {data?: MediaItem[]}>(
+    '/api/recommendations',
+    {
+      params: {scene: 'discover', count},
+      headers: {'X-Recommendation-Session': getRecommendationSessionKey()},
+    },
+  );
+  const data = Array.isArray(response.data) ? response.data : response.data.data || [];
+  return data.map(normalizeMediaItem);
+}
+
+function getRecommendationSessionKey(): string {
+  if (!recommendationSessionKey) {
+    recommendationSessionKey = `mobile-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
+  }
+  return recommendationSessionKey;
+}
+
+export async function fetchFavoriteTankoubons(): Promise<Tankoubon[]> {
+  const result = await searchArchives({
+    favorite_tankoubons_only: true,
+    groupby_tanks: true,
+    page: 1,
+    pageSize: 1000,
+  });
+  return result.data.filter(isTankoubon);
 }
 
 export async function fetchArchiveMetadata(id: string): Promise<ArchiveMetadata> {
@@ -78,7 +165,7 @@ export async function fetchArchiveMetadata(id: string): Promise<ArchiveMetadata>
 export async function fetchArchiveFiles(id: string): Promise<PageInfo[]> {
   const response = await apiClient.get<ArchiveFilesResponse>(
     `/api/archives/${encodeURIComponent(id)}/files`,
-    {params: {images_only: true, include_metadata: true}},
+    {params: {include_metadata: true}},
   );
   const payload = response.data;
   const pages = Array.isArray(payload)
@@ -181,5 +268,39 @@ function normalizePageSource(
     path,
     url,
     type: raw.type || 'image',
+  };
+}
+
+export function isTankoubon(item: MediaItem): item is Tankoubon {
+  return Boolean((item as Tankoubon).tankoubon_id);
+}
+
+export function mediaItemId(item: MediaItem): string {
+  return isTankoubon(item) ? item.tankoubon_id : item.arcid;
+}
+
+export function mediaItemTitle(item: MediaItem): string {
+  return item.title || (isTankoubon(item) ? item.tankoubon_id : item.filename || item.arcid);
+}
+
+export function mediaItemCoverAsset(item: MediaItem): number | undefined {
+  return item.assets?.cover || item.assets?.clearlogo || item.assets?.backdrop;
+}
+
+function normalizeMediaItem(raw: MediaItem): MediaItem {
+  if (isTankoubon(raw)) {
+    return {
+      ...raw,
+      title: String(raw.title || '').trim(),
+      description: String(raw.description || '').trim(),
+      children: Array.isArray(raw.children)
+        ? raw.children.map(child => String(child || '').trim()).filter(Boolean)
+        : [],
+    };
+  }
+  return {
+    ...raw,
+    title: String(raw.title || '').trim(),
+    description: String(raw.description || '').trim(),
   };
 }

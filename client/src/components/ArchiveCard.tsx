@@ -9,27 +9,41 @@ import {
   View,
 } from 'react-native';
 
-import {assetPath, setArchiveFavorite} from '../api/lanlu';
+import {
+  assetPath,
+  isTankoubon,
+  mediaItemCoverAsset,
+  mediaItemTitle,
+  setArchiveFavorite,
+} from '../api/lanlu';
 import {buildAuthorizedImageSource, extractApiError} from '../api/client';
 import {colors, radius, spacing} from '../theme/colors';
-import type {Archive} from '../types/api';
+import type {Archive, MediaItem} from '../types/api';
 
 type Props = {
-  archive: Archive;
+  archive: MediaItem;
   onPress: () => void;
+  variant?: 'grid' | 'list' | 'tweet' | 'channel' | 'row';
   onChanged?: () => void;
 };
 
-export function ArchiveCard({archive, onPress, onChanged}: Props) {
+export function ArchiveCard({archive, onPress, variant = 'grid', onChanged}: Props) {
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<ImageSourcePropType | null>(null);
   const [favorite, setFavorite] = useState(Boolean(archive.isfavorite));
-  const itemWidth = Math.floor((width - spacing.lg * 2 - spacing.md) / 2);
+  const itemWidth =
+    variant === 'row'
+      ? 136
+      : variant === 'grid'
+        ? Math.floor((width - spacing.lg * 2 - spacing.md) / 2)
+        : width - spacing.lg * 2;
+  const title = mediaItemTitle(archive);
+  const isCollection = isTankoubon(archive);
 
   useEffect(() => {
     let cancelled = false;
     async function loadCover() {
-      const path = assetPath(archive.assets?.cover);
+      const path = assetPath(mediaItemCoverAsset(archive));
       if (!path) {
         setImageSource(null);
         return;
@@ -43,18 +57,24 @@ export function ArchiveCard({archive, onPress, onChanged}: Props) {
     return () => {
       cancelled = true;
     };
-  }, [archive.assets?.cover]);
+  }, [archive]);
 
-  const progressLabel =
-    archive.pagecount > 0 && archive.progress > 0
-      ? `${Math.min(archive.progress, archive.pagecount)} / ${archive.pagecount}`
-      : `${archive.pagecount || 0} pages`;
+  const pagecount = Number(archive.pagecount || 0);
+  const progress = Number(archive.progress || 0);
+  const progressLabel = isCollection
+    ? `${archive.children?.length || 0} archives`
+    : pagecount > 0 && progress > 0
+      ? `${Math.min(progress, pagecount)} / ${pagecount}`
+      : `${pagecount || 0} pages`;
 
   async function toggleFavorite() {
+    if (isCollection) {
+      return;
+    }
     const next = !favorite;
     setFavorite(next);
     try {
-      await setArchiveFavorite(archive, next);
+      await setArchiveFavorite(archive as Archive, next);
       onChanged?.();
     } catch (error) {
       setFavorite(!next);
@@ -64,10 +84,23 @@ export function ArchiveCard({archive, onPress, onChanged}: Props) {
 
   return (
     <TouchableOpacity
-      style={[styles.card, {width: itemWidth}]}
+      style={[
+        styles.card,
+        {width: itemWidth},
+        variant !== 'grid' && variant !== 'row' && styles.fullWidthCard,
+        variant === 'list' && styles.listCard,
+        variant === 'tweet' && styles.tweetCard,
+        variant === 'channel' && styles.channelCard,
+      ]}
       onPress={onPress}
       activeOpacity={0.82}>
-      <View style={styles.coverWrap}>
+      <View
+        style={[
+          styles.coverWrap,
+          variant === 'list' && styles.listCover,
+          variant === 'tweet' && styles.tweetCover,
+          variant === 'channel' && styles.channelCover,
+        ]}>
         {imageSource ? (
           <Image source={imageSource} style={styles.cover} resizeMode="cover" />
         ) : (
@@ -75,29 +108,41 @@ export function ArchiveCard({archive, onPress, onChanged}: Props) {
             <Text style={styles.placeholderText}>No Cover</Text>
           </View>
         )}
-        {archive.isnew ? (
+        {!isCollection && archive.isnew ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>NEW</Text>
+          </View>
+        ) : null}
+        {isCollection ? (
+          <View style={styles.collectionBadge}>
+            <Text style={styles.badgeText}>COLLECTION</Text>
           </View>
         ) : null}
       </View>
       <View style={styles.body}>
         <Text numberOfLines={2} style={styles.title}>
-          {archive.title || archive.filename || archive.arcid}
+          {title}
         </Text>
         <Text numberOfLines={1} style={styles.meta}>
           {progressLabel}
         </Text>
+        {(variant === 'tweet' || variant === 'channel') && archive.description ? (
+          <Text numberOfLines={3} style={styles.description}>
+            {archive.description}
+          </Text>
+        ) : null}
       </View>
-      <TouchableOpacity
-        accessibilityRole="button"
-        accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
-        onPress={toggleFavorite}
-        style={styles.favoriteButton}>
-        <Text style={[styles.favoriteText, favorite && styles.favoriteActive]}>
-          {favorite ? '★' : '☆'}
-        </Text>
-      </TouchableOpacity>
+      {!isCollection ? (
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
+          onPress={toggleFavorite}
+          style={styles.favoriteButton}>
+          <Text style={[styles.favoriteText, favorite && styles.favoriteActive]}>
+            {favorite ? '★' : '☆'}
+          </Text>
+        </TouchableOpacity>
+      ) : null}
     </TouchableOpacity>
   );
 }
@@ -111,9 +156,32 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     overflow: 'hidden',
   },
+  fullWidthCard: {
+    marginBottom: spacing.sm,
+  },
+  listCard: {
+    flexDirection: 'row',
+    minHeight: 112,
+  },
+  tweetCard: {
+    borderRadius: radius.md,
+  },
+  channelCard: {
+    borderRadius: radius.md,
+  },
   coverWrap: {
     aspectRatio: 0.72,
     backgroundColor: colors.surfaceMuted,
+  },
+  listCover: {
+    aspectRatio: 0.72,
+    width: 82,
+  },
+  tweetCover: {
+    aspectRatio: 1.35,
+  },
+  channelCover: {
+    aspectRatio: 1.65,
   },
   cover: {
     height: '100%',
@@ -130,6 +198,15 @@ const styles = StyleSheet.create({
   },
   badge: {
     backgroundColor: colors.primary,
+    borderRadius: 4,
+    left: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    position: 'absolute',
+    top: 8,
+  },
+  collectionBadge: {
+    backgroundColor: colors.text,
     borderRadius: 4,
     left: 8,
     paddingHorizontal: 6,
@@ -156,6 +233,12 @@ const styles = StyleSheet.create({
   meta: {
     color: colors.textMuted,
     fontSize: 12,
+  },
+  description: {
+    color: colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   favoriteButton: {
     bottom: 8,

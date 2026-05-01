@@ -23,7 +23,9 @@
     "react-native-keychain": "^10.0.0",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.24.0",
-    "react-native-svg": "^15.15.4"
+    "react-native-svg": "^15.15.4",
+    "react-native-video": "^6.19.2",
+    "react-native-webview": "^13.16.1"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

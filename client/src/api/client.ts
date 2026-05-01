@@ -79,3 +79,13 @@ export async function buildAuthorizedImageSource(path: string) {
     ? {uri, headers: {Authorization: `Bearer ${token}`}}
     : {uri};
 }
+
+export async function buildAuthorizedUri(path: string) {
+  const uri = await buildApiUrl(path);
+  const server = await getActiveServer();
+  const token = await getStoredToken(server?.id);
+  return {
+    uri,
+    headers: token ? {Authorization: `Bearer ${token}`} : undefined,
+  };
+}
