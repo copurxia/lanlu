@@ -213,6 +213,33 @@ export async function fetchDiscover(count = 12): Promise<MediaItem[]> {
   return data.map(normalizeMediaItem);
 }
 
+export async function fetchArchiveRelated(
+  archiveId: string,
+  count = 8,
+): Promise<Archive[]> {
+  const response = await apiClient.get<{data?: MediaItem[]}>(
+    '/api/recommendations',
+    {
+      params: {
+        scene: 'archive_related',
+        archive_id: archiveId,
+        count,
+      },
+      headers: {'X-Recommendation-Session': getRecommendationSessionKey()},
+    },
+  );
+  const data = Array.isArray(response.data?.data) ? response.data.data : [];
+  return data.map(normalizeMediaItem).filter((item): item is Archive => !isTankoubon(item));
+}
+
+export async function fetchTankoubonsForArchive(archiveId: string): Promise<Tankoubon[]> {
+  const response = await apiClient.get<Tankoubon[] | {data?: Tankoubon[]}>(
+    `/api/archives/${encodeURIComponent(archiveId)}/tankoubons`,
+  );
+  const data = Array.isArray(response.data) ? response.data : response.data.data || [];
+  return data.map(item => normalizeMediaItem(item) as Tankoubon).filter(isTankoubon);
+}
+
 function getRecommendationSessionKey(): string {
   if (!recommendationSessionKey) {
     recommendationSessionKey = `mobile-${Date.now()}-${Math.random()

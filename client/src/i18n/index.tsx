@@ -166,6 +166,12 @@ const messages = {
     'reader.fileInfo': 'File',
     'reader.typeInfo': 'Type',
     'reader.settingsInfo': 'Settings',
+    'reader.finishedReading': 'Finished reading',
+    'reader.finishedPageCount': '{count} pages read.',
+    'reader.nextChapterLabel': 'Next chapter',
+    'reader.relatedNextLabel': 'Related next',
+    'reader.noNextChapter': 'No next chapter',
+    'reader.openNext': 'Open next',
   },
   zh: {
     'common.add': '添加',
@@ -328,6 +334,12 @@ const messages = {
     'reader.fileInfo': '文件',
     'reader.typeInfo': '类型',
     'reader.settingsInfo': '设置',
+    'reader.finishedReading': '已读完',
+    'reader.finishedPageCount': '已阅读 {count} 页。',
+    'reader.nextChapterLabel': '下一本',
+    'reader.relatedNextLabel': '相关推荐',
+    'reader.noNextChapter': '没有下一本',
+    'reader.openNext': '打开下一本',
   },
 } as const;
 

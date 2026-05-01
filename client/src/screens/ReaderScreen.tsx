@@ -45,7 +45,10 @@ import {WebView} from 'react-native-webview';
 
 import {buildAuthorizedImageSource, buildAuthorizedUri, extractApiError} from '../api/client';
 import {
+  fetchArchiveMetadata,
   fetchArchiveFiles,
+  fetchArchiveRelated,
+  fetchTankoubonsForArchive,
   getPageDefaultSource,
   pagePath,
   probeMediaPage,
@@ -69,6 +72,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Reader'>;
 
 type ReaderPage = PageInfo & {
   pageNumber: number;
+  sourceArchiveId: string;
   activeSource?: PageSourceInfo | null;
   imageSource?: ImageSourcePropType;
   uri?: string;
@@ -83,6 +87,21 @@ type ReaderItem = {
   key: string;
   pages: ReaderPage[];
   progressPage: number;
+  kind?: 'pages' | 'collection-end';
+};
+
+type ReaderWebtoonItem =
+  | ReaderPage
+  | {
+      kind: 'collection-end';
+      key: string;
+      pageNumber: number;
+    };
+
+type NextArchiveCandidate = {
+  id: string;
+  title: string;
+  source: 'tankoubon' | 'archive_related';
 };
 
 type VlcPlayerRef = {
@@ -178,13 +197,17 @@ export function ReaderScreen({route, navigation}: Props) {
   const {width, height} = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ReaderItem>>(null);
-  const webtoonRef = useRef<FlashListRef<ReaderPage>>(null);
+  const webtoonRef = useRef<FlashListRef<ReaderWebtoonItem>>(null);
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const vlcSessions = useRef<Record<number, {target?: number; playable: boolean; ignoredProgress: number}>>({});
   const vlcSourceKeys = useRef<Record<number, string>>({});
+  const mediaLastSeekAt = useRef<Record<number, number>>({});
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
-  const lastSavedPage = useRef(0);
+  const appendedArchiveIds = useRef<Set<string>>(new Set());
+  const nextArchiveCache = useRef<Record<string, NextArchiveCandidate | null>>({});
+  const lastSavedProgressKey = useRef('');
+  const progressSeekLockedRef = useRef(false);
   const settingsHydratedRef = useRef(false);
   const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
@@ -200,10 +223,17 @@ export function ReaderScreen({route, navigation}: Props) {
   const [activeLaneId, setActiveLaneId] = useState<string>('book');
   const [mediaStateByPage, setMediaStateByPage] = useState<Record<number, MediaPlaybackState>>({});
   const [zoomedPages, setZoomedPages] = useState<Record<number, boolean>>({});
+  const [progressSeekLocked, setProgressSeekLocked] = useState(false);
+  const [nextArchiveById, setNextArchiveById] = useState<Record<string, NextArchiveCandidate | null>>({});
+  const [appendingNext, setAppendingNext] = useState(false);
   const chromeProgress = useSharedValue(chromeVisible ? 1 : 0);
   useEffect(() => {
     chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {duration: 160});
   }, [chromeProgress, chromeVisible]);
+
+  useEffect(() => {
+    progressSeekLockedRef.current = progressSeekLocked;
+  }, [progressSeekLocked]);
 
   const topBarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: chromeProgress.value,
@@ -216,7 +246,7 @@ export function ReaderScreen({route, navigation}: Props) {
   }));
 
   const hydratePage = useCallback(
-    async (page: PageInfo, index: number): Promise<ReaderPage> => {
+    async (page: PageInfo, index: number, pageArchiveId = archiveId): Promise<ReaderPage> => {
       const sourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
       const sources = Array.isArray(page.sources) ? page.sources : [];
       const source =
@@ -225,11 +255,12 @@ export function ReaderScreen({route, navigation}: Props) {
           : getPageDefaultSource(page);
       const effectiveType = source?.type || page.type || 'image';
       const path = source?.path || page.path || '';
-      const url = source?.url?.startsWith('/api/') ? source.url : pagePath(archiveId, {...page, defaultSource: source || undefined});
+      const url = source?.url?.startsWith('/api/') ? source.url : pagePath(pageArchiveId, {...page, defaultSource: source || undefined});
       const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
       return {
         ...page,
         pageNumber: index + 1,
+        sourceArchiveId: pageArchiveId,
         activeSource: source,
         resolvedPath: path,
         effectiveType,
@@ -248,6 +279,10 @@ export function ReaderScreen({route, navigation}: Props) {
     mediaProxyKeys.current.clear();
     vlcSourceKeys.current = {};
     vlcSessions.current = {};
+    appendedArchiveIds.current = new Set([archiveId]);
+    nextArchiveCache.current = {};
+    lastSavedProgressKey.current = '';
+    setNextArchiveById({});
     try {
       const [storedSettings, files] = await Promise.all([
         loadReaderSettings(),
@@ -255,7 +290,7 @@ export function ReaderScreen({route, navigation}: Props) {
       ]);
       setSettings(storedSettings);
       settingsHydratedRef.current = true;
-      const hydrated = await Promise.all(files.map(hydratePage));
+      const hydrated = await Promise.all(files.map((page, index) => hydratePage(page, index, archiveId)));
       setPages(hydrated);
       const startIndex = Math.max(0, Math.min(initialPage - 1, hydrated.length - 1));
       setCurrentPage(startIndex + 1);
@@ -314,49 +349,157 @@ export function ReaderScreen({route, navigation}: Props) {
     );
   }, [settings]);
 
+  const resolveProgressTarget = useCallback(
+    (page: number) => {
+      if (!pages.length) return null;
+      const pageIndex = Math.max(0, Math.min(page - 1, pages.length - 1));
+      const targetPage = pages[pageIndex];
+      if (!targetPage) return null;
+      const targetArchiveId = targetPage.sourceArchiveId || archiveId;
+      const localPage = pages
+        .slice(0, pageIndex + 1)
+        .filter(item => (item.sourceArchiveId || archiveId) === targetArchiveId).length;
+      return {
+        archiveId: targetArchiveId,
+        page: Math.max(1, localPage),
+        globalPage: pageIndex + 1,
+      };
+    },
+    [archiveId, pages],
+  );
+
+  const persistReadingProgress = useCallback(
+    async (page: number, reason: string) => {
+      const target = resolveProgressTarget(page);
+      if (!target) return;
+      const key = `${target.archiveId}:${target.page}`;
+      if (lastSavedProgressKey.current === key) return;
+      try {
+        await updateArchiveProgress(target.archiveId, target.page);
+        lastSavedProgressKey.current = key;
+        await appendDiagnosticLog('reader.progress.saved', {
+          reason,
+          archiveId: target.archiveId,
+          page: target.page,
+          globalPage: target.globalPage,
+        });
+      } catch (err) {
+        await appendDiagnosticLog('reader.progress.error', {
+          reason,
+          archiveId: target.archiveId,
+          page: target.page,
+          globalPage: target.globalPage,
+          message: extractApiError(err),
+        });
+        console.warn(extractApiError(err, 'Failed to save progress'));
+      }
+    },
+    [resolveProgressTarget],
+  );
+
   useEffect(() => {
-    if (!pages.length || currentPage <= 0 || currentPage === lastSavedPage.current) return;
+    if (!pages.length || currentPage <= 0 || currentPage > pages.length) return;
     const timer = setTimeout(() => {
-      lastSavedPage.current = currentPage;
-      updateArchiveProgress(archiveId, currentPage).catch(err => {
+      persistReadingProgress(currentPage, 'settled').catch(err => {
         console.warn(extractApiError(err, 'Failed to save progress'));
       });
     }, 900);
     return () => clearTimeout(timer);
-  }, [archiveId, currentPage, pages.length]);
+  }, [currentPage, pages.length, persistReadingProgress]);
+
+  useEffect(() => {
+    appendDiagnosticLog('reader.collectionContext', {
+      archiveId,
+      childIndex,
+      childrenCount: Array.isArray(children) ? children.length : 0,
+      children,
+      tankoubonId,
+    }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+  }, [archiveId, childIndex, children, tankoubonId]);
+
+  const archiveChildren = useMemo(
+    () => (Array.isArray(children) ? children.filter(Boolean) : []),
+    [children],
+  );
+  const tailArchiveId = pages[pages.length - 1]?.sourceArchiveId || archiveId;
+  const nextArchive = nextArchiveById[tailArchiveId] ?? null;
+  const nextArchiveId = nextArchive?.id;
+  const hasNextArchive = Boolean(nextArchiveId);
+  const shouldShowCollectionEnd = Boolean(settings.seamlessNext && pages.length);
+
+  useEffect(() => {
+    appendDiagnosticLog('reader.collectionEnd', {
+      archiveId,
+      hasNextArchive,
+      nextArchiveId,
+      pages: pages.length,
+      seamlessNext: settings.seamlessNext,
+      shouldShowCollectionEnd,
+      tailArchiveId,
+    }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+  }, [archiveId, hasNextArchive, nextArchiveId, pages.length, settings.seamlessNext, shouldShowCollectionEnd, tailArchiveId]);
 
   const readerItems = useMemo<ReaderItem[]>(() => {
+    const appendCollectionEnd = (items: ReaderItem[]) => {
+      if (!shouldShowCollectionEnd || settings.readingMode === 'webtoon') return items;
+      return [
+        ...items,
+        {
+          key: 'collection-end',
+          kind: 'collection-end' as const,
+          pages: [],
+          progressPage: pages.length + 1,
+        },
+      ];
+    };
     if (!settings.doublePage || settings.readingMode === 'webtoon') {
-      return pages.map(page => ({
+      return appendCollectionEnd(pages.map(page => ({
+        kind: 'pages' as const,
         key: String(page.pageNumber),
         pages: [page],
         progressPage: page.pageNumber,
-      }));
+      })));
     }
     const out: ReaderItem[] = [];
     let index = 0;
     if (settings.splitCover && pages[0]) {
-      out.push({key: 'cover', pages: [pages[0]], progressPage: 1});
+      out.push({key: 'cover', kind: 'pages', pages: [pages[0]], progressPage: 1});
       index = 1;
     }
     while (index < pages.length) {
       const pair = pages.slice(index, index + 2);
       out.push({
         key: pair.map(page => page.pageNumber).join('-'),
+        kind: 'pages',
         pages: settings.readingMode === 'single-rtl' ? [...pair].reverse() : pair,
         progressPage: pair[0].pageNumber,
       });
       index += 2;
     }
-    return out;
-  }, [pages, settings.doublePage, settings.readingMode, settings.splitCover]);
+    return appendCollectionEnd(out);
+  }, [pages, settings.doublePage, settings.readingMode, settings.splitCover, shouldShowCollectionEnd]);
+  const webtoonItems = useMemo<ReaderWebtoonItem[]>(
+    () =>
+      shouldShowCollectionEnd
+        ? [
+            ...pages,
+            {
+              kind: 'collection-end' as const,
+              key: 'collection-end',
+              pageNumber: pages.length + 1,
+            },
+          ]
+        : pages,
+    [pages, shouldShowCollectionEnd],
+  );
 
   const currentItemIndex = useMemo(() => {
     const index = readerItems.findIndex(item =>
-      item.pages.some(page => page.pageNumber === currentPage),
+      item.progressPage === currentPage || item.pages.some(page => page.pageNumber === currentPage),
     );
-    return Math.max(0, index);
-  }, [currentPage, readerItems]);
+    if (index >= 0) return index;
+    return currentPage > pages.length ? Math.max(0, readerItems.length - 1) : 0;
+  }, [currentPage, pages.length, readerItems]);
 
   const activeReaderItem = readerItems[currentItemIndex];
   const activeMediaPages = useMemo(
@@ -381,59 +524,253 @@ export function ReaderScreen({route, navigation}: Props) {
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<ReaderItem>[]}) => {
+      if (progressSeekLockedRef.current) return;
       const first = viewableItems[0]?.item;
       if (first?.progressPage) setCurrentPage(first.progressPage);
     },
   );
 
   const activePage = pages[currentPage - 1];
+  const isOnCollectionEnd = activeReaderItem?.kind === 'collection-end' || currentPage > pages.length;
 
-  const goToNextArchive = useCallback(() => {
-    const archiveChildren = Array.isArray(children) ? children.filter(Boolean) : [];
-    if (!settings.seamlessNext || archiveChildren.length <= 1) return false;
-    const currentChildIndex =
-      typeof childIndex === 'number'
-        ? childIndex
-        : archiveChildren.findIndex(childArchiveId => childArchiveId === archiveId);
-    const nextIndex = currentChildIndex + 1;
-    const nextArchiveId = archiveChildren[nextIndex];
-    if (!nextArchiveId) return false;
-    navigation.replace('Reader', {
-      archiveId: nextArchiveId,
-      initialPage: 1,
-      tankoubonId,
-      children: archiveChildren,
-      childIndex: nextIndex,
-    });
-    return true;
-  }, [archiveId, childIndex, children, navigation, settings.seamlessNext, tankoubonId]);
+  const resolveNextArchiveCandidate = useCallback(
+    async (targetArchiveId: string, excludedIds: Set<string>): Promise<NextArchiveCandidate | null> => {
+      const cached = nextArchiveCache.current[targetArchiveId];
+      if (cached !== undefined && (!cached?.id || !excludedIds.has(cached.id))) return cached;
+
+      const routeIndex = archiveChildren.indexOf(targetArchiveId);
+      const routeNextId = routeIndex >= 0 ? archiveChildren[routeIndex + 1] : undefined;
+      if (routeNextId && routeNextId !== targetArchiveId && !excludedIds.has(routeNextId)) {
+        try {
+          const meta = await fetchArchiveMetadata(routeNextId);
+          const candidate = {
+            id: routeNextId,
+            title: meta.title?.trim() || meta.filename || routeNextId,
+            source: 'tankoubon' as const,
+          };
+          nextArchiveCache.current[targetArchiveId] = candidate;
+          return candidate;
+        } catch {
+          const candidate = {id: routeNextId, title: routeNextId, source: 'tankoubon' as const};
+          nextArchiveCache.current[targetArchiveId] = candidate;
+          return candidate;
+        }
+      }
+
+      try {
+        const tanks = await fetchTankoubonsForArchive(targetArchiveId);
+        const chosen = [...tanks].sort((a, b) => {
+          const favorite = Number(Boolean(b.isfavorite)) - Number(Boolean(a.isfavorite));
+          if (favorite !== 0) return favorite;
+          return (b.children?.length || 0) - (a.children?.length || 0);
+        })[0];
+        const index = chosen?.children?.indexOf(targetArchiveId) ?? -1;
+        const nextId = index >= 0 ? chosen?.children?.[index + 1] : undefined;
+        if (nextId && nextId !== targetArchiveId && !excludedIds.has(nextId)) {
+          try {
+            const meta = await fetchArchiveMetadata(nextId);
+            const candidate = {
+              id: nextId,
+              title: meta.title?.trim() || meta.filename || nextId,
+              source: 'tankoubon' as const,
+            };
+            nextArchiveCache.current[targetArchiveId] = candidate;
+            return candidate;
+          } catch {
+            const candidate = {id: nextId, title: nextId, source: 'tankoubon' as const};
+            nextArchiveCache.current[targetArchiveId] = candidate;
+            return candidate;
+          }
+        }
+      } catch (err) {
+        appendDiagnosticLog('reader.next.tankoubon.error', {
+          archiveId: targetArchiveId,
+          message: extractApiError(err),
+        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      }
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          const related = await fetchArchiveRelated(targetArchiveId, 8);
+          const item = related.find(candidate => candidate.arcid !== targetArchiveId && !excludedIds.has(candidate.arcid));
+          if (item) {
+            const candidate = {
+              id: item.arcid,
+              title: item.title?.trim() || item.filename || item.arcid,
+              source: 'archive_related' as const,
+            };
+            nextArchiveCache.current[targetArchiveId] = candidate;
+            return candidate;
+          }
+        } catch (err) {
+          appendDiagnosticLog('reader.next.related.error', {
+            archiveId: targetArchiveId,
+            attempt,
+            message: extractApiError(err),
+          }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+        }
+      }
+
+      nextArchiveCache.current[targetArchiveId] = null;
+      return null;
+    },
+    [archiveChildren],
+  );
+
+  const appendNextArchiveToStream = useCallback(async () => {
+    if (!settings.seamlessNext || appendingNext || !tailArchiveId) return false;
+    const excluded = new Set(appendedArchiveIds.current);
+    excluded.add(tailArchiveId);
+    setAppendingNext(true);
+    try {
+      const candidate = await resolveNextArchiveCandidate(tailArchiveId, excluded);
+      setNextArchiveById(current => ({...current, [tailArchiveId]: candidate}));
+      if (!candidate?.id || appendedArchiveIds.current.has(candidate.id)) return false;
+      const files = await fetchArchiveFiles(candidate.id);
+      if (!files.length) return false;
+      const start = pages.length;
+      const hydrated = await Promise.all(files.map((page, index) => hydratePage(page, start + index, candidate.id)));
+      appendedArchiveIds.current.add(candidate.id);
+      setPages(current => [...current, ...hydrated]);
+      setCurrentPage(start + 1);
+      return true;
+    } catch (err) {
+      appendDiagnosticLog('reader.next.append.error', {
+        archiveId: tailArchiveId,
+        message: extractApiError(err),
+      }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      return false;
+    } finally {
+      setAppendingNext(false);
+    }
+  }, [appendingNext, hydratePage, pages.length, resolveNextArchiveCandidate, settings.seamlessNext, tailArchiveId]);
+
+  useEffect(() => {
+    if (!settings.seamlessNext || !tailArchiveId || nextArchiveById[tailArchiveId] !== undefined) return;
+    const excluded = new Set(appendedArchiveIds.current);
+    excluded.add(tailArchiveId);
+    let cancelled = false;
+    resolveNextArchiveCandidate(tailArchiveId, excluded)
+      .then(candidate => {
+        if (cancelled) return;
+        setNextArchiveById(current => ({...current, [tailArchiveId]: candidate}));
+      })
+      .catch(err => {
+        appendDiagnosticLog('reader.next.resolve.error', {
+          archiveId: tailArchiveId,
+          message: extractApiError(err),
+        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [nextArchiveById, resolveNextArchiveCandidate, settings.seamlessNext, tailArchiveId]);
+
+  const scrollToReaderItem = useCallback(
+    (itemIndex: number, animated = true) => {
+      const index = Math.max(0, itemIndex);
+      const dimension = settings.readingMode === 'single-ltr' || settings.readingMode === 'single-rtl' ? width : height;
+      listRef.current?.scrollToOffset({
+        animated,
+        offset: dimension * index,
+      });
+    },
+    [height, settings.readingMode, width],
+  );
 
   const goToPage = useCallback(
     (page: number) => {
       if (!pages.length) return;
-      if (page > pages.length && goToNextArchive()) return;
-      const next = Math.max(1, Math.min(page, pages.length));
+      const lastReaderPage =
+        shouldShowCollectionEnd && settings.readingMode === 'webtoon'
+          ? pages.length + 1
+          : readerItems[readerItems.length - 1]?.progressPage || pages.length;
+      if (page > lastReaderPage && isOnCollectionEnd) {
+        appendNextArchiveToStream().catch(err => console.warn('Failed to append next archive:', err));
+        return;
+      }
+      const next = Math.max(1, Math.min(page, lastReaderPage));
       setCurrentPage(next);
       if (settings.readingMode === 'webtoon') {
         webtoonRef.current?.scrollToOffset({
           animated: true,
-          offset: (next - 1) * height,
+          offset: (next > pages.length ? pages.length : next - 1) * height,
         });
         return;
       }
       const itemIndex = readerItems.findIndex(item =>
-        item.pages.some(readerPage => readerPage.pageNumber === next),
+        item.progressPage === next || item.pages.some(readerPage => readerPage.pageNumber === next),
       );
-      listRef.current?.scrollToIndex({index: Math.max(0, itemIndex), animated: true});
+      if (itemIndex < 0) return;
+      scrollToReaderItem(itemIndex);
     },
-    [goToNextArchive, height, pages.length, readerItems, settings.readingMode],
+    [appendNextArchiveToStream, height, isOnCollectionEnd, pages.length, readerItems, scrollToReaderItem, settings.readingMode, shouldShowCollectionEnd],
+  );
+
+  const goToNextPage = useCallback(() => {
+    if (isOnCollectionEnd) {
+      appendNextArchiveToStream().catch(err => console.warn('Failed to append next archive:', err));
+      return;
+    }
+    goToPage(currentPage + 1);
+  }, [appendNextArchiveToStream, currentPage, goToPage, isOnCollectionEnd]);
+
+  const jumpToPageFromProgress = useCallback(
+    (page: number) => {
+      if (progressSeekLockedRef.current || !pages.length) return;
+      const lastReaderPage =
+        shouldShowCollectionEnd && settings.readingMode === 'webtoon'
+          ? pages.length + 1
+          : readerItems[readerItems.length - 1]?.progressPage || pages.length;
+      const next = Math.max(1, Math.min(page, lastReaderPage));
+      const targetIndex = Math.min(next, pages.length) - 1;
+      appendDiagnosticLog('reader.progress.jump.start', {
+        requestedPage: page,
+        targetPage: next,
+        targetIndex,
+        readingMode: settings.readingMode,
+      }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      progressSeekLockedRef.current = true;
+      setProgressSeekLocked(true);
+
+      if (settings.readingMode === 'webtoon') {
+        webtoonRef.current?.scrollToIndex({
+          animated: false,
+          index: Math.max(0, targetIndex),
+        });
+      } else {
+        const itemIndex = readerItems.findIndex(item =>
+          item.progressPage === next || item.pages.some(readerPage => readerPage.pageNumber === next),
+        );
+        if (itemIndex >= 0) scrollToReaderItem(itemIndex, false);
+      }
+
+      setTimeout(() => {
+        setCurrentPage(next);
+        if (next <= pages.length) {
+          persistReadingProgress(next, 'progress-jump').catch(err => {
+            console.warn(extractApiError(err, 'Failed to save progress'));
+          });
+        }
+      }, 80);
+
+      setTimeout(() => {
+        progressSeekLockedRef.current = false;
+        setProgressSeekLocked(false);
+        appendDiagnosticLog('reader.progress.jump.done', {
+          targetPage: next,
+          readingMode: settings.readingMode,
+        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      }, 450);
+    },
+    [pages.length, persistReadingProgress, readerItems, scrollToReaderItem, settings.readingMode, shouldShowCollectionEnd],
   );
 
   useEffect(() => {
     if (!settings.autoPlay || settings.readingMode === 'webtoon') return;
-    const timer = setInterval(() => goToPage(currentPage + 1), settings.autoPlayInterval * 1000);
+    const timer = setInterval(goToNextPage, settings.autoPlayInterval * 1000);
     return () => clearInterval(timer);
-  }, [currentPage, goToPage, settings.autoPlay, settings.autoPlayInterval, settings.readingMode]);
+  }, [goToNextPage, settings.autoPlay, settings.autoPlayInterval, settings.readingMode]);
 
   useEffect(() => {
     if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
@@ -443,6 +780,11 @@ export function ReaderScreen({route, navigation}: Props) {
       if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
     };
   }, [chromeVisible, currentPage, settings.autoHide, settingsOpen]);
+
+  useEffect(() => {
+    if (settings.autoHide) return;
+    setChromeVisible(true);
+  }, [settings.autoHide]);
 
   function patchSettings(patch: Partial<ReaderSettings>) {
     setSettings(current => {
@@ -504,7 +846,12 @@ export function ReaderScreen({route, navigation}: Props) {
 
   function seekMedia(page: ReaderPage, seconds: number) {
     const state = getMediaState(page.pageNumber);
-    const duration = Math.max(1, state.duration);
+    const session = vlcSessions.current[page.pageNumber];
+    const duration = state.duration;
+    const now = Date.now();
+    if (!session?.playable || duration <= 0 || !vlcRefs.current[page.pageNumber]) return;
+    if (now - (mediaLastSeekAt.current[page.pageNumber] || 0) < 350) return;
+    mediaLastSeekAt.current[page.pageNumber] = now;
     const nextTime = Math.max(0, Math.min(duration, seconds));
     const position = Math.max(0, Math.min(1, nextTime / duration));
     vlcRefs.current[page.pageNumber]?.seek(position);
@@ -512,6 +859,10 @@ export function ReaderScreen({route, navigation}: Props) {
   }
 
   function toggleChrome() {
+    if (!settings.autoHide) {
+      setChromeVisible(true);
+      return;
+    }
     setChromeVisible(visible => !visible);
   }
 
@@ -526,7 +877,7 @@ export function ReaderScreen({route, navigation}: Props) {
     const verticalEdge = height * 0.28;
     if (settings.readingMode === 'single-rtl') {
       if (x < horizontalEdge) {
-        goToPage(currentPage + 1);
+        goToNextPage();
         return;
       }
       if (x > width - horizontalEdge) {
@@ -539,7 +890,7 @@ export function ReaderScreen({route, navigation}: Props) {
         return;
       }
       if (y > height - verticalEdge) {
-        goToPage(currentPage + 1);
+        goToNextPage();
         return;
       }
     } else {
@@ -548,7 +899,7 @@ export function ReaderScreen({route, navigation}: Props) {
         return;
       }
       if (x > width - horizontalEdge) {
-        goToPage(currentPage + 1);
+        goToNextPage();
         return;
       }
     }
@@ -917,8 +1268,26 @@ export function ReaderScreen({route, navigation}: Props) {
     {id: 'book', kind: 'book', label: t('reader.book')},
   ];
   const activeLane = lanes.find(lane => lane.id === activeLaneId) || lanes[0];
+  const readerProgressTotal = readerItems[readerItems.length - 1]?.progressPage || pages.length;
+  const displayCurrentPage = Math.min(currentPage, pages.length);
 
   const renderItem = ({item}: ListRenderItemInfo<ReaderItem>) => {
+    if (item.kind === 'collection-end') {
+      return (
+        <ReaderTapSurface
+          onTap={() => goToNextPage()}
+          style={[styles.page, {width, height: pageFrameHeight}]}>
+          <ReaderCollectionEndPage
+            finishedPageCount={pages.length}
+            nextArchiveId={nextArchiveId}
+            nextTitle={nextArchive?.title}
+            nextMode={nextArchive?.source}
+            t={t}
+            onOpenNext={goToNextPage}
+          />
+        </ReaderTapSurface>
+      );
+    }
     const spreadPageWidth = item.pages.length > 1 ? width / 2 : width;
     const mediaActive = item.pages.some(page => page.pageNumber === currentPage);
     return (
@@ -941,14 +1310,31 @@ export function ReaderScreen({route, navigation}: Props) {
     );
   };
 
-  const renderWebtoonItem = ({item}: FlashListRenderItemInfo<ReaderPage>) => {
-    const mediaActive = Math.abs(item.pageNumber - currentPage) <= 1;
+  const renderWebtoonItem = ({item}: FlashListRenderItemInfo<ReaderWebtoonItem>) => {
+    if ('kind' in item && item.kind === 'collection-end') {
+      return (
+        <ReaderTapSurface
+          onTap={() => goToNextPage()}
+          style={[styles.webtoonItem, {minHeight: height}]}>
+          <ReaderCollectionEndPage
+            finishedPageCount={pages.length}
+            nextArchiveId={nextArchiveId}
+            nextTitle={nextArchive?.title}
+            nextMode={nextArchive?.source}
+            t={t}
+            onOpenNext={goToNextPage}
+          />
+        </ReaderTapSurface>
+      );
+    }
+    const page = item as ReaderPage;
+    const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
     return (
       <ReaderTapSurface
-        onDoubleTap={() => handleReaderDoubleTap(item.pageNumber)}
+        onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
         onTap={handleReaderTap}
         style={styles.webtoonItem}>
-        {renderMedia(item, width, settings.longPage ? undefined : height, true, mediaActive)}
+        {renderMedia(page, width, settings.longPage ? undefined : height, true, mediaActive)}
       </ReaderTapSurface>
     );
   };
@@ -962,7 +1348,7 @@ export function ReaderScreen({route, navigation}: Props) {
       />
       {settings.readingMode === 'webtoon' ? (
         <FlashList
-          data={pages}
+          data={webtoonItems}
           drawDistance={height * 1.5}
           extraData={{
             currentPage,
@@ -971,11 +1357,12 @@ export function ReaderScreen({route, navigation}: Props) {
             longPage: settings.longPage,
           }}
           key={`webtoon:${settings.longPage ? 'long' : 'paged'}`}
-          keyExtractor={page => `${page.pageNumber}:${page.uri || page.id}`}
+          keyExtractor={page => ('kind' in page ? page.key : `${page.pageNumber}:${page.uri || page.id}`)}
           onScroll={event => {
+            if (progressSeekLockedRef.current) return;
             const approx =
               Math.floor(event.nativeEvent.contentOffset.y / Math.max(1, height * 0.86)) + 1;
-            setCurrentPage(Math.max(1, Math.min(approx, pages.length)));
+            setCurrentPage(Math.max(1, Math.min(approx, readerProgressTotal)));
           }}
           ref={webtoonRef}
           renderItem={renderWebtoonItem}
@@ -1012,12 +1399,18 @@ export function ReaderScreen({route, navigation}: Props) {
       {settings.mediaInfo && activePage ? (
         <MediaInfoOverlay
           activeLane={activeLane}
+          activeReaderItem={activeReaderItem}
+          archiveId={archiveId}
           currentPage={currentPage}
+          failedPages={failedPages}
           getMediaState={getMediaState}
+          loadedPages={loadedPages}
           page={activePage}
           pages={pages}
           settings={settings}
+          sourceIndexByPage={sourceIndexByPage}
           t={t}
+          viewport={`${Math.round(width)}x${Math.round(height)}`}
         />
       ) : null}
 
@@ -1029,7 +1422,7 @@ export function ReaderScreen({route, navigation}: Props) {
             </TouchableOpacity>
             <TouchableOpacity onPress={cycleMode} style={styles.modeButton}>
               <Text style={styles.modeText}>{t(modeLabelKey(settings.readingMode))}</Text>
-              <Text style={styles.progress}>{currentPage} / {pages.length}</Text>
+              <Text style={styles.progress}>{displayCurrentPage} / {pages.length}</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.iconButton}>
               <SettingsIcon color={colors.white} size={21} />
@@ -1061,22 +1454,23 @@ export function ReaderScreen({route, navigation}: Props) {
               {activeLane.kind === 'book' ? (
                 <TouchableOpacity
                   activeOpacity={0.9}
+                  disabled={progressSeekLocked}
                   onPress={event => {
                     const laneWidth = Math.max(1, width - 92);
                     const x = event.nativeEvent.locationX;
-                    const next = Math.round((x / laneWidth) * Math.max(1, pages.length - 1)) + 1;
-                    goToPage(next);
+                    const next = Math.round((x / laneWidth) * Math.max(1, readerProgressTotal - 1)) + 1;
+                    jumpToPageFromProgress(next);
                   }}
-                  style={styles.laneContent}>
+                  style={[styles.laneContent, progressSeekLocked && styles.laneContentDisabled]}>
                   <View style={styles.progressTrack}>
                     <View
                       style={[
                         styles.progressFill,
-                        {width: `${Math.max(2, (currentPage / Math.max(1, pages.length)) * 100)}%`},
+                        {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
                       ]}
                     />
                   </View>
-                  <Text style={styles.progressCaption}>{currentPage} / {pages.length}</Text>
+                  <Text style={styles.progressCaption}>{displayCurrentPage} / {pages.length}</Text>
                 </TouchableOpacity>
               ) : (
                 <MediaLaneControls
@@ -1131,34 +1525,98 @@ function ErrorOverlay({title, message}: {title: string; message: string}) {
   );
 }
 
+function ReaderCollectionEndPage({
+  finishedPageCount,
+  nextArchiveId,
+  nextTitle,
+  nextMode,
+  t,
+  onOpenNext,
+}: {
+  finishedPageCount: number;
+  nextArchiveId?: string;
+  nextTitle?: string;
+  nextMode?: 'tankoubon' | 'archive_related';
+  t: ReturnType<typeof useI18n>['t'];
+  onOpenNext: () => void;
+}) {
+  return (
+    <View style={styles.collectionEnd}>
+      <Text style={styles.collectionEndTitle}>{t('reader.finishedReading')}</Text>
+      <Text style={styles.collectionEndText}>
+        {t('reader.finishedPageCount', {count: finishedPageCount})}
+      </Text>
+      <View style={styles.collectionEndDivider} />
+      <Text style={styles.collectionEndLabel}>
+        {nextMode === 'archive_related' ? t('reader.relatedNextLabel') : t('reader.nextChapterLabel')}
+      </Text>
+      <Text style={styles.collectionEndNext} numberOfLines={2}>
+        {nextTitle || nextArchiveId || t('reader.noNextChapter')}
+      </Text>
+      {nextArchiveId ? (
+        <TouchableOpacity accessibilityRole="button" onPress={onOpenNext} style={styles.collectionEndButton}>
+          <Text style={styles.collectionEndButtonText}>{t('reader.openNext')}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 function MediaInfoOverlay({
   activeLane,
+  activeReaderItem,
+  archiveId,
   currentPage,
+  failedPages,
   getMediaState,
+  loadedPages,
   page,
   pages,
   settings,
+  sourceIndexByPage,
   t,
+  viewport,
 }: {
   activeLane: ReaderLane;
+  activeReaderItem?: ReaderItem;
+  archiveId: string;
   currentPage: number;
+  failedPages: Record<number, string>;
   getMediaState: (pageNumber: number) => MediaPlaybackState;
+  loadedPages: Record<number, boolean>;
   page: ReaderPage;
   pages: ReaderPage[];
   settings: ReaderSettings;
+  sourceIndexByPage: Record<number, number>;
   t: ReturnType<typeof useI18n>['t'];
+  viewport: string;
 }) {
   const mediaState =
     activeLane.kind === 'book' ? null : getMediaState(activeLane.page.pageNumber);
+  const spreadPages = activeReaderItem?.pages?.length
+    ? activeReaderItem.pages.map(item => item.pageNumber).join(',')
+    : String(currentPage);
+  const sourceIndex = sourceIndexByPage[page.pageNumber - 1] ?? page.defaultSourceIndex ?? 0;
+  const sourceCount = page.sources?.length || 0;
+  const fileName = page.resolvedPath || page.path || page.uri || page.id;
+  const loadState = failedPages[page.pageNumber]
+    ? 'error'
+    : loadedPages[page.pageNumber]
+      ? 'loaded'
+      : 'loading';
   const lines = [
-    `${t('reader.pageInfo')}: ${currentPage} / ${pages.length}`,
-    `${t('reader.modeInfo')}: ${t(modeLabelKey(settings.readingMode))}`,
-    `${t('reader.fileInfo')}: ${page.resolvedPath || page.path || page.uri || page.id}`,
-    `${t('reader.typeInfo')}: ${page.effectiveType}`,
-    `${t('reader.settingsInfo')}: tap=${settings.tapTurnPage ? 'on' : 'off'} auto=${settings.autoPlay ? 'on' : 'off'} hide=${settings.autoHide ? 'on' : 'off'}`,
+    `P ${Math.min(currentPage, pages.length)}/${pages.length}  spread ${spreadPages}`,
+    `mode ${t(modeLabelKey(settings.readingMode))}${settings.doublePage ? '  double' : ''}${settings.splitCover ? '  splitCover' : ''}`,
+    `ui toolbar=${settings.autoHide ? 'auto' : 'manual'}  vp=${viewport}`,
+    `cfg tap=${settings.tapTurnPage ? 'on' : 'off'} auto=${settings.autoPlay ? `${settings.autoPlayInterval}s` : 'off'} hide=${settings.autoHide ? 'on' : 'off'} zoom=${settings.doubleTapZoom ? 'on' : 'off'}`,
+    `archive ${archiveId}`,
+    `page ${page.effectiveType}  state=${loadState}  source=${sourceCount ? `${sourceIndex + 1}/${sourceCount}` : '1/1'}`,
+    `file ${fileName}`,
+    page.vlcUri ? `proxy ${page.vlcUri}` : page.uri ? `uri ${page.uri}` : '',
     mediaState
-      ? `${activeLane.label}: ${formatMediaTime(mediaState.currentTime)} / ${formatMediaTime(mediaState.duration)} ${mediaState.paused ? t('reader.pause') : t('reader.play')}`
+      ? `${activeLane.label}  ${formatMediaTime(mediaState.currentTime)} / ${formatMediaTime(mediaState.duration)}  pos=${Math.round(mediaState.position * 100)}%  vol=${Math.round(mediaState.volume * 100)}  ${mediaState.paused ? t('reader.pause') : t('reader.play')}`
       : '',
+    failedPages[page.pageNumber] ? `error ${failedPages[page.pageNumber]}` : '',
   ].filter(Boolean);
 
   return (
@@ -1543,6 +2001,61 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
   },
+  collectionEnd: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(32,31,30,0.94)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: 24,
+    maxWidth: 420,
+    padding: 22,
+  },
+  collectionEndTitle: {
+    color: colors.white,
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  collectionEndText: {
+    color: '#d2d0ce',
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  collectionEndDivider: {
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    height: StyleSheet.hairlineWidth,
+    marginVertical: 18,
+    width: '100%',
+  },
+  collectionEndLabel: {
+    color: '#c8e6ff',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  collectionEndNext: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 19,
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  collectionEndButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    marginTop: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+  },
+  collectionEndButtonText: {
+    color: colors.white,
+    fontSize: 13,
+    fontWeight: '800',
+  },
   topBar: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1643,6 +2156,9 @@ const styles = StyleSheet.create({
     gap: 5,
     minHeight: 36,
     justifyContent: 'center',
+  },
+  laneContentDisabled: {
+    opacity: 0.6,
   },
   mediaLane: {
     alignItems: 'center',
