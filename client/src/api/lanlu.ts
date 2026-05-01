@@ -33,6 +33,14 @@ export type SearchArchivesParams = {
   category_ids?: string;
   aggregate_by?: string;
   lang?: string;
+  date_from?: string;
+  date_to?: string;
+};
+
+export type TagSuggestion = {
+  value: string;
+  label: string;
+  display: string;
 };
 
 export async function login(params: {
@@ -84,6 +92,8 @@ export async function searchArchives(
     category_ids: params.category_ids || undefined,
     aggregate_by: params.aggregate_by || undefined,
     lang: params.lang || undefined,
+    date_from: params.date_from || undefined,
+    date_to: params.date_to || undefined,
   };
   const startedAt = Date.now();
   await appendDiagnosticLog('search.request', {params: requestParams});
@@ -126,6 +136,23 @@ export async function searchArchives(
     });
     throw error;
   }
+}
+
+export async function fetchTagAutocomplete(
+  query: string,
+  lang: string,
+  limit = 10,
+): Promise<TagSuggestion[]> {
+  const q = query.trim();
+  if (!q) return [];
+  const response = await apiClient.get<{
+    data?: {suggestions?: TagSuggestion[]};
+  }>('/api/tags/autocomplete', {
+    params: {q, lang, limit, require_bound: 1},
+  });
+  return Array.isArray(response.data?.data?.suggestions)
+    ? response.data.data.suggestions
+    : [];
 }
 
 export async function fetchCategories(): Promise<Category[]> {

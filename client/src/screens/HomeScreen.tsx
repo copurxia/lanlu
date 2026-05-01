@@ -1,9 +1,11 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -19,15 +21,19 @@ import {
   MessageSquareText,
   Rows3,
   Search,
+  SlidersHorizontal,
+  X,
 } from 'lucide-react-native';
 
 import {extractApiError} from '../api/client';
 import {
   fetchCategories,
   fetchDiscover,
+  fetchTagAutocomplete,
   isTankoubon,
   mediaItemId,
   searchArchives,
+  type TagSuggestion,
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
@@ -87,7 +93,7 @@ function ViewModeIcon({mode}: {mode: HomeViewMode}) {
 }
 
 export function HomeScreen() {
-  const {t} = useI18n();
+  const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
   const [viewMode, setViewMode] = useState<HomeViewMode>(DEFAULT_HOME_VIEW_MODE);
   const [items, setItems] = useState<MediaItem[]>([]);
@@ -99,6 +105,16 @@ export function HomeScreen() {
   const [searchVersion, setSearchVersion] = useState(0);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [sortby, setSortby] = useState('created_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [newOnly, setNewOnly] = useState(false);
+  const [untaggedOnly, setUntaggedOnly] = useState(false);
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
+  const [groupByTanks, setGroupByTanks] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<TagSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -107,7 +123,10 @@ export function HomeScreen() {
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
 
-  const showRows = viewMode === 'category-rows' && !submittedFilter && !selectedCategory;
+  const hasAdvancedFilters = Boolean(
+    dateFrom || dateTo || newOnly || untaggedOnly || favoriteOnly || !groupByTanks,
+  );
+  const showRows = viewMode === 'category-rows' && !submittedFilter && !selectedCategory && !hasAdvancedFilters;
 
   const openItem = useCallback(
     (item: MediaItem) => {
@@ -133,9 +152,15 @@ export function HomeScreen() {
         page: nextPage,
         pageSize: PAGE_SIZE,
         sortby: activeFilter && sortby === 'created_at' ? 'relevance' : sortby,
-        order: 'desc' as const,
-        groupby_tanks: true,
+        order: sortOrder,
+        groupby_tanks: groupByTanks,
         category_id: selectedCategory?.catid,
+        date_from: dateFrom,
+        date_to: dateTo,
+        newonly: newOnly,
+        untaggedonly: untaggedOnly,
+        favoriteonly: favoriteOnly,
+        lang: language,
       };
       if (mode === 'append') setLoadingMore(true);
       else if (!refreshing) setLoading(true);
@@ -175,7 +200,20 @@ export function HomeScreen() {
         setLoadingMore(false);
       }
     },
-    [refreshing, selectedCategory, sortby, submittedFilter],
+    [
+      dateFrom,
+      dateTo,
+      favoriteOnly,
+      groupByTanks,
+      language,
+      newOnly,
+      refreshing,
+      selectedCategory,
+      sortOrder,
+      sortby,
+      submittedFilter,
+      untaggedOnly,
+    ],
   );
 
   const loadRows = useCallback(async () => {
@@ -208,10 +246,16 @@ export function HomeScreen() {
             page: 1,
             pageSize: ROW_SIZE,
             sortby,
-            order: 'desc',
-            groupby_tanks: true,
+            order: sortOrder,
+            groupby_tanks: groupByTanks,
             category_ids: categoryIds.join(','),
             aggregate_by: 'category',
+            date_from: dateFrom,
+            date_to: dateTo,
+            newonly: newOnly,
+            untaggedonly: untaggedOnly,
+            favoriteonly: favoriteOnly,
+            lang: language,
           });
           if (requestId !== requestIdRef.current) return;
           for (const group of result.groups || []) {
@@ -232,9 +276,15 @@ export function HomeScreen() {
                 page: 1,
                 pageSize: ROW_SIZE,
                 sortby,
-                order: 'desc',
-                groupby_tanks: true,
+                order: sortOrder,
+                groupby_tanks: groupByTanks,
                 category_id: category.catid,
+                date_from: dateFrom,
+                date_to: dateTo,
+                newonly: newOnly,
+                untaggedonly: untaggedOnly,
+                favoriteonly: favoriteOnly,
+                lang: language,
               });
               return {category, items: result.data};
             }),
@@ -259,7 +309,7 @@ export function HomeScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [sortby]);
+  }, [dateFrom, dateTo, favoriteOnly, groupByTanks, language, newOnly, sortOrder, sortby, untaggedOnly]);
 
   const load = useCallback(
     async (nextPage = 1, mode: 'replace' | 'append' = 'replace') => {
@@ -284,6 +334,49 @@ export function HomeScreen() {
     load(1, 'replace').catch(err => console.warn('Failed to refresh home:', err));
   }, [load]);
 
+  useEffect(() => {
+    const words = filter.trim().split(/\s+/).filter(Boolean);
+    const lastWord = words[words.length - 1] || '';
+    if (!lastWord) {
+      setSuggestions([]);
+      setSuggestionsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setSuggestionsLoading(true);
+    const timer = setTimeout(() => {
+      fetchTagAutocomplete(lastWord, language, 10)
+        .then(result => {
+          if (!cancelled) setSuggestions(result);
+        })
+        .catch(autocompleteError => {
+          if (cancelled) return;
+          setSuggestions([]);
+          appendDiagnosticLog('home.search.autocomplete.error', {
+            query: lastWord,
+            message: autocompleteError instanceof Error ? autocompleteError.message : String(autocompleteError),
+          }).catch(() => undefined);
+        })
+        .finally(() => {
+          if (!cancelled) setSuggestionsLoading(false);
+        });
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [filter, language]);
+
+  function selectSuggestion(suggestion: TagSuggestion) {
+    const words = filter.trim().split(/\s+/).filter(Boolean);
+    const nextWords = words.length ? words.slice(0, -1) : [];
+    nextWords.push(suggestion.value);
+    setFilter(`${nextWords.join(' ')} `);
+    setSuggestions([]);
+  }
+
   function submitSearch() {
     const nextFilter = filter.trim();
     requestIdRef.current += 1;
@@ -291,8 +384,15 @@ export function HomeScreen() {
       filter: nextFilter,
       previousFilter: submittedFilter,
       sortby,
+      sortOrder,
       viewMode,
       selectedCategory: selectedCategory?.catid,
+      dateFrom,
+      dateTo,
+      newOnly,
+      untaggedOnly,
+      favoriteOnly,
+      groupByTanks,
       nextRequestSeed: requestIdRef.current,
     }).catch(logError => console.warn('Failed to log search submit:', logError));
     setItems([]);
@@ -302,6 +402,30 @@ export function HomeScreen() {
     setLoading(Boolean(nextFilter));
     setSubmittedFilter(nextFilter);
     setSelectedCategory(null);
+    setSearchVersion(version => version + 1);
+  }
+
+  function applyFilters() {
+    setFiltersOpen(false);
+    setItems([]);
+    setPage(1);
+    setTotal(0);
+    setSearchVersion(version => version + 1);
+  }
+
+  function resetFilters() {
+    setSortby('created_at');
+    setSortOrder('desc');
+    setDateFrom('');
+    setDateTo('');
+    setNewOnly(false);
+    setUntaggedOnly(false);
+    setFavoriteOnly(false);
+    setGroupByTanks(true);
+    setFiltersOpen(false);
+    setItems([]);
+    setPage(1);
+    setTotal(0);
     setSearchVersion(version => version + 1);
   }
 
@@ -446,11 +570,38 @@ export function HomeScreen() {
           style={styles.searchButton}>
           <Search color={colors.text} size={18} />
         </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityLabel={t('common.filter')}
+          accessibilityRole="button"
+          onPress={() => setFiltersOpen(true)}
+          style={[styles.searchButton, hasAdvancedFilters && styles.filterButtonActive]}>
+          <SlidersHorizontal color={hasAdvancedFilters ? colors.primary : colors.text} size={18} />
+        </TouchableOpacity>
         <TouchableOpacity onPress={cycleViewMode} style={styles.modeButton}>
           <ViewModeIcon mode={viewMode} />
           <Text style={styles.modeButtonText}>{viewModeLabel(viewMode, t)}</Text>
         </TouchableOpacity>
       </View>
+
+      {(suggestions.length > 0 || suggestionsLoading) && filter.trim() ? (
+        <View style={styles.suggestionsPanel}>
+          <Text style={styles.suggestionsTitle}>
+            {suggestionsLoading ? t('common.loading') : t('search.suggestions')}
+          </Text>
+          {suggestions.map(suggestion => (
+            <TouchableOpacity
+              accessibilityRole="button"
+              key={suggestion.value}
+              onPress={() => selectSuggestion(suggestion)}
+              style={styles.suggestionRow}>
+              <Text numberOfLines={1} style={styles.suggestionLabel}>{suggestion.label}</Text>
+              {suggestion.label !== suggestion.value ? (
+                <Text numberOfLines={1} style={styles.suggestionValue}>{suggestion.value}</Text>
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+      ) : null}
 
       <View style={styles.sortRow}>
         {selectedCategory ? (
@@ -522,6 +673,129 @@ export function HomeScreen() {
           }
         />
       )}
+
+      <Modal
+        animationType="slide"
+        onRequestClose={() => setFiltersOpen(false)}
+        transparent
+        visible={filtersOpen}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.filterSheet}>
+            <View style={styles.sheetHeader}>
+              <Text style={styles.sheetTitle}>{t('common.filter')}</Text>
+              <TouchableOpacity
+                accessibilityLabel={t('common.close')}
+                accessibilityRole="button"
+                onPress={() => setFiltersOpen(false)}
+                style={styles.sheetCloseButton}>
+                <X color={colors.textMuted} size={18} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.fieldLabel}>{t('search.sortBy')}</Text>
+            <View style={styles.optionGrid}>
+              {[
+                ['relevance', t('home.relevance')],
+                ['lastread', t('home.lastRead')],
+                ['created_at', t('home.created')],
+                ['release_at', t('home.release')],
+                ['updated_at', t('home.updated')],
+                ['title', t('home.titleSort')],
+                ['pagecount', t('home.pageCount')],
+              ].map(([value, label]) => (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  key={value}
+                  onPress={() => setSortby(value)}
+                  style={[styles.sheetChip, sortby === value && styles.sortChipActive]}>
+                  <Text style={[styles.sortChipText, sortby === value && styles.sortChipTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>{t('search.sortOrder')}</Text>
+            <View style={styles.optionRow}>
+              {[
+                ['desc', t('search.desc')],
+                ['asc', t('search.asc')],
+              ].map(([value, label]) => (
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  key={value}
+                  onPress={() => setSortOrder(value as 'asc' | 'desc')}
+                  style={[styles.sheetChip, sortOrder === value && styles.sortChipActive]}>
+                  <Text style={[styles.sortChipText, sortOrder === value && styles.sortChipTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.dateRow}>
+              <View style={styles.dateField}>
+                <Text style={styles.fieldLabel}>{t('search.dateFrom')}</Text>
+                <TextInput
+                  autoCapitalize="none"
+                  onChangeText={setDateFrom}
+                  placeholder="YYYY-MM-DD"
+                  style={styles.sheetInput}
+                  value={dateFrom}
+                />
+              </View>
+              <View style={styles.dateField}>
+                <Text style={styles.fieldLabel}>{t('search.dateTo')}</Text>
+                <TextInput
+                  autoCapitalize="none"
+                  onChangeText={setDateTo}
+                  placeholder="YYYY-MM-DD"
+                  style={styles.sheetInput}
+                  value={dateTo}
+                />
+              </View>
+            </View>
+
+            <View style={styles.switchList}>
+              <FilterSwitch label={t('search.newOnly')} value={newOnly} onValueChange={setNewOnly} />
+              <FilterSwitch label={t('search.untaggedOnly')} value={untaggedOnly} onValueChange={setUntaggedOnly} />
+              <FilterSwitch label={t('search.favoriteOnly')} value={favoriteOnly} onValueChange={setFavoriteOnly} />
+              <FilterSwitch label={t('search.groupByTanks')} value={groupByTanks} onValueChange={setGroupByTanks} />
+            </View>
+
+            <View style={styles.sheetActions}>
+              <TouchableOpacity onPress={resetFilters} style={styles.secondaryAction}>
+                <Text style={styles.secondaryActionText}>{t('common.reset')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={applyFilters} style={styles.primaryAction}>
+                <Text style={styles.primaryActionText}>{t('common.filter')}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
+function FilterSwitch({
+  label,
+  onValueChange,
+  value,
+}: {
+  label: string;
+  onValueChange: (value: boolean) => void;
+  value: boolean;
+}) {
+  return (
+    <View style={styles.switchRow}>
+      <Text style={styles.switchLabel}>{label}</Text>
+      <Switch
+        onValueChange={onValueChange}
+        thumbColor={value ? colors.primary : colors.white}
+        trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
+        value={value}
+      />
     </View>
   );
 }
@@ -559,6 +833,10 @@ const styles = StyleSheet.create({
     height: 42,
     justifyContent: 'center',
     width: 42,
+  },
+  filterButtonActive: {
+    backgroundColor: colors.primaryMuted,
+    borderColor: colors.primary,
   },
   modeButton: {
     alignItems: 'center',
@@ -625,6 +903,40 @@ const styles = StyleSheet.create({
   },
   sortChipTextActive: {
     color: colors.primary,
+  },
+  suggestionsPanel: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    overflow: 'hidden',
+  },
+  suggestionsTitle: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    textTransform: 'uppercase',
+  },
+  suggestionRow: {
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  suggestionLabel: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  suggestionValue: {
+    color: colors.textMuted,
+    fontSize: 12,
   },
   inlineError: {
     color: colors.danger,
@@ -714,5 +1026,132 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     padding: 16,
     textAlign: 'center',
+  },
+  modalBackdrop: {
+    backgroundColor: 'rgba(0,0,0,0.32)',
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  filterSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    gap: spacing.md,
+    maxHeight: '88%',
+    padding: spacing.lg,
+  },
+  sheetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  sheetTitle: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  sheetCloseButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 18,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  fieldLabel: {
+    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  optionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  optionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  sheetChip: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  dateField: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  sheetInput: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    color: colors.text,
+    fontSize: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  switchList: {
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+  },
+  switchRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderBottomColor: colors.border,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+  },
+  switchLabel: {
+    color: colors.text,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  sheetActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'flex-end',
+  },
+  primaryAction: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    height: 40,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  primaryActionText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  secondaryAction: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.borderStrong,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 40,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  secondaryActionText: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '800',
   },
 });
