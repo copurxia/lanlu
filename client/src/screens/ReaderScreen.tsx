@@ -102,6 +102,13 @@ type ReaderLane =
   | {id: 'book'; kind: 'book'; label: string}
   | {id: string; kind: 'video' | 'audio'; label: string; page: ReaderPage};
 
+type VlcPlaybackEvent = {
+  currentTime?: number;
+  duration?: number;
+  position?: number;
+  target?: number;
+};
+
 const READING_MODES: ReaderSettings['readingMode'][] = [
   'single-ltr',
   'single-rtl',
@@ -122,9 +129,21 @@ function modeLabelKey(mode: ReaderSettings['readingMode']) {
   }
 }
 
-function normalizeMediaSeconds(value: number) {
+function normalizeVlcSeconds(value: number) {
   if (!Number.isFinite(value) || value <= 0) return 0;
-  return value > 10000 ? value / 1000 : value;
+  return value / 1000;
+}
+
+function normalizeVlcProgress(event: VlcPlaybackEvent) {
+  const duration = normalizeVlcSeconds(Number(event.duration || 0));
+  const currentTime = normalizeVlcSeconds(Number(event.currentTime || 0));
+  const fallbackPosition = Number.isFinite(event.position || 0) ? Number(event.position || 0) : 0;
+  const position = duration > 0 ? currentTime / duration : fallbackPosition;
+  return {
+    currentTime,
+    duration,
+    position: Math.max(0, Math.min(1, position)),
+  };
 }
 
 function formatMediaTime(seconds: number) {
@@ -161,6 +180,8 @@ export function ReaderScreen({route, navigation}: Props) {
   const listRef = useRef<FlatList<ReaderItem>>(null);
   const webtoonRef = useRef<FlashListRef<ReaderPage>>(null);
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
+  const vlcSessions = useRef<Record<number, {target?: number; playable: boolean; ignoredProgress: number}>>({});
+  const vlcSourceKeys = useRef<Record<number, string>>({});
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const lastSavedPage = useRef(0);
   const settingsHydratedRef = useRef(false);
@@ -604,6 +625,14 @@ export function ReaderScreen({route, navigation}: Props) {
     if (page.effectiveType === 'video' || page.effectiveType === 'audio') {
       const mediaState = getMediaState(page.pageNumber);
       const mediaOptions = buildVlcMediaOptions(page);
+      const mediaUri = page.vlcUri || page.uri || '';
+      if (vlcSourceKeys.current[page.pageNumber] !== mediaUri) {
+        vlcSourceKeys.current[page.pageNumber] = mediaUri;
+        vlcSessions.current[page.pageNumber] = {
+          playable: false,
+          ignoredProgress: 0,
+        };
+      }
       if (!mediaActive) {
         return (
           <View style={frameStyle}>
@@ -627,8 +656,8 @@ export function ReaderScreen({route, navigation}: Props) {
             resizeMode="contain"
             source={
               {
-                uri: page.vlcUri || page.uri || '',
-                isNetwork: Boolean((page.vlcUri || page.uri)?.startsWith('http')),
+                uri: mediaUri,
+                isNetwork: Boolean(mediaUri.startsWith('http')),
                 initType: 2,
                 initOptions: ['--network-caching=600', ''],
                 mediaOptions,
@@ -680,28 +709,56 @@ export function ReaderScreen({route, navigation}: Props) {
                 duration: event.duration,
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
-                duration: normalizeMediaSeconds(event.duration),
+                duration: normalizeVlcSeconds(event.duration),
               });
             }}
             onPaused={() => setMediaState(page.pageNumber, {paused: true})}
             onPlaying={event => {
+              vlcSessions.current[page.pageNumber] = {
+                target: event.target,
+                playable: true,
+                ignoredProgress: vlcSessions.current[page.pageNumber]?.ignoredProgress || 0,
+              };
               appendDiagnosticLog('vlc.playing', {
                 archiveId,
                 page: page.pageNumber,
                 type: page.effectiveType,
+                target: event.target,
                 duration: event.duration,
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
-                duration: normalizeMediaSeconds(event.duration),
+                duration: normalizeVlcSeconds(event.duration),
                 paused: false,
               });
             }}
-            onProgress={event => {
-              setMediaState(page.pageNumber, {
-                currentTime: normalizeMediaSeconds(event.currentTime),
-                duration: normalizeMediaSeconds(event.duration),
-                position: Math.max(0, Math.min(1, event.position || 0)),
-              });
+            onProgress={(event: VlcPlaybackEvent) => {
+              const session = vlcSessions.current[page.pageNumber];
+              const staleTarget = Boolean(session?.target && event.target && session.target !== event.target);
+              if (!session?.playable || staleTarget) {
+                const ignoredProgress = (session?.ignoredProgress || 0) + 1;
+                vlcSessions.current[page.pageNumber] = {
+                  target: session?.target ?? event.target,
+                  playable: Boolean(session?.playable),
+                  ignoredProgress,
+                };
+                if (ignoredProgress <= 4) {
+                  appendDiagnosticLog('vlc.progress.ignored', {
+                    archiveId,
+                    page: page.pageNumber,
+                    type: page.effectiveType,
+                    reason: staleTarget ? 'stale-target' : 'before-playing',
+                    sessionTarget: session?.target,
+                    target: event.target,
+                    currentTime: event.currentTime,
+                    duration: event.duration,
+                    position: event.position,
+                  }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                }
+                return;
+              }
+              const progress = normalizeVlcProgress(event);
+              if (progress.duration <= 0 || progress.currentTime > progress.duration + 1) return;
+              setMediaState(page.pageNumber, progress);
             }}
           />
           {page.effectiveType === 'audio' ? (
