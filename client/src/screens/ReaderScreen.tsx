@@ -5,7 +5,6 @@ import {
   ImageSourcePropType,
   ListRenderItemInfo,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   StyleProp,
@@ -18,6 +17,7 @@ import {
   ViewToken,
 } from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import {
   FlashList,
   type FlashListRef,
@@ -25,6 +25,7 @@ import {
 } from '@shopify/flash-list';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -54,6 +55,7 @@ import {
   probeMediaPage,
   updateArchiveProgress,
 } from '../api/lanlu';
+import {ModalBackdrop} from '../components/SafeAreaSurface';
 import {ScreenState} from '../components/ScreenState';
 import {
   DEFAULT_READER_SETTINGS,
@@ -1641,23 +1643,27 @@ function ReaderTapSurface({
   onTap: (x: number, y: number) => void;
   style?: StyleProp<ViewStyle>;
 }) {
-  const lastTapAt = useRef(0);
+  const singleTap = Gesture.Tap()
+    .maxDuration(240)
+    .onEnd(event => {
+      runOnJS(onTap)(event.x, event.y);
+    });
+  const tapGesture = onDoubleTap
+    ? Gesture.Exclusive(
+        Gesture.Tap()
+          .numberOfTaps(2)
+          .maxDelay(260)
+          .onEnd(() => {
+            runOnJS(onDoubleTap)();
+          }),
+        singleTap,
+      )
+    : singleTap;
 
   return (
-    <Pressable
-      onPress={event => {
-        const now = Date.now();
-        const isDoubleTap = onDoubleTap && now - lastTapAt.current < 260;
-        lastTapAt.current = now;
-        if (isDoubleTap) {
-          onDoubleTap();
-          return;
-        }
-        onTap(event.nativeEvent.locationX, event.nativeEvent.locationY);
-      }}
-      style={style}>
-      {children}
-    </Pressable>
+    <GestureDetector gesture={tapGesture}>
+      <Animated.View style={style}>{children}</Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -1780,7 +1786,7 @@ function ReaderSettingsModal({
 }) {
   return (
     <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible={open}>
-      <View style={styles.modalBackdrop}>
+      <ModalBackdrop style={styles.modalBackdrop}>
         <View style={styles.sheet}>
           <View style={styles.sheetHandle} />
           <Text style={styles.sheetTitle}>{t('reader.settings')}</Text>
@@ -1866,7 +1872,7 @@ function ReaderSettingsModal({
             <Text style={styles.closeButtonText}>{t('common.close')}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ModalBackdrop>
     </Modal>
   );
 }

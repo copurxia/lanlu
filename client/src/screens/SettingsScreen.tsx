@@ -10,6 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import {useAuth} from '../auth/AuthContext';
+import {ModalBackdrop, ScreenRoot} from '../components/SafeAreaSurface';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
@@ -71,16 +72,7 @@ export function SettingsScreen() {
   }
 
   return (
-    <View
-      style={[
-        styles.screen,
-        {
-          paddingTop: insets.top + spacing.lg,
-          paddingLeft: Math.max(insets.left, spacing.lg),
-          paddingRight: Math.max(insets.right, spacing.lg),
-          paddingBottom: Math.max(insets.bottom, spacing.lg),
-        },
-      ]}>
+    <ScreenRoot style={styles.screen}>
       <FluentCard style={styles.section}>
         <FluentTitle>{t('settings.account')}</FluentTitle>
         <View style={styles.row}>
@@ -163,7 +155,7 @@ export function SettingsScreen() {
         statusBarTranslucent
         transparent
         visible={diagnosticsOpen}>
-        <Animated.View style={[styles.modalBackdrop, backdropStyle]}>
+        <ModalBackdrop animatedStyle={backdropStyle}>
           <Animated.View style={[styles.logSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}, sheetStyle]}>
             <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
             <ScrollView style={styles.logBox}>
@@ -192,9 +184,9 @@ export function SettingsScreen() {
               </TouchableOpacity>
             </View>
           </Animated.View>
-        </Animated.View>
+        </ModalBackdrop>
       </Modal>
-    </View>
+    </ScreenRoot>
   );
 }
 
@@ -253,10 +245,7 @@ function SettingsActionRow({
 
 const styles = StyleSheet.create({
   screen: {
-    backgroundColor: colors.background,
-    flex: 1,
     gap: spacing.md,
-    padding: spacing.lg,
   },
   section: {
     gap: spacing.md,
@@ -348,11 +337,6 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 14,
     fontWeight: '800',
-  },
-  modalBackdrop: {
-    backgroundColor: 'rgba(0,0,0,0.38)',
-    flex: 1,
-    justifyContent: 'flex-end',
   },
   logSheet: {
     backgroundColor: colors.surface,
