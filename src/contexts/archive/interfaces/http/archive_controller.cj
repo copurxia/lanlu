@@ -1126,6 +1126,7 @@ public class ArchiveController {
 
         // 支持 HTTP Range（仅单区间），用于视频拖动/断点播放
         let rangeHeader = (ctx.header("Range") ?? "").trimAscii()
+        let ifRangeHeader = (ctx.header("If-Range") ?? "").trimAscii()
         let (rangeState, rangeStart, rangeEnd) = parseRangeHeader(rangeHeader, fileSize)
         logger.info(
             "serve page request",
@@ -1135,6 +1136,7 @@ public class ArchiveController {
             ("content_type", contentType),
             ("file_size", fileSize.toString()),
             ("range_header", rangeHeader),
+            ("if_range_header", ifRangeHeader),
             ("has_authorization", if ((ctx.header("Authorization") ?? "").trimAscii().size > 0) { "true" } else { "false" }),
             ("has_auth_cookie", if ((ctx.header("Cookie") ?? "").contains("auth_token=")) { "true" } else { "false" }),
             ("user_agent", ctx.header("User-Agent") ?? "")
@@ -1153,6 +1155,19 @@ public class ArchiveController {
             return
         }
         if (rangeState > 0) {
+            if (ifRangeHeader.size > 0 && ifRangeHeader != etag) {
+                logger.info(
+                    "serve page if-range mismatch, ignoring range",
+                    ("arcid", id),
+                    ("entry_path", path),
+                    ("archive_type", archiveType),
+                    ("range_header", rangeHeader),
+                    ("if_range_header", ifRangeHeader),
+                    ("etag", etag)
+                )
+                sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
+                return
+            }
             sendWithReaderChunkedRange(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd, id, path, archiveType)
             return
         }
@@ -1261,6 +1276,7 @@ public class ArchiveController {
     ): Unit {
         let rangeExpr = "bytes ${rangeStart}-${rangeEnd}/${fileSize}"
         let rangeLength = rangeEnd - rangeStart + 1
+        let streamRangeWithoutContentLength = rangeLength > PAGE_STREAM_CHUNK_SIZE
 
         // 先跳过前置字节；EntryReader 不一定支持 seek，这里用读取丢弃实现
         if (!skipReaderBytes(reader, rangeStart)) {
@@ -1287,7 +1303,9 @@ public class ArchiveController {
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
         ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
-        ctx.setHeader("Content-Length", "${rangeLength}")
+        if (!streamRangeWithoutContentLength) {
+            ctx.setHeader("Content-Length", "${rangeLength}")
+        }
         ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
         logger.info(
             "serve page response",
@@ -1297,7 +1315,7 @@ public class ArchiveController {
             ("status", "206"),
             ("content_type", contentType),
             ("range", rangeExpr),
-            ("content_length", "${rangeLength}")
+            ("content_length", if (streamRangeWithoutContentLength) { "chunked" } else { "${rangeLength}" })
         )
 
         match (eagerBody) {
@@ -1378,6 +1396,19 @@ public class ArchiveController {
                 )
             }
         } finally {
+            if (remaining > 0) {
+                logger.warn(
+                    "serve page range stream ended before expected length",
+                    ("arcid", arcid),
+                    ("entry_path", entryPath),
+                    ("archive_type", archiveType),
+                    ("range", rangeExpr),
+                    ("expected_length", "${rangeLength}"),
+                    ("remaining", "${remaining}"),
+                    ("written", "${rangeLength - remaining}"),
+                    ("content_length", if (streamRangeWithoutContentLength) { "chunked" } else { "${rangeLength}" })
+                )
+            }
             try {
                 reader.close()
             } catch (e: Exception) {
