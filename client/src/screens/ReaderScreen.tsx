@@ -5,6 +5,7 @@ import {
   ImageSourcePropType,
   ListRenderItemInfo,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   StyleProp,
@@ -22,10 +23,8 @@ import {
   type FlashListRef,
   type ListRenderItemInfo as FlashListRenderItemInfo,
 } from '@shopify/flash-list';
-import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -165,6 +164,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const lastSavedPage = useRef(0);
   const settingsHydratedRef = useRef(false);
+  const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
@@ -177,6 +177,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const [chromeVisible, setChromeVisible] = useState(true);
   const [activeLaneId, setActiveLaneId] = useState<string>('book');
   const [mediaStateByPage, setMediaStateByPage] = useState<Record<number, MediaPlaybackState>>({});
+  const [zoomedPages, setZoomedPages] = useState<Record<number, boolean>>({});
   const chromeProgress = useSharedValue(chromeVisible ? 1 : 0);
   useEffect(() => {
     chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {duration: 160});
@@ -317,6 +318,8 @@ export function ReaderScreen({route, navigation}: Props) {
     },
   );
 
+  const activePage = pages[currentPage - 1];
+
   const goToPage = useCallback(
     (page: number) => {
       if (!pages.length) return;
@@ -348,6 +351,15 @@ export function ReaderScreen({route, navigation}: Props) {
     }, settings.autoPlayInterval * 1000);
     return () => clearInterval(timer);
   }, [goToPage, pages.length, settings.autoPlay, settings.autoPlayInterval, settings.readingMode]);
+
+  useEffect(() => {
+    if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+    if (!settings.autoHide || !chromeVisible || settingsOpen) return;
+    autoHideTimerRef.current = setTimeout(() => setChromeVisible(false), 3000);
+    return () => {
+      if (autoHideTimerRef.current) clearTimeout(autoHideTimerRef.current);
+    };
+  }, [chromeVisible, currentPage, settings.autoHide, settingsOpen]);
 
   function patchSettings(patch: Partial<ReaderSettings>) {
     setSettings(current => {
@@ -418,6 +430,52 @@ export function ReaderScreen({route, navigation}: Props) {
 
   function toggleChrome() {
     setChromeVisible(visible => !visible);
+  }
+
+  function handleReaderTap(x: number, y: number) {
+    if (!settings.tapTurnPage) {
+      toggleChrome();
+      return;
+    }
+
+    setChromeVisible(true);
+    const horizontalEdge = width * 0.32;
+    const verticalEdge = height * 0.28;
+    if (settings.readingMode === 'single-rtl') {
+      if (x < horizontalEdge) {
+        goToPage(currentPage + 1);
+        return;
+      }
+      if (x > width - horizontalEdge) {
+        goToPage(currentPage - 1);
+        return;
+      }
+    } else if (settings.readingMode === 'single-ttb' || settings.readingMode === 'webtoon') {
+      if (y < verticalEdge) {
+        goToPage(currentPage - 1);
+        return;
+      }
+      if (y > height - verticalEdge) {
+        goToPage(currentPage + 1);
+        return;
+      }
+    } else {
+      if (x < horizontalEdge) {
+        goToPage(currentPage - 1);
+        return;
+      }
+      if (x > width - horizontalEdge) {
+        goToPage(currentPage + 1);
+        return;
+      }
+    }
+
+    toggleChrome();
+  }
+
+  function handleReaderDoubleTap(pageNumber: number) {
+    if (!settings.doubleTapZoom) return;
+    setZoomedPages(current => ({...current, [pageNumber]: !current[pageNumber]}));
   }
 
   useEffect(() => {
@@ -696,6 +754,7 @@ export function ReaderScreen({route, navigation}: Props) {
               style={[
                 webtoon ? styles.webtoonImage : styles.pageImage,
                 webtoon && !settings.longPage && {height},
+                zoomedPages[page.pageNumber] && styles.zoomedMedia,
               ]}
             />
             {commonError ? (
@@ -731,22 +790,32 @@ export function ReaderScreen({route, navigation}: Props) {
     const spreadPageWidth = item.pages.length > 1 ? width / 2 : width;
     const mediaActive = item.pages.some(page => page.pageNumber === currentPage);
     return (
-      <ReaderTapSurface onTap={toggleChrome} style={[styles.page, {width, height: pageFrameHeight}]}>
+      <View style={[styles.page, {width, height: pageFrameHeight}]}>
         <View style={styles.spread}>
           {item.pages.map(page => (
-            <View key={`${item.key}:${page.pageNumber}`} style={{width: spreadPageWidth, height: pageFrameHeight}}>
-              {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
+            <View
+              key={`${item.key}:${page.pageNumber}`}
+              style={{width: spreadPageWidth, height: pageFrameHeight}}>
+              <ReaderTapSurface
+                onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
+                onTap={handleReaderTap}
+                style={{width: spreadPageWidth, height: pageFrameHeight}}>
+                {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
+              </ReaderTapSurface>
             </View>
           ))}
         </View>
-      </ReaderTapSurface>
+      </View>
     );
   };
 
   const renderWebtoonItem = ({item}: FlashListRenderItemInfo<ReaderPage>) => {
     const mediaActive = Math.abs(item.pageNumber - currentPage) <= 1;
     return (
-      <ReaderTapSurface onTap={toggleChrome} style={styles.webtoonItem}>
+      <ReaderTapSurface
+        onDoubleTap={() => handleReaderDoubleTap(item.pageNumber)}
+        onTap={handleReaderTap}
+        style={styles.webtoonItem}>
         {renderMedia(item, width, settings.longPage ? undefined : height, true, mediaActive)}
       </ReaderTapSurface>
     );
@@ -793,9 +862,8 @@ export function ReaderScreen({route, navigation}: Props) {
             index,
           })}
           horizontal={horizontal}
-          initialScrollIndex={currentItemIndex}
           inverted={settings.readingMode === 'single-rtl'}
-          key={`${settings.readingMode}:${settings.doublePage}:${settings.splitCover}`}
+          key={settings.readingMode}
           keyExtractor={item => item.key}
           onScrollToIndexFailed={info => setTimeout(() => goToPage(info.index + 1), 250)}
           onViewableItemsChanged={onViewableItemsChanged.current}
@@ -808,6 +876,18 @@ export function ReaderScreen({route, navigation}: Props) {
           viewabilityConfig={viewabilityConfig}
         />
       )}
+
+      {settings.mediaInfo && activePage ? (
+        <MediaInfoOverlay
+          activeLane={activeLane}
+          currentPage={currentPage}
+          getMediaState={getMediaState}
+          page={activePage}
+          pages={pages}
+          settings={settings}
+          t={t}
+        />
+      ) : null}
 
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
@@ -919,23 +999,75 @@ function ErrorOverlay({title, message}: {title: string; message: string}) {
   );
 }
 
+function MediaInfoOverlay({
+  activeLane,
+  currentPage,
+  getMediaState,
+  page,
+  pages,
+  settings,
+  t,
+}: {
+  activeLane: ReaderLane;
+  currentPage: number;
+  getMediaState: (pageNumber: number) => MediaPlaybackState;
+  page: ReaderPage;
+  pages: ReaderPage[];
+  settings: ReaderSettings;
+  t: ReturnType<typeof useI18n>['t'];
+}) {
+  const mediaState =
+    activeLane.kind === 'book' ? null : getMediaState(activeLane.page.pageNumber);
+  const lines = [
+    `${t('reader.pageInfo')}: ${currentPage} / ${pages.length}`,
+    `${t('reader.modeInfo')}: ${t(modeLabelKey(settings.readingMode))}`,
+    `${t('reader.fileInfo')}: ${page.resolvedPath || page.path || page.uri || page.id}`,
+    `${t('reader.typeInfo')}: ${page.effectiveType}`,
+    `${t('reader.settingsInfo')}: tap=${settings.tapTurnPage ? 'on' : 'off'} auto=${settings.autoPlay ? 'on' : 'off'} hide=${settings.autoHide ? 'on' : 'off'}`,
+    mediaState
+      ? `${activeLane.label}: ${formatMediaTime(mediaState.currentTime)} / ${formatMediaTime(mediaState.duration)} ${mediaState.paused ? t('reader.pause') : t('reader.play')}`
+      : '',
+  ].filter(Boolean);
+
+  return (
+    <View pointerEvents="none" style={styles.mediaInfoOverlay}>
+      {lines.map(line => (
+        <Text key={line} numberOfLines={1} style={styles.mediaInfoText}>
+          {line}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
 function ReaderTapSurface({
   children,
+  onDoubleTap,
   onTap,
   style,
 }: {
   children: React.ReactNode;
-  onTap: () => void;
+  onDoubleTap?: () => void;
+  onTap: (x: number, y: number) => void;
   style?: StyleProp<ViewStyle>;
 }) {
-  const gesture = Gesture.Tap().onEnd(() => {
-    runOnJS(onTap)();
-  });
+  const lastTapAt = useRef(0);
 
   return (
-    <GestureDetector gesture={gesture}>
-      <Animated.View style={style}>{children}</Animated.View>
-    </GestureDetector>
+    <Pressable
+      onPress={event => {
+        const now = Date.now();
+        const isDoubleTap = onDoubleTap && now - lastTapAt.current < 260;
+        lastTapAt.current = now;
+        if (isDoubleTap) {
+          onDoubleTap();
+          return;
+        }
+        onTap(event.nativeEvent.locationX, event.nativeEvent.locationY);
+      }}
+      style={style}>
+      {children}
+    </Pressable>
   );
 }
 
@@ -1207,6 +1339,9 @@ const styles = StyleSheet.create({
     height: '100%',
     width: '100%',
   },
+  zoomedMedia: {
+    transform: [{scale: 2}],
+  },
   webtoonContent: {
     backgroundColor: colors.black,
     paddingBottom: 24,
@@ -1313,6 +1448,24 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontSize: 15,
     fontWeight: '800',
+  },
+  mediaInfoOverlay: {
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    left: 12,
+    maxWidth: '88%',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    position: 'absolute',
+    top: 72,
+  },
+  mediaInfoText: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '700',
+    lineHeight: 15,
   },
   bottomBar: {
     alignItems: 'center',
