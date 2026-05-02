@@ -23,11 +23,36 @@ jest.mock('@react-native-async-storage/async-storage', () => {
         entries.forEach(([key, value]) => store.set(key, value));
         return Promise.resolve();
       }),
+      multiRemove: jest.fn(keys => {
+        keys.forEach(key => store.delete(key));
+        return Promise.resolve();
+      }),
       clear: jest.fn(() => {
         store.clear();
         return Promise.resolve();
       }),
     },
+  };
+});
+
+jest.mock('react-native-mmkv', () => {
+  const stores = new Map();
+  return {
+    createMMKV: jest.fn().mockImplementation(({id = 'default'} = {}) => {
+      if (!stores.has(id)) stores.set(id, new Map());
+      const store = stores.get(id);
+      return {
+        getString: jest.fn(key => store.get(key)),
+        set: jest.fn((key, value) => {
+          store.set(key, String(value));
+        }),
+        remove: jest.fn(key => {
+          const deleted = store.has(key);
+          store.delete(key);
+          return deleted;
+        }),
+      };
+    }),
   };
 });
 

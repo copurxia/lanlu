@@ -80,8 +80,8 @@ import {ReaderSidebar} from './reader/ReaderSidebar';
 import {OptionSelectSheet, type SelectOption} from './reader/OptionSelectSheet';
 import {ScreenState} from '../components/ScreenState';
 import {
-  DEFAULT_READER_SETTINGS,
   loadReaderSettings,
+  loadReaderSettingsSync,
   ReaderSettings,
   saveReaderSettings,
 } from '../storage/preferences';
@@ -808,7 +808,7 @@ export function ReaderScreen({route, navigation}: Props) {
       };
     });
   }, [rawInsets.bottom, rawInsets.left, rawInsets.right, rawInsets.top]);
-  const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
+  const [settings, setSettings] = useState<ReaderSettings>(() => loadReaderSettingsSync());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
   const [pages, setPages] = useState<ReaderPage[]>([]);

@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {getStoredString, removeStoredValue, setStoredString} from './mmkv';
 
 export type LanluServer = {
   id: string;
@@ -27,7 +27,7 @@ function normalizeServer(server: LanluServer): LanluServer {
 }
 
 export async function getServers(): Promise<LanluServer[]> {
-  const raw = await AsyncStorage.getItem(SERVERS_KEY);
+  const raw = await getStoredString(SERVERS_KEY);
   if (!raw) {
     return [];
   }
@@ -42,7 +42,7 @@ export async function getServers(): Promise<LanluServer[]> {
 }
 
 export async function saveServers(servers: LanluServer[]): Promise<void> {
-  await AsyncStorage.setItem(SERVERS_KEY, JSON.stringify(servers.map(normalizeServer)));
+  await setStoredString(SERVERS_KEY, JSON.stringify(servers.map(normalizeServer)));
 }
 
 export async function upsertServer(input: {
@@ -71,21 +71,21 @@ export async function deleteServer(serverId: string): Promise<void> {
   await saveServers(servers.filter(server => server.id !== serverId));
   const activeId = await getActiveServerId();
   if (activeId === serverId) {
-    await AsyncStorage.removeItem(ACTIVE_SERVER_ID_KEY);
+    await removeStoredValue(ACTIVE_SERVER_ID_KEY);
   }
 }
 
 export async function getActiveServerId(): Promise<string | null> {
-  const value = await AsyncStorage.getItem(ACTIVE_SERVER_ID_KEY);
+  const value = await getStoredString(ACTIVE_SERVER_ID_KEY);
   return value || null;
 }
 
 export async function setActiveServerId(serverId: string | null): Promise<void> {
   if (!serverId) {
-    await AsyncStorage.removeItem(ACTIVE_SERVER_ID_KEY);
+    await removeStoredValue(ACTIVE_SERVER_ID_KEY);
     return;
   }
-  await AsyncStorage.setItem(ACTIVE_SERVER_ID_KEY, serverId);
+  await setStoredString(ACTIVE_SERVER_ID_KEY, serverId);
 }
 
 export async function getActiveServer(): Promise<LanluServer | null> {

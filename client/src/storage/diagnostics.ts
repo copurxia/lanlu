@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {getStoredString, removeStoredValue, setStoredString} from './mmkv';
 
 const DIAGNOSTIC_LOG_KEY = 'lanlu.diagnosticLog.v1';
 const MAX_LOG_LINES = 220;
@@ -37,13 +37,13 @@ export async function appendDiagnosticLog(event: string, details?: DiagnosticDet
   const next = [...existing.split('\n').filter(Boolean), line]
     .slice(-MAX_LOG_LINES)
     .join('\n');
-  await AsyncStorage.setItem(DIAGNOSTIC_LOG_KEY, next);
+  await setStoredString(DIAGNOSTIC_LOG_KEY, next);
 }
 
 export async function getDiagnosticLog(): Promise<string> {
-  return (await AsyncStorage.getItem(DIAGNOSTIC_LOG_KEY)) || '';
+  return (await getStoredString(DIAGNOSTIC_LOG_KEY)) || '';
 }
 
 export async function clearDiagnosticLog() {
-  await AsyncStorage.removeItem(DIAGNOSTIC_LOG_KEY);
+  await removeStoredValue(DIAGNOSTIC_LOG_KEY);
 }

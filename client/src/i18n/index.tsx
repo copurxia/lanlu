@@ -1,6 +1,7 @@
 import React, {createContext, useContext, useEffect, useMemo, useState} from 'react';
 import {NativeModules, Platform} from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import {getStoredString, getStoredStringSync, setStoredStringSync} from '../storage/mmkv';
 
 export type Language = 'en' | 'zh';
 export type LanguagePreference = 'system' | Language;
@@ -552,11 +553,13 @@ const I18nContext = createContext<{
 
 export function I18nProvider({children}: {children: React.ReactNode}) {
   const [systemLanguage] = useState<Language>(() => detectLanguage());
-  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>('system');
+  const [languagePreference, setLanguagePreferenceState] = useState<LanguagePreference>(
+    () => normalizeLanguagePreference(getStoredStringSync(LANGUAGE_STORAGE_KEY)) || 'system',
+  );
   const language = languagePreference === 'system' ? systemLanguage : languagePreference;
   useEffect(() => {
     let cancelled = false;
-    AsyncStorage.getItem(LANGUAGE_STORAGE_KEY)
+    getStoredString(LANGUAGE_STORAGE_KEY)
       .then(value => {
         const stored = normalizeLanguagePreference(value);
         if (!cancelled && stored) setLanguagePreferenceState(stored);
@@ -573,7 +576,7 @@ export function I18nProvider({children}: {children: React.ReactNode}) {
       languagePreference,
       setLanguagePreference: (nextPreference: LanguagePreference) => {
         setLanguagePreferenceState(nextPreference);
-        AsyncStorage.setItem(LANGUAGE_STORAGE_KEY, nextPreference).catch(() => undefined);
+        setStoredStringSync(LANGUAGE_STORAGE_KEY, nextPreference);
       },
       t: (key: MessageKey, params?: Params) =>
         format(messages[language][key] || messages.en[key] || key, params),

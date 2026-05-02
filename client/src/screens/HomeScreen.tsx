@@ -51,6 +51,7 @@ import {
   DEFAULT_HOME_VIEW_MODE,
   HomeViewMode,
   loadHomeViewMode,
+  loadHomeViewModeSync,
   saveHomeViewMode,
 } from '../storage/preferences';
 import {colors, spacing} from '../theme/colors';
@@ -161,7 +162,7 @@ export function HomeScreen() {
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const [viewMode, setViewMode] = useState<HomeViewMode>(DEFAULT_HOME_VIEW_MODE);
+  const [viewMode, setViewMode] = useState<HomeViewMode>(() => loadHomeViewModeSync());
   const [items, setItems] = useState<MediaItem[]>([]);
   const [randomItems, setRandomItems] = useState<MediaItem[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);

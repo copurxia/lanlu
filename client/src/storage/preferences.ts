@@ -1,4 +1,10 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  getStoredString,
+  getStoredStrings,
+  getStoredStringSync,
+  setStoredString,
+  setStoredStrings,
+} from './mmkv';
 
 export type HomeViewMode = 'category-rows' | 'masonry' | 'list' | 'tweet' | 'channel';
 export type ReadingMode = 'single-ltr' | 'single-rtl' | 'single-ttb' | 'webtoon';
@@ -68,16 +74,18 @@ export function normalizeReadingMode(value?: string | null): ReadingMode {
 }
 
 export async function loadHomeViewMode(): Promise<HomeViewMode> {
-  return normalizeHomeViewMode(await AsyncStorage.getItem(HOME_VIEW_MODE_STORAGE_KEY));
+  return normalizeHomeViewMode(await getStoredString(HOME_VIEW_MODE_STORAGE_KEY));
+}
+
+export function loadHomeViewModeSync(): HomeViewMode {
+  return normalizeHomeViewMode(getStoredStringSync(HOME_VIEW_MODE_STORAGE_KEY));
 }
 
 export async function saveHomeViewMode(mode: HomeViewMode): Promise<void> {
-  await AsyncStorage.setItem(HOME_VIEW_MODE_STORAGE_KEY, mode);
+  await setStoredString(HOME_VIEW_MODE_STORAGE_KEY, mode);
 }
 
-export async function loadReaderSettings(): Promise<ReaderSettings> {
-  const entries = await AsyncStorage.multiGet(Object.values(READER_KEYS));
-  const map = Object.fromEntries(entries);
+function readerSettingsFromMap(map: Record<string, string | null>): ReaderSettings {
   return {
     readingMode: normalizeReadingMode(map[READER_KEYS.readingMode]),
     doublePage: map[READER_KEYS.doublePage] === 'true',
@@ -96,8 +104,20 @@ export async function loadReaderSettings(): Promise<ReaderSettings> {
   };
 }
 
+export async function loadReaderSettings(): Promise<ReaderSettings> {
+  const entries = await getStoredStrings(Object.values(READER_KEYS));
+  return readerSettingsFromMap(Object.fromEntries(entries));
+}
+
+export function loadReaderSettingsSync(): ReaderSettings {
+  const map = Object.fromEntries(
+    Object.values(READER_KEYS).map(key => [key, getStoredStringSync(key)]),
+  );
+  return readerSettingsFromMap(map);
+}
+
 export async function saveReaderSettings(settings: ReaderSettings): Promise<void> {
-  await AsyncStorage.multiSet([
+  await setStoredStrings([
     [READER_KEYS.readingMode, settings.readingMode],
     [READER_KEYS.doublePage, String(settings.doublePage)],
     [READER_KEYS.autoPlay, String(settings.autoPlay)],
