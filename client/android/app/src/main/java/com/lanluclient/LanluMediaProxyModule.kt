@@ -1,7 +1,11 @@
 package com.lanluclient
 
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import android.view.View
+import android.view.WindowInsets
+import android.view.WindowInsetsController
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -29,6 +33,42 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
 
   override fun getName(): String = "LanluMediaProxy"
+
+  @ReactMethod
+  fun setSystemBarsHidden(hidden: Boolean) {
+    val activity = reactApplicationContext.currentActivity ?: return
+    activity.runOnUiThread {
+      val window = activity.window ?: return@runOnUiThread
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        window.setDecorFitsSystemWindows(false)
+        val controller = window.insetsController
+        if (controller != null) {
+          controller.systemBarsBehavior =
+              WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+          if (hidden) {
+            controller.hide(WindowInsets.Type.systemBars())
+          } else {
+            controller.show(WindowInsets.Type.systemBars())
+          }
+        }
+      } else {
+        val layoutFlags =
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        val immersiveFlags =
+            if (hidden) {
+              View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                  View.SYSTEM_UI_FLAG_FULLSCREEN or
+                  View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            } else {
+              0
+            }
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = layoutFlags or immersiveFlags
+      }
+    }
+  }
 
   @ReactMethod
   fun createUrl(uri: String, headers: ReadableMap?, promise: Promise) {

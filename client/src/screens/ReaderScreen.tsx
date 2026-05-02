@@ -80,7 +80,7 @@ import {
   saveReaderSettings,
 } from '../storage/preferences';
 import {appendDiagnosticLog} from '../storage/diagnostics';
-import {createLocalSubtitleFile, createProxiedMediaUrl} from '../native/LanluMediaProxy';
+import {createLocalSubtitleFile, createProxiedMediaUrl, setSystemBarsHidden} from '../native/LanluMediaProxy';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
@@ -439,7 +439,12 @@ function buildVlcMediaOptions(page: ReaderPage, subtitleUri?: string) {
 export function ReaderScreen({route, navigation}: Props) {
   const {t} = useI18n();
   const {archiveId, initialPage = 1, children, childIndex, tankoubonId} = route.params;
-  const {width, height} = useWindowDimensions();
+  const windowDimensions = useWindowDimensions();
+  const [stableViewport, setStableViewport] = useState({
+    width: windowDimensions.width,
+    height: windowDimensions.height,
+  });
+  const {width, height} = stableViewport;
   const insets = useSafeAreaInsets();
   const listRef = useRef<FlatList<ReaderItem>>(null);
   const webtoonRef = useRef<FlashListRef<ReaderWebtoonItem>>(null);
@@ -458,6 +463,22 @@ export function ReaderScreen({route, navigation}: Props) {
   const settingsHydratedRef = useRef(false);
   const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoPreferredLaneItemKey = useRef('');
+
+  useEffect(() => {
+    setStableViewport(current => {
+      const currentLandscape = current.width > current.height;
+      const nextLandscape = windowDimensions.width > windowDimensions.height;
+      const widthDelta = Math.abs(windowDimensions.width - current.width);
+      const heightDelta = Math.abs(windowDimensions.height - current.height);
+      if (currentLandscape !== nextLandscape || widthDelta > 120 || heightDelta > 120) {
+        return {
+          width: windowDimensions.width,
+          height: windowDimensions.height,
+        };
+      }
+      return current;
+    });
+  }, [windowDimensions.height, windowDimensions.width]);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
@@ -1230,6 +1251,12 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [chromeVisible, currentPage, settings.autoHide, settingsOpen]);
 
   useEffect(() => {
+    setSystemBarsHidden(settings.autoHide && !chromeVisible);
+  }, [chromeVisible, settings.autoHide]);
+
+  useEffect(() => () => setSystemBarsHidden(false), []);
+
+  useEffect(() => {
     if (settings.autoHide) return;
     setChromeVisible(true);
   }, [settings.autoHide]);
@@ -1957,7 +1984,7 @@ export function ReaderScreen({route, navigation}: Props) {
         animated
         backgroundColor="transparent"
         barStyle="light-content"
-        hidden={!chromeVisible}
+        hidden={false}
         translucent
       />
       {settings.readingMode === 'webtoon' ? (
