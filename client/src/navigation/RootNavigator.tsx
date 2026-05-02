@@ -1,7 +1,11 @@
 import React from 'react';
 import {NavigationContainer} from '@react-navigation/native';
-import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
+import {
+  createBottomTabNavigator,
+  type BottomTabBarButtonProps,
+} from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
+import {Pressable, StyleSheet} from 'react-native';
 import {enableScreens} from 'react-native-screens';
 import {Heart, Home, Settings} from 'lucide-react-native';
 
@@ -37,6 +41,18 @@ function SettingsTabIcon({color, size}: {color: string; size: number}) {
   return <Settings color={color} size={size} />;
 }
 
+function StaticTabButton({
+  children,
+  style,
+  ...props
+}: BottomTabBarButtonProps) {
+  return (
+    <Pressable {...props} android_ripple={{color: 'transparent'}} style={style}>
+      {children}
+    </Pressable>
+  );
+}
+
 function MainTabs() {
   const {t} = useI18n();
   return (
@@ -44,7 +60,9 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
+        tabBarButton: StaticTabButton,
         tabBarInactiveTintColor: colors.textMuted,
+        tabBarStyle: styles.tabBar,
       }}>
       <Tabs.Screen
         name="Home"
@@ -76,6 +94,16 @@ function MainTabs() {
     </Tabs.Navigator>
   );
 }
+
+const styles = StyleSheet.create({
+  tabBar: {
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+});
 
 export function RootNavigator() {
   const {status} = useAuth();
