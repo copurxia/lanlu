@@ -194,6 +194,7 @@ export function FavoritesScreen() {
           autoCorrect={false}
           onChangeText={setQuery}
           placeholder={t('favorites.searchPlaceholder')}
+          placeholderTextColor={colors.textMuted}
           style={styles.searchInput}
           value={query}
         />

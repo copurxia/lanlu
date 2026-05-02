@@ -799,6 +799,7 @@ export function HomeScreen() {
           onChangeText={setFilter}
           onSubmitEditing={submitSearch}
           placeholder={t('common.search')}
+          placeholderTextColor={colors.textMuted}
           returnKeyType="search"
           style={styles.searchInput}
           value={filter}
@@ -1020,6 +1021,7 @@ export function HomeScreen() {
                     keyboardType="numbers-and-punctuation"
                     onChangeText={setDraftDateFrom}
                     placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.textMuted}
                     style={styles.dateInput}
                     value={draftDateFrom}
                   />
@@ -1040,6 +1042,7 @@ export function HomeScreen() {
                     keyboardType="numbers-and-punctuation"
                     onChangeText={setDraftDateTo}
                     placeholder="YYYY-MM-DD"
+                    placeholderTextColor={colors.textMuted}
                     style={styles.dateInput}
                     value={draftDateTo}
                   />
