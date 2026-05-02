@@ -96,6 +96,28 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun createPageUrl(uri: String, headers: ReadableMap?, path: String, promise: Promise) {
+    try {
+      val id = UUID.randomUUID().toString()
+      val copiedHeaders = mutableMapOf<String, String>()
+      headers?.let {
+        val iterator = it.keySetIterator()
+        while (iterator.hasNextKey()) {
+          val key = iterator.nextKey()
+          if (it.hasKey(key) && !it.isNull(key)) {
+            copiedHeaders[key] = it.getString(key) ?: ""
+          }
+        }
+      }
+      val port = ProxyServer.register(id, uri, copiedHeaders)
+      val encodedId = URLEncoder.encode(id, "UTF-8")
+      promise.resolve("http://127.0.0.1:$port/page/$encodedId/${encodeLocalPath(path)}")
+    } catch (error: Exception) {
+      promise.reject("LANLU_PAGE_PROXY", error)
+    }
+  }
+
+  @ReactMethod
   fun writeTextFile(extension: String, text: String, promise: Promise) {
     try {
       val safeExtension = extension
@@ -113,6 +135,11 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
       promise.reject("LANLU_SUBTITLE_FILE", error)
     }
   }
+
+  private fun encodeLocalPath(path: String): String =
+      path.split("/")
+          .filter { it.isNotEmpty() }
+          .joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
   private data class ProxyTarget(val uri: String, val headers: Map<String, String>)
 
@@ -175,10 +202,13 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
             }
           }
 
-          val id = URLDecoder.decode(
-              requestPath.substringAfter("/media/", "").substringBefore("?"),
-              "UTF-8",
-          )
+          val isPageRequest = requestPath.startsWith("/page/")
+          val encodedId = if (isPageRequest) {
+            requestPath.removePrefix("/page/").substringBefore("/")
+          } else {
+            requestPath.substringAfter("/media/", "").substringBefore("?")
+          }
+          val id = URLDecoder.decode(encodedId, "UTF-8")
           val target = targets[id]
           if (target == null) {
             writeText(socket, 404, "Not Found")
@@ -190,7 +220,25 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
             return
           }
 
-          proxyRequest(socket, method, target, requestHeaders)
+          val pagePath = if (isPageRequest) {
+            URLDecoder.decode(
+                requestPath.removePrefix("/page/").substringAfter("/", "").substringBefore("?"),
+                "UTF-8",
+            )
+          } else {
+            null
+          }
+          if (pagePath?.endsWith(".js", ignoreCase = true) == true) {
+            writeBytes(
+                socket,
+                200,
+                "application/javascript; charset=utf-8",
+                "/* EPUB scripts disabled by Lanlu reader. */\n".toByteArray(Charsets.UTF_8),
+                method == "HEAD",
+            )
+            return
+          }
+          proxyRequest(socket, method, target, requestHeaders, pagePath)
         } catch (error: Exception) {
           Log.e(TAG, "Proxy request failed", error)
           try {
@@ -207,13 +255,33 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
         target: ProxyTarget,
         requestHeaders: Map<String, String>,
     ) {
-      val connection = URL(target.uri).openConnection() as HttpURLConnection
+      proxyRequest(socket, method, target, requestHeaders, null)
+    }
+
+    private fun proxyRequest(
+        socket: Socket,
+        method: String,
+        target: ProxyTarget,
+        requestHeaders: Map<String, String>,
+        pagePath: String?,
+    ) {
+      val targetUri = if (pagePath.isNullOrBlank()) {
+        target.uri
+      } else {
+        Uri.parse(target.uri)
+            .buildUpon()
+            .clearQuery()
+            .appendQueryParameter("path", pagePath)
+            .build()
+            .toString()
+      }
+      val connection = URL(targetUri).openConnection() as HttpURLConnection
       try {
         configureTlsIfNeeded(connection)
         connection.requestMethod = method
         connection.instanceFollowRedirects = true
         connection.connectTimeout = 15000
-        connection.readTimeout = 0
+        connection.readTimeout = if (pagePath.isNullOrBlank()) 0 else 15000
         target.headers.forEach { (key, value) ->
           if (value.isNotBlank()) connection.setRequestProperty(key, value)
         }
@@ -300,16 +368,32 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     }
 
     private fun writeText(socket: Socket, status: Int, text: String) {
-      val body = text.toByteArray(Charsets.UTF_8)
+      writeBytes(socket, status, "text/plain; charset=utf-8", text.toByteArray(Charsets.UTF_8), false)
+    }
+
+    private fun writeBytes(
+        socket: Socket,
+        status: Int,
+        contentType: String,
+        body: ByteArray,
+        headersOnly: Boolean,
+    ) {
       val output = socket.getOutputStream()
       output.write("HTTP/1.1 $status ${reasonPhrase(status)}\r\n".toByteArray(Charsets.ISO_8859_1))
-      writeHeader(output, "Content-Type", "text/plain; charset=utf-8")
+      writeHeader(output, "Content-Type", contentType)
       writeHeader(output, "Content-Length", body.size.toString())
       writeHeader(output, "Connection", "close")
       output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
-      output.write(body)
+      if (!headersOnly) {
+        output.write(body)
+      }
       output.flush()
     }
+
+    private fun encodePath(path: String): String =
+        path.split("/")
+            .filter { it.isNotEmpty() }
+            .joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
 
     private fun reasonPhrase(status: Int): String =
         when (status) {

@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Dimensions,
   FlatList,
   Image,
   ImageSourcePropType,
@@ -80,7 +81,12 @@ import {
   saveReaderSettings,
 } from '../storage/preferences';
 import {appendDiagnosticLog} from '../storage/diagnostics';
-import {createLocalSubtitleFile, createProxiedMediaUrl, setSystemBarsHidden} from '../native/LanluMediaProxy';
+import {
+  createLocalSubtitleFile,
+  createProxiedMediaUrl,
+  createProxiedPageUrl,
+  setSystemBarsHidden,
+} from '../native/LanluMediaProxy';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
@@ -92,6 +98,7 @@ type ReaderPage = PageInfo & {
   pageNumber: number;
   sourceArchiveId: string;
   activeSource?: PageSourceInfo | null;
+  backendUri?: string;
   imageSource?: ImageSourcePropType;
   thumbnailSource?: ImageSourcePropType;
   uri?: string;
@@ -101,6 +108,58 @@ type ReaderPage = PageInfo & {
   resolvedPath?: string;
   effectiveType: 'image' | 'video' | 'audio' | 'html';
 };
+
+const EPUB_HTML_INJECTION = `
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<style>
+  html, body {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #111;
+    overflow-wrap: anywhere;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    box-sizing: border-box;
+    padding: 16px;
+    writing-mode: horizontal-tb !important;
+  }
+  img, svg, video, canvas {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 100%;
+    height: auto;
+  }
+  body, body * {
+    visibility: visible !important;
+    opacity: 1 !important;
+  }
+  p, div, h1, h2, h3, h4, h5, h6, li {
+    color: #111;
+  }
+  pre {
+    white-space: pre-wrap;
+  }
+</style>`;
+
+function prepareEpubHtml(html: string) {
+  const withoutScripts = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<script\b[^>]*\/?>/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, '')
+    .replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, '');
+
+  if (/<head\b[^>]*>/i.test(withoutScripts)) {
+    return withoutScripts.replace(/<head\b[^>]*>/i, match => `${match}${EPUB_HTML_INJECTION}`);
+  }
+  return `<!doctype html><html><head>${EPUB_HTML_INJECTION}</head><body>${withoutScripts}</body></html>`;
+}
 
 type ReaderItem = {
   key: string;
@@ -533,9 +592,17 @@ export function ReaderScreen({route, navigation}: Props) {
   const {t} = useI18n();
   const {archiveId, initialPage = 1, children, childIndex, tankoubonId} = route.params;
   const windowDimensions = useWindowDimensions();
+  const [screenDimensions, setScreenDimensions] = useState(() => Dimensions.get('screen'));
+  const viewportDimensions =
+    Platform.OS === 'android'
+      ? {
+          width: Math.max(windowDimensions.width, screenDimensions.width),
+          height: Math.max(windowDimensions.height, screenDimensions.height),
+        }
+      : windowDimensions;
   const [stableViewport, setStableViewport] = useState({
-    width: windowDimensions.width,
-    height: windowDimensions.height,
+    width: viewportDimensions.width,
+    height: viewportDimensions.height,
   });
   const {width, height} = stableViewport;
   const rawInsets = useSafeAreaInsets();
@@ -563,6 +630,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const pendingLocalSubtitleByAssetId = useRef<Record<number, Promise<string | undefined> | undefined>>({});
+  const htmlLoadingKeys = useRef<Set<string>>(new Set());
   const appendedArchiveIds = useRef<Set<string>>(new Set());
   const nextArchiveCache = useRef<Record<string, NextArchiveCandidate | null>>({});
   const lastSavedProgressKey = useRef('');
@@ -572,37 +640,53 @@ export function ReaderScreen({route, navigation}: Props) {
   const autoPreferredLaneItemKey = useRef('');
 
   useEffect(() => {
+    const subscription = Dimensions.addEventListener('change', ({screen}) => {
+      setScreenDimensions(screen);
+    });
+    return () => subscription.remove();
+  }, []);
+
+  useEffect(() => {
     setStableViewport(current => {
       const currentLandscape = current.width > current.height;
-      const nextLandscape = windowDimensions.width > windowDimensions.height;
-      const widthDelta = Math.abs(windowDimensions.width - current.width);
-      if (currentLandscape !== nextLandscape || widthDelta > 120) {
+      const nextLandscape = viewportDimensions.width > viewportDimensions.height;
+      const widthDelta = Math.abs(viewportDimensions.width - current.width);
+      const heightDelta = Math.abs(viewportDimensions.height - current.height);
+      if (currentLandscape !== nextLandscape || widthDelta > 120 || heightDelta > 12) {
         return {
-          width: windowDimensions.width,
-          height: windowDimensions.height,
+          width: viewportDimensions.width,
+          height: viewportDimensions.height,
         };
       }
       return current;
     });
-  }, [windowDimensions.height, windowDimensions.width]);
+  }, [viewportDimensions.height, viewportDimensions.width]);
 
   useEffect(() => {
-    const stableLandscape = width > height;
-    const windowLandscape = windowDimensions.width > windowDimensions.height;
-    if (stableLandscape === windowLandscape) return;
-    setStableInsets({
-      top: rawInsets.top,
-      right: rawInsets.right,
-      bottom: rawInsets.bottom,
-      left: rawInsets.left,
+    setStableInsets(current => {
+      if (
+        current.top === rawInsets.top &&
+        current.right === rawInsets.right &&
+        current.bottom === rawInsets.bottom &&
+        current.left === rawInsets.left
+      ) {
+        return current;
+      }
+      return {
+        top: rawInsets.top,
+        right: rawInsets.right,
+        bottom: rawInsets.bottom,
+        left: rawInsets.left,
+      };
     });
-  }, [height, rawInsets.bottom, rawInsets.left, rawInsets.right, rawInsets.top, width, windowDimensions.height, windowDimensions.width]);
+  }, [rawInsets.bottom, rawInsets.left, rawInsets.right, rawInsets.top]);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
   const [pages, setPages] = useState<ReaderPage[]>([]);
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
   const [loadedPages, setLoadedPages] = useState<Record<number, boolean>>({});
+  const [htmlContents, setHtmlContents] = useState<Record<number, string>>({});
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -667,6 +751,10 @@ export function ReaderScreen({route, navigation}: Props) {
       const path = source?.path || page.path || '';
       const url = source?.url?.startsWith('/api/') ? source.url : pagePath(pageArchiveId, {...page, defaultSource: source || undefined});
       const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
+      const proxiedPageUri =
+        effectiveType === 'html' && path && authorized.uri
+          ? await createProxiedPageUrl(authorized.uri, path, authorized.headers)
+          : undefined;
       const displayMetadata = source?.metadata || page.metadata;
       const thumbnailPath =
         displayMetadata?.thumb?.trim() ||
@@ -679,9 +767,10 @@ export function ReaderScreen({route, navigation}: Props) {
         pageNumber: index + 1,
         sourceArchiveId: pageArchiveId,
         activeSource: source,
+        backendUri: authorized.uri,
         resolvedPath: path,
         effectiveType,
-        uri: authorized.uri,
+        uri: proxiedPageUri || authorized.uri,
         headers: authorized.headers,
         token: authorized.token,
         imageSource,
@@ -695,6 +784,7 @@ export function ReaderScreen({route, navigation}: Props) {
     setLoading(true);
     setError('');
     mediaProxyKeys.current.clear();
+    htmlLoadingKeys.current.clear();
     vlcSourceKeys.current = {};
     vlcSourceCache.current = {};
     vlcSubtitleKeys.current = {};
@@ -705,6 +795,7 @@ export function ReaderScreen({route, navigation}: Props) {
     nextArchiveCache.current = {};
     lastSavedProgressKey.current = '';
     setNextArchiveById({});
+    setHtmlContents({});
     try {
       const [storedSettings, files] = await Promise.all([
         loadReaderSettings(),
@@ -759,6 +850,63 @@ export function ReaderScreen({route, navigation}: Props) {
         });
     },
     [archiveId],
+  );
+
+  const ensureHtmlContent = useCallback(
+    async (page: ReaderPage) => {
+      if (page.effectiveType !== 'html') return;
+      const htmlUri = page.backendUri || (!page.uri?.startsWith('http://127.0.0.1') ? page.uri : '');
+      if (!htmlUri) {
+        setFailedPages(current => ({
+          ...current,
+          [page.pageNumber]: t('reader.noImageSource'),
+        }));
+        return;
+      }
+      const key = `${page.sourceArchiveId || archiveId}:${page.pageNumber}:${htmlUri}:${page.headers?.Authorization || ''}`;
+      if (htmlContents[page.pageNumber] || htmlLoadingKeys.current.has(key)) return;
+      htmlLoadingKeys.current.add(key);
+      try {
+        const response = await apiClient.get<string>(htmlUri, {
+          headers: page.headers,
+          responseType: 'text',
+          transformResponse: data => data,
+          timeout: 15000,
+        });
+        const rawHtml = typeof response.data === 'string' ? response.data : String(response.data || '');
+        const html = prepareEpubHtml(rawHtml);
+        setHtmlContents(current => ({...current, [page.pageNumber]: html}));
+        setLoadedPages(current => ({...current, [page.pageNumber]: true}));
+        setFailedPages(current => {
+          if (!current[page.pageNumber]) return current;
+          const next = {...current};
+          delete next[page.pageNumber];
+          return next;
+        });
+        appendDiagnosticLog('html.content.load', {
+          archiveId: page.sourceArchiveId || archiveId,
+          page: page.pageNumber,
+          uri: htmlUri,
+          baseUrl: page.uri,
+          path: page.resolvedPath,
+          bytes: rawHtml.length,
+        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      } catch (err) {
+        const message = extractApiError(err, 'Failed to load HTML content');
+        setFailedPages(current => ({...current, [page.pageNumber]: message}));
+        appendDiagnosticLog('html.content.error', {
+          archiveId: page.sourceArchiveId || archiveId,
+          page: page.pageNumber,
+          uri: htmlUri,
+          baseUrl: page.uri,
+          path: page.resolvedPath,
+          message,
+        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      } finally {
+        htmlLoadingKeys.current.delete(key);
+      }
+    },
+    [archiveId, htmlContents, t],
   );
 
   useEffect(() => {
@@ -1009,7 +1157,16 @@ export function ReaderScreen({route, navigation}: Props) {
       ),
     [currentPage, pages],
   );
-
+  const nearbyHtmlPages = useMemo(
+    () =>
+      pages.filter(
+        page =>
+          page.effectiveType === 'html' &&
+          Boolean(page.backendUri || page.uri) &&
+          Math.abs(page.pageNumber - currentPage) <= 1,
+      ),
+    [currentPage, pages],
+  );
   useEffect(() => {
     let cancelled = false;
     const loadSubtitles = async () => {
@@ -1593,6 +1750,8 @@ export function ReaderScreen({route, navigation}: Props) {
   useEffect(() => {
     if (!pages.length) return;
     mediaProxyKeys.current.clear();
+    htmlLoadingKeys.current.clear();
+    setHtmlContents({});
     Promise.all(pages.map((page, index) => hydratePage(page, index)))
       .then(setPages)
       .catch(err => console.warn('Failed to switch reader source:', err));
@@ -1602,6 +1761,12 @@ export function ReaderScreen({route, navigation}: Props) {
   useEffect(() => {
     nearbyMediaPages.forEach(ensureMediaProxy);
   }, [ensureMediaProxy, nearbyMediaPages]);
+
+  useEffect(() => {
+    nearbyHtmlPages.forEach(page => {
+      ensureHtmlContent(page).catch(err => console.warn('Failed to load HTML content:', err));
+    });
+  }, [ensureHtmlContent, nearbyHtmlPages]);
 
   useEffect(() => {
     if (!sidebarOpen) return;
@@ -2067,22 +2232,111 @@ export function ReaderScreen({route, navigation}: Props) {
     }
 
     if (page.effectiveType === 'html') {
+      const htmlHeight = pageHeight || height;
+      const htmlFrameStyle = frameStyle;
+      const html = htmlContents[page.pageNumber];
+      const htmlSource = html
+        ? {
+            html,
+            baseUrl: page.uri?.startsWith('http://127.0.0.1') ? page.uri : undefined,
+          }
+        : undefined;
       return (
-        <View style={frameStyle}>
-          <WebView
-            allowsBackForwardNavigationGestures
-            androidLayerType="hardware"
-            overScrollMode="never"
-            source={{uri: page.uri || '', headers: page.headers}}
-            style={styles.webView}
-            containerStyle={styles.webViewContainer}
-            onError={event => {
-              setFailedPages(current => ({
-                ...current,
-                [page.pageNumber]: event.nativeEvent.description,
-              }));
-            }}
-          />
+        <View collapsable={false} renderToHardwareTextureAndroid style={htmlFrameStyle}>
+          {htmlSource ? (
+            <WebView
+              allowsBackForwardNavigationGestures
+              androidLayerType="software"
+              domStorageEnabled={false}
+              injectedJavaScript={`
+                (function () {
+                  var style = document.createElement('style');
+                  style.textContent = [
+                    'html,body{display:block!important;visibility:visible!important;opacity:1!important;background:#fff!important;color:#111!important;writing-mode:horizontal-tb!important;}',
+                    'body{min-height:100vh!important;margin:0!important;padding:16px!important;box-sizing:border-box!important;}',
+                    'body,body *{visibility:visible!important;opacity:1!important;}',
+                    'p,div,h1,h2,h3,h4,h5,h6,li,a,span{color:#111!important;}',
+                    'img,svg,video,canvas{display:block!important;max-width:100%!important;height:auto!important;margin-left:auto!important;margin-right:auto!important;}'
+                  ].join('\\n');
+                  document.head.appendChild(style);
+                  var body = document.body;
+                  var html = document.documentElement;
+                  var first = body && body.firstElementChild;
+                  var firstRect = first ? first.getBoundingClientRect() : null;
+                  var bodyStyle = body ? window.getComputedStyle(body) : null;
+                  window.ReactNativeWebView.postMessage(JSON.stringify({
+                    kind: 'epub-dom',
+                    bodyTextLength: body ? (body.innerText || body.textContent || '').length : 0,
+                    bodyChildren: body ? body.children.length : 0,
+                    bodyScrollHeight: body ? body.scrollHeight : 0,
+                    documentScrollHeight: html ? html.scrollHeight : 0,
+                    images: document.images ? document.images.length : 0,
+                    bodyDisplay: bodyStyle ? bodyStyle.display : '',
+                    bodyVisibility: bodyStyle ? bodyStyle.visibility : '',
+                    bodyColor: bodyStyle ? bodyStyle.color : '',
+                    firstRect: firstRect ? {x:firstRect.x,y:firstRect.y,width:firstRect.width,height:firstRect.height} : null
+                  }));
+                })();
+                true;
+              `}
+              javaScriptEnabled
+              mixedContentMode="always"
+              originWhitelist={['*']}
+              overScrollMode="never"
+              source={htmlSource}
+              textZoom={100}
+              style={[styles.webView, {width: pageWidth, height: htmlHeight}]}
+              containerStyle={[styles.webViewContainer, {width: pageWidth, height: htmlHeight}]}
+              onLoadStart={event => {
+                appendDiagnosticLog('html.webview.loadStart', {
+                  archiveId: page.sourceArchiveId || archiveId,
+                  page: page.pageNumber,
+                  uri: event.nativeEvent.url,
+                  path: page.resolvedPath,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              }}
+              onLoadEnd={event => {
+                appendDiagnosticLog('html.webview.loadEnd', {
+                  archiveId: page.sourceArchiveId || archiveId,
+                  page: page.pageNumber,
+                  uri: event.nativeEvent.url,
+                  baseUrl: page.uri,
+                  path: page.resolvedPath,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              }}
+              onError={event => {
+                setFailedPages(current => ({
+                  ...current,
+                  [page.pageNumber]: event.nativeEvent.description,
+                }));
+                appendDiagnosticLog('html.webview.error', {
+                  archiveId: page.sourceArchiveId || archiveId,
+                  page: page.pageNumber,
+                  uri: event.nativeEvent.url,
+                  path: page.resolvedPath,
+                  description: event.nativeEvent.description,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              }}
+              onHttpError={event => {
+                appendDiagnosticLog('html.webview.httpError', {
+                  archiveId: page.sourceArchiveId || archiveId,
+                  page: page.pageNumber,
+                  uri: event.nativeEvent.url,
+                  statusCode: event.nativeEvent.statusCode,
+                  description: event.nativeEvent.description,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              }}
+              onMessage={event => {
+                appendDiagnosticLog('html.webview.message', {
+                  archiveId: page.sourceArchiveId || archiveId,
+                  page: page.pageNumber,
+                  data: event.nativeEvent.data,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              }}
+            />
+          ) : (
+            <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
+          )}
           {commonError ? <ErrorOverlay title={t('reader.htmlFailed')} message={commonError} /> : null}
         </View>
       );
@@ -2174,12 +2428,18 @@ export function ReaderScreen({route, navigation}: Props) {
             <View
               key={`${item.key}:${page.pageNumber}`}
               style={{width: spreadPageWidth, height: pageFrameHeight}}>
-              <ReaderTapSurface
-                onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
-                onTap={handleReaderTap}
-                style={{width: spreadPageWidth, height: pageFrameHeight}}>
-                {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
-              </ReaderTapSurface>
+              {page.effectiveType === 'html' ? (
+                <View style={{width: spreadPageWidth, height: pageFrameHeight}}>
+                  {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
+                </View>
+              ) : (
+                <ReaderTapSurface
+                  onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
+                  onTap={handleReaderTap}
+                  style={{width: spreadPageWidth, height: pageFrameHeight}}>
+                  {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
+                </ReaderTapSurface>
+              )}
             </View>
           ))}
         </View>
@@ -2206,6 +2466,13 @@ export function ReaderScreen({route, navigation}: Props) {
     }
     const page = item as ReaderPage;
     const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
+    if (page.effectiveType === 'html') {
+      return (
+        <View style={styles.webtoonItem}>
+          {renderMedia(page, width, settings.longPage ? undefined : height, true, mediaActive)}
+        </View>
+      );
+    }
     return (
       <ReaderTapSurface
         onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
@@ -2231,6 +2498,7 @@ export function ReaderScreen({route, navigation}: Props) {
           extraData={{
             currentPage,
             failedPages,
+            htmlContents,
             loadedPages,
             longPage: settings.longPage,
           }}
@@ -2253,6 +2521,12 @@ export function ReaderScreen({route, navigation}: Props) {
         <FlatList
           data={readerItems}
           decelerationRate="fast"
+          extraData={{
+            currentPage,
+            failedPages,
+            htmlContents,
+            loadedPages,
+          }}
           getItemLayout={(_, index) => ({
             length: horizontal ? width : height,
             offset: (horizontal ? width : height) * index,
