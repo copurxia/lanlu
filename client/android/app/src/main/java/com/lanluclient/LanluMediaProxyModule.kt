@@ -35,31 +35,34 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
   override fun getName(): String = "LanluMediaProxy"
 
   @ReactMethod
-  fun setSystemBarsHidden(hidden: Boolean) {
+  fun setSystemBarsHidden(hidden: Boolean, edgeToEdge: Boolean) {
     val activity = reactApplicationContext.currentActivity ?: return
     activity.runOnUiThread {
       val window = activity.window ?: return@runOnUiThread
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        window.setDecorFitsSystemWindows(false)
+        window.setDecorFitsSystemWindows(!edgeToEdge)
         val controller = window.insetsController
         if (controller != null) {
           controller.systemBarsBehavior =
               WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
           if (hidden) {
-            controller.hide(WindowInsets.Type.systemBars())
+            controller.hide(WindowInsets.Type.statusBars())
           } else {
-            controller.show(WindowInsets.Type.systemBars())
+            controller.show(WindowInsets.Type.statusBars())
           }
         }
       } else {
         val layoutFlags =
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
-                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
-                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            if (edgeToEdge) {
+              View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                  View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                  View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            } else {
+              0
+            }
         val immersiveFlags =
             if (hidden) {
-              View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
-                  View.SYSTEM_UI_FLAG_FULLSCREEN or
+              View.SYSTEM_UI_FLAG_FULLSCREEN or
                   View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
             } else {
               0

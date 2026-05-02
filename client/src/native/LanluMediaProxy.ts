@@ -2,7 +2,7 @@ import {NativeModules, Platform} from 'react-native';
 
 type LanluMediaProxyModule = {
   createUrl: (uri: string, headers?: Record<string, string>) => Promise<string>;
-  setSystemBarsHidden?: (hidden: boolean) => void;
+  setSystemBarsHidden?: (hidden: boolean, edgeToEdge: boolean) => void;
   writeTextFile?: (extension: string, text: string) => Promise<string>;
 };
 
@@ -25,7 +25,7 @@ export async function createLocalSubtitleFile(text: string, extension = 'ass') {
   return nativeProxy.writeTextFile(extension, text);
 }
 
-export function setSystemBarsHidden(hidden: boolean) {
+export function setSystemBarsHidden(hidden: boolean, edgeToEdge = true) {
   if (Platform.OS !== 'android' || !nativeProxy?.setSystemBarsHidden) return;
-  nativeProxy.setSystemBarsHidden(hidden);
+  nativeProxy.setSystemBarsHidden(hidden, edgeToEdge);
 }

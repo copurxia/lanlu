@@ -127,6 +127,38 @@ type VlcPlayerRef = {
   seek: (position: number) => void;
 };
 
+type VlcTextTrack = {
+  id: number;
+  name: string;
+};
+
+type VlcSource = {
+  uri: string;
+  isNetwork: boolean;
+  initType: number;
+  initOptions: string[];
+  mediaOptions: string[];
+};
+
+type StableVlcPlayerProps = {
+  playerKey: string;
+  playerRef: (ref: VlcPlayerRef | null) => void;
+  paused: boolean;
+  muted: boolean;
+  textTrack: number;
+  subtitleUri?: string;
+  volume: number;
+  source: VlcSource;
+  style: StyleProp<ViewStyle>;
+  onBuffering: (event: any) => void;
+  onEnd: () => void;
+  onError: (event: any) => void;
+  onLoad: (event: any) => void;
+  onPaused: () => void;
+  onPlaying: (event: any) => void;
+  onProgress: (event: VlcPlaybackEvent) => void;
+};
+
 type MediaPlaybackState = {
   currentTime: number;
   duration: number;
@@ -152,11 +184,6 @@ type SubtitleCue = {
   start: number;
   end: number;
   text: string;
-};
-
-type VlcTextTrack = {
-  id: number;
-  name: string;
 };
 
 const SUBTITLE_OFF_VALUE = -1;
@@ -416,6 +443,18 @@ function vlcSubtitlePath(subtitleUri?: string) {
   }
 }
 
+function isExternalVlcTextTrack(track: VlcTextTrack, subtitleUri?: string) {
+  const subtitlePath = vlcSubtitlePath(subtitleUri);
+  if (!subtitlePath) return false;
+  const trackName = track.name.toLowerCase();
+  const subtitleName = subtitlePath.split('/').pop()?.toLowerCase() || '';
+  return (
+    Boolean(subtitleName && trackName.includes(subtitleName)) ||
+    trackName.includes('lanlu_subtitles') ||
+    trackName.includes('subtitle-')
+  );
+}
+
 function buildVlcMediaOptions(page: ReaderPage, subtitleUri?: string) {
   const subtitlePath = vlcSubtitlePath(subtitleUri);
   if (page.vlcUri) {
@@ -436,6 +475,60 @@ function buildVlcMediaOptions(page: ReaderPage, subtitleUri?: string) {
   ];
 }
 
+const StableVlcPlayer = React.memo(
+  function StableVlcPlayer({
+    playerKey,
+    playerRef,
+    paused,
+    muted,
+    textTrack,
+    subtitleUri,
+    volume,
+    source,
+    style,
+    onBuffering,
+    onEnd,
+    onError,
+    onLoad,
+    onPaused,
+    onPlaying,
+    onProgress,
+  }: StableVlcPlayerProps) {
+    return (
+      <VLCPlayer
+        key={playerKey}
+        ref={ref => playerRef(ref as VlcPlayerRef | null)}
+        autoplay
+        acceptInvalidCertificates
+        paused={paused}
+        muted={muted}
+        textTrack={textTrack}
+        subtitleUri={subtitleUri}
+        volume={volume}
+        resizeMode="contain"
+        source={source as never}
+        style={style}
+        onBuffering={onBuffering}
+        onEnd={onEnd}
+        onError={onError}
+        onLoad={onLoad}
+        onPaused={onPaused}
+        onPlaying={onPlaying}
+        onProgress={onProgress}
+      />
+    );
+  },
+  (previous, next) =>
+    previous.playerKey === next.playerKey &&
+    previous.paused === next.paused &&
+    previous.muted === next.muted &&
+    previous.textTrack === next.textTrack &&
+    previous.subtitleUri === next.subtitleUri &&
+    previous.volume === next.volume &&
+    previous.source === next.source &&
+    previous.style === next.style,
+);
+
 export function ReaderScreen({route, navigation}: Props) {
   const {t} = useI18n();
   const {archiveId, initialPage = 1, children, childIndex, tankoubonId} = route.params;
@@ -445,14 +538,28 @@ export function ReaderScreen({route, navigation}: Props) {
     height: windowDimensions.height,
   });
   const {width, height} = stableViewport;
-  const insets = useSafeAreaInsets();
+  const rawInsets = useSafeAreaInsets();
+  const [stableInsets, setStableInsets] = useState({
+    top: rawInsets.top,
+    right: rawInsets.right,
+    bottom: rawInsets.bottom,
+    left: rawInsets.left,
+  });
   const listRef = useRef<FlatList<ReaderItem>>(null);
   const webtoonRef = useRef<FlashListRef<ReaderWebtoonItem>>(null);
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const vlcSessions = useRef<Record<number, {target?: number; playable: boolean; ignoredProgress: number}>>({});
   const vlcSourceKeys = useRef<Record<number, string>>({});
+  const vlcSourceCache = useRef<Record<number, {key: string; source: VlcSource} | undefined>>({});
+  const vlcSubtitleKeys = useRef<Record<number, string | undefined>>({});
+  const vlcResumeAfterReload = useRef<Record<number, number | undefined>>({});
+  const vlcResumeTimers = useRef<Record<number, ReturnType<typeof setTimeout> | undefined>>({});
+  const embeddedVlcSubtitleTrackBaseline = useRef<Record<number, VlcTextTrack[] | undefined>>({});
+  const externalVlcSubtitleTrackIds = useRef<Record<number, number[] | undefined>>({});
   const vlcBufferLogBuckets = useRef<Record<number, number>>({});
   const mediaLastSeekAt = useRef<Record<number, number>>({});
+  const mediaLastProgressUiAt = useRef<Record<number, number>>({});
+  const mediaLastBufferUiAt = useRef<Record<number, number>>({});
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const pendingLocalSubtitleByAssetId = useRef<Record<number, Promise<string | undefined> | undefined>>({});
@@ -469,8 +576,7 @@ export function ReaderScreen({route, navigation}: Props) {
       const currentLandscape = current.width > current.height;
       const nextLandscape = windowDimensions.width > windowDimensions.height;
       const widthDelta = Math.abs(windowDimensions.width - current.width);
-      const heightDelta = Math.abs(windowDimensions.height - current.height);
-      if (currentLandscape !== nextLandscape || widthDelta > 120 || heightDelta > 120) {
+      if (currentLandscape !== nextLandscape || widthDelta > 120) {
         return {
           width: windowDimensions.width,
           height: windowDimensions.height,
@@ -479,6 +585,18 @@ export function ReaderScreen({route, navigation}: Props) {
       return current;
     });
   }, [windowDimensions.height, windowDimensions.width]);
+
+  useEffect(() => {
+    const stableLandscape = width > height;
+    const windowLandscape = windowDimensions.width > windowDimensions.height;
+    if (stableLandscape === windowLandscape) return;
+    setStableInsets({
+      top: rawInsets.top,
+      right: rawInsets.right,
+      bottom: rawInsets.bottom,
+      left: rawInsets.left,
+    });
+  }, [height, rawInsets.bottom, rawInsets.left, rawInsets.right, rawInsets.top, width, windowDimensions.height, windowDimensions.width]);
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
@@ -578,7 +696,11 @@ export function ReaderScreen({route, navigation}: Props) {
     setError('');
     mediaProxyKeys.current.clear();
     vlcSourceKeys.current = {};
+    vlcSourceCache.current = {};
+    vlcSubtitleKeys.current = {};
     vlcSessions.current = {};
+    mediaLastProgressUiAt.current = {};
+    mediaLastBufferUiAt.current = {};
     appendedArchiveIds.current = new Set([archiveId]);
     nextArchiveCache.current = {};
     lastSavedProgressKey.current = '';
@@ -1251,10 +1373,20 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [chromeVisible, currentPage, settings.autoHide, settingsOpen]);
 
   useEffect(() => {
-    setSystemBarsHidden(settings.autoHide && !chromeVisible);
-  }, [chromeVisible, settings.autoHide]);
+    const landscape = width > height;
+    setSystemBarsHidden(landscape && settings.autoHide && !chromeVisible, true);
+  }, [chromeVisible, height, settings.autoHide, width]);
 
-  useEffect(() => () => setSystemBarsHidden(false), []);
+  useEffect(() => {
+    setSystemBarsHidden(false, true);
+    return () => {
+      Object.values(vlcResumeTimers.current).forEach(timer => {
+        if (timer) clearTimeout(timer);
+      });
+      vlcResumeTimers.current = {};
+      setSystemBarsHidden(false, false);
+    };
+  }, []);
 
   useEffect(() => {
     if (settings.autoHide) return;
@@ -1379,7 +1511,7 @@ export function ReaderScreen({route, navigation}: Props) {
     [],
   );
 
-  function seekMedia(page: ReaderPage, seconds: number) {
+  function seekMedia(page: ReaderPage, seconds: number, reason = 'manual') {
     const state = getMediaState(page.pageNumber);
     const session = vlcSessions.current[page.pageNumber];
     const duration = state.duration;
@@ -1391,6 +1523,17 @@ export function ReaderScreen({route, navigation}: Props) {
     const position = Math.max(0, Math.min(1, nextTime / duration));
     vlcRefs.current[page.pageNumber]?.seek(position);
     setMediaState(page.pageNumber, {currentTime: nextTime, position});
+    appendDiagnosticLog('media.seek', {
+      archiveId,
+      page: page.pageNumber,
+      type: page.effectiveType,
+      reason,
+      seconds,
+      nextTime,
+      duration,
+      position,
+      target: session.target,
+    }).catch(err => console.warn('Failed to write diagnostic log:', err));
   }
 
   function toggleChrome() {
@@ -1593,6 +1736,21 @@ export function ReaderScreen({route, navigation}: Props) {
       );
       const externalVlcSubtitleUri = externalVlcSubtitleUriByPage[page.pageNumber];
       const mediaOptions = buildVlcMediaOptions(page, externalVlcSubtitleUri);
+      const vlcSourceCacheKey = `${mediaUri}|${mediaOptions.join('\u0001')}`;
+      let vlcSource = vlcSourceCache.current[page.pageNumber];
+      if (vlcSource?.key !== vlcSourceCacheKey) {
+        vlcSource = {
+          key: vlcSourceCacheKey,
+          source: {
+            uri: mediaUri,
+            isNetwork: Boolean(mediaUri.startsWith('http')),
+            initType: 2,
+            initOptions: ['--network-caching=600', ''],
+            mediaOptions,
+          },
+        };
+        vlcSourceCache.current[page.pageNumber] = vlcSource;
+      }
       const overlaySubtitleAttachments = externalVlcSubtitleUri
         ? pageSubtitleAttachments.filter(attachment => !isAssSubtitleAttachment(attachment))
         : pageSubtitleAttachments;
@@ -1601,9 +1759,30 @@ export function ReaderScreen({route, navigation}: Props) {
         subtitleTextsByAssetId,
         mediaState.currentTime,
       );
-      const vlcSourceKey = `${mediaUri}|subtitle:${externalVlcSubtitleUri || ''}`;
+      const vlcSourceKey = mediaUri;
+      const vlcSubtitleKey = externalVlcSubtitleUri || '';
       if (vlcSourceKeys.current[page.pageNumber] !== vlcSourceKey) {
+        if (vlcResumeTimers.current[page.pageNumber]) {
+          clearTimeout(vlcResumeTimers.current[page.pageNumber]);
+          vlcResumeTimers.current[page.pageNumber] = undefined;
+        }
         vlcSourceKeys.current[page.pageNumber] = vlcSourceKey;
+        vlcSubtitleKeys.current[page.pageNumber] = vlcSubtitleKey;
+        vlcSessions.current[page.pageNumber] = {
+          playable: false,
+          ignoredProgress: 0,
+        };
+        embeddedVlcSubtitleTrackBaseline.current[page.pageNumber] = undefined;
+        externalVlcSubtitleTrackIds.current[page.pageNumber] = undefined;
+      } else if (vlcSubtitleKeys.current[page.pageNumber] !== vlcSubtitleKey) {
+        if (mediaState.currentTime > 1) {
+          vlcResumeAfterReload.current[page.pageNumber] = mediaState.currentTime;
+        }
+        if (vlcResumeTimers.current[page.pageNumber]) {
+          clearTimeout(vlcResumeTimers.current[page.pageNumber]);
+          vlcResumeTimers.current[page.pageNumber] = undefined;
+        }
+        vlcSubtitleKeys.current[page.pageNumber] = vlcSubtitleKey;
         vlcSessions.current[page.pageNumber] = {
           playable: false,
           ignoredProgress: 0,
@@ -1627,33 +1806,28 @@ export function ReaderScreen({route, navigation}: Props) {
       }
       return (
         <View style={frameStyle}>
-          <VLCPlayer
-            key={vlcSourceKey}
-            ref={ref => {
-              vlcRefs.current[page.pageNumber] = ref as VlcPlayerRef | null;
+          <StableVlcPlayer
+            playerKey={vlcSourceKey}
+            playerRef={ref => {
+              vlcRefs.current[page.pageNumber] = ref;
             }}
-            autoplay
-            acceptInvalidCertificates
             paused={mediaState.paused}
             muted={mediaState.muted}
             textTrack={pageEmbeddedSubtitleTrack ?? -1}
-            subtitleUri={externalVlcSubtitleUri}
+            subtitleUri={vlcSubtitlePath(externalVlcSubtitleUri)}
             volume={Math.round(Math.max(0, Math.min(1, mediaState.volume)) * 100)}
-            resizeMode="contain"
-            source={
-              {
-                uri: mediaUri,
-                isNetwork: Boolean(mediaUri.startsWith('http')),
-                initType: 2,
-                initOptions: ['--network-caching=600', ''],
-                mediaOptions,
-              } as never
-            }
+            source={vlcSource.source}
             style={page.effectiveType === 'audio' ? styles.audioStage : styles.pageImage}
             onBuffering={event => {
               const buffered = normalizeVlcBufferRate(event);
               const bucket = Math.floor(buffered * 10);
-              if (vlcBufferLogBuckets.current[page.pageNumber] !== bucket || buffered >= 1) {
+              const now = Date.now();
+              const lastBufferUiAt = mediaLastBufferUiAt.current[page.pageNumber] || 0;
+              const previousBuffered = getMediaState(page.pageNumber).buffered;
+              if (
+                vlcBufferLogBuckets.current[page.pageNumber] !== bucket &&
+                now - lastBufferUiAt >= 250
+              ) {
                 vlcBufferLogBuckets.current[page.pageNumber] = bucket;
                 appendDiagnosticLog('vlc.buffering', {
                   archiveId,
@@ -1663,7 +1837,14 @@ export function ReaderScreen({route, navigation}: Props) {
                   event,
                 }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               }
-              setMediaState(page.pageNumber, {buffered});
+              if (
+                now - lastBufferUiAt >= 500 ||
+                Math.abs(buffered - previousBuffered) >= 0.25 ||
+                (buffered >= 1 && previousBuffered < 1)
+              ) {
+                mediaLastBufferUiAt.current[page.pageNumber] = now;
+                setMediaState(page.pageNumber, {buffered});
+              }
             }}
             onEnd={() => {
               setMediaState(page.pageNumber, {paused: true});
@@ -1692,7 +1873,7 @@ export function ReaderScreen({route, navigation}: Props) {
               }));
             }}
             onLoad={event => {
-              const tracks = Array.isArray((event as any).textTracks)
+              const vlcTracks = Array.isArray((event as any).textTracks)
                 ? ((event as any).textTracks as Array<{id?: number | string; name?: string}>)
                     .map(track => ({
                       id: Number(track.id),
@@ -1700,6 +1881,28 @@ export function ReaderScreen({route, navigation}: Props) {
                     }))
                     .filter(track => Number.isFinite(track.id) && track.id >= 0)
                 : [];
+              const knownExternalTrackIds = new Set(externalVlcSubtitleTrackIds.current[page.pageNumber] || []);
+              const knownEmbeddedTracks = embeddedSubtitleTracksByPage[page.pageNumber] || [];
+              const namedExternalTrackIds = vlcTracks
+                .filter(track => isExternalVlcTextTrack(track, externalVlcSubtitleUri))
+                .map(track => track.id);
+              const cleanVlcTracks = vlcTracks.filter(
+                track => !knownExternalTrackIds.has(track.id) && !namedExternalTrackIds.includes(track.id),
+              );
+              let embeddedTracks = cleanVlcTracks;
+              if (externalVlcSubtitleUri) {
+                const baseline = embeddedVlcSubtitleTrackBaseline.current[page.pageNumber] || knownEmbeddedTracks;
+                const baselineIds = new Set(baseline.map(track => track.id));
+                const externalTrackIds = vlcTracks
+                  .filter(track => !baselineIds.has(track.id) || namedExternalTrackIds.includes(track.id))
+                  .map(track => track.id);
+                externalVlcSubtitleTrackIds.current[page.pageNumber] = Array.from(
+                  new Set([...(externalVlcSubtitleTrackIds.current[page.pageNumber] || []), ...externalTrackIds]),
+                );
+                embeddedTracks = baseline.filter(track => vlcTracks.some(vlcTrack => vlcTrack.id === track.id));
+              } else {
+                embeddedVlcSubtitleTrackBaseline.current[page.pageNumber] = cleanVlcTracks;
+              }
               appendDiagnosticLog('vlc.load', {
                 archiveId,
                 page: page.pageNumber,
@@ -1710,7 +1913,9 @@ export function ReaderScreen({route, navigation}: Props) {
                 mediaOptions,
                 path: page.resolvedPath,
                 duration: event.duration,
-                textTracks: tracks,
+                textTracks: vlcTracks,
+                embeddedTextTracks: embeddedTracks,
+                externalTextTrackIds: externalVlcSubtitleTrackIds.current[page.pageNumber] || [],
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
                 duration: normalizeVlcSeconds(event.duration),
@@ -1718,14 +1923,15 @@ export function ReaderScreen({route, navigation}: Props) {
               setEmbeddedSubtitleTracksByPage(current => {
                 const previous = current[page.pageNumber] || [];
                 const same =
-                  previous.length === tracks.length &&
-                  previous.every((track, index) => track.id === tracks[index]?.id && track.name === tracks[index]?.name);
+                  previous.length === embeddedTracks.length &&
+                  previous.every((track, index) => track.id === embeddedTracks[index]?.id && track.name === embeddedTracks[index]?.name);
                 if (same) return current;
-                return {...current, [page.pageNumber]: tracks};
+                return {...current, [page.pageNumber]: embeddedTracks};
               });
             }}
             onPaused={() => setMediaState(page.pageNumber, {paused: true})}
             onPlaying={event => {
+              const resumeTime = vlcResumeAfterReload.current[page.pageNumber];
               const duration = normalizeVlcSeconds(event.duration);
               vlcSessions.current[page.pageNumber] = {
                 target: event.target,
@@ -1739,11 +1945,31 @@ export function ReaderScreen({route, navigation}: Props) {
                 target: event.target,
                 duration: event.duration,
                 subtitleUri: externalVlcSubtitleUri,
+                resumeTime,
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
                 duration,
                 paused: false,
               });
+              if (resumeTime && duration > 0 && !vlcResumeTimers.current[page.pageNumber]) {
+                vlcResumeTimers.current[page.pageNumber] = setTimeout(() => {
+                  vlcResumeTimers.current[page.pageNumber] = undefined;
+                  if (vlcResumeAfterReload.current[page.pageNumber] !== resumeTime) return;
+                  vlcResumeAfterReload.current[page.pageNumber] = undefined;
+                  const nextTime = Math.max(0, Math.min(duration, resumeTime));
+                  const position = Math.max(0, Math.min(1, nextTime / duration));
+                  vlcRefs.current[page.pageNumber]?.seek(position);
+                  setMediaState(page.pageNumber, {currentTime: nextTime, position});
+                  appendDiagnosticLog('vlc.resumeAfterSubtitle', {
+                    archiveId,
+                    page: page.pageNumber,
+                    type: page.effectiveType,
+                    resumeTime,
+                    position,
+                    subtitleUri: externalVlcSubtitleUri,
+                  }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                }, 800);
+              }
             }}
             onProgress={(event: VlcPlaybackEvent) => {
               const session = vlcSessions.current[page.pageNumber];
@@ -1772,6 +1998,18 @@ export function ReaderScreen({route, navigation}: Props) {
               }
               const progress = normalizeVlcProgress(event);
               if (progress.duration <= 0 || progress.currentTime > progress.duration + 1) return;
+              const now = Date.now();
+              const previous = getMediaState(page.pageNumber);
+              const lastUiAt = mediaLastProgressUiAt.current[page.pageNumber] || 0;
+              const currentTimeDelta = Math.abs(progress.currentTime - previous.currentTime);
+              const durationDelta = Math.abs(progress.duration - previous.duration);
+              const shouldUpdateUi =
+                now - lastUiAt >= 250 ||
+                currentTimeDelta >= 0.5 ||
+                durationDelta >= 0.5 ||
+                Math.abs(progress.position - previous.position) >= 0.01;
+              if (!shouldUpdateUi) return;
+              mediaLastProgressUiAt.current[page.pageNumber] = now;
               setMediaState(page.pageNumber, progress);
             }}
           />
@@ -1785,7 +2023,7 @@ export function ReaderScreen({route, navigation}: Props) {
               accessibilityLabel={t('reader.seekBack')}
               accessibilityRole="button"
               activeOpacity={0.82}
-              onPress={() => seekMedia(page, mediaState.currentTime - 5)}
+              onPress={() => seekMedia(page, mediaState.currentTime - 5, 'overlay-back')}
               style={styles.mediaSeekButton}>
               <Rewind color={colors.white} size={22} />
             </TouchableOpacity>
@@ -1809,7 +2047,7 @@ export function ReaderScreen({route, navigation}: Props) {
               accessibilityLabel={t('reader.seekForward')}
               accessibilityRole="button"
               activeOpacity={0.82}
-              onPress={() => seekMedia(page, mediaState.currentTime + 5)}
+              onPress={() => seekMedia(page, mediaState.currentTime + 5, 'overlay-forward')}
               style={styles.mediaSeekButton}>
               <FastForward color={colors.white} size={22} />
             </TouchableOpacity>
@@ -1984,7 +2222,6 @@ export function ReaderScreen({route, navigation}: Props) {
         animated
         backgroundColor="transparent"
         barStyle="light-content"
-        hidden={false}
         translucent
       />
       {settings.readingMode === 'webtoon' ? (
@@ -2057,7 +2294,7 @@ export function ReaderScreen({route, navigation}: Props) {
 
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
-        style={[styles.topBar, {paddingTop: insets.top + 8}, topBarAnimatedStyle]}>
+        style={[styles.topBar, {paddingTop: stableInsets.top + 8}, topBarAnimatedStyle]}>
           <View style={styles.topBarGroup}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
               <ChevronLeft color={colors.white} size={24} />
@@ -2085,7 +2322,7 @@ export function ReaderScreen({route, navigation}: Props) {
       </Animated.View>
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
-        style={[styles.bottomBar, {paddingBottom: insets.bottom + 10}, bottomBarAnimatedStyle]}>
+        style={[styles.bottomBar, {paddingBottom: stableInsets.bottom + 10}, bottomBarAnimatedStyle]}>
             <View style={styles.laneShell}>
               <View style={styles.laneRow}>
                 {lanes.map(lane => {
@@ -2137,9 +2374,13 @@ export function ReaderScreen({route, navigation}: Props) {
                             onOpenSourceSheet={() => handleOpenSourceSheet(activeLane.page)}
                             onOpenSubtitleSheet={() => setSubtitleSheetOpen(true)}
                             onOpenVolumeSheet={() => setVolumeSheetPageId(activeLane.page.pageNumber)}
-                            onSeek={seconds => seekMedia(activeLane.page, seconds)}
+                            onSeek={seconds => seekMedia(activeLane.page, seconds, 'lane-timeline')}
                             onSeekRelative={seconds =>
-                              seekMedia(activeLane.page, getMediaState(activeLane.page.pageNumber).currentTime + seconds)
+                              seekMedia(
+                                activeLane.page,
+                                getMediaState(activeLane.page.pageNumber).currentTime + seconds,
+                                seconds < 0 ? 'lane-back' : 'lane-forward',
+                              )
                             }
                             onToggleMute={() =>
                               setMediaState(activeLane.page.pageNumber, {
@@ -2221,9 +2462,9 @@ export function ReaderScreen({route, navigation}: Props) {
         visible={Boolean(volumeSheetPage && volumeSheetState)}>
         <ModalBackdrop style={[styles.modalBackdrop, styles.volumePopoverBackdrop]}>
           <TouchableOpacity activeOpacity={1} onPress={() => setVolumeSheetPageId(null)} style={StyleSheet.absoluteFill} />
-          {volumeSheetPage && volumeSheetState ? (
-            <VolumeStrip
-              bottomOffset={insets.bottom + 72}
+            {volumeSheetPage && volumeSheetState ? (
+              <VolumeStrip
+              bottomOffset={stableInsets.bottom + 72}
               pageNumber={volumeSheetPage.pageNumber}
               state={volumeSheetState}
               t={t}
