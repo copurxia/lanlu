@@ -1610,7 +1610,7 @@ public class WasmHostBridge {
     }
 
     private static func handleArchiveExportEntries(ctx: WasmHostCallContext): (Bool, String, String) {
-        let (allowed, err) = ensureHostCapability(ctx.executionId, ["archive.export_entries"], "archive.export_entries")
+        let (allowed, err) = ensureHostCapability(ctx.executionId, ["archive.export_entries", "archive.read_entry_bytes"], "archive.export_entries")
         if (!allowed) { return (false, "{}", err) }
 
         let (archiveId, entries, levelsUpRaw) = parseArchiveExportEntriesParams(ctx.effectiveParams)
@@ -2233,7 +2233,10 @@ public class WasmHostBridge {
 
             match (handler) {
                 case Some(h) =>
-                    exportedOk = h.extractEntryToFile(actualPath, safeRelPath, outputPath)
+                    exportedOk = exportEntryToFileStreaming(h, actualPath, safeRelPath, outputPath)
+                    if (!exportedOk) {
+                        exportedOk = h.extractEntryToFile(actualPath, safeRelPath, outputPath)
+                    }
                 case None => ()
             }
 
@@ -2275,6 +2278,41 @@ public class WasmHostBridge {
         w.endObject()
         w.flush()
         return (true, String.fromUtf8(readToEnd(out)), "")
+    }
+
+    private static func exportEntryToFileStreaming(handler: ArchiveHandler, archivePath: String, entryName: String, outputPath: String): Bool {
+        let (readerExitCode, readerOpt, _) = handler.getEntryReader(archivePath, entryName)
+        if (readerExitCode != 0) {
+            return false
+        }
+
+        match (readerOpt) {
+            case Some(reader) =>
+                try {
+                    let outputDir = FileUtils.getParentDirectory(outputPath)
+                    if (outputDir.size > 0) {
+                        FileUtils.ensureDirectoryExists(Path(outputDir))
+                    }
+
+                    try (file = File(Path(outputPath), Write)) {
+                        let bufSize: Int64 = 1024 * 1024
+                        var buf = Array<Byte>(bufSize, repeat: 0)
+                        while (true) {
+                            let n = reader.read(buf)
+                            if (n <= 0) {
+                                break
+                            }
+                            file.write(buf[0..n])
+                        }
+                    }
+                    return true
+                } catch (_: Exception) {
+                    return false
+                } finally {
+                    try { reader.close() } catch (_: Exception) {}
+                }
+            case None => return false
+        }
     }
 
     private static func ensureUnderRuntimeRoot(pluginDir: String): Bool {
