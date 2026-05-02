@@ -112,6 +112,7 @@ type ReaderPage = PageInfo & {
   token?: string;
   resolvedPath?: string;
   effectiveType: 'image' | 'video' | 'audio' | 'html';
+  hydratedSourceIndex?: number;
 };
 
 const EPUB_HTML_INJECTION = `
@@ -757,6 +758,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const audioLyricSnapshots = useRef<Record<number, AudioLyricSnapshot | undefined>>({});
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
+  const hydratingPageKeys = useRef<Set<string>>(new Set());
   const pendingLocalSubtitleByAssetId = useRef<Record<number, Promise<string | undefined> | undefined>>({});
   const htmlLoadingKeys = useRef<Set<string>>(new Set());
   const appendedArchiveIds = useRef<Set<string>>(new Set());
@@ -869,8 +871,8 @@ export function ReaderScreen({route, navigation}: Props) {
     transform: [{translateY: (1 - chromeProgress.value) * 18}],
   }));
 
-  const hydratePage = useCallback(
-    async (page: PageInfo, index: number, pageArchiveId = archiveId): Promise<ReaderPage> => {
+  const createReaderPage = useCallback(
+    (page: PageInfo, index: number, pageArchiveId = archiveId): ReaderPage => {
       const sourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
       const sources = Array.isArray(page.sources) ? page.sources : [];
       const source =
@@ -879,6 +881,25 @@ export function ReaderScreen({route, navigation}: Props) {
           : getPageDefaultSource(page);
       const effectiveType = source?.type || page.type || 'image';
       const path = source?.path || page.path || '';
+      return {
+        ...page,
+        pageNumber: index + 1,
+        sourceArchiveId: pageArchiveId,
+        activeSource: source,
+        resolvedPath: path,
+        effectiveType,
+      };
+    },
+    [archiveId, sourceIndexByPage],
+  );
+
+  const hydratePage = useCallback(
+    async (page: PageInfo, index: number, pageArchiveId = archiveId): Promise<ReaderPage> => {
+      const basePage = createReaderPage(page, index, pageArchiveId);
+      const sourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
+      const source = basePage.activeSource;
+      const effectiveType = basePage.effectiveType;
+      const path = basePage.resolvedPath || '';
       const url = source?.url?.startsWith('/api/') ? source.url : pagePath(pageArchiveId, {...page, defaultSource: source || undefined});
       const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
       const proxiedPageUri =
@@ -893,21 +914,17 @@ export function ReaderScreen({route, navigation}: Props) {
       const imageSource = effectiveType === 'image' && authorized.uri ? await buildAuthorizedImageSource_(url) : undefined;
       const thumbnailSource = thumbnailPath ? await buildAuthorizedImageSource_(thumbnailPath) : imageSource;
       return {
-        ...page,
-        pageNumber: index + 1,
-        sourceArchiveId: pageArchiveId,
-        activeSource: source,
+        ...basePage,
         backendUri: authorized.uri,
-        resolvedPath: path,
-        effectiveType,
         uri: proxiedPageUri || authorized.uri,
         headers: authorized.headers,
         token: authorized.token,
         imageSource,
         thumbnailSource,
+        hydratedSourceIndex: sourceIndex,
       };
     },
-    [archiveId, sourceIndexByPage],
+    [archiveId, createReaderPage, sourceIndexByPage],
   );
 
   const load = useCallback(async () => {
@@ -915,6 +932,7 @@ export function ReaderScreen({route, navigation}: Props) {
     setError('');
     mediaProxyKeys.current.clear();
     htmlLoadingKeys.current.clear();
+    hydratingPageKeys.current.clear();
     vlcSourceKeys.current = {};
     vlcSourceCache.current = {};
     vlcSubtitleKeys.current = {};
@@ -938,17 +956,17 @@ export function ReaderScreen({route, navigation}: Props) {
       ]);
       setSettings(storedSettings);
       settingsHydratedRef.current = true;
-      const hydrated = await Promise.all(files.map((page, index) => hydratePage(page, index, archiveId)));
-      setPages(hydrated);
-      setSidebarPages(hydrated);
-      const startIndex = Math.max(0, Math.min(initialPage - 1, hydrated.length - 1));
+      const readerPages = files.map((page, index) => createReaderPage(page, index, archiveId));
+      setPages(readerPages);
+      setSidebarPages(readerPages);
+      const startIndex = Math.max(0, Math.min(initialPage - 1, readerPages.length - 1));
       setCurrentPage(startIndex + 1);
     } catch (err) {
       setError(extractApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [archiveId, hydratePage, initialPage]);
+  }, [archiveId, createReaderPage, initialPage]);
 
   const ensureMediaProxy = useCallback(
     (page: ReaderPage) => {
@@ -1046,7 +1064,9 @@ export function ReaderScreen({route, navigation}: Props) {
 
   useEffect(() => {
     load().catch(err => console.warn('Failed to load reader:', err));
-  }, [load]);
+    // The archive should reload only when route identity changes; source switches are hydrated in-place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [archiveId, initialPage]);
 
   useEffect(() => {
     if (!settingsHydratedRef.current) return;
@@ -1553,9 +1573,9 @@ export function ReaderScreen({route, navigation}: Props) {
       const files = await fetchArchiveFiles(candidate.id);
       if (!files.length) return false;
       const start = pages.length;
-      const hydrated = await Promise.all(files.map((page, index) => hydratePage(page, start + index, candidate.id)));
+      const readerPages = files.map((page, index) => createReaderPage(page, start + index, candidate.id));
       appendedArchiveIds.current.add(candidate.id);
-      setPages(current => [...current, ...hydrated]);
+      setPages(current => [...current, ...readerPages]);
       setCurrentPage(start + 1);
       return true;
     } catch (err) {
@@ -1567,7 +1587,7 @@ export function ReaderScreen({route, navigation}: Props) {
     } finally {
       setAppendingNext(false);
     }
-  }, [appendingNext, hydratePage, pages.length, resolveNextArchiveCandidate, settings.seamlessNext, tailArchiveId]);
+  }, [appendingNext, createReaderPage, pages.length, resolveNextArchiveCandidate, settings.seamlessNext, tailArchiveId]);
 
   useEffect(() => {
     if (!settings.seamlessNext || !tailArchiveId || nextArchiveById[tailArchiveId] !== undefined) return;
@@ -1745,6 +1765,33 @@ export function ReaderScreen({route, navigation}: Props) {
 
   function handleSelectSource(value: number) {
     if (sourceSheetPageId == null) return;
+    const pageNumber = sourceSheetPageId;
+    mediaProxyKeys.current.clear();
+    htmlLoadingKeys.current.clear();
+    setLoadedPages(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setFailedPages(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setHtmlContents(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setHtmlHeights(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
     setSourceIndexByPage(prev => ({...prev, [sourceSheetPageId - 1]: value}));
     setSourceSheetOpen(false);
     setSourceSheetPageId(null);
@@ -1974,15 +2021,39 @@ export function ReaderScreen({route, navigation}: Props) {
 
   useEffect(() => {
     if (!pages.length) return;
-    mediaProxyKeys.current.clear();
-    htmlLoadingKeys.current.clear();
-    setHtmlContents({});
-    setHtmlHeights({});
-    Promise.all(pages.map((page, index) => hydratePage(page, index)))
-      .then(setPages)
-      .catch(err => console.warn('Failed to switch reader source:', err));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sourceIndexByPage]);
+    pages
+      .filter(page => Math.abs(page.pageNumber - currentPage) <= 2 || page.pageNumber === sourceSheetPageId)
+      .forEach(page => {
+        const index = page.pageNumber - 1;
+        const desiredSourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
+        const needsHydration =
+          page.hydratedSourceIndex !== desiredSourceIndex ||
+          !page.uri ||
+          (page.effectiveType === 'image' && !page.imageSource) ||
+          (page.effectiveType === 'html' && !page.backendUri);
+        if (!needsHydration) return;
+        const key = `${page.sourceArchiveId}:${page.pageNumber}:${desiredSourceIndex}:${page.activeSource?.id || page.id}`;
+        if (hydratingPageKeys.current.has(key)) return;
+        hydratingPageKeys.current.add(key);
+        hydratePage(page, index, page.sourceArchiveId)
+          .then(hydrated => {
+            setPages(current =>
+              current.map(item =>
+                item.pageNumber === hydrated.pageNumber && item.sourceArchiveId === hydrated.sourceArchiveId
+                  ? {
+                      ...hydrated,
+                      vlcUri: item.uri && item.uri === hydrated.uri ? item.vlcUri : undefined,
+                    }
+                  : item,
+              ),
+            );
+          })
+          .catch(err => console.warn('Failed to hydrate reader page:', err))
+          .finally(() => {
+            hydratingPageKeys.current.delete(key);
+          });
+      });
+  }, [currentPage, hydratePage, pages, sourceIndexByPage, sourceSheetPageId]);
 
   useEffect(() => {
     nearbyMediaPages.forEach(ensureMediaProxy);
@@ -2130,6 +2201,13 @@ export function ReaderScreen({route, navigation}: Props) {
     if (page.effectiveType === 'video' || page.effectiveType === 'audio') {
       const mediaState = getMediaState(page.pageNumber);
       const mediaUri = page.vlcUri || page.uri || '';
+      if (!mediaUri) {
+        return (
+          <View style={mediaFrameStyle}>
+            <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
+          </View>
+        );
+      }
       const waitingForProxy = Boolean(page.headers?.Authorization && !page.vlcUri);
       const pageEmbeddedSubtitleTrack = activeEmbeddedSubtitleTrackByPage[page.pageNumber];
       const pageSubtitleIndexes = activeSubtitleIndexesByPage[page.pageNumber] || [];
@@ -3112,7 +3190,11 @@ export function ReaderScreen({route, navigation}: Props) {
             ) : null}
           </>
         ) : (
-          <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
+          !page.uri && !commonError ? (
+            <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
+          ) : (
+            <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
+          )
         )}
       </View>
     );

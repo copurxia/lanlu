@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -75,7 +74,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   const [coverCache, setCoverCache] = useState<Record<string, FastImageSource | null>>({});
 
   // Dialogs
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<Archive | null>(null);
   const [removingArcids, setRemovingArcids] = useState<Set<string>>(new Set());
@@ -132,6 +130,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         .filter((item): item is Archive => 'arcid' in item)
         .map(item => item as Archive);
       setArchives(items);
+      setArchivesLoading(false);
 
       // Load covers
       const cache: Record<string, FastImageSource | null> = {};
@@ -167,10 +166,8 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   }, [loadMetadata]);
 
   useEffect(() => {
-    if (metadata) {
-      loadArchives().catch(err => console.warn('Failed to load archives:', err));
-    }
-  }, [metadata, loadArchives]);
+    loadArchives().catch(err => console.warn('Failed to load archives:', err));
+  }, [loadArchives]);
 
   useEffect(() => {
     loadRelated().catch(err => console.warn('Failed to load related:', err));
@@ -197,6 +194,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     }),
     [metadata, tankoubon, tankoubonId],
   );
+  const readerChildren = useMemo(() => archives.map(item => item.arcid), [archives]);
 
   const handleFavoriteToggle = useCallback(async () => {
     const next = !favorite;
@@ -276,10 +274,16 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           return next;
         });
       } else {
-        navigation.push('ArchiveDetail', {archiveId: item.arcid, archive: item});
+        navigation.push('ArchiveDetail', {
+          archiveId: item.arcid,
+          archive: item,
+          tankoubonId,
+          children: readerChildren,
+          childIndex: readerChildren.indexOf(item.arcid),
+        });
       }
     },
-    [selectionMode, navigation],
+    [selectionMode, navigation, readerChildren, tankoubonId],
   );
 
   const handleArchiveLongPress = useCallback(
@@ -324,7 +328,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         String(a.filename || '').toLowerCase().includes(q),
     );
   }, [archives, archiveFilter]);
-
   const tags = useMemo(() => {
     return Array.isArray(merged.tags)
       ? merged.tags.map(tag => String(tag || '').trim()).filter(Boolean)

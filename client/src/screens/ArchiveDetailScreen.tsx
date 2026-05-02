@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
-import {ArrowLeft, Heart} from 'lucide-react-native';
+import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
@@ -44,7 +44,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const {language, t} = useI18n();
   const insets = useSafeAreaInsets();
   const {user, status: authStatus} = useAuth();
-  const {archiveId, archive} = route.params;
+  const {archiveId, archive, tankoubonId, children, childIndex} = route.params;
   const [metadata, setMetadata] = useState<ArchiveMetadata | null>(null);
   const [cover, setCover] = useState<FastImageSource | null>(null);
   const [backdrop, setBackdrop] = useState<FastImageSource | null>(null);
@@ -282,6 +282,9 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
           navigation.navigate('Reader', {
             archiveId,
             initialPage: resumePage,
+            tankoubonId,
+            children,
+            childIndex,
           })
         }
         onDownload={handleDownload}
