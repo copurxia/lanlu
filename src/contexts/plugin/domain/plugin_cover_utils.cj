@@ -225,7 +225,17 @@ public class PluginCoverUtils {
             return PluginAssetInstallResult.Err("cover conversion failed: ${convertResult.error}")
         }
 
+        if (!exists(Path(tempAvifPath))) {
+            try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
+            return PluginAssetInstallResult.Err("cover conversion failed: converted file was not created")
+        }
+
         let avifSize = try { Int64(FileInfo(Path(tempAvifPath)).size) } catch (_: Exception) { 0 }
+        if (avifSize <= 0) {
+            try { let _ = FileUtils.removeFileOrDirectory(tempDir) } catch (_: Exception) {}
+            return PluginAssetInstallResult.Err("cover conversion failed: converted file is empty")
+        }
+
         match (AssetDao.create(None, assetKind, originalName, "image/avif", "avif", avifSize, thumbHash)) {
             case Some(assetId) =>
                 let finalPath = FileUtils.joinPath(assetPath, "${assetId}.avif")
