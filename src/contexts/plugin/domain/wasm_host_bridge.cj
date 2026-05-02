@@ -799,6 +799,7 @@ public class WasmHostBridge {
         registerHostMethod("archive.exportEntries", { ctx => handleArchiveExportEntries(ctx) })
         registerHostMethod("archive.export_cover_for_search", { ctx => handleHostArchiveExportCoverForSearch(ctx) })
         registerHostMethod("tankoubon.list_archives", { ctx => handleTankoubonListArchives(ctx) })
+        registerHostMethod("tankoubon.ensure_named_collection_for_archive", { ctx => handleTankoubonEnsureNamedCollectionForArchive(ctx) })
         registerHostMethod("tags.list", { ctx => handleTagsList(ctx) })
         registerHostMethod("tags.merge", { ctx => handleTagsMerge(ctx) })
         registerHostMethod("task_kv.get", { ctx => handleTaskKvGet(ctx) })
@@ -1135,6 +1136,36 @@ public class WasmHostBridge {
         } catch (_: Exception) {}
 
         return tankoubonId
+    }
+
+    private static func parseTankoubonEnsureNamedCollectionParams(raw: String): (String, String) {
+        var archiveId = ""
+        var name = ""
+
+        try {
+            var buf = ByteBuffer()
+            unsafe { buf.write(raw.rawData()) }
+            let r = JsonReader(buf)
+            if (r.peek() != Some(BeginObject)) {
+                return ("", "")
+            }
+            r.startObject()
+            while (r.peek() != EndObject) {
+                let key = r.readName()
+                match (key) {
+                    case "archive_id" => archiveId = r.readValue<String>().trimAscii()
+                    case "archiveId" => archiveId = r.readValue<String>().trimAscii()
+                    case "name" => name = r.readValue<String>().trimAscii()
+                    case "title" => name = r.readValue<String>().trimAscii()
+                    case "tankoubon_title" => name = r.readValue<String>().trimAscii()
+                    case "tankoubonTitle" => name = r.readValue<String>().trimAscii()
+                    case _ => r.skip()
+                }
+            }
+            r.endObject()
+        } catch (_: Exception) {}
+
+        return (archiveId, name)
     }
 
     private static func parseTagsListParams(raw: String): (String, String, String, Int64, Int64, Bool) {
@@ -1637,6 +1668,53 @@ public class WasmHostBridge {
             return (false, "{}", "missing tankoubon_id")
         }
         return (true, buildTankoubonArchivesResponseJson(tankoubonId), "")
+    }
+
+    private static func handleTankoubonEnsureNamedCollectionForArchive(ctx: WasmHostCallContext): (Bool, String, String) {
+        let (allowed, err) = ensureHostCapability(
+            ctx.executionId,
+            ["tankoubon.create", "tankoubon.ensure_named_collection_for_archive"],
+            "tankoubon.ensure_named_collection_for_archive"
+        )
+        if (!allowed) { return (false, "{}", err) }
+
+        let (archiveId, name) = parseTankoubonEnsureNamedCollectionParams(ctx.effectiveParams)
+        if (archiveId.size == 0) {
+            return (false, "{}", "missing archive_id")
+        }
+        if (name.size == 0) {
+            return (false, "{}", "missing name")
+        }
+        let archive = ArchiveDao.getArchiveById(archiveId)
+        if (archive.id.size == 0) {
+            return (false, "{}", "archive not found")
+        }
+
+        for (tankId in TankoubonDao.getTankoubonsForArchive(archiveId)) {
+            match (MetadataDao.getMetadataObject("tankoubon", tankId)) {
+                case Some(meta) =>
+                    if (meta.title.trimAscii().toAsciiLower() == name.toAsciiLower()) {
+                        return (true, buildTankoubonEnsureNamedCollectionResponseJson(tankId, false, false), "")
+                    }
+                case None => ()
+            }
+        }
+
+        var tankId = TankoubonDao.findTankoubonByExactTitle(name)
+        var created = false
+        if (tankId.size == 0) {
+            tankId = TankoubonDao.createTankoubon(name)
+            created = tankId.size > 0
+        }
+        if (tankId.size == 0) {
+            return (false, "{}", "failed to create tankoubon")
+        }
+
+        let attached = TankoubonDao.addArchiveToTankoubonAppend(tankId, archiveId)
+        if (!attached) {
+            return (false, "{}", "failed to attach archive to tankoubon")
+        }
+        return (true, buildTankoubonEnsureNamedCollectionResponseJson(tankId, created, true), "")
     }
 
     private static func handleTagsList(ctx: WasmHostCallContext): (Bool, String, String) {
@@ -2784,6 +2862,18 @@ public class WasmHostBridge {
         return String.fromUtf8(readToEnd(out))
     }
 
+    private static func buildTankoubonEnsureNamedCollectionResponseJson(tankoubonId: String, created: Bool, attached: Bool): String {
+        let out = ByteBuffer()
+        let w = JsonWriter(out)
+        w.startObject()
+        w.writeName("tankoubon_id").writeValue(tankoubonId)
+        w.writeName("created").writeValue(created)
+        w.writeName("attached").writeValue(attached)
+        w.endObject()
+        w.flush()
+        return String.fromUtf8(readToEnd(out))
+    }
+
     private static func readAdjacentTextCached(executionId: Int64, archiveId: String, levelsUp: Int64, safeName: String): (Bool, String, String) {
         let trimmedArchiveId = archiveId.trimAscii()
         let normalizedLevelsUp = normalizeLevelsUp(levelsUp)
@@ -3074,6 +3164,7 @@ public class WasmHostBridge {
         appendHostCallMetricLog(state, "archive.get_metadata")
         appendHostCallMetricLog(state, "archive.export_entries")
         appendHostCallMetricLog(state, "tankoubon.list_archives")
+        appendHostCallMetricLog(state, "tankoubon.ensure_named_collection_for_archive")
         appendHostCallMetricLog(state, "tags.list")
         appendHostCallMetricLog(state, "tags.merge")
         appendHostCallMetricLog(state, "ui.select")

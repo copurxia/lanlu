@@ -1322,6 +1322,7 @@ public class WasmTaskRunner {
         w.writeName("targetType").writeValue(targetType)
         w.writeName("targetId").writeValue(targetId)
         w.writeName("oneshotParam").writeValue(oneshotParam)
+        w.writeName("pluginDir").writeValue("/plugin")
         let normalizedMetadata = normalizeMetadataInputJson(metadataJson)
         if (normalizedMetadata.size > 0) {
             w.writeName("metadata").jsonValue(normalizedMetadata)

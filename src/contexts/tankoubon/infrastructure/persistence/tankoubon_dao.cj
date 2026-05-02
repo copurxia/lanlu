@@ -562,6 +562,53 @@ public class TankoubonDao {
     }
 
     /**
+     * Find a Tankoubon by its canonical metadata title.
+     */
+    public static func findTankoubonByExactTitle(title: String): String {
+        let normalizedTitle = title.trimAscii()
+        if (normalizedTitle.size == 0) { return "" }
+
+        let connOpt = DatabaseConfig.getPooledConnection()
+        match (connOpt) {
+            case Some(conn) =>
+                try {
+                    let stmt = conn.prepareStatement("""
+                        SELECT t.tankoubon_id
+                        FROM tankoubons t
+                        JOIN metadata_objects mo
+                          ON mo.entity_type = 'tankoubon'
+                         AND mo.entity_id = t.tankoubon_id
+                        WHERE LOWER(TRIM(COALESCE(mo.title, ''))) = LOWER(TRIM(?))
+                        ORDER BY t.id
+                        LIMIT 1
+                    """)
+                    try {
+                        stmt.set(0, normalizedTitle)
+                        let rs = stmt.query()
+                        try {
+                            if (rs.next()) {
+                                return rs.getOrNull<String>(0) ?? ""
+                            }
+                        } finally {
+                            rs.close()
+                        }
+                    } finally {
+                        stmt.close()
+                    }
+                    return ""
+                } catch (e: Exception) {
+                    getLogger("tankoubon_dao").error("按标题查找Tankoubon失败", ("title", normalizedTitle), ("error", e.message))
+                    return ""
+                } finally {
+                    try { conn.close() } catch (_: Exception) {}
+                }
+            case None =>
+                getLogger("tankoubon_dao").error("无法连接到数据库")
+                return ""
+        }
+    }
+
+    /**
      * 更新Tankoubon元数据
      */
     public static func updateTankoubon(tankoubonId: String, name: String, summary: String): Bool {
