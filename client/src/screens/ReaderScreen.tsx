@@ -3,14 +3,17 @@ import {
   FlatList,
   Image,
   ImageSourcePropType,
+  LayoutAnimation,
   ListRenderItemInfo,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   StyleProp,
   StatusBar,
   Text,
   TouchableOpacity,
+  UIManager,
   useWindowDimensions,
   View,
   ViewStyle,
@@ -32,8 +35,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import {
   BookOpen,
+  Captions,
   ChevronLeft,
   FastForward,
+  Heart,
+  List,
   Pause,
   Play,
   Rewind,
@@ -44,8 +50,14 @@ import {
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import {WebView} from 'react-native-webview';
 
-import {buildAuthorizedImageSource, buildAuthorizedUri, extractApiError} from '../api/client';
 import {
+  buildAuthorizedImageSource as buildAuthorizedImageSource_,
+  apiClient,
+  buildAuthorizedUri,
+  extractApiError,
+} from '../api/client';
+import {
+  assetPath,
   fetchArchiveMetadata,
   fetchArchiveFiles,
   fetchArchiveRelated,
@@ -53,9 +65,12 @@ import {
   getPageDefaultSource,
   pagePath,
   probeMediaPage,
+  setArchiveFavorite,
   updateArchiveProgress,
 } from '../api/lanlu';
 import {ModalBackdrop} from '../components/SafeAreaSurface';
+import {ReaderSidebar} from './reader/ReaderSidebar';
+import {OptionSelectSheet, type SelectOption} from './reader/OptionSelectSheet';
 import {ScreenState} from '../components/ScreenState';
 import {
   DEFAULT_READER_SETTINGS,
@@ -68,7 +83,7 @@ import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
-import type {PageInfo, PageSourceInfo} from '../types/api';
+import type {MetadataPageAttachment, PageInfo, PageSourceInfo} from '../types/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Reader'>;
 
@@ -77,6 +92,7 @@ type ReaderPage = PageInfo & {
   sourceArchiveId: string;
   activeSource?: PageSourceInfo | null;
   imageSource?: ImageSourcePropType;
+  thumbnailSource?: ImageSourcePropType;
   uri?: string;
   vlcUri?: string;
   headers?: Record<string, string>;
@@ -117,6 +133,7 @@ type MediaPlaybackState = {
   paused: boolean;
   muted: boolean;
   volume: number;
+  buffered: number;
 };
 
 type ReaderLane =
@@ -129,6 +146,20 @@ type VlcPlaybackEvent = {
   position?: number;
   target?: number;
 };
+
+type SubtitleCue = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+type VlcTextTrack = {
+  id: number;
+  name: string;
+};
+
+const SUBTITLE_OFF_VALUE = -1;
+const EMBEDDED_SUBTITLE_VALUE_OFFSET = 100000;
 
 const READING_MODES: ReaderSettings['readingMode'][] = [
   'single-ltr',
@@ -172,6 +203,133 @@ function formatMediaTime(seconds: number) {
   const minutes = Math.floor(safe / 60);
   const rest = safe % 60;
   return `${minutes}:${String(rest).padStart(2, '0')}`;
+}
+
+function getSubtitleAttachments(metadata?: PageInfo['metadata'] | null): MetadataPageAttachment[] {
+  const attachments = Array.isArray(metadata?.attachments) ? metadata.attachments : [];
+  return attachments
+    .filter(attachment => String(attachment.slot || '').trim().toLowerCase() === 'subtitle')
+    .sort((a, b) => {
+      const orderA = typeof a.order_index === 'number' ? a.order_index : 0;
+      const orderB = typeof b.order_index === 'number' ? b.order_index : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}
+
+function getPageSubtitleAttachments(page?: ReaderPage | null) {
+  return getSubtitleAttachments(page?.activeSource?.metadata || page?.metadata);
+}
+
+function buildSubtitleOptionLabel(attachment: MetadataPageAttachment, subtitleIndex: number) {
+  const language = String(attachment.language || '').trim();
+  const kind = String(attachment.kind || '').trim().toLowerCase();
+  const name = String(attachment.name || '').trim();
+  if (language && kind) return `${language} · ${kind}`;
+  if (language) return language;
+  if (name && kind && !name.toLowerCase().endsWith(`.${kind}`)) return `${name} · ${kind}`;
+  if (name) return name;
+  if (kind) return kind;
+  return `Subtitle ${subtitleIndex + 1}`;
+}
+
+function encodeEmbeddedSubtitleValue(trackId: number) {
+  return -(EMBEDDED_SUBTITLE_VALUE_OFFSET + trackId);
+}
+
+function decodeEmbeddedSubtitleValue(value: number) {
+  if (value > -EMBEDDED_SUBTITLE_VALUE_OFFSET) return null;
+  return Math.abs(value) - EMBEDDED_SUBTITLE_VALUE_OFFSET;
+}
+
+function parseTimestamp(raw: string): number {
+  const parts = raw.trim().replace(',', '.').split(':').map(part => Number(part));
+  if (parts.some(part => !Number.isFinite(part))) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  return parts[0] || 0;
+}
+
+function stripAssFormatting(text: string) {
+  return text
+    .replace(/\{[^}]*\}/g, '')
+    .replace(/\\N/gi, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/\\h/g, ' ')
+    .trim();
+}
+
+function parseSrt(text: string): SubtitleCue[] {
+  return text
+    .split(/\r?\n\r?\n/)
+    .map(block => block.trim())
+    .filter(Boolean)
+    .map(block => {
+      const lines = block.split(/\r?\n/).map(line => line.trim());
+      const timeLine = lines.find(line => line.includes('-->')) || '';
+      const [startRaw, endRaw] = timeLine.split('-->').map(value => value.trim());
+      if (!startRaw || !endRaw) return null;
+      const body = lines.filter(line => line && line !== timeLine && !/^\d+$/.test(line)).join('\n').trim();
+      if (!body) return null;
+      return {start: parseTimestamp(startRaw), end: parseTimestamp(endRaw), text: body};
+    })
+    .filter((cue): cue is SubtitleCue => Boolean(cue));
+}
+
+function parseVtt(text: string): SubtitleCue[] {
+  return text
+    .replace(/^WEBVTT[\s\r\n]*/i, '')
+    .split(/\r?\n\r?\n/)
+    .map(block => block.trim())
+    .filter(Boolean)
+    .map(block => {
+      const lines = block.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+      const timeLine = lines.find(line => line.includes('-->')) || '';
+      const [startRaw, endRaw] = timeLine.split('-->').map(value => value.trim().split(/\s+/)[0]);
+      if (!startRaw || !endRaw) return null;
+      const body = lines.filter(line => line && line !== timeLine).join('\n').trim();
+      if (!body) return null;
+      return {start: parseTimestamp(startRaw), end: parseTimestamp(endRaw), text: body};
+    })
+    .filter((cue): cue is SubtitleCue => Boolean(cue));
+}
+
+function parseAss(text: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith('Dialogue:')) continue;
+    const parts = line.slice('Dialogue:'.length).trim().split(',');
+    if (parts.length < 10) continue;
+    const body = stripAssFormatting(parts.slice(9).join(','));
+    if (body) cues.push({start: parseTimestamp(parts[1] || ''), end: parseTimestamp(parts[2] || ''), text: body});
+  }
+  return cues;
+}
+
+function parseSubtitleText(text: string, kind?: string): SubtitleCue[] {
+  const normalized = text.replace(/^\uFEFF/, '').trim();
+  const lowerKind = String(kind || '').toLowerCase();
+  if (lowerKind.includes('ass') || lowerKind.includes('ssa') || /^\[Script Info\]/i.test(normalized)) {
+    return parseAss(normalized);
+  }
+  if (lowerKind.includes('vtt') || /^WEBVTT/i.test(normalized)) {
+    return parseVtt(normalized);
+  }
+  return parseSrt(normalized);
+}
+
+function getActiveSubtitleCues(
+  attachments: MetadataPageAttachment[],
+  textsByAssetId: Record<number, string>,
+  currentTime: number,
+) {
+  return attachments
+    .map(attachment => {
+      const text = textsByAssetId[attachment.asset_id];
+      if (!text) return null;
+      return parseSubtitleText(text, attachment.kind).find(cue => currentTime >= cue.start && currentTime <= cue.end) || null;
+    })
+    .filter((cue): cue is SubtitleCue => Boolean(cue));
 }
 
 function nextReadingMode(mode: ReaderSettings['readingMode']) {
@@ -227,11 +385,27 @@ export function ReaderScreen({route, navigation}: Props) {
   const [zoomedPages, setZoomedPages] = useState<Record<number, boolean>>({});
   const [progressSeekLocked, setProgressSeekLocked] = useState(false);
   const [nextArchiveById, setNextArchiveById] = useState<Record<string, NextArchiveCandidate | null>>({});
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
+  const [subtitleSheetOpen, setSubtitleSheetOpen] = useState(false);
+  const [sourceSheetPageId, setSourceSheetPageId] = useState<number | null>(null);
+  const [activeSubtitleIndexesByPage, setActiveSubtitleIndexesByPage] = useState<Record<number, number[]>>({});
+  const [activeEmbeddedSubtitleTrackByPage, setActiveEmbeddedSubtitleTrackByPage] = useState<Record<number, number | undefined>>({});
+  const [embeddedSubtitleTracksByPage, setEmbeddedSubtitleTracksByPage] = useState<Record<number, VlcTextTrack[]>>({});
+  const [subtitleTextsByAssetId, setSubtitleTextsByAssetId] = useState<Record<number, string>>({});
+  const [isFavorited, setIsFavorited] = useState(false);
+  const [sidebarPages, setSidebarPages] = useState<any[]>([]);
   const [appendingNext, setAppendingNext] = useState(false);
   const chromeProgress = useSharedValue(chromeVisible ? 1 : 0);
   useEffect(() => {
     chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {duration: 160});
   }, [chromeProgress, chromeVisible]);
+
+  useEffect(() => {
+    if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+      UIManager.setLayoutAnimationEnabledExperimental(true);
+    }
+  }, []);
 
   useEffect(() => {
     progressSeekLockedRef.current = progressSeekLocked;
@@ -259,6 +433,13 @@ export function ReaderScreen({route, navigation}: Props) {
       const path = source?.path || page.path || '';
       const url = source?.url?.startsWith('/api/') ? source.url : pagePath(pageArchiveId, {...page, defaultSource: source || undefined});
       const authorized = path || source?.url ? await buildAuthorizedUri(url) : {uri: '', headers: undefined, token: undefined};
+      const displayMetadata = source?.metadata || page.metadata;
+      const thumbnailPath =
+        displayMetadata?.thumb?.trim() ||
+        assetPath(displayMetadata?.thumb_asset_id) ||
+        (effectiveType === 'image' ? url : '');
+      const imageSource = effectiveType === 'image' && authorized.uri ? await buildAuthorizedImageSource_(url) : undefined;
+      const thumbnailSource = thumbnailPath ? await buildAuthorizedImageSource_(thumbnailPath) : imageSource;
       return {
         ...page,
         pageNumber: index + 1,
@@ -269,7 +450,8 @@ export function ReaderScreen({route, navigation}: Props) {
         uri: authorized.uri,
         headers: authorized.headers,
         token: authorized.token,
-        imageSource: effectiveType === 'image' && authorized.uri ? await buildAuthorizedImageSource(url) : undefined,
+        imageSource,
+        thumbnailSource,
       };
     },
     [archiveId, sourceIndexByPage],
@@ -294,6 +476,7 @@ export function ReaderScreen({route, navigation}: Props) {
       settingsHydratedRef.current = true;
       const hydrated = await Promise.all(files.map((page, index) => hydratePage(page, index, archiveId)));
       setPages(hydrated);
+      setSidebarPages(hydrated);
       const startIndex = Math.max(0, Math.min(initialPage - 1, hydrated.length - 1));
       setCurrentPage(startIndex + 1);
     } catch (err) {
@@ -511,6 +694,44 @@ export function ReaderScreen({route, navigation}: Props) {
       ),
     [activeReaderItem],
   );
+  const lanes = useMemo<ReaderLane[]>(
+    () => [
+      ...(activeReaderItem?.pages || [])
+        .filter(page => page.effectiveType === 'video' || page.effectiveType === 'audio')
+        .map((page, index) => ({
+          id: `${page.effectiveType}-${page.pageNumber}`,
+          kind: page.effectiveType as 'video' | 'audio',
+          label:
+            page.effectiveType === 'audio'
+              ? `${t('reader.audio')}${activeReaderItem.pages.length > 1 ? ` ${index + 1}` : ''}`
+              : `${t('reader.video')}${activeReaderItem.pages.length > 1 ? ` ${index + 1}` : ''}`,
+          page,
+        })),
+      {id: 'book', kind: 'book', label: t('reader.book')},
+    ],
+    [activeReaderItem, t],
+  );
+  const activeLane = useMemo(
+    () => lanes.find(lane => lane.id === activeLaneId) || lanes[0],
+    [activeLaneId, lanes],
+  );
+  const activeSubtitleIndexes = useMemo(
+    () => (activeLane.kind !== 'book' ? activeSubtitleIndexesByPage[activeLane.page.pageNumber] || [] : []),
+    [activeLane, activeSubtitleIndexesByPage],
+  );
+  const activeEmbeddedSubtitleTrack =
+    activeLane.kind !== 'book' ? activeEmbeddedSubtitleTrackByPage[activeLane.page.pageNumber] : undefined;
+  const activeSubtitleAttachments = useMemo(
+    () =>
+      activeLane.kind !== 'book'
+        ? getPageSubtitleAttachments(activeLane.page).filter((_, index) => activeSubtitleIndexes.includes(index))
+        : [],
+    [activeLane, activeSubtitleIndexes],
+  );
+  const activeSubtitleAssetKey = activeSubtitleAttachments
+    .map(attachment => attachment.asset_id)
+    .filter(id => id > 0)
+    .join('|');
   const nearbyMediaPages = useMemo(
     () =>
       pages.filter(
@@ -522,6 +743,45 @@ export function ReaderScreen({route, navigation}: Props) {
       ),
     [currentPage, pages],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSubtitles = async () => {
+      const attachments = activeSubtitleAttachments.filter(attachment => attachment.asset_id > 0);
+      await Promise.all(
+        attachments.map(async attachment => {
+          if (subtitleTextsByAssetId[attachment.asset_id] != null) return;
+          const path = assetPath(attachment.asset_id);
+          if (!path) return;
+          try {
+            const response = await apiClient.get<string>(path, {
+              responseType: 'text',
+              transformResponse: [value => value],
+            });
+            if (cancelled) return;
+            const text = typeof response.data === 'string' ? response.data : String(response.data || '');
+            setSubtitleTextsByAssetId(current =>
+              current[attachment.asset_id] != null
+                ? current
+                : {...current, [attachment.asset_id]: text.replace(/^\uFEFF/, '').trim()},
+            );
+          } catch (err) {
+            appendDiagnosticLog('subtitle.load.error', {
+              archiveId,
+              page: activeLane.kind !== 'book' ? activeLane.page.pageNumber : undefined,
+              assetId: attachment.asset_id,
+              message: extractApiError(err),
+            }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+          }
+        }),
+      );
+    };
+
+    loadSubtitles().catch(err => console.warn('Failed to load subtitles:', err));
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLane, activeSubtitleAssetKey, activeSubtitleAttachments, archiveId, subtitleTextsByAssetId]);
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const onViewableItemsChanged = useRef(
@@ -800,13 +1060,72 @@ export function ReaderScreen({route, navigation}: Props) {
     patchSettings({readingMode: nextReadingMode(settings.readingMode)});
   }
 
-  function changeSource(page: ReaderPage, delta: number) {
-    const count = page.sources?.length || 0;
-    if (count <= 1) return;
-    const index = page.pageNumber - 1;
-    const current = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
-    const next = (current + delta + count) % count;
-    setSourceIndexByPage(value => ({...value, [index]: next}));
+  function handleOpenSourceSheet(page: ReaderPage) {
+    setSourceSheetPageId(page.pageNumber);
+    setSourceSheetOpen(true);
+  }
+
+  function handleSelectSource(value: number) {
+    if (sourceSheetPageId == null) return;
+    setSourceIndexByPage(prev => ({...prev, [sourceSheetPageId - 1]: value}));
+    setSourceSheetOpen(false);
+    setSourceSheetPageId(null);
+  }
+
+  function handleSetActiveLane(laneId: string) {
+    LayoutAnimation.configureNext({
+      duration: 220,
+      create: {type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity},
+      update: {type: LayoutAnimation.Types.easeInEaseOut},
+      delete: {type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity},
+    });
+    setActiveLaneId(laneId);
+  }
+
+  function handleToggleFavorite() {
+    const next = !isFavorited;
+    setIsFavorited(next);
+    fetchArchiveMetadata(archiveId)
+      .then(meta => setArchiveFavorite(meta, next))
+      .catch(err => {
+        console.warn('Failed to toggle favorite:', err);
+        setIsFavorited(!next);
+      });
+  }
+
+  const handleSidebarSelectPage = useCallback(
+    (pageIndex: number) => {
+      jumpToPageFromProgress(pageIndex + 1);
+    },
+    [jumpToPageFromProgress],
+  );
+
+  function handleSelectSubtitle(value: number) {
+    if (activeLane.kind === 'book') return;
+    const pageNumber = activeLane.page.pageNumber;
+    const embeddedTrackId = decodeEmbeddedSubtitleValue(value);
+    if (value === SUBTITLE_OFF_VALUE) {
+      setActiveSubtitleIndexesByPage(prev => ({...prev, [pageNumber]: []}));
+      setActiveEmbeddedSubtitleTrackByPage(prev => ({...prev, [pageNumber]: undefined}));
+      return;
+    }
+    if (embeddedTrackId != null) {
+      setActiveEmbeddedSubtitleTrackByPage(prev => ({
+        ...prev,
+        [pageNumber]: prev[pageNumber] === embeddedTrackId ? undefined : embeddedTrackId,
+      }));
+      return;
+    }
+    setActiveSubtitleIndexesByPage(prev => {
+      const set = new Set(prev[pageNumber] || []);
+      if (set.has(value)) set.delete(value);
+      else set.add(value);
+      return {...prev, [pageNumber]: Array.from(set).sort((a, b) => a - b)};
+    });
+  }
+
+  function handleVolumeChange(pageNumber: number, value: number) {
+    setMediaState(pageNumber, {muted: false, volume: Math.max(0, Math.min(1, value))});
   }
 
   const getMediaState = useCallback(
@@ -818,6 +1137,7 @@ export function ReaderScreen({route, navigation}: Props) {
         paused: false,
         muted: false,
         volume: 1,
+        buffered: 0,
       },
     [mediaStateByPage],
   );
@@ -1047,6 +1367,16 @@ export function ReaderScreen({route, navigation}: Props) {
       const mediaOptions = buildVlcMediaOptions(page);
       const mediaUri = page.vlcUri || page.uri || '';
       const waitingForProxy = Boolean(page.headers?.Authorization && !page.vlcUri);
+      const pageEmbeddedSubtitleTrack = activeEmbeddedSubtitleTrackByPage[page.pageNumber];
+      const pageSubtitleIndexes = activeSubtitleIndexesByPage[page.pageNumber] || [];
+      const pageSubtitleAttachments = getPageSubtitleAttachments(page).filter((_, index) =>
+        pageSubtitleIndexes.includes(index),
+      );
+      const activeSubtitleCues = getActiveSubtitleCues(
+        pageSubtitleAttachments,
+        subtitleTextsByAssetId,
+        mediaState.currentTime,
+      );
       if (vlcSourceKeys.current[page.pageNumber] !== mediaUri) {
         vlcSourceKeys.current[page.pageNumber] = mediaUri;
         vlcSessions.current[page.pageNumber] = {
@@ -1080,6 +1410,7 @@ export function ReaderScreen({route, navigation}: Props) {
             acceptInvalidCertificates
             paused={mediaState.paused}
             muted={mediaState.muted}
+            textTrack={pageEmbeddedSubtitleTrack ?? -1}
             volume={Math.round(Math.max(0, Math.min(1, mediaState.volume)) * 100)}
             resizeMode="contain"
             source={
@@ -1099,6 +1430,17 @@ export function ReaderScreen({route, navigation}: Props) {
                 type: page.effectiveType,
                 event,
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              const bufferedVal =
+                event != null && typeof event === 'object'
+                  ? 'rate' in event
+                    ? (event as any).rate
+                    : 'buffered' in event
+                      ? (event as any).buffered
+                      : 0
+                  : 0;
+              if (typeof bufferedVal === 'number' && bufferedVal >= 0) {
+                setMediaState(page.pageNumber, {buffered: Math.min(1, bufferedVal)});
+              }
             }}
             onEnd={() => {
               setMediaState(page.pageNumber, {paused: true});
@@ -1138,6 +1480,22 @@ export function ReaderScreen({route, navigation}: Props) {
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
                 duration: normalizeVlcSeconds(event.duration),
+              });
+              const tracks = Array.isArray((event as any).textTracks)
+                ? ((event as any).textTracks as Array<{id?: number | string; name?: string}>)
+                    .map(track => ({
+                      id: Number(track.id),
+                      name: String(track.name || '').trim(),
+                    }))
+                    .filter(track => Number.isFinite(track.id) && track.id >= 0)
+                : [];
+              setEmbeddedSubtitleTracksByPage(current => {
+                const previous = current[page.pageNumber] || [];
+                const same =
+                  previous.length === tracks.length &&
+                  previous.every((track, index) => track.id === tracks[index]?.id && track.name === tracks[index]?.name);
+                if (same) return current;
+                return {...current, [page.pageNumber]: tracks};
               });
             }}
             onPaused={() => setMediaState(page.pageNumber, {paused: true})}
@@ -1191,6 +1549,15 @@ export function ReaderScreen({route, navigation}: Props) {
           />
           {page.effectiveType === 'audio' ? (
             <Text style={styles.audioTitle}>{page.title || page.resolvedPath || `${t('reader.audio')} ${page.pageNumber}`}</Text>
+          ) : null}
+          {activeSubtitleCues.length > 0 ? (
+            <View pointerEvents="none" style={styles.subtitleOverlay}>
+              {activeSubtitleCues.map((cue, index) => (
+                <Text key={`${index}-${cue.start}-${cue.end}`} style={styles.subtitleText}>
+                  {cue.text}
+                </Text>
+              ))}
+            </View>
           ) : null}
           {commonError ? <ErrorOverlay title={t('reader.mediaFailed')} message={commonError} /> : null}
         </View>
@@ -1255,21 +1622,25 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const horizontal = settings.readingMode === 'single-ltr' || settings.readingMode === 'single-rtl';
   const pageFrameHeight = height;
-  const lanes: ReaderLane[] = [
-    ...(activeReaderItem?.pages || [])
-      .filter(page => page.effectiveType === 'video' || page.effectiveType === 'audio')
-      .map((page, index) => ({
-        id: `${page.effectiveType}-${page.pageNumber}`,
-        kind: page.effectiveType as 'video' | 'audio',
-        label:
-          page.effectiveType === 'audio'
-            ? `${t('reader.audio')}${activeReaderItem.pages.length > 1 ? ` ${index + 1}` : ''}`
-            : `${t('reader.video')}${activeReaderItem.pages.length > 1 ? ` ${index + 1}` : ''}`,
-        page,
-      })),
-    {id: 'book', kind: 'book', label: t('reader.book')},
+  const sourceSheetPage = sourceSheetPageId
+    ? pages.find(page => page.pageNumber === sourceSheetPageId)
+    : activeLane.kind !== 'book'
+      ? activeLane.page
+      : null;
+  const subtitleSheetPage = activeLane.kind !== 'book' ? activeLane.page : null;
+  const subtitleSheetAttachments = getPageSubtitleAttachments(subtitleSheetPage);
+  const embeddedSubtitleTracks = subtitleSheetPage ? embeddedSubtitleTracksByPage[subtitleSheetPage.pageNumber] || [] : [];
+  const subtitleOptions: SelectOption[] = [
+    {value: SUBTITLE_OFF_VALUE, label: t('reader.subtitleOff')},
+    ...subtitleSheetAttachments.map((attachment, index) => ({
+      value: index,
+      label: t('reader.subtitleExternal', {label: buildSubtitleOptionLabel(attachment, index)}),
+    })),
+    ...embeddedSubtitleTracks.map((track, index) => ({
+      value: encodeEmbeddedSubtitleValue(track.id),
+      label: t('reader.subtitleEmbedded', {label: track.name || `Track ${index + 1}`}),
+    })),
   ];
-  const activeLane = lanes.find(lane => lane.id === activeLaneId) || lanes[0];
   const readerProgressTotal = readerItems[readerItems.length - 1]?.progressPage || pages.length;
   const displayCurrentPage = Math.min(currentPage, pages.length);
 
@@ -1422,6 +1793,9 @@ export function ReaderScreen({route, navigation}: Props) {
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
               <ChevronLeft color={colors.white} size={24} />
             </TouchableOpacity>
+            <TouchableOpacity onPress={() => setSidebarOpen(true)} style={styles.iconButton}>
+              <List color={colors.white} size={21} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={cycleMode} style={styles.modeButton}>
               <Text style={styles.modeText}>{t(modeLabelKey(settings.readingMode))}</Text>
               <Text style={styles.progress}>{displayCurrentPage} / {pages.length}</Text>
@@ -1434,76 +1808,81 @@ export function ReaderScreen({route, navigation}: Props) {
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[styles.bottomBar, {paddingBottom: insets.bottom + 10}, bottomBarAnimatedStyle]}>
             <View style={styles.laneShell}>
-              <View style={styles.laneTabs}>
-                {lanes.map(lane => (
-                  <TouchableOpacity
-                    accessibilityLabel={lane.label}
-                    accessibilityRole="button"
-                    key={lane.id}
-                    onPress={() => setActiveLaneId(lane.id)}
-                    style={[styles.laneTab, activeLane.id === lane.id && styles.laneTabActive]}>
-                    {lane.kind === 'book' ? (
-                      <BookOpen color={activeLane.id === lane.id ? colors.black : colors.white} size={16} />
-                    ) : lane.kind === 'audio' ? (
-                      <Volume2 color={activeLane.id === lane.id ? colors.black : colors.white} size={16} />
-                    ) : (
-                      <Play color={activeLane.id === lane.id ? colors.black : colors.white} size={15} />
-                    )}
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.laneRow}>
+                {lanes.map(lane => {
+                  const isExpanded = activeLane.id === lane.id;
+                  const LaneIcon = lane.kind === 'book' ? BookOpen : lane.kind === 'audio' ? Volume2 : Play;
+                  return (
+                    <View key={lane.id} style={[styles.laneUnit, isExpanded && styles.laneUnitExpanded]}>
+                      <TouchableOpacity
+                        accessibilityLabel={lane.label}
+                        accessibilityRole="button"
+                        onPress={() => handleSetActiveLane(lane.id)}
+                        style={[styles.laneTabMini, isExpanded && styles.laneTabMiniActive]}>
+                        <LaneIcon color={isExpanded ? colors.black : colors.white} size={14} />
+                      </TouchableOpacity>
+                      {isExpanded ? (
+                        lane.kind === 'book' ? (
+                          <TouchableOpacity
+                            activeOpacity={0.9}
+                            disabled={progressSeekLocked}
+                            onPress={event => {
+                              const laneWidth = Math.max(1, width - 92);
+                              const x = event.nativeEvent.locationX;
+                              const next = Math.round((x / laneWidth) * Math.max(1, readerProgressTotal - 1)) + 1;
+                              jumpToPageFromProgress(next);
+                            }}
+                            style={[styles.laneContent, progressSeekLocked && styles.laneContentDisabled]}>
+                            <View style={styles.progressTrack}>
+                              <View
+                                style={[
+                                  styles.progressFill,
+                                  {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
+                                ]}
+                              />
+                            </View>
+                            <Text style={styles.progressCaption}>{displayCurrentPage} / {pages.length}</Text>
+                          </TouchableOpacity>
+                        ) : activeLane.kind !== 'book' && (
+                          <MediaLaneControls
+                            label={activeLane.label}
+                            page={activeLane.page}
+                            state={getMediaState(activeLane.page.pageNumber)}
+                            sourceIndex={sourceIndexByPage[activeLane.page.pageNumber - 1] ?? activeLane.page.defaultSourceIndex ?? 0}
+                            t={t}
+                            onOpenSourceSheet={() => handleOpenSourceSheet(activeLane.page)}
+                            onOpenSubtitleSheet={() => setSubtitleSheetOpen(true)}
+                            onSeek={seconds => seekMedia(activeLane.page, seconds)}
+                            onSeekRelative={seconds =>
+                              seekMedia(activeLane.page, getMediaState(activeLane.page.pageNumber).currentTime + seconds)
+                            }
+                            onToggleMute={() =>
+                              setMediaState(activeLane.page.pageNumber, {
+                                muted: !getMediaState(activeLane.page.pageNumber).muted,
+                              })
+                            }
+                            onTogglePlay={() =>
+                              setMediaState(activeLane.page.pageNumber, {
+                                paused: !getMediaState(activeLane.page.pageNumber).paused,
+                              })
+                            }
+                            onVolumeChange={value => handleVolumeChange(activeLane.page.pageNumber, value)}
+                          />
+                        )
+                      ) : null}
+                    </View>
+                  );
+                })}
               </View>
-
-              {activeLane.kind === 'book' ? (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  disabled={progressSeekLocked}
-                  onPress={event => {
-                    const laneWidth = Math.max(1, width - 92);
-                    const x = event.nativeEvent.locationX;
-                    const next = Math.round((x / laneWidth) * Math.max(1, readerProgressTotal - 1)) + 1;
-                    jumpToPageFromProgress(next);
-                  }}
-                  style={[styles.laneContent, progressSeekLocked && styles.laneContentDisabled]}>
-                  <View style={styles.progressTrack}>
-                    <View
-                      style={[
-                        styles.progressFill,
-                        {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.progressCaption}>{displayCurrentPage} / {pages.length}</Text>
-                </TouchableOpacity>
-              ) : (
-                <MediaLaneControls
-                  label={activeLane.label}
-                  page={activeLane.page}
-                  state={getMediaState(activeLane.page.pageNumber)}
-                  sourceIndex={sourceIndexByPage[activeLane.page.pageNumber - 1] ?? activeLane.page.defaultSourceIndex ?? 0}
-                  t={t}
-                  onChangeSource={() => changeSource(activeLane.page, 1)}
-                  onSeek={seconds => seekMedia(activeLane.page, seconds)}
-                  onSeekRelative={seconds =>
-                    seekMedia(activeLane.page, getMediaState(activeLane.page.pageNumber).currentTime + seconds)
-                  }
-                  onToggleMute={() =>
-                    setMediaState(activeLane.page.pageNumber, {
-                      muted: !getMediaState(activeLane.page.pageNumber).muted,
-                    })
-                  }
-                  onTogglePlay={() =>
-                    setMediaState(activeLane.page.pageNumber, {
-                      paused: !getMediaState(activeLane.page.pageNumber).paused,
-                    })
-                  }
-                  onVolumeStep={delta =>
-                    setMediaState(activeLane.page.pageNumber, {
-                      muted: false,
-                      volume: Math.max(0, Math.min(1, getMediaState(activeLane.page.pageNumber).volume + delta)),
-                    })
-                  }
+              <TouchableOpacity
+                onPress={handleToggleFavorite}
+                style={[styles.iconButton, {marginLeft: 6}]}>
+                <Heart
+                  color={colors.white}
+                  fill={isFavorited ? colors.white : 'transparent'}
+                  size={18}
                 />
-              )}
+              </TouchableOpacity>
             </View>
       </Animated.View>
 
@@ -1513,6 +1892,49 @@ export function ReaderScreen({route, navigation}: Props) {
         t={t}
         onClose={() => setSettingsOpen(false)}
         onPatch={patchSettings}
+      />
+
+      <ReaderSidebar
+        open={sidebarOpen}
+        pages={sidebarPages}
+        currentPage={currentPage}
+        onClose={() => setSidebarOpen(false)}
+        onSelectPage={handleSidebarSelectPage}
+        t={t as (key: string, params?: Record<string, string | number>) => string}
+      />
+
+      <OptionSelectSheet
+        open={sourceSheetOpen}
+        title={t('reader.sourceSelect')}
+        options={sourceSheetPage?.sources?.length
+          ? sourceSheetPage.sources.map((s, i) => ({
+              value: i,
+              label: s.title || `${t('reader.source', {current: i + 1, total: sourceSheetPage.sources!.length})}`,
+            }))
+          : []}
+        selectedValues={[
+          sourceSheetPage
+            ? (sourceIndexByPage[sourceSheetPage.pageNumber - 1] ?? sourceSheetPage.defaultSourceIndex ?? 0)
+            : 0,
+        ]}
+        onSelect={handleSelectSource}
+        onClose={() => setSourceSheetOpen(false)}
+        t={t as (key: string, params?: Record<string, string | number>) => string}
+      />
+
+      <OptionSelectSheet
+        open={subtitleSheetOpen}
+        title={t('reader.subtitle')}
+        options={subtitleOptions}
+        selectedValues={[
+          ...activeSubtitleIndexes,
+          ...(activeEmbeddedSubtitleTrack == null ? [] : [encodeEmbeddedSubtitleValue(activeEmbeddedSubtitleTrack)]),
+          ...(activeSubtitleIndexes.length || activeEmbeddedSubtitleTrack != null ? [] : [SUBTITLE_OFF_VALUE]),
+        ]}
+        multiSelect
+        onSelect={handleSelectSubtitle}
+        onClose={() => setSubtitleSheetOpen(false)}
+        t={t as (key: string, params?: Record<string, string | number>) => string}
       />
     </View>
   );
@@ -1673,29 +2095,32 @@ function MediaLaneControls({
   state,
   sourceIndex,
   t,
-  onChangeSource,
+  onOpenSourceSheet,
+  onOpenSubtitleSheet,
   onSeek,
   onSeekRelative,
   onToggleMute,
   onTogglePlay,
-  onVolumeStep,
+  onVolumeChange,
 }: {
   label: string;
   page: ReaderPage;
   state: MediaPlaybackState;
   sourceIndex: number;
   t: ReturnType<typeof useI18n>['t'];
-  onChangeSource: () => void;
+  onOpenSourceSheet: () => void;
+  onOpenSubtitleSheet: () => void;
   onSeek: (seconds: number) => void;
   onSeekRelative: (seconds: number) => void;
   onToggleMute: () => void;
   onTogglePlay: () => void;
-  onVolumeStep: (delta: number) => void;
+  onVolumeChange: (value: number) => void;
 }) {
   const sourceCount = page.sources?.length || 0;
   const duration = Math.max(0, state.duration);
   const position = duration > 0 ? state.currentTime / duration : state.position;
   const [timelineWidth, setTimelineWidth] = useState(1);
+  const [volBarWidth, setVolBarWidth] = useState(1);
   return (
     <View style={styles.mediaLane}>
       <TouchableOpacity
@@ -1733,6 +2158,12 @@ function MediaLaneControls({
         <View style={styles.progressTrack}>
           <View
             style={[
+              styles.progressBuffered,
+              {width: `${Math.max(0, Math.min(100, (state.buffered || 0) * 100))}%`},
+            ]}
+          />
+          <View
+            style={[
               styles.progressFill,
               {width: `${Math.max(2, Math.max(0, Math.min(1, position)) * 100)}%`},
             ]}
@@ -1754,19 +2185,36 @@ function MediaLaneControls({
         )}
       </TouchableOpacity>
       <TouchableOpacity
-        accessibilityLabel={t('reader.volume')}
-        accessibilityRole="button"
-        onPress={() => onVolumeStep(state.volume >= 1 ? -0.25 : 0.25)}
-        style={styles.volumePill}>
-        <Text style={styles.sourceButtonText}>{Math.round(state.volume * 100)}</Text>
+        activeOpacity={0.9}
+        onLayout={event => setVolBarWidth(Math.max(1, event.nativeEvent.layout.width))}
+        onPress={event => {
+          const ratio = Math.max(0, Math.min(1, event.nativeEvent.locationX / volBarWidth));
+          onVolumeChange(ratio);
+        }}
+        style={styles.volumeSlider}>
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              {width: `${state.muted ? 0 : Math.max(2, Math.round(state.volume * 100))}%`},
+            ]}
+          />
+        </View>
       </TouchableOpacity>
       {sourceCount > 1 ? (
-        <TouchableOpacity onPress={onChangeSource} style={styles.sourceButton}>
+        <TouchableOpacity onPress={onOpenSourceSheet} style={styles.sourceButton}>
           <Text style={styles.sourceButtonText}>
             {t('reader.source', {current: sourceIndex + 1, total: sourceCount})}
           </Text>
         </TouchableOpacity>
       ) : null}
+      <TouchableOpacity
+        accessibilityLabel={t('reader.subtitle')}
+        accessibilityRole="button"
+        onPress={onOpenSubtitleSheet}
+        style={styles.mediaIconButton}>
+        <Captions color={colors.white} size={16} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -1981,6 +2429,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     textAlign: 'center',
   },
+  subtitleOverlay: {
+    alignItems: 'center',
+    bottom: 28,
+    gap: 6,
+    left: spacing.lg,
+    position: 'absolute',
+    right: spacing.lg,
+    zIndex: 2,
+  },
+  subtitleText: {
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    borderRadius: 8,
+    color: colors.white,
+    fontSize: 15,
+    fontWeight: '700',
+    lineHeight: 22,
+    overflow: 'hidden',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    textAlign: 'center',
+  },
   loadingText: {
     color: colors.white,
     position: 'absolute',
@@ -2134,25 +2603,35 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    gap: 8,
-    minHeight: 48,
+    gap: 6,
+    minHeight: 40,
     padding: 6,
     width: '100%',
   },
-  laneTabs: {
+  laneRow: {
+    flex: 1,
+    flexDirection: 'row',
+    gap: 2,
+    overflow: 'hidden',
+  },
+  laneUnit: {
+    alignItems: 'center',
     flexDirection: 'row',
     gap: 4,
   },
-  laneTab: {
+  laneUnitExpanded: {
+    flex: 1,
+  },
+  laneTabMini: {
     alignItems: 'center',
     borderColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: StyleSheet.hairlineWidth,
-    height: 36,
+    height: 28,
     justifyContent: 'center',
-    width: 36,
+    width: 28,
   },
-  laneTabActive: {
+  laneTabMiniActive: {
     backgroundColor: colors.white,
     borderColor: colors.white,
   },
@@ -2170,15 +2649,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
     minWidth: 0,
   },
   mediaIconButton: {
     alignItems: 'center',
-    borderRadius: 16,
-    height: 32,
+    borderRadius: 18,
+    height: 36,
     justifyContent: 'center',
-    width: 32,
+    width: 36,
   },
   mediaTimeline: {
     flex: 1,
@@ -2191,12 +2670,10 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '800',
   },
-  volumePill: {
-    alignItems: 'center',
-    borderRadius: 999,
+  volumeSlider: {
+    height: 32,
     justifyContent: 'center',
-    minWidth: 28,
-    paddingHorizontal: 4,
+    width: 64,
   },
   progressLane: {
     alignItems: 'center',
@@ -2219,6 +2696,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     borderRadius: 999,
     height: 3,
+    position: 'absolute',
+    left: 0,
+    top: 0,
+  },
+  progressBuffered: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 999,
+    height: 3,
+    position: 'absolute',
+    left: 0,
+    top: 0,
   },
   progressCaption: {
     color: colors.white,
