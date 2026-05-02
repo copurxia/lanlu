@@ -681,6 +681,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
   const [loadedPages, setLoadedPages] = useState<Record<number, boolean>>({});
   const [htmlContents, setHtmlContents] = useState<Record<number, string>>({});
+  const [htmlHeights, setHtmlHeights] = useState<Record<number, number>>({});
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -790,6 +791,7 @@ export function ReaderScreen({route, navigation}: Props) {
     lastSavedProgressKey.current = '';
     setNextArchiveById({});
     setHtmlContents({});
+    setHtmlHeights({});
     try {
       const [storedSettings, files] = await Promise.all([
         loadReaderSettings(),
@@ -1746,6 +1748,7 @@ export function ReaderScreen({route, navigation}: Props) {
     mediaProxyKeys.current.clear();
     htmlLoadingKeys.current.clear();
     setHtmlContents({});
+    setHtmlHeights({});
     Promise.all(pages.map((page, index) => hydratePage(page, index)))
       .then(setPages)
       .catch(err => console.warn('Failed to switch reader source:', err));
@@ -2226,7 +2229,11 @@ export function ReaderScreen({route, navigation}: Props) {
     }
 
     if (page.effectiveType === 'html') {
-      const htmlHeight = pageHeight || height;
+      const measuredHtmlHeight = htmlHeights[page.pageNumber] || 0;
+      const htmlHeight =
+        webtoon && settings.longPage
+          ? Math.max(height, measuredHtmlHeight || 0)
+          : pageHeight || height;
       const htmlFrameStyle = frameStyle;
       const html = htmlContents[page.pageNumber];
       const htmlSource = html
@@ -2255,21 +2262,51 @@ export function ReaderScreen({route, navigation}: Props) {
                   document.head.appendChild(style);
                   var body = document.body;
                   var html = document.documentElement;
-                  var first = body && body.firstElementChild;
-                  var firstRect = first ? first.getBoundingClientRect() : null;
-                  var bodyStyle = body ? window.getComputedStyle(body) : null;
-                  window.ReactNativeWebView.postMessage(JSON.stringify({
-                    kind: 'epub-dom',
-                    bodyTextLength: body ? (body.innerText || body.textContent || '').length : 0,
-                    bodyChildren: body ? body.children.length : 0,
-                    bodyScrollHeight: body ? body.scrollHeight : 0,
-                    documentScrollHeight: html ? html.scrollHeight : 0,
-                    images: document.images ? document.images.length : 0,
-                    bodyDisplay: bodyStyle ? bodyStyle.display : '',
-                    bodyVisibility: bodyStyle ? bodyStyle.visibility : '',
-                    bodyColor: bodyStyle ? bodyStyle.color : '',
-                    firstRect: firstRect ? {x:firstRect.x,y:firstRect.y,width:firstRect.width,height:firstRect.height} : null
-                  }));
+                  var lastHeight = 0;
+                  function postMetrics() {
+                    body = document.body;
+                    html = document.documentElement;
+                    var first = body && body.firstElementChild;
+                    var firstRect = first ? first.getBoundingClientRect() : null;
+                    var bodyStyle = body ? window.getComputedStyle(body) : null;
+                    var bodyScrollHeight = body ? body.scrollHeight : 0;
+                    var documentScrollHeight = html ? html.scrollHeight : 0;
+                    var measuredHeight = Math.ceil(Math.max(
+                      bodyScrollHeight,
+                      documentScrollHeight,
+                      body ? body.offsetHeight : 0,
+                      html ? html.offsetHeight : 0,
+                      window.innerHeight || 0
+                    ));
+                    if (Math.abs(measuredHeight - lastHeight) < 2 && lastHeight > 0) return;
+                    lastHeight = measuredHeight;
+                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                      kind: 'epub-dom',
+                      height: measuredHeight,
+                      bodyTextLength: body ? (body.innerText || body.textContent || '').length : 0,
+                      bodyChildren: body ? body.children.length : 0,
+                      bodyScrollHeight: bodyScrollHeight,
+                      documentScrollHeight: documentScrollHeight,
+                      images: document.images ? document.images.length : 0,
+                      bodyDisplay: bodyStyle ? bodyStyle.display : '',
+                      bodyVisibility: bodyStyle ? bodyStyle.visibility : '',
+                      bodyColor: bodyStyle ? bodyStyle.color : '',
+                      firstRect: firstRect ? {x:firstRect.x,y:firstRect.y,width:firstRect.width,height:firstRect.height} : null
+                    }));
+                  }
+                  function scheduleMetrics() {
+                    setTimeout(postMetrics, 0);
+                    setTimeout(postMetrics, 120);
+                    setTimeout(postMetrics, 600);
+                  }
+                  window.addEventListener('load', scheduleMetrics);
+                  window.addEventListener('resize', scheduleMetrics);
+                  document.addEventListener('DOMContentLoaded', scheduleMetrics);
+                  Array.prototype.forEach.call(document.images || [], function (image) {
+                    image.addEventListener('load', scheduleMetrics);
+                    image.addEventListener('error', scheduleMetrics);
+                  });
+                  scheduleMetrics();
                 })();
                 true;
               `}
@@ -2277,6 +2314,7 @@ export function ReaderScreen({route, navigation}: Props) {
               mixedContentMode="always"
               originWhitelist={['*']}
               overScrollMode="never"
+              scrollEnabled={false}
               source={htmlSource}
               textZoom={100}
               style={[styles.webView, {width: pageWidth, height: htmlHeight}]}
@@ -2321,6 +2359,17 @@ export function ReaderScreen({route, navigation}: Props) {
                 }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               }}
               onMessage={event => {
+                try {
+                  const payload = JSON.parse(event.nativeEvent.data) as {kind?: string; height?: number};
+                  if (payload.kind === 'epub-dom' && typeof payload.height === 'number' && payload.height > 0) {
+                    setHtmlHeights(current => {
+                      const nextHeight = Math.ceil(payload.height || 0);
+                      if (Math.abs((current[page.pageNumber] || 0) - nextHeight) < 2) return current;
+                      return {...current, [page.pageNumber]: nextHeight};
+                    });
+                  }
+                } catch {
+                }
                 appendDiagnosticLog('html.webview.message', {
                   archiveId: page.sourceArchiveId || archiveId,
                   page: page.pageNumber,
@@ -2480,6 +2529,7 @@ export function ReaderScreen({route, navigation}: Props) {
             currentPage,
             failedPages,
             htmlContents,
+            htmlHeights,
             loadedPages,
             longPage: settings.longPage,
           }}
@@ -2506,6 +2556,7 @@ export function ReaderScreen({route, navigation}: Props) {
             currentPage,
             failedPages,
             htmlContents,
+            htmlHeights,
             loadedPages,
           }}
           getItemLayout={(_, index) => ({
