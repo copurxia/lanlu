@@ -39,11 +39,7 @@ export function TankoubonDetailHero({tankoubon, cover, backdrop, t}: Props) {
         <View style={styles.coverFrame}>
           {cover ? (
             <FastImage
-              source={{
-                ...cover,
-                cache: FastImage.cacheControl.web,
-                priority: FastImage.priority.high,
-              }}
+              source={cover}
               resizeMode={FastImage.resizeMode.cover}
               style={styles.cover}
             />

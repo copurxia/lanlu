@@ -46,7 +46,7 @@ export function TankoubonArchiveGridCard({
       <View style={styles.coverFrame}>
         {cover ? (
           <FastImage
-            source={{...cover, cache: FastImage.cacheControl.web}}
+            source={cover}
             resizeMode={FastImage.resizeMode.cover}
             style={styles.cover}
           />

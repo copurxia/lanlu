@@ -10,7 +10,11 @@ import {
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {Eye, Film, Heart} from 'lucide-react-native';
 
-import {buildAuthorizedImageSource, extractApiError} from '../api/client';
+import {
+  buildAuthorizedAssetImageSource,
+  buildAuthorizedImageSource,
+  extractApiError,
+} from '../api/client';
 import {
   assetPath,
   fetchArchiveFiles,
@@ -132,6 +136,12 @@ function pagePreviewPath(archiveId: string, page: PageInfo): {kind: PreviewItem[
 
 async function buildPreviewSource(path?: string): Promise<FastImageSource | undefined> {
   if (!path) return undefined;
+  const assetMatch = path.match(/\/api\/assets\/(\d+)(?:$|[?#])/);
+  if (assetMatch) {
+    return (await buildAuthorizedAssetImageSource(Number(assetMatch[1]), {
+      priority: FastImage.priority.low,
+    })) || undefined;
+  }
   const source = await buildAuthorizedImageSource(path);
   return {...source, cache: FastImage.cacheControl.web, priority: FastImage.priority.low};
 }

@@ -579,7 +579,7 @@ function readAssetId(rawAssets: unknown, wantedKey: string): number | undefined 
     for (const item of rawAssets) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
       const row = item as Record<string, unknown>;
-      const itemKey = String(row.key ?? row.type ?? row.name ?? '').trim().toLowerCase();
+      const itemKey = String(row.key ?? row.slot ?? row.type ?? row.name ?? '').trim().toLowerCase();
       if (itemKey !== wanted) continue;
       const value = normalizeAssetValue(row.value ?? row.path ?? row.id ?? row.asset_id ?? row.assetId);
       if (value !== undefined) return value;

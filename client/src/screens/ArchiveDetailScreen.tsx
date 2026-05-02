@@ -1,21 +1,21 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   Alert,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import {type Source as FastImageSource} from '@d11/react-native-fast-image';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {ArrowLeft, Heart} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {buildAuthorizedImageSource, extractApiError} from '../api/client';
+import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {
   archiveCoverAsset,
-  assetPath,
   deleteArchive,
   fetchArchiveMetadata,
   fetchArchiveRelated,
@@ -55,90 +55,79 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
   const [isNew, setIsNew] = useState(Boolean(archive?.isnew));
+  const [refreshing, setRefreshing] = useState(false);
 
   const isAuthenticated = authStatus === 'authenticated';
   const isAdmin = user?.isAdmin === true;
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError('');
     try {
       const result = await fetchArchiveMetadata(archiveId, language);
       setMetadata(result);
       setFavorite(Boolean(result.isfavorite));
       setIsNew(Boolean(result.isnew));
-      const sourcePath = assetPath(archiveCoverAsset(result) || archiveCoverAsset(archive));
-      setCover(sourcePath ? await buildAuthorizedImageSource(sourcePath) : null);
+      const coverAsset = archiveCoverAsset(result) || archiveCoverAsset(archive);
+      setCover(
+        await buildAuthorizedAssetImageSource(coverAsset, {
+          priority: FastImage.priority.high,
+        }),
+      );
 
-      const coverFromMetadata = archiveCoverAsset(result);
-      if (coverFromMetadata) {
-        const path = assetPath(coverFromMetadata);
-        if (path) setCover(await buildAuthorizedImageSource(path));
-      } else if (archive) {
-        const coverFromArchive = archiveCoverAsset(archive);
-        if (coverFromArchive) {
-          const path = assetPath(coverFromArchive);
-          if (path) setCover(await buildAuthorizedImageSource(path));
-        }
-      }
-
-      // Load backdrop if available
-      if (result.assets?.backdrop) {
-        const backdropPath = assetPath(result.assets.backdrop);
-        if (backdropPath) {
-          setBackdrop(await buildAuthorizedImageSource(backdropPath));
-        }
-      }
+      setBackdrop(
+        await buildAuthorizedAssetImageSource(result.assets?.backdrop, {
+          priority: FastImage.priority.low,
+        }),
+      );
     } catch (err) {
       setError(extractApiError(err));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [archive, archiveId, language]);
 
-  // Load related archives
-  useEffect(() => {
+  const loadRelatedArchives = useCallback(async () => {
     if (!archiveId) return;
-    let cancelled = false;
-
     setRelatedLoading(true);
-    fetchArchiveRelated(archiveId, 8)
-      .then(items => {
-        if (!cancelled) setRelatedArchives(items);
-      })
-      .catch(() => {
-        if (!cancelled) setRelatedArchives([]);
-      })
-      .finally(() => {
-        if (!cancelled) setRelatedLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const items = await fetchArchiveRelated(archiveId, 8);
+      setRelatedArchives(items);
+    } catch {
+      setRelatedArchives([]);
+    } finally {
+      setRelatedLoading(false);
+    }
   }, [archiveId]);
 
-  // Load tankoubons containing this archive
-  useEffect(() => {
+  const loadTankoubons = useCallback(async () => {
     if (!archiveId) return;
-    let cancelled = false;
-
-    fetchTankoubonsForArchive(archiveId)
-      .then(items => {
-        if (!cancelled) setTankoubons(items);
-      })
-      .catch(() => {
-        if (!cancelled) setTankoubons([]);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const items = await fetchTankoubonsForArchive(archiveId);
+      setTankoubons(items);
+    } catch {
+      setTankoubons([]);
+    }
   }, [archiveId]);
+
+  useEffect(() => {
+    loadRelatedArchives().catch(err => console.warn('Failed to load related archives:', err));
+  }, [loadRelatedArchives]);
+
+  useEffect(() => {
+    loadTankoubons().catch(err => console.warn('Failed to load archive collections:', err));
+  }, [loadTankoubons]);
 
   useEffect(() => {
     load().catch(err => console.warn('Failed to load archive:', err));
   }, [load]);
+
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    Promise.all([load(false), loadRelatedArchives(), loadTankoubons()])
+      .catch(err => console.warn('Failed to refresh archive:', err))
+      .finally(() => setRefreshing(false));
+  }, [load, loadRelatedArchives, loadTankoubons]);
 
   const merged = useMemo<ArchiveMetadata>(() => {
     return {
@@ -264,7 +253,15 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, {paddingTop: insets.top + 12}]}>
+      contentContainerStyle={[styles.content, {paddingTop: insets.top + 12}]}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={refresh}
+          tintColor={colors.primary}
+          colors={[colors.primary]}
+        />
+      }>
       <TouchableOpacity
         accessibilityRole="button"
         onPress={() => navigation.goBack()}

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,16 +19,14 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {
   archiveCoverAsset,
-  assetPath,
   deleteTankoubon,
-  fetchArchiveRelated,
   fetchTankoubonMetadata,
   fetchTankoubonRelated,
   removeArchiveFromTankoubon,
   searchArchives,
   setTankoubonFavorite,
 } from '../api/lanlu';
-import {buildAuthorizedImageSource, extractApiError} from '../api/client';
+import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {colors} from '../theme/colors';
@@ -85,12 +84,13 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   // Related
   const [related, setRelated] = useState<Tankoubon[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Batch operations
   const [batchActionRunning, setBatchActionRunning] = useState(false);
 
-  const loadMetadata = useCallback(async () => {
-    setLoading(true);
+  const loadMetadata = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     setError('');
     try {
       const result = await fetchTankoubonMetadata(tankoubonId, language);
@@ -98,19 +98,21 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
       setFavorite(Boolean(result.isfavorite));
 
       const coverAsset = archiveCoverAsset(result) || archiveCoverAsset(tankoubon);
-      if (coverAsset) {
-        const path = assetPath(coverAsset);
-        if (path) setCover(await buildAuthorizedImageSource(path));
-      }
+      setCover(
+        await buildAuthorizedAssetImageSource(coverAsset, {
+          priority: FastImage.priority.high,
+        }),
+      );
 
-      if (result.assets?.backdrop) {
-        const bp = assetPath(result.assets.backdrop);
-        if (bp) setBackdrop(await buildAuthorizedImageSource(bp));
-      }
+      setBackdrop(
+        await buildAuthorizedAssetImageSource(result.assets?.backdrop, {
+          priority: FastImage.priority.low,
+        }),
+      );
     } catch (err) {
       setError(extractApiError(err));
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   }, [language, tankoubon, tankoubonId]);
 
@@ -136,14 +138,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
       await Promise.all(
         items.map(async item => {
           const ca = archiveCoverAsset(item);
-          if (ca) {
-            const p = assetPath(ca);
-            if (p) {
-              cache[item.arcid] = await buildAuthorizedImageSource(p);
-              return;
-            }
-          }
-          cache[item.arcid] = null;
+          cache[item.arcid] = await buildAuthorizedAssetImageSource(ca);
         }),
       );
       setCoverCache(cache);
@@ -180,6 +175,13 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   useEffect(() => {
     loadRelated().catch(err => console.warn('Failed to load related:', err));
   }, [loadRelated]);
+
+  const refresh = useCallback(() => {
+    setRefreshing(true);
+    Promise.all([loadMetadata(false), loadArchives(), loadRelated()])
+      .catch(err => console.warn('Failed to refresh tankoubon:', err))
+      .finally(() => setRefreshing(false));
+  }, [loadArchives, loadMetadata, loadRelated]);
 
   const merged = useMemo<TankoubonMetadata>(
     () => ({
@@ -355,7 +357,15 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     <View style={styles.screen}>
       <ScrollView
         contentContainerStyle={[styles.content, {paddingTop: insets.top + 12}]}
-        showsVerticalScrollIndicator={false}>
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }>
         <TouchableOpacity
           accessibilityRole="button"
           onPress={() => navigation.goBack()}

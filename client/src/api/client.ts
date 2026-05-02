@@ -1,4 +1,5 @@
 import axios, {AxiosError, InternalAxiosRequestConfig} from 'axios';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 
 import {getActiveServer} from '../storage/servers';
 import {clearStoredToken, getStoredToken} from '../storage/token';
@@ -82,6 +83,22 @@ export async function buildAuthorizedImageSource(path: string) {
   return token && shouldAttachAuth
     ? {uri, headers: {Authorization: `Bearer ${token}`}}
     : {uri};
+}
+
+export async function buildAuthorizedAssetImageSource(
+  assetId?: number | null,
+  options: {
+    priority?: FastImageSource['priority'];
+  } = {},
+): Promise<FastImageSource | null> {
+  const id = Math.trunc(Number(assetId || 0));
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const source = await buildAuthorizedImageSource(`/api/assets/${id}`);
+  return {
+    ...source,
+    cache: FastImage.cacheControl.immutable,
+    priority: options.priority || FastImage.priority.normal,
+  };
 }
 
 export async function buildAuthorizedUri(path: string) {

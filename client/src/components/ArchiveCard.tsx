@@ -17,14 +17,13 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import {
-  assetPath,
   isTankoubon,
   mediaItemCoverAsset,
   mediaItemId,
   mediaItemTitle,
   setArchiveFavorite,
 } from '../api/lanlu';
-import {buildAuthorizedImageSource, extractApiError} from '../api/client';
+import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {useI18n} from '../i18n';
 import {colors, radius, spacing} from '../theme/colors';
 import type {Archive, MediaItem} from '../types/api';
@@ -106,12 +105,7 @@ export function ArchiveCard({
   useEffect(() => {
     let cancelled = false;
     async function loadCover() {
-      const path = assetPath(mediaItemCoverAsset(archive));
-      if (!path) {
-        setImageSource(null);
-        return;
-      }
-      const source = await buildAuthorizedImageSource(path);
+      const source = await buildAuthorizedAssetImageSource(mediaItemCoverAsset(archive));
       if (!cancelled) {
         setImageError('');
         setImageSource(source);
@@ -207,11 +201,7 @@ export function ArchiveCard({
             ]}>
             {imageSource ? (
               <FastImage
-                source={{
-                  ...imageSource,
-                  cache: FastImage.cacheControl.web,
-                  priority: FastImage.priority.normal,
-                }}
+                source={imageSource}
                 style={styles.cover}
                 resizeMode={FastImage.resizeMode.cover}
                 onError={event => {

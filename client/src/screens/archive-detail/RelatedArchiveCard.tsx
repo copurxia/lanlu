@@ -2,8 +2,8 @@ import React, {useEffect, useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 
-import {archiveCoverAsset, assetPath} from '../../api/lanlu';
-import {buildAuthorizedImageSource} from '../../api/client';
+import {archiveCoverAsset} from '../../api/lanlu';
+import {buildAuthorizedAssetImageSource} from '../../api/client';
 import {colors} from '../../theme/colors';
 import type {Archive} from '../../types/api';
 
@@ -19,17 +19,14 @@ export function RelatedArchiveCard({archive, onPress}: Props) {
     let cancelled = false;
     const ca = archiveCoverAsset(archive);
     if (ca) {
-      const path = assetPath(ca);
-      if (path) {
-        buildAuthorizedImageSource(path)
-          .then((src: FastImageSource | null) => {
-            if (!cancelled) setCover(src);
-          })
-          .catch(() => {
-            if (!cancelled) setCover(null);
-          });
-        return;
-      }
+      buildAuthorizedAssetImageSource(ca)
+        .then((src: FastImageSource | null) => {
+          if (!cancelled) setCover(src);
+        })
+        .catch(() => {
+          if (!cancelled) setCover(null);
+        });
+      return;
     }
     setCover(null);
     return () => {
