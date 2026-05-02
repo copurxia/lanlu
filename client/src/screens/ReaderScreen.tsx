@@ -2428,18 +2428,12 @@ export function ReaderScreen({route, navigation}: Props) {
             <View
               key={`${item.key}:${page.pageNumber}`}
               style={{width: spreadPageWidth, height: pageFrameHeight}}>
-              {page.effectiveType === 'html' ? (
-                <View style={{width: spreadPageWidth, height: pageFrameHeight}}>
-                  {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
-                </View>
-              ) : (
-                <ReaderTapSurface
-                  onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
-                  onTap={handleReaderTap}
-                  style={{width: spreadPageWidth, height: pageFrameHeight}}>
-                  {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
-                </ReaderTapSurface>
-              )}
+              <ReaderTapSurface
+                onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
+                onTap={handleReaderTap}
+                style={{width: spreadPageWidth, height: pageFrameHeight}}>
+                {renderMedia(page, spreadPageWidth, pageFrameHeight, false, mediaActive)}
+              </ReaderTapSurface>
             </View>
           ))}
         </View>
@@ -2466,13 +2460,6 @@ export function ReaderScreen({route, navigation}: Props) {
     }
     const page = item as ReaderPage;
     const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
-    if (page.effectiveType === 'html') {
-      return (
-        <View style={styles.webtoonItem}>
-          {renderMedia(page, width, settings.longPage ? undefined : height, true, mediaActive)}
-        </View>
-      );
-    }
     return (
       <ReaderTapSurface
         onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
