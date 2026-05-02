@@ -406,9 +406,24 @@ function nextReadingMode(mode: ReaderSettings['readingMode']) {
   return READING_MODES[(index + 1) % READING_MODES.length];
 }
 
-function buildVlcMediaOptions(page: ReaderPage) {
+function vlcSubtitlePath(subtitleUri?: string) {
+  if (!subtitleUri) return undefined;
+  if (!subtitleUri.startsWith('file://')) return subtitleUri;
+  try {
+    return decodeURIComponent(subtitleUri.replace(/^file:\/\//, ''));
+  } catch {
+    return subtitleUri.replace(/^file:\/\//, '');
+  }
+}
+
+function buildVlcMediaOptions(page: ReaderPage, subtitleUri?: string) {
+  const subtitlePath = vlcSubtitlePath(subtitleUri);
   if (page.vlcUri) {
-    return [':http-reconnect', ''];
+    return [
+      ':http-reconnect',
+      ...(subtitlePath ? [`:sub-file=${subtitlePath}`] : []),
+      '',
+    ];
   }
   return [
     ...(page.headers?.Authorization
@@ -416,6 +431,7 @@ function buildVlcMediaOptions(page: ReaderPage) {
       : []),
     ...(page.token ? [`:http-header=Cookie: auth_token=${page.token}`] : []),
     ':http-reconnect',
+    ...(subtitlePath ? [`:sub-file=${subtitlePath}`] : []),
     '',
   ];
 }
@@ -434,6 +450,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const mediaLastSeekAt = useRef<Record<number, number>>({});
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
+  const pendingLocalSubtitleByAssetId = useRef<Record<number, Promise<string | undefined> | undefined>>({});
   const appendedArchiveIds = useRef<Set<string>>(new Set());
   const nextArchiveCache = useRef<Record<string, NextArchiveCandidate | null>>({});
   const lastSavedProgressKey = useRef('');
@@ -465,6 +482,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const [activeEmbeddedSubtitleTrackByPage, setActiveEmbeddedSubtitleTrackByPage] = useState<Record<number, number | undefined>>({});
   const [embeddedSubtitleTracksByPage, setEmbeddedSubtitleTracksByPage] = useState<Record<number, VlcTextTrack[]>>({});
   const [externalVlcSubtitleUriByPage, setExternalVlcSubtitleUriByPage] = useState<Record<number, string | undefined>>({});
+  const [localSubtitleUriByAssetId, setLocalSubtitleUriByAssetId] = useState<Record<number, string>>({});
   const [subtitleTextsByAssetId, setSubtitleTextsByAssetId] = useState<Record<number, string>>({});
   const [isFavorited, setIsFavorited] = useState(false);
   const [sidebarPages, setSidebarPages] = useState<any[]>([]);
@@ -901,19 +919,37 @@ export function ReaderScreen({route, navigation}: Props) {
     }
 
     const resolveSubtitleUri = async () => {
-      const text = subtitleTextsByAssetId[activeExternalVlcSubtitleAttachment.asset_id];
+      const assetId = activeExternalVlcSubtitleAttachment.asset_id;
+      const cachedSubtitleUri = localSubtitleUriByAssetId[assetId];
+      if (cachedSubtitleUri) {
+        setExternalVlcSubtitleUriByPage(current =>
+          current[pageNumber] === cachedSubtitleUri ? current : {...current, [pageNumber]: cachedSubtitleUri},
+        );
+        return;
+      }
+
+      const text = subtitleTextsByAssetId[assetId];
       if (!text?.trim()) return;
-      const subtitleUri = await createLocalSubtitleFile(
-        text,
-        subtitleFileExtension(activeExternalVlcSubtitleAttachment),
-      );
+      const pendingSubtitle =
+        pendingLocalSubtitleByAssetId.current[assetId] ||
+        createLocalSubtitleFile(text, subtitleFileExtension(activeExternalVlcSubtitleAttachment));
+      pendingLocalSubtitleByAssetId.current[assetId] = pendingSubtitle;
+      const subtitleUri = await pendingSubtitle.finally(() => {
+        if (pendingLocalSubtitleByAssetId.current[assetId] === pendingSubtitle) {
+          pendingLocalSubtitleByAssetId.current[assetId] = undefined;
+        }
+      });
       if (cancelled) return;
+      if (!subtitleUri) return;
       appendDiagnosticLog('subtitle.localFile.ready', {
         archiveId,
         page: pageNumber,
-        assetId: activeExternalVlcSubtitleAttachment.asset_id,
+        assetId,
         subtitleUri,
       }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      setLocalSubtitleUriByAssetId(current =>
+        current[assetId] === subtitleUri ? current : {...current, [assetId]: subtitleUri},
+      );
       setExternalVlcSubtitleUriByPage(current =>
         current[pageNumber] === subtitleUri ? current : {...current, [pageNumber]: subtitleUri},
       );
@@ -931,7 +967,7 @@ export function ReaderScreen({route, navigation}: Props) {
     return () => {
       cancelled = true;
     };
-  }, [activeExternalVlcSubtitleAttachment, activeLane, archiveId, subtitleTextsByAssetId]);
+  }, [activeExternalVlcSubtitleAttachment, activeLane, archiveId, localSubtitleUriByAssetId, subtitleTextsByAssetId]);
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const onViewableItemsChanged = useRef(
@@ -1521,7 +1557,6 @@ export function ReaderScreen({route, navigation}: Props) {
       : [styles.mediaPage, {width: pageWidth, height: pageHeight || height}];
     if (page.effectiveType === 'video' || page.effectiveType === 'audio') {
       const mediaState = getMediaState(page.pageNumber);
-      const mediaOptions = buildVlcMediaOptions(page);
       const mediaUri = page.vlcUri || page.uri || '';
       const waitingForProxy = Boolean(page.headers?.Authorization && !page.vlcUri);
       const pageEmbeddedSubtitleTrack = activeEmbeddedSubtitleTrackByPage[page.pageNumber];
@@ -1530,6 +1565,7 @@ export function ReaderScreen({route, navigation}: Props) {
         pageSubtitleIndexes.includes(index),
       );
       const externalVlcSubtitleUri = externalVlcSubtitleUriByPage[page.pageNumber];
+      const mediaOptions = buildVlcMediaOptions(page, externalVlcSubtitleUri);
       const overlaySubtitleAttachments = externalVlcSubtitleUri
         ? pageSubtitleAttachments.filter(attachment => !isAssSubtitleAttachment(attachment))
         : pageSubtitleAttachments;
@@ -1538,8 +1574,9 @@ export function ReaderScreen({route, navigation}: Props) {
         subtitleTextsByAssetId,
         mediaState.currentTime,
       );
-      if (vlcSourceKeys.current[page.pageNumber] !== mediaUri) {
-        vlcSourceKeys.current[page.pageNumber] = mediaUri;
+      const vlcSourceKey = `${mediaUri}|subtitle:${externalVlcSubtitleUri || ''}`;
+      if (vlcSourceKeys.current[page.pageNumber] !== vlcSourceKey) {
+        vlcSourceKeys.current[page.pageNumber] = vlcSourceKey;
         vlcSessions.current[page.pageNumber] = {
           playable: false,
           ignoredProgress: 0,
@@ -1564,6 +1601,7 @@ export function ReaderScreen({route, navigation}: Props) {
       return (
         <View style={frameStyle}>
           <VLCPlayer
+            key={vlcSourceKey}
             ref={ref => {
               vlcRefs.current[page.pageNumber] = ref as VlcPlayerRef | null;
             }}
@@ -1642,6 +1680,7 @@ export function ReaderScreen({route, navigation}: Props) {
                 uri: page.uri,
                 vlcUri: page.vlcUri,
                 subtitleUri: externalVlcSubtitleUri,
+                mediaOptions,
                 path: page.resolvedPath,
                 duration: event.duration,
                 textTracks: tracks,
@@ -1660,6 +1699,7 @@ export function ReaderScreen({route, navigation}: Props) {
             }}
             onPaused={() => setMediaState(page.pageNumber, {paused: true})}
             onPlaying={event => {
+              const duration = normalizeVlcSeconds(event.duration);
               vlcSessions.current[page.pageNumber] = {
                 target: event.target,
                 playable: true,
@@ -1671,9 +1711,10 @@ export function ReaderScreen({route, navigation}: Props) {
                 type: page.effectiveType,
                 target: event.target,
                 duration: event.duration,
+                subtitleUri: externalVlcSubtitleUri,
               }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               setMediaState(page.pageNumber, {
-                duration: normalizeVlcSeconds(event.duration),
+                duration,
                 paused: false,
               });
             }}
