@@ -6,8 +6,8 @@ export type RootStackParamList = {
   AddServer: {server?: LanluServer} | undefined;
   Login: undefined;
   Main: undefined;
-  ArchiveDetail: {archiveId: string; archive?: Archive};
   TankoubonDetail: {tankoubonId: string; tankoubon?: Tankoubon};
+  ArchiveDetail: {archiveId: string; archive?: Archive};
   Reader: {
     archiveId: string;
     initialPage?: number;

@@ -30,6 +30,7 @@ export type SearchArchivesParams = {
   newonly?: boolean;
   untaggedonly?: boolean;
   groupby_tanks?: boolean;
+  tankoubon_id?: string;
   category_id?: string;
   category_ids?: string;
   aggregate_by?: string;
@@ -107,6 +108,7 @@ export async function searchArchives(
     groupby_tanks: params.groupby_tanks,
     category_id: params.category_id || undefined,
     category_ids: params.category_ids || undefined,
+    tankoubon_id: params.tankoubon_id || undefined,
     aggregate_by: params.aggregate_by || undefined,
     lang: params.lang || undefined,
     date_from: params.date_from || undefined,
@@ -274,6 +276,77 @@ export async function fetchArchiveMetadata(id: string, lang?: string): Promise<A
     {params: {lang: lang || undefined}},
   );
   return response.data;
+}
+
+export async function setTankoubonFavorite(
+  tankoubonId: string,
+  favorite: boolean,
+): Promise<void> {
+  if (favorite) {
+    await apiClient.put(`/api/tankoubons/${encodeURIComponent(tankoubonId)}/favorite`);
+  } else {
+    await apiClient.delete(`/api/tankoubons/${encodeURIComponent(tankoubonId)}/favorite`);
+  }
+}
+
+export async function markArchiveAsRead(archiveId: string): Promise<void> {
+  await apiClient.delete(`/api/archives/${encodeURIComponent(archiveId)}/isnew`);
+}
+
+export async function markArchiveAsNew(archiveId: string): Promise<void> {
+  await apiClient.put(`/api/archives/${encodeURIComponent(archiveId)}/isnew`);
+}
+
+export async function deleteArchive(archiveId: string): Promise<void> {
+  await apiClient.delete(`/api/archives/${encodeURIComponent(archiveId)}`);
+}
+
+export async function deleteTankoubon(tankoubonId: string): Promise<void> {
+  await apiClient.delete(`/api/tankoubons/${encodeURIComponent(tankoubonId)}`);
+}
+
+export async function addArchiveToTankoubon(
+  tankoubonId: string,
+  archiveId: string,
+): Promise<void> {
+  await apiClient.post(
+    `/api/tankoubons/${encodeURIComponent(tankoubonId)}/archives`,
+    {archive_id: archiveId},
+  );
+}
+
+export async function removeArchiveFromTankoubon(
+  tankoubonId: string,
+  archiveId: string,
+): Promise<void> {
+  await apiClient.delete(
+    `/api/tankoubons/${encodeURIComponent(tankoubonId)}/archives/${encodeURIComponent(archiveId)}`,
+  );
+}
+
+export async function fetchTankoubonRelated(
+  tankoubonId: string,
+  count = 8,
+): Promise<Tankoubon[]> {
+  const response = await apiClient.get<{data?: MediaItem[]}>(
+    '/api/recommendations',
+    {
+      params: {
+        scene: 'tankoubon_related',
+        tankoubon_id: tankoubonId,
+        count,
+      },
+      headers: {'X-Recommendation-Session': getRecommendationSessionKey()},
+    },
+  );
+  const data = Array.isArray(response.data?.data) ? response.data.data : [];
+  return data
+    .map(normalizeMediaItem)
+    .filter((item): item is Tankoubon => isTankoubon(item));
+}
+
+export function getArchiveDownloadUrl(archiveId: string): string {
+  return `/api/archives/${encodeURIComponent(archiveId)}/download`;
 }
 
 export async function fetchArchiveFiles(id: string): Promise<PageInfo[]> {
