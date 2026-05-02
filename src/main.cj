@@ -117,6 +117,18 @@ main(): Int64 {
     let localKvInitialized = LocalKVService.initializeFromSettings()
     if (localKvInitialized) {
         logger.info("Local KV initialized successfully")
+        let cacheRepairNamespace = "startup_repairs"
+        let assetsRepairKey = "metadata_assets_cache_invalidation_v1"
+        match (PersistentCacheService.get(cacheRepairNamespace, assetsRepairKey)) {
+            case Some(_) => ()
+            case None =>
+                let archiveVersion = DerivedCacheUtils.bumpArchiveAssetsRawVersion("startup:${assetsRepairKey}")
+                let tankVersion = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("startup:${assetsRepairKey}")
+                let _ = PersistentCacheService.set(cacheRepairNamespace, assetsRepairKey, "done", 0)
+                logger.info("Invalidated metadata assets derived caches",
+                    ("archive_assets_raw_version", archiveVersion.toString()),
+                    ("tankoubon_aggregated_version", tankVersion.toString()))
+        }
     } else {
         logger.error("Local KV unavailable; RocksDB is required for archive index and task KV")
         return 1

@@ -8,6 +8,7 @@ import lanlu.contexts.metadata.domain.*
 import lanlu.contexts.tag.infrastructure.persistence.*
 import lanlu.shared.config.*
 import lanlu.shared.utils.*
+import lanlu.infrastructure.kv.*
 
 public class MetadataAssetData {
     public var slot: String = ""
@@ -78,6 +79,19 @@ public class MetadataChildData {
 
 public class MetadataDao {
     private static let logger = getLogger("metadata_dao")
+
+    private static func invalidateAssetDerivedCaches(entityType: String, entityId: String, reason: String): Unit {
+        let normalizedType = entityType.trimAscii().toAsciiLower()
+        let normalizedId = entityId.trimAscii()
+        if (normalizedId.size == 0) {
+            return
+        }
+        if (normalizedType == "archive") {
+            let _ = DerivedCacheUtils.bumpArchiveAssetsRawVersion("${reason}:${normalizedId}")
+        } else if (normalizedType == "tankoubon") {
+            let _ = DerivedCacheUtils.bumpTankoubonAggregatedContentVersion("${reason}:${normalizedId}")
+        }
+    }
 
     private static func normalizePageEntryPath(entryPath: String, pageNumber: Int32): String {
         let trimmed = entryPath.trimAscii()
@@ -465,7 +479,7 @@ public class MetadataDao {
             return false
         }
 
-        return DatabaseConfig.withTransaction("metadata_dao", "replaceMetadataAssets failed", { conn =>
+        let updated = DatabaseConfig.withTransaction("metadata_dao", "replaceMetadataAssets failed", { conn =>
             let metadataId = getMetadataIdForRoot(conn, normalizedType, normalizedId)
             if (metadataId <= 0) {
                 return false
@@ -514,6 +528,10 @@ public class MetadataDao {
                 insertAsset.close()
             }
         })
+        if (updated) {
+            invalidateAssetDerivedCaches(normalizedType, normalizedId, "replaceMetadataAssets")
+        }
+        return updated
     }
 
     public static func setMetadataAssetId(entityType: String, entityId: String, slot: String, assetId: Int64): Bool {
@@ -573,6 +591,7 @@ public class MetadataDao {
                             stmt.close()
                         }
                     }
+                    invalidateAssetDerivedCaches(normalizedType, normalizedId, "setMetadataAssetId:${normalizedSlot}")
                     return true
                 } catch (e: Exception) {
                     logger.error("setMetadataAssetId failed", ("entityType", normalizedType), ("entityId", normalizedId), ("slot", normalizedSlot), ("error", e.message))
