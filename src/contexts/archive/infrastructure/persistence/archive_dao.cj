@@ -201,6 +201,41 @@ public class ArchiveDao {
             buildTagLikeCondition(pattern, params, tableAlias, unaccentFunction)
     }
 
+    private static func buildMetadataTagLikeCondition(
+        pattern: String,
+        params: ArrayList<String>,
+        entityType: String,
+        entityIdExpr: String,
+        unaccentFunction: String
+    ): String {
+        params.add(pattern)
+        params.add(pattern)
+        let nameExpr = if (unaccentFunction.size > 0) {
+            "${unaccentFunction}(substring(mt.tag FROM position(':' IN mt.tag) + 1))"
+        } else {
+            "substring(mt.tag FROM position(':' IN mt.tag) + 1)"
+        }
+        let tagExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(mt.tag)" } else { "mt.tag" }
+        let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+        return "EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = '${entityType}' AND mo.entity_id = ${entityIdExpr} AND ((position(':' IN mt.tag) > 0 AND ${nameExpr} LIKE ${patternExpr} ESCAPE '\\') OR ${tagExpr} LIKE ${patternExpr} ESCAPE '\\'))"
+    }
+
+    private static func buildTankoubonTextMatchCondition(
+        pattern: String,
+        params: ArrayList<String>,
+        unaccentFunction: String
+    ): String {
+        params.add(pattern)
+        params.add(pattern)
+        params.add(pattern)
+        let titleExpr = wrapSearchExpr("tankoubon_metadata.title", unaccentFunction)
+        let summaryExpr = wrapSearchExpr("tankoubon_metadata.description", unaccentFunction)
+        let idExpr = wrapSearchExpr("tb.tankoubon_id", unaccentFunction)
+        let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
+        return "(${titleExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${summaryExpr} LIKE ${patternExpr} ESCAPE '\\' OR ${idExpr} LIKE ${patternExpr} ESCAPE '\\' OR " +
+            buildMetadataTagLikeCondition(pattern, params, "tankoubon", "tb.tankoubon_id", unaccentFunction) + ")"
+    }
+
     /**
      * 从搜索 token 中剥离 `$` 精确匹配后缀。
      * 约定：`xxx$` 表示对标签进行完全匹配（tag token 精确匹配）。
@@ -387,16 +422,7 @@ public class ArchiveDao {
      * 同时匹配 name 与 namespace:name 两种形式。
      */
     private static func buildTagLikeCondition(pattern: String, params: ArrayList<String>, tableAlias: String, unaccentFunction: String): String {
-        params.add(pattern)
-        params.add(pattern)
-        let nameExpr = if (unaccentFunction.size > 0) {
-            "${unaccentFunction}(substring(mt.tag FROM position(':' IN mt.tag) + 1))"
-        } else {
-            "substring(mt.tag FROM position(':' IN mt.tag) + 1)"
-        }
-        let tagExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(mt.tag)" } else { "mt.tag" }
-        let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(?)" } else { "?" }
-        return "EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'archive' AND mo.entity_id = ${tableAlias}.arcid AND ((position(':' IN mt.tag) > 0 AND ${nameExpr} LIKE ${patternExpr} ESCAPE '\\') OR ${tagExpr} LIKE ${patternExpr} ESCAPE '\\'))"
+        return buildMetadataTagLikeCondition(pattern, params, "archive", "${tableAlias}.arcid", unaccentFunction)
     }
 
     private static func ensureArchiveMetadataRoot(archiveId: String): Bool {
@@ -683,6 +709,33 @@ public class ArchiveDao {
         let relevanceExpr = "COALESCE(ts_rank(" + tablePrefix + "search_tsv, websearch_to_tsquery('simple', '" + tsQueryStr + "')) * 2, 0) + (" + ilikeScoreExpr + ")"
 
         return relevanceExpr
+    }
+
+    private static func buildTankoubonRelevanceExpr(filter: String, unaccentFunction: String): String {
+        let searchResult = SearchFilter.parse(filter)
+        var relevanceTerms: ArrayList<String> = ArrayList<String>()
+        for (term in searchResult.terms) {
+            let (_, isExactTag) = stripExactSuffix(term)
+            if (!isExactTag) {
+                relevanceTerms.add(term)
+            }
+        }
+
+        if (relevanceTerms.size == 0) {
+            return "0"
+        }
+
+        var expr = "0"
+        for (term in relevanceTerms) {
+            let escapedTerm = term.replace("'", "''")
+            let pattern = "'%" + escapedTerm + "%'"
+            let patternExpr = if (unaccentFunction.size > 0) { "${unaccentFunction}(${pattern})" } else { pattern }
+            expr = expr + " + CASE WHEN " + wrapSearchExpr("tankoubon_metadata.title", unaccentFunction) + " ILIKE " + patternExpr + " THEN 0.35 ELSE 0 END"
+            expr = expr + " + CASE WHEN " + wrapSearchExpr("tankoubon_metadata.description", unaccentFunction) + " ILIKE " + patternExpr + " THEN 0.12 ELSE 0 END"
+            expr = expr + " + CASE WHEN " + wrapSearchExpr("tb.tankoubon_id", unaccentFunction) + " ILIKE " + patternExpr + " THEN 0.08 ELSE 0 END"
+            expr = expr + " + CASE WHEN EXISTS (SELECT 1 FROM metadata_objects mo JOIN metadata_tags mt ON mt.metadata_id = mo.id WHERE mo.entity_type = 'tankoubon' AND mo.entity_id = tb.tankoubon_id AND " + wrapSearchExpr("mt.tag", unaccentFunction) + " ILIKE " + patternExpr + ") THEN 0.08 ELSE 0 END"
+        }
+        return expr
     }
 
     public static func searchArchives(filter: String, category: String, start: Int32, count: Int32, sortby: String, order: String, newOnly: Bool, untaggedOnly: Bool, favoriteOnly: Bool, dateFrom: String, dateTo: String, userId: Int64): (Array<ArchiveData>, Int64) {
@@ -1153,7 +1206,8 @@ public class ArchiveDao {
                             }
 
                             fieldCondition += ")"
-                            termConditions.add(fieldCondition)
+                            let tankCondition = buildTankoubonTextMatchCondition(pattern, filterParams, unaccentFunction)
+                            termConditions.add("(" + fieldCondition + " OR " + tankCondition + ")")
                         }
                         if (termConditions.size > 0) {
                             var combined = ""
@@ -1191,7 +1245,8 @@ public class ArchiveDao {
                             }
 
                             fieldCondition += ")"
-                            whereConditions.add(fieldCondition)
+                            let tankCondition = buildTankoubonTextMatchCondition(pattern, filterParams, unaccentFunction)
+                            whereConditions.add("(" + fieldCondition + " OR " + tankCondition + ")")
                         }
                     }
 
@@ -1221,7 +1276,8 @@ public class ArchiveDao {
                             }
 
                             fieldCondition += ")"
-                            whereConditions.add("NOT " + fieldCondition)
+                            let tankCondition = buildTankoubonTextMatchCondition(pattern, filterParams, unaccentFunction)
+                            whereConditions.add("NOT (" + fieldCondition + " OR " + tankCondition + ")")
                         }
                     }
 
@@ -1259,7 +1315,13 @@ public class ArchiveDao {
 	                        filterParams.add(dateTo + " 23:59:59")
 	                    }
 
-                    let relevanceExpr = buildRelevanceExpr(filter, "archive_metadata_search.", unaccentFunction)
+                    let archiveRelevanceExpr = buildRelevanceExpr(filter, "archive_metadata_search.", unaccentFunction)
+                    let tankRelevanceExpr = buildTankoubonRelevanceExpr(filter, unaccentFunction)
+                    let relevanceExpr = if (archiveRelevanceExpr == "1") {
+                        "1"
+                    } else {
+                        "(" + archiveRelevanceExpr + ") + (" + tankRelevanceExpr + ")"
+                    }
                     let minRelevanceThreshold = 0.05
 
                     var whereClause = ""
@@ -1280,6 +1342,9 @@ public class ArchiveDao {
                         FROM archive_metadata_search
                         LEFT JOIN tankoubon_archives tba ON tba.archive_id = archive_metadata_search.id
                         LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
+                        LEFT JOIN metadata_objects tankoubon_metadata
+                               ON tankoubon_metadata.entity_type = 'tankoubon'
+                              AND tankoubon_metadata.entity_id = tb.tankoubon_id
                     """
                     if (whereClause.size > 0) {
                         countSql += " WHERE " + whereClause
@@ -1385,6 +1450,9 @@ public class ArchiveDao {
                             FROM archive_metadata_search
                             LEFT JOIN tankoubon_archives tba ON tba.archive_id = archive_metadata_search.id
                             LEFT JOIN tankoubons tb ON tb.id = tba.tankoubon_id
+                            LEFT JOIN metadata_objects tankoubon_metadata
+                                   ON tankoubon_metadata.entity_type = 'tankoubon'
+                                  AND tankoubon_metadata.entity_id = tb.tankoubon_id
                     """
                     if (sortby == "tank_order" && tankoubonId.size > 0) {
                         dataSql += " LEFT JOIN tankoubons t_order ON t_order.tankoubon_id = ?"
