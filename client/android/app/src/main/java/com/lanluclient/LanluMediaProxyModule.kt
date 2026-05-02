@@ -1,5 +1,6 @@
 package com.lanluclient
 
+import android.net.Uri
 import android.util.Log
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
@@ -7,6 +8,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import java.io.BufferedReader
+import java.io.File
 import java.io.InputStream
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
@@ -47,6 +49,25 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
       promise.resolve("http://127.0.0.1:$port/media/$encodedId")
     } catch (error: Exception) {
       promise.reject("LANLU_MEDIA_PROXY", error)
+    }
+  }
+
+  @ReactMethod
+  fun writeTextFile(extension: String, text: String, promise: Promise) {
+    try {
+      val safeExtension = extension
+          .lowercase()
+          .replace(Regex("[^a-z0-9]"), "")
+          .ifBlank { "ass" }
+      val directory = File(reactApplicationContext.cacheDir, "lanlu_subtitles")
+      if (!directory.exists()) {
+        directory.mkdirs()
+      }
+      val file = File(directory, "subtitle-${UUID.randomUUID()}.$safeExtension")
+      file.writeText(text, Charsets.UTF_8)
+      promise.resolve(Uri.fromFile(file).toString())
+    } catch (error: Exception) {
+      promise.reject("LANLU_SUBTITLE_FILE", error)
     }
   }
 

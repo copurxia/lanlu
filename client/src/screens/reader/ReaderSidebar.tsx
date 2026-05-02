@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import {ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, Music} from 'lucide-react-native';
+import {VLCPlayer} from 'react-native-vlc-media-player';
 import {colors, spacing} from '../../theme/colors';
 import type {PageInfo} from '../../types/api';
 
@@ -22,6 +23,7 @@ type SbPage = {
   imageSource?: ImageSourcePropType | null;
   thumbnailSource?: ImageSourcePropType | null;
   uri?: string;
+  vlcUri?: string;
   headers?: Record<string, string>;
   resolvedPath?: string;
   title?: string;
@@ -105,12 +107,14 @@ function getDisplayDescription(page: SbPage) {
 }
 
 export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, t}: Props) {
-  const {width: screenWidth} = useWindowDimensions();
+  const {width: screenWidth, height: screenHeight} = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<SidebarTab>('thumbnails');
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
-  const thumbColumns = 3;
+  const sidePanel = screenWidth >= 700 && screenWidth > screenHeight;
+  const panelWidth = sidePanel ? Math.min(380, Math.max(320, Math.floor(screenWidth * 0.34))) : screenWidth;
+  const thumbColumns = sidePanel ? 2 : 3;
   const thumbGap = 6;
-  const thumbWidth = Math.floor((screenWidth - 48 - thumbGap * (thumbColumns - 1)) / thumbColumns);
+  const thumbWidth = Math.floor((panelWidth - 48 - thumbGap * (thumbColumns - 1)) / thumbColumns);
   const thumbHeight = Math.floor(thumbWidth * 1.4);
 
   useEffect(() => {
@@ -122,9 +126,9 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
   const handleSelect = useCallback(
     (pageIndex: number) => {
       onSelectPage(pageIndex);
-      onClose();
+      if (!sidePanel) onClose();
     },
-    [onSelectPage, onClose],
+    [onSelectPage, onClose, sidePanel],
   );
 
   const fileTree = useMemo(() => {
@@ -252,6 +256,7 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
       const isCurrent = pageIdx + 1 === currentPage;
       const thumbSource = item.thumbnailSource || item.imageSource;
       const thumbSrc = getImageUri(thumbSource) || item.uri;
+      const videoPreviewUri = item.effectiveType === 'video' ? item.vlcUri || item.uri || '' : '';
       return (
         <TouchableOpacity
           activeOpacity={0.7}
@@ -268,6 +273,24 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
                 resizeMode="cover"
                 source={thumbSource || {uri: thumbSrc, headers: item.headers}}
                 style={[styles.thumbImage, {width: thumbWidth, height: thumbHeight}]}
+              />
+            ) : item.effectiveType === 'video' && videoPreviewUri ? (
+              <VLCPlayer
+                autoplay
+                muted
+                paused={false}
+                resizeMode="cover"
+                source={
+                  {
+                    uri: videoPreviewUri,
+                    isNetwork: Boolean(videoPreviewUri.startsWith('http')),
+                    initType: 2,
+                    initOptions: ['--network-caching=300', ''],
+                    mediaOptions: [':no-audio', ':http-reconnect', ''],
+                  } as never
+                }
+                style={[styles.thumbImage, {width: thumbWidth, height: thumbHeight}]}
+                volume={0}
               />
             ) : (
               <View style={[styles.thumbPlaceholder, {width: thumbWidth, height: thumbHeight}]}>
@@ -388,15 +411,22 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
 
   return (
     <Modal
-      animationType="slide"
+      animationType={sidePanel ? 'fade' : 'slide'}
       onRequestClose={onClose}
       statusBarTranslucent
       transparent
       visible={open}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>{t('reader.sidebar')}</Text>
+      <View style={[styles.backdrop, sidePanel && styles.sideBackdrop]}>
+        <View style={[styles.sheet, sidePanel && [styles.sideSheet, {width: panelWidth}]]}>
+          {!sidePanel ? <View style={styles.sheetHandle} /> : null}
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t('reader.sidebar')}</Text>
+            {sidePanel ? (
+              <TouchableOpacity onPress={onClose} style={styles.sideCloseButton}>
+                <Text style={styles.sideCloseButtonText}>x</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
 
           <View style={styles.tabBar}>
             <TouchableOpacity
@@ -454,9 +484,11 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
             />
           )}
 
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>{t('common.close')}</Text>
-          </TouchableOpacity>
+          {!sidePanel ? (
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>{t('common.close')}</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       </View>
     </Modal>
@@ -469,12 +501,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'flex-end',
   },
+  sideBackdrop: {
+    alignItems: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    justifyContent: 'flex-start',
+  },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: 14,
     borderTopRightRadius: 14,
     maxHeight: '82%',
     padding: spacing.lg,
+  },
+  sideSheet: {
+    borderLeftColor: colors.border,
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    height: '100%',
+    maxHeight: '100%',
+    paddingTop: spacing.lg,
   },
   sheetHandle: {
     alignSelf: 'center',
@@ -484,11 +530,32 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     width: 44,
   },
+  sheetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
   sheetTitle: {
     color: colors.text,
+    flex: 1,
     fontSize: 18,
     fontWeight: '800',
-    marginBottom: spacing.md,
+  },
+  sideCloseButton: {
+    alignItems: 'center',
+    borderColor: colors.border,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  sideCloseButtonText: {
+    color: colors.textMuted,
+    fontSize: 14,
+    fontWeight: '800',
   },
   tabBar: {
     flexDirection: 'row',

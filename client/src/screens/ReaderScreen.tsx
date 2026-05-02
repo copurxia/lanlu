@@ -39,6 +39,7 @@ import {
   ChevronLeft,
   FastForward,
   Heart,
+  Layers,
   List,
   Pause,
   Play,
@@ -79,7 +80,7 @@ import {
   saveReaderSettings,
 } from '../storage/preferences';
 import {appendDiagnosticLog} from '../storage/diagnostics';
-import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
+import {createLocalSubtitleFile, createProxiedMediaUrl} from '../native/LanluMediaProxy';
 import {useI18n} from '../i18n';
 import {colors, spacing} from '../theme/colors';
 import type {RootStackParamList} from '../navigation/types';
@@ -198,6 +199,20 @@ function normalizeVlcProgress(event: VlcPlaybackEvent) {
   };
 }
 
+function normalizeVlcBufferRate(event: unknown) {
+  if (!event || typeof event !== 'object') return 0;
+  const payload = event as Record<string, unknown>;
+  const raw =
+    typeof payload.bufferRate === 'number'
+      ? payload.bufferRate / 100
+      : typeof payload.rate === 'number'
+        ? payload.rate
+        : typeof payload.buffered === 'number'
+          ? payload.buffered
+          : 0;
+  return Math.max(0, Math.min(1, raw));
+}
+
 function formatMediaTime(seconds: number) {
   const safe = Math.max(0, Math.floor(seconds));
   const minutes = Math.floor(safe / 60);
@@ -231,6 +246,21 @@ function buildSubtitleOptionLabel(attachment: MetadataPageAttachment, subtitleIn
   if (name) return name;
   if (kind) return kind;
   return `Subtitle ${subtitleIndex + 1}`;
+}
+
+function isAssSubtitleAttachment(attachment?: MetadataPageAttachment | null) {
+  const kind = String(attachment?.kind || '').trim().toLowerCase();
+  const name = String(attachment?.name || '').trim().toLowerCase();
+  return kind.includes('ass') || kind.includes('ssa') || name.endsWith('.ass') || name.endsWith('.ssa');
+}
+
+function subtitleFileExtension(attachment?: MetadataPageAttachment | null) {
+  const kind = String(attachment?.kind || '').trim().toLowerCase();
+  const name = String(attachment?.name || '').trim().toLowerCase();
+  if (kind.includes('ssa') || name.endsWith('.ssa')) return 'ssa';
+  if (kind.includes('vtt') || name.endsWith('.vtt')) return 'vtt';
+  if (kind.includes('srt') || name.endsWith('.srt')) return 'srt';
+  return 'ass';
 }
 
 function encodeEmbeddedSubtitleValue(trackId: number) {
@@ -295,13 +325,52 @@ function parseVtt(text: string): SubtitleCue[] {
 }
 
 function parseAss(text: string): SubtitleCue[] {
+  let eventSection = false;
+  let formatFields: string[] = [];
   const cues: SubtitleCue[] = [];
   for (const line of text.split(/\r?\n/)) {
-    if (!line.startsWith('Dialogue:')) continue;
-    const parts = line.slice('Dialogue:'.length).trim().split(',');
-    if (parts.length < 10) continue;
-    const body = stripAssFormatting(parts.slice(9).join(','));
-    if (body) cues.push({start: parseTimestamp(parts[1] || ''), end: parseTimestamp(parts[2] || ''), text: body});
+    const trimmed = line.trim();
+    if (/^\[events\]$/i.test(trimmed)) {
+      eventSection = true;
+      continue;
+    }
+    if (/^\[.+\]$/.test(trimmed)) {
+      eventSection = false;
+      continue;
+    }
+    if (!eventSection) continue;
+    if (/^Format:/i.test(trimmed)) {
+      formatFields = trimmed
+        .slice(trimmed.indexOf(':') + 1)
+        .split(',')
+        .map(field => field.trim().toLowerCase());
+      continue;
+    }
+    if (!/^Dialogue:/i.test(trimmed)) continue;
+
+    const payload = trimmed.slice(trimmed.indexOf(':') + 1).trim();
+    const fieldCount = Math.max(formatFields.length, 10);
+    const parts = payload.split(',');
+    if (parts.length < fieldCount) continue;
+
+    const startIndex = formatFields.indexOf('start');
+    const endIndex = formatFields.indexOf('end');
+    const textIndex = formatFields.indexOf('text');
+    const resolvedStartIndex = startIndex >= 0 ? startIndex : 1;
+    const resolvedEndIndex = endIndex >= 0 ? endIndex : 2;
+    const resolvedTextIndex = textIndex >= 0 ? textIndex : 9;
+
+    const head = parts.slice(0, resolvedTextIndex);
+    const bodyParts = parts.slice(resolvedTextIndex);
+    if (head.length <= Math.max(resolvedStartIndex, resolvedEndIndex) || bodyParts.length === 0) continue;
+    const body = stripAssFormatting(bodyParts.join(','));
+    if (body) {
+      cues.push({
+        start: parseTimestamp(head[resolvedStartIndex] || ''),
+        end: parseTimestamp(head[resolvedEndIndex] || ''),
+        text: body,
+      });
+    }
   }
   return cues;
 }
@@ -361,6 +430,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const vlcRefs = useRef<Record<number, VlcPlayerRef | null>>({});
   const vlcSessions = useRef<Record<number, {target?: number; playable: boolean; ignoredProgress: number}>>({});
   const vlcSourceKeys = useRef<Record<number, string>>({});
+  const vlcBufferLogBuckets = useRef<Record<number, number>>({});
   const mediaLastSeekAt = useRef<Record<number, number>>({});
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
@@ -370,6 +440,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const progressSeekLockedRef = useRef(false);
   const settingsHydratedRef = useRef(false);
   const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoPreferredLaneItemKey = useRef('');
   const [settings, setSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sourceIndexByPage, setSourceIndexByPage] = useState<Record<number, number>>({});
@@ -388,10 +459,12 @@ export function ReaderScreen({route, navigation}: Props) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sourceSheetOpen, setSourceSheetOpen] = useState(false);
   const [subtitleSheetOpen, setSubtitleSheetOpen] = useState(false);
+  const [volumeSheetPageId, setVolumeSheetPageId] = useState<number | null>(null);
   const [sourceSheetPageId, setSourceSheetPageId] = useState<number | null>(null);
   const [activeSubtitleIndexesByPage, setActiveSubtitleIndexesByPage] = useState<Record<number, number[]>>({});
   const [activeEmbeddedSubtitleTrackByPage, setActiveEmbeddedSubtitleTrackByPage] = useState<Record<number, number | undefined>>({});
   const [embeddedSubtitleTracksByPage, setEmbeddedSubtitleTracksByPage] = useState<Record<number, VlcTextTrack[]>>({});
+  const [externalVlcSubtitleUriByPage, setExternalVlcSubtitleUriByPage] = useState<Record<number, string | undefined>>({});
   const [subtitleTextsByAssetId, setSubtitleTextsByAssetId] = useState<Record<number, string>>({});
   const [isFavorited, setIsFavorited] = useState(false);
   const [sidebarPages, setSidebarPages] = useState<any[]>([]);
@@ -410,6 +483,10 @@ export function ReaderScreen({route, navigation}: Props) {
   useEffect(() => {
     progressSeekLockedRef.current = progressSeekLocked;
   }, [progressSeekLocked]);
+
+  useEffect(() => {
+    setSidebarPages(pages);
+  }, [pages]);
 
   const topBarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: chromeProgress.value,
@@ -715,6 +792,27 @@ export function ReaderScreen({route, navigation}: Props) {
     () => lanes.find(lane => lane.id === activeLaneId) || lanes[0],
     [activeLaneId, lanes],
   );
+
+  useEffect(() => {
+    if (!lanes.length) return;
+    const activeReaderItemKey = activeReaderItem?.key || '';
+    const preferredLane = lanes.find(lane => lane.kind !== 'book') || lanes.find(lane => lane.id === 'book') || lanes[0];
+    const activeLaneExists = lanes.some(lane => lane.id === activeLaneId);
+
+    if (!activeLaneExists) {
+      autoPreferredLaneItemKey.current = activeReaderItemKey;
+      setActiveLaneId(preferredLane.id);
+      return;
+    }
+
+    if (autoPreferredLaneItemKey.current === activeReaderItemKey) return;
+    autoPreferredLaneItemKey.current = activeReaderItemKey;
+
+    if (activeLaneId === 'book' && preferredLane.id !== 'book') {
+      setActiveLaneId(preferredLane.id);
+    }
+  }, [activeLaneId, activeReaderItem, lanes]);
+
   const activeSubtitleIndexes = useMemo(
     () => (activeLane.kind !== 'book' ? activeSubtitleIndexesByPage[activeLane.page.pageNumber] || [] : []),
     [activeLane, activeSubtitleIndexesByPage],
@@ -727,6 +825,13 @@ export function ReaderScreen({route, navigation}: Props) {
         ? getPageSubtitleAttachments(activeLane.page).filter((_, index) => activeSubtitleIndexes.includes(index))
         : [],
     [activeLane, activeSubtitleIndexes],
+  );
+  const activeExternalVlcSubtitleAttachment = useMemo(
+    () =>
+      activeSubtitleAttachments.length === 1 && isAssSubtitleAttachment(activeSubtitleAttachments[0])
+        ? activeSubtitleAttachments[0]
+        : null,
+    [activeSubtitleAttachments],
   );
   const activeSubtitleAssetKey = activeSubtitleAttachments
     .map(attachment => attachment.asset_id)
@@ -782,6 +887,51 @@ export function ReaderScreen({route, navigation}: Props) {
       cancelled = true;
     };
   }, [activeLane, activeSubtitleAssetKey, activeSubtitleAttachments, archiveId, subtitleTextsByAssetId]);
+
+  useEffect(() => {
+    if (activeLane.kind === 'book') return;
+    const pageNumber = activeLane.page.pageNumber;
+    let cancelled = false;
+
+    if (!activeExternalVlcSubtitleAttachment?.asset_id) {
+      setExternalVlcSubtitleUriByPage(current =>
+        current[pageNumber] == null ? current : {...current, [pageNumber]: undefined},
+      );
+      return;
+    }
+
+    const resolveSubtitleUri = async () => {
+      const text = subtitleTextsByAssetId[activeExternalVlcSubtitleAttachment.asset_id];
+      if (!text?.trim()) return;
+      const subtitleUri = await createLocalSubtitleFile(
+        text,
+        subtitleFileExtension(activeExternalVlcSubtitleAttachment),
+      );
+      if (cancelled) return;
+      appendDiagnosticLog('subtitle.localFile.ready', {
+        archiveId,
+        page: pageNumber,
+        assetId: activeExternalVlcSubtitleAttachment.asset_id,
+        subtitleUri,
+      }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      setExternalVlcSubtitleUriByPage(current =>
+        current[pageNumber] === subtitleUri ? current : {...current, [pageNumber]: subtitleUri},
+      );
+    };
+
+    resolveSubtitleUri().catch(err => {
+      appendDiagnosticLog('subtitle.vlcUri.error', {
+        archiveId,
+        page: pageNumber,
+        assetId: activeExternalVlcSubtitleAttachment.asset_id,
+        message: extractApiError(err),
+      }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeExternalVlcSubtitleAttachment, activeLane, archiveId, subtitleTextsByAssetId]);
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const onViewableItemsChanged = useRef(
@@ -1248,6 +1398,13 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [ensureMediaProxy, nearbyMediaPages]);
 
   useEffect(() => {
+    if (!sidebarOpen) return;
+    pages
+      .filter(page => page.uri && !page.vlcUri && (page.effectiveType === 'video' || page.effectiveType === 'audio'))
+      .forEach(ensureMediaProxy);
+  }, [ensureMediaProxy, pages, sidebarOpen]);
+
+  useEffect(() => {
     activeMediaPages.forEach(page => {
       const mediaOptions = buildVlcMediaOptions(page);
       appendDiagnosticLog('media.active', {
@@ -1372,8 +1529,12 @@ export function ReaderScreen({route, navigation}: Props) {
       const pageSubtitleAttachments = getPageSubtitleAttachments(page).filter((_, index) =>
         pageSubtitleIndexes.includes(index),
       );
+      const externalVlcSubtitleUri = externalVlcSubtitleUriByPage[page.pageNumber];
+      const overlaySubtitleAttachments = externalVlcSubtitleUri
+        ? pageSubtitleAttachments.filter(attachment => !isAssSubtitleAttachment(attachment))
+        : pageSubtitleAttachments;
       const activeSubtitleCues = getActiveSubtitleCues(
-        pageSubtitleAttachments,
+        overlaySubtitleAttachments,
         subtitleTextsByAssetId,
         mediaState.currentTime,
       );
@@ -1411,6 +1572,7 @@ export function ReaderScreen({route, navigation}: Props) {
             paused={mediaState.paused}
             muted={mediaState.muted}
             textTrack={pageEmbeddedSubtitleTrack ?? -1}
+            subtitleUri={externalVlcSubtitleUri}
             volume={Math.round(Math.max(0, Math.min(1, mediaState.volume)) * 100)}
             resizeMode="contain"
             source={
@@ -1424,23 +1586,19 @@ export function ReaderScreen({route, navigation}: Props) {
             }
             style={page.effectiveType === 'audio' ? styles.audioStage : styles.pageImage}
             onBuffering={event => {
-              appendDiagnosticLog('vlc.buffering', {
-                archiveId,
-                page: page.pageNumber,
-                type: page.effectiveType,
-                event,
-              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
-              const bufferedVal =
-                event != null && typeof event === 'object'
-                  ? 'rate' in event
-                    ? (event as any).rate
-                    : 'buffered' in event
-                      ? (event as any).buffered
-                      : 0
-                  : 0;
-              if (typeof bufferedVal === 'number' && bufferedVal >= 0) {
-                setMediaState(page.pageNumber, {buffered: Math.min(1, bufferedVal)});
+              const buffered = normalizeVlcBufferRate(event);
+              const bucket = Math.floor(buffered * 10);
+              if (vlcBufferLogBuckets.current[page.pageNumber] !== bucket || buffered >= 1) {
+                vlcBufferLogBuckets.current[page.pageNumber] = bucket;
+                appendDiagnosticLog('vlc.buffering', {
+                  archiveId,
+                  page: page.pageNumber,
+                  type: page.effectiveType,
+                  buffered,
+                  event,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
               }
+              setMediaState(page.pageNumber, {buffered});
             }}
             onEnd={() => {
               setMediaState(page.pageNumber, {paused: true});
@@ -1469,18 +1627,6 @@ export function ReaderScreen({route, navigation}: Props) {
               }));
             }}
             onLoad={event => {
-              appendDiagnosticLog('vlc.load', {
-                archiveId,
-                page: page.pageNumber,
-                type: page.effectiveType,
-                uri: page.uri,
-                vlcUri: page.vlcUri,
-                path: page.resolvedPath,
-                duration: event.duration,
-              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
-              setMediaState(page.pageNumber, {
-                duration: normalizeVlcSeconds(event.duration),
-              });
               const tracks = Array.isArray((event as any).textTracks)
                 ? ((event as any).textTracks as Array<{id?: number | string; name?: string}>)
                     .map(track => ({
@@ -1489,6 +1635,20 @@ export function ReaderScreen({route, navigation}: Props) {
                     }))
                     .filter(track => Number.isFinite(track.id) && track.id >= 0)
                 : [];
+              appendDiagnosticLog('vlc.load', {
+                archiveId,
+                page: page.pageNumber,
+                type: page.effectiveType,
+                uri: page.uri,
+                vlcUri: page.vlcUri,
+                subtitleUri: externalVlcSubtitleUri,
+                path: page.resolvedPath,
+                duration: event.duration,
+                textTracks: tracks,
+              }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+              setMediaState(page.pageNumber, {
+                duration: normalizeVlcSeconds(event.duration),
+              });
               setEmbeddedSubtitleTracksByPage(current => {
                 const previous = current[page.pageNumber] || [];
                 const same =
@@ -1550,6 +1710,42 @@ export function ReaderScreen({route, navigation}: Props) {
           {page.effectiveType === 'audio' ? (
             <Text style={styles.audioTitle}>{page.title || page.resolvedPath || `${t('reader.audio')} ${page.pageNumber}`}</Text>
           ) : null}
+          <View
+            pointerEvents={chromeVisible ? 'box-none' : 'none'}
+            style={[styles.mediaOverlayControls, !chromeVisible && styles.mediaOverlayControlsHidden]}>
+            <TouchableOpacity
+              accessibilityLabel={t('reader.seekBack')}
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              onPress={() => seekMedia(page, mediaState.currentTime - 5)}
+              style={styles.mediaSeekButton}>
+              <Rewind color={colors.white} size={22} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={mediaState.paused ? t('reader.play') : t('reader.pause')}
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              onPress={() =>
+                setMediaState(page.pageNumber, {
+                  paused: !getMediaState(page.pageNumber).paused,
+                })
+              }
+              style={styles.mediaCenterButton}>
+              {mediaState.paused ? (
+                <Play color={colors.white} size={28} />
+              ) : (
+                <Pause color={colors.white} size={28} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={t('reader.seekForward')}
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              onPress={() => seekMedia(page, mediaState.currentTime + 5)}
+              style={styles.mediaSeekButton}>
+              <FastForward color={colors.white} size={22} />
+            </TouchableOpacity>
+          </View>
           {activeSubtitleCues.length > 0 ? (
             <View pointerEvents="none" style={styles.subtitleOverlay}>
               {activeSubtitleCues.map((cue, index) => (
@@ -1641,6 +1837,8 @@ export function ReaderScreen({route, navigation}: Props) {
       label: t('reader.subtitleEmbedded', {label: track.name || `Track ${index + 1}`}),
     })),
   ];
+  const volumeSheetPage = volumeSheetPageId ? pages.find(page => page.pageNumber === volumeSheetPageId) : null;
+  const volumeSheetState = volumeSheetPage ? getMediaState(volumeSheetPage.pageNumber) : null;
   const readerProgressTotal = readerItems[readerItems.length - 1]?.progressPage || pages.length;
   const displayCurrentPage = Math.min(currentPage, pages.length);
 
@@ -1715,8 +1913,10 @@ export function ReaderScreen({route, navigation}: Props) {
   return (
     <View style={styles.screen}>
       <StatusBar
+        animated
         backgroundColor="transparent"
         barStyle="light-content"
+        hidden={!chromeVisible}
         translucent
       />
       {settings.readingMode === 'webtoon' ? (
@@ -1790,19 +1990,30 @@ export function ReaderScreen({route, navigation}: Props) {
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[styles.topBar, {paddingTop: insets.top + 8}, topBarAnimatedStyle]}>
+          <View style={styles.topBarGroup}>
             <TouchableOpacity onPress={() => navigation.goBack()} style={styles.iconButton}>
               <ChevronLeft color={colors.white} size={24} />
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setSidebarOpen(true)} style={styles.iconButton}>
               <List color={colors.white} size={21} />
             </TouchableOpacity>
+          </View>
             <TouchableOpacity onPress={cycleMode} style={styles.modeButton}>
               <Text style={styles.modeText}>{t(modeLabelKey(settings.readingMode))}</Text>
               <Text style={styles.progress}>{displayCurrentPage} / {pages.length}</Text>
             </TouchableOpacity>
+          <View style={styles.topBarGroup}>
+            <TouchableOpacity onPress={handleToggleFavorite} style={styles.iconButton}>
+              <Heart
+                color={colors.white}
+                fill={isFavorited ? colors.white : 'transparent'}
+                size={20}
+              />
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => setSettingsOpen(true)} style={styles.iconButton}>
               <SettingsIcon color={colors.white} size={21} />
             </TouchableOpacity>
+          </View>
       </Animated.View>
       <Animated.View
         pointerEvents={chromeVisible ? 'auto' : 'none'}
@@ -1833,25 +2044,31 @@ export function ReaderScreen({route, navigation}: Props) {
                               jumpToPageFromProgress(next);
                             }}
                             style={[styles.laneContent, progressSeekLocked && styles.laneContentDisabled]}>
-                            <View style={styles.progressTrack}>
-                              <View
-                                style={[
-                                  styles.progressFill,
-                                  {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
-                                ]}
-                              />
+                            <View style={styles.progressInline}>
+                              <View style={[styles.progressTrack, styles.progressTrackInline]}>
+                                <View
+                                  style={[
+                                    styles.progressFill,
+                                    {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
+                                  ]}
+                                />
+                              </View>
+                              <Text style={styles.progressCaption} numberOfLines={1}>
+                                {displayCurrentPage} / {pages.length}
+                              </Text>
                             </View>
-                            <Text style={styles.progressCaption}>{displayCurrentPage} / {pages.length}</Text>
                           </TouchableOpacity>
                         ) : activeLane.kind !== 'book' && (
                           <MediaLaneControls
-                            label={activeLane.label}
+                            compact={width < 430}
+                            hideTransportControls={width < 430}
                             page={activeLane.page}
                             state={getMediaState(activeLane.page.pageNumber)}
                             sourceIndex={sourceIndexByPage[activeLane.page.pageNumber - 1] ?? activeLane.page.defaultSourceIndex ?? 0}
                             t={t}
                             onOpenSourceSheet={() => handleOpenSourceSheet(activeLane.page)}
                             onOpenSubtitleSheet={() => setSubtitleSheetOpen(true)}
+                            onOpenVolumeSheet={() => setVolumeSheetPageId(activeLane.page.pageNumber)}
                             onSeek={seconds => seekMedia(activeLane.page, seconds)}
                             onSeekRelative={seconds =>
                               seekMedia(activeLane.page, getMediaState(activeLane.page.pageNumber).currentTime + seconds)
@@ -1874,15 +2091,6 @@ export function ReaderScreen({route, navigation}: Props) {
                   );
                 })}
               </View>
-              <TouchableOpacity
-                onPress={handleToggleFavorite}
-                style={[styles.iconButton, {marginLeft: 6}]}>
-                <Heart
-                  color={colors.white}
-                  fill={isFavorited ? colors.white : 'transparent'}
-                  size={18}
-                />
-              </TouchableOpacity>
             </View>
       </Animated.View>
 
@@ -1936,6 +2144,32 @@ export function ReaderScreen({route, navigation}: Props) {
         onClose={() => setSubtitleSheetOpen(false)}
         t={t as (key: string, params?: Record<string, string | number>) => string}
       />
+
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setVolumeSheetPageId(null)}
+        statusBarTranslucent
+        transparent
+        visible={Boolean(volumeSheetPage && volumeSheetState)}>
+        <ModalBackdrop style={[styles.modalBackdrop, styles.volumePopoverBackdrop]}>
+          <TouchableOpacity activeOpacity={1} onPress={() => setVolumeSheetPageId(null)} style={StyleSheet.absoluteFill} />
+          {volumeSheetPage && volumeSheetState ? (
+            <VolumeStrip
+              bottomOffset={insets.bottom + 72}
+              pageNumber={volumeSheetPage.pageNumber}
+              state={volumeSheetState}
+              t={t}
+              onClose={() => setVolumeSheetPageId(null)}
+              onToggleMute={() =>
+                setMediaState(volumeSheetPage.pageNumber, {
+                  muted: !volumeSheetState.muted,
+                })
+              }
+              onVolumeChange={handleVolumeChange}
+            />
+          ) : null}
+        </ModalBackdrop>
+      </Modal>
     </View>
   );
 }
@@ -2090,26 +2324,30 @@ function ReaderTapSurface({
 }
 
 function MediaLaneControls({
-  label,
+  compact,
+  hideTransportControls,
   page,
   state,
   sourceIndex,
   t,
   onOpenSourceSheet,
   onOpenSubtitleSheet,
+  onOpenVolumeSheet,
   onSeek,
   onSeekRelative,
   onToggleMute,
   onTogglePlay,
   onVolumeChange,
 }: {
-  label: string;
+  compact?: boolean;
+  hideTransportControls?: boolean;
   page: ReaderPage;
   state: MediaPlaybackState;
   sourceIndex: number;
   t: ReturnType<typeof useI18n>['t'];
   onOpenSourceSheet: () => void;
   onOpenSubtitleSheet: () => void;
+  onOpenVolumeSheet: () => void;
   onSeek: (seconds: number) => void;
   onSeekRelative: (seconds: number) => void;
   onToggleMute: () => void;
@@ -2122,32 +2360,36 @@ function MediaLaneControls({
   const [timelineWidth, setTimelineWidth] = useState(1);
   const [volBarWidth, setVolBarWidth] = useState(1);
   return (
-    <View style={styles.mediaLane}>
-      <TouchableOpacity
-        accessibilityLabel={state.paused ? t('reader.play') : t('reader.pause')}
-        accessibilityRole="button"
-        onPress={onTogglePlay}
-        style={styles.mediaIconButton}>
-        {state.paused ? (
-          <Play color={colors.white} size={16} />
-        ) : (
-          <Pause color={colors.white} size={16} />
-        )}
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityLabel={t('reader.seekBack')}
-        accessibilityRole="button"
-        onPress={() => onSeekRelative(-5)}
-        style={styles.mediaIconButton}>
-        <Rewind color={colors.white} size={16} />
-      </TouchableOpacity>
-      <TouchableOpacity
-        accessibilityLabel={t('reader.seekForward')}
-        accessibilityRole="button"
-        onPress={() => onSeekRelative(5)}
-        style={styles.mediaIconButton}>
-        <FastForward color={colors.white} size={16} />
-      </TouchableOpacity>
+    <View style={[styles.mediaLane, compact && styles.mediaLaneCompact]}>
+      {!hideTransportControls ? (
+        <>
+          <TouchableOpacity
+            accessibilityLabel={t('reader.seekBack')}
+            accessibilityRole="button"
+            onPress={() => onSeekRelative(-5)}
+            style={styles.mediaIconButton}>
+            <Rewind color={colors.white} size={16} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityLabel={state.paused ? t('reader.play') : t('reader.pause')}
+            accessibilityRole="button"
+            onPress={onTogglePlay}
+            style={styles.mediaIconButton}>
+            {state.paused ? (
+              <Play color={colors.white} size={16} />
+            ) : (
+              <Pause color={colors.white} size={16} />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityLabel={t('reader.seekForward')}
+            accessibilityRole="button"
+            onPress={() => onSeekRelative(5)}
+            style={styles.mediaIconButton}>
+            <FastForward color={colors.white} size={16} />
+          </TouchableOpacity>
+        </>
+      ) : null}
       <TouchableOpacity
         activeOpacity={0.9}
         onLayout={event => setTimelineWidth(Math.max(1, event.nativeEvent.layout.width))}
@@ -2155,28 +2397,30 @@ function MediaLaneControls({
           onSeek((event.nativeEvent.locationX / timelineWidth) * Math.max(1, duration));
         }}
         style={styles.mediaTimeline}>
-        <View style={styles.progressTrack}>
-          <View
-            style={[
-              styles.progressBuffered,
-              {width: `${Math.max(0, Math.min(100, (state.buffered || 0) * 100))}%`},
-            ]}
-          />
-          <View
-            style={[
-              styles.progressFill,
-              {width: `${Math.max(2, Math.max(0, Math.min(1, position)) * 100)}%`},
-            ]}
-          />
+        <View style={styles.progressInline}>
+          <View style={[styles.progressTrack, styles.progressTrackInline]}>
+            <View
+              style={[
+                styles.progressBuffered,
+                {width: `${Math.max(0, Math.min(100, (state.buffered || 0) * 100))}%`},
+              ]}
+            />
+            <View
+              style={[
+                styles.progressFill,
+                {width: `${Math.max(2, Math.max(0, Math.min(1, position)) * 100)}%`},
+              ]}
+            />
+          </View>
+          <Text style={styles.mediaTime} numberOfLines={1}>
+            {formatMediaTime(state.currentTime)}/{formatMediaTime(duration)}
+          </Text>
         </View>
-        <Text style={styles.mediaTime} numberOfLines={1}>
-          {label} {formatMediaTime(state.currentTime)} / {formatMediaTime(duration)}
-        </Text>
       </TouchableOpacity>
       <TouchableOpacity
         accessibilityLabel={state.muted ? t('reader.unmute') : t('reader.mute')}
         accessibilityRole="button"
-        onPress={onToggleMute}
+        onPress={compact ? onOpenVolumeSheet : onToggleMute}
         style={styles.mediaIconButton}>
         {state.muted ? (
           <VolumeX color={colors.white} size={16} />
@@ -2184,28 +2428,32 @@ function MediaLaneControls({
           <Volume2 color={colors.white} size={16} />
         )}
       </TouchableOpacity>
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onLayout={event => setVolBarWidth(Math.max(1, event.nativeEvent.layout.width))}
-        onPress={event => {
-          const ratio = Math.max(0, Math.min(1, event.nativeEvent.locationX / volBarWidth));
-          onVolumeChange(ratio);
-        }}
-        style={styles.volumeSlider}>
-        <View style={styles.progressTrack}>
-          <View
-            style={[
-              styles.progressFill,
-              {width: `${state.muted ? 0 : Math.max(2, Math.round(state.volume * 100))}%`},
-            ]}
-          />
-        </View>
-      </TouchableOpacity>
+      {!compact ? (
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onLayout={event => setVolBarWidth(Math.max(1, event.nativeEvent.layout.width))}
+          onPress={event => {
+            const ratio = Math.max(0, Math.min(1, event.nativeEvent.locationX / volBarWidth));
+            onVolumeChange(ratio);
+          }}
+          style={styles.volumeSlider}>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                {width: `${state.muted ? 0 : Math.max(2, Math.round(state.volume * 100))}%`},
+              ]}
+            />
+          </View>
+        </TouchableOpacity>
+      ) : null}
       {sourceCount > 1 ? (
-        <TouchableOpacity onPress={onOpenSourceSheet} style={styles.sourceButton}>
-          <Text style={styles.sourceButtonText}>
-            {t('reader.source', {current: sourceIndex + 1, total: sourceCount})}
-          </Text>
+        <TouchableOpacity
+          accessibilityLabel={t('reader.source', {current: sourceIndex + 1, total: sourceCount})}
+          accessibilityRole="button"
+          onPress={onOpenSourceSheet}
+          style={styles.mediaIconButton}>
+          <Layers color={colors.white} size={16} />
         </TouchableOpacity>
       ) : null}
       <TouchableOpacity
@@ -2214,6 +2462,61 @@ function MediaLaneControls({
         onPress={onOpenSubtitleSheet}
         style={styles.mediaIconButton}>
         <Captions color={colors.white} size={16} />
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function VolumeStrip({
+  bottomOffset,
+  pageNumber,
+  state,
+  t,
+  onClose,
+  onToggleMute,
+  onVolumeChange,
+}: {
+  bottomOffset: number;
+  pageNumber: number;
+  state: MediaPlaybackState;
+  t: ReturnType<typeof useI18n>['t'];
+  onClose: () => void;
+  onToggleMute: () => void;
+  onVolumeChange: (pageNumber: number, value: number) => void;
+}) {
+  const [barWidth, setBarWidth] = useState(1);
+  const volume = state.muted ? 0 : Math.max(0, Math.min(1, state.volume));
+  return (
+    <View style={[styles.volumePopover, {bottom: bottomOffset}]}>
+      <TouchableOpacity
+        accessibilityLabel={state.muted ? t('reader.unmute') : t('reader.mute')}
+        accessibilityRole="button"
+        onPress={onToggleMute}
+        style={styles.volumePopoverIconButton}>
+        {state.muted ? (
+          <VolumeX color={colors.white} size={17} />
+        ) : (
+          <Volume2 color={colors.white} size={17} />
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        activeOpacity={0.9}
+        onLayout={event => setBarWidth(Math.max(1, event.nativeEvent.layout.width))}
+        onPress={event => {
+          onVolumeChange(pageNumber, Math.max(0, Math.min(1, event.nativeEvent.locationX / barWidth)));
+        }}
+        style={styles.volumePopoverSlider}>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, {width: `${Math.max(2, Math.round(volume * 100))}%`}]} />
+        </View>
+      </TouchableOpacity>
+      <Text style={styles.volumePopoverValue}>{Math.round(volume * 100)}%</Text>
+      <TouchableOpacity
+        accessibilityLabel={t('common.close')}
+        accessibilityRole="button"
+        onPress={onClose}
+        style={styles.volumePopoverClose}>
+        <Text style={styles.volumePopoverCloseText}>x</Text>
       </TouchableOpacity>
     </View>
   );
@@ -2429,6 +2732,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     textAlign: 'center',
   },
+  mediaCenterButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.46)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 32,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 64,
+    justifyContent: 'center',
+    width: 64,
+    zIndex: 2,
+  },
+  mediaOverlayControls: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 18,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: '44%',
+    zIndex: 2,
+  },
+  mediaOverlayControlsHidden: {
+    opacity: 0,
+  },
+  mediaSeekButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
   subtitleOverlay: {
     alignItems: 'center',
     bottom: 28,
@@ -2542,6 +2880,11 @@ const styles = StyleSheet.create({
     right: 0,
     top: 0,
   },
+  topBarGroup: {
+    flexDirection: 'row',
+    gap: 8,
+    minWidth: 88,
+  },
   iconButton: {
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.44)',
@@ -2652,6 +2995,9 @@ const styles = StyleSheet.create({
     gap: 8,
     minWidth: 0,
   },
+  mediaLaneCompact: {
+    gap: 4,
+  },
   mediaIconButton: {
     alignItems: 'center',
     borderRadius: 18,
@@ -2661,14 +3007,15 @@ const styles = StyleSheet.create({
   },
   mediaTimeline: {
     flex: 1,
-    gap: 5,
     justifyContent: 'center',
     minWidth: 0,
   },
   mediaTime: {
     color: colors.white,
+    flexShrink: 0,
     fontSize: 10,
     fontWeight: '800',
+    textAlign: 'left',
   },
   volumeSlider: {
     height: 32,
@@ -2692,6 +3039,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     width: '100%',
   },
+  progressInline: {
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  progressTrackInline: {
+    flex: 1,
+    width: undefined,
+  },
   progressFill: {
     backgroundColor: colors.white,
     borderRadius: 999,
@@ -2710,24 +3067,18 @@ const styles = StyleSheet.create({
   },
   progressCaption: {
     color: colors.white,
+    flexShrink: 0,
     fontSize: 11,
     fontWeight: '800',
-  },
-  sourceButton: {
-    alignItems: 'center',
-    borderRadius: 999,
-    justifyContent: 'center',
-    minHeight: 18,
-  },
-  sourceButtonText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '800',
+    textAlign: 'left',
   },
   modalBackdrop: {
     backgroundColor: 'rgba(0,0,0,0.38)',
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  volumePopoverBackdrop: {
+    backgroundColor: 'transparent',
   },
   sheet: {
     backgroundColor: colors.surface,
@@ -2749,6 +3100,94 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     marginBottom: spacing.md,
+  },
+  volumeSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    padding: spacing.lg,
+  },
+  volumeSheetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.md,
+  },
+  volumeSheetIconButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 20,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  volumeSheetValue: {
+    color: colors.text,
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  volumePresetRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  volumePresetButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.border,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    flex: 1,
+    paddingVertical: 12,
+  },
+  volumePresetText: {
+    color: colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  volumePopover: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,0,0,0.74)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 10,
+    minHeight: 42,
+    paddingHorizontal: 10,
+    position: 'absolute',
+    width: '78%',
+  },
+  volumePopoverIconButton: {
+    alignItems: 'center',
+    borderRadius: 17,
+    height: 34,
+    justifyContent: 'center',
+    width: 34,
+  },
+  volumePopoverSlider: {
+    flex: 1,
+    height: 34,
+    justifyContent: 'center',
+  },
+  volumePopoverValue: {
+    color: colors.white,
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'right',
+    width: 34,
+  },
+  volumePopoverClose: {
+    alignItems: 'center',
+    borderRadius: 15,
+    height: 30,
+    justifyContent: 'center',
+    width: 30,
+  },
+  volumePopoverCloseText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '800',
   },
   modeGrid: {
     flexDirection: 'row',
