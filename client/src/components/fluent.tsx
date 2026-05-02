@@ -1,9 +1,10 @@
 import React from 'react';
-import {Button as FluentNativeButton} from '@fluentui-react-native/button';
-import {Text as FluentNativeText} from '@fluentui-react-native/text';
 import {
   ActivityIndicator,
+  Pressable,
+  StyleProp,
   StyleSheet,
+  Text,
   TextInput,
   TextInputProps,
   TextStyle,
@@ -18,7 +19,7 @@ type ButtonProps = {
   onPress?: () => void;
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
   disabled?: boolean;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 };
 
 export function FluentButton({
@@ -29,27 +30,29 @@ export function FluentButton({
   style,
 }: ButtonProps) {
   return (
-    <FluentNativeButton
+    <Pressable
+      accessibilityRole="button"
       accessibilityLabel={label}
       disabled={disabled}
-      style={[
+      style={({pressed}) => [
         styles.button,
         variant === 'primary' && styles.buttonPrimary,
         variant === 'danger' && styles.buttonDanger,
         variant === 'ghost' && styles.buttonGhost,
+        pressed && !disabled && styles.buttonPressed,
         disabled && styles.disabled,
         style,
       ]}
-      onClick={onPress}>
-      <FluentNativeText
+      onPress={onPress}>
+      <Text
         style={[
           styles.buttonText,
           variant === 'primary' && styles.buttonTextPrimary,
           variant === 'danger' && styles.buttonTextDanger,
         ]}>
         {label}
-      </FluentNativeText>
-    </FluentNativeButton>
+      </Text>
+    </Pressable>
   );
 }
 
@@ -57,7 +60,7 @@ export function FluentTextField(props: TextInputProps & {label?: string}) {
   return (
     <View style={styles.fieldWrap}>
       {props.label ? (
-        <FluentNativeText style={styles.label}>{props.label}</FluentNativeText>
+        <Text style={styles.label}>{props.label}</Text>
       ) : null}
       <TextInput
         {...props}
@@ -73,7 +76,7 @@ export function FluentCard({
   style,
 }: {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
@@ -83,20 +86,20 @@ export function FluentTitle({
   style,
 }: {
   children: React.ReactNode;
-  style?: TextStyle;
+  style?: StyleProp<TextStyle>;
 }) {
-  return <FluentNativeText style={[styles.title, style]}>{children}</FluentNativeText>;
+  return <Text style={[styles.title, style]}>{children}</Text>;
 }
 
 export function FluentCaption({children}: {children: React.ReactNode}) {
-  return <FluentNativeText style={styles.caption}>{children}</FluentNativeText>;
+  return <Text style={styles.caption}>{children}</Text>;
 }
 
 export function FluentSpinner({label}: {label?: string}) {
   return (
     <View style={styles.spinner}>
       <ActivityIndicator color={colors.primary} />
-      {label ? <FluentNativeText style={styles.caption}>{label}</FluentNativeText> : null}
+      {label ? <Text style={styles.caption}>{label}</Text> : null}
     </View>
   );
 }
@@ -115,6 +118,9 @@ const styles = StyleSheet.create({
   buttonPrimary: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
+  },
+  buttonPressed: {
+    opacity: 0.78,
   },
   buttonDanger: {
     borderColor: colors.danger,
