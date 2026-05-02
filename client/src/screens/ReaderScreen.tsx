@@ -29,9 +29,12 @@ import {
 } from '@shopify/flash-list';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
+  cancelAnimation,
+  Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withTiming,
 } from 'react-native-reanimated';
 import {
@@ -46,9 +49,11 @@ import {
   Play,
   Rewind,
   Settings as SettingsIcon,
+  Music,
   Volume2,
   VolumeX,
 } from 'lucide-react-native';
+import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import {WebView} from 'react-native-webview';
 
@@ -193,6 +198,20 @@ type VlcSource = {
   mediaOptions: string[];
 };
 
+type PendingMediaSeek = {
+  fromTime: number;
+  targetTime: number;
+  createdAt: number;
+  reason: string;
+};
+
+type RecentMediaSeek = {
+  fromTime: number;
+  targetTime: number;
+  until: number;
+  reason: string;
+};
+
 type StableVlcPlayerProps = {
   playerKey: string;
   playerRef: (ref: VlcPlayerRef | null) => void;
@@ -237,6 +256,44 @@ type SubtitleCue = {
   start: number;
   end: number;
   text: string;
+};
+
+type TimedLyricLine = {
+  time: number;
+  text: string;
+  key: string;
+};
+
+type AudioLyricTouchTrace = {
+  phase: 'pressIn' | 'pressOut' | 'press' | 'pressSuppressed';
+  lineIndex: number;
+  lineTime: number;
+  activeLyricIndex: number;
+  textPreview: string;
+  now: number;
+  suppressUntil: number;
+  userScrolling: boolean;
+  seekTime?: number;
+  nextLineTime?: number;
+  nativeTimestamp?: number;
+};
+
+type AudioLyricDebugWindow = {
+  until: number;
+  lastProgressLogAt: number;
+  lineIndex?: number;
+  lineTime?: number;
+  targetTime: number;
+  textPreview?: string;
+};
+
+type AudioLyricSnapshot = {
+  activeLyricIndex: number;
+  activeLineTime?: number;
+  activeTextPreview?: string;
+  playbackTime: number;
+  timedLyricsCount: number;
+  updatedAt: number;
 };
 
 const SUBTITLE_OFF_VALUE = -1;
@@ -312,8 +369,25 @@ function getSubtitleAttachments(metadata?: PageInfo['metadata'] | null): Metadat
     });
 }
 
+function getPageAttachmentsBySlot(metadata: PageInfo['metadata'] | undefined | null, slot: string): MetadataPageAttachment[] {
+  const normalizedSlot = slot.trim().toLowerCase();
+  const attachments = Array.isArray(metadata?.attachments) ? metadata.attachments : [];
+  return attachments
+    .filter(attachment => String(attachment.slot || '').trim().toLowerCase() === normalizedSlot)
+    .sort((a, b) => {
+      const orderA = typeof a.order_index === 'number' ? a.order_index : 0;
+      const orderB = typeof b.order_index === 'number' ? b.order_index : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}
+
 function getPageSubtitleAttachments(page?: ReaderPage | null) {
   return getSubtitleAttachments(page?.activeSource?.metadata || page?.metadata);
+}
+
+function getPageLyricsAttachments(page?: ReaderPage | null) {
+  return getPageAttachmentsBySlot(page?.activeSource?.metadata || page?.metadata, 'lyrics');
 }
 
 function buildSubtitleOptionLabel(attachment: MetadataPageAttachment, subtitleIndex: number) {
@@ -326,6 +400,18 @@ function buildSubtitleOptionLabel(attachment: MetadataPageAttachment, subtitleIn
   if (name) return name;
   if (kind) return kind;
   return `Subtitle ${subtitleIndex + 1}`;
+}
+
+function buildLyricsOptionLabel(attachment: MetadataPageAttachment, lyricsIndex: number) {
+  const language = String(attachment.language || '').trim();
+  const kind = String(attachment.kind || '').trim().toLowerCase();
+  const name = String(attachment.name || '').trim();
+  if (language && kind) return `${language} · ${kind}`;
+  if (language) return language;
+  if (name && kind && !name.toLowerCase().endsWith(`.${kind}`)) return `${name} · ${kind}`;
+  if (name) return name;
+  if (kind) return kind;
+  return `Lyrics ${lyricsIndex + 1}`;
 }
 
 function isAssSubtitleAttachment(attachment?: MetadataPageAttachment | null) {
@@ -481,6 +567,50 @@ function getActiveSubtitleCues(
     .filter((cue): cue is SubtitleCue => Boolean(cue));
 }
 
+const LRC_TIME_TAG = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
+
+function parseTimedLyrics(rawLyrics: string): TimedLyricLine[] {
+  const parsed: TimedLyricLine[] = [];
+  let lineIndex = 0;
+  for (const rawLine of rawLyrics.split(/\r?\n/)) {
+    const tags = [...rawLine.matchAll(LRC_TIME_TAG)];
+    if (!tags.length) {
+      lineIndex += 1;
+      continue;
+    }
+    const text = rawLine.replace(LRC_TIME_TAG, '').trim();
+    tags.forEach((tag, tagIndex) => {
+      const minutes = Number(tag[1] || 0);
+      const seconds = Number(tag[2] || 0);
+      const fraction = Number(`${tag[3] || '0'}00`.slice(0, 3));
+      if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || !Number.isFinite(fraction)) return;
+      const time = minutes * 60 + seconds + fraction / 1000;
+      parsed.push({time, text, key: `${lineIndex}-${tagIndex}-${time.toFixed(3)}`});
+    });
+    lineIndex += 1;
+  }
+  return parsed.sort((a, b) => a.time - b.time);
+}
+
+function getActiveTimedLyricIndex(lines: TimedLyricLine[], currentTime: number) {
+  if (!lines.length || currentTime < lines[0].time) return -1;
+  let low = 0;
+  let high = lines.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    if (lines[mid].time <= currentTime) low = mid + 1;
+    else high = mid - 1;
+  }
+  return high;
+}
+
+function getPlainLyricLines(rawLyrics: string) {
+  return rawLyrics
+    .split(/\r?\n/)
+    .map(line => line.replace(LRC_TIME_TAG, '').trim())
+    .filter(Boolean);
+}
+
 function nextReadingMode(mode: ReaderSettings['readingMode']) {
   const index = READING_MODES.indexOf(mode);
   return READING_MODES[(index + 1) % READING_MODES.length];
@@ -619,8 +749,12 @@ export function ReaderScreen({route, navigation}: Props) {
   const externalVlcSubtitleTrackIds = useRef<Record<number, number[] | undefined>>({});
   const vlcBufferLogBuckets = useRef<Record<number, number>>({});
   const mediaLastSeekAt = useRef<Record<number, number>>({});
+  const mediaPendingSeekByPage = useRef<Record<number, PendingMediaSeek | undefined>>({});
+  const mediaRecentSeekByPage = useRef<Record<number, RecentMediaSeek | undefined>>({});
   const mediaLastProgressUiAt = useRef<Record<number, number>>({});
   const mediaLastBufferUiAt = useRef<Record<number, number>>({});
+  const audioLyricDebugWindows = useRef<Record<number, AudioLyricDebugWindow | undefined>>({});
+  const audioLyricSnapshots = useRef<Record<number, AudioLyricSnapshot | undefined>>({});
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const pendingLocalSubtitleByAssetId = useRef<Record<number, Promise<string | undefined> | undefined>>({});
@@ -697,6 +831,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const [volumeSheetPageId, setVolumeSheetPageId] = useState<number | null>(null);
   const [sourceSheetPageId, setSourceSheetPageId] = useState<number | null>(null);
   const [activeSubtitleIndexesByPage, setActiveSubtitleIndexesByPage] = useState<Record<number, number[]>>({});
+  const [activeLyricsIndexByPage, setActiveLyricsIndexByPage] = useState<Record<number, number>>({});
   const [activeEmbeddedSubtitleTrackByPage, setActiveEmbeddedSubtitleTrackByPage] = useState<Record<number, number | undefined>>({});
   const [embeddedSubtitleTracksByPage, setEmbeddedSubtitleTracksByPage] = useState<Record<number, VlcTextTrack[]>>({});
   const [externalVlcSubtitleUriByPage, setExternalVlcSubtitleUriByPage] = useState<Record<number, string | undefined>>({});
@@ -785,7 +920,11 @@ export function ReaderScreen({route, navigation}: Props) {
     vlcSubtitleKeys.current = {};
     vlcSessions.current = {};
     mediaLastProgressUiAt.current = {};
+    mediaPendingSeekByPage.current = {};
+    mediaRecentSeekByPage.current = {};
     mediaLastBufferUiAt.current = {};
+    audioLyricDebugWindows.current = {};
+    audioLyricSnapshots.current = {};
     appendedArchiveIds.current = new Set([archiveId]);
     nextArchiveCache.current = {};
     lastSavedProgressKey.current = '';
@@ -1142,6 +1281,34 @@ export function ReaderScreen({route, navigation}: Props) {
     .map(attachment => attachment.asset_id)
     .filter(id => id > 0)
     .join('|');
+  const activeLyricsAttachments = useMemo(
+    () =>
+      activeMediaPages
+        .filter(page => page.effectiveType === 'audio')
+        .map(page => {
+          const selectedIndex = activeLyricsIndexByPage[page.pageNumber] ?? 0;
+          if (selectedIndex === SUBTITLE_OFF_VALUE) return undefined;
+          return getPageLyricsAttachments(page)[selectedIndex];
+        })
+        .filter((attachment): attachment is MetadataPageAttachment => Boolean(attachment?.asset_id)),
+    [activeLyricsIndexByPage, activeMediaPages],
+  );
+  const activeLyricsAssetKey = activeLyricsAttachments
+    .map(attachment => attachment.asset_id)
+    .filter(id => id > 0)
+    .join('|');
+  const activeAudioPanelSubtitleAttachments = useMemo(
+    () =>
+      activeMediaPages
+        .filter(page => page.effectiveType === 'audio')
+        .map(page => getPageSubtitleAttachments(page)[0])
+        .filter((attachment): attachment is MetadataPageAttachment => Boolean(attachment?.asset_id)),
+    [activeMediaPages],
+  );
+  const activeAudioPanelSubtitleAssetKey = activeAudioPanelSubtitleAttachments
+    .map(attachment => attachment.asset_id)
+    .filter(id => id > 0)
+    .join('|');
   const nearbyMediaPages = useMemo(
     () =>
       pages.filter(
@@ -1166,7 +1333,10 @@ export function ReaderScreen({route, navigation}: Props) {
   useEffect(() => {
     let cancelled = false;
     const loadSubtitles = async () => {
-      const attachments = activeSubtitleAttachments.filter(attachment => attachment.asset_id > 0);
+      const attachments = [...activeSubtitleAttachments, ...activeLyricsAttachments, ...activeAudioPanelSubtitleAttachments].filter(
+        (attachment, index, all) =>
+          attachment.asset_id > 0 && all.findIndex(item => item.asset_id === attachment.asset_id) === index,
+      );
       await Promise.all(
         attachments.map(async attachment => {
           if (subtitleTextsByAssetId[attachment.asset_id] != null) return;
@@ -1200,7 +1370,17 @@ export function ReaderScreen({route, navigation}: Props) {
     return () => {
       cancelled = true;
     };
-  }, [activeLane, activeSubtitleAssetKey, activeSubtitleAttachments, archiveId, subtitleTextsByAssetId]);
+  }, [
+    activeLane,
+    activeAudioPanelSubtitleAssetKey,
+    activeAudioPanelSubtitleAttachments,
+    activeLyricsAssetKey,
+    activeLyricsAttachments,
+    activeSubtitleAssetKey,
+    activeSubtitleAttachments,
+    archiveId,
+    subtitleTextsByAssetId,
+  ]);
 
   useEffect(() => {
     if (activeLane.kind === 'book') return;
@@ -1622,6 +1802,13 @@ export function ReaderScreen({route, navigation}: Props) {
     });
   }
 
+  function handleSelectLyrics(value: number) {
+    if (activeLane.kind !== 'audio') return;
+    const pageNumber = activeLane.page.pageNumber;
+    setActiveLyricsIndexByPage(prev => ({...prev, [pageNumber]: value}));
+    setSubtitleSheetOpen(false);
+  }
+
   function handleVolumeChange(pageNumber: number, value: number) {
     setMediaState(pageNumber, {muted: false, volume: Math.max(0, Math.min(1, value))});
   }
@@ -1669,11 +1856,53 @@ export function ReaderScreen({route, navigation}: Props) {
     const session = vlcSessions.current[page.pageNumber];
     const duration = state.duration;
     const now = Date.now();
-    if (!session?.playable || duration <= 0 || !vlcRefs.current[page.pageNumber]) return;
-    if (now - (mediaLastSeekAt.current[page.pageNumber] || 0) < 350) return;
+    if (!session?.playable || duration <= 0 || !vlcRefs.current[page.pageNumber]) {
+      appendDiagnosticLog('media.seek.skipped', {
+        archiveId,
+        page: page.pageNumber,
+        type: page.effectiveType,
+        reason,
+        seconds,
+        currentTime: state.currentTime,
+        duration,
+        sessionPlayable: Boolean(session?.playable),
+        hasPlayerRef: Boolean(vlcRefs.current[page.pageNumber]),
+        target: session?.target,
+        skipReason: !session?.playable ? 'not-playable' : duration <= 0 ? 'no-duration' : 'missing-player-ref',
+      }).catch(err => console.warn('Failed to write diagnostic log:', err));
+      return;
+    }
+    const lastSeekAt = mediaLastSeekAt.current[page.pageNumber] || 0;
+    if (now - lastSeekAt < 350) {
+      appendDiagnosticLog('media.seek.skipped', {
+        archiveId,
+        page: page.pageNumber,
+        type: page.effectiveType,
+        reason,
+        seconds,
+        currentTime: state.currentTime,
+        duration,
+        target: session.target,
+        skipReason: 'throttled',
+        elapsedSinceLastSeek: now - lastSeekAt,
+      }).catch(err => console.warn('Failed to write diagnostic log:', err));
+      return;
+    }
     mediaLastSeekAt.current[page.pageNumber] = now;
     const nextTime = Math.max(0, Math.min(duration, seconds));
     const position = Math.max(0, Math.min(1, nextTime / duration));
+    mediaPendingSeekByPage.current[page.pageNumber] = {
+      fromTime: state.currentTime,
+      targetTime: nextTime,
+      createdAt: now,
+      reason,
+    };
+    mediaRecentSeekByPage.current[page.pageNumber] = {
+      fromTime: state.currentTime,
+      targetTime: nextTime,
+      until: now + 3000,
+      reason,
+    };
     vlcRefs.current[page.pageNumber]?.seek(position);
     setMediaState(page.pageNumber, {currentTime: nextTime, position});
     appendDiagnosticLog('media.seek', {
@@ -1887,6 +2116,17 @@ export function ReaderScreen({route, navigation}: Props) {
     const frameStyle = webtoon
       ? [styles.webtoonPage, {width}]
       : [styles.mediaPage, {width: pageWidth, height: pageHeight || height}];
+    const mediaFrameStyle =
+      page.effectiveType === 'audio'
+        ? [
+            styles.audioMediaPage,
+            {
+              width: pageWidth,
+              height: pageHeight || height,
+              minHeight: pageHeight || height,
+            },
+          ]
+        : frameStyle;
     if (page.effectiveType === 'video' || page.effectiveType === 'audio') {
       const mediaState = getMediaState(page.pageNumber);
       const mediaUri = page.vlcUri || page.uri || '';
@@ -1921,6 +2161,229 @@ export function ReaderScreen({route, navigation}: Props) {
         subtitleTextsByAssetId,
         mediaState.currentTime,
       );
+      const displayMetadata = page.activeSource?.metadata || page.metadata;
+      const pageLyricsAttachments = page.effectiveType === 'audio' ? getPageLyricsAttachments(page) : [];
+      const selectedLyricsIndex = activeLyricsIndexByPage[page.pageNumber] ?? 0;
+      const lyricsAttachment = selectedLyricsIndex === SUBTITLE_OFF_VALUE
+        ? undefined
+        : pageLyricsAttachments[selectedLyricsIndex];
+      const lyricsText = lyricsAttachment?.asset_id ? subtitleTextsByAssetId[lyricsAttachment.asset_id] || '' : '';
+      const timedLyrics = page.effectiveType === 'audio' && lyricsText ? parseTimedLyrics(lyricsText) : [];
+      const activeLyricIndex = timedLyrics.length ? getActiveTimedLyricIndex(timedLyrics, mediaState.currentTime) : -1;
+      const activeLyricLine = activeLyricIndex >= 0 ? timedLyrics[activeLyricIndex] : undefined;
+      const previousLyricSnapshot = audioLyricSnapshots.current[page.pageNumber];
+      const lyricSnapshotChanged =
+        page.effectiveType === 'audio' &&
+        timedLyrics.length > 0 &&
+        (!previousLyricSnapshot ||
+          previousLyricSnapshot.activeLyricIndex !== activeLyricIndex ||
+          Math.abs(previousLyricSnapshot.playbackTime - mediaState.currentTime) >= 1.2);
+      if (lyricSnapshotChanged) {
+        const snapshot: AudioLyricSnapshot = {
+          activeLyricIndex,
+          activeLineTime: activeLyricLine?.time,
+          activeTextPreview: activeLyricLine?.text.slice(0, 80),
+          playbackTime: mediaState.currentTime,
+          timedLyricsCount: timedLyrics.length,
+          updatedAt: Date.now(),
+        };
+        audioLyricSnapshots.current[page.pageNumber] = snapshot;
+        const debugWindow = audioLyricDebugWindows.current[page.pageNumber];
+        if (debugWindow && snapshot.updatedAt <= debugWindow.until) {
+          appendDiagnosticLog('audio.lyric.active', {
+            archiveId,
+            page: page.pageNumber,
+            sourceArchiveId: page.sourceArchiveId,
+            sourcePath: page.resolvedPath,
+            debugTargetTime: debugWindow.targetTime,
+            clickedLineIndex: debugWindow.lineIndex,
+            clickedLineTime: debugWindow.lineTime,
+            clickedTextPreview: debugWindow.textPreview,
+            ...snapshot,
+          }).catch(err => console.warn('Failed to write diagnostic log:', err));
+        }
+      }
+      const plainLyricLines = page.effectiveType === 'audio' && lyricsText && !timedLyrics.length
+        ? getPlainLyricLines(lyricsText)
+        : [];
+      const audioSubtitleAttachment = page.effectiveType === 'audio'
+        ? pageSubtitleAttachments[0] || getPageSubtitleAttachments(page)[0]
+        : undefined;
+      const audioSubtitleText = audioSubtitleAttachment?.asset_id
+        ? subtitleTextsByAssetId[audioSubtitleAttachment.asset_id] || ''
+        : '';
+      const audioSubtitleLines = audioSubtitleText
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean);
+      const audioTitle = displayMetadata?.title || page.activeSource?.title || page.title || page.resolvedPath || `${t('reader.audio')} ${page.pageNumber}`;
+      const audioDescription = displayMetadata?.description?.trim();
+      const resolvedPageHeight = pageHeight || height;
+      const audioLandscape = pageWidth > resolvedPageHeight && pageWidth >= 620;
+      const audioCompact = !audioLandscape && (pageWidth < 620 || resolvedPageHeight < 520);
+      const audioCoverSize = Math.round(
+        Math.max(
+          audioLandscape ? 96 : 132,
+          Math.min(
+            audioLandscape ? 164 : audioCompact ? 196 : 276,
+            pageWidth * (audioLandscape ? 0.18 : audioCompact ? 0.48 : 0.32),
+            resolvedPageHeight * (audioLandscape ? 0.32 : 0.42),
+          ),
+        ),
+      );
+      const audioProgress = mediaState.duration > 0 ? mediaState.currentTime / mediaState.duration : mediaState.position;
+      const audioBackdropWidth = Math.max(1, Math.round(pageWidth));
+      const audioBackdropHeight = Math.max(1, Math.round(resolvedPageHeight));
+      const audioBackdropKey = `${page.pageNumber}:${audioBackdropWidth}x${audioBackdropHeight}:${audioLandscape ? 'landscape' : 'portrait'}`;
+      const audioGradientId = `reader-audio-mask-${page.pageNumber}-${audioBackdropWidth}-${audioBackdropHeight}-${audioLandscape ? 'l' : 'p'}`;
+      const audioHero = (
+        <View
+          style={[
+            styles.audioHero,
+            audioLandscape ? styles.audioHeroLandscape : audioCompact ? styles.audioHeroCompact : styles.audioHeroWide,
+          ]}>
+          <AudioCoverArtwork
+            paused={mediaState.paused}
+            size={audioCoverSize}
+            source={page.thumbnailSource}
+          />
+          <View
+            style={[
+              styles.audioTextBlock,
+              audioCompact && styles.audioTextBlockCompact,
+              audioLandscape && styles.audioTextBlockLandscape,
+            ]}>
+            <Text
+              numberOfLines={audioLandscape ? 2 : 2}
+              style={[
+                styles.audioTitle,
+                audioCompact && styles.audioTitleCompact,
+                audioLandscape && styles.audioTitleLandscape,
+              ]}>
+              {audioTitle}
+            </Text>
+            {audioDescription ? (
+              <Text
+                numberOfLines={audioLandscape ? 2 : audioCompact ? 2 : 4}
+                style={[styles.audioDescription, audioLandscape && styles.audioDescriptionLandscape]}>
+                {audioDescription}
+              </Text>
+            ) : null}
+            <Text numberOfLines={1} style={[styles.audioPathText, audioLandscape && styles.audioPathTextLandscape]}>
+              {page.resolvedPath || page.id}
+            </Text>
+          </View>
+        </View>
+      );
+      const audioLyricsPanel = (
+        <AudioLyricsPanel
+          activeLyricIndex={activeLyricIndex}
+          audioLandscape={audioLandscape}
+          audioSubtitleAttachment={audioSubtitleAttachment}
+          audioSubtitleLines={audioSubtitleLines}
+          audioSubtitleText={audioSubtitleText}
+          lyricsAttachment={lyricsAttachment}
+          lyricsText={lyricsText}
+          plainLyricLines={plainLyricLines}
+          t={t}
+          timedLyrics={timedLyrics}
+          onLyricTouchTrace={trace => {
+            appendDiagnosticLog('audio.lyric.touch', {
+              archiveId,
+              page: page.pageNumber,
+              sourceArchiveId: page.sourceArchiveId,
+              sourcePath: page.resolvedPath,
+              playbackTime: mediaState.currentTime,
+              duration: mediaState.duration,
+              paused: mediaState.paused,
+              selectedLyricsIndex,
+              lyricsAssetId: lyricsAttachment?.asset_id,
+              ...trace,
+            }).catch(err => console.warn('Failed to write diagnostic log:', err));
+          }}
+          onSeekLyric={(seconds, trace) => {
+            audioLyricDebugWindows.current[page.pageNumber] = {
+              until: Date.now() + 20000,
+              lastProgressLogAt: 0,
+              lineIndex: trace?.lineIndex,
+              lineTime: trace?.lineTime,
+              targetTime: seconds,
+              textPreview: trace?.textPreview,
+            };
+            appendDiagnosticLog('audio.lyric.seek_request', {
+              archiveId,
+              page: page.pageNumber,
+              sourceArchiveId: page.sourceArchiveId,
+              sourcePath: page.resolvedPath,
+              playbackTime: mediaState.currentTime,
+              duration: mediaState.duration,
+              paused: mediaState.paused,
+              activeLyricIndex,
+              selectedLyricsIndex,
+              lyricsAssetId: lyricsAttachment?.asset_id,
+              seconds,
+              trace,
+            }).catch(err => console.warn('Failed to write diagnostic log:', err));
+            seekMedia(page, seconds, 'audio-lyric');
+          }}
+        />
+      );
+      const audioPlayerDock = (
+        <View style={[styles.audioPlayerDock, audioLandscape && styles.audioPlayerDockLandscape]}>
+          <View style={styles.audioProgressRow}>
+            <Text style={styles.audioTimeText}>{formatMediaTime(mediaState.currentTime)}</Text>
+            <View style={styles.audioProgressTrack}>
+              <View
+                style={[
+                  styles.audioProgressBuffered,
+                  {width: `${Math.max(0, Math.min(100, (mediaState.buffered || 0) * 100))}%`},
+                ]}
+              />
+              <View
+                style={[
+                  styles.audioProgressFill,
+                  {width: `${Math.max(1, Math.min(100, audioProgress * 100))}%`},
+                ]}
+              />
+            </View>
+            <Text style={styles.audioTimeText}>{formatMediaTime(mediaState.duration)}</Text>
+          </View>
+          <View style={[styles.audioTransportRow, audioLandscape && styles.audioTransportRowLandscape]}>
+            <TouchableOpacity
+              accessibilityLabel={t('reader.seekBack')}
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              onPress={() => seekMedia(page, mediaState.currentTime - 5, 'audio-back')}
+              style={[styles.audioTransportSideButton, audioLandscape && styles.audioTransportSideButtonLandscape]}>
+              <Rewind color={colors.white} size={22} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={mediaState.paused ? t('reader.play') : t('reader.pause')}
+              accessibilityRole="button"
+              activeOpacity={0.86}
+              onPress={() =>
+                setMediaState(page.pageNumber, {
+                  paused: !getMediaState(page.pageNumber).paused,
+                })
+              }
+              style={[styles.audioTransportPlayButton, audioLandscape && styles.audioTransportPlayButtonLandscape]}>
+              {mediaState.paused ? (
+                <Play color={colors.black} size={audioLandscape ? 24 : 30} />
+              ) : (
+                <Pause color={colors.black} size={audioLandscape ? 24 : 30} />
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={t('reader.seekForward')}
+              accessibilityRole="button"
+              activeOpacity={0.82}
+              onPress={() => seekMedia(page, mediaState.currentTime + 5, 'audio-forward')}
+              style={[styles.audioTransportSideButton, audioLandscape && styles.audioTransportSideButtonLandscape]}>
+              <FastForward color={colors.white} size={22} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
       const vlcSourceKey = mediaUri;
       const vlcSubtitleKey = externalVlcSubtitleUri || '';
       if (vlcSourceKeys.current[page.pageNumber] !== vlcSourceKey) {
@@ -1934,6 +2397,7 @@ export function ReaderScreen({route, navigation}: Props) {
           playable: false,
           ignoredProgress: 0,
         };
+        mediaPendingSeekByPage.current[page.pageNumber] = undefined;
         embeddedVlcSubtitleTrackBaseline.current[page.pageNumber] = undefined;
         externalVlcSubtitleTrackIds.current[page.pageNumber] = undefined;
       } else if (vlcSubtitleKeys.current[page.pageNumber] !== vlcSubtitleKey) {
@@ -1949,6 +2413,7 @@ export function ReaderScreen({route, navigation}: Props) {
           playable: false,
           ignoredProgress: 0,
         };
+        mediaPendingSeekByPage.current[page.pageNumber] = undefined;
       }
       if (!mediaActive) {
         return (
@@ -1967,7 +2432,55 @@ export function ReaderScreen({route, navigation}: Props) {
         );
       }
       return (
-        <View style={frameStyle}>
+        <View style={mediaFrameStyle}>
+          {page.effectiveType === 'audio' ? (
+            <View
+              key={audioBackdropKey}
+              pointerEvents="none"
+              style={[
+                styles.audioBackdrop,
+                {height: audioBackdropHeight, width: audioBackdropWidth},
+              ]}>
+              {page.thumbnailSource ? (
+                <Image
+                  blurRadius={22}
+                  resizeMode="cover"
+                  source={page.thumbnailSource}
+                  style={styles.audioBackdropImage}
+                />
+              ) : null}
+              <Svg
+                height={audioBackdropHeight}
+                pointerEvents="none"
+                style={styles.audioBackdropGradient}
+                width={audioBackdropWidth}>
+                <Defs>
+                  {audioLandscape ? (
+                    <LinearGradient id={audioGradientId} x1="0" x2="1" y1="0" y2="0">
+                        <Stop offset="0" stopColor="#000000" stopOpacity="0.14" />
+                        <Stop offset="0.42" stopColor="#000000" stopOpacity="0.2" />
+                        <Stop offset="0.72" stopColor="#000000" stopOpacity="0.4" />
+                        <Stop offset="1" stopColor="#000000" stopOpacity="0.68" />
+                    </LinearGradient>
+                  ) : (
+                    <LinearGradient id={audioGradientId} x1="0" x2="0" y1="0" y2="1">
+                        <Stop offset="0" stopColor="#000000" stopOpacity="0.1" />
+                        <Stop offset="0.38" stopColor="#000000" stopOpacity="0.18" />
+                        <Stop offset="0.72" stopColor="#000000" stopOpacity="0.46" />
+                        <Stop offset="1" stopColor="#000000" stopOpacity="0.7" />
+                    </LinearGradient>
+                  )}
+                </Defs>
+                <Rect
+                  fill={`url(#${audioGradientId})`}
+                  height={audioBackdropHeight}
+                  width={audioBackdropWidth}
+                  x="0"
+                  y="0"
+                />
+              </Svg>
+            </View>
+          ) : null}
           <StableVlcPlayer
             playerKey={vlcSourceKey}
             playerRef={ref => {
@@ -2121,6 +2634,18 @@ export function ReaderScreen({route, navigation}: Props) {
                   const nextTime = Math.max(0, Math.min(duration, resumeTime));
                   const position = Math.max(0, Math.min(1, nextTime / duration));
                   vlcRefs.current[page.pageNumber]?.seek(position);
+                  mediaPendingSeekByPage.current[page.pageNumber] = {
+                    fromTime: getMediaState(page.pageNumber).currentTime,
+                    targetTime: nextTime,
+                    createdAt: Date.now(),
+                    reason: 'resume-after-subtitle',
+                  };
+                  mediaRecentSeekByPage.current[page.pageNumber] = {
+                    fromTime: getMediaState(page.pageNumber).currentTime,
+                    targetTime: nextTime,
+                    until: Date.now() + 3000,
+                    reason: 'resume-after-subtitle',
+                  };
                   setMediaState(page.pageNumber, {currentTime: nextTime, position});
                   appendDiagnosticLog('vlc.resumeAfterSubtitle', {
                     archiveId,
@@ -2161,7 +2686,133 @@ export function ReaderScreen({route, navigation}: Props) {
               const progress = normalizeVlcProgress(event);
               if (progress.duration <= 0 || progress.currentTime > progress.duration + 1) return;
               const now = Date.now();
+              const lyricDebugWindow = audioLyricDebugWindows.current[page.pageNumber];
+              if (lyricDebugWindow) {
+                if (now > lyricDebugWindow.until) {
+                  audioLyricDebugWindows.current[page.pageNumber] = undefined;
+                } else if (
+                  now - lyricDebugWindow.lastProgressLogAt >= 1000 ||
+                  Math.abs(progress.currentTime - lyricDebugWindow.targetTime) <= 0.35
+                ) {
+                  lyricDebugWindow.lastProgressLogAt = now;
+                  const snapshot = audioLyricSnapshots.current[page.pageNumber];
+                  appendDiagnosticLog('audio.lyric.progress', {
+                    archiveId,
+                    page: page.pageNumber,
+                    type: page.effectiveType,
+                    debugTargetTime: lyricDebugWindow.targetTime,
+                    clickedLineIndex: lyricDebugWindow.lineIndex,
+                    clickedLineTime: lyricDebugWindow.lineTime,
+                    clickedTextPreview: lyricDebugWindow.textPreview,
+                    currentTime: progress.currentTime,
+                    duration: progress.duration,
+                    position: progress.position,
+                    rawCurrentTime: event.currentTime,
+                    rawDuration: event.duration,
+                    rawPosition: event.position,
+                    paused: getMediaState(page.pageNumber).paused,
+                    activeLyricIndex: snapshot?.activeLyricIndex,
+                    activeLineTime: snapshot?.activeLineTime,
+                    activeTextPreview: snapshot?.activeTextPreview,
+                    snapshotPlaybackTime: snapshot?.playbackTime,
+                  }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                }
+              }
+              const pendingSeek = mediaPendingSeekByPage.current[page.pageNumber];
+              if (pendingSeek) {
+                const seekAge = now - pendingSeek.createdAt;
+                const seekingBackward = pendingSeek.targetTime < pendingSeek.fromTime - 0.35;
+                const seekingForward = pendingSeek.targetTime > pendingSeek.fromTime + 0.35;
+                const reachedSeekTarget =
+                  (seekingBackward
+                    ? progress.currentTime <= pendingSeek.targetTime + 0.35
+                    : seekingForward
+                      ? progress.currentTime >= pendingSeek.targetTime - 0.35
+                      : true) ||
+                  Math.abs(progress.currentTime - pendingSeek.targetTime) <= 0.35;
+                if (reachedSeekTarget || seekAge > 1800) {
+                  appendDiagnosticLog('media.seek.progress_resolved', {
+                    archiveId,
+                    page: page.pageNumber,
+                    type: page.effectiveType,
+                    reason: pendingSeek.reason,
+                    fromTime: pendingSeek.fromTime,
+                    targetTime: pendingSeek.targetTime,
+                    currentTime: progress.currentTime,
+                    duration: progress.duration,
+                    position: progress.position,
+                    seekAge,
+                    reachedSeekTarget,
+                    timedOut: seekAge > 1800,
+                  }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                  mediaPendingSeekByPage.current[page.pageNumber] = undefined;
+                } else if (
+                  (seekingForward && progress.currentTime + 0.35 < pendingSeek.targetTime) ||
+                  (seekingBackward && progress.currentTime - 0.35 > pendingSeek.targetTime)
+                ) {
+                  if (seekAge > 1000) {
+                    appendDiagnosticLog('media.seek.progress_waiting', {
+                      archiveId,
+                      page: page.pageNumber,
+                      type: page.effectiveType,
+                      reason: pendingSeek.reason,
+                      targetTime: pendingSeek.targetTime,
+                      currentTime: progress.currentTime,
+                      duration: progress.duration,
+                    }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                    mediaPendingSeekByPage.current[page.pageNumber] = undefined;
+                  }
+                  return;
+                }
+              }
               const previous = getMediaState(page.pageNumber);
+              const recentSeek = mediaRecentSeekByPage.current[page.pageNumber];
+              if (recentSeek && now > recentSeek.until) {
+                mediaRecentSeekByPage.current[page.pageNumber] = undefined;
+              } else if (recentSeek) {
+                const seekingForward = recentSeek.targetTime > recentSeek.fromTime + 0.35;
+                const seekingBackward = recentSeek.targetTime < recentSeek.fromTime - 0.35;
+                const staleAfterForwardSeek =
+                  seekingForward &&
+                  (progress.currentTime + 0.5 < previous.currentTime ||
+                    progress.currentTime + 0.35 < recentSeek.targetTime);
+                const staleAfterBackwardSeek =
+                  seekingBackward &&
+                  (progress.currentTime - 0.5 > previous.currentTime ||
+                    progress.currentTime - 0.35 > recentSeek.targetTime);
+                if (staleAfterForwardSeek || staleAfterBackwardSeek) {
+                  appendDiagnosticLog('vlc.progress.stale_after_seek', {
+                    archiveId,
+                    page: page.pageNumber,
+                    type: page.effectiveType,
+                    reason: recentSeek.reason,
+                    fromTime: recentSeek.fromTime,
+                    targetTime: recentSeek.targetTime,
+                    previousTime: previous.currentTime,
+                    currentTime: progress.currentTime,
+                    duration: progress.duration,
+                    position: progress.position,
+                    rawCurrentTime: event.currentTime,
+                    rawDuration: event.duration,
+                    rawPosition: event.position,
+                  }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                  return;
+                }
+              } else if (progress.currentTime + 0.75 < previous.currentTime && !previous.paused) {
+                appendDiagnosticLog('vlc.progress.regression_ignored', {
+                  archiveId,
+                  page: page.pageNumber,
+                  type: page.effectiveType,
+                  previousTime: previous.currentTime,
+                  currentTime: progress.currentTime,
+                  duration: progress.duration,
+                  position: progress.position,
+                  rawCurrentTime: event.currentTime,
+                  rawDuration: event.duration,
+                  rawPosition: event.position,
+                }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+                return;
+              }
               const lastUiAt = mediaLastProgressUiAt.current[page.pageNumber] || 0;
               const currentTimeDelta = Math.abs(progress.currentTime - previous.currentTime);
               const durationDelta = Math.abs(progress.duration - previous.duration);
@@ -2176,46 +2827,94 @@ export function ReaderScreen({route, navigation}: Props) {
             }}
           />
           {page.effectiveType === 'audio' ? (
-            <Text style={styles.audioTitle}>{page.title || page.resolvedPath || `${t('reader.audio')} ${page.pageNumber}`}</Text>
+            <View
+              pointerEvents="box-none"
+              style={[
+                styles.audioScene,
+                {
+                  paddingBottom: stableInsets.bottom + (audioLandscape ? (chromeVisible ? 46 : 10) : chromeVisible ? 72 : 18),
+                  paddingTop: stableInsets.top + (audioLandscape ? (chromeVisible ? 42 : 10) : chromeVisible ? 70 : 18),
+                },
+              ]}>
+              <View
+                style={[
+                  styles.audioSceneInner,
+                  audioLandscape
+                    ? styles.audioSceneInnerLandscape
+                    : audioCompact
+                      ? styles.audioSceneInnerCompact
+                      : styles.audioSceneInnerWide,
+                ]}>
+                {audioLandscape ? (
+                  <>
+                    <View style={styles.audioLandscapeLeftPane}>
+                      {audioHero}
+                      {audioPlayerDock}
+                    </View>
+                    {audioLyricsPanel}
+                  </>
+                ) : (
+                  <>
+                    {audioHero}
+                    {audioLyricsPanel}
+                    {audioPlayerDock}
+                  </>
+                )}
+              </View>
+            </View>
           ) : null}
-          <View
-            pointerEvents={chromeVisible ? 'box-none' : 'none'}
-            style={[styles.mediaOverlayControls, !chromeVisible && styles.mediaOverlayControlsHidden]}>
-            <TouchableOpacity
-              accessibilityLabel={t('reader.seekBack')}
-              accessibilityRole="button"
-              activeOpacity={0.82}
-              onPress={() => seekMedia(page, mediaState.currentTime - 5, 'overlay-back')}
-              style={styles.mediaSeekButton}>
-              <Rewind color={colors.white} size={22} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityLabel={mediaState.paused ? t('reader.play') : t('reader.pause')}
-              accessibilityRole="button"
-              activeOpacity={0.82}
-              onPress={() =>
-                setMediaState(page.pageNumber, {
-                  paused: !getMediaState(page.pageNumber).paused,
-                })
-              }
-              style={styles.mediaCenterButton}>
-              {mediaState.paused ? (
-                <Play color={colors.white} size={28} />
-              ) : (
-                <Pause color={colors.white} size={28} />
-              )}
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityLabel={t('reader.seekForward')}
-              accessibilityRole="button"
-              activeOpacity={0.82}
-              onPress={() => seekMedia(page, mediaState.currentTime + 5, 'overlay-forward')}
-              style={styles.mediaSeekButton}>
-              <FastForward color={colors.white} size={22} />
-            </TouchableOpacity>
-          </View>
-          {activeSubtitleCues.length > 0 ? (
-            <View pointerEvents="none" style={styles.subtitleOverlay}>
+          {page.effectiveType !== 'audio' ? (
+            <View
+              pointerEvents={chromeVisible ? 'box-none' : 'none'}
+              style={[styles.mediaOverlayControls, !chromeVisible && styles.mediaOverlayControlsHidden]}>
+              <TouchableOpacity
+                accessibilityLabel={t('reader.seekBack')}
+                accessibilityRole="button"
+                activeOpacity={0.82}
+                onPress={() => seekMedia(page, mediaState.currentTime - 5, 'overlay-back')}
+                style={styles.mediaSeekButton}>
+                <Rewind color={colors.white} size={22} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityLabel={mediaState.paused ? t('reader.play') : t('reader.pause')}
+                accessibilityRole="button"
+                activeOpacity={0.82}
+                onPress={() =>
+                  setMediaState(page.pageNumber, {
+                    paused: !getMediaState(page.pageNumber).paused,
+                  })
+                }
+                style={styles.mediaCenterButton}>
+                {mediaState.paused ? (
+                  <Play color={colors.white} size={28} />
+                ) : (
+                  <Pause color={colors.white} size={28} />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityLabel={t('reader.seekForward')}
+                accessibilityRole="button"
+                activeOpacity={0.82}
+                onPress={() => seekMedia(page, mediaState.currentTime + 5, 'overlay-forward')}
+                style={styles.mediaSeekButton}>
+                <FastForward color={colors.white} size={22} />
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {page.effectiveType !== 'audio' ? (
+            <>
+              {activeSubtitleCues.length > 0 ? (
+                <View pointerEvents="none" style={styles.subtitleOverlay}>
+                  {activeSubtitleCues.map((cue, index) => (
+                    <Text key={`${index}-${cue.start}-${cue.end}`} style={styles.subtitleText}>
+                      {cue.text}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
+            </>
+          ) : activeSubtitleCues.length > 0 ? (
+            <View pointerEvents="none" style={styles.audioTimedSubtitleOverlay}>
               {activeSubtitleCues.map((cue, index) => (
                 <Text key={`${index}-${cue.start}-${cue.end}`} style={styles.subtitleText}>
                   {cue.text}
@@ -2427,7 +3126,9 @@ export function ReaderScreen({route, navigation}: Props) {
       ? activeLane.page
       : null;
   const subtitleSheetPage = activeLane.kind !== 'book' ? activeLane.page : null;
+  const lyricsSheetOpen = subtitleSheetPage?.effectiveType === 'audio';
   const subtitleSheetAttachments = getPageSubtitleAttachments(subtitleSheetPage);
+  const lyricsSheetAttachments = lyricsSheetOpen ? getPageLyricsAttachments(subtitleSheetPage) : [];
   const embeddedSubtitleTracks = subtitleSheetPage ? embeddedSubtitleTracksByPage[subtitleSheetPage.pageNumber] || [] : [];
   const subtitleOptions: SelectOption[] = [
     {value: SUBTITLE_OFF_VALUE, label: t('reader.subtitleOff')},
@@ -2440,6 +3141,20 @@ export function ReaderScreen({route, navigation}: Props) {
       label: t('reader.subtitleEmbedded', {label: track.name || `Track ${index + 1}`}),
     })),
   ];
+  const lyricsOptions: SelectOption[] = [
+    {value: SUBTITLE_OFF_VALUE, label: t('reader.lyricsOff')},
+    ...lyricsSheetAttachments.map((attachment, index) => ({
+      value: index,
+      label: t('reader.lyricsExternal', {label: buildLyricsOptionLabel(attachment, index)}),
+    })),
+  ];
+  const rawLyricsSelectedValue = subtitleSheetPage
+    ? activeLyricsIndexByPage[subtitleSheetPage.pageNumber] ?? 0
+    : SUBTITLE_OFF_VALUE;
+  const lyricsSelectedValue =
+    rawLyricsSelectedValue >= 0 && rawLyricsSelectedValue < lyricsSheetAttachments.length
+      ? rawLyricsSelectedValue
+      : SUBTITLE_OFF_VALUE;
   const volumeSheetPage = volumeSheetPageId ? pages.find(page => page.pageNumber === volumeSheetPageId) : null;
   const volumeSheetState = volumeSheetPage ? getMediaState(volumeSheetPage.pageNumber) : null;
   const readerProgressTotal = readerItems[readerItems.length - 1]?.progressPage || pages.length;
@@ -2676,6 +3391,7 @@ export function ReaderScreen({route, navigation}: Props) {
                             page={activeLane.page}
                             state={getMediaState(activeLane.page.pageNumber)}
                             sourceIndex={sourceIndexByPage[activeLane.page.pageNumber - 1] ?? activeLane.page.defaultSourceIndex ?? 0}
+                            textTrackKind={activeLane.kind === 'audio' ? 'lyrics' : 'subtitle'}
                             t={t}
                             onOpenSourceSheet={() => handleOpenSourceSheet(activeLane.page)}
                             onOpenSubtitleSheet={() => setSubtitleSheetOpen(true)}
@@ -2747,15 +3463,17 @@ export function ReaderScreen({route, navigation}: Props) {
 
       <OptionSelectSheet
         open={subtitleSheetOpen}
-        title={t('reader.subtitle')}
-        options={subtitleOptions}
-        selectedValues={[
-          ...activeSubtitleIndexes,
-          ...(activeEmbeddedSubtitleTrack == null ? [] : [encodeEmbeddedSubtitleValue(activeEmbeddedSubtitleTrack)]),
-          ...(activeSubtitleIndexes.length || activeEmbeddedSubtitleTrack != null ? [] : [SUBTITLE_OFF_VALUE]),
-        ]}
-        multiSelect
-        onSelect={handleSelectSubtitle}
+        title={lyricsSheetOpen ? t('reader.lyrics') : t('reader.subtitle')}
+        options={lyricsSheetOpen ? lyricsOptions : subtitleOptions}
+        selectedValues={lyricsSheetOpen
+          ? [lyricsSelectedValue]
+          : [
+              ...activeSubtitleIndexes,
+              ...(activeEmbeddedSubtitleTrack == null ? [] : [encodeEmbeddedSubtitleValue(activeEmbeddedSubtitleTrack)]),
+              ...(activeSubtitleIndexes.length || activeEmbeddedSubtitleTrack != null ? [] : [SUBTITLE_OFF_VALUE]),
+            ]}
+        multiSelect={!lyricsSheetOpen}
+        onSelect={lyricsSheetOpen ? handleSelectLyrics : handleSelectSubtitle}
         onClose={() => setSubtitleSheetOpen(false)}
         t={t as (key: string, params?: Record<string, string | number>) => string}
       />
@@ -2944,6 +3662,7 @@ function MediaLaneControls({
   page,
   state,
   sourceIndex,
+  textTrackKind,
   t,
   onOpenSourceSheet,
   onOpenSubtitleSheet,
@@ -2959,6 +3678,7 @@ function MediaLaneControls({
   page: ReaderPage;
   state: MediaPlaybackState;
   sourceIndex: number;
+  textTrackKind: 'subtitle' | 'lyrics';
   t: ReturnType<typeof useI18n>['t'];
   onOpenSourceSheet: () => void;
   onOpenSubtitleSheet: () => void;
@@ -2974,6 +3694,7 @@ function MediaLaneControls({
   const position = duration > 0 ? state.currentTime / duration : state.position;
   const [timelineWidth, setTimelineWidth] = useState(1);
   const [volBarWidth, setVolBarWidth] = useState(1);
+  const textTrackLabel = textTrackKind === 'lyrics' ? t('reader.lyrics') : t('reader.subtitle');
   return (
     <View style={[styles.mediaLane, compact && styles.mediaLaneCompact]}>
       {!hideTransportControls ? (
@@ -3072,12 +3793,199 @@ function MediaLaneControls({
         </TouchableOpacity>
       ) : null}
       <TouchableOpacity
-        accessibilityLabel={t('reader.subtitle')}
+        accessibilityLabel={textTrackLabel}
         accessibilityRole="button"
         onPress={onOpenSubtitleSheet}
         style={styles.mediaIconButton}>
-        <Captions color={colors.white} size={16} />
+        {textTrackKind === 'lyrics' ? (
+          <Music color={colors.white} size={16} />
+        ) : (
+          <Captions color={colors.white} size={16} />
+        )}
       </TouchableOpacity>
+    </View>
+  );
+}
+
+function AudioLyricsPanel({
+  activeLyricIndex,
+  audioLandscape,
+  audioSubtitleAttachment,
+  audioSubtitleLines,
+  audioSubtitleText,
+  lyricsAttachment,
+  lyricsText,
+  plainLyricLines,
+  t,
+  timedLyrics,
+  onLyricTouchTrace,
+  onSeekLyric,
+}: {
+  activeLyricIndex: number;
+  audioLandscape: boolean;
+  audioSubtitleAttachment?: MetadataPageAttachment;
+  audioSubtitleLines: string[];
+  audioSubtitleText: string;
+  lyricsAttachment?: MetadataPageAttachment;
+  lyricsText: string;
+  plainLyricLines: string[];
+  t: ReturnType<typeof useI18n>['t'];
+  timedLyrics: TimedLyricLine[];
+  onLyricTouchTrace?: (trace: AudioLyricTouchTrace) => void;
+  onSeekLyric: (seconds: number, trace?: AudioLyricTouchTrace) => void;
+}) {
+  const scrollRef = useRef<ScrollView | null>(null);
+  const lineYByIndex = useRef<Record<number, number>>({});
+  const userScrollingRef = useRef(false);
+  const suppressPressUntilRef = useRef(0);
+  const releaseUserScrollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [viewportHeight, setViewportHeight] = useState(1);
+
+  const releaseUserScrollSoon = useCallback(() => {
+    if (releaseUserScrollTimer.current) {
+      clearTimeout(releaseUserScrollTimer.current);
+    }
+    releaseUserScrollTimer.current = setTimeout(() => {
+      userScrollingRef.current = false;
+    }, 360);
+  }, []);
+
+  useEffect(() => {
+    if (userScrollingRef.current) return;
+    if (activeLyricIndex < 0 || !timedLyrics.length) return;
+    const y = lineYByIndex.current[activeLyricIndex];
+    if (typeof y !== 'number') return;
+    scrollRef.current?.scrollTo({
+      animated: true,
+      y: Math.max(0, y - viewportHeight * 0.42),
+    });
+  }, [activeLyricIndex, timedLyrics.length, viewportHeight]);
+
+  useEffect(
+    () => () => {
+      if (releaseUserScrollTimer.current) {
+        clearTimeout(releaseUserScrollTimer.current);
+      }
+    },
+    [],
+  );
+
+  return (
+    <View style={[styles.audioLyricsPanel, audioLandscape && styles.audioLyricsPanelLandscape]}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.audioLyricsContent,
+          audioLandscape && styles.audioLyricsContentLandscape,
+        ]}
+        fadingEdgeLength={28}
+        onMomentumScrollEnd={releaseUserScrollSoon}
+        onScrollBeginDrag={() => {
+          userScrollingRef.current = true;
+          suppressPressUntilRef.current = Date.now() + 650;
+          if (releaseUserScrollTimer.current) {
+            clearTimeout(releaseUserScrollTimer.current);
+            releaseUserScrollTimer.current = null;
+          }
+        }}
+        onScrollEndDrag={releaseUserScrollSoon}
+        onLayout={event => setViewportHeight(Math.max(1, event.nativeEvent.layout.height))}
+        ref={scrollRef}
+        showsVerticalScrollIndicator={false}
+        style={styles.audioLyricsScroll}>
+        {!lyricsAttachment ? (
+          <Text style={styles.audioLyricsEmpty}>{t('reader.audioLyricsEmpty')}</Text>
+        ) : lyricsText ? (
+          timedLyrics.length ? (
+            timedLyrics.map((line, index) => {
+              const active = index === activeLyricIndex;
+              const buildTrace = (
+                phase: AudioLyricTouchTrace['phase'],
+                nativeTimestamp?: number,
+              ): AudioLyricTouchTrace => {
+                const now = Date.now();
+                const nextLineTime = timedLyrics[index + 1]?.time;
+                const seekNudge = typeof nextLineTime === 'number' && nextLineTime - line.time > 0.18 ? 0.08 : 0;
+                return {
+                  phase,
+                  lineIndex: index,
+                  lineTime: line.time,
+                  activeLyricIndex,
+                  textPreview: line.text.slice(0, 80),
+                  now,
+                  suppressUntil: suppressPressUntilRef.current,
+                  userScrolling: userScrollingRef.current,
+                  seekTime: line.time + seekNudge,
+                  nextLineTime,
+                  nativeTimestamp,
+                };
+              };
+              return (
+                <TouchableOpacity
+                  accessibilityLabel={line.text || formatMediaTime(line.time)}
+                  accessibilityRole="button"
+                  activeOpacity={0.74}
+                  key={line.key}
+                  onLayout={event => {
+                    lineYByIndex.current[index] = event.nativeEvent.layout.y;
+                  }}
+                  onPress={event => {
+                    const trace = buildTrace(
+                      Date.now() < suppressPressUntilRef.current ? 'pressSuppressed' : 'press',
+                      event.nativeEvent.timestamp,
+                    );
+                    onLyricTouchTrace?.(trace);
+                    if (trace.phase === 'pressSuppressed') return;
+                    onSeekLyric(trace.seekTime ?? line.time, trace);
+                  }}
+                  onPressIn={event => {
+                    onLyricTouchTrace?.(buildTrace('pressIn', event.nativeEvent.timestamp));
+                  }}
+                  onPressOut={event => {
+                    onLyricTouchTrace?.(buildTrace('pressOut', event.nativeEvent.timestamp));
+                  }}
+                  style={styles.audioLyricTouchable}>
+                  <Text
+                    style={[
+                      styles.audioLyricLine,
+                      audioLandscape && styles.audioLyricLineLandscape,
+                      active && styles.audioLyricLineActive,
+                      audioLandscape && active && styles.audioLyricLineActiveLandscape,
+                    ]}>
+                    {line.text || '...'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })
+          ) : (
+            plainLyricLines.map((line, index) => (
+              <Text
+                key={`${index}-${line}`}
+                style={[styles.audioLyricLine, audioLandscape && styles.audioLyricLineLandscape]}>
+                {line}
+              </Text>
+            ))
+          )
+        ) : (
+          <Text style={styles.audioLyricsEmpty}>{t('reader.audioLyricsLoading')}</Text>
+        )}
+        {audioSubtitleAttachment ? (
+          <View style={styles.audioSubtitleBlock}>
+            {audioSubtitleText ? (
+              audioSubtitleLines.length ? (
+                audioSubtitleLines.map((line, index) => (
+                  <Text key={`${index}-${line}`} style={styles.audioSubtitleLine}>
+                    {line}
+                  </Text>
+                ))
+              ) : (
+                <Text style={styles.audioLyricsEmpty}>{t('reader.audioSubtitleEmpty')}</Text>
+              )
+            ) : (
+              <Text style={styles.audioLyricsEmpty}>{t('reader.audioSubtitleLoading')}</Text>
+            )}
+          </View>
+        ) : null}
+      </ScrollView>
     </View>
   );
 }
@@ -3275,6 +4183,51 @@ function ReaderSettingToggle({
   );
 }
 
+function AudioCoverArtwork({
+  paused,
+  size,
+  source,
+}: {
+  paused: boolean;
+  size: number;
+  source?: ImageSourcePropType;
+}) {
+  const rotation = useSharedValue(0);
+
+  useEffect(() => {
+    if (paused) {
+      cancelAnimation(rotation);
+      return;
+    }
+    rotation.value = withRepeat(
+      withTiming(360, {duration: 18000, easing: Easing.linear}),
+      -1,
+      false,
+    );
+    return () => cancelAnimation(rotation);
+  }, [paused, rotation]);
+
+  const coverAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{rotate: `${rotation.value}deg`}],
+  }));
+
+  return (
+    <View style={[styles.audioCoverFrame, {height: size, width: size}]}>
+      <Animated.View style={[styles.audioCoverShell, coverAnimatedStyle]}>
+        {source ? (
+          <Image resizeMode="cover" source={source} style={styles.audioCover} />
+        ) : (
+          <View style={styles.audioCoverFallback}>
+            <Volume2 color="rgba(255,255,255,0.72)" size={Math.max(38, Math.round(size * 0.22))} />
+          </View>
+        )}
+        <View style={styles.audioCoverVinylShade} />
+        <View style={styles.audioCoverCenterDot} />
+      </Animated.View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.black,
@@ -3296,6 +4249,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.black,
     justifyContent: 'center',
+  },
+  audioMediaPage: {
+    backgroundColor: colors.black,
+    overflow: 'hidden',
+    position: 'relative',
   },
   pageImage: {
     height: '100%',
@@ -3336,16 +4294,360 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   audioStage: {
-    height: 84,
-    width: '92%',
+    height: 1,
+    opacity: 0,
+    position: 'absolute',
+    width: 1,
+  },
+  audioBackdrop: {
+    backgroundColor: '#080a0e',
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  audioBackdropImage: {
+    bottom: -34,
+    left: -34,
+    opacity: 0.92,
+    position: 'absolute',
+    right: -34,
+    top: -34,
+  },
+  audioBackdropGradient: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+  },
+  audioScene: {
+    bottom: 0,
+    left: 0,
+    paddingHorizontal: spacing.lg,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 1,
+  },
+  audioSceneInner: {
+    flex: 1,
+    minHeight: 0,
+    width: '100%',
+  },
+  audioSceneInnerWide: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xl,
+  },
+  audioSceneInnerLandscape: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    gap: spacing.lg,
+    justifyContent: 'center',
+  },
+  audioSceneInnerCompact: {
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  audioLandscapeLeftPane: {
+    alignItems: 'center',
+    flexBasis: 270,
+    flexGrow: 0,
+    flexShrink: 1,
+    justifyContent: 'center',
+    minWidth: 220,
+  },
+  audioHero: {
+    minWidth: 0,
+  },
+  audioHeroWide: {
+    alignItems: 'center',
+    flex: 0.9,
+  },
+  audioHeroCompact: {
+    alignItems: 'center',
+    flexShrink: 0,
+    width: '100%',
+  },
+  audioHeroLandscape: {
+    alignItems: 'center',
+    flexShrink: 0,
+    width: '100%',
+  },
+  audioCoverFrame: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 999,
+    elevation: 16,
+    shadowColor: '#000',
+    shadowOffset: {height: 16, width: 0},
+    shadowOpacity: 0.34,
+    shadowRadius: 26,
+  },
+  audioCoverShell: {
+    backgroundColor: 'rgba(8,10,14,0.92)',
+    borderColor: 'rgba(255,255,255,0.24)',
+    borderRadius: 999,
+    borderWidth: 1,
+    height: '100%',
+    overflow: 'hidden',
+    padding: 7,
+    width: '100%',
+  },
+  audioCover: {
+    borderRadius: 999,
+    height: '100%',
+    width: '100%',
+  },
+  audioCoverFallback: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 999,
+    height: '100%',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  audioCoverVinylShade: {
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 999,
+    borderWidth: 18,
+    bottom: 14,
+    left: 14,
+    opacity: 0.5,
+    position: 'absolute',
+    right: 14,
+    top: 14,
+  },
+  audioCoverCenterDot: {
+    backgroundColor: 'rgba(250,250,250,0.92)',
+    borderColor: 'rgba(0,0,0,0.54)',
+    borderRadius: 15,
+    borderWidth: 6,
+    height: 30,
+    left: '50%',
+    marginLeft: -15,
+    marginTop: -15,
+    position: 'absolute',
+    top: '50%',
+    width: 30,
+  },
+  audioTextBlock: {
+    marginTop: spacing.lg,
+    maxWidth: 420,
+    minWidth: 0,
+    width: '100%',
+  },
+  audioTextBlockCompact: {
+    marginBottom: spacing.md,
+    marginTop: spacing.md,
+  },
+  audioTextBlockLandscape: {
+    marginTop: spacing.sm,
+    maxWidth: 270,
   },
   audioTitle: {
     color: colors.white,
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: spacing.md,
-    paddingHorizontal: spacing.lg,
+    fontSize: 24,
+    fontWeight: '900',
+    lineHeight: 31,
     textAlign: 'center',
+  },
+  audioTitleCompact: {
+    fontSize: 20,
+    lineHeight: 26,
+  },
+  audioTitleLandscape: {
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  audioDescription: {
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  audioDescriptionLandscape: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+  audioPathText: {
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 11,
+    marginTop: spacing.sm,
+    textAlign: 'center',
+  },
+  audioPathTextLandscape: {
+    marginTop: 4,
+  },
+  audioLyricsPanel: {
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 0,
+    width: '100%',
+  },
+  audioLyricsPanelLandscape: {
+    alignSelf: 'stretch',
+    flexBasis: 0,
+    flexGrow: 1,
+    maxWidth: 620,
+  },
+  audioLyricsScroll: {
+    flex: 1,
+  },
+  audioLyricsContent: {
+    justifyContent: 'center',
+    minHeight: '100%',
+    paddingBottom: spacing.md,
+    paddingTop: spacing.md,
+  },
+  audioLyricsContentLandscape: {
+    alignItems: 'stretch',
+    paddingHorizontal: spacing.lg,
+  },
+  audioLyricLine: {
+    color: 'rgba(255,255,255,0.56)',
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 25,
+    paddingVertical: 5,
+    textAlign: 'center',
+  },
+  audioLyricTouchable: {
+    width: '100%',
+  },
+  audioLyricLineLandscape: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 14,
+    lineHeight: 22,
+    paddingVertical: 3,
+    textAlign: 'left',
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: {height: 1, width: 0},
+    textShadowRadius: 3,
+  },
+  audioLyricLineActive: {
+    color: colors.white,
+    fontSize: 20,
+    fontWeight: '900',
+    lineHeight: 29,
+  },
+  audioLyricLineActiveLandscape: {
+    fontSize: 17,
+    lineHeight: 24,
+  },
+  audioLyricsEmpty: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 14,
+    lineHeight: 21,
+    paddingVertical: spacing.lg,
+    textAlign: 'center',
+  },
+  audioSubtitleBlock: {
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: spacing.lg,
+    paddingTop: spacing.md,
+  },
+  audioSubtitleLine: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 13,
+    lineHeight: 20,
+    paddingVertical: 2,
+    textAlign: 'center',
+  },
+  audioPlayerDock: {
+    flexShrink: 0,
+    paddingTop: spacing.sm,
+    width: '100%',
+  },
+  audioPlayerDockLandscape: {
+    maxWidth: 270,
+    paddingTop: spacing.sm,
+  },
+  audioProgressRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  audioTimeText: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 11,
+    fontWeight: '700',
+    minWidth: 38,
+    textAlign: 'center',
+  },
+  audioProgressTrack: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 3,
+    flex: 1,
+    height: 6,
+    overflow: 'hidden',
+  },
+  audioProgressBuffered: {
+    backgroundColor: 'rgba(255,255,255,0.22)',
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    top: 0,
+  },
+  audioProgressFill: {
+    backgroundColor: colors.white,
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    top: 0,
+  },
+  audioTransportRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xl,
+    justifyContent: 'center',
+    paddingTop: spacing.md,
+  },
+  audioTransportRowLandscape: {
+    gap: spacing.md,
+    paddingTop: spacing.sm,
+  },
+  audioTransportSideButton: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 48,
+    justifyContent: 'center',
+    width: 48,
+  },
+  audioTransportSideButtonLandscape: {
+    borderRadius: 21,
+    height: 42,
+    width: 42,
+  },
+  audioTransportPlayButton: {
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 34,
+    height: 68,
+    justifyContent: 'center',
+    width: 68,
+  },
+  audioTransportPlayButtonLandscape: {
+    borderRadius: 28,
+    height: 56,
+    width: 56,
+  },
+  audioTimedSubtitleOverlay: {
+    alignItems: 'center',
+    bottom: 108,
+    gap: 6,
+    left: spacing.lg,
+    position: 'absolute',
+    right: spacing.lg,
+    zIndex: 2,
   },
   mediaCenterButton: {
     alignItems: 'center',
