@@ -228,16 +228,6 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
           } else {
             null
           }
-          if (pagePath?.endsWith(".js", ignoreCase = true) == true) {
-            writeBytes(
-                socket,
-                200,
-                "application/javascript; charset=utf-8",
-                "/* EPUB scripts disabled by Lanlu reader. */\n".toByteArray(Charsets.UTF_8),
-                method == "HEAD",
-            )
-            return
-          }
           proxyRequest(socket, method, target, requestHeaders, pagePath)
         } catch (error: Exception) {
           Log.e(TAG, "Proxy request failed", error)

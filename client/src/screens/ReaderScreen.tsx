@@ -149,16 +149,10 @@ const EPUB_HTML_INJECTION = `
 </style>`;
 
 function prepareEpubHtml(html: string) {
-  const withoutScripts = html
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<script\b[^>]*\/?>/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\s+on[a-z]+\s*=\s*'[^']*'/gi, '');
-
-  if (/<head\b[^>]*>/i.test(withoutScripts)) {
-    return withoutScripts.replace(/<head\b[^>]*>/i, match => `${match}${EPUB_HTML_INJECTION}`);
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/<head\b[^>]*>/i, match => `${match}${EPUB_HTML_INJECTION}`);
   }
-  return `<!doctype html><html><head>${EPUB_HTML_INJECTION}</head><body>${withoutScripts}</body></html>`;
+  return `<!doctype html><html><head>${EPUB_HTML_INJECTION}</head><body>${html}</body></html>`;
 }
 
 type ReaderItem = {
