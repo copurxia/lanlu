@@ -4222,7 +4222,6 @@ function AudioCoverArtwork({
           </View>
         )}
         <View style={styles.audioCoverVinylShade} />
-        <View style={styles.audioCoverCenterDot} />
       </Animated.View>
     </View>
   );
