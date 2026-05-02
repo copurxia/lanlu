@@ -398,9 +398,9 @@ function HomePageContent() {
 
   useEffect(() => {
     if (!isInitialized) return;
-    if (homeViewMode !== 'list') return;
-    setCurrentPage(urlPage);
-  }, [homeViewMode, isInitialized, urlPage]);
+    if (!showArchiveFeed || isContinuousFeed) return;
+    setCurrentPage(Number.isFinite(urlPage) && urlPage > 0 ? urlPage : 0);
+  }, [isContinuousFeed, isInitialized, showArchiveFeed, urlPage]);
 
   // Home view mode change listener
   useEffect(() => {
@@ -436,6 +436,19 @@ function HomePageContent() {
   // Sync state to URL
   useEffect(() => {
     if (!isInitialized) return;
+    const urlStateSynced =
+      searchQuery === urlQuery &&
+      sortBy === urlSortBy &&
+      sortOrder === urlSortOrder &&
+      newonly === urlNewonly &&
+      untaggedonly === urlUntaggedonly &&
+      favoriteonly === urlFavoriteonly &&
+      dateFrom === urlDateFrom &&
+      dateTo === urlDateTo &&
+      groupByTanks === urlGroupByTanks &&
+      (searchQuery ? 'all' : categoryId) === (urlQuery ? 'all' : urlCategoryId);
+    if (!urlStateSynced) return;
+
     const params = new URLSearchParams();
     if (searchQuery) params.set('q', searchQuery);
     if (sortBy !== DEFAULT_SEARCH_SORT_BY) params.set('sortby', sortBy);
@@ -457,7 +470,7 @@ function HomePageContent() {
       return;
     }
     router.replace(newUrl);
-  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isContinuousFeed, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly]);
+  }, [categoryId, currentPage, dateFrom, dateTo, favoriteonly, groupByTanks, isContinuousFeed, isInitialized, newonly, router, searchQuery, sortBy, sortOrder, untaggedonly, urlCategoryId, urlDateFrom, urlDateTo, urlFavoriteonly, urlGroupByTanks, urlNewonly, urlQuery, urlSortBy, urlSortOrder, urlUntaggedonly]);
 
   // Fetch archives on filter change
   useEffect(() => {
