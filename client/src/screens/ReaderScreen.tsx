@@ -767,6 +767,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const nextArchiveCache = useRef<Record<string, NextArchiveCandidate | null>>({});
   const lastSavedProgressKey = useRef('');
   const progressSeekLockedRef = useRef(false);
+  const webtoonScrollOffset = useRef(0);
   const settingsHydratedRef = useRef(false);
   const autoHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoPreferredLaneItemKey = useRef('');
@@ -844,6 +845,8 @@ export function ReaderScreen({route, navigation}: Props) {
   const [isFavorited, setIsFavorited] = useState(false);
   const [sidebarPages, setSidebarPages] = useState<any[]>([]);
   const [appendingNext, setAppendingNext] = useState(false);
+  const [webtoonHeights, setWebtoonHeights] = useState<Record<number, number>>({});
+  const [imageSizeByPage, setImageSizeByPage] = useState<Record<number, {width: number; height: number}>>({});
   const chromeProgress = useSharedValue(chromeVisible ? 1 : 0);
   useEffect(() => {
     chromeProgress.value = withTiming(chromeVisible ? 1 : 0, {duration: 160});
@@ -951,6 +954,8 @@ export function ReaderScreen({route, navigation}: Props) {
     setNextArchiveById({});
     setHtmlContents({});
     setHtmlHeights({});
+    setWebtoonHeights({});
+    setImageSizeByPage({});
     try {
       const [storedSettings, files] = await Promise.all([
         loadReaderSettings(),
@@ -1011,13 +1016,7 @@ export function ReaderScreen({route, navigation}: Props) {
     async (page: ReaderPage) => {
       if (page.effectiveType !== 'html') return;
       const htmlUri = page.backendUri || (!page.uri?.startsWith('http://127.0.0.1') ? page.uri : '');
-      if (!htmlUri) {
-        setFailedPages(current => ({
-          ...current,
-          [page.pageNumber]: t('reader.noImageSource'),
-        }));
-        return;
-      }
+      if (!htmlUri) return;
       const key = `${page.sourceArchiveId || archiveId}:${page.pageNumber}:${htmlUri}:${page.headers?.Authorization || ''}`;
       if (htmlContents[page.pageNumber] || htmlLoadingKeys.current.has(key)) return;
       htmlLoadingKeys.current.add(key);
@@ -1136,6 +1135,50 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [currentPage, pages.length, persistReadingProgress]);
 
   useEffect(() => {
+    setWebtoonHeights({});
+    setImageSizeByPage({});
+  }, [width]);
+
+  useEffect(() => {
+    const far = 4;
+    const keys = Object.keys(vlcSourceKeys.current).map(Number);
+    for (const pageNum of keys) {
+      if (Math.abs(pageNum - currentPage) > far) {
+        const cache = vlcSourceCache.current[pageNum];
+        if (cache && vlcSessions.current[pageNum]?.playable) {
+          setMediaStateByPage(prev => {
+            const s = prev[pageNum];
+            if (!s) return prev;
+            return {...prev, [pageNum]: {...s, paused: true}};
+          });
+        }
+      }
+    }
+    setHtmlContents(prev => {
+      let changed = false;
+      const next = {...prev};
+      for (const p of Object.keys(next).map(Number)) {
+        if (Math.abs(p - currentPage) > far * 2) {
+          delete next[p];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    setImageSizeByPage(prev => {
+      let changed = false;
+      const next = {...prev};
+      for (const p of Object.keys(next).map(Number)) {
+        if (Math.abs(p - currentPage) > far * 2) {
+          delete next[p];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [currentPage]);
+
+  useEffect(() => {
     appendDiagnosticLog('reader.collectionContext', {
       archiveId,
       childIndex,
@@ -1220,6 +1263,58 @@ export function ReaderScreen({route, navigation}: Props) {
         : pages,
     [pages, shouldShowCollectionEnd],
   );
+
+  const webtoonPrefix = useMemo(() => {
+    const prefix: Record<number, number> = {};
+    let acc = 0;
+    for (const item of webtoonItems) {
+      const pageNum = 'kind' in item && item.kind === 'collection-end' ? pages.length + 1 : item.pageNumber;
+      const h = webtoonHeights[pageNum];
+      prefix[pageNum] = acc;
+      acc += typeof h === 'number' && h > 0 ? h : height;
+    }
+    return prefix;
+  }, [webtoonHeights, webtoonItems, pages.length, height]);
+
+  function clampPageNum(pn: number): number {
+    return pn > pages.length ? pages.length : Math.max(1, pn);
+  }
+
+  function findWebtoonPageAtOffset(offsetY: number): number {
+    const center = offsetY + height / 2;
+    if (center <= 0 || !webtoonItems.length) return 1;
+    if (webtoonItems.length === pages.length && Object.keys(webtoonHeights).length < 3) {
+      return clampPageNum(Math.floor(offsetY / Math.max(1, height)) + 1);
+    }
+    let fallback = 1;
+    for (const item of webtoonItems) {
+      const pageNum = 'kind' in item && item.kind === 'collection-end' ? pages.length + 1 : item.pageNumber;
+      const y = webtoonPrefix[pageNum] ?? 0;
+      const h = webtoonHeights[pageNum] || height;
+      const isTall = h > height * 1.5;
+      if (isTall) {
+        if (offsetY >= y && offsetY < y + h) return clampPageNum(pageNum);
+      } else if (center >= y && center < y + h) {
+        return clampPageNum(pageNum);
+      }
+      if (center < y && h > 0) break;
+      fallback = clampPageNum(pageNum);
+    }
+    return fallback;
+  }
+
+  function getWebtoonOffset(pageNum: number): number {
+    if (pageNum <= 1) return 0;
+    const p = Math.min(pageNum, pages.length);
+    const y = webtoonPrefix[p];
+    if (typeof y === 'number') return y;
+    let offset = 0;
+    for (let i = 1; i < p; i++) {
+      const h = webtoonHeights[i];
+      offset += typeof h === 'number' && h > 0 ? h : height;
+    }
+    return offset;
+  }
 
   const currentItemIndex = useMemo(() => {
     const index = readerItems.findIndex(item =>
@@ -1332,24 +1427,28 @@ export function ReaderScreen({route, navigation}: Props) {
     .filter(id => id > 0)
     .join('|');
   const nearbyMediaPages = useMemo(
-    () =>
-      pages.filter(
-        page =>
+    () => {
+      const idx = Math.max(0, Math.min(currentPage - 1, pages.length - 1));
+      return pages.filter(
+        (page, i) =>
           page.uri &&
           !page.vlcUri &&
-          Math.abs(page.pageNumber - currentPage) <= 1 &&
+          Math.abs(i - idx) <= 2 &&
           (page.effectiveType === 'video' || page.effectiveType === 'audio'),
-      ),
+      );
+    },
     [currentPage, pages],
   );
   const nearbyHtmlPages = useMemo(
-    () =>
-      pages.filter(
-        page =>
+    () => {
+      const idx = Math.max(0, Math.min(currentPage - 1, pages.length - 1));
+      return pages.filter(
+        (page, i) =>
           page.effectiveType === 'html' &&
           Boolean(page.backendUri || page.uri) &&
-          Math.abs(page.pageNumber - currentPage) <= 1,
-      ),
+          Math.abs(i - idx) <= 2,
+      );
+    },
     [currentPage, pages],
   );
   useEffect(() => {
@@ -1580,6 +1679,9 @@ export function ReaderScreen({route, navigation}: Props) {
       appendedArchiveIds.current.add(candidate.id);
       setPages(current => [...current, ...readerPages]);
       setCurrentPage(start + 1);
+      setTimeout(() => {
+        webtoonRef.current?.scrollToIndex({animated: true, index: start});
+      }, 80);
       return true;
     } catch (err) {
       appendDiagnosticLog('reader.next.append.error', {
@@ -1639,9 +1741,9 @@ export function ReaderScreen({route, navigation}: Props) {
       const next = Math.max(1, Math.min(page, lastReaderPage));
       setCurrentPage(next);
       if (settings.readingMode === 'webtoon') {
-        webtoonRef.current?.scrollToOffset({
+        webtoonRef.current?.scrollToIndex({
           animated: true,
-          offset: (next > pages.length ? pages.length : next - 1) * height,
+          index: Math.max(0, Math.min(next - 1, pages.length - 1)),
         });
         return;
       }
@@ -1677,14 +1779,16 @@ export function ReaderScreen({route, navigation}: Props) {
         targetIndex,
         readingMode: settings.readingMode,
       }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
-      progressSeekLockedRef.current = true;
-      setProgressSeekLocked(true);
+
+      setCurrentPage(next);
 
       if (settings.readingMode === 'webtoon') {
-        webtoonRef.current?.scrollToIndex({
-          animated: false,
-          index: Math.max(0, targetIndex),
-        });
+        setTimeout(() => {
+          webtoonRef.current?.scrollToIndex({
+            animated: false,
+            index: Math.max(0, targetIndex),
+          });
+        }, 0);
       } else {
         const itemIndex = readerItems.findIndex(item =>
           item.progressPage === next || item.pages.some(readerPage => readerPage.pageNumber === next),
@@ -1692,23 +1796,11 @@ export function ReaderScreen({route, navigation}: Props) {
         if (itemIndex >= 0) scrollToReaderItem(itemIndex, false);
       }
 
-      setTimeout(() => {
-        setCurrentPage(next);
-        if (next <= pages.length) {
-          persistReadingProgress(next, 'progress-jump').catch(err => {
-            console.warn(extractApiError(err, 'Failed to save progress'));
-          });
-        }
-      }, 80);
-
-      setTimeout(() => {
-        progressSeekLockedRef.current = false;
-        setProgressSeekLocked(false);
-        appendDiagnosticLog('reader.progress.jump.done', {
-          targetPage: next,
-          readingMode: settings.readingMode,
-        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
-      }, 450);
+      if (next <= pages.length) {
+        persistReadingProgress(next, 'progress-jump').catch(err => {
+          console.warn(extractApiError(err, 'Failed to save progress'));
+        });
+      }
     },
     [pages.length, persistReadingProgress, readerItems, scrollToReaderItem, settings.readingMode, shouldShowCollectionEnd],
   );
@@ -1996,10 +2088,19 @@ export function ReaderScreen({route, navigation}: Props) {
       }
     } else if (settings.readingMode === 'single-ttb' || settings.readingMode === 'webtoon') {
       if (y < verticalEdge) {
+        if (settings.readingMode === 'webtoon') {
+          const targetOffset = Math.max(0, webtoonScrollOffset.current - height * 0.9);
+          webtoonRef.current?.scrollToOffset({animated: true, offset: targetOffset});
+          return;
+        }
         goToPage(currentPage - 1);
         return;
       }
       if (y > height - verticalEdge) {
+        if (settings.readingMode === 'webtoon') {
+          webtoonRef.current?.scrollToOffset({animated: true, offset: webtoonScrollOffset.current + height * 0.9});
+          return;
+        }
         goToNextPage();
         return;
       }
@@ -2019,13 +2120,14 @@ export function ReaderScreen({route, navigation}: Props) {
 
   function handleReaderDoubleTap(pageNumber: number) {
     if (!settings.doubleTapZoom) return;
+    if (settings.readingMode === 'webtoon') return;
     setZoomedPages(current => ({...current, [pageNumber]: !current[pageNumber]}));
   }
 
   useEffect(() => {
     if (!pages.length) return;
     pages
-      .filter(page => Math.abs(page.pageNumber - currentPage) <= 2 || page.pageNumber === sourceSheetPageId)
+      .filter(page => Math.abs(page.pageNumber - currentPage) <= 4 || page.pageNumber === sourceSheetPageId)
       .forEach(page => {
         const index = page.pageNumber - 1;
         const desiredSourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
@@ -2188,7 +2290,7 @@ export function ReaderScreen({route, navigation}: Props) {
   ) => {
     const commonError = failedPages[page.pageNumber];
     const frameStyle = webtoon
-      ? [styles.webtoonPage, {width}]
+      ? [styles.webtoonPage, {width}, page.effectiveType === 'video' ? {aspectRatio: 16 / 9, maxHeight: height} : null]
       : [styles.mediaPage, {width: pageWidth, height: pageHeight || height}];
     const mediaFrameStyle =
       page.effectiveType === 'audio'
@@ -3144,7 +3246,15 @@ export function ReaderScreen({route, navigation}: Props) {
                   if (payload.kind === 'epub-dom' && typeof payload.height === 'number' && payload.height > 0) {
                     setHtmlHeights(current => {
                       const nextHeight = Math.ceil(payload.height || 0);
-                      if (Math.abs((current[page.pageNumber] || 0) - nextHeight) < 2) return current;
+                      const oldHeight = current[page.pageNumber] || 0;
+                      if (Math.abs(oldHeight - nextHeight) < 2) return current;
+                      const delta = nextHeight - oldHeight;
+                      if (delta !== 0 && page.pageNumber < currentPage) {
+                        const scrollTarget = webtoonScrollOffset.current + delta;
+                        setTimeout(() => {
+                          webtoonRef.current?.scrollToOffset({animated: false, offset: Math.max(0, scrollTarget)});
+                        }, 0);
+                      }
                       return {...current, [page.pageNumber]: nextHeight};
                     });
                   }
@@ -3165,6 +3275,17 @@ export function ReaderScreen({route, navigation}: Props) {
       );
     }
 
+    const webtoonImageSize = webtoon && settings.longPage ? imageSizeByPage[page.pageNumber] : undefined;
+    const webtoonImageStyle = webtoon
+      ? [
+          styles.webtoonImage,
+          webtoonImageSize
+            ? {aspectRatio: webtoonImageSize.width / webtoonImageSize.height, height: undefined}
+            : {aspectRatio: 0.72},
+          ...(settings.longPage ? [] : [{height}]),
+          zoomedPages[page.pageNumber] && styles.zoomedMedia,
+        ]
+      : [styles.pageImage, zoomedPages[page.pageNumber] && styles.zoomedMedia];
     return (
       <View style={frameStyle}>
         {page.imageSource ? (
@@ -3179,14 +3300,20 @@ export function ReaderScreen({route, navigation}: Props) {
                   [page.pageNumber]: event.nativeEvent.error || 'Image failed to load.',
                 }));
               }}
-              onLoad={() => setLoadedPages(current => ({...current, [page.pageNumber]: true}))}
+              onLoad={event => {
+                setLoadedPages(current => ({...current, [page.pageNumber]: true}));
+                const src = event.nativeEvent?.source;
+                if (src && typeof src.width === 'number' && typeof src.height === 'number' && src.width > 0 && src.height > 0) {
+                  setImageSizeByPage(prev => {
+                    const existing = prev[page.pageNumber];
+                    if (existing && existing.width === src.width && existing.height === src.height) return prev;
+                    return {...prev, [page.pageNumber]: {width: src.width, height: src.height}};
+                  });
+                }
+              }}
               resizeMode="contain"
               source={page.imageSource}
-              style={[
-                webtoon ? styles.webtoonImage : styles.pageImage,
-                webtoon && !settings.longPage && {height},
-                zoomedPages[page.pageNumber] && styles.zoomedMedia,
-              ]}
+              style={webtoonImageStyle}
             />
             {commonError ? (
               <ErrorOverlay title={t('reader.pageFailed')} message={`${commonError}\n${page.resolvedPath || page.uri || ''}`} />
@@ -3286,30 +3413,47 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const renderWebtoonItem = ({item}: FlashListRenderItemInfo<ReaderWebtoonItem>) => {
     if ('kind' in item && item.kind === 'collection-end') {
+      const colPageNum = pages.length + 1;
       return (
-        <ReaderTapSurface
-          onTap={() => goToNextPage()}
-          style={[styles.webtoonItem, {minHeight: height}]}>
-          <ReaderCollectionEndPage
-            finishedPageCount={pages.length}
-            nextArchiveId={nextArchiveId}
-            nextTitle={nextArchive?.title}
-            nextMode={nextArchive?.source}
-            t={t}
-            onOpenNext={goToNextPage}
-          />
-        </ReaderTapSurface>
+        <View
+          onLayout={e => {
+            const h = e.nativeEvent.layout.height;
+            setWebtoonHeights(prev => (prev[colPageNum] === h ? prev : {...prev, [colPageNum]: h}));
+          }}
+          style={styles.webtoonItem}>
+          <ReaderTapSurface
+            onTap={() => goToNextPage()}
+            style={{minHeight: height, width: '100%'}}>
+            <ReaderCollectionEndPage
+              finishedPageCount={pages.length}
+              nextArchiveId={nextArchiveId}
+              nextTitle={nextArchive?.title}
+              nextMode={nextArchive?.source}
+              t={t}
+              onOpenNext={goToNextPage}
+            />
+          </ReaderTapSurface>
+        </View>
       );
     }
     const page = item as ReaderPage;
-    const mediaActive = Math.abs(page.pageNumber - currentPage) <= 1;
+    const pageIdx = page.pageNumber - 1;
+    const currentIdx = Math.max(0, Math.min(currentPage - 1, pages.length - 1));
+    const mediaActiveStable = Math.abs(pageIdx - currentIdx) <= 1;
     return (
-      <ReaderTapSurface
-        onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
-        onTap={handleReaderTap}
+      <View
+        onLayout={e => {
+          const h = e.nativeEvent.layout.height;
+          setWebtoonHeights(prev => (prev[page.pageNumber] === h ? prev : {...prev, [page.pageNumber]: h}));
+        }}
         style={styles.webtoonItem}>
-        {renderMedia(page, width, settings.longPage ? undefined : height, true, mediaActive)}
-      </ReaderTapSurface>
+        <ReaderTapSurface
+          onDoubleTap={() => handleReaderDoubleTap(page.pageNumber)}
+          onTap={handleReaderTap}
+          style={{width: '100%'}}>
+          {renderMedia(page, width, settings.longPage ? undefined : height, true, mediaActiveStable)}
+        </ReaderTapSurface>
+      </View>
     );
   };
 
@@ -3325,6 +3469,7 @@ export function ReaderScreen({route, navigation}: Props) {
         <FlashList
           data={webtoonItems}
           drawDistance={height * 1.5}
+          estimatedItemSize={height}
           extraData={{
             currentPage,
             failedPages,
@@ -3334,12 +3479,16 @@ export function ReaderScreen({route, navigation}: Props) {
             longPage: settings.longPage,
           }}
           key={`webtoon:${settings.longPage ? 'long' : 'paged'}`}
-          keyExtractor={page => ('kind' in page ? page.key : `${page.pageNumber}:${page.uri || page.id}`)}
+          keyExtractor={page => {
+            if ('kind' in page && page.kind === 'collection-end') return 'collection-end';
+            return String(page.pageNumber);
+          }}
           onScroll={event => {
             if (progressSeekLockedRef.current) return;
-            const approx =
-              Math.floor(event.nativeEvent.contentOffset.y / Math.max(1, height * 0.86)) + 1;
-            setCurrentPage(Math.max(1, Math.min(approx, readerProgressTotal)));
+            const offsetY = Math.max(0, event.nativeEvent.contentOffset.y);
+            webtoonScrollOffset.current = offsetY;
+            const nextPage = findWebtoonPageAtOffset(offsetY);
+            setCurrentPage(Math.max(1, Math.min(nextPage, readerProgressTotal)));
           }}
           ref={webtoonRef}
           renderItem={renderWebtoonItem}
@@ -4384,7 +4533,6 @@ function createStyles(colors: ThemeColors) {
     justifyContent: 'center',
   },
   webtoonImage: {
-    aspectRatio: 0.72,
     height: undefined,
     width: '100%',
   },
