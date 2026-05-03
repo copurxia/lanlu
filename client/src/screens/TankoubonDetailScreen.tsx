@@ -27,6 +27,7 @@ import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
+import {getStoredStringSync, setStoredStringSync} from '../storage/mmkv';
 import {useTheme} from '../theme/ThemeContext';
 import {spacing} from '../theme/colors';
 import type {Archive, Tankoubon, TankoubonMetadata} from '../types/api';
@@ -39,6 +40,12 @@ import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
 
 type ViewMode = 'grid' | 'list';
+const TANKOUHON_VIEW_MODE_KEY = 'tankoubon_view_mode';
+
+function loadViewMode(): ViewMode {
+  const stored = getStoredStringSync(TANKOUHON_VIEW_MODE_KEY);
+  return stored === 'grid' || stored === 'list' ? stored : 'list';
+}
 
 type Props = NativeStackScreenProps<RootStackParamList, 'TankoubonDetail'>;
 
@@ -61,7 +68,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   const [archiveFilter, setArchiveFilter] = useState('');
 
   // View mode
-  const [viewMode, setViewMode] = useState<ViewMode>('list');
+  const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
@@ -428,7 +435,11 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
             <View style={styles.archiveControls}>
               <TouchableOpacity
                 style={styles.viewModeButton}
-                onPress={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}>
+                onPress={() => {
+                  const next = viewMode === 'grid' ? 'list' : 'grid';
+                  setViewMode(next);
+                  setStoredStringSync(TANKOUHON_VIEW_MODE_KEY, next);
+                }}>
                 {viewMode === 'grid' ? (
                   <List color={colors.textMuted} size={18} />
                 ) : (
