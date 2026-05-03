@@ -23,6 +23,7 @@ import {
   mediaItemId,
   mediaItemTitle,
   setArchiveFavorite,
+  setTankoubonFavorite,
 } from '../api/lanlu';
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {useI18n} from '../i18n';
@@ -93,7 +94,6 @@ export function ArchiveCard({
     return !lowered.includes('source') && !stripNamespace(lowered).includes('source');
   });
   const previewTags = visibleTags.slice(0, maxPreviewTags);
-
   const showActions = tagsOpen;
 
   useEffect(() => {
@@ -133,13 +133,14 @@ export function ArchiveCard({
       : t('common.pages', {count: pagecount || 0});
 
   async function toggleFavorite() {
-    if (isCollection) {
-      return;
-    }
     const next = !favorite;
     setFavorite(next);
     try {
-      await setArchiveFavorite(archive as Archive, next);
+      if (isCollection) {
+        await setTankoubonFavorite(archive.tankoubon_id, next);
+      } else {
+        await setArchiveFavorite(archive as Archive, next);
+      }
       onChanged?.();
     } catch (error) {
       setFavorite(!next);
@@ -166,9 +167,7 @@ export function ArchiveCard({
   }
 
   function showTags() {
-    if (visibleTags.length > 0 || archive.description?.trim()) {
-      setTagsOpen(true);
-    }
+    setTagsOpen(true);
   }
 
   const cardGesture = Gesture.Exclusive(
@@ -473,7 +472,7 @@ export function ArchiveCard({
                 </View>
               </Animated.View>
             ) : null}
-            {showActions && !isCollection ? (
+            {showActions ? (
               <View style={styles.actionButtons}>
                 {onOpenDetail ? (
                   <TouchableOpacity
