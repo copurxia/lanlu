@@ -276,6 +276,7 @@ function ReaderContent() {
   const searchParams = useSearchParams();
   const queryArchiveId = searchParams?.get('id') ?? null;
   const pageParam = searchParams?.get('page');
+  const tankoubonParam = searchParams?.get('tankoubon');
   const { t, language } = useLanguage();
   
   const [scale, setScale] = useState(1);
@@ -517,6 +518,7 @@ function ReaderContent() {
     seamlessEnabled,
     readingMode,
     pageParam,
+    tankoubonParam,
     suppressNextQueryIdSyncRef,
     appliedVirtualFromUrlForIdRef,
     handledUrlPositionRef,

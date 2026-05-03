@@ -15,6 +15,7 @@ export function useReaderSourceSession({
   seamlessEnabled,
   readingMode,
   pageParam,
+  tankoubonParam,
   suppressNextQueryIdSyncRef,
   appliedVirtualFromUrlForIdRef,
   handledUrlPositionRef,
@@ -33,6 +34,7 @@ export function useReaderSourceSession({
   seamlessEnabled: boolean;
   readingMode: 'single-ltr' | 'single-rtl' | 'single-ttb' | 'webtoon';
   pageParam: string | null;
+  tankoubonParam: string | null;
   suppressNextQueryIdSyncRef: MutableRef<string | null>;
   appliedVirtualFromUrlForIdRef: MutableRef<string | null>;
   handledUrlPositionRef: MutableRef<string | null>;
@@ -99,7 +101,38 @@ export function useReaderSourceSession({
       webtoonVirtualPageSeenRef.current = false;
 
       try {
-        const data = await ArchiveService.getFiles(sourceArchiveId);
+        let effectiveArchiveId = sourceArchiveId;
+
+        if (tankoubonParam) {
+          try {
+            const { TankoubonService } = await import('@/lib/services/tankoubon-service');
+            const tankMeta = await TankoubonService.getMetadata(tankoubonParam);
+            const childIds = (tankMeta.children || []).map(c => c.entity_id).filter(Boolean) as string[];
+            if (childIds.length > 0) {
+              const childMetas = await Promise.all(
+                childIds.map(id => ArchiveService.getMetadata(id).catch(() => null)),
+              );
+              let resumeIdx = 0;
+              let resumePage = 0;
+              for (let i = childMetas.length - 1; i >= 0; i--) {
+                const m = childMetas[i];
+                if (m && typeof m.progress === 'number' && m.progress > 0) {
+                  resumeIdx = i;
+                  resumePage = Math.min(m.progress, m.pagecount || m.progress);
+                  break;
+                }
+              }
+              effectiveArchiveId = childIds[resumeIdx];
+              if (resumePage > 0) {
+                latestPageParamRef.current = String(resumePage);
+              }
+            }
+          } catch {
+            // fallback to original sourceArchiveId
+          }
+        }
+
+        const data = await ArchiveService.getFiles(effectiveArchiveId);
         const initialPages = mapPageDtosToReaderPageItems(data.pages, sourceArchiveId);
         appendedArchiveIdsRef.current = new Set([sourceArchiveId]);
         setSegments([

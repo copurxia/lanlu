@@ -145,7 +145,7 @@ export function HomeMediaItemMenu({
   const canDelete = type === 'archive' ? isAdmin : isAuthenticated;
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`;
   const readerPath = readerTargetId
-    ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined)
+    ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined, type !== 'archive' ? id : undefined)
     : detailPath;
   const menuActionDisabled = deleting || editSaving;
   const displayTitle = resolveSyncedValue(displayTitleState, title);

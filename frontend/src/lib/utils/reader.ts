@@ -1,4 +1,4 @@
-export function buildReaderPath(id: string, page?: number): string {
+export function buildReaderPath(id: string, page?: number, tankoubonId?: string): string {
   const archiveId = String(id || '').trim();
   if (!archiveId) return '/reader';
 
@@ -7,9 +7,9 @@ export function buildReaderPath(id: string, page?: number): string {
       ? Math.trunc(page)
       : 0;
 
-  if (normalizedPage > 0) {
-    return `/reader?id=${archiveId}&page=${normalizedPage}`;
-  }
+  const parts = [`/reader?id=${archiveId}`];
+  if (normalizedPage > 0) parts.push(`page=${normalizedPage}`);
+  if (tankoubonId) parts.push(`tankoubon=${encodeURIComponent(tankoubonId)}`);
 
-  return `/reader?id=${archiveId}`;
+  return parts.join('&');
 }

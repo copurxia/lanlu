@@ -148,7 +148,7 @@ export function BaseMediaCard({
   const detailPath = type === 'archive' ? `/archive?id=${id}` : `/tankoubon?id=${id}`
   const readerTargetId = type === 'archive' ? id : thumbnailId
   const readerPath = readerTargetId
-    ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined)
+    ? buildReaderPath(readerTargetId, type === 'archive' ? progress : undefined, type !== 'archive' ? id : undefined)
     : detailPath
   const progressPercent = pagecount > 0 ? Math.round((progress / pagecount) * 100) : 0
   const [touchInputEnabled, setTouchInputEnabled] = React.useState(false)
