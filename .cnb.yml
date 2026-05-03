@@ -236,6 +236,45 @@ $:
             attachments:
               - dist/extension-*.zip
 
+    - &client_pipeline
+      name: client
+      ifModify:
+        - client/**
+      docker:
+        image: reactnativecommunity/react-native-android
+        volumes:
+          - main:/root/.npm:copy-on-write
+          - main:/root/.gradle:copy-on-write
+      env:
+        NEXT_TELEMETRY_DISABLED: "1"
+      stages:
+        - name: Build release APK
+          script: |
+            bash -lc '
+              set -eux
+
+              # Generate debug keystore if missing
+              if [ ! -f client/android/app/debug.keystore ]; then
+                keytool -genkey -v -keystore client/android/app/debug.keystore \
+                  -storepass android -alias androiddebugkey -keypass android \
+                  -keyalg RSA -keysize 2048 -validity 10000 \
+                  -dname "CN=Android Debug,O=Android,C=US"
+              fi
+
+              cd client
+              npm ci
+              cd android
+              ./gradlew assembleRelease
+              ls -lh app/build/outputs/apk/release/
+            '
+
+        - name: Upload APK artifacts
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - client/android/app/build/outputs/apk/release/app-release.apk
+
   pull_request:
     - *build_pipeline
     - *extension_pipeline
+    - *client_pipeline
