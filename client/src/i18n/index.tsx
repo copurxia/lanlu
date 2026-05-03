@@ -301,7 +301,7 @@ const messages = {
     'tabs.home': '首页',
     'tabs.favorites': '收藏',
     'tabs.settings': '设置',
-    'home.rows': '分组',
+    'home.rows': '合集',
     'home.grid': '网格',
     'home.list': '列表',
     'home.feed': '动态',

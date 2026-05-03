@@ -252,7 +252,7 @@ export function ArchiveCard({
           top: 8,
         },
         collectionBadge: {
-          backgroundColor: colors.text,
+          backgroundColor: colors.primary,
           borderRadius: 4,
           left: 8,
           paddingHorizontal: 6,
