@@ -1,4 +1,4 @@
-import React, {useState, useEffect, useCallback} from 'react';
+import React, {useState, useEffect, useCallback, useMemo} from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import {addArchiveToTankoubon, searchArchives} from '../../api/lanlu';
-import {colors} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 import type {Archive} from '../../types/api';
 
@@ -32,6 +32,7 @@ export function AddArchiveDialog({
   onAdded,
   t,
 }: Props) {
+  const {colors} = useTheme();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Archive[]>([]);
   const [loading, setLoading] = useState(false);
@@ -93,6 +94,138 @@ export function AddArchiveDialog({
       setAdding(false);
     }
   }, [selected, tankoubonId, onAdded, onClose]);
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        overlay: {
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          flex: 1,
+          justifyContent: 'flex-end',
+        },
+        container: {
+          backgroundColor: colors.background,
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16,
+          maxHeight: '80%',
+          paddingBottom: 34,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+        },
+        header: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          marginBottom: 14,
+        },
+        title: {
+          color: colors.text,
+          fontSize: 17,
+          fontWeight: '800',
+        },
+        closeText: {
+          color: colors.primary,
+          fontSize: 15,
+          fontWeight: '600',
+        },
+        searchRow: {
+          flexDirection: 'row',
+          gap: 8,
+          marginBottom: 12,
+        },
+        input: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          color: colors.text,
+          flex: 1,
+          fontSize: 15,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+        },
+        searchButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          justifyContent: 'center',
+          paddingHorizontal: 16,
+        },
+        searchButtonText: {
+          color: colors.white,
+          fontSize: 14,
+          fontWeight: '700',
+        },
+        loading: {
+          paddingVertical: 24,
+        },
+        list: {
+          maxHeight: 400,
+        },
+        listContent: {
+          gap: 6,
+        },
+        resultItem: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          gap: 10,
+          padding: 12,
+        },
+        resultItemSelected: {
+          borderColor: colors.primary,
+          backgroundColor: colors.primaryMuted,
+        },
+        checkbox: {
+          alignItems: 'center',
+          borderColor: colors.borderStrong,
+          borderRadius: 4,
+          borderWidth: 2,
+          height: 22,
+          justifyContent: 'center',
+          width: 22,
+        },
+        checkboxChecked: {
+          color: colors.primary,
+          fontWeight: '800',
+        },
+        resultBody: {
+          flex: 1,
+        },
+        resultTitle: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '600',
+        },
+        resultMeta: {
+          color: colors.textMuted,
+          fontSize: 12,
+          marginTop: 2,
+        },
+        emptyText: {
+          color: colors.textMuted,
+          fontSize: 14,
+          paddingVertical: 24,
+          textAlign: 'center',
+        },
+        addButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          marginTop: 12,
+          paddingVertical: 12,
+        },
+        addButtonText: {
+          color: colors.white,
+          fontSize: 15,
+          fontWeight: '800',
+        },
+      }),
+    [colors],
+  );
 
   return (
     <Modal visible={visible} animationType="slide" transparent>
@@ -173,130 +306,3 @@ export function AddArchiveDialog({
   );
 }
 
-const styles = StyleSheet.create({
-  overlay: {
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  container: {
-    backgroundColor: colors.background,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    maxHeight: '80%',
-    paddingBottom: 34,
-    paddingHorizontal: 16,
-    paddingTop: 12,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  closeText: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  searchRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  input: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: colors.text,
-    flex: 1,
-    fontSize: 15,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  searchButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  searchButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  loading: {
-    paddingVertical: 24,
-  },
-  list: {
-    maxHeight: 400,
-  },
-  listContent: {
-    gap: 6,
-  },
-  resultItem: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 10,
-    padding: 12,
-  },
-  resultItemSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryMuted,
-  },
-  checkbox: {
-    alignItems: 'center',
-    borderColor: colors.borderStrong,
-    borderRadius: 4,
-    borderWidth: 2,
-    height: 22,
-    justifyContent: 'center',
-    width: 22,
-  },
-  checkboxChecked: {
-    color: colors.primary,
-    fontWeight: '800',
-  },
-  resultBody: {
-    flex: 1,
-  },
-  resultTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  resultMeta: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginTop: 2,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    paddingVertical: 24,
-    textAlign: 'center',
-  },
-  addButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    marginTop: 12,
-    paddingVertical: 12,
-  },
-  addButtonText: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-});

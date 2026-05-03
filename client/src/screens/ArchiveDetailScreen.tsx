@@ -28,7 +28,7 @@ import {
 import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
-import {colors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {Archive, ArchiveMetadata, Tankoubon} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 import {ArchiveDetailActions} from './archive-detail/ArchiveDetailActions';
@@ -42,6 +42,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ArchiveDetail'>;
 
 export function ArchiveDetailScreen({route, navigation}: Props) {
   const {language, t} = useI18n();
+  const {colors} = useTheme();
   const insets = useSafeAreaInsets();
   const {user, status: authStatus} = useAuth();
   const {archiveId, archive, tankoubonId, children, childIndex} = route.params;
@@ -233,6 +234,75 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
       : [];
   }, [merged.tags]);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+        content: {
+          padding: 16,
+          paddingBottom: 40,
+        },
+        backButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 20,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 40,
+          justifyContent: 'center',
+          marginBottom: 14,
+          width: 40,
+        },
+        error: {
+          color: colors.danger,
+          marginTop: 14,
+        },
+        section: {
+          marginTop: 20,
+        },
+        sectionTitle: {
+          color: colors.text,
+          fontSize: 15,
+          fontWeight: '800',
+          marginBottom: 8,
+        },
+        tankoubonList: {
+          gap: 6,
+        },
+        tankoubonItem: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+        },
+        tankoubonItemText: {
+          color: colors.primary,
+          fontSize: 14,
+          fontWeight: '600',
+        },
+        relatedCard: {
+          width: 120,
+        },
+        relatedCover: {
+          aspectRatio: 0.72,
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 6,
+          width: '100%',
+        },
+        relatedTitle: {
+          color: colors.text,
+          fontSize: 12,
+          marginTop: 4,
+        },
+      }),
+    [colors],
+  );
+
   if (loading && !metadata && !archive) {
     return <ScreenState loading title={t('archive.loading')} />;
   }
@@ -332,67 +402,3 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  backButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 40,
-    justifyContent: 'center',
-    marginBottom: 14,
-    width: 40,
-  },
-  error: {
-    color: colors.danger,
-    marginTop: 14,
-  },
-  section: {
-    marginTop: 20,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  tankoubonList: {
-    gap: 6,
-  },
-  tankoubonItem: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  tankoubonItemText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  relatedCard: {
-    width: 120,
-  },
-  relatedCover: {
-    aspectRatio: 0.72,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 6,
-    width: '100%',
-  },
-  relatedTitle: {
-    color: colors.text,
-    fontSize: 12,
-    marginTop: 4,
-  },
-});

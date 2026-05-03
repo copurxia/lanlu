@@ -1,7 +1,7 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {ActivityIndicator, FlatList, ListRenderItemInfo, StyleSheet, Text, View} from 'react-native';
 
-import {colors} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 import type {Archive} from '../../types/api';
 
@@ -14,6 +14,34 @@ type Props = {
 };
 
 export function ArchiveRelated({related, loading, t, keyExtractor, renderItem}: Props) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        section: {
+          marginTop: 24,
+        },
+        sectionTitle: {
+          color: colors.text,
+          fontSize: 15,
+          fontWeight: '800',
+          marginBottom: 2,
+        },
+        sectionSubtitle: {
+          color: colors.textMuted,
+          fontSize: 12,
+          marginBottom: 10,
+        },
+        loading: {
+          paddingVertical: 20,
+        },
+        list: {
+          gap: 10,
+        },
+      }),
+    [colors],
+  );
+
   if (!loading && related.length === 0) return null;
 
   return (
@@ -40,26 +68,3 @@ export function ArchiveRelated({related, loading, t, keyExtractor, renderItem}: 
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  section: {
-    marginTop: 24,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  sectionSubtitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginBottom: 10,
-  },
-  loading: {
-    paddingVertical: 20,
-  },
-  list: {
-    gap: 10,
-  },
-});

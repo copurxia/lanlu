@@ -1,4 +1,4 @@
-import React, {useCallback} from 'react';
+import React, {useCallback, useMemo} from 'react';
 import {
   Alert,
   FlatList,
@@ -15,7 +15,8 @@ import {Pencil, Plus, Trash2} from 'lucide-react-native';
 import {useAuth} from '../auth/AuthContext';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {RootStackParamList} from '../navigation/types';
 import type {LanluServer} from '../storage/servers';
 
@@ -23,6 +24,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ServerList'>;
 
 export function ServerListScreen({navigation}: Props) {
   const {t} = useI18n();
+  const {colors} = useTheme();
   const {servers, reloadServers, selectServer, deleteServer} = useAuth();
   const insets = useSafeAreaInsets();
 
@@ -46,6 +48,105 @@ export function ServerListScreen({navigation}: Props) {
       },
     ]);
   }
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+        header: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.md,
+          padding: spacing.lg,
+        },
+        headerText: {
+          flex: 1,
+          gap: spacing.xs,
+        },
+        addButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 20,
+          height: 40,
+          justifyContent: 'center',
+          width: 40,
+        },
+        list: {
+          flexGrow: 1,
+          gap: spacing.md,
+          padding: spacing.lg,
+          paddingTop: 0,
+        },
+        empty: {
+          alignItems: 'flex-start',
+          gap: spacing.sm,
+        },
+        emptyTitle: {
+          color: colors.text,
+          fontSize: 17,
+          fontWeight: '800',
+        },
+        emptyButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          flexDirection: 'row',
+          gap: spacing.xs,
+          marginTop: spacing.sm,
+          paddingHorizontal: spacing.md,
+          paddingVertical: 9,
+        },
+        emptyButtonText: {
+          color: colors.white,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        serverCard: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.md,
+        },
+        serverMain: {
+          flex: 1,
+          gap: spacing.xs,
+        },
+        serverName: {
+          color: colors.text,
+          fontSize: 17,
+          fontWeight: '800',
+        },
+        serverUrl: {
+          color: colors.primary,
+          fontSize: 14,
+        },
+        lastUsed: {
+          color: colors.textMuted,
+          fontSize: 12,
+        },
+        serverActions: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.xs,
+        },
+        iconAction: {
+          alignItems: 'center',
+          backgroundColor: colors.surfaceMuted,
+          borderColor: colors.border,
+          borderRadius: 18,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 36,
+          justifyContent: 'center',
+          width: 36,
+        },
+        deleteAction: {
+          backgroundColor: colors.danger === '#e84d3d' ? '#2a1515' : '#fff5f5',
+        },
+      }),
+    [colors],
+  );
 
   return (
     <View style={[styles.screen, {paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
@@ -123,98 +224,3 @@ export function ServerListScreen({navigation}: Props) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.md,
-    padding: spacing.lg,
-  },
-  headerText: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  addButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 20,
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
-  list: {
-    flexGrow: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
-    paddingTop: 0,
-  },
-  empty: {
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  emptyTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  emptyButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 9,
-  },
-  emptyButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  serverCard: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  serverMain: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  serverName: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '800',
-  },
-  serverUrl: {
-    color: colors.primary,
-    fontSize: 14,
-  },
-  lastUsed: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  serverActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  iconAction: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-  deleteAction: {
-    backgroundColor: '#fff5f5',
-  },
-});

@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   ScrollView,
   StyleSheet,
@@ -25,7 +25,8 @@ import {
   setArchiveFavorite,
 } from '../api/lanlu';
 import {useI18n} from '../i18n';
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {MediaItem, PageInfo} from '../types/api';
 import {
   computeChannelPreviewLayout,
@@ -185,6 +186,7 @@ async function loadPreviewItems(archiveId: string): Promise<PreviewItem[]> {
 }
 
 export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onTagPress}: Props) {
+  const {colors} = useTheme();
   const {t} = useI18n();
   const {width} = useWindowDimensions();
   const currentPreviewArchiveId = previewArchiveId(item);
@@ -214,6 +216,160 @@ export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onT
   const previewWidth = Math.max(
     240,
     width - spacing.lg * 2 - CHANNEL_ARTICLE_HORIZONTAL_PADDING - CHANNEL_AVATAR_SIZE - spacing.sm,
+  );
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        author: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        avatar: {
+          alignItems: 'center',
+          backgroundColor: colors.primaryMuted,
+          borderRadius: 22,
+          height: 44,
+          justifyContent: 'center',
+          width: 44,
+        },
+        avatarText: {
+          color: colors.primary,
+          fontSize: 15,
+          fontWeight: '900',
+        },
+        card: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 12,
+          borderWidth: StyleSheet.hairlineWidth,
+          marginBottom: spacing.md,
+          overflow: 'hidden',
+        },
+        channelActionOverlay: {
+          backgroundColor: colors.background === '#0d0d0d' ? 'rgba(0,0,0,0.78)' : 'rgba(255,255,255,0.88)',
+          borderColor: colors.border,
+          borderRadius: 20,
+          borderWidth: StyleSheet.hairlineWidth,
+          paddingHorizontal: 4,
+          paddingVertical: 3,
+          position: 'absolute',
+          right: 10,
+          top: 10,
+          zIndex: 2,
+        },
+        channelArticle: {
+          alignItems: 'flex-end',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          marginBottom: spacing.md,
+          paddingHorizontal: 4,
+          paddingVertical: spacing.xs,
+        },
+        channelAvatar: {
+          alignItems: 'center',
+          backgroundColor: colors.primaryMuted,
+          borderRadius: 20,
+          height: 40,
+          justifyContent: 'center',
+          width: 40,
+        },
+        channelBody: {
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.md,
+        },
+        channelBubble: {
+          backgroundColor: colors.surface,
+          borderBottomLeftRadius: 6,
+          borderColor: colors.border,
+          borderRadius: 26,
+          borderWidth: StyleSheet.hairlineWidth,
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+        },
+        channelHeader: {
+          gap: 2,
+        },
+        channelPreview: {
+          overflow: 'hidden',
+        },
+        channelText: {
+          color: colors.text,
+          fontSize: 15,
+          lineHeight: 22,
+          marginTop: spacing.sm,
+        },
+        expandText: {
+          color: colors.primary,
+          fontSize: 13,
+          fontWeight: '800',
+          marginTop: spacing.xs,
+        },
+        headerText: {
+          flex: 1,
+          minWidth: 0,
+        },
+        meta: {
+          color: colors.textMuted,
+          fontSize: 12,
+        },
+        previewAction: {
+          color: colors.primary,
+          flexShrink: 0,
+          fontSize: 13,
+          fontWeight: '900',
+        },
+        previewFooter: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          justifyContent: 'space-between',
+          padding: spacing.md,
+        },
+        previewText: {
+          flex: 1,
+          minWidth: 0,
+        },
+        previewTitle: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        tweetCard: {
+          padding: spacing.md,
+        },
+        tweetContent: {
+          flex: 1,
+          minWidth: 0,
+        },
+        tweetHeader: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+        },
+        tweetPreview: {
+          borderColor: colors.border,
+          borderRadius: 14,
+          borderWidth: StyleSheet.hairlineWidth,
+          marginTop: spacing.md,
+          overflow: 'hidden',
+        },
+        tweetRow: {
+          alignItems: 'flex-start',
+          flexDirection: 'row',
+          gap: spacing.sm,
+        },
+        tweetText: {
+          color: colors.text,
+          fontSize: 15,
+          lineHeight: 22,
+          marginTop: spacing.sm,
+        },
+      }),
+    [colors],
   );
 
   useEffect(() => {
@@ -308,7 +464,7 @@ export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onT
                 <Text style={styles.expandText}>{expanded ? t('common.collapse') : t('common.expand')}</Text>
               </TouchableOpacity>
             ) : null}
-            {renderTags(tagItems, onTagPress)}
+            <RenderTags tags={tagItems} onTagPress={onTagPress} />
           </View>
         </View>
       </View>
@@ -333,7 +489,7 @@ export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onT
               <Text style={styles.expandText}>{expanded ? t('common.collapse') : t('common.expand')}</Text>
             </TouchableOpacity>
           ) : null}
-          {renderTags(tagItems, onTagPress)}
+          <RenderTags tags={tagItems} onTagPress={onTagPress} />
           <TouchableOpacity activeOpacity={0.86} onPress={onPress} style={styles.tweetPreview}>
             {preview}
             <View style={styles.previewFooter}>
@@ -361,6 +517,28 @@ function FeedActions({
   onDetailPress?: () => void;
   onToggleFavorite: () => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        actions: {
+          flexDirection: 'row',
+          gap: spacing.xs,
+        },
+        iconButton: {
+          alignItems: 'center',
+          borderRadius: 18,
+          height: 34,
+          justifyContent: 'center',
+          width: 34,
+        },
+        iconButtonDisabled: {
+          opacity: 0.35,
+        },
+      }),
+    [],
+  );
+
   return (
     <View style={styles.actions}>
       {onDetailPress ? (
@@ -379,7 +557,24 @@ function FeedActions({
   );
 }
 
-function renderTags(tags: string[], onTagPress?: (tag: string) => void) {
+function RenderTags({tags, onTagPress}: {tags: string[]; onTagPress?: (tag: string) => void}) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        tags: {
+          gap: spacing.md,
+          paddingTop: spacing.sm,
+        },
+        feedTag: {
+          color: colors.primary,
+          fontSize: 13,
+          fontWeight: '800',
+        },
+      }),
+    [colors],
+  );
+
   if (!tags.length) return null;
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tags}>
@@ -393,6 +588,124 @@ function renderTags(tags: string[], onTagPress?: (tag: string) => void) {
 }
 
 function TweetPreview({items, loading, label}: {items: PreviewItem[]; loading: boolean; label: string}) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        tweetOne: {
+          aspectRatio: 1.6,
+          backgroundColor: colors.border,
+        },
+        tweetTwo: {
+          aspectRatio: 1.6,
+          backgroundColor: colors.border,
+          flexDirection: 'row',
+          gap: 1,
+        },
+        tweetThree: {
+          aspectRatio: 1.6,
+          backgroundColor: colors.border,
+          flexDirection: 'row',
+          gap: 1,
+        },
+        tweetThreeHero: {
+          flex: 1,
+        },
+        tweetThreeSide: {
+          flex: 1,
+          gap: 1,
+        },
+        tweetGridMedium: {
+          aspectRatio: 1.5,
+          backgroundColor: colors.border,
+          gap: 1,
+        },
+        tweetGridLarge: {
+          aspectRatio: 1,
+          backgroundColor: colors.border,
+          gap: 1,
+        },
+        tweetGridRow: {
+          flex: 1,
+          flexDirection: 'row',
+          gap: 1,
+          minHeight: 0,
+        },
+        tweetGridCell: {
+          flex: 1,
+          minWidth: 0,
+        },
+        tile: {
+          backgroundColor: colors.surfaceMuted,
+          height: '100%',
+          overflow: 'hidden',
+          width: '100%',
+        },
+        tileImage: {
+          height: '100%',
+          width: '100%',
+        },
+        videoTile: {
+          alignItems: 'center',
+          flex: 1,
+          justifyContent: 'center',
+        },
+        videoBadge: {
+          backgroundColor: 'rgba(0,0,0,0.55)',
+          borderRadius: 14,
+          padding: 6,
+          position: 'absolute',
+          right: 8,
+          top: 8,
+        },
+      }),
+    [colors],
+  );
+
+  function renderTile(item: PreviewItem, onMeasure?: (measurementKey: string, aspectRatio: number) => void) {
+    return (
+      <View key={item.id} style={styles.tile}>
+        {item.source ? (
+          <FastImage
+            source={item.source}
+            resizeMode={FastImage.resizeMode.cover}
+            style={styles.tileImage}
+            onLoad={event => {
+              const {width, height} = event.nativeEvent;
+              if (width > 0 && height > 0) onMeasure?.(item.measurementKey, width / height);
+            }}
+          />
+        ) : (
+          <View style={styles.videoTile}><Film color={colors.textMuted} size={24} /></View>
+        )}
+        {item.kind !== 'image' ? (
+          <View style={styles.videoBadge}><Film color={colors.white} size={13} /></View>
+        ) : null}
+      </View>
+    );
+  }
+
+  function renderTweetGrid(visible: PreviewItem[]) {
+    const rows: PreviewItem[][] = [];
+    let offset = 0;
+    for (const columns of tweetGridRows(visible.length)) {
+      rows.push(visible.slice(offset, offset + columns));
+      offset += columns;
+    }
+    const gridStyle = visible.length <= 6 ? styles.tweetGridMedium : styles.tweetGridLarge;
+    return (
+      <View style={gridStyle}>
+        {rows.map((row, rowIndex) => (
+          <View key={`tweet-row-${rowIndex}`} style={styles.tweetGridRow}>
+            {row.map(item => (
+              <View key={item.id} style={styles.tweetGridCell}>{renderTile(item)}</View>
+            ))}
+          </View>
+        ))}
+      </View>
+    );
+  }
+
   if (!items.length) return <PreviewPlaceholder loading={loading} label={label} />;
   const visible = items.slice(0, PREVIEW_LIMIT);
   if (visible.length === 1) return <View style={styles.tweetOne}>{renderTile(visible[0])}</View>;
@@ -417,27 +730,6 @@ function tweetGridRows(count: number) {
   return [3, 3, 3];
 }
 
-function renderTweetGrid(items: PreviewItem[]) {
-  const rows: PreviewItem[][] = [];
-  let offset = 0;
-  for (const columns of tweetGridRows(items.length)) {
-    rows.push(items.slice(offset, offset + columns));
-    offset += columns;
-  }
-  const gridStyle = items.length <= 6 ? styles.tweetGridMedium : styles.tweetGridLarge;
-  return (
-    <View style={gridStyle}>
-      {rows.map((row, rowIndex) => (
-        <View key={`tweet-row-${rowIndex}`} style={styles.tweetGridRow}>
-          {row.map(item => (
-            <View key={item.id} style={styles.tweetGridCell}>{renderTile(item)}</View>
-          ))}
-        </View>
-      ))}
-    </View>
-  );
-}
-
 function ChannelPreview({
   items,
   loading,
@@ -451,6 +743,100 @@ function ChannelPreview({
   width: number;
   onMeasure: (measurementKey: string, aspectRatio: number) => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        channelSingle: {
+          backgroundColor: colors.border,
+          width: '100%',
+        },
+        channelSplit: {
+          backgroundColor: colors.border,
+          flexDirection: 'row',
+          gap: 1,
+          overflow: 'hidden',
+        },
+        channelHeroSide: {
+          height: '100%',
+        },
+        channelRows: {
+          gap: 1,
+        },
+        channelSideRows: {
+          flex: 1,
+          overflow: 'hidden',
+        },
+        channelRow: {
+          flexDirection: 'row',
+          gap: 1,
+        },
+        channelRowItem: {
+          height: '100%',
+        },
+        tile: {
+          backgroundColor: colors.surfaceMuted,
+          height: '100%',
+          overflow: 'hidden',
+          width: '100%',
+        },
+        tileImage: {
+          height: '100%',
+          width: '100%',
+        },
+        videoTile: {
+          alignItems: 'center',
+          flex: 1,
+          justifyContent: 'center',
+        },
+        videoBadge: {
+          backgroundColor: 'rgba(0,0,0,0.55)',
+          borderRadius: 14,
+          padding: 6,
+          position: 'absolute',
+          right: 8,
+          top: 8,
+        },
+      }),
+    [colors],
+  );
+
+  function renderTile(item: PreviewItem, onMeasureFn?: (measurementKey: string, aspectRatio: number) => void) {
+    return (
+      <View key={item.id} style={styles.tile}>
+        {item.source ? (
+          <FastImage
+            source={item.source}
+            resizeMode={FastImage.resizeMode.cover}
+            style={styles.tileImage}
+            onLoad={event => {
+              const {width, height} = event.nativeEvent;
+              if (width > 0 && height > 0) onMeasureFn?.(item.measurementKey, width / height);
+            }}
+          />
+        ) : (
+          <View style={styles.videoTile}><Film color={colors.textMuted} size={24} /></View>
+        )}
+        {item.kind !== 'image' ? (
+          <View style={styles.videoBadge}><Film color={colors.white} size={13} /></View>
+        ) : null}
+      </View>
+    );
+  }
+
+  function renderChannelRow(
+    row: {height: number; items: Array<PreviewItem & {width: number}>},
+    index: number,
+  ) {
+    return (
+      <View key={`row-${index}`} style={[styles.channelRow, {height: row.height}]}>
+        {row.items.map(item => (
+          <View key={item.id} style={[styles.channelRowItem, {width: item.width}]}>{renderTile(item, onMeasure)}</View>
+        ))}
+      </View>
+    );
+  }
+
   if (!items.length) return <PreviewPlaceholder loading={loading} label={label} />;
   const layout = computeChannelPreviewLayout(items.slice(0, PREVIEW_LIMIT), width);
   if (layout.kind === 'single') {
@@ -461,7 +847,7 @@ function ChannelPreview({
       <View style={[styles.channelSplit, {height: layout.totalHeight}]}>
         <View style={[styles.channelHeroSide, {width: layout.heroWidth}]}>{renderTile(layout.hero, onMeasure)}</View>
         <View style={[styles.channelRows, styles.channelSideRows]}>
-          {layout.rows.map((row, index) => renderChannelRow(row, index, onMeasure))}
+          {layout.rows.map((row, index) => renderChannelRow(row, index))}
         </View>
       </View>
     );
@@ -470,332 +856,37 @@ function ChannelPreview({
     return (
       <View style={styles.channelRows}>
         <View style={{height: layout.heroHeight}}>{renderTile(layout.hero, onMeasure)}</View>
-        {layout.rows.map((row, index) => renderChannelRow(row, index, onMeasure))}
+        {layout.rows.map((row, index) => renderChannelRow(row, index))}
       </View>
     );
   }
-  return <View style={styles.channelRows}>{layout.rows.map((row, index) => renderChannelRow(row, index, onMeasure))}</View>;
-}
-
-function renderChannelRow(
-  row: {height: number; items: Array<PreviewItem & {width: number}>},
-  index: number,
-  onMeasure: (measurementKey: string, aspectRatio: number) => void,
-) {
-  return (
-    <View key={`row-${index}`} style={[styles.channelRow, {height: row.height}]}>
-      {row.items.map(item => (
-        <View key={item.id} style={[styles.channelRowItem, {width: item.width}]}>{renderTile(item, onMeasure)}</View>
-      ))}
-    </View>
-  );
-}
-
-function renderTile(item: PreviewItem, onMeasure?: (measurementKey: string, aspectRatio: number) => void) {
-  return (
-    <View key={item.id} style={styles.tile}>
-      {item.source ? (
-        <FastImage
-          source={item.source}
-          resizeMode={FastImage.resizeMode.cover}
-          style={styles.tileImage}
-          onLoad={event => {
-            const {width, height} = event.nativeEvent;
-            if (width > 0 && height > 0) onMeasure?.(item.measurementKey, width / height);
-          }}
-        />
-      ) : (
-        <View style={styles.videoTile}><Film color={colors.textMuted} size={24} /></View>
-      )}
-      {item.kind !== 'image' ? (
-        <View style={styles.videoBadge}><Film color={colors.white} size={13} /></View>
-      ) : null}
-    </View>
-  );
+  return <View style={styles.channelRows}>{layout.rows.map((row, index) => renderChannelRow(row, index))}</View>;
 }
 
 function PreviewPlaceholder({loading, label}: {loading: boolean; label: string}) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        previewPlaceholder: {
+          alignItems: 'center',
+          aspectRatio: 1.6,
+          backgroundColor: colors.surfaceMuted,
+          justifyContent: 'center',
+          padding: spacing.md,
+        },
+        placeholderText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          textAlign: 'center',
+        },
+      }),
+    [colors],
+  );
+
   return (
     <View style={styles.previewPlaceholder}>
       <Text numberOfLines={2} style={styles.placeholderText}>{loading ? '...' : label}</Text>
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  actions: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-  },
-  author: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  avatar: {
-    alignItems: 'center',
-    backgroundColor: colors.primaryMuted,
-    borderRadius: 22,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
-  avatarText: {
-    color: colors.primary,
-    fontSize: 15,
-    fontWeight: '900',
-  },
-  card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 12,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  channelActionOverlay: {
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 4,
-    paddingVertical: 3,
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    zIndex: 2,
-  },
-  channelArticle: {
-    alignItems: 'flex-end',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-    paddingHorizontal: 4,
-    paddingVertical: spacing.xs,
-  },
-  channelAvatar: {
-    alignItems: 'center',
-    backgroundColor: colors.primaryMuted,
-    borderRadius: 20,
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
-  channelBody: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  channelBubble: {
-    backgroundColor: colors.surface,
-    borderBottomLeftRadius: 6,
-    borderColor: colors.border,
-    borderRadius: 26,
-    borderWidth: StyleSheet.hairlineWidth,
-    flex: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-  },
-  channelHeader: {
-    gap: 2,
-  },
-  channelPreview: {
-    overflow: 'hidden',
-  },
-  channelHeroSide: {
-    height: '100%',
-  },
-  channelRow: {
-    flexDirection: 'row',
-    gap: 1,
-  },
-  channelRowItem: {
-    height: '100%',
-  },
-  channelRows: {
-    gap: 1,
-  },
-  channelSideRows: {
-    flex: 1,
-    overflow: 'hidden',
-  },
-  channelSingle: {
-    backgroundColor: colors.border,
-    width: '100%',
-  },
-  channelSplit: {
-    backgroundColor: colors.border,
-    flexDirection: 'row',
-    gap: 1,
-    overflow: 'hidden',
-  },
-  channelText: {
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: spacing.sm,
-  },
-  expandText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '800',
-    marginTop: spacing.xs,
-  },
-  feedTag: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  headerText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  iconButton: {
-    alignItems: 'center',
-    borderRadius: 18,
-    height: 34,
-    justifyContent: 'center',
-    width: 34,
-  },
-  iconButtonDisabled: {
-    opacity: 0.35,
-  },
-  meta: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  placeholderText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  previewAction: {
-    color: colors.primary,
-    flexShrink: 0,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  previewFooter: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'space-between',
-    padding: spacing.md,
-  },
-  previewPlaceholder: {
-    alignItems: 'center',
-    aspectRatio: 1.6,
-    backgroundColor: colors.surfaceMuted,
-    justifyContent: 'center',
-    padding: spacing.md,
-  },
-  previewText: {
-    flex: 1,
-    minWidth: 0,
-  },
-  previewTitle: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  tags: {
-    gap: spacing.md,
-    paddingTop: spacing.sm,
-  },
-  tile: {
-    backgroundColor: colors.surfaceMuted,
-    height: '100%',
-    overflow: 'hidden',
-    width: '100%',
-  },
-  tileImage: {
-    height: '100%',
-    width: '100%',
-  },
-  tweetCard: {
-    padding: spacing.md,
-  },
-  tweetContent: {
-    flex: 1,
-    minWidth: 0,
-  },
-  tweetGridCell: {
-    flex: 1,
-    minWidth: 0,
-  },
-  tweetGridLarge: {
-    aspectRatio: 1,
-    backgroundColor: colors.border,
-    gap: 1,
-  },
-  tweetGridMedium: {
-    aspectRatio: 1.5,
-    backgroundColor: colors.border,
-    gap: 1,
-  },
-  tweetGridRow: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: 1,
-    minHeight: 0,
-  },
-  tweetHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  tweetOne: {
-    aspectRatio: 1.6,
-    backgroundColor: colors.border,
-  },
-  tweetPreview: {
-    borderColor: colors.border,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginTop: spacing.md,
-    overflow: 'hidden',
-  },
-  tweetRow: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  tweetText: {
-    color: colors.text,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: spacing.sm,
-  },
-  tweetThree: {
-    aspectRatio: 1.6,
-    backgroundColor: colors.border,
-    flexDirection: 'row',
-    gap: 1,
-  },
-  tweetThreeHero: {
-    flex: 1,
-  },
-  tweetThreeSide: {
-    flex: 1,
-    gap: 1,
-  },
-  tweetTwo: {
-    aspectRatio: 1.6,
-    backgroundColor: colors.border,
-    flexDirection: 'row',
-    gap: 1,
-  },
-  videoBadge: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    borderRadius: 14,
-    padding: 6,
-    position: 'absolute',
-    right: 8,
-    top: 8,
-  },
-  videoTile: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
-});

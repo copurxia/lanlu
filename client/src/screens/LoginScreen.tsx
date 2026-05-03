@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -14,10 +14,12 @@ import {extractApiError} from '../api/client';
 import {useAuth} from '../auth/AuthContext';
 import {FluentCard, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 
 export function LoginScreen() {
   const {t} = useI18n();
+  const {colors} = useTheme();
   const {activeServer, signIn, showServerList} = useAuth();
   const insets = useSafeAreaInsets();
   const [username, setUsername] = useState('');
@@ -40,6 +42,102 @@ export function LoginScreen() {
       setSubmitting(false);
     }
   }
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+          justifyContent: 'center',
+        },
+        panel: {
+          alignSelf: 'center',
+          gap: spacing.md,
+          maxWidth: 460,
+          width: '100%',
+        },
+        header: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.md,
+        },
+        headerText: {
+          flex: 1,
+          gap: 2,
+          minWidth: 0,
+        },
+        serverIcon: {
+          alignItems: 'center',
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 40,
+          justifyContent: 'center',
+          width: 40,
+        },
+        serverName: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        serverUrl: {
+          color: colors.primary,
+          fontSize: 13,
+        },
+        error: {
+          color: colors.danger,
+          fontSize: 13,
+          lineHeight: 18,
+          marginTop: 14,
+        },
+        actions: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          justifyContent: 'flex-end',
+          marginTop: spacing.sm,
+        },
+        primaryButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          flexDirection: 'row',
+          gap: spacing.xs,
+          height: 40,
+          justifyContent: 'center',
+          paddingHorizontal: spacing.md,
+        },
+        primaryButtonText: {
+          color: colors.white,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        secondaryButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.borderStrong,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          gap: spacing.xs,
+          height: 40,
+          justifyContent: 'center',
+          paddingHorizontal: spacing.md,
+        },
+        secondaryButtonText: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        buttonDisabled: {
+          opacity: 0.62,
+        },
+      }),
+    [colors],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -117,95 +215,3 @@ export function LoginScreen() {
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-    justifyContent: 'center',
-  },
-  panel: {
-    alignSelf: 'center',
-    gap: spacing.md,
-    maxWidth: 460,
-    width: '100%',
-  },
-  header: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-  },
-  headerText: {
-    flex: 1,
-    gap: 2,
-    minWidth: 0,
-  },
-  serverIcon: {
-    alignItems: 'center',
-    backgroundColor: colors.primaryMuted,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 40,
-    justifyContent: 'center',
-    width: 40,
-  },
-  serverName: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  serverUrl: {
-    color: colors.primary,
-    fontSize: 13,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 14,
-  },
-  actions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'flex-end',
-    marginTop: spacing.sm,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  primaryButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  secondaryButtonText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  buttonDisabled: {
-    opacity: 0.62,
-  },
-});

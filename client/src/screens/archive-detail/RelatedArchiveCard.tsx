@@ -1,10 +1,10 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 
 import {archiveCoverAsset} from '../../api/lanlu';
 import {buildAuthorizedAssetImageSource} from '../../api/client';
-import {colors} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {Archive} from '../../types/api';
 
 type Props = {
@@ -13,6 +13,7 @@ type Props = {
 };
 
 export function RelatedArchiveCard({archive, onPress}: Props) {
+  const {colors} = useTheme();
   const [cover, setCover] = useState<FastImageSource | null>(null);
 
   useEffect(() => {
@@ -34,6 +35,28 @@ export function RelatedArchiveCard({archive, onPress}: Props) {
     };
   }, [archive]);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        card: {
+          width: 120,
+        },
+        cover: {
+          aspectRatio: 0.72,
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 6,
+          width: '100%',
+        },
+        coverPlaceholder: {},
+        title: {
+          color: colors.text,
+          fontSize: 12,
+          marginTop: 4,
+        },
+      }),
+    [colors],
+  );
+
   return (
     <TouchableOpacity style={styles.card} onPress={() => onPress(archive)}>
       {cover ? (
@@ -51,21 +74,3 @@ export function RelatedArchiveCard({archive, onPress}: Props) {
     </TouchableOpacity>
   );
 }
-
-const styles = StyleSheet.create({
-  card: {
-    width: 120,
-  },
-  cover: {
-    aspectRatio: 0.72,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 6,
-    width: '100%',
-  },
-  coverPlaceholder: {},
-  title: {
-    color: colors.text,
-    fontSize: 12,
-    marginTop: 4,
-  },
-});

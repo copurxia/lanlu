@@ -1,13 +1,15 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {
   StyleSheet,
   type StyleProp,
   type ViewStyle,
+  View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {type AnimatedStyle} from 'react-native-reanimated';
 
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 
 type EdgeInsets = {
   top: number;
@@ -39,6 +41,17 @@ export function screenSafeAreaPadding(insets: EdgeInsets) {
 
 export function ScreenRoot({children, padded = true, style}: ScreenRootProps) {
   const insets = useSafeAreaInsets();
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+      }),
+    [colors],
+  );
   return (
     <Animated.View
       style={[
@@ -53,10 +66,16 @@ export function ScreenRoot({children, padded = true, style}: ScreenRootProps) {
 
 export function ModalBackdrop({animatedStyle, children, style}: ModalBackdropProps) {
   const insets = useSafeAreaInsets();
+  const backdropStyle = useMemo(() => StyleSheet.create({
+    backdrop: {
+      backgroundColor: 'rgba(0,0,0,0.38)',
+      flex: 1,
+    },
+  }), []);
   return (
     <Animated.View
       style={[
-        styles.backdrop,
+        backdropStyle.backdrop,
         {
           marginTop: -insets.top,
           paddingTop: insets.top,
@@ -71,14 +90,4 @@ export function ModalBackdrop({animatedStyle, children, style}: ModalBackdropPro
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  backdrop: {
-    backgroundColor: 'rgba(0,0,0,0.38)',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-});
+

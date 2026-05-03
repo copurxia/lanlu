@@ -1,22 +1,32 @@
-import React from 'react';
-import {StatusBar, StyleSheet, useColorScheme} from 'react-native';
+import React, {useMemo} from 'react';
+import {StatusBar, StyleSheet} from 'react-native';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 
 import {AuthProvider} from './src/auth/AuthContext';
 import {I18nProvider} from './src/i18n';
 import {RootNavigator} from './src/navigation/RootNavigator';
-import {colors} from './src/theme/colors';
+import {ThemeProvider, useTheme} from './src/theme/ThemeContext';
 
-function App() {
-  const isDarkMode = useColorScheme() === 'dark';
+function AppShell() {
+  const {colors, effectiveScheme} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        root: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+      }),
+    [colors],
+  );
 
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <StatusBar
           backgroundColor="transparent"
-          barStyle={isDarkMode ? 'light-content' : 'dark-content'}
+          barStyle={effectiveScheme === 'dark' ? 'light-content' : 'dark-content'}
           translucent
         />
         <I18nProvider>
@@ -29,11 +39,12 @@ function App() {
   );
 }
 
-const styles = StyleSheet.create({
-  root: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-});
+function App() {
+  return (
+    <ThemeProvider>
+      <AppShell />
+    </ThemeProvider>
+  );
+}
 
 export default App;

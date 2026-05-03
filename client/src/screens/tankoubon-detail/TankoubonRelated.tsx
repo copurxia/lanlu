@@ -1,7 +1,7 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {ActivityIndicator, FlatList, ListRenderItemInfo, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
-import {colors} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 import type {Tankoubon} from '../../types/api';
 
@@ -13,7 +13,56 @@ type Props = {
 };
 
 export function TankoubonRelated({related, loading, t, onPress}: Props) {
+  const {colors} = useTheme();
   if (!loading && related.length === 0) return null;
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        section: {
+          marginTop: 24,
+        },
+        sectionTitle: {
+          color: colors.text,
+          fontSize: 15,
+          fontWeight: '800',
+          marginBottom: 2,
+        },
+        sectionSubtitle: {
+          color: colors.textMuted,
+          fontSize: 12,
+          marginBottom: 10,
+        },
+        loading: {
+          paddingVertical: 20,
+        },
+        list: {
+          gap: 10,
+        },
+        card: {
+          width: 120,
+        },
+        coverPlaceholder: {
+          aspectRatio: 0.72,
+          alignItems: 'center',
+          backgroundColor: colors.primaryMuted,
+          borderRadius: 6,
+          justifyContent: 'center',
+          width: '100%',
+        },
+        coverPlaceholderText: {
+          color: colors.primary,
+          fontSize: 18,
+          fontWeight: '800',
+        },
+        cardTitle: {
+          color: colors.text,
+          fontSize: 12,
+          marginTop: 4,
+        },
+      }),
+    [colors],
+  );
 
   return (
     <View style={styles.section}>
@@ -53,46 +102,3 @@ export function TankoubonRelated({related, loading, t, onPress}: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  section: {
-    marginTop: 24,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 2,
-  },
-  sectionSubtitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    marginBottom: 10,
-  },
-  loading: {
-    paddingVertical: 20,
-  },
-  list: {
-    gap: 10,
-  },
-  card: {
-    width: 120,
-  },
-  coverPlaceholder: {
-    aspectRatio: 0.72,
-    alignItems: 'center',
-    backgroundColor: colors.primaryMuted,
-    borderRadius: 6,
-    justifyContent: 'center',
-    width: '100%',
-  },
-  coverPlaceholderText: {
-    color: colors.primary,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  cardTitle: {
-    color: colors.text,
-    fontSize: 12,
-    marginTop: 4,
-  },
-});

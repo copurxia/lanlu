@@ -12,7 +12,8 @@ import {
 } from 'react-native';
 import {ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, Music} from 'lucide-react-native';
 import {VLCPlayer} from 'react-native-vlc-media-player';
-import {colors, spacing} from '../../theme/colors';
+import {spacing} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {PageInfo} from '../../types/api';
 
 type SidebarTab = 'thumbnails' | 'list' | 'tree';
@@ -107,6 +108,7 @@ function getDisplayDescription(page: SbPage) {
 }
 
 export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, t}: Props) {
+  const {colors} = useTheme();
   const {width: screenWidth, height: screenHeight} = useWindowDimensions();
   const [activeTab, setActiveTab] = useState<SidebarTab>('thumbnails');
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
@@ -116,6 +118,252 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
   const thumbGap = 6;
   const thumbWidth = Math.floor((panelWidth - 48 - thumbGap * (thumbColumns - 1)) / thumbColumns);
   const thumbHeight = Math.floor(thumbWidth * 1.4);
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        backdrop: {
+          backgroundColor: 'rgba(0,0,0,0.38)',
+          flex: 1,
+          justifyContent: 'flex-end',
+        },
+        sideBackdrop: {
+          alignItems: 'flex-end',
+          backgroundColor: 'rgba(0,0,0,0.18)',
+          justifyContent: 'flex-start',
+        },
+        sheet: {
+          backgroundColor: colors.surface,
+          borderTopLeftRadius: 14,
+          borderTopRightRadius: 14,
+          maxHeight: '82%',
+          padding: spacing.lg,
+        },
+        sideSheet: {
+          borderLeftColor: colors.border,
+          borderLeftWidth: StyleSheet.hairlineWidth,
+          borderTopLeftRadius: 0,
+          borderTopRightRadius: 0,
+          height: '100%',
+          maxHeight: '100%',
+          paddingTop: spacing.lg,
+        },
+        sheetHandle: {
+          alignSelf: 'center',
+          backgroundColor: colors.borderStrong,
+          borderRadius: 999,
+          height: 4,
+          marginBottom: spacing.md,
+          width: 44,
+        },
+        sheetHeader: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          justifyContent: 'space-between',
+          marginBottom: spacing.md,
+        },
+        sheetTitle: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 18,
+          fontWeight: '800',
+        },
+        sideCloseButton: {
+          alignItems: 'center',
+          borderColor: colors.border,
+          borderRadius: 16,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 32,
+          justifyContent: 'center',
+          width: 32,
+        },
+        sideCloseButtonText: {
+          color: colors.textMuted,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        tabBar: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+          marginBottom: spacing.md,
+        },
+        tab: {
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          paddingHorizontal: 12,
+          paddingVertical: 9,
+        },
+        tabActive: {
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
+        },
+        tabText: {
+          color: colors.textMuted,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        tabTextActive: {
+          color: colors.primary,
+        },
+        thumbContent: {
+          paddingBottom: spacing.sm,
+        },
+        thumbRow: {
+          gap: 6,
+          marginBottom: 6,
+        },
+        thumbItem: {
+          alignItems: 'center',
+        },
+        thumbFrame: {
+          backgroundColor: '#f0f0f0',
+          borderRadius: 6,
+          overflow: 'hidden',
+        },
+        thumbFrameActive: {
+          borderColor: colors.primary,
+          borderWidth: 2.5,
+        },
+        thumbImage: {
+          borderRadius: 6,
+        },
+        thumbPlaceholder: {
+          alignItems: 'center',
+          backgroundColor: '#e8e8e8',
+          borderRadius: 6,
+          justifyContent: 'center',
+        },
+        thumbBadge: {
+          backgroundColor: colors.primary,
+          borderBottomLeftRadius: 6,
+          paddingHorizontal: 6,
+          paddingVertical: 2,
+          position: 'absolute',
+          right: 0,
+          top: 0,
+        },
+        thumbBadgeText: {
+          color: colors.white,
+          fontSize: 9,
+          fontWeight: '800',
+        },
+        thumbLabel: {
+          color: colors.textMuted,
+          fontSize: 11,
+          fontWeight: '700',
+          marginTop: 3,
+          textAlign: 'center',
+        },
+        thumbLabelActive: {
+          color: colors.primary,
+        },
+        listContent: {
+          paddingBottom: spacing.sm,
+        },
+        listRow: {
+          alignItems: 'center',
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          marginBottom: 6,
+          paddingHorizontal: 10,
+          paddingVertical: 10,
+        },
+        listRowActive: {
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
+        },
+        listIcon: {
+          alignItems: 'center',
+          height: 28,
+          justifyContent: 'center',
+          marginRight: 10,
+          width: 28,
+        },
+        listThumb: {
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 6,
+          height: 42,
+          marginRight: 10,
+          width: 58,
+        },
+        listInfo: {
+          flex: 1,
+          minWidth: 0,
+        },
+        listPageNum: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '700',
+        },
+        listPageNumActive: {
+          color: colors.primary,
+        },
+        listFileName: {
+          color: colors.textMuted,
+          fontSize: 11,
+          marginTop: 2,
+        },
+        listType: {
+          color: colors.textMuted,
+          fontSize: 11,
+          fontWeight: '700',
+          marginLeft: 8,
+        },
+        listTypeActive: {
+          color: colors.primary,
+        },
+        treeRow: {
+          alignItems: 'center',
+          borderRadius: 7,
+          flexDirection: 'row',
+          gap: 6,
+          minHeight: 32,
+          paddingRight: 8,
+        },
+        treeRowActive: {
+          backgroundColor: colors.primaryMuted,
+        },
+        treeFolderText: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 13,
+          fontWeight: '700',
+          minWidth: 0,
+        },
+        treeFileText: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 12,
+          minWidth: 0,
+        },
+        treeFileTextActive: {
+          color: colors.primary,
+          fontWeight: '800',
+        },
+        treePageText: {
+          color: colors.textMuted,
+          fontSize: 10,
+          fontWeight: '700',
+        },
+        closeButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          marginTop: spacing.md,
+          paddingVertical: 12,
+        },
+        closeButtonText: {
+          color: colors.white,
+          fontSize: 15,
+          fontWeight: '800',
+        },
+      }),
+    [colors],
+  );
 
   useEffect(() => {
     if (open) {
@@ -495,244 +743,3 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
   );
 }
 
-const styles = StyleSheet.create({
-  backdrop: {
-    backgroundColor: 'rgba(0,0,0,0.38)',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  sideBackdrop: {
-    alignItems: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    justifyContent: 'flex-start',
-  },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    maxHeight: '82%',
-    padding: spacing.lg,
-  },
-  sideSheet: {
-    borderLeftColor: colors.border,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-    height: '100%',
-    maxHeight: '100%',
-    paddingTop: spacing.lg,
-  },
-  sheetHandle: {
-    alignSelf: 'center',
-    backgroundColor: colors.borderStrong,
-    borderRadius: 999,
-    height: 4,
-    marginBottom: spacing.md,
-    width: 44,
-  },
-  sheetHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-  },
-  sheetTitle: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  sideCloseButton: {
-    alignItems: 'center',
-    borderColor: colors.border,
-    borderRadius: 16,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 32,
-    justifyContent: 'center',
-    width: 32,
-  },
-  sideCloseButtonText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  tabBar: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  tab: {
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  tabActive: {
-    backgroundColor: colors.primaryMuted,
-    borderColor: colors.primary,
-  },
-  tabText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  tabTextActive: {
-    color: colors.primary,
-  },
-  thumbContent: {
-    paddingBottom: spacing.sm,
-  },
-  thumbRow: {
-    gap: 6,
-    marginBottom: 6,
-  },
-  thumbItem: {
-    alignItems: 'center',
-  },
-  thumbFrame: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 6,
-    overflow: 'hidden',
-  },
-  thumbFrameActive: {
-    borderColor: colors.primary,
-    borderWidth: 2.5,
-  },
-  thumbImage: {
-    borderRadius: 6,
-  },
-  thumbPlaceholder: {
-    alignItems: 'center',
-    backgroundColor: '#e8e8e8',
-    borderRadius: 6,
-    justifyContent: 'center',
-  },
-  thumbBadge: {
-    backgroundColor: colors.primary,
-    borderBottomLeftRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  thumbBadgeText: {
-    color: colors.white,
-    fontSize: 9,
-    fontWeight: '800',
-  },
-  thumbLabel: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    marginTop: 3,
-    textAlign: 'center',
-  },
-  thumbLabelActive: {
-    color: colors.primary,
-  },
-  listContent: {
-    paddingBottom: spacing.sm,
-  },
-  listRow: {
-    alignItems: 'center',
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    marginBottom: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-  },
-  listRowActive: {
-    backgroundColor: colors.primaryMuted,
-    borderColor: colors.primary,
-  },
-  listIcon: {
-    alignItems: 'center',
-    height: 28,
-    justifyContent: 'center',
-    marginRight: 10,
-    width: 28,
-  },
-  listThumb: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 6,
-    height: 42,
-    marginRight: 10,
-    width: 58,
-  },
-  listInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  listPageNum: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  listPageNumActive: {
-    color: colors.primary,
-  },
-  listFileName: {
-    color: colors.textMuted,
-    fontSize: 11,
-    marginTop: 2,
-  },
-  listType: {
-    color: colors.textMuted,
-    fontSize: 11,
-    fontWeight: '700',
-    marginLeft: 8,
-  },
-  listTypeActive: {
-    color: colors.primary,
-  },
-  treeRow: {
-    alignItems: 'center',
-    borderRadius: 7,
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 32,
-    paddingRight: 8,
-  },
-  treeRowActive: {
-    backgroundColor: colors.primaryMuted,
-  },
-  treeFolderText: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-    minWidth: 0,
-  },
-  treeFileText: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 12,
-    minWidth: 0,
-  },
-  treeFileTextActive: {
-    color: colors.primary,
-    fontWeight: '800',
-  },
-  treePageText: {
-    color: colors.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  closeButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    marginTop: spacing.md,
-    paddingVertical: 12,
-  },
-  closeButtonText: {
-    color: colors.white,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-});

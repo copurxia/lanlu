@@ -1,6 +1,6 @@
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {Check, FileText, Languages, LogOut, RotateCcw, Share2, Trash2} from 'lucide-react-native';
+import {Check, FileText, Languages, LogOut, Moon, RotateCcw, Share2, Sun, Trash2} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import Animated, {
   runOnJS,
@@ -18,11 +18,13 @@ import {
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
-import {colors, spacing} from '../theme/colors';
+import {spacing, type ThemeColors} from '../theme/colors';
+import {useTheme, type ThemePreference} from '../theme/ThemeContext';
 
 export function SettingsScreen() {
   const {languagePreference, setLanguagePreference, t} = useI18n();
   const {activeServer, user, showServerList, signOut} = useAuth();
+  const {colors, themePreference, setThemePreference} = useTheme();
   const insets = useSafeAreaInsets();
   const [diagnosticLog, setDiagnosticLog] = useState('');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -33,6 +35,8 @@ export function SettingsScreen() {
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{translateY: (1 - diagnosticsProgress.value) * 28}],
   }));
+
+  const styles = useMemo(() => createStyles(colors), [colors]);
 
   function confirmSignOut() {
     Alert.alert(t('settings.signOutTitle'), t('settings.signOutMessage'), [
@@ -100,6 +104,7 @@ export function SettingsScreen() {
           </FluentCaption>
           <View style={styles.actionList}>
             <SettingsActionRow
+              colors={colors}
               icon={<RotateCcw color={colors.textMuted} size={18} />}
               label={t('auth.switchServer')}
               onPress={() => {
@@ -109,10 +114,39 @@ export function SettingsScreen() {
               }}
             />
             <SettingsActionRow
+              colors={colors}
               danger
               icon={<LogOut color={colors.danger} size={18} />}
               label={t('settings.signOut')}
               onPress={confirmSignOut}
+            />
+          </View>
+        </FluentCard>
+
+        <FluentCard style={styles.section}>
+          <FluentTitle>{t('settings.theme')}</FluentTitle>
+          <FluentCaption>{t('settings.themeDescription')}</FluentCaption>
+          <View style={styles.actionList}>
+            <ThemeActionRow
+              active={themePreference === 'system'}
+              colors={colors}
+              icon={<Languages color={themePreference === 'system' ? colors.primary : colors.textMuted} size={18} />}
+              label={t('settings.themeSystem')}
+              onPress={() => setThemePreference('system')}
+            />
+            <ThemeActionRow
+              active={themePreference === 'light'}
+              colors={colors}
+              icon={<Sun color={themePreference === 'light' ? colors.primary : colors.textMuted} size={18} />}
+              label={t('settings.themeLight')}
+              onPress={() => setThemePreference('light')}
+            />
+            <ThemeActionRow
+              active={themePreference === 'dark'}
+              colors={colors}
+              icon={<Moon color={themePreference === 'dark' ? colors.primary : colors.textMuted} size={18} />}
+              label={t('settings.themeDark')}
+              onPress={() => setThemePreference('dark')}
             />
           </View>
         </FluentCard>
@@ -123,16 +157,19 @@ export function SettingsScreen() {
           <View style={styles.actionList}>
             <LanguageActionRow
               active={languagePreference === 'system'}
+              colors={colors}
               label={t('settings.languageSystem')}
               onPress={() => setLanguagePreference('system')}
             />
             <LanguageActionRow
               active={languagePreference === 'zh'}
+              colors={colors}
               label={t('settings.languageChinese')}
               onPress={() => setLanguagePreference('zh')}
             />
             <LanguageActionRow
               active={languagePreference === 'en'}
+              colors={colors}
               label={t('settings.languageEnglish')}
               onPress={() => setLanguagePreference('en')}
             />
@@ -144,11 +181,13 @@ export function SettingsScreen() {
           <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
           <View style={styles.actionList}>
             <SettingsActionRow
+              colors={colors}
               icon={<FileText color={colors.textMuted} size={18} />}
               label={t('settings.viewLogs')}
               onPress={openDiagnostics}
             />
             <SettingsActionRow
+              colors={colors}
               icon={<Share2 color={colors.textMuted} size={18} />}
               label={t('settings.shareLogs')}
               onPress={shareDiagnostics}
@@ -200,13 +239,16 @@ export function SettingsScreen() {
 
 function LanguageActionRow({
   active,
+  colors,
   label,
   onPress,
 }: {
   active: boolean;
+  colors: ThemeColors;
   label: string;
   onPress: () => void;
 }) {
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <TouchableOpacity
       activeOpacity={0.78}
@@ -227,17 +269,54 @@ function LanguageActionRow({
   );
 }
 
+function ThemeActionRow({
+  active,
+  colors,
+  icon,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  colors: ThemeColors;
+  icon: React.ReactNode;
+  label: string;
+  onPress: () => void;
+}) {
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.actionRow}>
+      <View style={styles.languageIcon}>
+        {icon}
+      </View>
+      <Text style={[styles.actionLabel, active && styles.actionLabelActive]}>{label}</Text>
+      {active ? (
+        <View style={styles.checkIcon}>
+          <Check color={colors.white} size={15} />
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+}
+
 function SettingsActionRow({
+  colors,
   danger,
   icon,
   label,
   onPress,
 }: {
+  colors: ThemeColors;
   danger?: boolean;
   icon: React.ReactNode;
   label: string;
   onPress: () => void;
 }) {
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <TouchableOpacity
       activeOpacity={0.78}
@@ -251,121 +330,123 @@ function SettingsActionRow({
   );
 }
 
-const styles = StyleSheet.create({
-  content: {
-    gap: spacing.md,
-  },
-  section: {
-    gap: spacing.md,
-  },
-  row: {
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  value: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  actionList: {
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  actionRow: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: spacing.md,
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-  },
-  actionLabel: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  actionLabelDanger: {
-    color: colors.danger,
-  },
-  actionLabelActive: {
-    color: colors.primary,
-  },
-  languageIcon: {
-    alignItems: 'center',
-    height: 36,
-    justifyContent: 'center',
-    width: 28,
-  },
-  checkIcon: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 13,
-    height: 26,
-    justifyContent: 'center',
-    width: 26,
-  },
-  iconAction: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-  deleteAction: {
-    backgroundColor: '#fff5f5',
-  },
-  sheetActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'flex-end',
-  },
-  closePill: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 18,
-    height: 36,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  closePillText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  logSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    gap: spacing.md,
-    maxHeight: '82%',
-    padding: spacing.lg,
-  },
-  logBox: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    maxHeight: 420,
-    padding: spacing.md,
-  },
-  logText: {
-    color: colors.text,
-    fontFamily: 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
-  },
-});
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    content: {
+      gap: spacing.md,
+    },
+    section: {
+      gap: spacing.md,
+    },
+    row: {
+      gap: spacing.xs,
+    },
+    label: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+    },
+    value: {
+      color: colors.text,
+      fontSize: 16,
+      fontWeight: '800',
+    },
+    actionList: {
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden',
+    },
+    actionRow: {
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      gap: spacing.md,
+      minHeight: 48,
+      paddingHorizontal: spacing.md,
+    },
+    actionLabel: {
+      color: colors.text,
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '800',
+    },
+    actionLabelDanger: {
+      color: colors.danger,
+    },
+    actionLabelActive: {
+      color: colors.primary,
+    },
+    languageIcon: {
+      alignItems: 'center',
+      height: 36,
+      justifyContent: 'center',
+      width: 28,
+    },
+    checkIcon: {
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 13,
+      height: 26,
+      justifyContent: 'center',
+      width: 26,
+    },
+    iconAction: {
+      alignItems: 'center',
+      backgroundColor: colors.surfaceMuted,
+      borderColor: colors.border,
+      borderRadius: 18,
+      borderWidth: StyleSheet.hairlineWidth,
+      height: 36,
+      justifyContent: 'center',
+      width: 36,
+    },
+    deleteAction: {
+      backgroundColor: colors.danger === '#e84d3d' ? '#2a1515' : '#fff5f5',
+    },
+    sheetActions: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: spacing.sm,
+      justifyContent: 'flex-end',
+    },
+    closePill: {
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 18,
+      height: 36,
+      justifyContent: 'center',
+      paddingHorizontal: spacing.lg,
+    },
+    closePillText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    logSheet: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 14,
+      borderTopRightRadius: 14,
+      gap: spacing.md,
+      maxHeight: '82%',
+      padding: spacing.lg,
+    },
+    logBox: {
+      backgroundColor: colors.surfaceMuted,
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      maxHeight: 420,
+      padding: spacing.md,
+    },
+    logText: {
+      color: colors.text,
+      fontFamily: 'monospace',
+      fontSize: 11,
+      lineHeight: 16,
+    },
+  });
+}

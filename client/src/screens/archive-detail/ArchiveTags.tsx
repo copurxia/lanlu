@@ -1,7 +1,7 @@
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
-import {colors} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 
 type Props = {
@@ -11,12 +11,53 @@ type Props = {
 };
 
 export function ArchiveTags({tags, onTagPress, t}: Props) {
-  if (!tags?.length) return null;
-
+  const {colors} = useTheme();
   const INITIAL_VISIBLE = 12;
   const [expanded, setExpanded] = useState(false);
-  const visibleTags = expanded ? tags : tags.slice(0, INITIAL_VISIBLE);
-  const hasMore = tags.length > INITIAL_VISIBLE;
+  const visibleTags = expanded ? tags ?? [] : (tags ?? []).slice(0, INITIAL_VISIBLE);
+  const hasMore = (tags?.length ?? 0) > INITIAL_VISIBLE;
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        section: {
+          marginTop: 20,
+        },
+        sectionTitle: {
+          color: colors.text,
+          fontSize: 15,
+          fontWeight: '800',
+          marginBottom: 8,
+        },
+        tags: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 8,
+        },
+        tag: {
+          backgroundColor: colors.primaryMuted,
+          borderRadius: 6,
+          paddingHorizontal: 10,
+          paddingVertical: 5,
+        },
+        tagText: {
+          color: colors.primary,
+          fontSize: 12,
+          fontWeight: '700',
+        },
+        toggleButton: {
+          marginTop: 8,
+        },
+        toggleText: {
+          color: colors.primary,
+          fontSize: 13,
+          fontWeight: '600',
+        },
+      }),
+    [colors],
+  );
+
+  if (!tags?.length) return null;
 
   return (
     <View style={styles.section}>
@@ -44,39 +85,3 @@ export function ArchiveTags({tags, onTagPress, t}: Props) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  section: {
-    marginTop: 20,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  tags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tag: {
-    backgroundColor: colors.primaryMuted,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  tagText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  toggleButton: {
-    marginTop: 8,
-  },
-  toggleText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-});

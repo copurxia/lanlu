@@ -28,7 +28,7 @@ import {
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
-import {colors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {Archive, Tankoubon, TankoubonMetadata} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 import {TankoubonDetailHero} from './tankoubon-detail/TankoubonDetailHero';
@@ -46,6 +46,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'TankoubonDetail'>;
 
 export function TankoubonDetailScreen({route, navigation}: Props) {
   const {language, t} = useI18n();
+  const {colors} = useTheme();
   const insets = useSafeAreaInsets();
   const {width: screenWidth} = useWindowDimensions();
   const {tankoubonId, tankoubon} = route.params;
@@ -339,6 +340,198 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     [archives],
   );
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+        content: {
+          padding: 16,
+          paddingBottom: 40,
+        },
+        backButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 20,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 40,
+          justifyContent: 'center',
+          marginBottom: 14,
+          width: 40,
+        },
+        error: {
+          color: colors.danger,
+          marginTop: 14,
+        },
+        archiveSection: {
+          marginTop: 24,
+        },
+        archiveSectionHeader: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          marginBottom: 10,
+        },
+        archiveSectionTitleRow: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: 8,
+        },
+        archiveSectionTitle: {
+          color: colors.text,
+          fontSize: 16,
+          fontWeight: '800',
+        },
+        archiveCount: {
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 10,
+          paddingHorizontal: 8,
+          paddingVertical: 2,
+        },
+        archiveCountText: {
+          color: colors.textMuted,
+          fontSize: 12,
+          fontWeight: '600',
+        },
+        archiveControls: {
+          flexDirection: 'row',
+          gap: 8,
+        },
+        viewModeButton: {
+          padding: 6,
+        },
+        filterRow: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          marginBottom: 12,
+          paddingHorizontal: 10,
+        },
+        filterIcon: {
+          marginRight: 6,
+        },
+        filterInput: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 14,
+          paddingVertical: 10,
+        },
+        selectionBar: {
+          alignItems: 'center',
+          backgroundColor: colors.primaryMuted,
+          borderRadius: 8,
+          flexDirection: 'row',
+          gap: 10,
+          marginBottom: 10,
+          padding: 10,
+        },
+        selectionText: {
+          color: colors.primary,
+          flex: 1,
+          fontSize: 13,
+          fontWeight: '700',
+        },
+        selectionActionButton: {
+          backgroundColor: colors.danger,
+          borderRadius: 6,
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+        },
+        selectionActionText: {
+          color: colors.white,
+          fontSize: 12,
+          fontWeight: '700',
+        },
+        selectionCancelText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          fontWeight: '600',
+        },
+        loading: {
+          paddingVertical: 24,
+        },
+        emptyState: {
+          alignItems: 'center',
+          paddingVertical: 24,
+        },
+        emptyText: {
+          color: colors.textMuted,
+          fontSize: 14,
+          textAlign: 'center',
+        },
+        resetText: {
+          color: colors.primary,
+          fontSize: 14,
+          fontWeight: '600',
+          marginTop: 8,
+        },
+        grid: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          margin: -4,
+        },
+        listContainer: {
+          gap: 8,
+        },
+        dialogOverlay: {
+          ...StyleSheet.absoluteFill,
+          alignItems: 'center',
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          justifyContent: 'center',
+          zIndex: 100,
+        },
+        dialog: {
+          backgroundColor: colors.surface,
+          borderRadius: 14,
+          marginHorizontal: 32,
+          padding: 20,
+          width: '80%',
+        },
+        dialogTitle: {
+          color: colors.text,
+          fontSize: 17,
+          fontWeight: '800',
+          marginBottom: 8,
+        },
+        dialogMessage: {
+          color: colors.textMuted,
+          fontSize: 14,
+          lineHeight: 20,
+          marginBottom: 16,
+        },
+        dialogButtons: {
+          flexDirection: 'row',
+          gap: 10,
+          justifyContent: 'flex-end',
+        },
+        dialogButton: {
+          borderRadius: 8,
+          paddingHorizontal: 16,
+          paddingVertical: 10,
+        },
+        dialogButtonText: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '600',
+        },
+        dialogButtonDanger: {
+          backgroundColor: colors.danger,
+        },
+        dialogButtonDangerText: {
+          color: colors.white,
+          fontSize: 14,
+          fontWeight: '700',
+        },
+      }),
+    [colors],
+  );
+
   if (loading && !metadata && !tankoubon) {
     return <ScreenState loading title={t('tankoubon.loading')} />;
   }
@@ -597,190 +790,3 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 40,
-  },
-  backButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 40,
-    justifyContent: 'center',
-    marginBottom: 14,
-    width: 40,
-  },
-  error: {
-    color: colors.danger,
-    marginTop: 14,
-  },
-  archiveSection: {
-    marginTop: 24,
-  },
-  archiveSectionHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  archiveSectionTitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  archiveSectionTitle: {
-    color: colors.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  archiveCount: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-  },
-  archiveCountText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  archiveControls: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  viewModeButton: {
-    padding: 6,
-  },
-  filterRow: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    marginBottom: 12,
-    paddingHorizontal: 10,
-  },
-  filterIcon: {
-    marginRight: 6,
-  },
-  filterInput: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 14,
-    paddingVertical: 10,
-  },
-  selectionBar: {
-    alignItems: 'center',
-    backgroundColor: colors.primaryMuted,
-    borderRadius: 8,
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 10,
-    padding: 10,
-  },
-  selectionText: {
-    color: colors.primary,
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  selectionActionButton: {
-    backgroundColor: colors.danger,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  selectionActionText: {
-    color: colors.white,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  selectionCancelText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  loading: {
-    paddingVertical: 24,
-  },
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  emptyText: {
-    color: colors.textMuted,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  resetText: {
-    color: colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    margin: -4,
-  },
-  listContainer: {
-    gap: 8,
-  },
-  dialogOverlay: {
-    ...StyleSheet.absoluteFill,
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    zIndex: 100,
-  },
-  dialog: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    marginHorizontal: 32,
-    padding: 20,
-    width: '80%',
-  },
-  dialogTitle: {
-    color: colors.text,
-    fontSize: 17,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  dialogMessage: {
-    color: colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  dialogButtons: {
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'flex-end',
-  },
-  dialogButton: {
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  dialogButtonText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  dialogButtonDanger: {
-    backgroundColor: colors.danger,
-  },
-  dialogButtonDangerText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-});

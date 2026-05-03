@@ -1,7 +1,7 @@
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
-import {colors} from '../../theme/colors';
+import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 
 type Props = {
@@ -10,8 +10,38 @@ type Props = {
 };
 
 export function ArchiveDescription({description, t}: Props) {
+  const {colors} = useTheme();
   const [expanded, setExpanded] = useState(false);
   const content = description?.trim();
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        section: {
+          marginTop: 20,
+        },
+        sectionTitle: {
+          color: colors.text,
+          fontSize: 15,
+          fontWeight: '800',
+          marginBottom: 8,
+        },
+        description: {
+          color: colors.text,
+          fontSize: 14,
+          lineHeight: 21,
+        },
+        toggleButton: {
+          marginTop: 6,
+        },
+        toggleText: {
+          color: colors.primary,
+          fontSize: 13,
+          fontWeight: '600',
+        },
+      }),
+    [colors],
+  );
 
   if (!content) {
     return (
@@ -38,28 +68,3 @@ export function ArchiveDescription({description, t}: Props) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  section: {
-    marginTop: 20,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  description: {
-    color: colors.text,
-    fontSize: 14,
-    lineHeight: 21,
-  },
-  toggleButton: {
-    marginTop: 6,
-  },
-  toggleText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-});

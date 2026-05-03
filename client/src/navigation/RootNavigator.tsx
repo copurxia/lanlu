@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useMemo} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {
   createBottomTabNavigator,
@@ -21,7 +21,7 @@ import {ServerListScreen} from '../screens/ServerListScreen';
 import {SettingsScreen} from '../screens/SettingsScreen';
 import {TankoubonDetailScreen} from '../screens/TankoubonDetailScreen';
 import {useI18n} from '../i18n';
-import {colors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {MainTabParamList, RootStackParamList} from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -55,6 +55,20 @@ function StaticTabButton({
 
 function MainTabs() {
   const {t} = useI18n();
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        tabBar: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          elevation: 0,
+          shadowOpacity: 0,
+        },
+      }),
+    [colors],
+  );
   return (
     <Tabs.Navigator
       screenOptions={{
@@ -95,19 +109,10 @@ function MainTabs() {
   );
 }
 
-const styles = StyleSheet.create({
-  tabBar: {
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    elevation: 0,
-    shadowOpacity: 0,
-  },
-});
-
 export function RootNavigator() {
   const {status} = useAuth();
   const {t} = useI18n();
+  const {colors} = useTheme();
 
   if (status === 'booting') {
     return <ScreenState loading title={t('common.loading')} />;

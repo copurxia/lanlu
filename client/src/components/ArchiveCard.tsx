@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {
   StyleSheet,
   Text,
@@ -25,7 +25,8 @@ import {
 } from '../api/lanlu';
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {useI18n} from '../i18n';
-import {colors, radius, spacing} from '../theme/colors';
+import {radius, spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {Archive, MediaItem} from '../types/api';
 
 type Props = {
@@ -63,6 +64,7 @@ export function ArchiveCard({
   onChanged,
   onTagPress,
 }: Props) {
+  const {colors} = useTheme();
   const {t} = useI18n();
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<FastImageSource | null>(null);
@@ -177,6 +179,183 @@ export function ArchiveCard({
     Gesture.Tap().onEnd(() => {
       runOnJS(handleCardPress)();
     }),
+  );
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        card: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: radius.md,
+          borderWidth: StyleSheet.hairlineWidth,
+          marginBottom: spacing.md,
+          overflow: 'hidden',
+        },
+        fullWidthCard: {
+          marginBottom: spacing.sm,
+        },
+        listCard: {
+          flexDirection: 'row',
+          minHeight: 112,
+        },
+        tweetCard: {
+          borderRadius: radius.md,
+        },
+        channelCard: {
+          borderRadius: radius.md,
+        },
+        coverWrap: {
+          aspectRatio: 0.72,
+          backgroundColor: colors.surfaceMuted,
+        },
+        listCover: {
+          aspectRatio: 0.72,
+          width: 82,
+        },
+        tweetCover: {
+          aspectRatio: 1.35,
+        },
+        channelCover: {
+          aspectRatio: 1.65,
+        },
+        cover: {
+          height: '100%',
+          width: '100%',
+        },
+        placeholder: {
+          alignItems: 'center',
+          flex: 1,
+          justifyContent: 'center',
+        },
+        placeholderText: {
+          color: colors.textMuted,
+          fontSize: 12,
+        },
+        placeholderOverlay: {
+          alignItems: 'center',
+          backgroundColor: colors.surfaceMuted,
+          bottom: 0,
+          justifyContent: 'center',
+          left: 0,
+          position: 'absolute',
+          right: 0,
+          top: 0,
+        },
+        badge: {
+          backgroundColor: colors.primary,
+          borderRadius: 4,
+          left: 8,
+          paddingHorizontal: 6,
+          paddingVertical: 3,
+          position: 'absolute',
+          top: 8,
+        },
+        collectionBadge: {
+          backgroundColor: colors.text,
+          borderRadius: 4,
+          left: 8,
+          paddingHorizontal: 6,
+          paddingVertical: 3,
+          position: 'absolute',
+          top: 8,
+        },
+        badgeText: {
+          color: colors.white,
+          fontSize: 10,
+          fontWeight: '800',
+        },
+        body: {
+          gap: 4,
+          minHeight: 72,
+          padding: spacing.sm,
+        },
+        title: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '700',
+          lineHeight: 18,
+        },
+        meta: {
+          color: colors.textMuted,
+          fontSize: 12,
+        },
+        description: {
+          color: colors.textMuted,
+          fontSize: 13,
+          lineHeight: 18,
+          marginTop: 4,
+        },
+        favoriteButton: {
+          bottom: 8,
+          position: 'absolute',
+          right: 8,
+        },
+        favoriteText: {
+          color: colors.textMuted,
+          fontSize: 24,
+          textShadowColor: colors.white,
+          textShadowRadius: 2,
+        },
+        favoriteActive: {
+          color: '#f2a900',
+        },
+        tagOverlay: {
+          bottom: 0,
+          left: 0,
+          position: 'absolute',
+          right: 0,
+          top: 0,
+        },
+        gradientOverlay: {
+          bottom: 0,
+          left: 0,
+          position: 'absolute',
+          right: 0,
+          top: 0,
+        },
+        tagOverlayContent: {
+          bottom: 0,
+          gap: 7,
+          left: 0,
+          paddingBottom: 28,
+          paddingHorizontal: 12,
+          paddingTop: 18,
+          position: 'absolute',
+          right: 0,
+        },
+        tagList: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 5,
+          overflow: 'hidden',
+        },
+        tagListTall: {
+          maxHeight: 74,
+        },
+        tagListWithDescription: {
+          maxHeight: 50,
+        },
+        tagChip: {
+          backgroundColor: 'rgba(255, 255, 255, 0.16)',
+          borderRadius: 3,
+          maxWidth: 140,
+          paddingHorizontal: 7,
+          paddingVertical: 2,
+        },
+        tagText: {
+          color: colors.white,
+          fontSize: 11,
+          lineHeight: 15,
+        },
+        previewDescription: {
+          color: 'rgba(255, 255, 255, 0.9)',
+          fontSize: 11,
+          lineHeight: 15,
+        },
+      }),
+    [colors],
   );
 
   return (
@@ -309,175 +488,3 @@ export function ArchiveCard({
   );
 }
 
-const styles = StyleSheet.create({
-  card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  fullWidthCard: {
-    marginBottom: spacing.sm,
-  },
-  listCard: {
-    flexDirection: 'row',
-    minHeight: 112,
-  },
-  tweetCard: {
-    borderRadius: radius.md,
-  },
-  channelCard: {
-    borderRadius: radius.md,
-  },
-  coverWrap: {
-    aspectRatio: 0.72,
-    backgroundColor: colors.surfaceMuted,
-  },
-  listCover: {
-    aspectRatio: 0.72,
-    width: 82,
-  },
-  tweetCover: {
-    aspectRatio: 1.35,
-  },
-  channelCover: {
-    aspectRatio: 1.65,
-  },
-  cover: {
-    height: '100%',
-    width: '100%',
-  },
-  placeholder: {
-    alignItems: 'center',
-    flex: 1,
-    justifyContent: 'center',
-  },
-  placeholderText: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  placeholderOverlay: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    bottom: 0,
-    justifyContent: 'center',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  badge: {
-    backgroundColor: colors.primary,
-    borderRadius: 4,
-    left: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    position: 'absolute',
-    top: 8,
-  },
-  collectionBadge: {
-    backgroundColor: colors.text,
-    borderRadius: 4,
-    left: 8,
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    position: 'absolute',
-    top: 8,
-  },
-  badgeText: {
-    color: colors.white,
-    fontSize: 10,
-    fontWeight: '800',
-  },
-  body: {
-    gap: 4,
-    minHeight: 72,
-    padding: spacing.sm,
-  },
-  title: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18,
-  },
-  meta: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  description: {
-    color: colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
-  },
-  favoriteButton: {
-    bottom: 8,
-    position: 'absolute',
-    right: 8,
-  },
-  favoriteText: {
-    color: colors.textMuted,
-    fontSize: 24,
-    textShadowColor: colors.white,
-    textShadowRadius: 2,
-  },
-  favoriteActive: {
-    color: '#f2a900',
-  },
-  tagOverlay: {
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  gradientOverlay: {
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-  },
-  tagOverlayContent: {
-    bottom: 0,
-    gap: 7,
-    left: 0,
-    paddingBottom: 28,
-    paddingHorizontal: 12,
-    paddingTop: 18,
-    position: 'absolute',
-    right: 0,
-  },
-  tagList: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5,
-    overflow: 'hidden',
-  },
-  tagListTall: {
-    maxHeight: 74,
-  },
-  tagListWithDescription: {
-    maxHeight: 50,
-  },
-  tagChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.16)',
-    borderRadius: 3,
-    maxWidth: 140,
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-  },
-  tagText: {
-    color: colors.white,
-    fontSize: 11,
-    lineHeight: 15,
-  },
-  previewDescription: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 11,
-    lineHeight: 15,
-  },
-});

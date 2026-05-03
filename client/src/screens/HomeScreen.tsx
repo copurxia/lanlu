@@ -54,7 +54,8 @@ import {
   loadHomeViewModeSync,
   saveHomeViewMode,
 } from '../storage/preferences';
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {Category, MediaItem} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -95,6 +96,7 @@ function viewModeLabel(mode: HomeViewMode, t: ReturnType<typeof useI18n>['t']) {
 }
 
 function ViewModeIcon({mode}: {mode: HomeViewMode}) {
+  const {colors} = useTheme();
   const props = {color: colors.text, size: 18};
   if (mode === 'masonry') return <Grid2X2 {...props} />;
   if (mode === 'list') return <List {...props} />;
@@ -159,6 +161,7 @@ function resolveHomeViewSurface(mode: HomeViewMode, isRowsLanding: boolean): Hom
 }
 
 export function HomeScreen() {
+  const {colors} = useTheme();
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
@@ -725,6 +728,376 @@ export function HomeScreen() {
     return rows;
   }, [categories, categoryRows, randomItems, t]);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+        toolbar: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          paddingHorizontal: spacing.lg,
+          paddingTop: spacing.md,
+          paddingBottom: spacing.sm,
+        },
+        searchInput: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          color: colors.text,
+          flex: 1,
+          fontSize: 15,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+        },
+        searchButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 42,
+          justifyContent: 'center',
+          width: 42,
+        },
+        filterButtonActive: {
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
+        },
+        modeButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          gap: 6,
+          minHeight: 42,
+          paddingHorizontal: 10,
+        },
+        modeButtonText: {
+          color: colors.text,
+          fontSize: 12,
+          fontWeight: '800',
+        },
+        sortRow: {
+          flexGrow: 0,
+          minHeight: 42,
+          paddingBottom: spacing.xs,
+        },
+        sortRowContent: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          minHeight: 38,
+          paddingHorizontal: spacing.lg,
+        },
+        categoryChip: {
+          alignItems: 'center',
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
+          borderRadius: 999,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          gap: spacing.xs,
+          maxWidth: '100%',
+          paddingHorizontal: 10,
+          paddingVertical: 6,
+        },
+        categoryChipText: {
+          color: colors.primary,
+          fontSize: 12,
+          fontWeight: '800',
+          maxWidth: 220,
+        },
+        categoryChipClear: {
+          color: colors.primary,
+          fontSize: 12,
+          fontWeight: '900',
+        },
+        sortChip: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 999,
+          borderWidth: StyleSheet.hairlineWidth,
+          justifyContent: 'center',
+          maxWidth: 180,
+          minHeight: 32,
+          paddingHorizontal: 10,
+          paddingVertical: 7,
+        },
+        sortChipActive: {
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
+        },
+        sortChipText: {
+          color: colors.textMuted,
+          fontSize: 12,
+          fontWeight: '700',
+          lineHeight: 16,
+          maxWidth: 160,
+        },
+        sortChipTextActive: {
+          color: colors.primary,
+        },
+        suggestionsPanel: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          marginHorizontal: spacing.lg,
+          marginBottom: spacing.sm,
+          overflow: 'hidden',
+        },
+        suggestionsTitle: {
+          color: colors.textMuted,
+          fontSize: 12,
+          fontWeight: '800',
+          paddingHorizontal: spacing.md,
+          paddingTop: spacing.sm,
+          paddingBottom: spacing.xs,
+          textTransform: 'uppercase',
+        },
+        suggestionRow: {
+          borderTopColor: colors.border,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          gap: 2,
+          paddingHorizontal: spacing.md,
+          paddingVertical: spacing.sm,
+        },
+        suggestionLabel: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        suggestionValue: {
+          color: colors.textMuted,
+          fontSize: 12,
+        },
+        inlineError: {
+          color: colors.danger,
+          fontSize: 13,
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.sm,
+        },
+        rowsContent: {
+          paddingTop: spacing.xs,
+          paddingBottom: spacing.lg,
+        },
+        rowSection: {
+          marginBottom: spacing.md,
+        },
+        rowHeader: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          paddingHorizontal: spacing.lg,
+          marginBottom: spacing.sm,
+        },
+        sectionIcon: {
+          fontSize: 18,
+        },
+        sectionTitle: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 18,
+          fontWeight: '800',
+        },
+        viewMoreButton: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: 2,
+          minHeight: 32,
+          paddingLeft: spacing.sm,
+        },
+        viewMoreText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          fontWeight: '800',
+        },
+        rowScroller: {
+          gap: spacing.md,
+          paddingLeft: spacing.lg,
+          paddingRight: spacing.lg,
+        },
+        rowSkeleton: {
+          flexDirection: 'row',
+          gap: spacing.md,
+          paddingHorizontal: spacing.lg,
+        },
+        skeletonCard: {
+          width: 136,
+        },
+        skeletonCover: {
+          aspectRatio: 0.72,
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 8,
+        },
+        skeletonLine: {
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 999,
+          height: 12,
+          marginTop: spacing.sm,
+        },
+        skeletonLineShort: {
+          width: '64%',
+        },
+        emptyRowText: {
+          color: colors.textMuted,
+          fontSize: 13,
+          paddingHorizontal: spacing.lg,
+        },
+        emptyList: {
+          flexGrow: 1,
+        },
+        listContent: {
+          flexGrow: 1,
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.lg,
+        },
+        column: {
+          gap: spacing.md,
+        },
+        footerText: {
+          color: colors.textMuted,
+          padding: 16,
+          textAlign: 'center',
+        },
+        modalBackdrop: {
+          backgroundColor: 'rgba(0,0,0,0.32)',
+          flex: 1,
+          justifyContent: 'flex-end',
+        },
+        filterSheet: {
+          backgroundColor: colors.surface,
+          borderTopLeftRadius: 14,
+          borderTopRightRadius: 14,
+          gap: spacing.md,
+          maxHeight: '88%',
+          padding: spacing.lg,
+        },
+        sheetHeader: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.md,
+        },
+        sheetTitle: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 18,
+          fontWeight: '900',
+        },
+        sheetCloseButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 18,
+          height: 36,
+          justifyContent: 'center',
+          width: 36,
+        },
+        fieldLabel: {
+          color: colors.textMuted,
+          fontSize: 12,
+          fontWeight: '800',
+          textTransform: 'uppercase',
+        },
+        optionGrid: {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: spacing.sm,
+        },
+        optionRow: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+        },
+        sheetChip: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 999,
+          borderWidth: StyleSheet.hairlineWidth,
+          paddingHorizontal: 12,
+          paddingVertical: 8,
+        },
+        dateRow: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+        },
+        dateField: {
+          flex: 1,
+          gap: spacing.xs,
+        },
+        dateInputRow: {
+          alignItems: 'center',
+          backgroundColor: colors.surfaceMuted,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          minHeight: 40,
+          overflow: 'hidden',
+        },
+        dateInput: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 14,
+          paddingHorizontal: 10,
+          paddingVertical: 8,
+        },
+        datePickerButton: {
+          alignItems: 'center',
+          alignSelf: 'stretch',
+          borderLeftColor: colors.border,
+          borderLeftWidth: StyleSheet.hairlineWidth,
+          justifyContent: 'center',
+          width: 40,
+        },
+        switchList: {
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          overflow: 'hidden',
+        },
+        sheetActions: {
+          flexDirection: 'row',
+          gap: spacing.sm,
+          justifyContent: 'flex-end',
+        },
+        primaryAction: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          height: 40,
+          justifyContent: 'center',
+          paddingHorizontal: spacing.lg,
+        },
+        primaryActionText: {
+          color: colors.white,
+          fontSize: 14,
+          fontWeight: '900',
+        },
+        secondaryAction: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.borderStrong,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          height: 40,
+          justifyContent: 'center',
+          paddingHorizontal: spacing.lg,
+        },
+        secondaryActionText: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+      }),
+    [colors],
+  );
+
   if (loading && !refreshing && !items.length && !showRows && !submittedFilter) {
     return <ScreenState loading title={t('home.loading')} />;
   }
@@ -1096,6 +1469,29 @@ function FilterSwitch({
   onValueChange: (value: boolean) => void;
   value: boolean;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        switchRow: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderBottomColor: colors.border,
+          borderBottomWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          minHeight: 48,
+          paddingHorizontal: spacing.md,
+        },
+        switchLabel: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 15,
+          fontWeight: '800',
+        },
+      }),
+    [colors],
+  );
+
   return (
     <View style={styles.switchRow}>
       <Text style={styles.switchLabel}>{label}</Text>
@@ -1108,384 +1504,3 @@ function FilterSwitch({
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  toolbar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
-  },
-  searchInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: colors.text,
-    flex: 1,
-    fontSize: 15,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  searchButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
-  },
-  filterButtonActive: {
-    backgroundColor: colors.primaryMuted,
-    borderColor: colors.primary,
-  },
-  modeButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 42,
-    paddingHorizontal: 10,
-  },
-  modeButtonText: {
-    color: colors.text,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  sortRow: {
-    flexGrow: 0,
-    minHeight: 42,
-    paddingBottom: spacing.xs,
-  },
-  sortRowContent: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    minHeight: 38,
-    paddingHorizontal: spacing.lg,
-  },
-  categoryChip: {
-    alignItems: 'center',
-    backgroundColor: colors.primaryMuted,
-    borderColor: colors.primary,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    maxWidth: '100%',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  categoryChipText: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '800',
-    maxWidth: 220,
-  },
-  categoryChipClear: {
-    color: colors.primary,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  sortChip: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    justifyContent: 'center',
-    maxWidth: 180,
-    minHeight: 32,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  sortChipActive: {
-    backgroundColor: colors.primaryMuted,
-    borderColor: colors.primary,
-  },
-  sortChipText: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 16,
-    maxWidth: 160,
-  },
-  sortChipTextActive: {
-    color: colors.primary,
-  },
-  suggestionsPanel: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    overflow: 'hidden',
-  },
-  suggestionsTitle: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xs,
-    textTransform: 'uppercase',
-  },
-  suggestionRow: {
-    borderTopColor: colors.border,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 2,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  suggestionLabel: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  suggestionValue: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  inlineError: {
-    color: colors.danger,
-    fontSize: 13,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  rowsContent: {
-    paddingTop: spacing.xs,
-    paddingBottom: spacing.lg,
-  },
-  rowSection: {
-    marginBottom: spacing.md,
-  },
-  rowHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-  },
-  sectionIcon: {
-    fontSize: 18,
-  },
-  sectionTitle: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  viewMoreButton: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 2,
-    minHeight: 32,
-    paddingLeft: spacing.sm,
-  },
-  viewMoreText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  rowScroller: {
-    gap: spacing.md,
-    paddingLeft: spacing.lg,
-    paddingRight: spacing.lg,
-  },
-  rowSkeleton: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-  },
-  skeletonCard: {
-    width: 136,
-  },
-  skeletonCover: {
-    aspectRatio: 0.72,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 8,
-  },
-  skeletonLine: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    height: 12,
-    marginTop: spacing.sm,
-  },
-  skeletonLineShort: {
-    width: '64%',
-  },
-  emptyRowText: {
-    color: colors.textMuted,
-    fontSize: 13,
-    paddingHorizontal: spacing.lg,
-  },
-  emptyList: {
-    flexGrow: 1,
-  },
-  listContent: {
-    flexGrow: 1,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-  },
-  column: {
-    gap: spacing.md,
-  },
-  footerText: {
-    color: colors.textMuted,
-    padding: 16,
-    textAlign: 'center',
-  },
-  modalBackdrop: {
-    backgroundColor: 'rgba(0,0,0,0.32)',
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  filterSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    gap: spacing.md,
-    maxHeight: '88%',
-    padding: spacing.lg,
-  },
-  sheetHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  sheetTitle: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  sheetCloseButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 18,
-    height: 36,
-    justifyContent: 'center',
-    width: 36,
-  },
-  fieldLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  optionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  optionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  sheetChip: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  dateRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  dateField: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  dateInputRow: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    minHeight: 40,
-    overflow: 'hidden',
-  },
-  dateInput: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  datePickerButton: {
-    alignItems: 'center',
-    alignSelf: 'stretch',
-    borderLeftColor: colors.border,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    justifyContent: 'center',
-    width: 40,
-  },
-  switchList: {
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    overflow: 'hidden',
-  },
-  switchRow: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderBottomColor: colors.border,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-  },
-  switchLabel: {
-    color: colors.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  sheetActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'flex-end',
-  },
-  primaryAction: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  primaryActionText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  secondaryAction: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  secondaryActionText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-});

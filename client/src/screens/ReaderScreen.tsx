@@ -93,7 +93,8 @@ import {
   setSystemBarsHidden,
 } from '../native/LanluMediaProxy';
 import {useI18n} from '../i18n';
-import {colors, spacing} from '../theme/colors';
+import {spacing, type ThemeColors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {RootStackParamList} from '../navigation/types';
 import type {MetadataPageAttachment, PageInfo, PageSourceInfo} from '../types/api';
 
@@ -714,6 +715,7 @@ const StableVlcPlayer = React.memo(
 );
 
 export function ReaderScreen({route, navigation}: Props) {
+  const {colors} = useTheme();
   const {t} = useI18n();
   const {archiveId, initialPage = 1, children, childIndex, tankoubonId} = route.params;
   const windowDimensions = useWindowDimensions();
@@ -1466,6 +1468,7 @@ export function ReaderScreen({route, navigation}: Props) {
   }, [activeExternalVlcSubtitleAttachment, activeLane, archiveId, localSubtitleUriByAssetId, subtitleTextsByAssetId]);
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<ReaderItem>[]}) => {
       if (progressSeekLockedRef.current) return;
@@ -3590,6 +3593,8 @@ export function ReaderScreen({route, navigation}: Props) {
 }
 
 function ErrorOverlay({title, message}: {title: string; message: string}) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.imageError}>
       <Text style={styles.imageErrorTitle}>{title}</Text>
@@ -3613,6 +3618,8 @@ function ReaderCollectionEndPage({
   t: ReturnType<typeof useI18n>['t'];
   onOpenNext: () => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.collectionEnd}>
       <Text style={styles.collectionEndTitle}>{t('reader.finishedReading')}</Text>
@@ -3664,6 +3671,8 @@ function MediaInfoOverlay({
   t: ReturnType<typeof useI18n>['t'];
   viewport: string;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const mediaState =
     activeLane.kind === 'book' ? null : getMediaState(activeLane.page.pageNumber);
   const spreadPages = activeReaderItem?.pages?.length
@@ -3771,6 +3780,8 @@ function MediaLaneControls({
   onTogglePlay: () => void;
   onVolumeChange: (value: number) => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const sourceCount = page.sources?.length || 0;
   const duration = Math.max(0, state.duration);
   const position = duration > 0 ? state.currentTime / duration : state.position;
@@ -3916,6 +3927,8 @@ function AudioLyricsPanel({
   onLyricTouchTrace?: (trace: AudioLyricTouchTrace) => void;
   onSeekLyric: (seconds: number, trace?: AudioLyricTouchTrace) => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const scrollRef = useRef<ScrollView | null>(null);
   const lineYByIndex = useRef<Record<number, number>>({});
   const userScrollingRef = useRef(false);
@@ -4089,6 +4102,8 @@ function VolumeStrip({
   onToggleMute: () => void;
   onVolumeChange: (pageNumber: number, value: number) => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [barWidth, setBarWidth] = useState(1);
   const volume = state.muted ? 0 : Math.max(0, Math.min(1, state.volume));
   return (
@@ -4140,6 +4155,8 @@ function ReaderSettingsModal({
   onClose: () => void;
   onPatch: (patch: Partial<ReaderSettings>) => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible={open}>
       <ModalBackdrop style={styles.modalBackdrop}>
@@ -4246,6 +4263,8 @@ function ReaderSettingToggle({
   t: ReturnType<typeof useI18n>['t'];
   onPress: () => void;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <TouchableOpacity
       disabled={disabled}
@@ -4274,6 +4293,8 @@ function AudioCoverArtwork({
   size: number;
   source?: ImageSourcePropType;
 }) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const rotation = useSharedValue(0);
 
   useEffect(() => {
@@ -4309,7 +4330,8 @@ function AudioCoverArtwork({
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   screen: {
     backgroundColor: colors.black,
     flex: 1,
@@ -5257,4 +5279,5 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
   },
-});
+  });
+}

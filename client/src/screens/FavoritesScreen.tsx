@@ -25,7 +25,8 @@ import {
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {Archive, MediaItem} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -69,6 +70,7 @@ function groupByTime(items: MediaItem[], tab: Tab, t: TFunction): Section[] {
 export function FavoritesScreen() {
   const navigation = useNavigation<Nav>();
   const {t} = useI18n();
+  const {colors} = useTheme();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('favorites');
   const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]);
@@ -164,6 +166,88 @@ export function FavoritesScreen() {
 
   const sections = useMemo(() => groupByTime(filteredItems, tab, t), [filteredItems, t, tab]);
 
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+        },
+        header: {
+          gap: spacing.md,
+          padding: spacing.lg,
+        },
+        tabs: {
+          backgroundColor: colors.surfaceMuted,
+          borderRadius: 8,
+          flexDirection: 'row',
+          padding: 3,
+        },
+        tab: {
+          alignItems: 'center',
+          borderRadius: 7,
+          flex: 1,
+          flexDirection: 'row',
+          gap: 6,
+          justifyContent: 'center',
+          paddingVertical: 9,
+        },
+        tabActive: {
+          backgroundColor: colors.surface,
+        },
+        tabText: {
+          color: colors.textMuted,
+          fontWeight: '800',
+        },
+        tabTextActive: {
+          color: colors.primary,
+        },
+        searchInput: {
+          backgroundColor: colors.surface,
+          borderColor: colors.border,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          color: colors.text,
+          fontSize: 15,
+          paddingHorizontal: 12,
+          paddingVertical: 10,
+        },
+        inlineError: {
+          color: colors.danger,
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.sm,
+        },
+        content: {
+          paddingHorizontal: spacing.lg,
+          paddingBottom: spacing.lg,
+        },
+        emptyContent: {
+          flexGrow: 1,
+        },
+        sectionHeader: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          marginBottom: spacing.md,
+          marginTop: spacing.md,
+        },
+        sectionTitle: {
+          color: colors.text,
+          fontSize: 18,
+          fontWeight: '800',
+        },
+        sectionCount: {
+          color: colors.textMuted,
+          fontSize: 13,
+          fontWeight: '700',
+        },
+        column: {
+          gap: spacing.md,
+        },
+      }),
+    [colors],
+  );
+
   if (loading && !refreshing && filteredItems.length === 0) {
     return <ScreenState loading title={t('favorites.loading')} />;
   }
@@ -236,81 +320,3 @@ export function FavoritesScreen() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  header: {
-    gap: spacing.md,
-    padding: spacing.lg,
-  },
-  tabs: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 8,
-    flexDirection: 'row',
-    padding: 3,
-  },
-  tab: {
-    alignItems: 'center',
-    borderRadius: 7,
-    flex: 1,
-    flexDirection: 'row',
-    gap: 6,
-    justifyContent: 'center',
-    paddingVertical: 9,
-  },
-  tabActive: {
-    backgroundColor: colors.surface,
-  },
-  tabText: {
-    color: colors.textMuted,
-    fontWeight: '800',
-  },
-  tabTextActive: {
-    color: colors.primary,
-  },
-  searchInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.border,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    color: colors.text,
-    fontSize: 15,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  inlineError: {
-    color: colors.danger,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  content: {
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-  },
-  emptyContent: {
-    flexGrow: 1,
-  },
-  sectionHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-    marginTop: spacing.md,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  sectionCount: {
-    color: colors.textMuted,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  column: {
-    gap: spacing.md,
-  },
-});

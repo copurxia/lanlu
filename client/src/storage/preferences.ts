@@ -6,9 +6,11 @@ import {
   setStoredStrings,
 } from './mmkv';
 
+export type ThemePreference = 'light' | 'dark' | 'system';
 export type HomeViewMode = 'category-rows' | 'masonry' | 'list' | 'tweet' | 'channel';
 export type ReadingMode = 'single-ltr' | 'single-rtl' | 'single-ttb' | 'webtoon';
 
+export const THEME_STORAGE_KEY = 'app-theme';
 export const HOME_VIEW_MODE_STORAGE_KEY = 'home_view_mode';
 export const DEFAULT_HOME_VIEW_MODE: HomeViewMode = 'category-rows';
 
@@ -130,4 +132,17 @@ export async function saveReaderSettings(settings: ReaderSettings): Promise<void
     [READER_KEYS.longPage, String(settings.longPage)],
     [READER_KEYS.seamlessNext, String(settings.seamlessNext)],
   ]);
+}
+
+function normalizeThemePreference(value?: string | null): ThemePreference {
+  if (value === 'light' || value === 'dark') return value;
+  return 'system';
+}
+
+export function loadThemePreferenceSync(): ThemePreference {
+  return normalizeThemePreference(getStoredStringSync(THEME_STORAGE_KEY));
+}
+
+export async function saveThemePreference(preference: ThemePreference): Promise<void> {
+  await setStoredString(THEME_STORAGE_KEY, preference);
 }

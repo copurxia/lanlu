@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useMemo, useState} from 'react';
 import {KeyboardAvoidingView, Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -8,7 +8,8 @@ import {testServer} from '../api/lanlu';
 import {useAuth} from '../auth/AuthContext';
 import {FluentCard, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
-import {colors, spacing} from '../theme/colors';
+import {spacing} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
 import type {RootStackParamList} from '../navigation/types';
 import {normalizeServerUrl} from '../storage/servers';
 
@@ -16,6 +17,7 @@ type Props = NativeStackScreenProps<RootStackParamList, 'AddServer'>;
 
 export function AddServerScreen({route, navigation}: Props) {
   const {t} = useI18n();
+  const {colors} = useTheme();
   const insets = useSafeAreaInsets();
   const editing = route.params?.server;
   const {saveServer, selectServer} = useAuth();
@@ -61,6 +63,76 @@ export function AddServerScreen({route, navigation}: Props) {
       setBusy(false);
     }
   }
+
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        screen: {
+          backgroundColor: colors.background,
+          flex: 1,
+          justifyContent: 'center',
+          padding: spacing.lg,
+        },
+        card: {
+          alignSelf: 'center',
+          gap: spacing.md,
+          maxWidth: 460,
+          width: '100%',
+        },
+        actions: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          gap: spacing.sm,
+          justifyContent: 'flex-end',
+          marginTop: spacing.sm,
+        },
+        primaryButton: {
+          alignItems: 'center',
+          backgroundColor: colors.primary,
+          borderRadius: 8,
+          flexDirection: 'row',
+          gap: spacing.xs,
+          height: 40,
+          justifyContent: 'center',
+          paddingHorizontal: spacing.md,
+        },
+        primaryButtonText: {
+          color: colors.white,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        secondaryButton: {
+          alignItems: 'center',
+          backgroundColor: colors.surface,
+          borderColor: colors.borderStrong,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flexDirection: 'row',
+          gap: spacing.xs,
+          height: 40,
+          justifyContent: 'center',
+          paddingHorizontal: spacing.md,
+        },
+        secondaryButtonText: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '800',
+        },
+        buttonDisabled: {
+          opacity: 0.62,
+        },
+        message: {
+          color: colors.success,
+          fontSize: 13,
+        },
+        error: {
+          color: colors.danger,
+          fontSize: 13,
+          lineHeight: 18,
+        },
+      }),
+    [colors],
+  );
 
   return (
     <KeyboardAvoidingView
@@ -116,69 +188,3 @@ export function AddServerScreen({route, navigation}: Props) {
     </KeyboardAvoidingView>
   );
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    backgroundColor: colors.background,
-    flex: 1,
-    justifyContent: 'center',
-    padding: spacing.lg,
-  },
-  card: {
-    alignSelf: 'center',
-    gap: spacing.md,
-    maxWidth: 460,
-    width: '100%',
-  },
-  actions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'flex-end',
-    marginTop: spacing.sm,
-  },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 8,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  primaryButtonText: {
-    color: colors.white,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.borderStrong,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    gap: spacing.xs,
-    height: 40,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  secondaryButtonText: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  buttonDisabled: {
-    opacity: 0.62,
-  },
-  message: {
-    color: colors.success,
-    fontSize: 13,
-  },
-  error: {
-    color: colors.danger,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-});
