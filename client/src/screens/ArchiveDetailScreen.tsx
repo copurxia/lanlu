@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
   RefreshControl,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import type {NativeStackScreenProps} from '@react-navigation/native-stack';
+import {useFocusEffect} from '@react-navigation/native';
 import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
@@ -122,6 +123,17 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   useEffect(() => {
     load().catch(err => console.warn('Failed to load archive:', err));
   }, [load]);
+
+  const detailHasLoaded = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (detailHasLoaded.current) {
+        load(false).catch(err => console.warn('Failed to reload archive:', err));
+      } else {
+        detailHasLoaded.current = true;
+      }
+    }, [load]),
+  );
 
   const refresh = useCallback(() => {
     setRefreshing(true);

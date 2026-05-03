@@ -20,6 +20,7 @@ export type RootStackParamList = {
     tankoubonId?: string;
     children?: string[];
     childIndex?: number;
+    resumeCollection?: boolean;
   };
 };
 

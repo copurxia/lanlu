@@ -126,10 +126,16 @@ export function ArchiveCard({
 
   const pagecount = Number(archive.pagecount || 0);
   const progress = Number(archive.progress || 0);
+  const progressPercent =
+    pagecount > 0 && progress > 0
+      ? Math.round((Math.min(progress, pagecount) / pagecount) * 100)
+      : 0;
   const progressLabel = isCollection
-    ? t('common.archives', {count: archive.children?.length || 0})
+    ? progressPercent > 0
+      ? `${t('common.archives', {count: archive.children?.length || 0})}  •  ${progressPercent}%`
+      : t('common.archives', {count: archive.children?.length || 0})
     : pagecount > 0 && progress > 0
-      ? `${Math.min(progress, pagecount)} / ${pagecount}`
+      ? `${t('common.pages', {count: pagecount})}  •  ${progressPercent}%`
       : t('common.pages', {count: pagecount || 0});
 
   async function toggleFavorite() {

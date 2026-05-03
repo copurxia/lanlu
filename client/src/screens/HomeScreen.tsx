@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {useNavigation} from '@react-navigation/native';
+import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
@@ -215,13 +215,13 @@ export function HomeScreen() {
       if (isTankoubon(item)) {
         const firstArchive = item.children?.[0];
         if (firstArchive) {
-          navigation.navigate('Reader', {
-            archiveId: firstArchive,
-            initialPage: 1,
-            tankoubonId: item.tankoubon_id,
-            children: item.children,
-            childIndex: 0,
-          });
+      navigation.navigate('Reader', {
+        archiveId: firstArchive,
+        tankoubonId: item.tankoubon_id,
+        children: item.children,
+        childIndex: 0,
+        resumeCollection: true,
+      });
         }
         return;
       }
@@ -451,6 +451,17 @@ export function HomeScreen() {
   useEffect(() => {
     load(1, 'replace').catch(err => console.warn('Failed to load home:', err));
   }, [load, searchVersion]);
+
+  const homeHasLoaded = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      if (homeHasLoaded.current) {
+        load(1, 'replace').catch(err => console.warn('Failed to reload home:', err));
+      } else {
+        homeHasLoaded.current = true;
+      }
+    }, [load]),
+  );
 
   const refresh = useCallback(() => {
     setRefreshing(true);

@@ -712,7 +712,7 @@ const StableVlcPlayer = React.memo(
 export function ReaderScreen({route, navigation}: Props) {
   const {colors} = useTheme();
   const {t} = useI18n();
-  const {archiveId, initialPage = 1, children, childIndex, tankoubonId} = route.params;
+  const {archiveId, initialPage = 1, children, childIndex, tankoubonId, resumeCollection = false} = route.params;
   const windowDimensions = useWindowDimensions();
   const [screenDimensions, setScreenDimensions] = useState(() => Dimensions.get('screen'));
   const viewportDimensions =
@@ -986,24 +986,51 @@ export function ReaderScreen({route, navigation}: Props) {
     setWebtoonHeights({});
     setImageSizeByPage({});
     setWebtoonHydrationTargets({});
+    let targetArchiveId = archiveId;
+    let targetInitialPage = initialPage;
+    let targetChildIndex = childIndex;
+
+    if (resumeCollection && tankoubonId && children?.length) {
+      try {
+        const metas = await Promise.all(
+          children.map(id => fetchArchiveMetadata(id).catch(() => null)),
+        );
+        let resumeIdx = 0;
+        for (let i = metas.length - 1; i >= 0; i--) {
+          if (metas[i]?.progress && metas[i].progress > 0) {
+            resumeIdx = i;
+            break;
+          }
+        }
+        targetArchiveId = children[resumeIdx];
+        targetChildIndex = resumeIdx;
+        const childMeta = metas[resumeIdx];
+        targetInitialPage = childMeta?.progress
+          ? Math.min(childMeta.progress, childMeta.pagecount || childMeta.progress)
+          : 1;
+      } catch {
+        // fallback to route params
+      }
+    }
+
     try {
       const [storedSettings, files] = await Promise.all([
         loadReaderSettings(),
-        fetchArchiveFiles(archiveId),
+        fetchArchiveFiles(targetArchiveId),
       ]);
       setSettings(storedSettings);
       settingsHydratedRef.current = true;
-      const readerPages = files.map((page, index) => createReaderPage(page, index, archiveId));
+      const readerPages = files.map((page, index) => createReaderPage(page, index, targetArchiveId));
       setPages(readerPages);
       setSidebarPages(readerPages);
-      const startIndex = Math.max(0, Math.min(initialPage - 1, readerPages.length - 1));
+      const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
       setCurrentPage(startIndex + 1);
     } catch (err) {
       setError(extractApiError(err));
     } finally {
       setLoading(false);
     }
-  }, [archiveId, createReaderPage, initialPage]);
+  }, [archiveId, createReaderPage, initialPage, tankoubonId, children, childIndex, resumeCollection]);
 
   const ensureMediaProxy = useCallback(
     (page: ReaderPage) => {
