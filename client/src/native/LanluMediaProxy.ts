@@ -4,6 +4,7 @@ type LanluMediaProxyModule = {
   createUrl: (uri: string, headers?: Record<string, string>) => Promise<string>;
   createPageUrl?: (uri: string, headers: Record<string, string> | undefined, path: string) => Promise<string>;
   setSystemBarsHidden?: (hidden: boolean, edgeToEdge: boolean) => void;
+  shareTextFile?: (extension: string, fileName: string, text: string, title: string) => Promise<string>;
   writeTextFile?: (extension: string, text: string) => Promise<string>;
 };
 
@@ -35,6 +36,18 @@ export async function createLocalSubtitleFile(text: string, extension = 'ass') {
     return undefined;
   }
   return nativeProxy.writeTextFile(extension, text);
+}
+
+export async function shareLocalTextFile(
+  text: string,
+  extension = 'txt',
+  fileName = 'lanlu-log',
+  title = fileName,
+) {
+  if (Platform.OS !== 'android' || !nativeProxy?.shareTextFile) {
+    return undefined;
+  }
+  return nativeProxy.shareTextFile(extension, fileName, text, title);
 }
 
 export function setSystemBarsHidden(hidden: boolean, edgeToEdge = true) {

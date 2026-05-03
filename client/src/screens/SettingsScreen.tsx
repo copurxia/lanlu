@@ -18,8 +18,9 @@ import {
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
+import {shareLocalTextFile} from '../native/LanluMediaProxy';
 import {spacing, type ThemeColors} from '../theme/colors';
-import {useTheme, type ThemePreference} from '../theme/ThemeContext';
+import {useTheme} from '../theme/ThemeContext';
 
 export function SettingsScreen() {
   const {languagePreference, setLanguagePreference, t} = useI18n();
@@ -68,9 +69,23 @@ export function SettingsScreen() {
 
   async function shareDiagnostics() {
     const log = await getDiagnosticLog();
+    const text = log || t('settings.diagnosticsEmpty');
+    try {
+      const sharedUri = await shareLocalTextFile(
+        text,
+        'log',
+        'lanlu-diagnostics',
+        t('settings.diagnostics'),
+      );
+      if (sharedUri) {
+        return;
+      }
+    } catch (error) {
+      console.warn('Failed to share diagnostics as file:', error);
+    }
     await Share.share({
       title: t('settings.diagnostics'),
-      message: log || t('settings.diagnosticsEmpty'),
+      message: text,
     });
   }
 
@@ -202,7 +217,7 @@ export function SettingsScreen() {
         statusBarTranslucent
         transparent
         visible={diagnosticsOpen}>
-        <ModalBackdrop animatedStyle={backdropStyle}>
+        <ModalBackdrop animatedStyle={backdropStyle} style={styles.logBackdrop}>
           <Animated.View style={[styles.logSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}, sheetStyle]}>
             <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
             <ScrollView style={styles.logBox}>
@@ -407,6 +422,9 @@ function createStyles(colors: ThemeColors) {
     deleteAction: {
       backgroundColor: colors.danger === '#e84d3d' ? '#2a1515' : '#fff5f5',
     },
+    logBackdrop: {
+      justifyContent: 'flex-end',
+    },
     sheetActions: {
       alignItems: 'center',
       flexDirection: 'row',
@@ -433,6 +451,7 @@ function createStyles(colors: ThemeColors) {
       gap: spacing.md,
       maxHeight: '82%',
       padding: spacing.lg,
+      width: '100%',
     },
     logBox: {
       backgroundColor: colors.surfaceMuted,

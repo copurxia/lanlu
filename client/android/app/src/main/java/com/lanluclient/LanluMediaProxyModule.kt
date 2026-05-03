@@ -1,11 +1,14 @@
 package com.lanluclient
 
+import android.content.ClipData
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import androidx.core.content.FileProvider
 import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
@@ -135,6 +138,52 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
       promise.reject("LANLU_SUBTITLE_FILE", error)
     }
   }
+
+  @ReactMethod
+  fun shareTextFile(extension: String, fileName: String, text: String, title: String, promise: Promise) {
+    try {
+      val safeExtension = sanitizeFilePart(extension, "txt")
+      val safeFileName = sanitizeFilePart(fileName, "lanlu-log")
+      val directory = File(reactApplicationContext.cacheDir, "lanlu_shared")
+      if (!directory.exists()) {
+        directory.mkdirs()
+      }
+      val file = File(directory, "$safeFileName-${System.currentTimeMillis()}.$safeExtension")
+      file.writeText(text, Charsets.UTF_8)
+      val uri = FileProvider.getUriForFile(
+          reactApplicationContext,
+          "${reactApplicationContext.packageName}.fileprovider",
+          file,
+      )
+      val intent = Intent(Intent.ACTION_SEND).apply {
+        type = if (safeExtension == "log" || safeExtension == "txt") "text/plain" else "application/octet-stream"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, title)
+        clipData = ClipData.newUri(reactApplicationContext.contentResolver, file.name, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      val chooser = Intent.createChooser(intent, title).apply {
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      val activity = reactApplicationContext.currentActivity
+      if (activity != null) {
+        activity.startActivity(chooser)
+      } else {
+        chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        reactApplicationContext.startActivity(chooser)
+      }
+      promise.resolve(uri.toString())
+    } catch (error: Exception) {
+      promise.reject("LANLU_SHARE_TEXT_FILE", error)
+    }
+  }
+
+  private fun sanitizeFilePart(value: String, fallback: String): String =
+      value
+          .lowercase()
+          .replace(Regex("[^a-z0-9._-]"), "-")
+          .trim('-', '.', '_')
+          .ifBlank { fallback }
 
   private fun encodeLocalPath(path: String): String =
       path.split("/")
