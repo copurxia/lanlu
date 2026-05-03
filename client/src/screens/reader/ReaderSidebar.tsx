@@ -13,10 +13,17 @@ import {
 import {ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, Music} from 'lucide-react-native';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import {spacing} from '../../theme/colors';
+import {getStoredStringSync, setStoredStringSync} from '../../storage/mmkv';
 import {useTheme} from '../../theme/ThemeContext';
 import type {PageInfo} from '../../types/api';
 
 type SidebarTab = 'thumbnails' | 'list' | 'tree';
+const SIDEBAR_TAB_KEY = 'reader_sidebar_tab';
+
+function loadSidebarTab(): SidebarTab {
+  const stored = getStoredStringSync(SIDEBAR_TAB_KEY);
+  return stored === 'thumbnails' || stored === 'list' || stored === 'tree' ? stored : 'thumbnails';
+}
 
 type SbPage = {
   pageNumber: number;
@@ -110,7 +117,11 @@ function getDisplayDescription(page: SbPage) {
 export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, t}: Props) {
   const {colors} = useTheme();
   const {width: screenWidth, height: screenHeight} = useWindowDimensions();
-  const [activeTab, setActiveTab] = useState<SidebarTab>('thumbnails');
+  const [activeTab, setActiveTabState] = useState<SidebarTab>(loadSidebarTab);
+  const setActiveTab = useCallback((tab: SidebarTab) => {
+    setActiveTabState(tab);
+    setStoredStringSync(SIDEBAR_TAB_KEY, tab);
+  }, []);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(new Set());
   const sidePanel = screenWidth >= 700 && screenWidth > screenHeight;
   const panelWidth = sidePanel ? Math.min(380, Math.max(320, Math.floor(screenWidth * 0.34))) : screenWidth;
@@ -516,13 +527,7 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
               {width: thumbWidth, height: thumbHeight},
               isCurrent && styles.thumbFrameActive,
             ]}>
-            {item.effectiveType === 'image' && thumbSrc ? (
-              <Image
-                resizeMode="cover"
-                source={thumbSource || {uri: thumbSrc, headers: item.headers}}
-                style={[styles.thumbImage, {width: thumbWidth, height: thumbHeight}]}
-              />
-            ) : item.effectiveType === 'video' && videoPreviewUri ? (
+            {item.effectiveType === 'video' && videoPreviewUri ? (
               <VLCPlayer
                 autoplay
                 muted
@@ -539,6 +544,12 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
                 }
                 style={[styles.thumbImage, {width: thumbWidth, height: thumbHeight}]}
                 volume={0}
+              />
+            ) : thumbSrc ? (
+              <Image
+                resizeMode="cover"
+                source={thumbSource || {uri: thumbSrc, headers: item.headers}}
+                style={[styles.thumbImage, {width: thumbWidth, height: thumbHeight}]}
               />
             ) : (
               <View style={[styles.thumbPlaceholder, {width: thumbWidth, height: thumbHeight}]}>
