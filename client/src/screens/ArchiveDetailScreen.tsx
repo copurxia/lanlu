@@ -35,8 +35,8 @@ import {ArchiveDetailActions} from './archive-detail/ArchiveDetailActions';
 import {ArchiveDetailHero} from './archive-detail/ArchiveDetailHero';
 import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
+import {ArchiveCard} from '../components/ArchiveCard';
 import {ArchiveRelated} from './archive-detail/ArchiveRelated';
-import {RelatedArchiveCard} from './archive-detail/RelatedArchiveCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ArchiveDetail'>;
 
@@ -395,7 +395,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         t={t}
         keyExtractor={item => item.arcid}
         renderItem={item => (
-          <RelatedArchiveCard archive={item} onPress={handleRelatedPress} />
+          <ArchiveCard archive={item} variant="related" onOpenReader={() => handleRelatedPress(item)} />
         )}
       />
     </ScrollView>

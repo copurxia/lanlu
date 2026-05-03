@@ -8,7 +8,6 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
@@ -21,20 +20,19 @@ import {
   deleteTankoubon,
   fetchTankoubonMetadata,
   fetchTankoubonRelated,
-  removeArchiveFromTankoubon,
   searchArchives,
   setTankoubonFavorite,
 } from '../api/lanlu';
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
+import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {useTheme} from '../theme/ThemeContext';
+import {spacing} from '../theme/colors';
 import type {Archive, Tankoubon, TankoubonMetadata} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 import {TankoubonDetailHero} from './tankoubon-detail/TankoubonDetailHero';
 import {TankoubonDetailActions} from './tankoubon-detail/TankoubonDetailActions';
-import {TankoubonArchiveGridCard} from './tankoubon-detail/TankoubonArchiveGridCard';
-import {TankoubonArchiveListItem} from './tankoubon-detail/TankoubonArchiveListItem';
 import {AddArchiveDialog} from './tankoubon-detail/AddArchiveDialog';
 import {TankoubonRelated} from './tankoubon-detail/TankoubonRelated';
 import {ArchiveDescription} from './archive-detail/ArchiveDescription';
@@ -48,7 +46,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   const {language, t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
-  const {width: screenWidth} = useWindowDimensions();
   const {tankoubonId, tankoubon} = route.params;
 
   const [metadata, setMetadata] = useState<TankoubonMetadata | null>(null);
@@ -65,28 +62,13 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
 
   // View mode
   const [viewMode, setViewMode] = useState<ViewMode>('list');
-  const gridColumns = screenWidth > 500 ? 3 : 2;
 
-  // Selection
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedArcids, setSelectedArcids] = useState<Set<string>>(new Set());
-
-  // Cover cache
-  const [coverCache, setCoverCache] = useState<Record<string, FastImageSource | null>>({});
-
-  // Dialogs
-  const [removeDialogOpen, setRemoveDialogOpen] = useState(false);
-  const [removeTarget, setRemoveTarget] = useState<Archive | null>(null);
-  const [removingArcids, setRemovingArcids] = useState<Set<string>>(new Set());
   const [addDialogOpen, setAddDialogOpen] = useState(false);
 
   // Related
   const [related, setRelated] = useState<Tankoubon[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Batch operations
-  const [batchActionRunning, setBatchActionRunning] = useState(false);
 
   const loadMetadata = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -131,17 +113,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         .filter((item): item is Archive => 'arcid' in item)
         .map(item => item as Archive);
       setArchives(items);
-      setArchivesLoading(false);
-
-      // Load covers
-      const cache: Record<string, FastImageSource | null> = {};
-      await Promise.all(
-        items.map(async item => {
-          const ca = archiveCoverAsset(item);
-          cache[item.arcid] = await buildAuthorizedAssetImageSource(ca);
-        }),
-      );
-      setCoverCache(cache);
     } catch {
       setArchives([]);
     } finally {
@@ -229,32 +200,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     );
   }, [tankoubonId, navigation, t]);
 
-  const handleRemoveArchive = useCallback(
-    async (arcid: string) => {
-      setRemovingArcids(prev => new Set(prev).add(arcid));
-      try {
-        await removeArchiveFromTankoubon(tankoubonId, arcid);
-        setArchives(prev => prev.filter(a => a.arcid !== arcid));
-      } catch {
-        // ignore
-      } finally {
-        setRemovingArcids(prev => {
-          const next = new Set(prev);
-          next.delete(arcid);
-          return next;
-        });
-      }
-    },
-    [tankoubonId],
-  );
-
-  const confirmRemove = useCallback(() => {
-    if (!removeTarget) return;
-    handleRemoveArchive(removeTarget.arcid).catch(() => {});
-    setRemoveDialogOpen(false);
-    setRemoveTarget(null);
-  }, [removeTarget, handleRemoveArchive]);
-
   const handleTagPress = useCallback(
     (tag: string) => {
       (navigation as any).navigate('Main', {
@@ -267,58 +212,16 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
 
   const handleArchivePress = useCallback(
     (item: Archive) => {
-      if (selectionMode) {
-        setSelectedArcids(prev => {
-          const next = new Set(prev);
-          if (next.has(item.arcid)) next.delete(item.arcid);
-          else next.add(item.arcid);
-          return next;
-        });
-      } else {
-        navigation.push('ArchiveDetail', {
-          archiveId: item.arcid,
-          archive: item,
-          tankoubonId,
-          children: readerChildren,
-          childIndex: readerChildren.indexOf(item.arcid),
-        });
-      }
+      navigation.push('ArchiveDetail', {
+        archiveId: item.arcid,
+        archive: item,
+        tankoubonId,
+        children: readerChildren,
+        childIndex: readerChildren.indexOf(item.arcid),
+      });
     },
-    [selectionMode, navigation, readerChildren, tankoubonId],
+    [navigation, readerChildren, tankoubonId],
   );
-
-  const handleArchiveLongPress = useCallback(
-    (arcid: string) => {
-      if (!selectionMode) {
-        setSelectionMode(true);
-        setSelectedArcids(new Set([arcid]));
-      }
-    },
-    [selectionMode],
-  );
-
-  const exitSelectionMode = useCallback(() => {
-    setSelectionMode(false);
-    setSelectedArcids(new Set());
-  }, []);
-
-  const handleBatchRemove = useCallback(async () => {
-    if (selectedArcids.size === 0) return;
-    setBatchActionRunning(true);
-    try {
-      await Promise.all(
-        Array.from(selectedArcids).map(arcid =>
-          removeArchiveFromTankoubon(tankoubonId, arcid),
-        ),
-      );
-      setArchives(prev => prev.filter(a => !selectedArcids.has(a.arcid)));
-      exitSelectionMode();
-    } catch {
-      Alert.alert('', t('common.error'));
-    } finally {
-      setBatchActionRunning(false);
-    }
-  }, [selectedArcids, tankoubonId, exitSelectionMode, t]);
 
   const filteredArchives = useMemo(() => {
     const q = archiveFilter.trim().toLowerCase();
@@ -422,37 +325,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           fontSize: 14,
           paddingVertical: 10,
         },
-        selectionBar: {
-          alignItems: 'center',
-          backgroundColor: colors.primaryMuted,
-          borderRadius: 8,
-          flexDirection: 'row',
-          gap: 10,
-          marginBottom: 10,
-          padding: 10,
-        },
-        selectionText: {
-          color: colors.primary,
-          flex: 1,
-          fontSize: 13,
-          fontWeight: '700',
-        },
-        selectionActionButton: {
-          backgroundColor: colors.danger,
-          borderRadius: 6,
-          paddingHorizontal: 12,
-          paddingVertical: 6,
-        },
-        selectionActionText: {
-          color: colors.white,
-          fontSize: 12,
-          fontWeight: '700',
-        },
-        selectionCancelText: {
-          color: colors.textMuted,
-          fontSize: 13,
-          fontWeight: '600',
-        },
         loading: {
           paddingVertical: 24,
         },
@@ -474,59 +346,10 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         grid: {
           flexDirection: 'row',
           flexWrap: 'wrap',
-          margin: -4,
+          gap: spacing.md,
         },
         listContainer: {
           gap: 8,
-        },
-        dialogOverlay: {
-          ...StyleSheet.absoluteFill,
-          alignItems: 'center',
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          justifyContent: 'center',
-          zIndex: 100,
-        },
-        dialog: {
-          backgroundColor: colors.surface,
-          borderRadius: 14,
-          marginHorizontal: 32,
-          padding: 20,
-          width: '80%',
-        },
-        dialogTitle: {
-          color: colors.text,
-          fontSize: 17,
-          fontWeight: '800',
-          marginBottom: 8,
-        },
-        dialogMessage: {
-          color: colors.textMuted,
-          fontSize: 14,
-          lineHeight: 20,
-          marginBottom: 16,
-        },
-        dialogButtons: {
-          flexDirection: 'row',
-          gap: 10,
-          justifyContent: 'flex-end',
-        },
-        dialogButton: {
-          borderRadius: 8,
-          paddingHorizontal: 16,
-          paddingVertical: 10,
-        },
-        dialogButtonText: {
-          color: colors.text,
-          fontSize: 14,
-          fontWeight: '600',
-        },
-        dialogButtonDanger: {
-          backgroundColor: colors.danger,
-        },
-        dialogButtonDangerText: {
-          color: colors.white,
-          fontSize: 14,
-          fontWeight: '700',
         },
       }),
     [colors],
@@ -626,40 +449,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
             />
           </View>
 
-          {selectionMode ? (
-            <View style={styles.selectionBar}>
-              <Text style={styles.selectionText}>
-                {t('common.selected')} ({selectedArcids.size})
-              </Text>
-              <TouchableOpacity
-                style={styles.selectionActionButton}
-                onPress={() => {
-                  Alert.alert(
-                    t('tankoubon.removeSelectedConfirmTitle'),
-                    t('tankoubon.removeSelectedConfirmMessage', {
-                      count: selectedArcids.size,
-                    }),
-                    [
-                      {text: t('common.cancel'), style: 'cancel'},
-                      {
-                        text: t('common.remove'),
-                        style: 'destructive',
-                        onPress: () => handleBatchRemove(),
-                      },
-                    ],
-                  );
-                }}
-                disabled={batchActionRunning}>
-                <Text style={styles.selectionActionText}>
-                  {batchActionRunning ? t('common.loading') : t('tankoubon.removeSelected')}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={exitSelectionMode}>
-                <Text style={styles.selectionCancelText}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
           {archivesLoading ? (
             <ActivityIndicator color={colors.primary} style={styles.loading} />
           ) : archives.length === 0 ? (
@@ -675,55 +464,29 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
             </View>
           ) : viewMode === 'grid' ? (
             <View style={styles.grid}>
-              {filteredArchives.map(item => {
-                const isRemoving = removingArcids.has(item.arcid);
-                const isSelected = selectedArcids.has(item.arcid);
-                return (
-                  <View key={item.arcid} style={{width: `${100 / gridColumns}%` as any, padding: 4}}>
-                    <TankoubonArchiveGridCard
-                      archive={item}
-                      cover={coverCache[item.arcid] ?? null}
-                      selected={isSelected}
-                      selectionMode={selectionMode}
-                      onPress={() => handleArchivePress(item)}
-                      onLongPress={() => handleArchiveLongPress(item.arcid)}
-                      onRemove={() => {
-                        setRemoveTarget(item);
-                        setRemoveDialogOpen(true);
-                      }}
-                      removing={isRemoving}
-                      t={t}
-                    />
-                  </View>
-                );
-              })}
+              {filteredArchives.map(item => (
+                <ArchiveCard
+                  key={`${item.arcid}-${viewMode}`}
+                  archive={item}
+                  variant="grid"
+                  onPress={() => handleArchivePress(item)}
+                  onChanged={() => loadArchives()}
+                  onTagPress={handleTagPress}
+                />
+              ))}
             </View>
           ) : (
             <View style={styles.listContainer}>
-              {filteredArchives.map(item => {
-                const isRemoving = removingArcids.has(item.arcid);
-                const isSelected = selectedArcids.has(item.arcid);
-                return (
-                  <TankoubonArchiveListItem
-                    key={item.arcid}
-                    archive={item}
-                    cover={coverCache[item.arcid] ?? null}
-                    selected={isSelected}
-                    selectionMode={selectionMode}
-                    onPress={() => handleArchivePress(item)}
-                    onRemove={
-                      !selectionMode
-                        ? () => {
-                            setRemoveTarget(item);
-                            setRemoveDialogOpen(true);
-                          }
-                        : undefined
-                    }
-                    removing={isRemoving}
-                    t={t}
-                  />
-                );
-              })}
+              {filteredArchives.map(item => (
+                <ArchiveCard
+                  key={`${item.arcid}-${viewMode}`}
+                  archive={item}
+                  variant="list"
+                  onPress={() => handleArchivePress(item)}
+                  onChanged={() => loadArchives()}
+                  onTagPress={handleTagPress}
+                />
+              ))}
             </View>
           )}
         </View>
@@ -754,38 +517,6 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         }}
         t={t}
       />
-
-      {removeDialogOpen && removeTarget ? (
-        <View style={styles.dialogOverlay}>
-          <View style={styles.dialog}>
-            <Text style={styles.dialogTitle}>
-              {t('tankoubon.removeConfirmTitle')}
-            </Text>
-            <Text style={styles.dialogMessage}>
-              {t('tankoubon.removeConfirmMessage', {
-                title: removeTarget.title || removeTarget.filename || removeTarget.arcid,
-              })}
-            </Text>
-            <View style={styles.dialogButtons}>
-              <TouchableOpacity
-                style={styles.dialogButton}
-                onPress={() => {
-                  setRemoveDialogOpen(false);
-                  setRemoveTarget(null);
-                }}>
-                <Text style={styles.dialogButtonText}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.dialogButton, styles.dialogButtonDanger]}
-                onPress={confirmRemove}>
-                <Text style={styles.dialogButtonDangerText}>
-                  {t('common.remove')}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      ) : null}
     </View>
   );
 }

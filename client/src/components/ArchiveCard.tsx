@@ -15,6 +15,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
+import {Eye, Heart} from 'lucide-react-native';
 
 import {
   isTankoubon,
@@ -31,10 +32,10 @@ import type {Archive, MediaItem} from '../types/api';
 
 type Props = {
   archive: MediaItem;
-  onPress: () => void;
+  onPress?: () => void;
   onOpenDetail?: () => void;
   onOpenReader?: () => void;
-  variant?: 'grid' | 'list' | 'tweet' | 'channel' | 'row';
+  variant?: 'grid' | 'list' | 'tweet' | 'channel' | 'row' | 'related';
   onChanged?: () => void;
   onTagPress?: (tag: string) => void;
 };
@@ -78,7 +79,9 @@ export function ArchiveCard({
       ? 136
       : variant === 'grid'
         ? Math.floor((width - spacing.lg * 2 - spacing.md) / 2)
-        : width - spacing.lg * 2;
+        : variant === 'related'
+          ? 120
+          : width - spacing.lg * 2;
   const title = mediaItemTitle(archive);
   const isCollection = isTankoubon(archive);
   const itemId = mediaItemId(archive);
@@ -90,6 +93,8 @@ export function ArchiveCard({
     return !lowered.includes('source') && !stripNamespace(lowered).includes('source');
   });
   const previewTags = visibleTags.slice(0, maxPreviewTags);
+
+  const showActions = tagsOpen;
 
   useEffect(() => {
     tagProgress.value = withTiming(tagsOpen ? 1 : 0, {duration: 160});
@@ -147,7 +152,8 @@ export function ArchiveCard({
       setTagsOpen(false);
       return;
     }
-    (onOpenReader || onPress)();
+    const handler = onOpenReader || onPress;
+    if (handler) handler();
   }
 
   function handleBodyPress() {
@@ -155,7 +161,8 @@ export function ArchiveCard({
       setTagsOpen(false);
       return;
     }
-    (onOpenDetail || onPress)();
+    const handler = onOpenDetail || onPress;
+    if (handler) handler();
   }
 
   function showTags() {
@@ -185,10 +192,7 @@ export function ArchiveCard({
     () =>
       StyleSheet.create({
         card: {
-          backgroundColor: colors.surface,
-          borderColor: colors.border,
           borderRadius: radius.md,
-          borderWidth: StyleSheet.hairlineWidth,
           marginBottom: spacing.md,
           overflow: 'hidden',
         },
@@ -208,6 +212,8 @@ export function ArchiveCard({
         coverWrap: {
           aspectRatio: 0.72,
           backgroundColor: colors.surfaceMuted,
+          borderRadius: radius.md,
+          overflow: 'hidden',
         },
         listCover: {
           aspectRatio: 0.72,
@@ -286,19 +292,23 @@ export function ArchiveCard({
           lineHeight: 18,
           marginTop: 4,
         },
-        favoriteButton: {
+        actionButtons: {
           bottom: 8,
+          flexDirection: 'row',
+          gap: 8,
+          left: 8,
           position: 'absolute',
-          right: 8,
         },
-        favoriteText: {
-          color: colors.textMuted,
-          fontSize: 24,
-          textShadowColor: colors.white,
-          textShadowRadius: 2,
+        actionButton: {
+          alignItems: 'center',
+          backgroundColor: 'rgba(255,255,255,0.15)',
+          borderRadius: 18,
+          height: 32,
+          justifyContent: 'center',
+          width: 32,
         },
-        favoriteActive: {
-          color: '#f2a900',
+        actionButtonActive: {
+          backgroundColor: 'rgba(255,255,255,0.25)',
         },
         tagOverlay: {
           bottom: 0,
@@ -318,7 +328,7 @@ export function ArchiveCard({
           bottom: 0,
           gap: 7,
           left: 0,
-          paddingBottom: 28,
+          paddingBottom: 48,
           paddingHorizontal: 12,
           paddingTop: 18,
           position: 'absolute',
@@ -354,6 +364,10 @@ export function ArchiveCard({
           fontSize: 11,
           lineHeight: 15,
         },
+        // 'related' variant: override marginBottom for horizontal scroll
+        relatedCard: {
+          marginBottom: 0,
+        },
       }),
     [colors],
   );
@@ -367,6 +381,7 @@ export function ArchiveCard({
         variant === 'list' && styles.listCard,
         variant === 'tweet' && styles.tweetCard,
         variant === 'channel' && styles.channelCard,
+        variant === 'related' && styles.relatedCard,
         cardAnimatedStyle,
       ]}
     >
@@ -458,12 +473,43 @@ export function ArchiveCard({
                 </View>
               </Animated.View>
             ) : null}
+            {showActions && !isCollection ? (
+              <View style={styles.actionButtons}>
+                {onOpenDetail ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    onPress={(e) => {
+                      e.stopPropagation?.();
+                      handleBodyPress();
+                    }}
+                    style={styles.actionButton}>
+                    <Eye color={colors.white} size={16} />
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  accessibilityRole="button"
+                  accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
+                  onPress={(e) => {
+                    e.stopPropagation?.();
+                    toggleFavorite();
+                  }}
+                  style={[styles.actionButton, favorite && styles.actionButtonActive]}>
+                  <Heart
+                    color={favorite ? '#f87171' : colors.white}
+                    fill={favorite ? '#f87171' : 'transparent'}
+                    size={16}
+                  />
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </Animated.View>
         </GestureDetector>
         <TouchableOpacity activeOpacity={0.78} onPress={handleBodyPress} style={styles.body}>
-          <Text numberOfLines={2} style={styles.title}>
-            {title}
-          </Text>
+          <TouchableOpacity activeOpacity={0.7} onPress={handleBodyPress}>
+            <Text numberOfLines={2} style={styles.title}>
+              {title}
+            </Text>
+          </TouchableOpacity>
           <Text numberOfLines={1} style={styles.meta}>
             {progressLabel}
           </Text>
@@ -473,18 +519,6 @@ export function ArchiveCard({
             </Text>
           ) : null}
         </TouchableOpacity>
-        {!isCollection ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
-            onPress={toggleFavorite}
-            style={styles.favoriteButton}>
-            <Text style={[styles.favoriteText, favorite && styles.favoriteActive]}>
-              {favorite ? '★' : '☆'}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
     </Animated.View>
   );
 }
-

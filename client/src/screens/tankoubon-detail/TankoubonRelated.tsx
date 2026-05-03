@@ -1,6 +1,7 @@
 import React, {useMemo} from 'react';
-import {ActivityIndicator, FlatList, ListRenderItemInfo, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {ActivityIndicator, FlatList, ListRenderItemInfo, StyleSheet, Text, View} from 'react-native';
 
+import {ArchiveCard} from '../../components/ArchiveCard';
 import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 import type {Tankoubon} from '../../types/api';
@@ -39,27 +40,6 @@ export function TankoubonRelated({related, loading, t, onPress}: Props) {
         list: {
           gap: 10,
         },
-        card: {
-          width: 120,
-        },
-        coverPlaceholder: {
-          aspectRatio: 0.72,
-          alignItems: 'center',
-          backgroundColor: colors.primaryMuted,
-          borderRadius: 6,
-          justifyContent: 'center',
-          width: '100%',
-        },
-        coverPlaceholderText: {
-          color: colors.primary,
-          fontSize: 18,
-          fontWeight: '800',
-        },
-        cardTitle: {
-          color: colors.text,
-          fontSize: 12,
-          marginTop: 4,
-        },
       }),
     [colors],
   );
@@ -83,18 +63,11 @@ export function TankoubonRelated({related, loading, t, onPress}: Props) {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.list}
           renderItem={({item}: ListRenderItemInfo<Tankoubon>) => (
-            <TouchableOpacity
-              style={styles.card}
-              onPress={() => onPress(item)}>
-              <View style={styles.coverPlaceholder}>
-                <Text style={styles.coverPlaceholderText}>
-                  {item.title?.[0] || 'C'}
-                </Text>
-              </View>
-              <Text style={styles.cardTitle} numberOfLines={2}>
-                {item.title || item.tankoubon_id}
-              </Text>
-            </TouchableOpacity>
+            <ArchiveCard
+              archive={item}
+              variant="related"
+              onOpenReader={() => onPress(item)}
+            />
           )}
         />
       ) : null}
