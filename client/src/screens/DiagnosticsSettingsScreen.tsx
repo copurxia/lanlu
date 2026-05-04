@@ -1,0 +1,270 @@
+import React, {useMemo, useState} from 'react';
+import {Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {ArrowLeft, FileText, Share2, Trash2} from 'lucide-react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {useNavigation} from '@react-navigation/native';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+
+import {
+  ModalBackdrop,
+  ScreenRoot,
+  screenSafeAreaPadding,
+} from '../components/SafeAreaSurface';
+import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
+import {useI18n} from '../i18n';
+import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
+import {shareLocalTextFile} from '../native/LanluMediaProxy';
+import {spacing, type ThemeColors} from '../theme/colors';
+import {useTheme} from '../theme/ThemeContext';
+
+export function DiagnosticsSettingsScreen() {
+  const {t} = useI18n();
+  const {colors} = useTheme();
+  const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [diagnosticLog, setDiagnosticLog] = useState('');
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const diagnosticsProgress = useSharedValue(0);
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: diagnosticsProgress.value,
+  }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{translateY: (1 - diagnosticsProgress.value) * 28}],
+  }));
+
+  async function openDiagnostics() {
+    const log = await getDiagnosticLog();
+    setDiagnosticLog(log || t('settings.diagnosticsEmpty'));
+    setDiagnosticsOpen(true);
+    diagnosticsProgress.value = withTiming(1, {duration: 160});
+  }
+
+  function closeDiagnostics() {
+    diagnosticsProgress.value = withTiming(0, {duration: 130}, finished => {
+      if (finished) {
+        runOnJS(setDiagnosticsOpen)(false);
+      }
+    });
+  }
+
+  async function shareDiagnostics() {
+    const log = await getDiagnosticLog();
+    const text = log || t('settings.diagnosticsEmpty');
+    try {
+      const sharedUri = await shareLocalTextFile(
+        text,
+        'log',
+        'lanlu-diagnostics',
+        t('settings.diagnostics'),
+      );
+      if (sharedUri) return;
+    } catch {
+      // fallback
+    }
+    await Share.share({
+      title: t('settings.diagnostics'),
+      message: text,
+    });
+  }
+
+  async function clearDiagnostics() {
+    await clearDiagnosticLog();
+    setDiagnosticLog(t('settings.diagnosticsEmpty'));
+  }
+
+  return (
+    <ScreenRoot padded={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}>
+            <ArrowLeft color={colors.text} size={24} />
+          </TouchableOpacity>
+          <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
+        </View>
+
+        <FluentCard style={styles.section}>
+          <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
+          <View style={styles.actionList}>
+            <SettingsActionRow
+              colors={colors}
+              icon={<FileText color={colors.textMuted} size={18} />}
+              label={t('settings.viewLogs')}
+              onPress={openDiagnostics}
+            />
+            <SettingsActionRow
+              colors={colors}
+              icon={<Share2 color={colors.textMuted} size={18} />}
+              label={t('settings.shareLogs')}
+              onPress={shareDiagnostics}
+            />
+          </View>
+        </FluentCard>
+      </ScrollView>
+
+      <Modal
+        animationType="fade"
+        onRequestClose={closeDiagnostics}
+        statusBarTranslucent
+        transparent
+        visible={diagnosticsOpen}>
+        <ModalBackdrop animatedStyle={backdropStyle} style={styles.logBackdrop}>
+          <Animated.View style={[styles.logSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}, sheetStyle]}>
+            <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
+            <ScrollView style={styles.logBox}>
+              <Text selectable style={styles.logText}>{diagnosticLog}</Text>
+            </ScrollView>
+            <View style={styles.sheetActions}>
+              <TouchableOpacity
+                accessibilityLabel={t('settings.clearLogs')}
+                accessibilityRole="button"
+                onPress={clearDiagnostics}
+                style={[styles.iconAction, styles.deleteAction]}>
+                <Trash2 color={colors.danger} size={18} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityLabel={t('settings.shareLogs')}
+                accessibilityRole="button"
+                onPress={shareDiagnostics}
+                style={styles.iconAction}>
+                <Share2 color={colors.textMuted} size={18} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={closeDiagnostics}
+                style={styles.closePill}>
+                <Text style={styles.closePillText}>{t('common.close')}</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        </ModalBackdrop>
+      </Modal>
+    </ScreenRoot>
+  );
+}
+
+function SettingsActionRow({
+  colors,
+  icon,
+  label,
+  onPress,
+}: {
+  colors: ThemeColors;
+  icon: React.ReactNode;
+  label: string;
+  onPress: () => void;
+}) {
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <TouchableOpacity
+      activeOpacity={0.78}
+      accessibilityLabel={label}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={styles.actionRow}>
+      <Text style={styles.actionLabel}>{label}</Text>
+      <View style={styles.iconAction}>{icon}</View>
+    </TouchableOpacity>
+  );
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    content: {gap: spacing.md},
+    section: {gap: spacing.md},
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    backButton: {padding: spacing.xs},
+    actionList: {
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      overflow: 'hidden',
+    },
+    actionRow: {
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderBottomColor: colors.border,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      gap: spacing.md,
+      minHeight: 48,
+      paddingHorizontal: spacing.md,
+    },
+    actionLabel: {
+      color: colors.text,
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '800',
+    },
+    iconAction: {
+      alignItems: 'center',
+      backgroundColor: colors.surfaceMuted,
+      borderColor: colors.border,
+      borderRadius: 18,
+      borderWidth: StyleSheet.hairlineWidth,
+      height: 36,
+      justifyContent: 'center',
+      width: 36,
+    },
+    deleteAction: {
+      backgroundColor: colors.danger === '#e84d3d' ? '#2a1515' : '#fff5f5',
+    },
+    logBackdrop: {justifyContent: 'flex-end'},
+    sheetActions: {
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: spacing.sm,
+      justifyContent: 'flex-end',
+    },
+    closePill: {
+      alignItems: 'center',
+      backgroundColor: colors.primary,
+      borderRadius: 18,
+      height: 36,
+      justifyContent: 'center',
+      paddingHorizontal: spacing.lg,
+    },
+    closePillText: {
+      color: colors.white,
+      fontSize: 14,
+      fontWeight: '800',
+    },
+    logSheet: {
+      backgroundColor: colors.surface,
+      borderTopLeftRadius: 14,
+      borderTopRightRadius: 14,
+      gap: spacing.md,
+      maxHeight: '82%',
+      padding: spacing.lg,
+      width: '100%',
+    },
+    logBox: {
+      backgroundColor: colors.surfaceMuted,
+      borderColor: colors.border,
+      borderRadius: 8,
+      borderWidth: StyleSheet.hairlineWidth,
+      maxHeight: 420,
+      padding: spacing.md,
+    },
+    logText: {
+      color: colors.text,
+      fontFamily: 'monospace',
+      fontSize: 11,
+      lineHeight: 16,
+    },
+  });
+}

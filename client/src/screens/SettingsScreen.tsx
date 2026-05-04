@@ -1,34 +1,76 @@
-import React, {useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useState} from 'react';
 import {Alert, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {Check, FileText, Languages, LogOut, Moon, RotateCcw, Share2, Sun, Trash2} from 'lucide-react-native';
+import {BarChart3, BookOpen, ChevronRight, Clock, Database, FileText, Filter, FolderOpen, Heart, Languages, ListTodo, LogOut, Moon, Package, Repeat, Server, Shield, Sun, Tag, Trash2, TrendingUp, User, Users} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import Animated, {
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
-
+import {useNavigation} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import Animated, {runOnJS, useAnimatedStyle, useSharedValue, withTiming} from 'react-native-reanimated';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {useAuth} from '../auth/AuthContext';
-import {
-  ModalBackdrop,
-  ScreenRoot,
-  screenSafeAreaPadding,
-} from '../components/SafeAreaSurface';
+import {ModalBackdrop, ScreenRoot, screenSafeAreaPadding} from '../components/SafeAreaSurface';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
+import type {RootStackParamList} from '../navigation/types';
+import {buildAuthorizedAssetImageSource} from '../api/client';
+import {fetchUserStats, fetchReadingTrend, type UserStats, type ReadingTrendItem} from '../api/lanlu';
+import {DashboardStats} from '../components/DashboardStats';
+import {ReadingTrendChart} from '../components/ReadingTrendChart';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
 import {shareLocalTextFile} from '../native/LanluMediaProxy';
-import {spacing, type ThemeColors} from '../theme/colors';
+import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 
+type SettingsItem = {
+  icon: React.ReactNode;
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+};
+
+function SettingsGroup({title, items}: {title?: string; items: SettingsItem[]}) {
+  const {colors} = useTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <FluentCard style={styles.section}>
+      {title ? <Text style={styles.groupTitle}>{title}</Text> : null}
+      <View style={styles.actionList}>
+        {items.map((item, index) => (
+          <TouchableOpacity
+            key={index}
+            activeOpacity={0.78}
+            accessibilityLabel={item.label}
+            accessibilityRole="button"
+            onPress={item.onPress}
+            style={[
+              styles.actionRow,
+              index === items.length - 1 && styles.actionRowLast,
+            ]}>
+            <View style={styles.iconWrap}>{item.icon}</View>
+            <Text
+              style={[styles.actionLabel, item.danger && styles.actionLabelDanger]}
+              numberOfLines={1}>
+              {item.label}
+            </Text>
+            <ChevronRight color={item.danger ? colors.danger : colors.textMuted} size={18} />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </FluentCard>
+  );
+}
+
 export function SettingsScreen() {
-  const {languagePreference, setLanguagePreference, t} = useI18n();
+  const {t} = useI18n();
   const {activeServer, user, showServerList, signOut} = useAuth();
   const {colors, themePreference, setThemePreference} = useTheme();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
   const [diagnosticLog, setDiagnosticLog] = useState('');
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [avatarSource, setAvatarSource] = useState<FastImageSource | null>(null);
+  const [stats, setStats] = useState<UserStats | null>(null);
+  const [trend, setTrend] = useState<ReadingTrendItem[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(true);
   const diagnosticsProgress = useSharedValue(0);
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: diagnosticsProgress.value,
@@ -36,8 +78,33 @@ export function SettingsScreen() {
   const sheetStyle = useAnimatedStyle(() => ({
     transform: [{translateY: (1 - diagnosticsProgress.value) * 28}],
   }));
-
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  useEffect(() => {
+    if (user?.avatarAssetId) {
+      buildAuthorizedAssetImageSource(user.avatarAssetId).then(setAvatarSource);
+    } else {
+      setAvatarSource(null);
+    }
+  }, [user?.avatarAssetId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadDashboard() {
+      setDashboardLoading(true);
+      const [statsData, trendData] = await Promise.all([
+        fetchUserStats(),
+        fetchReadingTrend(30),
+      ]);
+      if (!cancelled) {
+        setStats(statsData);
+        setTrend(trendData);
+        setDashboardLoading(false);
+      }
+    }
+    loadDashboard();
+    return () => {cancelled = true;};
+  }, []);
 
   function confirmSignOut() {
     Alert.alert(t('settings.signOutTitle'), t('settings.signOutMessage'), [
@@ -51,6 +118,12 @@ export function SettingsScreen() {
       },
     ]);
   }
+
+  const themeIcon = themePreference === 'dark'
+    ? <Moon color={colors.textMuted} size={20} />
+    : themePreference === 'light'
+    ? <Sun color={colors.textMuted} size={20} />
+    : <Languages color={colors.textMuted} size={20} />;
 
   async function openDiagnostics() {
     const log = await getDiagnosticLog();
@@ -77,11 +150,9 @@ export function SettingsScreen() {
         'lanlu-diagnostics',
         t('settings.diagnostics'),
       );
-      if (sharedUri) {
-        return;
-      }
-    } catch (error) {
-      console.warn('Failed to share diagnostics as file:', error);
+      if (sharedUri) return;
+    } catch {
+      // fallback
     }
     await Share.share({
       title: t('settings.diagnostics'),
@@ -94,123 +165,141 @@ export function SettingsScreen() {
     setDiagnosticLog(t('settings.diagnosticsEmpty'));
   }
 
+  const clientSettings: SettingsItem[] = [
+    {
+      icon: themeIcon,
+      label: t('settings.theme'),
+      onPress: () => navigation.navigate('ThemeSettings'),
+    },
+    {
+      icon: <Languages color={colors.textMuted} size={20} />,
+      label: t('settings.language'),
+      onPress: () => navigation.navigate('LanguageSettings'),
+    },
+    {
+      icon: <FileText color={colors.textMuted} size={20} />,
+      label: t('settings.diagnostics'),
+      onPress: () => navigation.navigate('DiagnosticsSettings'),
+    },
+  ];
+
+  const serverSettings: SettingsItem[] = [
+    {
+      icon: <Shield color={colors.textMuted} size={20} />,
+      label: t('settings.auth'),
+      onPress: () => navigation.navigate('AccountSecurity'),
+    },
+  ];
+
+  if (user?.isAdmin === true) {
+    serverSettings.push(
+      {
+        icon: <FolderOpen color={colors.textMuted} size={20} />,
+        label: t('settings.categories'),
+        onPress: () => navigation.navigate('CategorySettings'),
+      },
+      {
+        icon: <Tag color={colors.textMuted} size={20} />,
+        label: t('settings.tags'),
+        onPress: () => navigation.navigate('TagSettings'),
+      },
+      {
+        icon: <Filter color={colors.textMuted} size={20} />,
+        label: t('settings.smartFilters'),
+        onPress: () => navigation.navigate('SmartFilterSettings'),
+      },
+      {
+        icon: <Users color={colors.textMuted} size={20} />,
+        label: t('settings.users'),
+        onPress: () => navigation.navigate('UserSettings'),
+      },
+      {
+        icon: <Server color={colors.textMuted} size={20} />,
+        label: t('settings.system.title'),
+        onPress: () => navigation.navigate('SystemSettings'),
+      },
+      {
+        icon: <ListTodo color={colors.textMuted} size={20} />,
+        label: t('settings.tasks'),
+        onPress: () => navigation.navigate('TaskSettings'),
+      },
+      {
+        icon: <Clock color={colors.textMuted} size={20} />,
+        label: t('settings.cron'),
+        onPress: () => navigation.navigate('CronSettings'),
+      },
+      {
+        icon: <Package color={colors.textMuted} size={20} />,
+        label: t('settings.plugins'),
+        onPress: () => navigation.navigate('PluginSettings'),
+      },
+      {
+        icon: <BarChart3 color={colors.textMuted} size={20} />,
+        label: t('settings.stats'),
+        onPress: () => navigation.navigate('StatsSettings'),
+      },
+    );
+  }
+
   return (
     <ScreenRoot padded={false}>
       <ScrollView
         contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
         showsVerticalScrollIndicator={false}>
-        <FluentCard style={styles.section}>
-          <FluentTitle>{t('settings.account')}</FluentTitle>
-          <View style={styles.row}>
-            <Text style={styles.label}>{t('settings.user')}</Text>
-            <Text style={styles.value}>{user?.username || t('common.unknown')}</Text>
+        {/* 概览 */}
+        <View style={styles.overviewRow}>
+          <View style={styles.avatarWrap}>
+            {avatarSource ? (
+              <FastImage source={avatarSource} style={styles.avatar} />
+            ) : (
+              <User color={colors.textMuted} size={24} />
+            )}
           </View>
-          <View style={styles.row}>
-            <Text style={styles.label}>{t('settings.server')}</Text>
-            <Text style={styles.value}>{activeServer?.name || 'Lanlu'}</Text>
-            <FluentCaption>{activeServer?.baseUrl || ''}</FluentCaption>
+          <View style={styles.overviewInfo}>
+            <Text style={styles.overviewUsername} numberOfLines={1}>
+              {user?.username || t('common.unknown')}
+            </Text>
+            <Text style={styles.overviewServer} numberOfLines={1}>
+              {activeServer?.name || 'Lanlu'}
+              {activeServer?.baseUrl ? ` · ${activeServer.baseUrl}` : ''}
+            </Text>
           </View>
-        </FluentCard>
-
-        <FluentCard style={styles.section}>
-          <FluentTitle>{t('settings.client')}</FluentTitle>
-          <FluentCaption>
-            {t('settings.clientDescription')}
-          </FluentCaption>
-          <View style={styles.actionList}>
-            <SettingsActionRow
-              colors={colors}
-              icon={<RotateCcw color={colors.textMuted} size={18} />}
-              label={t('auth.switchServer')}
+          <View style={styles.overviewActions}>
+            <TouchableOpacity
+              accessibilityLabel={t('auth.switchServer')}
+              accessibilityRole="button"
               onPress={() => {
                 showServerList().catch(error =>
                   console.warn('Failed to switch server:', error),
                 );
               }}
-            />
-            <SettingsActionRow
-              colors={colors}
-              danger
-              icon={<LogOut color={colors.danger} size={18} />}
-              label={t('settings.signOut')}
+              style={styles.iconButton}>
+              <Repeat color={colors.textMuted} size={20} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              accessibilityLabel={t('settings.signOut')}
+              accessibilityRole="button"
               onPress={confirmSignOut}
-            />
+              style={styles.iconButton}>
+              <LogOut color={colors.danger} size={20} />
+            </TouchableOpacity>
           </View>
+        </View>
+
+        {/* 统计概览 */}
+        <FluentCard style={styles.section}>
+          <DashboardStats stats={stats} loading={dashboardLoading} />
+          <ReadingTrendChart data={trend} loading={dashboardLoading} />
         </FluentCard>
 
-        <FluentCard style={styles.section}>
-          <FluentTitle>{t('settings.theme')}</FluentTitle>
-          <FluentCaption>{t('settings.themeDescription')}</FluentCaption>
-          <View style={styles.actionList}>
-            <ThemeActionRow
-              active={themePreference === 'system'}
-              colors={colors}
-              icon={<Languages color={themePreference === 'system' ? colors.primary : colors.textMuted} size={18} />}
-              label={t('settings.themeSystem')}
-              onPress={() => setThemePreference('system')}
-            />
-            <ThemeActionRow
-              active={themePreference === 'light'}
-              colors={colors}
-              icon={<Sun color={themePreference === 'light' ? colors.primary : colors.textMuted} size={18} />}
-              label={t('settings.themeLight')}
-              onPress={() => setThemePreference('light')}
-            />
-            <ThemeActionRow
-              active={themePreference === 'dark'}
-              colors={colors}
-              icon={<Moon color={themePreference === 'dark' ? colors.primary : colors.textMuted} size={18} />}
-              label={t('settings.themeDark')}
-              onPress={() => setThemePreference('dark')}
-            />
-          </View>
-        </FluentCard>
+        {/* 客户端设置 */}
+        <SettingsGroup title={t('settings.clientSettings')} items={clientSettings} />
 
-        <FluentCard style={styles.section}>
-          <FluentTitle>{t('settings.language')}</FluentTitle>
-          <FluentCaption>{t('settings.languageDescription')}</FluentCaption>
-          <View style={styles.actionList}>
-            <LanguageActionRow
-              active={languagePreference === 'system'}
-              colors={colors}
-              label={t('settings.languageSystem')}
-              onPress={() => setLanguagePreference('system')}
-            />
-            <LanguageActionRow
-              active={languagePreference === 'zh'}
-              colors={colors}
-              label={t('settings.languageChinese')}
-              onPress={() => setLanguagePreference('zh')}
-            />
-            <LanguageActionRow
-              active={languagePreference === 'en'}
-              colors={colors}
-              label={t('settings.languageEnglish')}
-              onPress={() => setLanguagePreference('en')}
-            />
-          </View>
-        </FluentCard>
-
-        <FluentCard style={styles.section}>
-          <FluentTitle>{t('settings.diagnostics')}</FluentTitle>
-          <FluentCaption>{t('settings.diagnosticsDescription')}</FluentCaption>
-          <View style={styles.actionList}>
-            <SettingsActionRow
-              colors={colors}
-              icon={<FileText color={colors.textMuted} size={18} />}
-              label={t('settings.viewLogs')}
-              onPress={openDiagnostics}
-            />
-            <SettingsActionRow
-              colors={colors}
-              icon={<Share2 color={colors.textMuted} size={18} />}
-              label={t('settings.shareLogs')}
-              onPress={shareDiagnostics}
-            />
-          </View>
-        </FluentCard>
+        {/* 服务端设置 */}
+        <SettingsGroup title={t('settings.serverSettings')} items={serverSettings} />
       </ScrollView>
 
+      {/* Diagnostics Modal */}
       <Modal
         animationType="fade"
         onRequestClose={closeDiagnostics}
@@ -236,7 +325,7 @@ export function SettingsScreen() {
                 accessibilityRole="button"
                 onPress={shareDiagnostics}
                 style={styles.iconAction}>
-                <Share2 color={colors.textMuted} size={18} />
+                <FileText color={colors.textMuted} size={18} />
               </TouchableOpacity>
               <TouchableOpacity
                 accessibilityRole="button"
@@ -252,120 +341,62 @@ export function SettingsScreen() {
   );
 }
 
-function LanguageActionRow({
-  active,
-  colors,
-  label,
-  onPress,
-}: {
-  active: boolean;
-  colors: ThemeColors;
-  label: string;
-  onPress: () => void;
-}) {
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  return (
-    <TouchableOpacity
-      activeOpacity={0.78}
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={styles.actionRow}>
-      <View style={styles.languageIcon}>
-        <Languages color={active ? colors.primary : colors.textMuted} size={18} />
-      </View>
-      <Text style={[styles.actionLabel, active && styles.actionLabelActive]}>{label}</Text>
-      {active ? (
-        <View style={styles.checkIcon}>
-          <Check color={colors.white} size={15} />
-        </View>
-      ) : null}
-    </TouchableOpacity>
-  );
-}
-
-function ThemeActionRow({
-  active,
-  colors,
-  icon,
-  label,
-  onPress,
-}: {
-  active: boolean;
-  colors: ThemeColors;
-  icon: React.ReactNode;
-  label: string;
-  onPress: () => void;
-}) {
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  return (
-    <TouchableOpacity
-      activeOpacity={0.78}
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={styles.actionRow}>
-      <View style={styles.languageIcon}>
-        {icon}
-      </View>
-      <Text style={[styles.actionLabel, active && styles.actionLabelActive]}>{label}</Text>
-      {active ? (
-        <View style={styles.checkIcon}>
-          <Check color={colors.white} size={15} />
-        </View>
-      ) : null}
-    </TouchableOpacity>
-  );
-}
-
-function SettingsActionRow({
-  colors,
-  danger,
-  icon,
-  label,
-  onPress,
-}: {
-  colors: ThemeColors;
-  danger?: boolean;
-  icon: React.ReactNode;
-  label: string;
-  onPress: () => void;
-}) {
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  return (
-    <TouchableOpacity
-      activeOpacity={0.78}
-      accessibilityLabel={label}
-      accessibilityRole="button"
-      onPress={onPress}
-      style={styles.actionRow}>
-      <Text style={[styles.actionLabel, danger && styles.actionLabelDanger]}>{label}</Text>
-      <View style={[styles.iconAction, danger && styles.deleteAction]}>{icon}</View>
-    </TouchableOpacity>
-  );
-}
-
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    content: {
-      gap: spacing.md,
-    },
-    section: {
-      gap: spacing.md,
-    },
-    row: {
-      gap: spacing.xs,
-    },
-    label: {
+    content: {gap: spacing.md},
+    section: {gap: spacing.md},
+    groupTitle: {
       color: colors.textMuted,
       fontSize: 12,
       fontWeight: '700',
       textTransform: 'uppercase',
     },
-    value: {
+    overviewRow: {
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: radius.md,
+      borderColor: colors.border,
+      borderWidth: StyleSheet.hairlineWidth,
+      flexDirection: 'row',
+      gap: spacing.md,
+      padding: spacing.lg,
+    },
+    avatarWrap: {
+      alignItems: 'center',
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: 24,
+      height: 48,
+      justifyContent: 'center',
+      overflow: 'hidden',
+      width: 48,
+    },
+    avatar: {
+      height: 48,
+      width: 48,
+    },
+    overviewInfo: {
+      flex: 1,
+      gap: 2,
+    },
+    overviewUsername: {
       color: colors.text,
-      fontSize: 16,
-      fontWeight: '800',
+      fontSize: 17,
+      fontWeight: '700',
+    },
+    overviewServer: {
+      color: colors.textMuted,
+      fontSize: 13,
+    },
+    overviewActions: {
+      flexDirection: 'row',
+      gap: spacing.xs,
+    },
+    iconButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     actionList: {
       borderColor: colors.border,
@@ -383,31 +414,19 @@ function createStyles(colors: ThemeColors) {
       minHeight: 48,
       paddingHorizontal: spacing.md,
     },
+    actionRowLast: {borderBottomWidth: 0},
     actionLabel: {
       color: colors.text,
       flex: 1,
       fontSize: 15,
       fontWeight: '800',
     },
-    actionLabelDanger: {
-      color: colors.danger,
-    },
-    actionLabelActive: {
-      color: colors.primary,
-    },
-    languageIcon: {
+    actionLabelDanger: {color: colors.danger},
+    iconWrap: {
       alignItems: 'center',
       height: 36,
       justifyContent: 'center',
       width: 28,
-    },
-    checkIcon: {
-      alignItems: 'center',
-      backgroundColor: colors.primary,
-      borderRadius: 13,
-      height: 26,
-      justifyContent: 'center',
-      width: 26,
     },
     iconAction: {
       alignItems: 'center',
@@ -422,9 +441,7 @@ function createStyles(colors: ThemeColors) {
     deleteAction: {
       backgroundColor: colors.danger === '#e84d3d' ? '#2a1515' : '#fff5f5',
     },
-    logBackdrop: {
-      justifyContent: 'flex-end',
-    },
+    logBackdrop: {justifyContent: 'flex-end'},
     sheetActions: {
       alignItems: 'center',
       flexDirection: 'row',

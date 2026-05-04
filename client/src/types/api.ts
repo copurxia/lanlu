@@ -174,3 +174,50 @@ export type LoginResponse = ApiEnvelope<{
   token?: AuthToken;
   challengeId?: string;
 }>;
+
+export type AuthSession = {
+  id: number;
+  name: string;
+  prefix: string;
+  createdAt?: string;
+  lastUsedAt?: string;
+  lastUsedIp?: string;
+  userAgent?: string;
+  expiresAt?: string;
+  current?: boolean;
+};
+
+export type PasskeyCredential = {
+  id: number;
+  name: string;
+  credentialId: string;
+  algorithm: string;
+  transports: string[];
+  userVerified: boolean;
+  backupEligible: boolean;
+  backupState: boolean;
+  createdAt: string;
+  lastUsedAt: string;
+};
+
+export type TotpStatus = {
+  enabled: boolean;
+  credentialName?: string;
+  createdAt?: string;
+  recoveryCodesRemaining: number;
+};
+
+export type TotpEnrollmentPayload = {
+  challengeId: string;
+  secret: string;
+  manualEntryKey: string;
+  otpauthUri: string;
+  issuer: string;
+  accountName: string;
+};
+
+export type StepUpOptions = {
+  methods: string[];
+};
+
+export type AuthTokenFull = AuthToken & {token: string};

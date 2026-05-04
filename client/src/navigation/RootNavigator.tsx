@@ -11,15 +11,28 @@ import {Heart, Home, Settings} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
+import {AccountSecurityScreen} from '../screens/AccountSecurityScreen';
 import {AddServerScreen} from '../screens/AddServerScreen';
 import {ArchiveDetailScreen} from '../screens/ArchiveDetailScreen';
+import {CategorySettingsScreen} from '../screens/CategorySettingsScreen';
+import {CronSettingsScreen} from '../screens/CronSettingsScreen';
+import {DiagnosticsSettingsScreen} from '../screens/DiagnosticsSettingsScreen';
 import {FavoritesScreen} from '../screens/FavoritesScreen';
 import {HomeScreen} from '../screens/HomeScreen';
+import {LanguageSettingsScreen} from '../screens/LanguageSettingsScreen';
 import {LoginScreen} from '../screens/LoginScreen';
+import {PluginSettingsScreen} from '../screens/PluginSettingsScreen';
 import {ReaderScreen} from '../screens/ReaderScreen';
 import {ServerListScreen} from '../screens/ServerListScreen';
 import {SettingsScreen} from '../screens/SettingsScreen';
+import {SmartFilterSettingsScreen} from '../screens/SmartFilterSettingsScreen';
+import {StatsSettingsScreen} from '../screens/StatsSettingsScreen';
+import {SystemSettingsScreen} from '../screens/SystemSettingsScreen';
+import {TagSettingsScreen} from '../screens/TagSettingsScreen';
 import {TankoubonDetailScreen} from '../screens/TankoubonDetailScreen';
+import {TaskSettingsScreen} from '../screens/TaskSettingsScreen';
+import {ThemeSettingsScreen} from '../screens/ThemeSettingsScreen';
+import {UserSettingsScreen} from '../screens/UserSettingsScreen';
 import {useI18n} from '../i18n';
 import {useTheme} from '../theme/ThemeContext';
 import type {MainTabParamList, RootStackParamList} from './types';
@@ -130,6 +143,71 @@ export function RootNavigator() {
             <Stack.Screen
               name="Main"
               component={MainTabs}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="AccountSecurity"
+              component={AccountSecurityScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="ThemeSettings"
+              component={ThemeSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="LanguageSettings"
+              component={LanguageSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="DiagnosticsSettings"
+              component={DiagnosticsSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="CategorySettings"
+              component={CategorySettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="TagSettings"
+              component={TagSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="SmartFilterSettings"
+              component={SmartFilterSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="UserSettings"
+              component={UserSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="SystemSettings"
+              component={SystemSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="TaskSettings"
+              component={TaskSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="CronSettings"
+              component={CronSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="PluginSettings"
+              component={PluginSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="StatsSettings"
+              component={StatsSettingsScreen}
               options={{headerShown: false}}
             />
             <Stack.Screen

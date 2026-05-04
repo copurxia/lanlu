@@ -6,6 +6,21 @@ export type RootStackParamList = {
   AddServer: {server?: LanluServer} | undefined;
   Login: undefined;
   Main: undefined;
+  // Settings
+  AccountSecurity: undefined;
+  ThemeSettings: undefined;
+  LanguageSettings: undefined;
+  DiagnosticsSettings: undefined;
+  OverviewSettings: undefined;
+  CategorySettings: undefined;
+  TagSettings: undefined;
+  SmartFilterSettings: undefined;
+  UserSettings: undefined;
+  SystemSettings: undefined;
+  TaskSettings: undefined;
+  CronSettings: undefined;
+  PluginSettings: undefined;
+  StatsSettings: undefined;
   TankoubonDetail: {tankoubonId: string; tankoubon?: Tankoubon};
   ArchiveDetail: {
     archiveId: string;

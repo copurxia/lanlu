@@ -4,15 +4,22 @@ import type {
   Archive,
   ArchiveFilesResponse,
   ArchiveMetadata,
+  AuthSession,
+  AuthToken,
+  AuthTokenFull,
   AuthUser,
   Category,
   LoginResponse,
   MediaItem,
   PageInfo,
   PageSourceInfo,
+  PasskeyCredential,
   SearchResponse,
+  StepUpOptions,
   Tankoubon,
   TankoubonMetadata,
+  TotpEnrollmentPayload,
+  TotpStatus,
 } from '../types/api';
 import axios from 'axios';
 import {appendDiagnosticLog} from '../storage/diagnostics';
@@ -607,4 +614,206 @@ function normalizeAssets(rawAssets: unknown): Record<string, number> | undefined
     if (id !== undefined) out[key] = id;
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+// ─── Auth Security API ────────────────────────────────────────────────────
+
+export async function listTokens(): Promise<ApiEnvelope<{tokens: AuthToken[]}>> {
+  const response = await apiClient.get<ApiEnvelope<{tokens: AuthToken[]}>>('/api/auth/tokens');
+  return response.data;
+}
+
+export async function createToken(name: string): Promise<ApiEnvelope<{token: AuthTokenFull}>> {
+  const response = await apiClient.post<ApiEnvelope<{token: AuthTokenFull}>>('/api/auth/tokens', {name});
+  return response.data;
+}
+
+export async function revokeToken(id: number): Promise<void> {
+  await apiClient.delete(`/api/auth/tokens/${id}`);
+}
+
+export async function listSessions(): Promise<ApiEnvelope<{sessions: AuthSession[]}>> {
+  const response = await apiClient.get<ApiEnvelope<{sessions: AuthSession[]}>>('/api/auth/sessions');
+  return response.data;
+}
+
+export async function revokeSession(id: number): Promise<void> {
+  await apiClient.delete(`/api/auth/sessions/${id}`);
+}
+
+export async function revokeOtherSessions(): Promise<void> {
+  await apiClient.post('/api/auth/sessions/revoke-others', {});
+}
+
+export async function changeUsername(newUsername: string): Promise<ApiEnvelope<{user: AuthUser}>> {
+  const response = await apiClient.post<ApiEnvelope<{user: AuthUser}>>('/api/auth/username', {newUsername});
+  return response.data;
+}
+
+export async function changePassword(newPassword: string): Promise<void> {
+  await apiClient.post('/api/auth/password', {newPassword});
+}
+
+export async function getTotpStatus(): Promise<ApiEnvelope<TotpStatus>> {
+  const response = await apiClient.get<ApiEnvelope<TotpStatus>>('/api/auth/totp/status');
+  return response.data;
+}
+
+export async function startTotpEnrollment(name?: string): Promise<ApiEnvelope<TotpEnrollmentPayload>> {
+  const response = await apiClient.post<ApiEnvelope<TotpEnrollmentPayload>>(
+    '/api/auth/totp/enroll/start',
+    {name: name?.trim() || ''},
+  );
+  return response.data;
+}
+
+export async function confirmTotpEnrollment(params: {
+  challengeId: string;
+  code: string;
+  name?: string;
+}): Promise<ApiEnvelope<{recoveryCodes: string[]}>> {
+  const response = await apiClient.post<ApiEnvelope<{recoveryCodes: string[]}>>(
+    '/api/auth/totp/enroll/confirm',
+    {
+      challengeId: params.challengeId,
+      code: params.code,
+      name: params.name?.trim() || '',
+    },
+  );
+  return response.data;
+}
+
+export async function regenerateRecoveryCodes(code: string): Promise<ApiEnvelope<{recoveryCodes: string[]}>> {
+  const response = await apiClient.post<ApiEnvelope<{recoveryCodes: string[]}>>(
+    '/api/auth/totp/recovery-codes/regenerate',
+    {code},
+  );
+  return response.data;
+}
+
+export async function disableTotp(): Promise<void> {
+  await apiClient.delete('/api/auth/totp');
+}
+
+export async function listPasskeyCredentials(): Promise<ApiEnvelope<{credentials: PasskeyCredential[]}>> {
+  const response = await apiClient.get<ApiEnvelope<{credentials: PasskeyCredential[]}>>(
+    '/api/auth/webauthn/credentials',
+  );
+  return response.data;
+}
+
+export async function revokePasskeyCredential(id: number): Promise<void> {
+  await apiClient.delete(`/api/auth/webauthn/credentials/${id}`, {data: {}});
+}
+
+export async function getStepUpOptions(): Promise<ApiEnvelope<StepUpOptions>> {
+  const response = await apiClient.get<ApiEnvelope<StepUpOptions>>('/api/auth/step-up/options');
+  return response.data;
+}
+
+export async function verifyStepUpPassword(password: string): Promise<void> {
+  await apiClient.post('/api/auth/step-up/password', {password});
+}
+
+export async function verifyStepUpTotp(params: {code?: string; recoveryCode?: string}): Promise<void> {
+  await apiClient.post('/api/auth/step-up/totp', {
+    code: params.code || '',
+    recoveryCode: params.recoveryCode || '',
+  });
+}
+
+// WebAuthn registration via passkey native module
+export async function getWebauthnRegisterOptions(): Promise<ApiEnvelope<{
+  challengeId: string;
+  publicKey: Record<string, unknown>;
+}>> {
+  const response = await apiClient.post<ApiEnvelope<{
+    challengeId: string;
+    publicKey: Record<string, unknown>;
+  }>>('/api/auth/webauthn/register/options', {});
+  return response.data;
+}
+
+export async function verifyWebauthnRegistration(params: {
+  challengeId: string;
+  name: string;
+  credential: Record<string, unknown>;
+}): Promise<void> {
+  await apiClient.post('/api/auth/webauthn/register/verify', {
+    challengeId: params.challengeId,
+    name: params.name,
+    credential: params.credential,
+  });
+}
+
+// WebAuthn step-up via passkey native module
+export async function getWebauthnStepUpOptions(): Promise<ApiEnvelope<{
+  challengeId: string;
+  publicKey: Record<string, unknown>;
+}>> {
+  const response = await apiClient.post<ApiEnvelope<{
+    challengeId: string;
+    publicKey: Record<string, unknown>;
+  }>>('/api/auth/step-up/webauthn/options', {});
+  return response.data;
+}
+
+export async function verifyWebauthnStepUp(params: {
+  challengeId: string;
+  credential: Record<string, unknown>;
+}): Promise<void> {
+  await apiClient.post('/api/auth/step-up/webauthn/verify', {
+    challengeId: params.challengeId,
+    credential: params.credential,
+  });
+}
+
+// ─── User Stats ────────────────────────────────────────────────────────────
+
+export type UserStats = {
+  favoriteCount: number;
+  readCount: number;
+  totalPagesRead: number;
+  totalArchives: number;
+};
+
+export type ReadingTrendItem = {
+  date: string;
+  count: number;
+};
+
+export async function fetchUserStats(): Promise<UserStats> {
+  try {
+    const response = await apiClient.get<ApiEnvelope<UserStats>>('/api/user/stats');
+    const data = response.data?.data;
+    if (data) {
+      return {
+        favoriteCount: Number(data.favoriteCount) || 0,
+        readCount: Number(data.readCount) || 0,
+        totalPagesRead: Number(data.totalPagesRead) || 0,
+        totalArchives: Number(data.totalArchives) || 0,
+      };
+    }
+  } catch {
+    // silent
+  }
+  return {favoriteCount: 0, readCount: 0, totalPagesRead: 0, totalArchives: 0};
+}
+
+export async function fetchReadingTrend(days = 30): Promise<ReadingTrendItem[]> {
+  try {
+    const safeDays = Math.max(1, Math.min(365, Math.trunc(days)));
+    const response = await apiClient.get<ApiEnvelope<ReadingTrendItem[]>>('/api/user/trend', {
+      params: {days: safeDays},
+    });
+    if (Array.isArray(response.data?.data)) {
+      return response.data.data.map(item => ({
+        date: String(item.date || ''),
+        count: Number(item.count) || 0,
+      }));
+    }
+  } catch {
+    // silent
+  }
+  return [];
 }
