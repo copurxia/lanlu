@@ -5,7 +5,6 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -17,6 +16,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {FluentSwitch} from '../components/fluent';
 import {
   CalendarDays,
   ChevronRight,
@@ -1506,10 +1506,8 @@ function FilterSwitch({
   return (
     <View style={styles.switchRow}>
       <Text style={styles.switchLabel}>{label}</Text>
-      <Switch
+      <FluentSwitch
         onValueChange={onValueChange}
-        thumbColor={value ? colors.primary : colors.white}
-        trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
         value={value}
       />
     </View>

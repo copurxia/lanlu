@@ -1,6 +1,6 @@
 import React, {useCallback, useMemo, useState} from 'react';
-import {Alert, Linking, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {Download, Heart} from 'lucide-react-native';
+import {Alert, Linking, Modal, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {CheckCircle, Download, Edit, FolderOpen, Heart, MoreHorizontal, RotateCcw, Trash2} from 'lucide-react-native';
 
 import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
@@ -37,6 +37,7 @@ export function ArchiveDetailActions({
 }: Props) {
   const {colors} = useTheme();
   const progress = Number(metadata.progress || 0);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   const styles = useMemo(
     () =>
@@ -76,41 +77,68 @@ export function ArchiveDetailActions({
           backgroundColor: colors.primary,
           borderColor: colors.primary,
         },
-        secondaryRow: {
+        overlay: {
+          backgroundColor: 'rgba(0,0,0,0.4)',
+          flex: 1,
+          justifyContent: 'flex-end',
+        },
+        menuSheet: {
+          backgroundColor: colors.background,
+          borderTopLeftRadius: 16,
+          borderTopRightRadius: 16,
+          paddingBottom: 24,
+          paddingTop: 8,
+        },
+        menuHandle: {
+          alignSelf: 'center',
+          backgroundColor: colors.border,
+          borderRadius: 3,
+          height: 4,
+          marginBottom: 12,
+          width: 40,
+        },
+        menuItem: {
+          alignItems: 'center',
           flexDirection: 'row',
-          flexWrap: 'wrap',
-          gap: 8,
+          gap: 12,
+          paddingHorizontal: 20,
+          paddingVertical: 14,
         },
-        secondaryButton: {
-          alignItems: 'center',
-          backgroundColor: colors.surface,
-          borderColor: colors.border,
-          borderRadius: 6,
-          borderWidth: StyleSheet.hairlineWidth,
-          paddingHorizontal: 12,
-          paddingVertical: 7,
-        },
-        secondaryButtonText: {
+        menuItemText: {
           color: colors.text,
-          fontSize: 13,
-          fontWeight: '600',
+          fontSize: 15,
+          fontWeight: '500',
         },
-        secondaryButtonDanger: {
-          alignItems: 'center',
-          borderColor: colors.danger,
-          borderRadius: 6,
-          borderWidth: 1,
-          paddingHorizontal: 12,
-          paddingVertical: 7,
-        },
-        secondaryButtonDangerText: {
+        menuItemDangerText: {
           color: colors.danger,
-          fontSize: 13,
-          fontWeight: '600',
+          fontSize: 15,
+          fontWeight: '500',
         },
       }),
     [colors],
   );
+
+  function renderMenuItem(
+    label: string,
+    icon: React.ReactNode,
+    onPress?: () => void,
+    danger = false,
+  ) {
+    if (!onPress) return null;
+    return (
+      <TouchableOpacity
+        style={styles.menuItem}
+        onPress={() => {
+          setMenuVisible(false);
+          onPress();
+        }}>
+        {icon}
+        <Text style={danger ? styles.menuItemDangerText : styles.menuItemText}>
+          {label}
+        </Text>
+      </TouchableOpacity>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -136,40 +164,57 @@ export function ArchiveDetailActions({
 
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel={t('archive.download')}
+          accessibilityLabel={t('common.more')}
           style={styles.iconButton}
-          onPress={onDownload}>
-          <Download color={colors.text} size={20} />
+          onPress={() => setMenuVisible(true)}>
+          <MoreHorizontal color={colors.text} size={20} />
         </TouchableOpacity>
       </View>
 
-      <View style={styles.secondaryRow}>
-        {onMarkAsRead ? (
-          <TouchableOpacity style={styles.secondaryButton} onPress={onMarkAsRead}>
-            <Text style={styles.secondaryButtonText}>{t('archive.markAsRead')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onMarkAsNew ? (
-          <TouchableOpacity style={styles.secondaryButton} onPress={onMarkAsNew}>
-            <Text style={styles.secondaryButtonText}>{t('archive.markAsNew')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onAddToTankoubon ? (
-          <TouchableOpacity style={styles.secondaryButton} onPress={onAddToTankoubon}>
-            <Text style={styles.secondaryButtonText}>{t('tankoubon.addArchive')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onEdit ? (
-          <TouchableOpacity style={styles.secondaryButton} onPress={onEdit}>
-            <Text style={styles.secondaryButtonText}>{t('common.edit')}</Text>
-          </TouchableOpacity>
-        ) : null}
-        {onDelete ? (
-          <TouchableOpacity style={styles.secondaryButtonDanger} onPress={onDelete}>
-            <Text style={styles.secondaryButtonDangerText}>{t('common.delete')}</Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
+      <Modal
+        animationType="fade"
+        onRequestClose={() => setMenuVisible(false)}
+        statusBarTranslucent
+        transparent
+        visible={menuVisible}>
+        <Pressable style={styles.overlay} onPress={() => setMenuVisible(false)}>
+          <Pressable style={styles.menuSheet}>
+            <View style={styles.menuHandle} />
+
+            {renderMenuItem(
+              t('archive.download'),
+              <Download color={colors.text} size={20} />,
+              onDownload,
+            )}
+            {renderMenuItem(
+              t('archive.markAsRead'),
+              <CheckCircle color={colors.text} size={20} />,
+              onMarkAsRead,
+            )}
+            {renderMenuItem(
+              t('archive.markAsNew'),
+              <RotateCcw color={colors.text} size={20} />,
+              onMarkAsNew,
+            )}
+            {renderMenuItem(
+              t('tankoubon.addArchive'),
+              <FolderOpen color={colors.text} size={20} />,
+              onAddToTankoubon,
+            )}
+            {renderMenuItem(
+              t('common.edit'),
+              <Edit color={colors.text} size={20} />,
+              onEdit,
+            )}
+            {renderMenuItem(
+              t('common.delete'),
+              <Trash2 color={colors.danger} size={20} />,
+              onDelete,
+              true,
+            )}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

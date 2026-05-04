@@ -1,10 +1,10 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Switch} from 'react-native';
+import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {ArrowLeft, Plus} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle} from '../components/fluent';
+import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
@@ -211,11 +211,9 @@ export function CronSettingsScreen() {
               </View>
             </TouchableOpacity>
             <View style={styles.taskActions}>
-              <Switch
+              <FluentSwitch
                 value={task.enabled}
                 onValueChange={() => handleToggleEnabled(task)}
-                trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                thumbColor={task.enabled ? colors.primary : colors.textMuted}
               />
               <FluentButton label={t("common.trigger")} variant="ghost" onPress={() => handleTrigger(task.id)} />
               <FluentButton label={t('common.delete')} variant="danger" onPress={() => confirmDelete(task)} />
@@ -233,11 +231,9 @@ export function CronSettingsScreen() {
             <FluentTextField label={t("common.taskType")} value={form.taskType} onChangeText={v => setForm(f => ({...f, taskType: v}))} />
             <View style={styles.switchRow}>
               <Text style={styles.switchLabel}>Enabled</Text>
-              <Switch
+              <FluentSwitch
                 value={form.enabled}
                 onValueChange={v => setForm(f => ({...f, enabled: v}))}
-                trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                thumbColor={form.enabled ? colors.primary : colors.textMuted}
               />
             </View>
             <FluentTextField label={t("common.priority")} value={form.priority} onChangeText={v => setForm(f => ({...f, priority: v}))} keyboardType="numeric" />

@@ -1,9 +1,9 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View} from 'react-native';
+import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle, FluentSpinner} from '../components/fluent';
+import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle, FluentSpinner} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {
@@ -325,11 +325,9 @@ export function SmartFilterSettingsScreen() {
                   style={styles.actionButton}>
                   <Icons.Edit3 color={colors.textMuted} size={18} />
                 </TouchableOpacity>
-                <Switch
+                <FluentSwitch
                   onValueChange={() => handleToggle(filter)}
                   value={filter.enabled !== false}
-                  trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                  thumbColor={filter.enabled !== false ? colors.primary : colors.textMuted}
                 />
                 <TouchableOpacity
                   accessibilityRole="button"
@@ -437,29 +435,23 @@ export function SmartFilterSettingsScreen() {
               />
               <View style={styles.switchRow}>
                 <Text style={styles.switchLabel}>{'New only'}</Text>
-                <Switch
-                  onValueChange={setFormNewOnly}
-                  value={formNewOnly}
-                  trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                  thumbColor={formNewOnly ? colors.primary : colors.textMuted}
-                />
+              <FluentSwitch
+                onValueChange={setFormNewOnly}
+                value={formNewOnly}
+              />
               </View>
               <View style={styles.switchRow}>
                 <Text style={styles.switchLabel}>{'Untagged only'}</Text>
-                <Switch
+                <FluentSwitch
                   onValueChange={setFormUntaggedOnly}
                   value={formUntaggedOnly}
-                  trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                  thumbColor={formUntaggedOnly ? colors.primary : colors.textMuted}
                 />
               </View>
               <View style={styles.switchRow}>
                 <Text style={styles.switchLabel}>{t('common.enabled')}</Text>
-                <Switch
+                <FluentSwitch
                   onValueChange={setFormEnabled}
                   value={formEnabled}
-                  trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                  thumbColor={formEnabled ? colors.primary : colors.textMuted}
                 />
               </View>
               <View style={styles.modalActions}>

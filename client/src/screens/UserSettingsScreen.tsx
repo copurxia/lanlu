@@ -1,10 +1,10 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View} from 'react-native';
+import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {ArrowLeft, Plus} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle} from '../components/fluent';
+import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {
@@ -171,11 +171,9 @@ export function UserSettingsScreen() {
               ) : null}
               <View style={styles.toggleRow}>
                 <Text style={styles.toggleLabel}>{t('auth.admin')}</Text>
-                <Switch
+                <FluentSwitch
                   value={user.isAdmin}
                   onValueChange={() => handleToggleRole(user)}
-                  trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                  thumbColor={user.isAdmin ? colors.primary : colors.textMuted}
                 />
               </View>
               <View style={styles.userActions}>
@@ -215,11 +213,9 @@ export function UserSettingsScreen() {
             />
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>{t('auth.admin')}</Text>
-              <Switch
+              <FluentSwitch
                 value={createIsAdmin}
                 onValueChange={setCreateIsAdmin}
-                trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                thumbColor={createIsAdmin ? colors.primary : colors.textMuted}
               />
             </View>
             <View style={styles.modalActions}>

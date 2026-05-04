@@ -1,6 +1,7 @@
-import React, {useMemo} from 'react';
+import React, {useEffect, useMemo, useRef} from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Pressable,
   StyleProp,
   StyleSheet,
@@ -235,6 +236,102 @@ export function FluentSpinner({label}: {label?: string}) {
     <View style={styles.spinner}>
       <ActivityIndicator color={colors.primary} />
       {label ? <Text style={styles.caption}>{label}</Text> : null}
+    </View>
+  );
+}
+
+export function FluentSwitch({
+  value,
+  onValueChange,
+  disabled,
+}: {
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+}) {
+  const {colors} = useTheme();
+  const thumbTranslate = useRef(new Animated.Value(value ? 20 : 0)).current;
+
+  useEffect(() => {
+    Animated.spring(thumbTranslate, {
+      toValue: value ? 20 : 0,
+      useNativeDriver: true,
+      friction: 8,
+      tension: 120,
+    }).start();
+  }, [value, thumbTranslate]);
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{checked: value}}
+      disabled={disabled}
+      onPress={() => onValueChange?.(!value)}
+      style={{
+        width: 44,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: value ? colors.primary : colors.borderStrong,
+        justifyContent: 'center',
+        paddingHorizontal: 3,
+        opacity: disabled ? 0.5 : 1,
+      }}>
+      <Animated.View
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: 9,
+          backgroundColor: colors.white,
+          shadowColor: colors.black,
+          shadowOffset: {width: 0, height: 1},
+          shadowOpacity: 0.2,
+          shadowRadius: 1.5,
+          elevation: 2,
+          transform: [{translateX: thumbTranslate}],
+        }}
+      />
+    </Pressable>
+  );
+}
+
+export function FluentSwitchRow({
+  label,
+  value,
+  onValueChange,
+  disabled,
+  style,
+}: {
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+  disabled?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const {colors} = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        row: {
+          alignItems: 'center',
+          flexDirection: 'row',
+          justifyContent: 'space-between',
+          minHeight: 48,
+        },
+        label: {
+          color: colors.text,
+          flex: 1,
+          fontSize: 15,
+          fontWeight: '700',
+          marginRight: spacing.md,
+        },
+      }),
+    [colors],
+  );
+
+  return (
+    <View style={[styles.row, style]}>
+      <Text style={styles.label}>{label}</Text>
+      <FluentSwitch disabled={disabled} onValueChange={onValueChange} value={value} />
     </View>
   );
 }

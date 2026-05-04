@@ -1,10 +1,10 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentTitle} from '../components/fluent';
+import {FluentButton, FluentCard, FluentSwitch, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {adminListSystemSettings, adminUpdateSystemSettings, type SystemSetting} from '../api/admin';
@@ -205,9 +205,7 @@ export function SystemSettingsScreen() {
                   return (
                     <View key={setting.key} style={[styles.settingRow, isDirty && styles.settingRowDirty]}>
                       <Text style={styles.settingLabel} numberOfLines={2}>{localizedLabel}</Text>
-                      <Switch
-                        trackColor={{false: colors.surfaceMuted, true: colors.primaryMuted}}
-                        thumbColor={boolVal ? colors.primary : colors.textMuted}
+                      <FluentSwitch
                         value={boolVal}
                         onValueChange={v => setValue(setting.key, v.toString())}
                       />

@@ -1,10 +1,10 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View} from 'react-native';
+import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
 import {ArrowLeft, Edit3, Plus, RefreshCw, Scan, Search, Trash2} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle, FluentSpinner} from '../components/fluent';
+import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle, FluentSpinner} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
 import {createCategory, deleteCategory, scanCategory, scanMediaLibrary, updateCategory, adminListPlugins} from '../api/admin';
@@ -395,11 +395,9 @@ export function CategorySettingsScreen() {
               )}
               <View style={styles.switchRow}>
                 <Text style={styles.switchLabel}>{t('common.enabled')}</Text>
-                <Switch
+                <FluentSwitch
                   onValueChange={setFormEnabled}
                   value={formEnabled}
-                  trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                  thumbColor={formEnabled ? colors.primary : colors.textMuted}
                 />
               </View>
               <View style={styles.modalActions}>

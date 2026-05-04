@@ -1,10 +1,10 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View, Switch} from 'react-native';
+import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {ArrowLeft, Settings, Trash2} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle} from '../components/fluent';
+import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
@@ -239,11 +239,9 @@ export function PluginSettingsScreen() {
                 <Text style={styles.pluginName}>{plugin.name}</Text>
                 <Text style={styles.pluginVersion}>{plugin.version}</Text>
               </View>
-              <Switch
+              <FluentSwitch
                 value={plugin.enabled}
                 onValueChange={() => handleToggle(plugin)}
-                trackColor={{false: colors.borderStrong, true: colors.primaryMuted}}
-                thumbColor={plugin.enabled ? colors.primary : colors.textMuted}
               />
             </View>
             {plugin.description ? (
