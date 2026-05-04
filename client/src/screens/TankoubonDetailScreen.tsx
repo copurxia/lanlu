@@ -175,6 +175,17 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   );
   const readerChildren = useMemo(() => archives.map(item => item.arcid), [archives]);
 
+  const handleStartReading = useCallback(() => {
+    const first = archives[0];
+    if (!first) return;
+    navigation.push('Reader', {
+      archiveId: first.arcid,
+      tankoubonId,
+      children: readerChildren,
+      childIndex: 0,
+    });
+  }, [archives, navigation, tankoubonId, readerChildren]);
+
   const handleFavoriteToggle = useCallback(async () => {
     const next = !favorite;
     setFavorite(next);
@@ -404,8 +415,10 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <TankoubonDetailActions
+          progress={merged.progress}
           favorite={favorite}
           favoriteLoading={false}
+          onStartReading={handleStartReading}
           onToggleFavorite={handleFavoriteToggle}
           onEdit={() => Alert.alert(t('common.edit'), t('common.comingSoon'))}
           onDelete={handleDelete}

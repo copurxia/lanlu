@@ -112,7 +112,7 @@ export function CronSettingsScreen() {
   }
 
   function confirmDelete(task: ScheduledTask) {
-    Alert.alert(t('common.confirm'), t('common.delete') + ' cron task?', [
+    Alert.alert(t('common.confirm'), t('common.deleteTaskConfirm'), [
       {text: t('common.cancel'), style: 'cancel'},
       {text: t('common.delete'), style: 'destructive', onPress: () => handleDelete(task.id)},
     ]);
@@ -173,11 +173,11 @@ export function CronSettingsScreen() {
             </Text>
           </View>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>{t('common.total') || 'Total tasks'}</Text>
+            <Text style={styles.statLabel}>{t('common.total')}</Text>
             <Text style={styles.statValue}>{status?.totalTasks ?? 0}</Text>
           </View>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>{t('common.enabledTasks') || 'Enabled tasks'}</Text>
+            <Text style={styles.statLabel}>{t('common.enabledTasks')}</Text>
             <Text style={styles.statValue}>{status?.enabledTasks ?? 0}</Text>
           </View>
           <View style={styles.buttonRow}>
@@ -200,11 +200,11 @@ export function CronSettingsScreen() {
               </View>
               <FluentCaption>{task.cronExpression}</FluentCaption>
               <View style={styles.taskMeta}>
-                <Text style={styles.metaText}>Last run: {task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '-'}</Text>
-                <Text style={styles.metaText}>Next run: {task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : '-'}</Text>
+                <Text style={styles.metaText}>{t('common.lastRun')}: {task.lastRunAt ? new Date(task.lastRunAt).toLocaleString() : '-'}</Text>
+                <Text style={styles.metaText}>{t('common.nextRun')}: {task.nextRunAt ? new Date(task.nextRunAt).toLocaleString() : '-'}</Text>
               </View>
               <View style={styles.taskMeta}>
-                <Text style={styles.metaText}>Run count: {task.runCount ?? 0}</Text>
+                <Text style={styles.metaText}>{t('common.runCount')}: {task.runCount ?? 0}</Text>
                 {task.lastRunAt ? (
                   <View style={[styles.dot, {backgroundColor: task.lastRunSuccess ? colors.success : colors.danger}]} />
                 ) : null}
@@ -225,12 +225,12 @@ export function CronSettingsScreen() {
       <Modal animationType="fade" onRequestClose={() => setModalOpen(false)} statusBarTranslucent transparent visible={modalOpen}>
         <ModalBackdrop style={styles.modalBackdrop}>
           <View style={[styles.modalSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}]}>
-            <FluentTitle>{editingTask ? t('common.edit') + ' Task' : t('common.create') + ' Task'}</FluentTitle>
+            <FluentTitle>{editingTask ? t('common.editTask') : t('common.createTask')}</FluentTitle>
             <FluentTextField label={t("common.name")} value={form.name} onChangeText={v => setForm(f => ({...f, name: v}))} />
             <FluentTextField label={t("common.cronExpression")} value={form.cronExpression} onChangeText={v => setForm(f => ({...f, cronExpression: v}))} />
             <FluentTextField label={t("common.taskType")} value={form.taskType} onChangeText={v => setForm(f => ({...f, taskType: v}))} />
             <View style={styles.switchRow}>
-              <Text style={styles.switchLabel}>Enabled</Text>
+              <Text style={styles.switchLabel}>{t('common.enabled')}</Text>
               <FluentSwitch
                 value={form.enabled}
                 onValueChange={v => setForm(f => ({...f, enabled: v}))}
