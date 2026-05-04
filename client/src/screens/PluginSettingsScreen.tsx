@@ -1,10 +1,19 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {ArrowLeft, Settings, Trash2} from 'lucide-react-native';
+import {ArrowLeft, Trash2} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
-import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle} from '../components/fluent';
+import {
+  FluentButton,
+  FluentCard,
+  FluentCaption,
+  FluentSwitch,
+  FluentSwitchRow,
+  FluentTextField,
+  FluentTitle,
+  FluentSpinner,
+} from '../components/fluent';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
@@ -16,8 +25,10 @@ import {
   adminInstallPlugin,
   adminUpdatePlugin,
   adminCheckPluginUpdate,
+  adminGetPluginConfig,
+  adminUpdatePluginConfig,
 } from '../api/admin';
-import type {Plugin} from '../api/admin';
+import type {Plugin, PluginParameter} from '../api/admin';
 
 const PLUGIN_TYPE_LABELS: Record<string, string> = {
   metadata: 'common.pluginTypeMetadata',
@@ -55,7 +66,11 @@ export function PluginSettingsScreen() {
   const [typeFilter, setTypeFilter] = useState('');
   const [checkingAll, setCheckingAll] = useState(false);
   const [configModalOpen, setConfigModalOpen] = useState(false);
-  const [configPluginName, setConfigPluginName] = useState('');
+  const [configPlugin, setConfigPlugin] = useState<Plugin | null>(null);
+  const [configParameters, setConfigParameters] = useState<PluginParameter[]>([]);
+  const [configFormValues, setConfigFormValues] = useState<Record<string, unknown>>({});
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
 
   async function loadData() {
     try {
@@ -80,10 +95,6 @@ export function PluginSettingsScreen() {
     return [...new Set(plugins.map(p => p.plugin_type))];
   }, [plugins]);
 
-  function capitalize(s: string) {
-    return s.charAt(0).toUpperCase() + s.slice(1);
-  }
-
   const filteredPlugins = useMemo(() => {
     if (!typeFilter) return plugins;
     return plugins.filter(p => p.plugin_type === typeFilter);
@@ -97,7 +108,7 @@ export function PluginSettingsScreen() {
   }
 
   function confirmDelete(plugin: Plugin) {
-    Alert.alert(t('common.confirm'), 'Delete this plugin?', [
+    Alert.alert(t('common.confirm'), t('settings.pluginDeleteConfirm'), [
       {text: t('common.cancel'), style: 'cancel'},
       {text: t('common.delete'), style: 'destructive', onPress: () => handleDelete(plugin.namespace)},
     ]);
@@ -117,28 +128,99 @@ export function PluginSettingsScreen() {
       setInstallModalOpen(false);
       setInstallUrl('');
       await loadData();
-      Alert.alert(t('common.success'), 'Plugin installed successfully');
+      Alert.alert(t('common.success'), t('settings.pluginInstallSuccess'));
     } catch (e) {Alert.alert(t('common.error'), extractApiError(e));}
   }
 
   async function handleCheckUpdate(plugin: Plugin) {
     try {
       await adminCheckPluginUpdate(plugin.namespace);
-      Alert.alert(t('common.success'), 'Update check done');
+      Alert.alert(t('common.success'), t('common.checkUpdate'));
     } catch (e) {Alert.alert(t('common.error'), extractApiError(e));}
   }
 
-  async function handleUpdate(plugin: Plugin) {
+  async function handleUpdate(plugin: Plugin, force = false) {
     try {
-      await adminUpdatePlugin(plugin.namespace);
+      await adminUpdatePlugin(plugin.namespace, force);
       await loadData();
-      Alert.alert(t('common.success'), 'Plugin updated successfully');
-    } catch (e) {Alert.alert(t('common.error'), extractApiError(e));}
+      Alert.alert(t('common.success'), t('settings.pluginUpdateSuccess'));
+    } catch (e) {
+      const msg = extractApiError(e);
+      if (!force && msg.toLowerCase().includes('without force')) {
+        Alert.alert(
+          t('settings.pluginForceUpdate'),
+          t('settings.pluginForceUpdateConfirm', {name: plugin.name}),
+          [
+            {text: t('common.cancel'), style: 'cancel'},
+            {text: t('settings.pluginForceUpdate'), style: 'destructive', onPress: () => handleUpdate(plugin, true)},
+          ],
+        );
+      } else {
+        Alert.alert(t('common.error'), msg);
+      }
+    }
   }
 
   function handleConfigure(plugin: Plugin) {
-    setConfigPluginName(plugin.name);
+    setConfigPlugin(plugin);
     setConfigModalOpen(true);
+    loadPluginConfig(plugin.namespace);
+  }
+
+  async function loadPluginConfig(namespace: string) {
+    setConfigLoading(true);
+    setConfigParameters([]);
+    setConfigFormValues({});
+    try {
+      const res = await adminGetPluginConfig(namespace);
+      const data = res.data;
+      if (data?.has_schema && data?.parameters) {
+        let parsed: PluginParameter[] = [];
+        if (typeof data.parameters === 'string') {
+          try {
+            parsed = (JSON.parse(data.parameters) as unknown[]).filter(
+              (p: unknown) => typeof p === 'object' && p !== null && 'type' in (p as Record<string, unknown>) && 'desc' in (p as Record<string, unknown>),
+            ) as PluginParameter[];
+          } catch (_) {}
+        } else if (Array.isArray(data.parameters)) {
+          parsed = data.parameters.filter(
+            (p: unknown) => typeof p === 'object' && p !== null && 'type' in (p as Record<string, unknown>) && 'desc' in (p as Record<string, unknown>),
+          ) as PluginParameter[];
+        }
+        setConfigParameters(parsed);
+        const initial: Record<string, unknown> = {};
+        parsed.forEach((p, i) => {
+          initial[`param${i}`] = p.value ?? p.default_value ?? '';
+        });
+        setConfigFormValues(initial);
+      }
+    } catch (_) {
+      setConfigParameters([]);
+    } finally {
+      setConfigLoading(false);
+    }
+  }
+
+  async function handleSaveConfig() {
+    if (!configPlugin) return;
+    setConfigSaving(true);
+    try {
+      const updated = configParameters.map((p, i) => ({
+        ...p,
+        value: configFormValues[`param${i}`] ?? p.default_value ?? '',
+      }));
+      await adminUpdatePluginConfig(configPlugin.namespace, updated);
+      setConfigModalOpen(false);
+      Alert.alert(t('common.success'), t('settings.pluginConfigSaved'));
+    } catch (e) {
+      Alert.alert(t('common.error'), t('settings.pluginConfigSaveFailed'));
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
+  function handleConfigFieldChange(key: string, value: unknown) {
+    setConfigFormValues(prev => ({...prev, [key]: value}));
   }
 
   async function handleCheckAllUpdates() {
@@ -264,7 +346,7 @@ export function PluginSettingsScreen() {
             </View>
             <View style={styles.pluginActions}>
               <FluentButton label={t("common.checkUpdate")} variant="ghost" onPress={() => handleCheckUpdate(plugin)} />
-              <FluentButton label="Update" variant="secondary" onPress={() => handleUpdate(plugin)} />
+              <FluentButton label={t("common.update")} variant="ghost" onPress={() => handleUpdate(plugin)} />
               <FluentButton label={t("common.configure")} variant="ghost" onPress={() => handleConfigure(plugin)} />
               <TouchableOpacity
                 accessibilityRole="button"
@@ -300,12 +382,51 @@ export function PluginSettingsScreen() {
       <Modal animationType="fade" onRequestClose={() => setConfigModalOpen(false)} statusBarTranslucent transparent visible={configModalOpen}>
         <ModalBackdrop style={styles.modalBackdrop}>
           <View style={[styles.modalSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}]}>
-            <FluentTitle>Configure {configPluginName}</FluentTitle>
-            <Text style={styles.configText}>
-              Plugin configuration is not yet available on mobile.
-            </Text>
+            <FluentTitle>{t('settings.pluginConfiguration')}</FluentTitle>
+            {configLoading ? (
+              <FluentSpinner label={t('common.loading')} />
+            ) : configParameters.length > 0 ? (
+              <ScrollView style={styles.configForm} showsVerticalScrollIndicator={false}>
+                {configParameters.map((param, index) => {
+                  const key = `param${index}`;
+                  const value = configFormValues[key];
+                  return (
+                    <View key={key} style={styles.configField}>
+                      <Text style={styles.configFieldLabel}>{param.desc}</Text>
+                      {param.type === 'bool' ? (
+                        <FluentSwitchRow
+                          label=""
+                          value={Boolean(value)}
+                          onValueChange={v => handleConfigFieldChange(key, v)}
+                        />
+                      ) : param.type === 'int' ? (
+                        <FluentTextField
+                          value={String(value ?? '')}
+                          onChangeText={v => handleConfigFieldChange(key, v.replace(/[^0-9-]/g, ''))}
+                          keyboardType="numeric"
+                        />
+                      ) : param.type === 'array' ? (
+                        <FluentTextField
+                          value={Array.isArray(value) ? value.join(', ') : String(value ?? '')}
+                          onChangeText={v => handleConfigFieldChange(key, v.split(',').map(s => s.trim()))}
+                          placeholder="comma-separated values"
+                        />
+                      ) : (
+                        <FluentTextField
+                          value={String(value ?? '')}
+                          onChangeText={v => handleConfigFieldChange(key, v)}
+                        />
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            ) : (
+              <Text style={styles.configText}>{t('settings.noConfigurationRequired')}</Text>
+            )}
             <View style={styles.modalActions}>
-              <FluentButton label={t('common.close')} variant="primary" onPress={() => setConfigModalOpen(false)} style={styles.flexButton} />
+              <FluentButton label={t('common.cancel')} variant="secondary" onPress={() => setConfigModalOpen(false)} style={styles.flexButton} disabled={configSaving} />
+              <FluentButton label={t('common.save')} variant="primary" onPress={handleSaveConfig} style={styles.flexButton} disabled={configSaving || configParameters.length === 0} />
             </View>
           </View>
         </ModalBackdrop>
@@ -414,10 +535,24 @@ function createStyles(colors: ThemeColors) {
       gap: spacing.sm,
       flexWrap: 'wrap',
     },
+    configForm: {
+      maxHeight: 300,
+    },
+    configField: {
+      gap: spacing.xs,
+      marginBottom: spacing.md,
+    },
+    configFieldLabel: {
+      color: colors.text,
+      fontSize: 14,
+      fontWeight: '700',
+    },
     configText: {
       color: colors.textMuted,
       fontSize: 14,
       lineHeight: 20,
+      textAlign: 'center',
+      paddingVertical: spacing.xl,
     },
     modalBackdrop: {justifyContent: 'flex-end'},
     modalSheet: {

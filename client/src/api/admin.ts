@@ -477,6 +477,33 @@ export async function adminCheckPluginUpdate(namespace: string, force?: boolean)
   return response.data;
 }
 
+// ─── Plugin Config ──────────────────────────────────────────────────────────
+
+export type PluginParameter = {
+  type: 'string' | 'int' | 'bool' | 'array';
+  name?: string;
+  desc: string;
+  default_value?: unknown;
+  value?: unknown;
+};
+
+export async function adminGetPluginConfig(
+  namespace: string,
+): Promise<ApiEnvelope<{has_schema: boolean; parameters?: string | PluginParameter[]; message?: string}>> {
+  const response = await apiClient.get(`/api/admin/plugins/${namespace}/config`);
+  return response.data;
+}
+
+export async function adminUpdatePluginConfig(
+  namespace: string,
+  parameters: PluginParameter[],
+): Promise<ApiEnvelope<unknown>> {
+  const response = await apiClient.put(`/api/admin/plugins/${namespace}/config`, {
+    parameters: JSON.stringify(parameters),
+  });
+  return response.data;
+}
+
 // ─── Stats ─────────────────────────────────────────────────────────────────
 
 export async function getTagCloud(lang?: string, limit = 50): Promise<ApiEnvelope<{items: TagCloudItem[]; total: number}>> {
