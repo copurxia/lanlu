@@ -7,10 +7,8 @@ import {
   View,
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
-import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Svg, {Defs, LinearGradient, Rect, Stop} from 'react-native-svg';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
@@ -83,9 +81,11 @@ export function ArchiveCard({
   const [imageError, setImageError] = useState('');
   const [favoriteState, setFavoriteState] = useState(Boolean(archive.isfavorite));
   const [tagsOpen, setTagsOpen] = useState(false);
+  const [coverTouching, setCoverTouching] = useState(false);
   const pressed = useSharedValue(0);
   const tagProgress = useSharedValue(0);
-  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const coverLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const selectionLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const itemWidth =
     variant === 'row'
       ? 136
@@ -135,6 +135,12 @@ export function ArchiveCard({
     };
   }, [archive]);
 
+  useEffect(() => {
+    return () => {
+      clearCoverLongPressTimers();
+    };
+  }, []);
+
   const pagecount = Number(archive.pagecount || 0);
   const progress = Number(archive.progress || 0);
   const progressPercent =
@@ -165,68 +171,70 @@ export function ArchiveCard({
     }
   }
 
-  function handleCardPress() {
-    if (selectionMode && selectable) {
-      onToggleSelect?.();
-      return;
-    }
-    if (tagsOpen) {
-      setTagsOpen(false);
-      return;
-    }
-    const handler = onOpenReader || onPress;
-    if (handler) handler();
-  }
-
   function handleBodyPress() {
-    if (selectionMode && selectable) {
-      onToggleSelect?.();
-      return;
-    }
     if (tagsOpen) {
       setTagsOpen(false);
+      return;
+    }
+    if (selectionMode && selectable) {
+      onToggleSelect?.();
       return;
     }
     const handler = onOpenDetail || onPress;
     if (handler) handler();
   }
 
-  function handleLongPressAction() {
-    if (selectionMode) return;
-    if (selectable) {
-      onLongPress?.();
-      return;
-    }
-    showTags();
-  }
-
   function showTags() {
     setTagsOpen(true);
   }
 
-  function clearLongPressTimer() {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
+  function clearCoverLongPressTimers() {
+    if (coverLongPressTimerRef.current) {
+      clearTimeout(coverLongPressTimerRef.current);
+      coverLongPressTimerRef.current = null;
+    }
+    if (selectionLongPressTimerRef.current) {
+      clearTimeout(selectionLongPressTimerRef.current);
+      selectionLongPressTimerRef.current = null;
     }
   }
 
-  const cardGesture = Gesture.Exclusive(
-    Gesture.LongPress()
-      .minDuration(450)
-      .onBegin(() => {
-        pressed.value = 1;
-      })
-      .onStart(() => {
-        runOnJS(handleLongPressAction)();
-      })
-      .onFinalize(() => {
-        pressed.value = 0;
-      }),
-    Gesture.Tap().onEnd(() => {
-      runOnJS(handleCardPress)();
-    }),
-  );
+  function handleCoverPressIn() {
+    if (selectionMode) return;
+    setCoverTouching(true);
+    pressed.value = 1;
+    clearCoverLongPressTimers();
+    coverLongPressTimerRef.current = setTimeout(() => {
+      coverLongPressTimerRef.current = null;
+      showTags();
+    }, 450);
+    if (selectable) {
+      selectionLongPressTimerRef.current = setTimeout(() => {
+        selectionLongPressTimerRef.current = null;
+        setTagsOpen(false);
+        onLongPress?.();
+      }, 1500);
+    }
+  }
+
+  function handleCoverPressOut() {
+    setCoverTouching(false);
+    pressed.value = 0;
+    clearCoverLongPressTimers();
+  }
+
+  function handleCoverPress() {
+    if (tagsOpen) {
+      setTagsOpen(false);
+      return;
+    }
+    if (selectionMode && selectable) {
+      onToggleSelect?.();
+      return;
+    }
+    const handler = onOpenReader || onPress;
+    if (handler) handler();
+  }
 
   const styles = useMemo(
     () =>
@@ -317,8 +325,12 @@ export function ArchiveCard({
         },
         body: {
           gap: 4,
+          flex: 1,
           minHeight: 72,
           padding: spacing.sm,
+        },
+        bodyList: {
+          justifyContent: 'center',
         },
         title: {
           color: colors.text,
@@ -454,164 +466,155 @@ export function ArchiveCard({
         cardAnimatedStyle,
       ]}
     >
-        <GestureDetector gesture={cardGesture}>
-          <Animated.View
-            style={[
-              styles.coverWrap,
-              variant === 'list' && styles.listCover,
-              variant === 'tweet' && styles.tweetCover,
-              variant === 'channel' && styles.channelCover,
-            ]}>
-            {imageSource ? (
-              <FastImage
-                source={imageSource}
-                style={styles.cover}
-                resizeMode={FastImage.resizeMode.cover}
-                onError={event => {
-                  const message = event.nativeEvent.error || 'Image failed to load';
-                  setImageError(message);
-                  console.warn('Cover failed to load:', itemId, message);
-                }}
-              />
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={handleCoverPress}
+        onPressIn={handleCoverPressIn}
+        onPressOut={handleCoverPressOut}
+        style={[
+          styles.coverWrap,
+          variant === 'list' && styles.listCover,
+          variant === 'tweet' && styles.tweetCover,
+          variant === 'channel' && styles.channelCover,
+        ]}>
+        {imageSource ? (
+          <FastImage
+            source={imageSource}
+            style={styles.cover}
+            resizeMode={FastImage.resizeMode.cover}
+            onError={event => {
+              const message = event.nativeEvent.error || 'Image failed to load';
+              setImageError(message);
+              console.warn('Cover failed to load:', itemId, message);
+            }}
+          />
+        ) : (
+          <View style={styles.placeholder}>
+            <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
+          </View>
+        )}
+        {imageError ? (
+          <View style={styles.placeholderOverlay}>
+            <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
+          </View>
+        ) : null}
+        {!isCollection && archive.isnew ? (
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>NEW</Text>
+          </View>
+        ) : null}
+        {isCollection ? (
+          <View style={styles.collectionBadge}>
+            <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
+          </View>
+        ) : null}
+
+        {selectable ? (
+          <TouchableOpacity
+            style={[styles.checkbox, selected && styles.checkboxSelected]}
+            onPress={() => {
+              if (!selected && !selectionMode) {
+                onLongPress?.();
+              }
+              onToggleSelect?.();
+            }}>
+            {selected ? (
+              <Check color={colors.white} size={16} />
             ) : (
-              <View style={styles.placeholder}>
-                <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
-              </View>
+              <Square color={colors.white} size={14} />
             )}
-            {imageError ? (
-              <View style={styles.placeholderOverlay}>
-                <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
-              </View>
-            ) : null}
-            {!isCollection && archive.isnew ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>NEW</Text>
-              </View>
-            ) : null}
-            {isCollection ? (
-              <View style={styles.collectionBadge}>
-                <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
-              </View>
-            ) : null}
+          </TouchableOpacity>
+        ) : null}
 
-            {/* Selection checkbox */}
-            {selectable ? (
-              <TouchableOpacity
-                style={[styles.checkbox, selected && styles.checkboxSelected]}
-                onPress={() => {
-                  if (!selected && !selectionMode) {
-                    onLongPress?.();
-                  }
-                  onToggleSelect?.();
-                }}>
-                {selected ? (
-                  <Check color={colors.white} size={16} />
-                ) : (
-                  <Square color={colors.white} size={14} />
-                )}
-              </TouchableOpacity>
-            ) : null}
+        {selectionMode && !selected && selectable ? <View style={styles.selectionOverlay} /> : null}
 
-            {/* Dark overlay when in selection mode but not selected */}
-            {selectionMode && !selected && selectable ? (
-              <View style={styles.selectionOverlay} />
-            ) : null}
-
-            {visibleTags.length > 0 || archive.description ? (
-              <Animated.View
-                pointerEvents={tagsOpen ? 'auto' : 'none'}
-                style={[styles.tagOverlay, tagOverlayStyle]}>
-                <Svg height="100%" pointerEvents="none" style={styles.gradientOverlay} width="100%">
-                  <Defs>
-                    <LinearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
-                      <Stop offset="0" stopColor="#000000" stopOpacity="0" />
-                      <Stop offset="0.38" stopColor="#000000" stopOpacity="0.18" />
-                      <Stop offset="0.68" stopColor="#000000" stopOpacity="0.52" />
-                      <Stop offset="1" stopColor="#000000" stopOpacity="0.78" />
-                    </LinearGradient>
-                  </Defs>
-                  <Rect fill={`url(#${gradientId})`} height="100%" width="100%" x="0" y="0" />
-                </Svg>
-                <View style={styles.tagOverlayContent}>
-                  {previewTags.length > 0 ? (
-                    <View style={[styles.tagList, archive.description ? styles.tagListWithDescription : styles.tagListTall]}>
-                      {previewTags.map(tag => (
-                        <TouchableOpacity
-                          accessibilityRole="button"
-                          key={tag}
-                          onPress={() => {
-                            setTagsOpen(false);
-                            onTagPress?.(tag);
-                          }}
-                          style={styles.tagChip}>
-                          <Text numberOfLines={1} style={styles.tagText}>
-                            {stripNamespace(tag)}
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
-                      {visibleTags.length > previewTags.length ? (
-                        <View style={styles.tagChip}>
-                          <Text numberOfLines={1} style={styles.tagText}>
-                            +{visibleTags.length - previewTags.length}
-                          </Text>
-                        </View>
-                      ) : null}
+        {visibleTags.length > 0 || archive.description ? (
+          <Animated.View
+            pointerEvents={coverTouching ? 'none' : tagsOpen ? 'auto' : 'none'}
+            style={[styles.tagOverlay, tagOverlayStyle]}>
+            <Svg height="100%" pointerEvents="none" style={styles.gradientOverlay} width="100%">
+              <Defs>
+                <LinearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+                  <Stop offset="0" stopColor="#000000" stopOpacity="0" />
+                  <Stop offset="0.38" stopColor="#000000" stopOpacity="0.18" />
+                  <Stop offset="0.68" stopColor="#000000" stopOpacity="0.52" />
+                  <Stop offset="1" stopColor="#000000" stopOpacity="0.78" />
+                </LinearGradient>
+              </Defs>
+              <Rect fill={`url(#${gradientId})`} height="100%" width="100%" x="0" y="0" />
+            </Svg>
+            <View style={styles.tagOverlayContent}>
+              {previewTags.length > 0 ? (
+                <View style={[styles.tagList, archive.description ? styles.tagListWithDescription : styles.tagListTall]}>
+                  {previewTags.map(tag => (
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      key={tag}
+                      onPress={() => {
+                        setTagsOpen(false);
+                        onTagPress?.(tag);
+                      }}
+                      style={styles.tagChip}>
+                      <Text numberOfLines={1} style={styles.tagText}>
+                        {stripNamespace(tag)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {visibleTags.length > previewTags.length ? (
+                    <View style={styles.tagChip}>
+                      <Text numberOfLines={1} style={styles.tagText}>
+                        +{visibleTags.length - previewTags.length}
+                      </Text>
                     </View>
                   ) : null}
-                  {archive.description ? (
-                    <Text numberOfLines={3} style={styles.previewDescription}>
-                      {archive.description}
-                    </Text>
-                  ) : null}
                 </View>
-              </Animated.View>
-            ) : null}
-            {showActions ? (
-              <View style={styles.actionButtons}>
-                {onOpenDetail ? (
-                  <TouchableOpacity
-                    accessibilityRole="button"
-                    onPress={(e) => {
-                      e.stopPropagation?.();
-                      handleBodyPress();
-                    }}
-                    style={styles.actionButton}>
-                    <Eye color={colors.white} size={16} />
-                  </TouchableOpacity>
-                ) : null}
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={favoriteState ? 'Remove favorite' : 'Add favorite'}
-                  onPress={(e) => {
-                    e.stopPropagation?.();
-                    toggleFavorite();
-                  }}
-                  style={[styles.actionButton, favoriteState && styles.actionButtonActive]}>
-                  <Heart
-                    color={favoriteState ? '#f87171' : colors.white}
-                    fill={favoriteState ? '#f87171' : 'transparent'}
-                    size={16}
-                  />
-                </TouchableOpacity>
-              </View>
-            ) : null}
+              ) : null}
+              {archive.description ? (
+                <Text numberOfLines={3} style={styles.previewDescription}>
+                  {archive.description}
+                </Text>
+              ) : null}
+            </View>
           </Animated.View>
-        </GestureDetector>
-        <TouchableOpacity activeOpacity={0.78} onPress={handleBodyPress} style={styles.body}>
-          <TouchableOpacity activeOpacity={0.7} onPress={handleBodyPress}>
-            <Text numberOfLines={2} style={styles.title}>
-              {title}
-            </Text>
-          </TouchableOpacity>
-          <Text numberOfLines={1} style={styles.meta}>
-            {progressLabel}
+        ) : null}
+
+        {showActions ? (
+          <View style={styles.actionButtons}>
+            {onOpenDetail ? (
+              <TouchableOpacity
+                accessibilityRole="button"
+                onPress={handleBodyPress}
+                style={styles.actionButton}>
+                <Eye color={colors.white} size={16} />
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel={favoriteState ? 'Remove favorite' : 'Add favorite'}
+              onPress={toggleFavorite}
+              style={[styles.actionButton, favoriteState && styles.actionButtonActive]}>
+              <Heart
+                color={favoriteState ? '#f87171' : colors.white}
+                fill={favoriteState ? '#f87171' : 'transparent'}
+                size={16}
+              />
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </TouchableOpacity>
+      <TouchableOpacity activeOpacity={0.78} onPress={handleBodyPress} style={[styles.body, variant === 'list' && styles.bodyList]}>
+        <Text numberOfLines={2} style={styles.title}>
+          {title}
+        </Text>
+        <Text numberOfLines={1} style={styles.meta}>
+          {progressLabel}
+        </Text>
+        {(variant === 'tweet' || variant === 'channel') && archive.description ? (
+          <Text numberOfLines={3} style={styles.description}>
+            {archive.description}
           </Text>
-          {(variant === 'tweet' || variant === 'channel') && archive.description ? (
-            <Text numberOfLines={3} style={styles.description}>
-              {archive.description}
-            </Text>
-          ) : null}
-        </TouchableOpacity>
+        ) : null}
+      </TouchableOpacity>
     </Animated.View>
   );
 }
