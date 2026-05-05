@@ -21,6 +21,10 @@ import {FluentSwitch} from '../components/fluent';
 import {
   CalendarDays,
   ChevronRight,
+  Check,
+  Download,
+  Edit,
+  Heart,
   Grid2X2,
   List,
   MessageCircle,
@@ -28,6 +32,7 @@ import {
   Rows3,
   Search,
   SlidersHorizontal,
+  Trash2,
   X,
 } from 'lucide-react-native';
 
@@ -35,21 +40,23 @@ import {extractApiError} from '../api/client';
 import {
   fetchCategories,
   fetchDiscover,
-  fetchMetadataPlugins,
   fetchSmartFilters,
   fetchTagAutocomplete,
+  fetchTankoubonMetadata,
   isTankoubon,
   mediaItemId,
   searchArchives,
   setArchiveFavorite,
+  setTankoubonFavorite,
   markArchiveAsRead,
   markArchiveAsNew,
   deleteArchive,
+  deleteTankoubon,
   runMetadataPlugin,
   updateArchiveMetadata,
+  updateTankoubonMetadata,
   type SmartFilter,
   type TagSuggestion,
-  type Plugin,
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {HomeFeedCard} from '../components/HomeFeedCard';
@@ -218,28 +225,37 @@ export function HomeScreen() {
   // Selection / batch state
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedArchiveIds, setSelectedArchiveIds] = useState<Set<string>>(new Set());
+  const [selectedTankoubonIds, setSelectedTankoubonIds] = useState<Set<string>>(new Set());
+  // Force a fresh card instance when a selection session ends so Android touch state is cleared.
+  const [selectionResetToken, setSelectionResetToken] = useState(0);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [batchApplying, setBatchApplying] = useState(false);
-  const [batchPlugins, setBatchPlugins] = useState<Plugin[]>([]);
   const [batchActionRunning, setBatchActionRunning] = useState(false);
 
   const selectedArchiveCount = selectedArchiveIds.size;
-  const hasAnySelected = selectedArchiveCount > 0;
+  const selectedTankoubonCount = selectedTankoubonIds.size;
+  const selectedTotal = selectedArchiveCount + selectedTankoubonCount;
+  const hasAnySelected = selectedTotal > 0;
 
-  const clearSelection = useCallback(() => {
+  const endSelectionSession = useCallback(() => {
     setSelectionMode(false);
     setSelectedArchiveIds(new Set());
+    setSelectedTankoubonIds(new Set());
+    setBatchEditOpen(false);
+    setSelectionResetToken(token => token + 1);
   }, []);
+
+  const clearSelection = useCallback(() => {
+    endSelectionSession();
+  }, [endSelectionSession]);
 
   const enterSelectionMode = useCallback(() => {
     setSelectionMode(true);
   }, []);
 
   const exitSelectionMode = useCallback(() => {
-    setSelectionMode(false);
-    setSelectedArchiveIds(new Set());
-    setBatchEditOpen(false);
-  }, []);
+    endSelectionSession();
+  }, [endSelectionSession]);
 
   const toggleArchiveSelect = useCallback(
     (archiveId: string) => {
@@ -248,22 +264,53 @@ export function HomeScreen() {
         if (next.has(archiveId)) next.delete(archiveId);
         else next.add(archiveId);
         if (next.size === 0) {
-          setSelectionMode(false);
+          if (selectedTankoubonIds.size === 0) {
+            endSelectionSession();
+          }
         }
         return next;
       });
     },
-    [],
+    [endSelectionSession, selectedTankoubonIds.size],
+  );
+
+  const toggleTankoubonSelect = useCallback(
+    (tankoubonId: string) => {
+      setSelectedTankoubonIds(prev => {
+        const next = new Set(prev);
+        if (next.has(tankoubonId)) next.delete(tankoubonId);
+        else next.add(tankoubonId);
+        if (next.size === 0) {
+          if (selectedArchiveIds.size === 0) {
+            endSelectionSession();
+          }
+        }
+        return next;
+      });
+    },
+    [endSelectionSession, selectedArchiveIds.size],
   );
 
   const handleCardLongPress = useCallback(
-    (archiveId: string) => {
+    (item: MediaItem) => {
       if (!selectionMode) {
         enterSelectionMode();
-        setSelectedArchiveIds(new Set([archiveId]));
+        if (isTankoubon(item)) {
+          setSelectedTankoubonIds(new Set([item.tankoubon_id]));
+          setSelectedArchiveIds(new Set());
+        } else {
+          setSelectedArchiveIds(new Set([item.arcid]));
+          setSelectedTankoubonIds(new Set());
+        }
+        return;
+      }
+      if (isTankoubon(item)) {
+        setSelectedTankoubonIds(prev => new Set(prev).add(item.tankoubon_id));
+      } else {
+        setSelectedArchiveIds(prev => new Set(prev).add(item.arcid));
       }
     },
-    [selectionMode, enterSelectionMode],
+    [enterSelectionMode, selectionMode],
   );
 
   const hasAdvancedFilters = Boolean(
@@ -536,11 +583,10 @@ export function HomeScreen() {
     if (!hasAnySelected || batchActionRunning) return;
     setBatchActionRunning(true);
     try {
-      const settled = await Promise.allSettled(
-        Array.from(selectedArchiveIds).map(id =>
-          setArchiveFavorite({arcid: id} as any, true),
-        ),
-      );
+      const settled = await Promise.allSettled([
+        ...Array.from(selectedArchiveIds).map(id => setArchiveFavorite({arcid: id} as any, true)),
+        ...Array.from(selectedTankoubonIds).map(id => setTankoubonFavorite(id, true)),
+      ]);
       const successCount = settled.filter(r => r.status === 'fulfilled').length;
       if (successCount > 0) refresh();
     } catch {
@@ -549,11 +595,11 @@ export function HomeScreen() {
       setBatchActionRunning(false);
       clearSelection();
     }
-  }, [hasAnySelected, selectedArchiveIds, batchActionRunning, refresh, clearSelection]);
+  }, [hasAnySelected, selectedArchiveIds, selectedTankoubonIds, batchActionRunning, refresh, clearSelection]);
 
   const handleBatchReadStatus = useCallback(
     async (toRead: boolean) => {
-      if (!hasAnySelected || batchActionRunning) return;
+      if (!hasAnySelected || batchActionRunning || selectedArchiveCount === 0) return;
       setBatchActionRunning(true);
       try {
         const settled = await Promise.allSettled(
@@ -570,22 +616,22 @@ export function HomeScreen() {
         clearSelection();
       }
     },
-    [hasAnySelected, selectedArchiveIds, batchActionRunning, refresh, clearSelection],
+    [hasAnySelected, selectedArchiveIds, selectedArchiveCount, batchActionRunning, refresh, clearSelection],
   );
 
   const handleBatchDownload = useCallback(() => {
-    if (!hasAnySelected) return;
+    if (!hasAnySelected || selectedArchiveCount === 0) return;
     for (const id of selectedArchiveIds) {
       const url = `/api/archives/${encodeURIComponent(id)}/download`;
       Alert.alert(t('archive.download'), url);
     }
-  }, [hasAnySelected, selectedArchiveIds, t]);
+  }, [hasAnySelected, selectedArchiveCount, selectedArchiveIds, t]);
 
   const handleBatchDelete = useCallback(() => {
     if (!hasAnySelected || batchActionRunning) return;
     Alert.alert(
       t('common.delete'),
-      `${t('common.delete')} ${selectedArchiveCount} archives?`,
+      t('home.batchDeleteConfirm').replace('{count}', String(selectedTotal)),
       [
         {text: t('common.cancel'), style: 'cancel'},
         {
@@ -595,7 +641,10 @@ export function HomeScreen() {
             setBatchActionRunning(true);
             try {
               const settled = await Promise.allSettled(
-                Array.from(selectedArchiveIds).map(id => deleteArchive(id)),
+                [
+                  ...Array.from(selectedArchiveIds).map(id => deleteArchive(id)),
+                  ...Array.from(selectedTankoubonIds).map(id => deleteTankoubon(id)),
+                ],
               );
               const successCount = settled.filter(r => r.status === 'fulfilled').length;
               if (successCount > 0) refresh();
@@ -609,15 +658,9 @@ export function HomeScreen() {
         },
       ],
     );
-  }, [hasAnySelected, selectedArchiveIds, selectedArchiveCount, batchActionRunning, t, refresh, clearSelection]);
+  }, [hasAnySelected, selectedArchiveIds, selectedTankoubonIds, selectedTotal, batchActionRunning, t, refresh, clearSelection]);
 
   const handleOpenBatchEdit = useCallback(async () => {
-    try {
-      const metas = await fetchMetadataPlugins();
-      setBatchPlugins(metas);
-    } catch {
-      setBatchPlugins([]);
-    }
     setBatchEditOpen(true);
   }, []);
 
@@ -656,47 +699,91 @@ export function HomeScreen() {
       if (!hasAnySelected || batchApplying) return false;
       setBatchApplying(true);
       try {
-        const arcids = Array.from(selectedArchiveIds);
-        const jobs = arcids.map(id => async () => {
-          if (payload.runMetadataPlugin && payload.metadataPluginNamespace.trim()) {
-            await runMetadataPlugin(
-              'archive',
-              id,
-              payload.metadataPluginNamespace.trim(),
-              payload.metadataPluginParam,
-              {writeBack: true},
-            );
-          }
-          if (payload.updateTitle || payload.updateSummary || payload.updateTags) {
-            const result = await searchArchives({
-              filter: id,
-              page: 1,
-              pageSize: 1,
-            });
-            const item = result.data.find(m => !isTankoubon(m) && (m as any).arcid === id);
-            if (!item || isTankoubon(item)) return;
-            const a = item as any;
-            const baseTitle = String(a.title || '');
-            const nextTitle = payload.updateTitle
-              ? `${payload.titlePrefix}${baseTitle}${payload.titleSuffix}`.trim()
-              : baseTitle;
-            const baseSummary = String(a.description || '');
-            const nextSummary = payload.updateSummary
-              ? applySummaryFn(baseSummary, payload.summaryMode, payload.summaryValue)
-              : baseSummary;
-            const baseTags = parseArchiveTags(a.tags);
-            const nextTags = payload.updateTags
-              ? mergeTagsFn(baseTags, payload.tagsAdd, payload.tagsRemove)
-              : baseTags;
+        const applyToArchives = payload.scope !== 'tankoubon';
+        const applyToTankoubons = payload.scope !== 'archive';
+        const archiveIds = applyToArchives ? Array.from(selectedArchiveIds) : [];
+        const tankoubonIds = applyToTankoubons ? Array.from(selectedTankoubonIds) : [];
+        const jobs = [
+          ...archiveIds.map(id => async () => {
+            if (payload.runMetadataPlugin && payload.metadataPluginNamespace.trim()) {
+              await runMetadataPlugin(
+                'archive',
+                id,
+                payload.metadataPluginNamespace.trim(),
+                payload.metadataPluginParam,
+                {writeBack: true},
+              );
+            }
+            if (payload.updateTitle || payload.updateSummary || payload.updateTags) {
+              const result = await searchArchives({
+                filter: id,
+                page: 1,
+                pageSize: 1,
+              });
+              const item = result.data.find(m => !isTankoubon(m) && (m as any).arcid === id);
+              if (!item || isTankoubon(item)) return;
+              const a = item as any;
+              const baseTitle = String(a.title || '');
+              const nextTitle = payload.updateTitle
+                ? `${payload.titlePrefix}${baseTitle}${payload.titleSuffix}`.trim()
+                : baseTitle;
+              const baseSummary = String(a.description || '');
+              const nextSummary = payload.updateSummary
+                ? applySummaryFn(baseSummary, payload.summaryMode, payload.summaryValue)
+                : baseSummary;
+              const baseTags = parseArchiveTags(a.tags);
+              const nextTags = payload.updateTags
+                ? mergeTagsFn(baseTags, payload.tagsAdd, payload.tagsRemove)
+                : baseTags;
 
-            await updateArchiveMetadata(id, {
-              title: nextTitle || baseTitle,
-              type: 0,
-              description: nextSummary,
-              tags: nextTags,
-            });
-          }
-        });
+              await updateArchiveMetadata(id, {
+                title: nextTitle || baseTitle,
+                type: 0,
+                description: nextSummary,
+                tags: nextTags,
+              });
+            }
+          }),
+          ...tankoubonIds.map(id => async () => {
+            if (payload.runMetadataPlugin && payload.metadataPluginNamespace.trim()) {
+              await runMetadataPlugin(
+                'tankoubon',
+                id,
+                payload.metadataPluginNamespace.trim(),
+                payload.metadataPluginParam,
+                {writeBack: true},
+              );
+            }
+            if (payload.updateTitle || payload.updateSummary || payload.updateTags) {
+              const metadata = await fetchTankoubonMetadata(id, language);
+              const baseTitle = String(metadata.title || '');
+              const nextTitle = payload.updateTitle
+                ? `${payload.titlePrefix}${baseTitle}${payload.titleSuffix}`.trim()
+                : baseTitle;
+              const baseSummary = String(metadata.description || '');
+              const nextSummary = payload.updateSummary
+                ? applySummaryFn(baseSummary, payload.summaryMode, payload.summaryValue)
+                : baseSummary;
+              const baseTags = Array.isArray(metadata.tags)
+                ? metadata.tags.map(tag => String(tag || '').trim()).filter(Boolean)
+                : [];
+              const nextTags = payload.updateTags
+                ? mergeTagsFn(baseTags, payload.tagsAdd, payload.tagsRemove)
+                : baseTags;
+
+              await updateTankoubonMetadata(id, {
+                title: nextTitle || baseTitle,
+                type: 1,
+                description: nextSummary,
+                tags: nextTags,
+                assets: metadata.assets,
+                children: metadata.children,
+              });
+            }
+          }),
+        ];
+
+        if (jobs.length === 0) return false;
 
         const settled = await Promise.allSettled(jobs.map(job => job()));
         const successCount = settled.filter(r => r.status === 'fulfilled').length;
@@ -716,18 +803,18 @@ export function HomeScreen() {
         clearSelection();
       }
     },
-    [hasAnySelected, selectedArchiveIds, batchApplying, t, refresh, clearSelection, mergeTagsFn, applySummaryFn],
+    [hasAnySelected, selectedArchiveIds, selectedTankoubonIds, batchApplying, t, refresh, clearSelection, mergeTagsFn, applySummaryFn, language],
   );
 
   const batchActions = useMemo<BatchAction[]>(
     () => {
       const icons = {
-        edit: null,
-        favorite: null,
-        download: null,
-        'mark-read': null,
-        delete: null,
-      } as any;
+        edit: <Edit color={colors.text} size={16} />,
+        favorite: <Heart color={colors.text} size={16} />,
+        download: <Download color={colors.text} size={16} />,
+        'mark-read': <Check color={colors.text} size={16} />,
+        delete: <Trash2 color={colors.danger} size={16} />,
+      };
       return [
         {
           id: 'edit',
@@ -747,14 +834,14 @@ export function HomeScreen() {
           id: 'download',
           label: t('archive.download'),
           icon: icons.download,
-          disabled: !hasAnySelected || batchActionRunning,
+          disabled: !hasAnySelected || batchActionRunning || selectedArchiveCount === 0,
           onPress: handleBatchDownload,
         },
         {
           id: 'mark-read',
           label: t('archive.markAsRead'),
           icon: icons['mark-read'],
-          disabled: !hasAnySelected || batchActionRunning,
+          disabled: !hasAnySelected || batchActionRunning || selectedArchiveCount === 0,
           onPress: () => handleBatchReadStatus(true),
         },
         {
@@ -771,11 +858,14 @@ export function HomeScreen() {
       hasAnySelected,
       batchActionRunning,
       batchApplying,
+      colors.danger,
+      colors.text,
       handleOpenBatchEdit,
       handleBatchFavorite,
       handleBatchDownload,
       handleBatchReadStatus,
       handleBatchDelete,
+      selectedArchiveCount,
       t,
     ],
   );
@@ -1466,12 +1556,17 @@ export function HomeScreen() {
           {row.items.map(item => (
             <ArchiveCard
               archive={item}
-              key={mediaItemId(item)}
+              key={`${mediaItemId(item)}|${selectionResetToken}`}
               variant="row"
               onOpenDetail={() => openDetail(item)}
               onOpenReader={() => openReader(item)}
               onPress={() => openReader(item)}
               onTagPress={applyTagSearch}
+              selectable
+              selectionMode={selectionMode}
+              selected={isTankoubon(item) ? selectedTankoubonIds.has(item.tankoubon_id) : selectedArchiveIds.has(item.arcid)}
+              onToggleSelect={() => (isTankoubon(item) ? toggleTankoubonSelect(item.tankoubon_id) : toggleArchiveSelect(item.arcid))}
+              onLongPress={() => handleCardLongPress(item)}
             />
           ))}
         </ScrollView>
@@ -1612,7 +1707,7 @@ export function HomeScreen() {
             items.length === 0 && styles.emptyList,
           ]}
           data={items}
-          extraData={itemVariant}
+          extraData={`${itemVariant}|${selectionMode}|${Array.from(selectedArchiveIds).join(',')}|${Array.from(selectedTankoubonIds).join(',')}`}
           key={listLayoutKey}
           keyExtractor={item => mediaItemId(item)}
           numColumns={itemVariant === 'grid' ? 2 : 1}
@@ -1634,20 +1729,21 @@ export function HomeScreen() {
                 onTagPress={applyTagSearch}
               />
             ) : (
-              <ArchiveCard
-                archive={item}
-                variant={itemVariant}
-                onOpenDetail={() => openDetail(item)}
-                onOpenReader={() => openReader(item)}
-                onPress={() => openReader(item)}
-                onTagPress={applyTagSearch}
-                selectable={isArchive}
-                selectionMode={selectionMode}
-                selected={isArchive && selectedArchiveIds.has(arcid)}
-                onToggleSelect={() => isArchive && toggleArchiveSelect(arcid)}
-                onLongPress={() => isArchive && handleCardLongPress(arcid)}
-              />
-            ));
+            <ArchiveCard
+              archive={item}
+              key={`${mediaItemId(item)}|${selectionResetToken}`}
+              variant={itemVariant}
+              onOpenDetail={() => openDetail(item)}
+              onOpenReader={() => openReader(item)}
+              onPress={() => openReader(item)}
+              onTagPress={applyTagSearch}
+              selectable
+              selectionMode={selectionMode}
+              selected={isArchive ? selectedArchiveIds.has(arcid) : selectedTankoubonIds.has(item.tankoubon_id)}
+              onToggleSelect={() => (isArchive ? toggleArchiveSelect(arcid) : toggleTankoubonSelect(item.tankoubon_id))}
+              onLongPress={() => handleCardLongPress(item)}
+            />
+          ));
           }}
           ListEmptyComponent={
             loading ? (
@@ -1665,7 +1761,7 @@ export function HomeScreen() {
       {selectionMode ? (
         <BatchActionBar
           visible={selectionMode}
-          selectedCount={selectedArchiveCount}
+          selectedCount={selectedTotal}
           actions={batchActions}
           onExit={exitSelectionMode}
           t={t}
@@ -1675,7 +1771,9 @@ export function HomeScreen() {
       <BatchEditDialog
         visible={batchEditOpen}
         onClose={() => setBatchEditOpen(false)}
-        selectedCount={selectedArchiveCount}
+        totalSelected={selectedTotal}
+        selectedArchiveCount={selectedArchiveCount}
+        selectedTankoubonCount={selectedTankoubonCount}
         applying={batchApplying}
         t={t}
         onApply={applyBatchEdit}

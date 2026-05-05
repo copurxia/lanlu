@@ -2,6 +2,7 @@ import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   StyleSheet,
   Text,
+  Pressable,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -85,7 +86,8 @@ export function ArchiveCard({
   const pressed = useSharedValue(0);
   const tagProgress = useSharedValue(0);
   const coverLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const selectionLongPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggeredRef = useRef(false);
+  const previousSelectionModeRef = useRef(selectionMode);
   const itemWidth =
     variant === 'row'
       ? 136
@@ -141,6 +143,17 @@ export function ArchiveCard({
     };
   }, []);
 
+  useEffect(() => {
+    const wasSelectionMode = previousSelectionModeRef.current;
+    previousSelectionModeRef.current = selectionMode;
+    if (!wasSelectionMode || selectionMode) return;
+    setTagsOpen(false);
+    setCoverTouching(false);
+    longPressTriggeredRef.current = false;
+    pressed.value = 0;
+    clearCoverLongPressTimers();
+  }, [pressed, selectionMode]);
+
   const pagecount = Number(archive.pagecount || 0);
   const progress = Number(archive.progress || 0);
   const progressPercent =
@@ -172,6 +185,10 @@ export function ArchiveCard({
   }
 
   function handleBodyPress() {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
     if (tagsOpen) {
       setTagsOpen(false);
       return;
@@ -193,28 +210,28 @@ export function ArchiveCard({
       clearTimeout(coverLongPressTimerRef.current);
       coverLongPressTimerRef.current = null;
     }
-    if (selectionLongPressTimerRef.current) {
-      clearTimeout(selectionLongPressTimerRef.current);
-      selectionLongPressTimerRef.current = null;
-    }
   }
 
   function handleCoverPressIn() {
     if (selectionMode) return;
     setCoverTouching(true);
     pressed.value = 1;
+    longPressTriggeredRef.current = false;
     clearCoverLongPressTimers();
     coverLongPressTimerRef.current = setTimeout(() => {
       coverLongPressTimerRef.current = null;
       showTags();
     }, 450);
-    if (selectable) {
-      selectionLongPressTimerRef.current = setTimeout(() => {
-        selectionLongPressTimerRef.current = null;
-        setTagsOpen(false);
-        onLongPress?.();
-      }, 1500);
-    }
+  }
+
+  function handleSelectionLongPress() {
+    if (!selectable) return;
+    longPressTriggeredRef.current = true;
+    setCoverTouching(false);
+    pressed.value = 0;
+    clearCoverLongPressTimers();
+    setTagsOpen(false);
+    onLongPress?.();
   }
 
   function handleCoverPressOut() {
@@ -224,6 +241,10 @@ export function ArchiveCard({
   }
 
   function handleCoverPress() {
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
     if (tagsOpen) {
       setTagsOpen(false);
       return;
@@ -466,10 +487,11 @@ export function ArchiveCard({
         cardAnimatedStyle,
       ]}
     >
-      <TouchableOpacity
-        activeOpacity={1}
+      <Pressable
         onPress={handleCoverPress}
         onPressIn={handleCoverPressIn}
+        onLongPress={handleSelectionLongPress}
+        delayLongPress={1500}
         onPressOut={handleCoverPressOut}
         style={[
           styles.coverWrap,
@@ -509,24 +531,19 @@ export function ArchiveCard({
           </View>
         ) : null}
 
-        {selectable ? (
-          <TouchableOpacity
-            style={[styles.checkbox, selected && styles.checkboxSelected]}
-            onPress={() => {
-              if (!selected && !selectionMode) {
-                onLongPress?.();
-              }
-              onToggleSelect?.();
-            }}>
+        {selectable && selectionMode ? (
+          <View style={[styles.checkbox, selected && styles.checkboxSelected]} pointerEvents="none">
             {selected ? (
               <Check color={colors.white} size={16} />
             ) : (
               <Square color={colors.white} size={14} />
             )}
-          </TouchableOpacity>
+          </View>
         ) : null}
 
-        {selectionMode && !selected && selectable ? <View style={styles.selectionOverlay} /> : null}
+        {selectionMode && !selected && selectable ? (
+          <View pointerEvents="none" style={styles.selectionOverlay} />
+        ) : null}
 
         {visibleTags.length > 0 || archive.description ? (
           <Animated.View
@@ -581,14 +598,14 @@ export function ArchiveCard({
         {showActions ? (
           <View style={styles.actionButtons}>
             {onOpenDetail ? (
-              <TouchableOpacity
+              <Pressable
                 accessibilityRole="button"
                 onPress={handleBodyPress}
                 style={styles.actionButton}>
                 <Eye color={colors.white} size={16} />
-              </TouchableOpacity>
+              </Pressable>
             ) : null}
-            <TouchableOpacity
+            <Pressable
               accessibilityRole="button"
               accessibilityLabel={favoriteState ? 'Remove favorite' : 'Add favorite'}
               onPress={toggleFavorite}
@@ -598,11 +615,15 @@ export function ArchiveCard({
                 fill={favoriteState ? '#f87171' : 'transparent'}
                 size={16}
               />
-            </TouchableOpacity>
+            </Pressable>
           </View>
         ) : null}
-      </TouchableOpacity>
-      <TouchableOpacity activeOpacity={0.78} onPress={handleBodyPress} style={[styles.body, variant === 'list' && styles.bodyList]}>
+      </Pressable>
+      <TouchableOpacity
+        delayLongPress={1500}
+        onLongPress={handleSelectionLongPress}
+        onPress={handleBodyPress}
+        style={[styles.body, variant === 'list' && styles.bodyList]}>
         <Text numberOfLines={2} style={styles.title}>
           {title}
         </Text>

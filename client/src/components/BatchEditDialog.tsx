@@ -1,8 +1,8 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,8 +16,10 @@ import {useTheme} from '../theme/ThemeContext';
 import type {TFunction} from '../i18n';
 
 export type SummaryMode = 'append' | 'replace' | 'clear';
+export type BatchEditScope = 'all' | 'archive' | 'tankoubon';
 
 export type BatchEditPayload = {
+  scope: BatchEditScope;
   updateTitle: boolean;
   titlePrefix: string;
   titleSuffix: string;
@@ -35,7 +37,9 @@ export type BatchEditPayload = {
 type Props = {
   visible: boolean;
   onClose: () => void;
-  selectedCount: number;
+  totalSelected: number;
+  selectedArchiveCount: number;
+  selectedTankoubonCount: number;
   applying: boolean;
   t: TFunction;
   onApply: (payload: BatchEditPayload) => Promise<boolean>;
@@ -44,13 +48,16 @@ type Props = {
 export function BatchEditDialog({
   visible,
   onClose,
-  selectedCount,
+  totalSelected,
+  selectedArchiveCount,
+  selectedTankoubonCount,
   applying,
   t,
   onApply,
 }: Props) {
   const {colors} = useTheme();
 
+  const [scope, setScope] = useState<BatchEditScope>('all');
   const [updateTitle, setUpdateTitle] = useState(false);
   const [titlePrefix, setTitlePrefix] = useState('');
   const [titleSuffix, setTitleSuffix] = useState('');
@@ -63,11 +70,13 @@ export function BatchEditDialog({
   const [runMetadataPlugin, setRunMetadataPlugin] = useState(false);
   const [metadataPluginNamespace, setMetadataPluginNamespace] = useState('');
   const [metadataPluginParam, setMetadataPluginParam] = useState('');
+  const [metadataPluginPickerOpen, setMetadataPluginPickerOpen] = useState(false);
 
   const [plugins, setPlugins] = useState<Plugin[]>([]);
 
   useEffect(() => {
     if (visible) {
+      setScope('all');
       setUpdateTitle(false);
       setTitlePrefix('');
       setTitleSuffix('');
@@ -80,6 +89,7 @@ export function BatchEditDialog({
       setRunMetadataPlugin(false);
       setMetadataPluginNamespace('');
       setMetadataPluginParam('');
+      setMetadataPluginPickerOpen(false);
 
       fetchMetadataPlugins()
         .then(setPlugins)
@@ -109,9 +119,19 @@ export function BatchEditDialog({
     updateTitle || updateSummary || updateTags || runMetadataPlugin;
   const pluginReady =
     !runMetadataPlugin || metadataPluginNamespace.trim().length > 0;
+  const effectiveArchiveCount = scope === 'tankoubon' ? 0 : selectedArchiveCount;
+  const effectiveTankoubonCount = scope === 'archive' ? 0 : selectedTankoubonCount;
+  const effectiveTotalCount = effectiveArchiveCount + effectiveTankoubonCount;
 
   const summaryLines = useMemo(() => {
     const lines: string[] = [];
+    const scopeLabel =
+      scope === 'all'
+        ? t('home.batchScopeAll')
+        : scope === 'archive'
+          ? t('home.batchScopeArchive')
+          : t('home.batchScopeTankoubon');
+    lines.push(`${t('home.batchScopeLabel')}: ${scopeLabel}`);
     if (updateTitle && (titlePrefix.trim() || titleSuffix.trim())) {
       lines.push(`Title: +${titlePrefix.trim() || "''"} / +${titleSuffix.trim() || "''"}`);
     }
@@ -135,7 +155,9 @@ export function BatchEditDialog({
     return lines;
   }, [
     metadataPluginNamespace,
+    scope,
     runMetadataPlugin,
+    t,
     summaryMode,
     tagsAdd.length,
     tagsRemove.length,
@@ -148,6 +170,7 @@ export function BatchEditDialog({
 
   const handleApply = useCallback(async () => {
     const ok = await onApply({
+      scope,
       updateTitle,
       titlePrefix,
       titleSuffix,
@@ -165,6 +188,7 @@ export function BatchEditDialog({
   }, [
     onApply,
     onClose,
+    scope,
     updateTitle,
     titlePrefix,
     titleSuffix,
@@ -191,6 +215,7 @@ export function BatchEditDialog({
           backgroundColor: colors.background,
           borderTopLeftRadius: 16,
           borderTopRightRadius: 16,
+          flex: 1,
           maxHeight: '92%',
           paddingBottom: 34,
         },
@@ -217,8 +242,13 @@ export function BatchEditDialog({
           fontWeight: '600',
         },
         body: {
+          flex: 1,
           paddingHorizontal: 16,
           paddingTop: 16,
+        },
+        bodyContent: {
+          flexGrow: 1,
+          paddingBottom: 20,
         },
         infoBox: {
           backgroundColor: colors.surface,
@@ -237,6 +267,32 @@ export function BatchEditDialog({
           color: colors.textMuted,
           fontSize: 12,
           marginTop: 2,
+        },
+        scopeRow: {
+          flexDirection: 'row',
+          gap: 8,
+          marginBottom: 16,
+        },
+        scopeButton: {
+          alignItems: 'center',
+          borderColor: colors.borderStrong,
+          borderRadius: 8,
+          borderWidth: StyleSheet.hairlineWidth,
+          flex: 1,
+          paddingHorizontal: 10,
+          paddingVertical: 10,
+        },
+        scopeButtonActive: {
+          backgroundColor: colors.primary,
+          borderColor: colors.primary,
+        },
+        scopeButtonText: {
+          color: colors.text,
+          fontSize: 13,
+          fontWeight: '700',
+        },
+        scopeButtonTextActive: {
+          color: colors.white,
         },
         section: {
           borderColor: colors.border,
@@ -298,6 +354,64 @@ export function BatchEditDialog({
           borderWidth: StyleSheet.hairlineWidth,
           flex: 1,
           paddingHorizontal: 12,
+          paddingVertical: 10,
+        },
+        pickerOverlay: {
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          flex: 1,
+          justifyContent: 'flex-end',
+        },
+        pickerSheet: {
+          backgroundColor: colors.background,
+          borderTopLeftRadius: 18,
+          borderTopRightRadius: 18,
+          maxHeight: '70%',
+          paddingBottom: 24,
+          paddingHorizontal: 16,
+          paddingTop: 10,
+        },
+        pickerSheetHandle: {
+          alignSelf: 'center',
+          backgroundColor: colors.borderStrong,
+          borderRadius: 999,
+          height: 4,
+          marginBottom: 12,
+          width: 42,
+        },
+        pickerSheetTitle: {
+          color: colors.text,
+          fontSize: 16,
+          fontWeight: '800',
+          marginBottom: 12,
+        },
+        pickerSheetItem: {
+          borderColor: colors.border,
+          borderRadius: 12,
+          borderWidth: StyleSheet.hairlineWidth,
+          marginBottom: 10,
+          paddingHorizontal: 12,
+          paddingVertical: 12,
+        },
+        pickerSheetItemActive: {
+          backgroundColor: colors.primaryMuted,
+          borderColor: colors.primary,
+        },
+        pickerSheetItemText: {
+          color: colors.text,
+          fontSize: 14,
+          fontWeight: '700',
+        },
+        pickerSheetItemTextActive: {
+          color: colors.primary,
+        },
+        pickerSheetItemSub: {
+          color: colors.textMuted,
+          fontSize: 12,
+          marginTop: 2,
+        },
+        pickerSheetEmpty: {
+          color: colors.textMuted,
+          fontSize: 13,
           paddingVertical: 10,
         },
         pickerText: {
@@ -383,12 +497,38 @@ export function BatchEditDialog({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.body} showsVerticalScrollIndicator={false}>
-            <View style={styles.infoBox}>
-              <Text style={styles.infoLabel}>
-                {t('common.selected')}: {selectedCount}
-              </Text>
-            </View>
+          <ScrollView
+            contentContainerStyle={styles.bodyContent}
+            showsVerticalScrollIndicator={false}
+            style={styles.body}>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>
+                {t('common.selected')}: {totalSelected}
+            </Text>
+            <Text style={styles.infoSub}>
+              Archive: {effectiveArchiveCount} / Tankoubon: {effectiveTankoubonCount}
+            </Text>
+          </View>
+
+          <View style={styles.scopeRow}>
+            {[
+              {value: 'all', label: t('home.batchScopeAll')},
+              {value: 'archive', label: t('home.batchScopeArchive')},
+              {value: 'tankoubon', label: t('home.batchScopeTankoubon')},
+            ].map(option => {
+              const active = scope === option.value;
+              return (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[styles.scopeButton, active && styles.scopeButtonActive]}
+                  onPress={() => setScope(option.value as BatchEditScope)}>
+                  <Text style={[styles.scopeButtonText, active && styles.scopeButtonTextActive]}>
+                    {option.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
             {/* Title */}
             <View style={styles.section}>
@@ -528,10 +668,9 @@ export function BatchEditDialog({
                       style={styles.picker}
                       onPress={() => {
                         if (plugins.length === 0) return;
-                        const idx = plugins.findIndex(p => p.namespace === metadataPluginNamespace);
-                        const next = (idx + 1) % plugins.length;
-                        setMetadataPluginNamespace(plugins[next].namespace);
-                      }}>
+                        setMetadataPluginPickerOpen(true);
+                      }}
+                      disabled={plugins.length === 0}>
                       <Text style={styles.pickerText} numberOfLines={1}>
                         {metadataPluginNamespace
                           ? plugins.find(p => p.namespace === metadataPluginNamespace)?.name ||
@@ -557,10 +696,7 @@ export function BatchEditDialog({
             {/* Preview */}
             <View style={styles.previewBox}>
               <Text style={styles.previewTitle}>
-                {t('home.batchPreviewTarget').replace(
-                  '{count}',
-                  String(selectedCount),
-                )}
+                {t('home.batchPreviewTarget').replace('{count}', String(effectiveTotalCount))}
               </Text>
               {summaryLines.length > 0 ? (
                 summaryLines.map((line, i) => (
@@ -588,18 +724,18 @@ export function BatchEditDialog({
             <TouchableOpacity
               style={[
                 styles.applyButton,
-                (!hasAnyFieldEnabled || !pluginReady || applying) &&
+                (!hasAnyFieldEnabled || !pluginReady || applying || effectiveTotalCount === 0) &&
                   styles.applyButtonDisabled,
               ]}
               onPress={handleApply}
-              disabled={!hasAnyFieldEnabled || !pluginReady || applying}>
+              disabled={!hasAnyFieldEnabled || !pluginReady || applying || effectiveTotalCount === 0}>
               {applying ? (
                 <ActivityIndicator color={colors.white} size="small" />
               ) : (
                 <Text style={styles.applyButtonText}>
                   {t('home.batchApplyToCount').replace(
                     '{count}',
-                    String(selectedCount),
+                    String(effectiveTotalCount),
                   )}
                 </Text>
               )}
@@ -607,6 +743,43 @@ export function BatchEditDialog({
           </View>
         </View>
       </View>
+
+      <Modal
+        visible={metadataPluginPickerOpen}
+        transparent
+        statusBarTranslucent
+        onRequestClose={() => setMetadataPluginPickerOpen(false)}>
+        <Pressable style={styles.pickerOverlay} onPress={() => setMetadataPluginPickerOpen(false)}>
+          <View style={styles.pickerSheet}>
+            <View style={styles.pickerSheetHandle} />
+            <Text style={styles.pickerSheetTitle}>{t('archive.metadataPluginLabel')}</Text>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {plugins.map(plugin => {
+                const active = metadataPluginNamespace === plugin.namespace;
+                return (
+                  <TouchableOpacity
+                    key={plugin.namespace}
+                    style={[styles.pickerSheetItem, active && styles.pickerSheetItemActive]}
+                    onPress={() => {
+                      setMetadataPluginNamespace(plugin.namespace);
+                      setMetadataPluginPickerOpen(false);
+                    }}>
+                    <Text style={[styles.pickerSheetItemText, active && styles.pickerSheetItemTextActive]}>
+                      {plugin.name}
+                    </Text>
+                    <Text style={styles.pickerSheetItemSub} numberOfLines={1}>
+                      {plugin.namespace}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {plugins.length === 0 ? (
+                <Text style={styles.pickerSheetEmpty}>{t('archive.metadataPluginNoPlugins')}</Text>
+              ) : null}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
     </Modal>
   );
 }
