@@ -20,6 +20,7 @@ import {
   deleteTankoubon,
   fetchTankoubonMetadata,
   fetchTankoubonRelated,
+  readAssetId,
   searchArchives,
   setTankoubonFavorite,
 } from '../api/lanlu';
@@ -38,6 +39,7 @@ import {AddArchiveDialog} from './tankoubon-detail/AddArchiveDialog';
 import {TankoubonRelated} from './tankoubon-detail/TankoubonRelated';
 import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
+import {TankoubonEditDialog} from './tankoubon-detail/TankoubonEditDialog';
 
 type ViewMode = 'grid' | 'list';
 const TANKOUHON_VIEW_MODE_KEY = 'tankoubon_view_mode';
@@ -71,6 +73,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   const [viewMode, setViewMode] = useState<ViewMode>(loadViewMode);
 
   const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   // Related
   const [related, setRelated] = useState<Tankoubon[]>([]);
@@ -420,7 +423,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           favoriteLoading={false}
           onStartReading={handleStartReading}
           onToggleFavorite={handleFavoriteToggle}
-          onEdit={() => Alert.alert(t('common.edit'), t('common.comingSoon'))}
+          onEdit={() => setEditDialogOpen(true)}
           onDelete={handleDelete}
           onAddArchive={() => setAddDialogOpen(true)}
           t={t}
@@ -539,6 +542,22 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         onAdded={() => {
           loadArchives().catch(() => {});
         }}
+        t={t}
+      />
+
+      <TankoubonEditDialog
+        visible={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        onSaved={() => {
+          loadMetadata().catch(err => console.warn('Failed to reload tankoubon:', err));
+        }}
+        tankoubonId={tankoubonId}
+        initialTitle={merged.title || ''}
+        initialSummary={merged.description || ''}
+        initialTags={tags}
+        initialAssetCoverId={String(readAssetId(merged.assets, 'cover') || '')}
+        initialAssetBackdropId={String(readAssetId(merged.assets, 'backdrop') || '')}
+        initialAssetClearlogoId={String(readAssetId(merged.assets, 'clearlogo') || '')}
         t={t}
       />
     </View>

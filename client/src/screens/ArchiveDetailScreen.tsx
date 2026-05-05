@@ -24,6 +24,7 @@ import {
   getArchiveDownloadUrl,
   markArchiveAsNew,
   markArchiveAsRead,
+  readAssetId,
   setArchiveFavorite,
 } from '../api/lanlu';
 import {useAuth} from '../auth/AuthContext';
@@ -38,6 +39,7 @@ import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ArchiveRelated} from './archive-detail/ArchiveRelated';
+import {ArchiveEditDialog} from './archive-detail/ArchiveEditDialog';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ArchiveDetail'>;
 
@@ -58,6 +60,9 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const [tankoubons, setTankoubons] = useState<Tankoubon[]>([]);
   const [isNew, setIsNew] = useState(Boolean(archive?.isnew));
   const [refreshing, setRefreshing] = useState(false);
+
+  // Edit dialog state
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
 
   const isAuthenticated = authStatus === 'authenticated';
   const isAdmin = user?.isAdmin === true;
@@ -372,7 +377,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         onDownload={handleDownload}
         onMarkAsRead={isNew ? handleMarkAsRead : undefined}
         onMarkAsNew={!isNew && isNew !== undefined ? handleMarkAsNew : undefined}
-        onEdit={isAuthenticated ? () => Alert.alert(t('common.edit'), t('common.comingSoon')) : undefined}
+        onEdit={isAuthenticated ? () => setEditDialogOpen(true) : undefined}
         onDelete={isAdmin ? handleDeleteArchive : undefined}
         t={t}
       />
@@ -409,6 +414,22 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         renderItem={item => (
           <ArchiveCard archive={item} variant="related" onOpenReader={() => handleRelatedPress(item)} />
         )}
+      />
+
+      <ArchiveEditDialog
+        visible={editDialogOpen}
+        onClose={() => setEditDialogOpen(false)}
+        onSaved={() => {
+          load().catch(err => console.warn('Failed to reload archive:', err));
+        }}
+        archiveId={archiveId}
+        initialTitle={merged.title || ''}
+        initialSummary={merged.description || ''}
+        initialTags={tags}
+        initialAssetCoverId={String(readAssetId(merged.assets, 'cover') || '')}
+        initialAssetBackdropId={String(readAssetId(merged.assets, 'backdrop') || '')}
+        initialAssetClearlogoId={String(readAssetId(merged.assets, 'clearlogo') || '')}
+        t={t}
       />
     </ScrollView>
   );

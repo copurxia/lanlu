@@ -1,5 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  Alert,
   FlatList,
   Modal,
   RefreshControl,
@@ -34,17 +35,27 @@ import {extractApiError} from '../api/client';
 import {
   fetchCategories,
   fetchDiscover,
+  fetchMetadataPlugins,
   fetchSmartFilters,
   fetchTagAutocomplete,
   isTankoubon,
   mediaItemId,
   searchArchives,
+  setArchiveFavorite,
+  markArchiveAsRead,
+  markArchiveAsNew,
+  deleteArchive,
+  runMetadataPlugin,
+  updateArchiveMetadata,
   type SmartFilter,
   type TagSuggestion,
+  type Plugin,
 } from '../api/lanlu';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {HomeFeedCard} from '../components/HomeFeedCard';
 import {ScreenState} from '../components/ScreenState';
+import {BatchActionBar, type BatchAction} from '../components/BatchActionBar';
+import {BatchEditDialog, type BatchEditPayload} from '../components/BatchEditDialog';
 import {useI18n} from '../i18n';
 import {appendDiagnosticLog} from '../storage/diagnostics';
 import {
@@ -203,6 +214,57 @@ export function HomeScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
+
+  // Selection / batch state
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedArchiveIds, setSelectedArchiveIds] = useState<Set<string>>(new Set());
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [batchApplying, setBatchApplying] = useState(false);
+  const [batchPlugins, setBatchPlugins] = useState<Plugin[]>([]);
+  const [batchActionRunning, setBatchActionRunning] = useState(false);
+
+  const selectedArchiveCount = selectedArchiveIds.size;
+  const hasAnySelected = selectedArchiveCount > 0;
+
+  const clearSelection = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedArchiveIds(new Set());
+  }, []);
+
+  const enterSelectionMode = useCallback(() => {
+    setSelectionMode(true);
+  }, []);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedArchiveIds(new Set());
+    setBatchEditOpen(false);
+  }, []);
+
+  const toggleArchiveSelect = useCallback(
+    (archiveId: string) => {
+      setSelectedArchiveIds(prev => {
+        const next = new Set(prev);
+        if (next.has(archiveId)) next.delete(archiveId);
+        else next.add(archiveId);
+        if (next.size === 0) {
+          setSelectionMode(false);
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const handleCardLongPress = useCallback(
+    (archiveId: string) => {
+      if (!selectionMode) {
+        enterSelectionMode();
+        setSelectedArchiveIds(new Set([archiveId]));
+      }
+    },
+    [selectionMode, enterSelectionMode],
+  );
 
   const hasAdvancedFilters = Boolean(
     dateFrom || dateTo || newOnly || untaggedOnly || favoriteOnly || !groupByTanks,
@@ -468,6 +530,256 @@ export function HomeScreen() {
     load(1, 'replace').catch(err => console.warn('Failed to refresh home:', err));
   }, [load]);
 
+  // ─── Batch action handlers ────────────────────────────────────────────────
+
+  const handleBatchFavorite = useCallback(async () => {
+    if (!hasAnySelected || batchActionRunning) return;
+    setBatchActionRunning(true);
+    try {
+      const settled = await Promise.allSettled(
+        Array.from(selectedArchiveIds).map(id =>
+          setArchiveFavorite({arcid: id} as any, true),
+        ),
+      );
+      const successCount = settled.filter(r => r.status === 'fulfilled').length;
+      if (successCount > 0) refresh();
+    } catch {
+      // silent
+    } finally {
+      setBatchActionRunning(false);
+      clearSelection();
+    }
+  }, [hasAnySelected, selectedArchiveIds, batchActionRunning, refresh, clearSelection]);
+
+  const handleBatchReadStatus = useCallback(
+    async (toRead: boolean) => {
+      if (!hasAnySelected || batchActionRunning) return;
+      setBatchActionRunning(true);
+      try {
+        const settled = await Promise.allSettled(
+          Array.from(selectedArchiveIds).map(id =>
+            toRead ? markArchiveAsRead(id) : markArchiveAsNew(id),
+          ),
+        );
+        const successCount = settled.filter(r => r.status === 'fulfilled').length;
+        if (successCount > 0) refresh();
+      } catch {
+        // silent
+      } finally {
+        setBatchActionRunning(false);
+        clearSelection();
+      }
+    },
+    [hasAnySelected, selectedArchiveIds, batchActionRunning, refresh, clearSelection],
+  );
+
+  const handleBatchDownload = useCallback(() => {
+    if (!hasAnySelected) return;
+    for (const id of selectedArchiveIds) {
+      const url = `/api/archives/${encodeURIComponent(id)}/download`;
+      Alert.alert(t('archive.download'), url);
+    }
+  }, [hasAnySelected, selectedArchiveIds, t]);
+
+  const handleBatchDelete = useCallback(() => {
+    if (!hasAnySelected || batchActionRunning) return;
+    Alert.alert(
+      t('common.delete'),
+      `${t('common.delete')} ${selectedArchiveCount} archives?`,
+      [
+        {text: t('common.cancel'), style: 'cancel'},
+        {
+          text: t('common.delete'),
+          style: 'destructive',
+          onPress: async () => {
+            setBatchActionRunning(true);
+            try {
+              const settled = await Promise.allSettled(
+                Array.from(selectedArchiveIds).map(id => deleteArchive(id)),
+              );
+              const successCount = settled.filter(r => r.status === 'fulfilled').length;
+              if (successCount > 0) refresh();
+            } catch {
+              // silent
+            } finally {
+              setBatchActionRunning(false);
+              clearSelection();
+            }
+          },
+        },
+      ],
+    );
+  }, [hasAnySelected, selectedArchiveIds, selectedArchiveCount, batchActionRunning, t, refresh, clearSelection]);
+
+  const handleOpenBatchEdit = useCallback(async () => {
+    try {
+      const metas = await fetchMetadataPlugins();
+      setBatchPlugins(metas);
+    } catch {
+      setBatchPlugins([]);
+    }
+    setBatchEditOpen(true);
+  }, []);
+
+  function parseArchiveTags(rawTags: unknown): string[] {
+    if (Array.isArray(rawTags)) return rawTags.map(tag => String(tag).trim()).filter(Boolean);
+    if (!rawTags) return [];
+    return String(rawTags).split(',').map(tag => tag.trim()).filter(Boolean);
+  }
+
+  const mergeTagsFn = useCallback(
+    (source: string[], add: string[], remove: string[]) => {
+      const current = source.map(tag => String(tag || '').trim()).filter(Boolean);
+      const removeSet = new Set(remove.map(tag => String(tag || '').trim()).filter(Boolean));
+      const next = current.filter(tag => !removeSet.has(tag));
+      for (const tag of add.map(item => String(item || '').trim()).filter(Boolean)) {
+        if (!next.includes(tag)) next.push(tag);
+      }
+      return next;
+    },
+    [],
+  );
+
+  const applySummaryFn = useCallback(
+    (current: string, mode: BatchEditPayload['summaryMode'], value: string) => {
+      const rawCurrent = String(current || '');
+      const rawValue = String(value || '');
+      if (mode === 'clear') return '';
+      if (mode === 'replace') return rawValue.trim();
+      return rawCurrent.trim() ? `${rawCurrent}\n${rawValue}`.trim() : rawValue.trim();
+    },
+    [],
+  );
+
+  const applyBatchEdit = useCallback(
+    async (payload: BatchEditPayload): Promise<boolean> => {
+      if (!hasAnySelected || batchApplying) return false;
+      setBatchApplying(true);
+      try {
+        const arcids = Array.from(selectedArchiveIds);
+        const jobs = arcids.map(id => async () => {
+          if (payload.runMetadataPlugin && payload.metadataPluginNamespace.trim()) {
+            await runMetadataPlugin(
+              'archive',
+              id,
+              payload.metadataPluginNamespace.trim(),
+              payload.metadataPluginParam,
+              {writeBack: true},
+            );
+          }
+          if (payload.updateTitle || payload.updateSummary || payload.updateTags) {
+            const result = await searchArchives({
+              filter: id,
+              page: 1,
+              pageSize: 1,
+            });
+            const item = result.data.find(m => !isTankoubon(m) && (m as any).arcid === id);
+            if (!item || isTankoubon(item)) return;
+            const a = item as any;
+            const baseTitle = String(a.title || '');
+            const nextTitle = payload.updateTitle
+              ? `${payload.titlePrefix}${baseTitle}${payload.titleSuffix}`.trim()
+              : baseTitle;
+            const baseSummary = String(a.description || '');
+            const nextSummary = payload.updateSummary
+              ? applySummaryFn(baseSummary, payload.summaryMode, payload.summaryValue)
+              : baseSummary;
+            const baseTags = parseArchiveTags(a.tags);
+            const nextTags = payload.updateTags
+              ? mergeTagsFn(baseTags, payload.tagsAdd, payload.tagsRemove)
+              : baseTags;
+
+            await updateArchiveMetadata(id, {
+              title: nextTitle || baseTitle,
+              type: 0,
+              description: nextSummary,
+              tags: nextTags,
+            });
+          }
+        });
+
+        const settled = await Promise.allSettled(jobs.map(job => job()));
+        const successCount = settled.filter(r => r.status === 'fulfilled').length;
+        const failedCount = settled.length - successCount;
+        if (failedCount > 0) {
+          Alert.alert(
+            t('common.error'),
+            `${successCount}/${settled.length} ${t('home.batchDoneWithFailures')}`,
+          );
+        }
+        if (successCount > 0) refresh();
+        return true;
+      } catch {
+        return false;
+      } finally {
+        setBatchApplying(false);
+        clearSelection();
+      }
+    },
+    [hasAnySelected, selectedArchiveIds, batchApplying, t, refresh, clearSelection, mergeTagsFn, applySummaryFn],
+  );
+
+  const batchActions = useMemo<BatchAction[]>(
+    () => {
+      const icons = {
+        edit: null,
+        favorite: null,
+        download: null,
+        'mark-read': null,
+        delete: null,
+      } as any;
+      return [
+        {
+          id: 'edit',
+          label: t('common.edit'),
+          icon: icons.edit,
+          disabled: !hasAnySelected || batchActionRunning || batchApplying,
+          onPress: handleOpenBatchEdit,
+        },
+        {
+          id: 'favorite',
+          label: t('common.favorite'),
+          icon: icons.favorite,
+          disabled: !hasAnySelected || batchActionRunning,
+          onPress: handleBatchFavorite,
+        },
+        {
+          id: 'download',
+          label: t('archive.download'),
+          icon: icons.download,
+          disabled: !hasAnySelected || batchActionRunning,
+          onPress: handleBatchDownload,
+        },
+        {
+          id: 'mark-read',
+          label: t('archive.markAsRead'),
+          icon: icons['mark-read'],
+          disabled: !hasAnySelected || batchActionRunning,
+          onPress: () => handleBatchReadStatus(true),
+        },
+        {
+          id: 'delete',
+          label: t('common.delete'),
+          icon: icons.delete,
+          destructive: true,
+          disabled: !hasAnySelected || batchActionRunning,
+          onPress: handleBatchDelete,
+        },
+      ];
+    },
+    [
+      hasAnySelected,
+      batchActionRunning,
+      batchApplying,
+      handleOpenBatchEdit,
+      handleBatchFavorite,
+      handleBatchDownload,
+      handleBatchReadStatus,
+      handleBatchDelete,
+      t,
+    ],
+  );
+
   useEffect(() => {
     const words = filter.trim().split(/\s+/).filter(Boolean);
     const lastWord = words[words.length - 1] || '';
@@ -512,6 +824,7 @@ export function HomeScreen() {
   }
 
   function submitSearch() {
+    clearSelection();
     const nextFilter = filter.trim();
     requestIdRef.current += 1;
     appendDiagnosticLog('home.search.submit', {
@@ -540,6 +853,7 @@ export function HomeScreen() {
   }
 
   function applyFilters() {
+    clearSelection();
     setSortby(draftSortby);
     setSortOrder(draftSortOrder);
     setDateFrom(draftDateFrom.trim());
@@ -633,6 +947,7 @@ export function HomeScreen() {
   }
 
   function openCategory(category: Category) {
+    clearSelection();
     setSelectedCategory(category);
     setActiveSmartFilterId(null);
     setSubmittedFilter('');
@@ -644,6 +959,7 @@ export function HomeScreen() {
   }
 
   function showAll() {
+    clearSelection();
     setActiveSmartFilterId(null);
     setSelectedCategory(null);
     setFilter('');
@@ -663,6 +979,7 @@ export function HomeScreen() {
   }
 
   function applySmartFilter(filterItem: SmartFilter) {
+    clearSelection();
     setActiveSmartFilterId(filterItem.id);
     setSelectedCategory(null);
     const nextQuery = String(filterItem.query || '').trim();
@@ -684,6 +1001,7 @@ export function HomeScreen() {
   }
 
   function applyTagSearch(tag: string) {
+    clearSelection();
     const nextQuery = buildExactTagSearchQuery(tag);
     if (!nextQuery) return;
     setActiveSmartFilterId(null);
@@ -1302,7 +1620,10 @@ export function HomeScreen() {
           onEndReached={loadMore}
           onEndReachedThreshold={0.5}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-          renderItem={({item}) => (
+          renderItem={({item}) => {
+            const isArchive = !isTankoubon(item);
+            const arcid = isArchive ? item.arcid : '';
+            return (
             itemVariant === 'tweet' || itemVariant === 'channel' ? (
               <HomeFeedCard
                 item={item}
@@ -1320,9 +1641,14 @@ export function HomeScreen() {
                 onOpenReader={() => openReader(item)}
                 onPress={() => openReader(item)}
                 onTagPress={applyTagSearch}
+                selectable={isArchive}
+                selectionMode={selectionMode}
+                selected={isArchive && selectedArchiveIds.has(arcid)}
+                onToggleSelect={() => isArchive && toggleArchiveSelect(arcid)}
+                onLongPress={() => isArchive && handleCardLongPress(arcid)}
               />
-            )
-          )}
+            ));
+          }}
           ListEmptyComponent={
             loading ? (
               <ScreenState loading title={t('home.loading')} />
@@ -1335,6 +1661,25 @@ export function HomeScreen() {
           }
         />
       )}
+
+      {selectionMode ? (
+        <BatchActionBar
+          visible={selectionMode}
+          selectedCount={selectedArchiveCount}
+          actions={batchActions}
+          onExit={exitSelectionMode}
+          t={t}
+        />
+      ) : null}
+
+      <BatchEditDialog
+        visible={batchEditOpen}
+        onClose={() => setBatchEditOpen(false)}
+        selectedCount={selectedArchiveCount}
+        applying={batchApplying}
+        t={t}
+        onApply={applyBatchEdit}
+      />
 
       <Modal
         animationType="slide"

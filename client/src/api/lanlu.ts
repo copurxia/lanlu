@@ -26,6 +26,319 @@ import {appendDiagnosticLog} from '../storage/diagnostics';
 
 let recommendationSessionKey: string | null = null;
 
+// ─── Plugin API ────────────────────────────────────────────────────────────
+
+export type Plugin = {
+  id: number;
+  name: string;
+  namespace: string;
+  version?: string;
+  plugin_type: string;
+  author?: string;
+  description?: string;
+  enabled: boolean;
+  installed: boolean;
+  update_url?: string;
+  has_schema?: boolean;
+  icon?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export async function fetchPlugins(): Promise<Plugin[]> {
+  const response = await apiClient.get<Plugin[]>('/api/admin/plugins');
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function fetchMetadataPlugins(): Promise<Plugin[]> {
+  const plugins = await fetchPlugins();
+  return plugins.filter(p => String(p.plugin_type || '').toLowerCase() === 'metadata');
+}
+
+// ─── Metadata Update API ───────────────────────────────────────────────────
+
+export async function updateArchiveMetadata(
+  archiveId: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  await apiClient.put(`/api/archives/${encodeURIComponent(archiveId)}/metadata`, body);
+}
+
+export async function updateTankoubonMetadata(
+  tankoubonId: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  await apiClient.put(`/api/tankoubons/${encodeURIComponent(tankoubonId)}/metadata`, body);
+}
+
+// ─── Task Pool / Metadata Plugin ───────────────────────────────────────────
+
+export type TaskDetail = {
+  id: number;
+  status: string;
+  message?: string;
+  result?: string;
+  progress?: number;
+};
+
+async function fetchTaskDetail(taskId: number): Promise<TaskDetail> {
+  const response = await apiClient.get<TaskDetail>(`/api/admin/taskpool/${taskId}`);
+  return response.data;
+}
+
+export async function waitForTaskDetail(
+  taskId: number,
+  onUpdate?: (task: TaskDetail) => void,
+  timeoutMs = 10 * 60 * 1000,
+): Promise<TaskDetail> {
+  const startedAt = Date.now();
+  const pollInterval = 1000;
+  while (Date.now() - startedAt < timeoutMs) {
+    const task = await fetchTaskDetail(taskId);
+    onUpdate?.(task);
+    if (task.status === 'completed' || task.status === 'failed' || task.status === 'stopped') {
+      return task;
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, pollInterval));
+  }
+  throw new Error(`Task ${taskId} timed out`);
+}
+
+export async function runMetadataPlugin(
+  targetType: 'archive' | 'tankoubon',
+  targetId: string,
+  namespace: string,
+  param = '',
+  options?: {writeBack?: boolean; metadata?: Record<string, unknown>},
+  onUpdate?: (task: TaskDetail) => void,
+): Promise<TaskDetail> {
+  const payload: Record<string, unknown> = {
+    target_type: targetType,
+    target_id: targetId,
+    namespace,
+    param: param || '',
+    write_back: options?.writeBack ? 1 : 0,
+  };
+  if (options?.metadata) {
+    payload.metadata = options.metadata;
+  }
+
+  const response = await apiClient.post<{success?: number; job?: number; task_type?: string}>(
+    '/api/metadata_plugin',
+    payload,
+  );
+
+  const rawSuccess = response.data?.success;
+  const enqueueSuccess = typeof rawSuccess === 'number' && rawSuccess !== 0;
+  if (!enqueueSuccess) {
+    throw new Error('Metadata plugin enqueue failed');
+  }
+
+  const jobId = response.data?.job;
+  if (!jobId) {
+    throw new Error('No job id returned');
+  }
+
+  return await waitForTaskDetail(jobId, onUpdate);
+}
+
+export type MetadataPluginPreviewData = {
+  title: string;
+  summary: string;
+  tags: string[];
+  cover: string;
+  backdrop: string;
+  clearlogo: string;
+};
+
+export function parseMetadataPluginPreviewResult(rawResult: string | null | undefined): MetadataPluginPreviewData | null {
+  if (!rawResult) return null;
+  let out: any;
+  try {
+    out = JSON.parse(rawResult);
+  } catch {
+    return null;
+  }
+  if (typeof out !== 'object' || out === null) return null;
+
+  const success = out.success;
+  const isSuccess = typeof success === 'number' ? success !== 0 : success === true;
+  if (!isSuccess) return null;
+
+  const data = out.data || {};
+  const tags = Array.isArray(data.tags)
+    ? data.tags.map((tag: unknown) => String(tag || '').trim()).filter(Boolean)
+    : [];
+
+  function readAssetValue(assets: unknown, key: string): string {
+    if (!assets || typeof assets !== 'object') return '';
+    if (Array.isArray(assets)) {
+      for (const item of assets) {
+        if (!item || typeof item !== 'object') continue;
+        const r = item as Record<string, unknown>;
+        const itemKey = String(r.key ?? r.type ?? r.name ?? '').trim().toLowerCase();
+        if (itemKey !== key) continue;
+        const val = r.value ?? r.path ?? r.id ?? r.asset_id ?? r.assetId;
+        return val != null ? String(val) : '';
+      }
+      return '';
+    }
+    const obj = assets as Record<string, unknown>;
+    const direct = obj[key];
+    if (direct !== undefined) return String(direct);
+    return '';
+  }
+
+  return {
+    title: typeof data.title === 'string' ? data.title : '',
+    summary: typeof data.description === 'string' ? data.description : '',
+    tags,
+    cover: readAssetValue(data.assets, 'cover'),
+    backdrop: readAssetValue(data.assets, 'backdrop'),
+    clearlogo: readAssetValue(data.assets, 'clearlogo'),
+  };
+}
+
+export async function respondRpcSelect(
+  taskId: number,
+  requestId: string,
+  selectedIndex: number,
+): Promise<boolean> {
+  try {
+    const response = await apiClient.post(`/api/admin/taskpool/${taskId}/rpc/select`, {
+      request_id: requestId,
+      selected_index: selectedIndex,
+    });
+    return response.data?.success === 1;
+  } catch {
+    return false;
+  }
+}
+
+export async function abortRpcSelect(
+  taskId: number,
+  requestId: string,
+): Promise<boolean> {
+  try {
+    const response = await apiClient.post(`/api/admin/taskpool/${taskId}/rpc/select`, {
+      request_id: requestId,
+      abort: 1,
+    });
+    return response.data?.success === 1;
+  } catch {
+    return false;
+  }
+}
+
+export type RpcSelectOption = {
+  index: number;
+  label: string;
+  description?: string;
+  cover?: string;
+};
+
+export type RpcSelectRequest = {
+  request_id: string;
+  title: string;
+  message?: string;
+  default_index?: number;
+  timeout_seconds?: number;
+  options: RpcSelectOption[];
+};
+
+export function parseRpcSelectMessage(message: string): RpcSelectRequest | null {
+  const prefix = '[RPC_SELECT]';
+  if (!message?.startsWith(prefix)) return null;
+  try {
+    const parsed = JSON.parse(message.slice(prefix.length)) as RpcSelectRequest;
+    if (!parsed?.request_id || !Array.isArray(parsed?.options) || parsed.options.length === 0) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+// ─── Asset Upload ──────────────────────────────────────────────────────────
+
+export async function uploadMetadataAsset(
+  imageUri: string,
+  fileName: string,
+  mimeType: string,
+): Promise<number> {
+  const chunkSize = 10 * 1024 * 1024;
+  const fileResponse = await fetch(imageUri);
+  if (!fileResponse.ok) throw new Error('Failed to read selected image');
+  const fileBlob = await fileResponse.blob();
+  const fileSize = Number(fileBlob.size || 0);
+  if (fileSize <= 0) throw new Error('Selected image is empty');
+
+  const totalChunks = Math.max(1, Math.ceil(fileSize / chunkSize));
+  const initResp = await apiClient.post<{data?: {taskId?: string}}>('/api/assets/upload/init', {
+    filename: fileName || 'asset.jpg',
+    filesize: fileSize,
+    chunk_size: chunkSize,
+    total_chunks: totalChunks,
+    target_type: 'metadata_asset',
+    target_id: '',
+    overwrite: true,
+    content_type: mimeType || 'image/jpeg',
+  });
+  const taskId = Number(initResp.data?.data?.taskId || 0);
+  if (!taskId) throw new Error('Failed to initialize asset upload');
+
+  // Wait for task to be ready
+  let uploadTask = await waitForTaskDetail(taskId);
+  if (uploadTask.status === 'failed') throw new Error(uploadTask.message || 'Upload init failed');
+
+  // Upload chunks
+  for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex += 1) {
+    const start = chunkIndex * chunkSize;
+    const end = Math.min(start + chunkSize, fileSize);
+    const chunk = fileBlob.slice(start, end, mimeType || 'image/jpeg');
+    await apiClient.put(
+      `/api/assets/upload/chunk?taskId=${taskId}&chunkIndex=${chunkIndex}&totalChunks=${totalChunks}`,
+      chunk,
+      {headers: {'Content-Type': 'application/octet-stream'}},
+    );
+  }
+
+  await waitForTaskChain(taskId);
+  const finalTask = await fetchTaskDetail(taskId);
+  if (finalTask.status !== 'completed') throw new Error(finalTask.message || 'Upload failed');
+  if (!finalTask.result) throw new Error('No result from upload task');
+
+  const parsed = JSON.parse(finalTask.result) as Record<string, unknown>;
+  const assetId = Math.trunc(Number(parsed.asset_id || parsed.assetId || 0));
+  if (!Number.isFinite(assetId) || assetId <= 0) throw new Error('Invalid asset id from upload');
+  return assetId;
+}
+
+async function waitForTaskChain(taskId: number): Promise<void> {
+  const initTask = await waitForTaskDetail(taskId);
+  if (initTask.status !== 'completed') throw new Error(initTask.message || 'Upload init failed');
+
+  let nextTaskId = parseFollowUpTaskId(initTask, 'process_task_id');
+  if (nextTaskId <= 0) return;
+
+  const processTask = await waitForTaskDetail(nextTaskId);
+  nextTaskId = parseFollowUpTaskId(processTask, 'consume_task_id');
+  if (nextTaskId <= 0) return;
+
+  await waitForTaskDetail(nextTaskId);
+}
+
+function parseFollowUpTaskId(task: TaskDetail, key: string): number {
+  if (!task.result) return 0;
+  try {
+    const payload = JSON.parse(task.result) as Record<string, unknown>;
+    return Math.trunc(Number(payload[key] || 0));
+  } catch {
+    return 0;
+  }
+}
+
 export type SearchArchivesParams = {
   filter?: string;
   page?: number;
@@ -578,7 +891,7 @@ function normalizeAssetValue(value: unknown): number | undefined {
   return undefined;
 }
 
-function readAssetId(rawAssets: unknown, wantedKey: string): number | undefined {
+export function readAssetId(rawAssets: unknown, wantedKey: string): number | undefined {
   const wanted = wantedKey.trim().toLowerCase();
   if (!wanted) return undefined;
 

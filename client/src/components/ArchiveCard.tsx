@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react';
+import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,7 +15,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import {Eye, Heart} from 'lucide-react-native';
+import {Check, Eye, Heart, Square} from 'lucide-react-native';
 
 import {
   isTankoubon,
@@ -39,6 +39,11 @@ type Props = {
   variant?: 'grid' | 'list' | 'tweet' | 'channel' | 'row' | 'related';
   onChanged?: () => void;
   onTagPress?: (tag: string) => void;
+  selectable?: boolean;
+  selectionMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
+  onLongPress?: () => void;
 };
 
 function parseTags(rawTags: unknown): string[] {
@@ -65,16 +70,22 @@ export function ArchiveCard({
   variant = 'grid',
   onChanged,
   onTagPress,
+  selectable = false,
+  selectionMode = false,
+  selected = false,
+  onToggleSelect,
+  onLongPress,
 }: Props) {
   const {colors} = useTheme();
   const {t} = useI18n();
   const {width} = useWindowDimensions();
   const [imageSource, setImageSource] = useState<FastImageSource | null>(null);
   const [imageError, setImageError] = useState('');
-  const [favorite, setFavorite] = useState(Boolean(archive.isfavorite));
+  const [favoriteState, setFavoriteState] = useState(Boolean(archive.isfavorite));
   const [tagsOpen, setTagsOpen] = useState(false);
   const pressed = useSharedValue(0);
   const tagProgress = useSharedValue(0);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const itemWidth =
     variant === 'row'
       ? 136
@@ -139,8 +150,8 @@ export function ArchiveCard({
       : t('common.pages', {count: pagecount || 0});
 
   async function toggleFavorite() {
-    const next = !favorite;
-    setFavorite(next);
+    const next = !favoriteState;
+    setFavoriteState(next);
     try {
       if (isCollection) {
         await setTankoubonFavorite(archive.tankoubon_id, next);
@@ -149,12 +160,16 @@ export function ArchiveCard({
       }
       onChanged?.();
     } catch (error) {
-      setFavorite(!next);
+      setFavoriteState(!next);
       console.warn(extractApiError(error));
     }
   }
 
   function handleCardPress() {
+    if (selectionMode && selectable) {
+      onToggleSelect?.();
+      return;
+    }
     if (tagsOpen) {
       setTagsOpen(false);
       return;
@@ -164,6 +179,10 @@ export function ArchiveCard({
   }
 
   function handleBodyPress() {
+    if (selectionMode && selectable) {
+      onToggleSelect?.();
+      return;
+    }
     if (tagsOpen) {
       setTagsOpen(false);
       return;
@@ -172,8 +191,24 @@ export function ArchiveCard({
     if (handler) handler();
   }
 
+  function handleLongPressAction() {
+    if (selectionMode) return;
+    if (selectable) {
+      onLongPress?.();
+      return;
+    }
+    showTags();
+  }
+
   function showTags() {
     setTagsOpen(true);
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
   }
 
   const cardGesture = Gesture.Exclusive(
@@ -183,7 +218,7 @@ export function ArchiveCard({
         pressed.value = 1;
       })
       .onStart(() => {
-        runOnJS(showTags)();
+        runOnJS(handleLongPressAction)();
       })
       .onFinalize(() => {
         pressed.value = 0;
@@ -200,6 +235,10 @@ export function ArchiveCard({
           borderRadius: radius.md,
           marginBottom: spacing.md,
           overflow: 'hidden',
+        },
+        cardSelected: {
+          borderColor: colors.primary,
+          borderWidth: 2,
         },
         fullWidthCard: {
           marginBottom: spacing.sm,
@@ -369,9 +408,33 @@ export function ArchiveCard({
           fontSize: 11,
           lineHeight: 15,
         },
-        // 'related' variant: override marginBottom for horizontal scroll
         relatedCard: {
           marginBottom: 0,
+        },
+        selectionOverlay: {
+          backgroundColor: 'rgba(0,0,0,0.45)',
+          borderRadius: radius.md,
+          bottom: 0,
+          left: 0,
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          zIndex: 20,
+        },
+        checkbox: {
+          alignItems: 'center',
+          backgroundColor: 'rgba(255,255,255,0.15)',
+          borderRadius: 14,
+          height: 28,
+          justifyContent: 'center',
+          left: 8,
+          position: 'absolute',
+          top: 8,
+          width: 28,
+          zIndex: 30,
+        },
+        checkboxSelected: {
+          backgroundColor: colors.primary,
         },
       }),
     [colors],
@@ -387,6 +450,7 @@ export function ArchiveCard({
         variant === 'tweet' && styles.tweetCard,
         variant === 'channel' && styles.channelCard,
         variant === 'related' && styles.relatedCard,
+        selected && styles.cardSelected,
         cardAnimatedStyle,
       ]}
     >
@@ -429,6 +493,30 @@ export function ArchiveCard({
                 <Text style={styles.badgeText}>{t('home.rows').toUpperCase()}</Text>
               </View>
             ) : null}
+
+            {/* Selection checkbox */}
+            {selectable ? (
+              <TouchableOpacity
+                style={[styles.checkbox, selected && styles.checkboxSelected]}
+                onPress={() => {
+                  if (!selected && !selectionMode) {
+                    onLongPress?.();
+                  }
+                  onToggleSelect?.();
+                }}>
+                {selected ? (
+                  <Check color={colors.white} size={16} />
+                ) : (
+                  <Square color={colors.white} size={14} />
+                )}
+              </TouchableOpacity>
+            ) : null}
+
+            {/* Dark overlay when in selection mode but not selected */}
+            {selectionMode && !selected && selectable ? (
+              <View style={styles.selectionOverlay} />
+            ) : null}
+
             {visibleTags.length > 0 || archive.description ? (
               <Animated.View
                 pointerEvents={tagsOpen ? 'auto' : 'none'}
@@ -493,15 +581,15 @@ export function ArchiveCard({
                 ) : null}
                 <TouchableOpacity
                   accessibilityRole="button"
-                  accessibilityLabel={favorite ? 'Remove favorite' : 'Add favorite'}
+                  accessibilityLabel={favoriteState ? 'Remove favorite' : 'Add favorite'}
                   onPress={(e) => {
                     e.stopPropagation?.();
                     toggleFavorite();
                   }}
-                  style={[styles.actionButton, favorite && styles.actionButtonActive]}>
+                  style={[styles.actionButton, favoriteState && styles.actionButtonActive]}>
                   <Heart
-                    color={favorite ? '#f87171' : colors.white}
-                    fill={favorite ? '#f87171' : 'transparent'}
+                    color={favoriteState ? '#f87171' : colors.white}
+                    fill={favoriteState ? '#f87171' : 'transparent'}
                     size={16}
                   />
                 </TouchableOpacity>
