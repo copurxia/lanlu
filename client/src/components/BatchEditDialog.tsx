@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 
+import {Drawer} from './Drawer';
 import {fetchMetadataPlugins, type Plugin} from '../api/lanlu';
 import {useTheme} from '../theme/ThemeContext';
 import type {TFunction} from '../i18n';
@@ -206,18 +207,9 @@ export function BatchEditDialog({
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        overlay: {
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          flex: 1,
-          justifyContent: 'flex-end',
-        },
-        container: {
+        sheetContent: {
           backgroundColor: colors.background,
-          borderTopLeftRadius: 16,
-          borderTopRightRadius: 16,
           flex: 1,
-          maxHeight: '92%',
-          paddingBottom: 34,
         },
         header: {
           alignItems: 'center',
@@ -487,9 +479,8 @@ export function BatchEditDialog({
   );
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.overlay}>
-        <View style={styles.container}>
+    <Drawer open={visible} onClose={onClose} maxHeight="92%" showHandle={false} style={{backgroundColor: colors.background}}>
+      <View style={styles.sheetContent}>
           <View style={styles.header}>
             <Text style={styles.headerTitle}>{t('home.batchEditTitle')}</Text>
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
@@ -741,45 +732,44 @@ export function BatchEditDialog({
               )}
             </TouchableOpacity>
           </View>
-        </View>
-      </View>
 
-      <Modal
-        visible={metadataPluginPickerOpen}
-        transparent
-        statusBarTranslucent
-        onRequestClose={() => setMetadataPluginPickerOpen(false)}>
-        <Pressable style={styles.pickerOverlay} onPress={() => setMetadataPluginPickerOpen(false)}>
-          <View style={styles.pickerSheet}>
-            <View style={styles.pickerSheetHandle} />
-            <Text style={styles.pickerSheetTitle}>{t('archive.metadataPluginLabel')}</Text>
-            <ScrollView showsVerticalScrollIndicator={false}>
-              {plugins.map(plugin => {
-                const active = metadataPluginNamespace === plugin.namespace;
-                return (
-                  <TouchableOpacity
-                    key={plugin.namespace}
-                    style={[styles.pickerSheetItem, active && styles.pickerSheetItemActive]}
-                    onPress={() => {
-                      setMetadataPluginNamespace(plugin.namespace);
-                      setMetadataPluginPickerOpen(false);
-                    }}>
-                    <Text style={[styles.pickerSheetItemText, active && styles.pickerSheetItemTextActive]}>
-                      {plugin.name}
-                    </Text>
-                    <Text style={styles.pickerSheetItemSub} numberOfLines={1}>
-                      {plugin.namespace}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-              {plugins.length === 0 ? (
-                <Text style={styles.pickerSheetEmpty}>{t('archive.metadataPluginNoPlugins')}</Text>
-              ) : null}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
-    </Modal>
+        <Modal
+          visible={metadataPluginPickerOpen}
+          transparent
+          statusBarTranslucent
+          onRequestClose={() => setMetadataPluginPickerOpen(false)}>
+          <Pressable style={styles.pickerOverlay} onPress={() => setMetadataPluginPickerOpen(false)}>
+            <View style={styles.pickerSheet}>
+              <View style={styles.pickerSheetHandle} />
+              <Text style={styles.pickerSheetTitle}>{t('archive.metadataPluginLabel')}</Text>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {plugins.map(plugin => {
+                  const active = metadataPluginNamespace === plugin.namespace;
+                  return (
+                    <TouchableOpacity
+                      key={plugin.namespace}
+                      style={[styles.pickerSheetItem, active && styles.pickerSheetItemActive]}
+                      onPress={() => {
+                        setMetadataPluginNamespace(plugin.namespace);
+                        setMetadataPluginPickerOpen(false);
+                      }}>
+                      <Text style={[styles.pickerSheetItemText, active && styles.pickerSheetItemTextActive]}>
+                        {plugin.name}
+                      </Text>
+                      <Text style={styles.pickerSheetItemSub} numberOfLines={1}>
+                        {plugin.namespace}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {plugins.length === 0 ? (
+                  <Text style={styles.pickerSheetEmpty}>{t('archive.metadataPluginNoPlugins')}</Text>
+                ) : null}
+              </ScrollView>
+            </View>
+          </Pressable>
+        </Modal>
+      </View>
+    </Drawer>
   );
 }

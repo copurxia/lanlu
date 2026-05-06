@@ -2,7 +2,6 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
   FlatList,
-  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {Drawer} from '../components/Drawer';
 import {FluentSwitch} from '../components/fluent';
 import {
   CalendarDays,
@@ -1386,19 +1386,6 @@ export function HomeScreen() {
           padding: 16,
           textAlign: 'center',
         },
-        modalBackdrop: {
-          backgroundColor: 'rgba(0,0,0,0.32)',
-          flex: 1,
-          justifyContent: 'flex-end',
-        },
-        filterSheet: {
-          backgroundColor: colors.surface,
-          borderTopLeftRadius: 14,
-          borderTopRightRadius: 14,
-          gap: spacing.md,
-          maxHeight: '88%',
-          padding: spacing.lg,
-        },
         sheetHeader: {
           alignItems: 'center',
           flexDirection: 'row',
@@ -1779,24 +1766,22 @@ export function HomeScreen() {
         onApply={applyBatchEdit}
       />
 
-      <Modal
-        animationType="slide"
-        onRequestClose={closeFilters}
-        statusBarTranslucent
-        transparent
-        visible={filtersOpen}>
-        <View style={styles.modalBackdrop}>
-          <View style={[styles.filterSheet, {paddingBottom: Math.max(insets.bottom, spacing.lg)}]}>
-            <View style={styles.sheetHeader}>
-              <Text style={styles.sheetTitle}>{t('common.filter')}</Text>
-              <TouchableOpacity
-                accessibilityLabel={t('common.close')}
-                accessibilityRole="button"
-                onPress={closeFilters}
-                style={styles.sheetCloseButton}>
-                <X color={colors.textMuted} size={18} />
-              </TouchableOpacity>
-            </View>
+      <Drawer
+        open={filtersOpen}
+        onClose={closeFilters}
+        maxHeight="88%"
+        style={{backgroundColor: colors.surface}}>
+        <View style={{padding: spacing.lg, gap: spacing.md}}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>{t('common.filter')}</Text>
+            <TouchableOpacity
+              accessibilityLabel={t('common.close')}
+              accessibilityRole="button"
+              onPress={closeFilters}
+              style={styles.sheetCloseButton}>
+              <X color={colors.textMuted} size={18} />
+            </TouchableOpacity>
+          </View>
 
             <Text style={styles.fieldLabel}>{t('search.sortBy')}</Text>
             <View style={styles.optionGrid}>
@@ -1908,8 +1893,7 @@ export function HomeScreen() {
               />
             ) : null}
           </View>
-        </View>
-      </Modal>
+      </Drawer>
     </View>
   );
 }

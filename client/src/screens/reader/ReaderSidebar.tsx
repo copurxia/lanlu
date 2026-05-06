@@ -3,7 +3,6 @@ import {
   FlatList,
   Image,
   type ImageSourcePropType,
-  Modal,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -16,6 +15,7 @@ import {spacing} from '../../theme/colors';
 import {getStoredStringSync, setStoredStringSync} from '../../storage/mmkv';
 import {useTheme} from '../../theme/ThemeContext';
 import type {PageInfo} from '../../types/api';
+import {Drawer} from '../../components/Drawer';
 
 type SidebarTab = 'thumbnails' | 'list' | 'tree';
 const SIDEBAR_TAB_KEY = 'reader_sidebar_tab';
@@ -133,31 +133,16 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        backdrop: {
-          backgroundColor: 'rgba(0,0,0,0.38)',
-          flex: 1,
-          justifyContent: 'flex-end',
-        },
-        sideBackdrop: {
-          alignItems: 'flex-end',
-          backgroundColor: 'rgba(0,0,0,0.18)',
-          justifyContent: 'flex-start',
-        },
         sheet: {
           backgroundColor: colors.surface,
-          borderTopLeftRadius: 14,
-          borderTopRightRadius: 14,
-          maxHeight: '82%',
           padding: spacing.lg,
         },
         sideSheet: {
+          backgroundColor: colors.surface,
           borderLeftColor: colors.border,
           borderLeftWidth: StyleSheet.hairlineWidth,
-          borderTopLeftRadius: 0,
-          borderTopRightRadius: 0,
-          height: '100%',
-          maxHeight: '100%',
           paddingTop: spacing.lg,
+          paddingHorizontal: spacing.lg,
         },
         sheetHandle: {
           alignSelf: 'center',
@@ -669,88 +654,87 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
   );
 
   return (
-    <Modal
-      animationType={sidePanel ? 'fade' : 'slide'}
-      onRequestClose={onClose}
-      statusBarTranslucent
-      transparent
-      visible={open}>
-      <View style={[styles.backdrop, sidePanel && styles.sideBackdrop]}>
-        <View style={[styles.sheet, sidePanel && [styles.sideSheet, {width: panelWidth}]]}>
-          {!sidePanel ? <View style={styles.sheetHandle} /> : null}
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>{t('reader.sidebar')}</Text>
-            {sidePanel ? (
-              <TouchableOpacity onPress={onClose} style={styles.sideCloseButton}>
-                <Text style={styles.sideCloseButtonText}>x</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          <View style={styles.tabBar}>
-            <TouchableOpacity
-              onPress={() => setActiveTab('thumbnails')}
-              style={[styles.tab, activeTab === 'thumbnails' && styles.tabActive]}>
-              <Text
-                style={[styles.tabText, activeTab === 'thumbnails' && styles.tabTextActive]}>
-                {t('reader.thumbnails')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('list')}
-              style={[styles.tab, activeTab === 'list' && styles.tabActive]}>
-              <Text
-                style={[styles.tabText, activeTab === 'list' && styles.tabTextActive]}>
-                {t('reader.listTab')}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setActiveTab('tree')}
-              style={[styles.tab, activeTab === 'tree' && styles.tabActive]}>
-              <Text
-                style={[styles.tabText, activeTab === 'tree' && styles.tabTextActive]}>
-                {t('reader.fileTree')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {activeTab === 'thumbnails' ? (
-            <FlatList
-              data={pages}
-              key={`thumb-${thumbColumns}`}
-              keyExtractor={keyExtractor}
-              numColumns={thumbColumns}
-              columnWrapperStyle={styles.thumbRow}
-              contentContainerStyle={styles.thumbContent}
-              renderItem={renderThumbnailItem}
-              showsVerticalScrollIndicator={false}
-            />
-          ) : activeTab === 'tree' ? (
-            <FlatList
-              data={fileTree.nodes}
-              keyExtractor={item => item.id}
-              contentContainerStyle={styles.listContent}
-              renderItem={({item}) => renderFileTreeNode(item, 0) as React.ReactElement}
-              showsVerticalScrollIndicator={false}
-            />
-          ) : (
-            <FlatList
-              data={pages}
-              keyExtractor={keyExtractor}
-              contentContainerStyle={styles.listContent}
-              renderItem={renderListItem}
-              showsVerticalScrollIndicator={false}
-            />
-          )}
-
-          {!sidePanel ? (
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>{t('common.close')}</Text>
+    <Drawer
+      open={open}
+      onClose={onClose}
+      side={sidePanel ? 'right' : 'bottom'}
+      showHandle={!sidePanel}
+      enablePanDownToClose={!sidePanel}
+      maxHeight={sidePanel ? '100%' : '82%'}
+      style={sidePanel ? {width: panelWidth} : undefined}>
+      <View style={sidePanel ? styles.sideSheet : styles.sheet}>
+        <View style={styles.sheetHeader}>
+          <Text style={styles.sheetTitle}>{t('reader.sidebar')}</Text>
+          {sidePanel ? (
+            <TouchableOpacity onPress={onClose} style={styles.sideCloseButton}>
+              <Text style={styles.sideCloseButtonText}>x</Text>
             </TouchableOpacity>
           ) : null}
         </View>
+
+        <View style={styles.tabBar}>
+          <TouchableOpacity
+            onPress={() => setActiveTab('thumbnails')}
+            style={[styles.tab, activeTab === 'thumbnails' && styles.tabActive]}>
+            <Text
+              style={[styles.tabText, activeTab === 'thumbnails' && styles.tabTextActive]}>
+              {t('reader.thumbnails')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab('list')}
+            style={[styles.tab, activeTab === 'list' && styles.tabActive]}>
+            <Text
+              style={[styles.tabText, activeTab === 'list' && styles.tabTextActive]}>
+              {t('reader.listTab')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setActiveTab('tree')}
+            style={[styles.tab, activeTab === 'tree' && styles.tabActive]}>
+            <Text
+              style={[styles.tabText, activeTab === 'tree' && styles.tabTextActive]}>
+              {t('reader.fileTree')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {activeTab === 'thumbnails' ? (
+          <FlatList
+            data={pages}
+            key={`thumb-${thumbColumns}`}
+            keyExtractor={keyExtractor}
+            numColumns={thumbColumns}
+            columnWrapperStyle={styles.thumbRow}
+            contentContainerStyle={styles.thumbContent}
+            renderItem={renderThumbnailItem}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : activeTab === 'tree' ? (
+          <FlatList
+            data={fileTree.nodes}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({item}) => renderFileTreeNode(item, 0) as React.ReactElement}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <FlatList
+            data={pages}
+            keyExtractor={keyExtractor}
+            contentContainerStyle={styles.listContent}
+            renderItem={renderListItem}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+
+        {!sidePanel ? (
+          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>{t('common.close')}</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
-    </Modal>
+    </Drawer>
   );
 }
 

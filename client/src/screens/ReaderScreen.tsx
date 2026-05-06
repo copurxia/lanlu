@@ -70,6 +70,7 @@ import {
   setArchiveFavorite,
   updateArchiveProgress,
 } from '../api/lanlu';
+import {Drawer} from '../components/Drawer';
 import {ModalBackdrop} from '../components/SafeAreaSurface';
 import {ReaderSidebar} from './reader/ReaderSidebar';
 import {OptionSelectSheet, type SelectOption} from './reader/OptionSelectSheet';
@@ -4460,24 +4461,22 @@ function ReaderSettingsModal({
   const {colors} = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
-    <Modal animationType="slide" onRequestClose={onClose} statusBarTranslucent transparent visible={open}>
-      <ModalBackdrop style={styles.modalBackdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>{t('reader.settings')}</Text>
-          <View style={styles.modeGrid}>
-            {READING_MODES.map(mode => (
-              <TouchableOpacity
-                key={mode}
-                onPress={() => onPatch({readingMode: mode})}
-                style={[styles.modeChoice, settings.readingMode === mode && styles.modeChoiceActive]}>
-                <Text style={[styles.modeChoiceText, settings.readingMode === mode && styles.modeChoiceTextActive]}>
-                  {t(modeLabelKey(mode))}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-          <ScrollView style={styles.settingList}>
+    <Drawer open={open} onClose={onClose} maxHeight="82%" style={{backgroundColor: colors.surface}}>
+      <View style={{padding: spacing.lg}}>
+        <Text style={styles.sheetTitle}>{t('reader.settings')}</Text>
+        <View style={styles.modeGrid}>
+          {READING_MODES.map(mode => (
+            <TouchableOpacity
+              key={mode}
+              onPress={() => onPatch({readingMode: mode})}
+              style={[styles.modeChoice, settings.readingMode === mode && styles.modeChoiceActive]}>
+              <Text style={[styles.modeChoiceText, settings.readingMode === mode && styles.modeChoiceTextActive]}>
+                {t(modeLabelKey(mode))}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <ScrollView style={styles.settingList}>
             <ReaderSettingToggle
               label={t('reader.doublePage')}
               active={settings.doublePage}
@@ -4547,8 +4546,7 @@ function ReaderSettingsModal({
             <Text style={styles.closeButtonText}>{t('common.close')}</Text>
           </TouchableOpacity>
         </View>
-      </ModalBackdrop>
-    </Modal>
+    </Drawer>
   );
 }
 

@@ -1,7 +1,8 @@
 import React, {useMemo, useState} from 'react';
-import {Modal, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {Edit, FolderOpen, Heart, MoreHorizontal, Trash2} from 'lucide-react-native';
 
+import {Drawer} from '../../components/Drawer';
 import {useTheme} from '../../theme/ThemeContext';
 import type {TFunction} from '../../i18n';
 
@@ -69,25 +70,9 @@ export function TankoubonDetailActions({
           backgroundColor: colors.primary,
           borderColor: colors.primary,
         },
-        overlay: {
-          backgroundColor: 'rgba(0,0,0,0.4)',
-          flex: 1,
-          justifyContent: 'flex-end',
-        },
         menuSheet: {
-          backgroundColor: colors.background,
-          borderTopLeftRadius: 16,
-          borderTopRightRadius: 16,
           paddingBottom: 24,
           paddingTop: 8,
-        },
-        menuHandle: {
-          alignSelf: 'center',
-          backgroundColor: colors.border,
-          borderRadius: 3,
-          height: 4,
-          marginBottom: 12,
-          width: 40,
         },
         menuItem: {
           alignItems: 'center',
@@ -163,35 +148,29 @@ export function TankoubonDetailActions({
         </TouchableOpacity>
       </View>
 
-      <Modal
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}
-        statusBarTranslucent
-        transparent
-        visible={menuVisible}>
-        <Pressable style={styles.overlay} onPress={() => setMenuVisible(false)}>
-          <Pressable style={styles.menuSheet}>
-            <View style={styles.menuHandle} />
-
-            {renderMenuItem(
-              t('tankoubon.addArchive'),
-              <FolderOpen color={colors.text} size={20} />,
-              onAddArchive,
-            )}
-            {renderMenuItem(
-              t('common.edit'),
-              <Edit color={colors.text} size={20} />,
-              onEdit,
-            )}
-            {renderMenuItem(
-              t('common.delete'),
-              <Trash2 color={colors.danger} size={20} />,
-              onDelete,
-              true,
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
+      <Drawer
+        open={menuVisible}
+        onClose={() => setMenuVisible(false)}
+        style={{backgroundColor: colors.background}}>
+        <View style={styles.menuSheet}>
+          {renderMenuItem(
+            t('tankoubon.addArchive'),
+            <FolderOpen color={colors.text} size={20} />,
+            onAddArchive,
+          )}
+          {renderMenuItem(
+            t('common.edit'),
+            <Edit color={colors.text} size={20} />,
+            onEdit,
+          )}
+          {renderMenuItem(
+            t('common.delete'),
+            <Trash2 color={colors.danger} size={20} />,
+            onDelete,
+            true,
+          )}
+        </View>
+      </Drawer>
     </View>
   );
 }

@@ -1,6 +1,5 @@
 import React, {useMemo} from 'react';
 import {
-  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,7 +9,7 @@ import {
 import {Check} from 'lucide-react-native';
 import {spacing} from '../../theme/colors';
 import {useTheme} from '../../theme/ThemeContext';
-import {ModalBackdrop} from '../../components/SafeAreaSurface';
+import {Drawer} from '../../components/Drawer';
 
 export type SelectOption = {
   value: number;
@@ -44,25 +43,9 @@ export function OptionSelectSheet({
   const styles = useMemo(
     () =>
       StyleSheet.create({
-        backdrop: {
-          backgroundColor: 'rgba(0,0,0,0.38)',
-          flex: 1,
-          justifyContent: 'flex-end',
-        },
         sheet: {
           backgroundColor: colors.surface,
-          borderTopLeftRadius: 14,
-          borderTopRightRadius: 14,
-          maxHeight: '60%',
           padding: spacing.lg,
-        },
-        sheetHandle: {
-          alignSelf: 'center',
-          backgroundColor: colors.borderStrong,
-          borderRadius: 999,
-          height: 4,
-          marginBottom: spacing.md,
-          width: 44,
         },
         sheetTitle: {
           color: colors.text,
@@ -122,44 +105,36 @@ export function OptionSelectSheet({
   );
 
   return (
-    <Modal
-      animationType="fade"
-      onRequestClose={onClose}
-      statusBarTranslucent
-      transparent
-      visible={open}>
-      <ModalBackdrop style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.sheetHandle} />
-          <Text style={styles.sheetTitle}>{title}</Text>
-          <ScrollView style={styles.list}>
-            {options.map(option => {
-              const isSelected = selectedSet.has(option.value);
-              return (
-                <TouchableOpacity
-                  key={`option-${option.value}`}
-                  onPress={() => onSelect(option.value)}
-                  style={[styles.optionRow, isSelected && styles.optionRowActive]}>
-                  <View style={styles.checkbox}>
-                    {isSelected && (
-                      <Check color={multiSelect ? colors.primary : colors.white} size={16} />
-                    )}
-                  </View>
-                  <Text
-                    numberOfLines={2}
-                    style={[styles.optionLabel, isSelected && styles.optionLabelActive]}>
-                    {option.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>{t('common.close')}</Text>
-          </TouchableOpacity>
-        </View>
-      </ModalBackdrop>
-    </Modal>
+    <Drawer open={open} onClose={onClose} maxHeight="60%">
+      <View style={styles.sheet}>
+        <Text style={styles.sheetTitle}>{title}</Text>
+        <ScrollView style={styles.list}>
+          {options.map(option => {
+            const isSelected = selectedSet.has(option.value);
+            return (
+              <TouchableOpacity
+                key={`option-${option.value}`}
+                onPress={() => onSelect(option.value)}
+                style={[styles.optionRow, isSelected && styles.optionRowActive]}>
+                <View style={styles.checkbox}>
+                  {isSelected && (
+                    <Check color={multiSelect ? colors.primary : colors.white} size={16} />
+                  )}
+                </View>
+                <Text
+                  numberOfLines={2}
+                  style={[styles.optionLabel, isSelected && styles.optionLabelActive]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <Text style={styles.closeButtonText}>{t('common.close')}</Text>
+        </TouchableOpacity>
+      </View>
+    </Drawer>
   );
 }
 
