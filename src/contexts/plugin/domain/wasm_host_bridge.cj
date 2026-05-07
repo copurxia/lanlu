@@ -444,9 +444,11 @@ public class WasmHostBridge {
     public static func updateExecutionProgress(taskId: Int64, parentTaskId: Int64, progress: Int32, message: String): Unit {
         if (taskId > 0) {
             TaskModel.updateTaskProgress(taskId, progress, message)
+            TaskDao.extendTaskTimeout(taskId, 120)
         }
         if (parentTaskId > 0 && parentTaskId != taskId) {
             TaskModel.updateTaskProgress(parentTaskId, progress, message)
+            TaskDao.extendTaskTimeout(parentTaskId, 120)
         }
     }
 
