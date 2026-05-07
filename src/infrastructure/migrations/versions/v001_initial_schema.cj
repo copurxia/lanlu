@@ -88,6 +88,7 @@ public class V001_InitialSchema <: Migration {
         if (MigrationHelpers.tableExists(conn, "users")) {
             logger.debug("users table already exists, checking columns")
             MigrationHelpers.addColumnIfNotExists(conn, "users", "password_salt", "VARCHAR(64) NOT NULL DEFAULT ''")
+            MigrationHelpers.addColumnIfNotExists(conn, "users", "password_hash_version", "VARCHAR(32) NOT NULL DEFAULT 'sha256_v1'")
             MigrationHelpers.addColumnIfNotExists(conn, "users", "updated_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             MigrationHelpers.addColumnIfNotExists(conn, "users", "avatar_asset_id", "BIGINT")
             MigrationHelpers.createIndexIfNotExists(conn, "idx_users_avatar_asset_id", "users", "avatar_asset_id")
@@ -100,7 +101,8 @@ public class V001_InitialSchema <: Migration {
                 id SERIAL PRIMARY KEY,
                 username VARCHAR(64) NOT NULL UNIQUE,
                 password_salt VARCHAR(64) NOT NULL,
-                password_hash VARCHAR(64) NOT NULL,
+                password_hash TEXT NOT NULL,
+                password_hash_version VARCHAR(32) NOT NULL DEFAULT 'sha256_v1',
                 avatar_asset_id BIGINT,
                 is_admin BOOLEAN DEFAULT false,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
