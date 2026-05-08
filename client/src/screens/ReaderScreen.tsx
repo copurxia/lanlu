@@ -36,6 +36,7 @@ import {
   BookOpen,
   Captions,
   ChevronLeft,
+  ChevronRight,
   FastForward,
   Heart,
   Layers,
@@ -3748,30 +3749,46 @@ export function ReaderScreen({route, navigation}: Props) {
                       </TouchableOpacity>
                       {isExpanded ? (
                         lane.kind === 'book' ? (
-                          <TouchableOpacity
-                            activeOpacity={0.9}
-                            disabled={progressSeekLocked}
-                            onPress={event => {
-                              const laneWidth = Math.max(1, width - 92);
-                              const x = event.nativeEvent.locationX;
-                              const next = Math.round((x / laneWidth) * Math.max(1, readerProgressTotal - 1)) + 1;
-                              jumpToPageFromProgress(next);
-                            }}
-                            style={[styles.laneContent, progressSeekLocked && styles.laneContentDisabled]}>
-                            <View style={styles.progressInline}>
-                              <View style={[styles.progressTrack, styles.progressTrackInline]}>
-                                <View
-                                  style={[
-                                    styles.progressFill,
-                                    {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
-                                  ]}
-                                />
+                          <View style={styles.bookLaneRow}>
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              disabled={progressSeekLocked || currentPage <= 1}
+                              onPress={() => goToPage(currentPage - 1)}
+                              style={[styles.mediaIconButton, (progressSeekLocked || currentPage <= 1) && styles.laneContentDisabled]}>
+                              <ChevronLeft color={colors.white} size={16} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              activeOpacity={0.9}
+                              disabled={progressSeekLocked}
+                              onPress={event => {
+                                const laneWidth = Math.max(1, width - 92);
+                                const x = event.nativeEvent.locationX;
+                                const next = Math.round((x / laneWidth) * Math.max(1, readerProgressTotal - 1)) + 1;
+                                jumpToPageFromProgress(next);
+                              }}
+                              style={[styles.laneContent, progressSeekLocked && styles.laneContentDisabled]}>
+                              <View style={styles.progressInline}>
+                                <View style={[styles.progressTrack, styles.progressTrackInline]}>
+                                  <View
+                                    style={[
+                                      styles.progressFill,
+                                      {width: `${Math.max(2, (currentPage / Math.max(1, readerProgressTotal)) * 100)}%`},
+                                    ]}
+                                  />
+                                </View>
+                                <Text style={styles.progressCaption} numberOfLines={1}>
+                                  {displayCurrentPage} / {pages.length}
+                                </Text>
                               </View>
-                              <Text style={styles.progressCaption} numberOfLines={1}>
-                                {displayCurrentPage} / {pages.length}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              accessibilityRole="button"
+                              disabled={progressSeekLocked}
+                              onPress={goToNextPage}
+                              style={[styles.mediaIconButton, progressSeekLocked && styles.laneContentDisabled]}>
+                              <ChevronRight color={colors.white} size={16} />
+                            </TouchableOpacity>
+                          </View>
                         ) : activeLane.kind !== 'book' && (
                           <MediaLaneControls
                             compact={width < 430}
@@ -5283,6 +5300,12 @@ function createStyles(colors: ThemeColors) {
   },
   laneUnitExpanded: {
     flex: 1,
+  },
+  bookLaneRow: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 6,
   },
   laneTabMini: {
     alignItems: 'center',
