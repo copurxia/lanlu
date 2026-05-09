@@ -5,7 +5,7 @@ import {
   type BottomTabBarButtonProps,
 } from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {Pressable, StyleSheet} from 'react-native';
+import {Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {enableScreens} from 'react-native-screens';
 import {Heart, Home, Settings} from 'lucide-react-native';
 
@@ -123,16 +123,66 @@ function MainTabs() {
 }
 
 export function RootNavigator() {
-  const {status} = useAuth();
+  const {status, isOffline, reconnect} = useAuth();
   const {t} = useI18n();
   const {colors} = useTheme();
+
+  const bannerStyles = useMemo(
+    () =>
+      StyleSheet.create({
+        wrapper: {
+          flex: 1,
+        },
+        container: {
+          backgroundColor: '#f0a020',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          paddingTop: 50,
+          paddingBottom: 6,
+          paddingHorizontal: 16,
+        },
+        text: {
+          color: '#fff',
+          fontSize: 13,
+          fontWeight: '600',
+        },
+        button: {
+          marginLeft: 12,
+          paddingHorizontal: 10,
+          paddingVertical: 4,
+          borderRadius: 4,
+          borderWidth: 1,
+          borderColor: '#fff',
+        },
+        buttonText: {
+          color: '#fff',
+          fontSize: 12,
+          fontWeight: '700',
+        },
+      }),
+    [],
+  );
 
   if (status === 'booting') {
     return <ScreenState loading title={t('common.loading')} />;
   }
 
   return (
-    <NavigationContainer>
+    <View style={bannerStyles.wrapper}>
+      {isOffline && status === 'authenticated' ? (
+        <View style={bannerStyles.container}>
+          <Text style={bannerStyles.text}>{t('common.offline')}</Text>
+          <TouchableOpacity
+            style={bannerStyles.button}
+            onPress={() => {
+              reconnect().catch(() => undefined);
+            }}>
+            <Text style={bannerStyles.buttonText}>{t('common.reconnect')}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+      <NavigationContainer>
       <Stack.Navigator
         screenOptions={{
           animation: 'slide_from_right',
@@ -248,5 +298,6 @@ export function RootNavigator() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    </View>
   );
 }

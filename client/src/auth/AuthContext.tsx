@@ -7,7 +7,7 @@ import React, {
   useState,
 } from 'react';
 
-import {extractApiError, setUnauthorizedHandler} from '../api/client';
+import {extractApiError, isNetworkError, setUnauthorizedHandler, setOfflineHandler, setOnlineHandler} from '../api/client';
 import * as LanluApi from '../api/lanlu';
 import {
   deleteServer as deleteStoredServer,
@@ -29,6 +29,7 @@ type AuthContextValue = {
   activeServer: LanluServer | null;
   token: string | null;
   user: AuthUser | null;
+  isOffline: boolean;
   reloadServers: () => Promise<void>;
   saveServer: (params: {id?: string; name: string; baseUrl: string}) => Promise<LanluServer>;
   deleteServer: (serverId: string) => Promise<void>;
@@ -37,6 +38,7 @@ type AuthContextValue = {
   signIn: (params: {username: string; password: string}) => Promise<void>;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
+  reconnect: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -47,6 +49,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
   const [activeServer, setActiveServer] = useState<LanluServer | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [isOffline, setIsOffline] = useState(false);
 
   const reloadServers = useCallback(async () => {
     setServers(await getServers());
@@ -89,6 +92,12 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         setUser(currentUser);
         setStatus('authenticated');
       } catch (error) {
+        if (isNetworkError(error)) {
+          setUser(null);
+          setStatus('authenticated');
+          setIsOffline(true);
+          return;
+        }
         console.warn('Failed to restore server session:', extractApiError(error));
         await clearStoredToken(server.id);
         clearSessionState();
@@ -97,6 +106,19 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
     },
     [clearSessionState, reloadServers],
   );
+
+  useEffect(() => {
+    setOfflineHandler(() => {
+      setIsOffline(true);
+    });
+    setOnlineHandler(() => {
+      setIsOffline(false);
+    });
+    return () => {
+      setOfflineHandler(null);
+      setOnlineHandler(null);
+    };
+  }, []);
 
   useEffect(() => {
     setUnauthorizedHandler(() => {
@@ -201,7 +223,26 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
     }
     await clearStoredToken(serverId);
     clearSessionState();
+    setIsOffline(false);
     setStatus(activeServer ? 'login' : 'serverList');
+  }, [activeServer, clearSessionState]);
+
+  const reconnect = useCallback(async () => {
+    if (!activeServer) {
+      return;
+    }
+    try {
+      const currentUser = await LanluApi.fetchMe();
+      setUser(currentUser);
+      setIsOffline(false);
+      setStatus('authenticated');
+    } catch (error) {
+      if (!isNetworkError(error)) {
+        await clearStoredToken(activeServer.id);
+        clearSessionState();
+        setStatus('login');
+      }
+    }
   }, [activeServer, clearSessionState]);
 
   const value = useMemo<AuthContextValue>(
@@ -211,6 +252,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       activeServer,
       token,
       user,
+      isOffline,
       reloadServers,
       saveServer,
       deleteServer,
@@ -219,10 +261,13 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       signIn,
       signOut,
       refreshMe,
+      reconnect,
     }),
     [
       activeServer,
       deleteServer,
+      isOffline,
+      reconnect,
       refreshMe,
       reloadServers,
       saveServer,

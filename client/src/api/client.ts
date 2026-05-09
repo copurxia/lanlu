@@ -5,11 +5,23 @@ import {getActiveServer} from '../storage/servers';
 import {clearStoredToken, getStoredToken} from '../storage/token';
 
 type UnauthorizedHandler = () => void;
+type OfflineHandler = () => void;
+type OnlineHandler = () => void;
 
 let onUnauthorized: UnauthorizedHandler | null = null;
+let onOffline: OfflineHandler | null = null;
+let onOnline: OnlineHandler | null = null;
 
 export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
   onUnauthorized = handler;
+}
+
+export function setOfflineHandler(handler: OfflineHandler | null) {
+  onOffline = handler;
+}
+
+export function setOnlineHandler(handler: OnlineHandler | null) {
+  onOnline = handler;
 }
 
 export const apiClient = axios.create({
@@ -31,16 +43,25 @@ apiClient.interceptors.request.use(async (config: InternalAxiosRequestConfig) =>
 });
 
 apiClient.interceptors.response.use(
-  response => response,
+  response => {
+    onOnline?.();
+    return response;
+  },
   async (error: AxiosError) => {
     if (error.response?.status === 401) {
       const server = await getActiveServer();
       await clearStoredToken(server?.id);
       onUnauthorized?.();
+    } else if (!error.response) {
+      onOffline?.();
     }
     return Promise.reject(error);
   },
 );
+
+export function isNetworkError(error: unknown): boolean {
+  return axios.isAxiosError(error) && !error.response;
+}
 
 export function extractApiError(error: unknown, fallback = 'Request failed') {
   if (axios.isAxiosError(error)) {

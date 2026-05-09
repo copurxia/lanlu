@@ -5,6 +5,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
 import {FluentButton, FluentCard, FluentCaption, FluentSwitch, FluentTextField, FluentTitle} from '../components/fluent';
+import {useAuth} from '../auth/AuthContext';
 import {useI18n} from '../i18n';
 import {extractApiError} from '../api/client';
 import {
@@ -21,6 +22,7 @@ import {useTheme} from '../theme/ThemeContext';
 export function UserSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
+  const {user: currentUser} = useAuth();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -36,6 +38,8 @@ export function UserSettingsScreen() {
   const [resetOpen, setResetOpen] = useState(false);
   const [resetUser, setResetUser] = useState<AdminUser | null>(null);
   const [resetPassword, setResetPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [resetPasswordError, setResetPasswordError] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
 
   const loadUsers = useCallback(async () => {
@@ -62,10 +66,15 @@ export function UserSettingsScreen() {
     if (!createUsername.trim()) return;
     setCreateLoading(true);
     try {
-      await adminCreateUser({username: createUsername.trim(), isAdmin: createIsAdmin});
+      const resp = await adminCreateUser({username: createUsername.trim(), isAdmin: createIsAdmin});
+      const generatedPassword = resp.data?.generatedPassword;
       setCreateOpen(false);
       setCreateUsername('');
       setCreateIsAdmin(false);
+      const msg = generatedPassword
+        ? `Created "${createUsername.trim()}", generated password: ${generatedPassword}`
+        : `Created "${createUsername.trim()}"`;
+      Alert.alert(t('common.success'), msg);
       await loadUsers();
     } catch (e) {
       Alert.alert(t('common.error'), extractApiError(e));
@@ -108,24 +117,36 @@ export function UserSettingsScreen() {
   const handleResetPassword = useCallback((user: AdminUser) => {
     setResetUser(user);
     setResetPassword('');
+    setResetConfirmPassword('');
+    setResetPasswordError('');
     setResetOpen(true);
   }, [t]);
 
   const submitResetPassword = useCallback(async () => {
-    if (!resetUser || !resetPassword.trim()) return;
+    if (!resetUser) return;
+    if (resetPassword.length < 6) {
+      setResetPasswordError('Password must be at least 6 characters');
+      return;
+    }
+    if (resetPassword !== resetConfirmPassword) {
+      setResetPasswordError('Passwords do not match');
+      return;
+    }
+    setResetPasswordError('');
     setResetLoading(true);
     try {
       await adminResetUserPassword(resetUser.id, resetPassword.trim());
       setResetOpen(false);
       setResetUser(null);
       setResetPassword('');
+      setResetConfirmPassword('');
       Alert.alert(t('common.success'), 'Password reset successfully');
     } catch (e) {
       Alert.alert(t('common.error'), extractApiError(e));
     } finally {
       setResetLoading(false);
     }
-  }, [resetPassword, resetUser, t]);
+  }, [resetPassword, resetConfirmPassword, resetUser, t]);
 
   return (
     <ScreenRoot padded={false}>
@@ -156,42 +177,53 @@ export function UserSettingsScreen() {
             <FluentCaption>{t('common.noResult')}</FluentCaption>
           </FluentCard>
         ) : (
-          users.map(user => (
-            <FluentCard key={user.id} style={styles.section}>
-              <View style={styles.userHeader}>
-                <Text style={styles.userName}>{user.username}</Text>
-                {user.isAdmin ? (
-                  <View style={styles.adminBadge}>
-                    <Text style={styles.adminBadgeText}>{t('auth.admin')}</Text>
+          users.map(user => {
+            const isSelf = currentUser?.id === user.id;
+            return (
+              <FluentCard key={user.id} style={styles.section}>
+                <View style={styles.userHeader}>
+                  <Text style={styles.userName}>{user.username}</Text>
+                  {isSelf ? (
+                    <View style={styles.selfBadge}>
+                      <Text style={styles.selfBadgeText}>You</Text>
+                    </View>
+                  ) : null}
+                  <View style={user.isAdmin ? styles.adminBadge : styles.userBadge}>
+                    <Text style={user.isAdmin ? styles.adminBadgeText : styles.userBadgeText}>
+                      {user.isAdmin ? t('auth.admin') : t('auth.user')}
+                    </Text>
                   </View>
+                </View>
+                {user.createdAt ? (
+                  <Text style={styles.createdAt}>{user.createdAt}</Text>
                 ) : null}
-              </View>
-              {user.createdAt ? (
-                <Text style={styles.createdAt}>{user.createdAt}</Text>
-              ) : null}
-              <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>{t('auth.admin')}</Text>
-                <FluentSwitch
-                  value={user.isAdmin}
-                  onValueChange={() => handleToggleRole(user)}
-                />
-              </View>
-              <View style={styles.userActions}>
-                <FluentButton
-                  label={t('common.resetPassword')}
-                  variant="secondary"
-                  onPress={() => handleResetPassword(user)}
-                  style={styles.actionButton}
-                />
-                <FluentButton
-                  label={t('common.delete')}
-                  variant="danger"
-                  onPress={() => handleDelete(user)}
-                  style={styles.actionButton}
-                />
-              </View>
-            </FluentCard>
-          ))
+                <View style={styles.toggleRow}>
+                  <Text style={styles.toggleLabel}>{t('auth.admin')}</Text>
+                  <FluentSwitch
+                    value={user.isAdmin}
+                    disabled={isSelf}
+                    onValueChange={() => handleToggleRole(user)}
+                  />
+                </View>
+                <View style={styles.userActions}>
+                  <FluentButton
+                    label={t('common.resetPassword')}
+                    variant="secondary"
+                    onPress={() => handleResetPassword(user)}
+                    disabled={isSelf}
+                    style={styles.actionButton}
+                  />
+                  <FluentButton
+                    label={t('common.delete')}
+                    variant="danger"
+                    onPress={() => handleDelete(user)}
+                    disabled={isSelf}
+                    style={styles.actionButton}
+                  />
+                </View>
+              </FluentCard>
+            );
+          })
         )}
       </ScrollView>
 
@@ -248,13 +280,24 @@ export function UserSettingsScreen() {
               {resetUser ? `Reset password for "${resetUser.username}"?` : ''}
             </FluentCaption>
             <FluentTextField
-              label={t('common.resetPassword')}
+              label={'New password'}
               value={resetPassword}
-              onChangeText={setResetPassword}
-              placeholder={t('common.resetPassword')}
+              onChangeText={(v) => {setResetPassword(v); setResetPasswordError('');}}
+              placeholder={'New password'}
               secureTextEntry
               editable={!resetLoading}
             />
+            <FluentTextField
+              label={'Confirm password'}
+              value={resetConfirmPassword}
+              onChangeText={(v) => {setResetConfirmPassword(v); setResetPasswordError('');}}
+              placeholder={'Confirm password'}
+              secureTextEntry
+              editable={!resetLoading}
+            />
+            {resetPasswordError ? (
+              <Text style={styles.errorText}>{resetPasswordError}</Text>
+            ) : null}
             <View style={styles.modalActions}>
               <FluentButton
                 label={t('common.cancel')}
@@ -265,7 +308,7 @@ export function UserSettingsScreen() {
                 label={resetLoading ? t('common.saving') : t('common.confirm')}
                 variant="primary"
                 onPress={submitResetPassword}
-                disabled={resetLoading || !resetPassword.trim()}
+                disabled={resetLoading || !resetPassword.trim() || !resetConfirmPassword.trim()}
               />
             </View>
           </View>
@@ -302,6 +345,17 @@ function createStyles(colors: ThemeColors) {
       fontSize: 16,
       fontWeight: '800',
     },
+    selfBadge: {
+      backgroundColor: colors.textMuted + '30',
+      borderRadius: radius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+    },
+    selfBadgeText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '700',
+    },
     adminBadge: {
       backgroundColor: colors.primaryMuted,
       borderRadius: radius.sm,
@@ -313,9 +367,27 @@ function createStyles(colors: ThemeColors) {
       fontSize: 12,
       fontWeight: '700',
     },
+    userBadge: {
+      backgroundColor: colors.surfaceMuted,
+      borderRadius: radius.sm,
+      borderColor: colors.border,
+      borderWidth: 1,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 2,
+    },
+    userBadgeText: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: '700',
+    },
     createdAt: {
       color: colors.textMuted,
       fontSize: 12,
+    },
+    errorText: {
+      color: colors.danger,
+      fontSize: 13,
+      fontWeight: '600',
     },
     toggleRow: {
       flexDirection: 'row',

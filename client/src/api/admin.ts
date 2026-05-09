@@ -250,8 +250,8 @@ export async function adminListUsers(): Promise<ApiEnvelope<{users: AdminUser[]}
 export async function adminCreateUser(params: {
   username: string;
   isAdmin?: boolean;
-}): Promise<ApiEnvelope<{user: AdminUser}>> {
-  const response = await apiClient.post<ApiEnvelope<{user: AdminUser}>>('/api/auth/admin/users', params);
+}): Promise<ApiEnvelope<{user: AdminUser; generatedPassword?: string}>> {
+  const response = await apiClient.post<ApiEnvelope<{user: AdminUser; generatedPassword?: string}>>('/api/auth/admin/users', params);
   return response.data;
 }
 
