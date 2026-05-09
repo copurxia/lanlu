@@ -440,14 +440,16 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surfaceMuted,
       borderRadius: radius.md,
       paddingHorizontal: spacing.md,
-      height: 40,
+      minHeight: 42,
       gap: spacing.sm,
     },
     searchInput: {
       flex: 1,
       color: colors.text,
       fontSize: 15,
+      includeFontPadding: false,
       paddingVertical: 0,
+      textAlignVertical: 'center',
     },
     filterRow: {
       flexDirection: 'row',

@@ -429,8 +429,11 @@ function createStyles(colors: ThemeColors) {
       borderWidth: StyleSheet.hairlineWidth,
       color: colors.text,
       fontSize: 15,
+      includeFontPadding: false,
+      minHeight: 42,
       paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
+      paddingVertical: 0,
+      textAlignVertical: 'center',
     },
     chipScroll: {marginBottom: spacing.xs},
     chipContainer: {

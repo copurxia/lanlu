@@ -334,6 +334,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           borderRadius: 8,
           borderWidth: StyleSheet.hairlineWidth,
           flexDirection: 'row',
+          minHeight: 42,
           marginBottom: 12,
           paddingHorizontal: 10,
         },
@@ -344,7 +345,10 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
           color: colors.text,
           flex: 1,
           fontSize: 14,
-          paddingVertical: 10,
+          includeFontPadding: false,
+          minHeight: 40,
+          paddingVertical: 0,
+          textAlignVertical: 'center',
         },
         loading: {
           paddingVertical: 24,
@@ -563,4 +567,3 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
     </View>
   );
 }
-

@@ -1170,8 +1170,11 @@ export function HomeScreen() {
           color: colors.text,
           flex: 1,
           fontSize: 15,
+          includeFontPadding: false,
+          minHeight: 42,
           paddingHorizontal: 12,
-          paddingVertical: 10,
+          paddingVertical: 0,
+          textAlignVertical: 'center',
         },
         searchButton: {
           alignItems: 'center',

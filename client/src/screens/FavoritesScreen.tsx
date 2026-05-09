@@ -209,8 +209,11 @@ export function FavoritesScreen() {
           borderWidth: StyleSheet.hairlineWidth,
           color: colors.text,
           fontSize: 15,
+          includeFontPadding: false,
+          minHeight: 42,
           paddingHorizontal: 12,
-          paddingVertical: 10,
+          paddingVertical: 0,
+          textAlignVertical: 'center',
         },
         inlineError: {
           color: colors.danger,
