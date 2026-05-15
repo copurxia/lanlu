@@ -186,8 +186,7 @@ public class MetadataPluginController {
 
             if (writeBack) {
                 // 写回模式：metadata_plugin + callback
-                let task = TaskModel.createTask("元数据插件执行(写回)", "metadata_plugin")
-
+                // 先构造参数，再用 createTaskWithOptions 单次写入，避免两步创建产生的竞争窗口
                 let paramsJson = if (requestBody.trimAscii().size > 0) {
                     requestBody
                 } else {
@@ -207,7 +206,7 @@ public class MetadataPluginController {
                     String.fromUtf8(readToEnd(out))
                 }
 
-                TaskDao.updateTaskParameters(task.id, paramsJson)
+                let task = TaskModel.createTaskWithOptions("元数据插件执行(写回)", "metadata_plugin", paramsJson, 50, "", "manual")
                 TaskIO.appendLog(task.id, "enqueued metadata_plugin(write_back=1) target_type=${effectiveType} target_id=${targetId} namespace=${namespace}")
 
                 TaskPoolService.getInstance().notifyTaskAvailable()

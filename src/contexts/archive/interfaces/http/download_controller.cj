@@ -69,7 +69,8 @@ public class DownloadController {
 
             // 进入TaskPool：创建任务并立即返回job id，前端通过 /api/taskpool/{id} 查询进度与结果
             // 任务标题不携带参数（URL等），避免在任务列表里泄露/污染标题
-            let task = TaskModel.createTask("文件上传（在线下载）", "download_url")
+            // 使用 createTaskWithOptions 单次写入参数，避免两步创建（createTask + updateTaskParameters）
+            // 产生的竞争窗口导致 TaskPool 提前领取到空参数的任务
             let paramsJson = if (requestBody.trimAscii().size > 0) {
                 requestBody
             } else {
@@ -81,7 +82,7 @@ public class DownloadController {
                 w.flush()
                 String.fromUtf8(readToEnd(out))
             }
-            TaskDao.updateTaskParameters(task.id, paramsJson)
+            let task = TaskModel.createTaskWithOptions("文件上传（在线下载）", "download_url", paramsJson, 50, "", "manual")
             TaskIO.appendLog(task.id, "enqueued download_url url=${url}")
 
             // 唤醒 TaskPool 领取 pending（无轮询）
