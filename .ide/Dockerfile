@@ -32,10 +32,9 @@ RUN set -eux; \
   node -v; \
   npm -v
 
-# Install pnpm via corepack (bundled with Node.js).
+# Install pnpm via npm (corepack has ESM import bug on Node.js 20.20.0).
 RUN set -eux; \
-  corepack enable; \
-  corepack prepare pnpm@10.27.0 --activate; \
+  npm install -g pnpm@10.27.0; \
   pnpm -v
 
 # Install xmake using the official installer (tracks upstream; no pinned version).
