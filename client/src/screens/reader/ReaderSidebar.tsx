@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   useWindowDimensions,
   View,
+  type ViewToken,
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, Music} from 'lucide-react-native';
@@ -35,7 +36,7 @@ type SbPage = {
   resolvedPath?: string;
   title?: string;
   metadata?: PageInfo['metadata'];
-  activeSource?: PageInfo['defaultSource'];
+  activeSource?: PageInfo['defaultSource'] | null;
 };
 
 type FileTreeFileNode = {
@@ -70,6 +71,7 @@ type Props = {
   currentPage: number;
   onClose: () => void;
   onSelectPage: (pageIndex: number) => void;
+  onVisiblePagesChange?: (pageIndexes: number[]) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
 };
 
@@ -117,7 +119,15 @@ function getDisplayDescription(page: SbPage) {
   return page.activeSource?.metadata?.description || page.metadata?.description || '';
 }
 
-export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, t}: Props) {
+export function ReaderSidebar({
+  open,
+  pages,
+  currentPage,
+  onClose,
+  onSelectPage,
+  onVisiblePagesChange,
+  t,
+}: Props) {
   const {colors} = useTheme();
   const {width: screenWidth, height: screenHeight} = useWindowDimensions();
   const [activeTab, setActiveTabState] = useState<SidebarTab>(loadSidebarTab);
@@ -376,6 +386,21 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
       if (!sidePanel) onClose();
     },
     [onSelectPage, onClose, sidePanel],
+  );
+
+  const handleVisibleItemsChanged = useCallback(
+    ({viewableItems}: {viewableItems: ViewToken[]}) => {
+      if (!onVisiblePagesChange) return;
+      const visibleIndexes = [...new Set(
+        viewableItems
+          .map(item => item.index)
+          .filter((index): index is number => typeof index === 'number' && index >= 0),
+      )];
+      if (visibleIndexes.length > 0) {
+        onVisiblePagesChange(visibleIndexes);
+      }
+    },
+    [onVisiblePagesChange],
   );
 
   const fileTree = useMemo(() => {
@@ -710,7 +735,12 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
             numColumns={thumbColumns}
             columnWrapperStyle={styles.thumbRow}
             contentContainerStyle={styles.thumbContent}
+            initialNumToRender={10}
+            maxToRenderPerBatch={12}
+            onViewableItemsChanged={handleVisibleItemsChanged}
+            viewabilityConfig={{itemVisiblePercentThreshold: 50}}
             renderItem={renderThumbnailItem}
+            removeClippedSubviews
             showsVerticalScrollIndicator={false}
           />
         ) : activeTab === 'tree' ? (
@@ -719,6 +749,7 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
             keyExtractor={item => item.id}
             contentContainerStyle={styles.listContent}
             renderItem={({item}) => renderFileTreeNode(item, 0) as React.ReactElement}
+            removeClippedSubviews
             showsVerticalScrollIndicator={false}
           />
         ) : (
@@ -726,6 +757,9 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
             data={pages}
             keyExtractor={keyExtractor}
             contentContainerStyle={styles.listContent}
+            initialNumToRender={12}
+            maxToRenderPerBatch={16}
+            removeClippedSubviews
             renderItem={renderListItem}
             showsVerticalScrollIndicator={false}
           />

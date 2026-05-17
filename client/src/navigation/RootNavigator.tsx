@@ -239,7 +239,7 @@ export function RootNavigator() {
       onPanResponderMove: (_, gs) => {
         const route = currentRouteNameRef.current;
         const currentIdx = TAB_NAMES.indexOf(route ?? '');
-        if (route === 'Home' && gs.dx > 0 && gs.moveX < 60) return;
+        if (route === 'Home' && gs.dx > 0) return;
         if ((gs.dx > 0 && currentIdx <= 0) || (gs.dx < 0 && currentIdx >= TAB_NAMES.length - 1)) return;
         contentSlideAnim.setValue(Math.max(-120, Math.min(120, gs.dx)));
       },
@@ -248,7 +248,7 @@ export function RootNavigator() {
         const currentIndex = TAB_NAMES.indexOf(route ?? '');
         if (currentIndex === -1) return;
 
-        if (route === 'Home' && gs.dx > 50 && gs.moveX < 60) {
+        if (route === 'Home' && gs.dx > 50) {
           contentSlideAnim.setValue(0);
           setSidebarOpen(true);
           return;

@@ -858,7 +858,6 @@ export function ReaderScreen({route, navigation}: Props) {
   const [localSubtitleUriByAssetId, setLocalSubtitleUriByAssetId] = useState<Record<number, string>>({});
   const [subtitleTextsByAssetId, setSubtitleTextsByAssetId] = useState<Record<number, string>>({});
   const [isFavorited, setIsFavorited] = useState(false);
-  const [sidebarPages, setSidebarPages] = useState<any[]>([]);
   const [appendingNext, setAppendingNext] = useState(false);
   const [webtoonHeights, setWebtoonHeights] = useState<Record<number, number>>({});
   const [imageSizeByPage, setImageSizeByPage] = useState<Record<number, {width: number; height: number}>>({});
@@ -909,10 +908,6 @@ export function ReaderScreen({route, navigation}: Props) {
     },
     [pages.length],
   );
-
-  useEffect(() => {
-    setSidebarPages(pages);
-  }, [pages]);
 
   const topBarAnimatedStyle = useAnimatedStyle(() => ({
     opacity: chromeProgress.value,
@@ -1016,6 +1011,62 @@ export function ReaderScreen({route, navigation}: Props) {
     [archiveId, createReaderPage, sourceIndexByPage],
   );
 
+  const hydratePageIfNeeded = useCallback(
+    async (page: ReaderPage, index: number, reason: 'focus' | 'sidebar') => {
+      const desiredSourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
+      const needsHydration =
+        page.hydratedSourceIndex !== desiredSourceIndex ||
+        !page.uri ||
+        (page.effectiveType === 'image' && !page.imageSource) ||
+        (page.effectiveType === 'html' && !page.backendUri);
+      if (!needsHydration) return;
+
+      const key = `${page.sourceArchiveId}:${page.pageNumber}:${desiredSourceIndex}:${page.activeSource?.id || page.id}`;
+      if (hydratingPageKeys.current.has(key)) return;
+      hydratingPageKeys.current.add(key);
+
+      try {
+        const hydrated = await hydratePage(page, index, page.sourceArchiveId);
+        setPages(current =>
+          current.map(item =>
+            item.pageNumber === hydrated.pageNumber && item.sourceArchiveId === hydrated.sourceArchiveId
+              ? {
+                  ...hydrated,
+                  vlcUri: item.uri && item.uri === hydrated.uri ? item.vlcUri : undefined,
+                }
+              : item,
+          ),
+        );
+      } catch (err) {
+        console.warn(`Failed to hydrate reader page (${reason}):`, err);
+      } finally {
+        hydratingPageKeys.current.delete(key);
+      }
+    },
+    [hydratePage, sourceIndexByPage],
+  );
+
+  const handleSidebarVisiblePagesChange = useCallback(
+    (pageIndexes: number[]) => {
+      if (!pages.length || pageIndexes.length === 0) return;
+      const indexes = new Set<number>();
+      pageIndexes.forEach(index => {
+        for (let offset = -2; offset <= 2; offset += 1) {
+          const nextIndex = index + offset;
+          if (nextIndex >= 0 && nextIndex < pages.length) {
+            indexes.add(nextIndex);
+          }
+        }
+      });
+      indexes.forEach(index => {
+        const page = pages[index];
+        if (!page) return;
+        void hydratePageIfNeeded(page, index, 'sidebar');
+      });
+    },
+    [hydratePageIfNeeded, pages],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
@@ -1089,7 +1140,6 @@ export function ReaderScreen({route, navigation}: Props) {
       settingsHydratedRef.current = true;
       const readerPages = files.map((page, index) => createReaderPage(page, index, targetArchiveId));
       setPages(readerPages);
-      setSidebarPages(readerPages);
       const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
       setCurrentPage(startIndex + 1);
       if (serverId) {
@@ -1101,7 +1151,6 @@ export function ReaderScreen({route, navigation}: Props) {
         if (cached && cached.pages.length) {
           const readerPages = cached.pages.map((page, index) => createReaderPage(page, index, targetArchiveId));
           setPages(readerPages);
-          setSidebarPages(readerPages);
           const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
           setCurrentPage(startIndex + 1);
           setError('');
@@ -2378,40 +2427,13 @@ export function ReaderScreen({route, navigation}: Props) {
       )
       .forEach(page => {
         const index = page.pageNumber - 1;
-        const desiredSourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
-        const needsHydration =
-          page.hydratedSourceIndex !== desiredSourceIndex ||
-          !page.uri ||
-          (page.effectiveType === 'image' && !page.imageSource) ||
-          (page.effectiveType === 'html' && !page.backendUri);
-        if (!needsHydration) return;
-        const key = `${page.sourceArchiveId}:${page.pageNumber}:${desiredSourceIndex}:${page.activeSource?.id || page.id}`;
-        if (hydratingPageKeys.current.has(key)) return;
-        hydratingPageKeys.current.add(key);
-        hydratePage(page, index, page.sourceArchiveId)
-          .then(hydrated => {
-            setPages(current =>
-              current.map(item =>
-                item.pageNumber === hydrated.pageNumber && item.sourceArchiveId === hydrated.sourceArchiveId
-                  ? {
-                      ...hydrated,
-                      vlcUri: item.uri && item.uri === hydrated.uri ? item.vlcUri : undefined,
-                    }
-                  : item,
-              ),
-            );
-          })
-          .catch(err => console.warn('Failed to hydrate reader page:', err))
-          .finally(() => {
-            hydratingPageKeys.current.delete(key);
-          });
+        void hydratePageIfNeeded(page, index, 'focus');
       });
   }, [
     currentPage,
-    hydratePage,
+    hydratePageIfNeeded,
     pages,
     settings.readingMode,
-    sourceIndexByPage,
     sourceSheetPageId,
     webtoonHydrationTargets,
   ]);
@@ -4017,10 +4039,11 @@ export function ReaderScreen({route, navigation}: Props) {
 
       <ReaderSidebar
         open={sidebarOpen}
-        pages={sidebarPages}
+        pages={pages}
         currentPage={currentPage}
         onClose={() => setSidebarOpen(false)}
         onSelectPage={handleSidebarSelectPage}
+        onVisiblePagesChange={handleSidebarVisiblePagesChange}
         t={t as (key: string, params?: Record<string, string | number>) => string}
       />
 
