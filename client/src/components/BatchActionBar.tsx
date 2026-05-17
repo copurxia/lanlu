@@ -1,6 +1,7 @@
 import React, {useMemo} from 'react';
 import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {BlurView} from '@sbaiahmed1/react-native-blur';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Check, Download, Edit, Heart, RotateCcw, Trash2, X} from 'lucide-react-native';
 
 import {useTheme} from '../theme/ThemeContext';
@@ -24,8 +25,11 @@ type Props = {
   t: TFunction;
 };
 
+const TAB_BAR_HEIGHT = 58;
+
 export function BatchActionBar({visible, selectedCount, actions, onExit, t}: Props) {
   const {colors, effectiveScheme} = useTheme();
+  const insets = useSafeAreaInsets();
 
   const defaultActions: BatchAction[] = useMemo(
     () => [
@@ -69,25 +73,22 @@ export function BatchActionBar({visible, selectedCount, actions, onExit, t}: Pro
   if (!visible) return null;
 
   const tintColor = colors.background + '80';
+  const blurType = effectiveScheme === 'dark' ? 'dark' : 'light';
 
   return (
-    <View style={[styles.container, {paddingBottom: 24}]} pointerEvents="box-none">
+    <View style={[styles.container, {bottom: insets.bottom + TAB_BAR_HEIGHT, paddingBottom: 24}]} pointerEvents="box-none">
       <View style={styles.bar}>
-        <View style={styles.barBlur}>
-          <BlurView
-            blurType={effectiveScheme === 'dark' ? 'dark' : 'light'}
-            blurAmount={20}
-            style={StyleSheet.absoluteFill}
-          />
+        <View style={[styles.countBadge, {borderColor: colors.border}]}>
+          <BlurView blurType={blurType} blurAmount={20} style={StyleSheet.absoluteFill} />
           <View style={[StyleSheet.absoluteFill, {backgroundColor: tintColor}]} />
-        </View>
-        <View style={[styles.countBadge, {backgroundColor: 'transparent', borderColor: colors.border}]}>
           <Text style={[styles.countText, {color: colors.text}]}>
             {t('common.selected')}: {selectedCount}
           </Text>
         </View>
 
-        <View style={[styles.actionsRow, {backgroundColor: 'transparent', borderColor: colors.border}]}>
+        <View style={[styles.actionsRow, {borderColor: colors.border}]}>
+          <BlurView blurType={blurType} blurAmount={20} style={StyleSheet.absoluteFill} />
+          <View style={[StyleSheet.absoluteFill, {backgroundColor: tintColor}]} />
           {resolvedActions.map(action => (
             <TouchableOpacity
               key={action.id}
@@ -103,11 +104,13 @@ export function BatchActionBar({visible, selectedCount, actions, onExit, t}: Pro
           ))}
         </View>
 
-        <TouchableOpacity
-          style={[styles.exitButton, {backgroundColor: 'transparent', borderColor: colors.border}]}
-          onPress={onExit}>
-          <X color={colors.text} size={18} />
-        </TouchableOpacity>
+        <View style={[styles.exitButton, {borderColor: colors.border}]}>
+          <BlurView blurType={blurType} blurAmount={20} style={StyleSheet.absoluteFill} />
+          <View style={[StyleSheet.absoluteFill, {backgroundColor: tintColor}]} />
+          <TouchableOpacity style={styles.exitButtonInner} onPress={onExit}>
+            <X color={colors.text} size={18} />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -129,18 +132,10 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 4,
   },
-  barBlur: {
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
   countBadge: {
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
@@ -154,6 +149,7 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 2,
+    overflow: 'hidden',
     padding: 4,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
@@ -170,16 +166,20 @@ const styles = StyleSheet.create({
   },
   destructiveButton: {},
   exitButton: {
-    alignItems: 'center',
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
     height: 40,
-    justifyContent: 'center',
+    overflow: 'hidden',
     width: 40,
     shadowColor: '#000',
     shadowOffset: {width: 0, height: 2},
     shadowOpacity: 0.1,
     shadowRadius: 8,
     elevation: 4,
+  },
+  exitButtonInner: {
+    alignItems: 'center',
+    flex: 1,
+    justifyContent: 'center',
   },
 });
