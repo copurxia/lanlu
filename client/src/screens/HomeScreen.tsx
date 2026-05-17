@@ -232,8 +232,6 @@ export function HomeScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedArchiveIds, setSelectedArchiveIds] = useState<Set<string>>(new Set());
   const [selectedTankoubonIds, setSelectedTankoubonIds] = useState<Set<string>>(new Set());
-  // Force a fresh card instance when a selection session ends so Android touch state is cleared.
-  const [selectionResetToken, setSelectionResetToken] = useState(0);
   const [batchEditOpen, setBatchEditOpen] = useState(false);
   const [batchApplying, setBatchApplying] = useState(false);
   const [batchActionRunning, setBatchActionRunning] = useState(false);
@@ -248,7 +246,6 @@ export function HomeScreen() {
     setSelectedArchiveIds(new Set());
     setSelectedTankoubonIds(new Set());
     setBatchEditOpen(false);
-    setSelectionResetToken(token => token + 1);
   }, []);
 
   const clearSelection = useCallback(() => {
@@ -263,39 +260,23 @@ export function HomeScreen() {
     endSelectionSession();
   }, [endSelectionSession]);
 
-  const toggleArchiveSelect = useCallback(
-    (archiveId: string) => {
-      setSelectedArchiveIds(prev => {
-        const next = new Set(prev);
-        if (next.has(archiveId)) next.delete(archiveId);
-        else next.add(archiveId);
-        if (next.size === 0) {
-          if (selectedTankoubonIds.size === 0) {
-            endSelectionSession();
-          }
-        }
-        return next;
-      });
-    },
-    [endSelectionSession, selectedTankoubonIds.size],
-  );
+  const setArchiveSelected = useCallback((archiveId: string, selected: boolean) => {
+    setSelectedArchiveIds(prev => {
+      const next = new Set(prev);
+      if (selected) next.add(archiveId);
+      else next.delete(archiveId);
+      return next;
+    });
+  }, []);
 
-  const toggleTankoubonSelect = useCallback(
-    (tankoubonId: string) => {
-      setSelectedTankoubonIds(prev => {
-        const next = new Set(prev);
-        if (next.has(tankoubonId)) next.delete(tankoubonId);
-        else next.add(tankoubonId);
-        if (next.size === 0) {
-          if (selectedArchiveIds.size === 0) {
-            endSelectionSession();
-          }
-        }
-        return next;
-      });
-    },
-    [endSelectionSession, selectedArchiveIds.size],
-  );
+  const setTankoubonSelected = useCallback((tankoubonId: string, selected: boolean) => {
+    setSelectedTankoubonIds(prev => {
+      const next = new Set(prev);
+      if (selected) next.add(tankoubonId);
+      else next.delete(tankoubonId);
+      return next;
+    });
+  }, []);
 
   const handleCardLongPress = useCallback(
     (item: MediaItem) => {
@@ -1656,7 +1637,7 @@ export function HomeScreen() {
           {row.items.map(item => (
             <ArchiveCard
               archive={item}
-              key={`${mediaItemId(item)}|${selectionResetToken}`}
+              key={mediaItemId(item)}
               variant="row"
               onOpenDetail={() => openDetail(item)}
               onOpenReader={() => openReader(item)}
@@ -1665,7 +1646,7 @@ export function HomeScreen() {
               selectable
               selectionMode={selectionMode}
               selected={isTankoubon(item) ? selectedTankoubonIds.has(item.tankoubon_id) : selectedArchiveIds.has(item.arcid)}
-              onToggleSelect={() => (isTankoubon(item) ? toggleTankoubonSelect(item.tankoubon_id) : toggleArchiveSelect(item.arcid))}
+              onToggleSelect={(nextSelected) => (isTankoubon(item) ? setTankoubonSelected(item.tankoubon_id, nextSelected) : setArchiveSelected(item.arcid, nextSelected))}
               onLongPress={() => handleCardLongPress(item)}
             />
           ))}
@@ -1832,7 +1813,7 @@ export function HomeScreen() {
             ) : (
             <ArchiveCard
               archive={item}
-              key={`${mediaItemId(item)}|${selectionResetToken}`}
+              key={mediaItemId(item)}
               variant={itemVariant}
               onOpenDetail={() => openDetail(item)}
               onOpenReader={() => openReader(item)}
@@ -1841,7 +1822,7 @@ export function HomeScreen() {
               selectable
               selectionMode={selectionMode}
               selected={isArchive ? selectedArchiveIds.has(arcid) : selectedTankoubonIds.has(item.tankoubon_id)}
-              onToggleSelect={() => (isArchive ? toggleArchiveSelect(arcid) : toggleTankoubonSelect(item.tankoubon_id))}
+              onToggleSelect={(nextSelected) => (isArchive ? setArchiveSelected(arcid, nextSelected) : setTankoubonSelected(item.tankoubon_id, nextSelected))}
               onLongPress={() => handleCardLongPress(item)}
             />
           ));

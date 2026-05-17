@@ -41,7 +41,7 @@ type Props = {
   selectable?: boolean;
   selectionMode?: boolean;
   selected?: boolean;
-  onToggleSelect?: () => void;
+  onToggleSelect?: (selected: boolean) => void;
   onLongPress?: () => void;
 };
 
@@ -194,7 +194,7 @@ export function ArchiveCard({
       return;
     }
     if (selectionMode && selectable) {
-      onToggleSelect?.();
+      onToggleSelect?.(!selected);
       return;
     }
     const handler = onOpenDetail || onPress;
@@ -250,7 +250,7 @@ export function ArchiveCard({
       return;
     }
     if (selectionMode && selectable) {
-      onToggleSelect?.();
+      onToggleSelect?.(!selected);
       return;
     }
     const handler = onOpenReader || onPress;
@@ -261,13 +261,14 @@ export function ArchiveCard({
     () =>
       StyleSheet.create({
         card: {
+          backgroundColor: 'transparent',
           borderRadius: radius.md,
           marginBottom: spacing.md,
           overflow: 'hidden',
         },
+        cardSelectionMode: {
+        },
         cardSelected: {
-          borderColor: colors.primary,
-          borderWidth: 2,
         },
         fullWidthCard: {
           marginBottom: spacing.sm,
@@ -301,6 +302,15 @@ export function ArchiveCard({
         cover: {
           height: '100%',
           width: '100%',
+        },
+        coverMask: {
+          backgroundColor: 'rgba(0,0,0,0.35)',
+          bottom: 0,
+          left: 0,
+          position: 'absolute',
+          right: 0,
+          top: 0,
+          zIndex: 15,
         },
         placeholder: {
           alignItems: 'center',
@@ -444,16 +454,6 @@ export function ArchiveCard({
         relatedCard: {
           marginBottom: 0,
         },
-        selectionOverlay: {
-          backgroundColor: 'rgba(0,0,0,0.45)',
-          borderRadius: radius.md,
-          bottom: 0,
-          left: 0,
-          position: 'absolute',
-          right: 0,
-          top: 0,
-          zIndex: 20,
-        },
         checkbox: {
           alignItems: 'center',
           backgroundColor: 'rgba(255,255,255,0.15)',
@@ -477,6 +477,7 @@ export function ArchiveCard({
     <Animated.View
       style={[
         styles.card,
+        selectionMode && !selected && styles.cardSelectionMode,
         {width: itemWidth},
         variant !== 'grid' && variant !== 'row' && styles.fullWidthCard,
         variant === 'list' && styles.listCard,
@@ -520,6 +521,9 @@ export function ArchiveCard({
             <Text style={styles.placeholderText}>{t('common.noCover')}</Text>
           </View>
         ) : null}
+        {selectionMode && !selected ? (
+          <View pointerEvents="none" style={styles.coverMask} />
+        ) : null}
         {!isCollection && archive.isnew ? (
           <View style={styles.badge}>
             <Text style={styles.badgeText}>NEW</Text>
@@ -539,10 +543,6 @@ export function ArchiveCard({
               <Square color={colors.white} size={14} />
             )}
           </View>
-        ) : null}
-
-        {selectionMode && !selected && selectable ? (
-          <View pointerEvents="none" style={styles.selectionOverlay} />
         ) : null}
 
         {visibleTags.length > 0 || archive.description ? (
