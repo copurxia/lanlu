@@ -19,6 +19,7 @@ export interface DownloadMetadata {
 
 export interface DownloadProgressCallback {
   onProgress?: (progress: number) => void;
+  onTaskUpdate?: (task: Task) => void;
   onComplete?: (result: DownloadResult) => void;
   onError?: (error: string) => void;
 }
@@ -718,6 +719,7 @@ export class ArchiveService {
       const finalTask = await this.waitForTaskCompletion(Number(jobId), (task) => {
         const p = typeof task.progress === 'number' ? task.progress : 0;
         callbacks?.onProgress?.(Math.max(0, Math.min(100, p)));
+        callbacks?.onTaskUpdate?.(task);
       });
 
       const parsed = this.parseTaskOutput(finalTask);

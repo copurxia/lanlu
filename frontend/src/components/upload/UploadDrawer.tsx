@@ -28,6 +28,7 @@ interface DownloadTask {
   progress: number
   status: "downloading" | "success" | "error"
   error?: string
+  message?: string
 }
 
 interface UploadDrawerProps {
@@ -52,6 +53,7 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("")
   const [loadingCategories, setLoadingCategories] = useState(false)
   const [hasCompletedTasks, setHasCompletedTasks] = useState(false)
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
   const selectedCategoryInternalId = categories.find(cat => cat.catid === selectedCategoryId)?.id
 
   const supportedFormats = [".zip", ".rar", ".7z", ".tar", ".gz", ".pdf", ".epub", ".mobi", ".cbz", ".cbr"]
@@ -289,6 +291,11 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
         onProgress: (progress) => {
           setDownloadTasks(prev => prev.map(t =>
             t.id === task.id ? { ...t, progress } : t
+          ))
+        },
+        onTaskUpdate: (taskUpdate) => {
+          setDownloadTasks(prev => prev.map(t =>
+            t.id === task.id ? { ...t, message: taskUpdate.message, progress: taskUpdate.progress } : t
           ))
         },
         onComplete: (result) => {
@@ -620,7 +627,16 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                   <h3 className="text-lg font-medium">{t("download.taskList") || "下载任务列表"}</h3>
 
                   <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-4">
-                    {sortedDownloadTasks.map((task) => (
+                    {sortedDownloadTasks.map((task) => {
+                      const logFull = task.message || ''
+                      const logLines = logFull ? logFull.split('\n') : []
+                      const recentLogLines = logLines.slice(-80)
+                      const hiddenLineCount = Math.max(0, logLines.length - recentLogLines.length)
+                      const logPreview = recentLogLines.join('\n').trim()
+                      const lastLogLine = [...logLines].reverse().find(l => l.trim().length > 0) ?? logLines[logLines.length - 1] ?? ''
+                      const isLogExpanded = expandedLogs[task.id] ?? false
+
+                      return (
                       <div key={task.id} className="border rounded-lg p-4 space-y-3">
                         {/* Task Header */}
                         <div className="flex items-center justify-between">
@@ -658,12 +674,37 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
                           </div>
                         )}
 
+                        {/* Latest Log */}
+                        {!!task.message && (
+                          <div className="text-sm text-muted-foreground">
+                            <strong>{t("settings.taskManagement.latestLog") || "最新日志"}:</strong> {lastLogLine.length > 160 ? `${lastLogLine.slice(0, 160)}…` : lastLogLine}
+                            <div className="mt-1 p-2 bg-gray-50 dark:bg-gray-800 rounded text-xs max-h-28 overflow-y-auto whitespace-pre-wrap">
+                              {isLogExpanded ? logFull : logPreview}
+                            </div>
+                            {hiddenLineCount > 0 && (
+                              <div className="mt-2">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 px-2 text-xs"
+                                  onClick={() => setExpandedLogs(prev => ({ ...prev, [task.id]: !isLogExpanded }))}
+                                >
+                                  {isLogExpanded
+                                    ? (t("common.collapse") || "收起")
+                                    : `${t("common.expand") || "展开"} (${hiddenLineCount} lines hidden)`}
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Error Message */}
                         {task.status === "error" && task.error && (
                           <div className="text-sm text-red-600">{task.error}</div>
                         )}
                       </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               )}
