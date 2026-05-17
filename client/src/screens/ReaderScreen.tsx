@@ -2,6 +2,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {BlurView} from '@sbaiahmed1/react-native-blur';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   LayoutAnimation,
@@ -46,6 +47,7 @@ import {
   Rewind,
   Settings as SettingsIcon,
   Music,
+  RefreshCw,
   Volume2,
   VolumeX,
 } from 'lucide-react-native';
@@ -835,6 +837,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
   const [loadedPages, setLoadedPages] = useState<Record<number, boolean>>({});
   const [imageLoadProgressByPage, setImageLoadProgressByPage] = useState<Record<number, number>>({});
+  const [imageReloadNonceByPage, setImageReloadNonceByPage] = useState<Record<number, number>>({});
   const [htmlContents, setHtmlContents] = useState<Record<number, string>>({});
   const [htmlHeights, setHtmlHeights] = useState<Record<number, number>>({});
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
@@ -1106,6 +1109,7 @@ export function ReaderScreen({route, navigation}: Props) {
     setFailedPages({});
     setLoadedPages({});
     setImageLoadProgressByPage({});
+    setImageReloadNonceByPage({});
     setHtmlContents({});
     setHtmlHeights({});
     setWebtoonHeights({});
@@ -2168,6 +2172,31 @@ export function ReaderScreen({route, navigation}: Props) {
     setSourceSheetOpen(true);
   }
 
+  const retryImagePage = useCallback((pageNumber: number) => {
+    setFailedPages(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setLoadedPages(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setImageLoadProgressByPage(current => {
+      if (current[pageNumber] == null) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setImageReloadNonceByPage(current => ({
+      ...current,
+      [pageNumber]: (current[pageNumber] || 0) + 1,
+    }));
+  }, []);
+
   function handleSelectSource(value: number) {
     if (sourceSheetPageId == null) return;
     const pageNumber = sourceSheetPageId;
@@ -2181,6 +2210,12 @@ export function ReaderScreen({route, navigation}: Props) {
     });
     setImageLoadProgressByPage(current => {
       if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
+    setImageReloadNonceByPage(current => {
+      if (current[pageNumber] == null) return current;
       const next = {...current};
       delete next[pageNumber];
       return next;
@@ -3620,11 +3655,12 @@ export function ReaderScreen({route, navigation}: Props) {
                 <CircularProgress
                   value={imageLoadProgressByPage[page.pageNumber] ?? 0}
                   color={colors.white}
-                  showLabel={false}
+                  showLabel={true}
                 />
               </View>
             ) : null}
             <FastImage
+              key={`${page.pageNumber}:${imageReloadNonceByPage[page.pageNumber] || 0}`}
               onLoadStart={() => {
                 setLoadedPages(current => {
                   if (!current[page.pageNumber]) return current;
@@ -3705,16 +3741,30 @@ export function ReaderScreen({route, navigation}: Props) {
               style={webtoonImageStyle}
             />
             {commonError ? (
-              <ErrorOverlay title={t('reader.pageFailed')} message={`${commonError}\n${page.resolvedPath || page.uri || ''}`} />
+              <ErrorOverlay
+                actionLabel={t('common.retry')}
+                message={`${commonError}\n${page.resolvedPath || page.uri || ''}`}
+                onAction={() => retryImagePage(page.pageNumber)}
+                title={t('reader.pageFailed')}
+              />
             ) : null}
           </>
         ) : (
           !page.uri && !commonError ? (
             <View style={styles.loadingOverlay}>
-              <CircularProgress value={imageLoadProgressByPage[page.pageNumber] ?? 0} color={colors.white} showLabel={false} />
+              <CircularProgress
+                value={imageLoadProgressByPage[page.pageNumber] ?? 0}
+                color={colors.white}
+                showLabel={true}
+              />
             </View>
           ) : (
-            <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
+            <ErrorOverlay
+              actionLabel={t('common.retry')}
+              message={page.id}
+              onAction={() => retryImagePage(page.pageNumber)}
+              title={t('reader.noImageSource')}
+            />
           )
         )}
       </View>
@@ -4185,13 +4235,29 @@ export function ReaderScreen({route, navigation}: Props) {
   );
 }
 
-function ErrorOverlay({title, message}: {title: string; message: string}) {
+function ErrorOverlay({
+  title,
+  message,
+  actionLabel,
+  onAction,
+}: {
+  title: string;
+  message: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   const {colors} = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={styles.imageError}>
       <Text style={styles.imageErrorTitle}>{title}</Text>
       <Text style={styles.imageErrorText}>{message}</Text>
+      {actionLabel && onAction ? (
+        <TouchableOpacity accessibilityRole="button" onPress={onAction} style={styles.imageErrorButton}>
+          <RefreshCw color={colors.white} size={14} />
+          <Text style={styles.imageErrorButtonText}>{actionLabel}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -5428,6 +5494,24 @@ function createStyles(colors: ThemeColors) {
     color: '#d2d0ce',
     fontSize: 12,
     lineHeight: 17,
+  },
+  imageErrorButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderColor: 'rgba(255,255,255,0.22)',
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 6,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  imageErrorButtonText: {
+    color: colors.white,
+    fontSize: 12,
+    fontWeight: '800',
   },
   collectionEnd: {
     alignItems: 'center',
