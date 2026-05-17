@@ -947,6 +947,7 @@ public class ArchiveController {
         // 设置响应头（在获取 writer 之前设置）
         ctx.setHeader("Content-Type", "application/octet-stream")
         ctx.setHeader("Content-Disposition", "attachment; filename=\"${filename}\"")
+        ctx.setHeader("Content-Length", "${fileSize}")
         ctx.status(HttpStatusCode.STATUS_OK)
 
         // 获取 writer
@@ -964,7 +965,7 @@ public class ArchiveController {
                 // 完整块，直接使用预分配的 buffer
                 let bytesRead = file.read(chunkBuffer)
                 if (bytesRead > 0) {
-                    writer.write(chunkBuffer)
+                    writer.write(chunkBuffer[0..bytesRead])
                     remaining -= bytesRead
                 } else {
                     break
@@ -974,7 +975,7 @@ public class ArchiveController {
                 let lastBuffer = Array<Byte>(toRead, {_ => 0})
                 let bytesRead = file.read(lastBuffer)
                 if (bytesRead > 0) {
-                    writer.write(lastBuffer)
+                    writer.write(lastBuffer[0..bytesRead])
                     remaining -= bytesRead
                 } else {
                     break
@@ -1165,7 +1166,7 @@ public class ArchiveController {
                     ("if_range_header", ifRangeHeader),
                     ("etag", etag)
                 )
-                sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
+                sendWithReaderChunked(ctx, reader, contentType, etag, fileSize, id, path, archiveType)
                 return
             }
             sendWithReaderChunkedRange(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd, id, path, archiveType)
@@ -1174,7 +1175,7 @@ public class ArchiveController {
 
         // 统一使用流式传输，避免大缓冲区占用内存
         // 小文件也可以使用流式传输，性能影响可忽略，但能避免内存峰值问题
-        sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
+        sendWithReaderChunked(ctx, reader, contentType, etag, fileSize, id, path, archiveType)
     }
 
     /**
@@ -1185,6 +1186,7 @@ public class ArchiveController {
         reader: EntryReader,
         contentType: String,
         etag: String,
+        fileSize: Int64,
         arcid: String,
         entryPath: String,
         archiveType: String
@@ -1194,6 +1196,7 @@ public class ArchiveController {
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
+        ctx.setHeader("Content-Length", "${fileSize}")
         ctx.status(HttpStatusCode.STATUS_OK)
         logger.info(
             "serve page response",
@@ -1217,10 +1220,9 @@ public class ArchiveController {
                 }
 
                 if (bytesRead == PAGE_STREAM_CHUNK_SIZE) {
-                    writer.write(chunkBuffer)
+                    writer.write(chunkBuffer[0..bytesRead])
                 } else {
-                    let lastChunk = Array<Byte>(bytesRead, { i => chunkBuffer[i] })
-                    writer.write(lastChunk)
+                    writer.write(chunkBuffer[0..bytesRead])
                 }
             }
         } catch (e: Exception) {

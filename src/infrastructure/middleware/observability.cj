@@ -124,6 +124,7 @@ private func isUploadChunkRoute(ctx: Ctx): Bool {
 
 private func shouldSkipCompression(path: String): Bool {
     path.startsWith("/api/assets/") ||
+    path.startsWith("/api/archives/") && path.endsWith("/page") ||
     path.endsWith("/download") ||
     path.endsWith("/stream")
 }

@@ -69,6 +69,7 @@ public class AssetController {
                 ctx.send(bytes)
             } else {
                 // 大文件流式发送
+                ctx.setHeader("Content-Length", fileSize.toString())
                 let writer = ctx.writer()
                 let f = File(filePath, OpenMode.Read)
                 let chunkBufSize: Int64 = 131072 // 128KB
@@ -80,7 +81,7 @@ public class AssetController {
                         break
                     }
                     if (bytesRead == chunkBufSize) {
-                        writer.write(chunkBuffer)
+                        writer.write(chunkBuffer[0..bytesRead])
                     } else {
                         writer.write(chunkBuffer[0..bytesRead])
                     }
