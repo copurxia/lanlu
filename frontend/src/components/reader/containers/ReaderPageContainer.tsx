@@ -4,7 +4,8 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { useState, useEffect, useCallback, useMemo, Suspense, useRef } from 'react';
 import type React from 'react';
 import dynamic from 'next/dynamic';
-import { ArchiveService } from '@/lib/services/archive-service';
+import { ArchiveService, type PageInfo } from '@/lib/services/archive-service';
+import type { PageEditData } from '@/components/reader/components/ReaderPageEditDialog';
 import { RecommendationService } from '@/lib/services/recommendation-service';
 import type { Archive } from '@/types/archive';
 import { Button } from '@/components/ui/button';
@@ -89,6 +90,11 @@ const ReaderCollectionEndPage = dynamic(
 );
 const ReaderPreloadArea = dynamic(
   () => import('@/components/reader/components/ReaderPreloadArea').then((m) => m.ReaderPreloadArea)
+);
+const loadReaderPageEditDialog = () => import('@/components/reader/components/ReaderPageEditDialog');
+const ReaderPageEditDialog = dynamic(
+  () => loadReaderPageEditDialog().then((m) => m.ReaderPageEditDialog),
+  { loading: () => null }
 );
 const ReaderWebtoonModeView = dynamic(
   () => import('@/components/reader/components/ReaderWebtoonModeView').then((m) => m.ReaderWebtoonModeView)
@@ -180,6 +186,14 @@ function buildSubtitleOptionLabel(attachment: MetadataPageAttachment, subtitleIn
   if (name) return name;
   if (kind) return kind;
   return `Subtitle ${subtitleIndex + 1}`;
+}
+
+function buildLyricsOptionLabel(attachment: MetadataPageAttachment, lyricsIndex: number): string {
+  const name = String(attachment.name || '').trim();
+  if (name) return name;
+  const language = String(attachment.language || '').trim();
+  if (language) return language;
+  return `Lyrics ${lyricsIndex + 1}`;
 }
 
 function buildSubtitleSourceKey(pageIndex: number, sourceIndex: number): string {
@@ -313,6 +327,7 @@ function ReaderContent() {
   const [currentSourceIndexByPageIndex, setCurrentSourceIndexByPageIndex] = useState<Record<number, number>>({});
   const [currentSubtitleIndexBySourceKey, setCurrentSubtitleIndexBySourceKey] = useState<Record<string, number[]>>({});
   const subtitlePreferenceRef = useRef<{ language: string; name: string } | null>(null);
+  const [currentLyricsIndexBySourceKey, setCurrentLyricsIndexBySourceKey] = useState<Record<string, number[]>>({});
   const [videoTimelineByPageIndex, setVideoTimelineByPageIndex] = useState<
     Record<number, { currentTime: number; duration: number; paused: boolean; muted: boolean; volume: number; buffered: number }>
   >({});
@@ -323,6 +338,8 @@ function ReaderContent() {
   const [webtoonContentElement, setWebtoonContentElement] = useState<HTMLDivElement | null>(null);
   const [webtoonContentWidth, setWebtoonContentWidth] = useState(0);
   const [webtoonZoom, setWebtoonZoom] = useState<WebtoonZoomState | null>(null);
+  const [editingPageIndex, setEditingPageIndex] = useState<number | null>(null);
+  const [isPageEditSaving, setIsPageEditSaving] = useState(false);
   const archiveNavLockRef = useRef(0);
   const chapterJumpCountdownRef = useRef<{
     seconds: number;
@@ -578,6 +595,16 @@ function ReaderContent() {
     return out;
   }, [currentSourceIndexByPageIndex, currentSubtitleIndexBySourceKey, effectivePages]);
 
+  const currentLyricsIndexByPageIndex = useMemo(() => {
+    const out: Record<number, number[]> = {};
+    for (let i = 0; i < effectivePages.length; i += 1) {
+      const sourceIndex = currentSourceIndexByPageIndex[i] ?? effectivePages[i]?.defaultSourceIndex ?? 0;
+      const key = buildSubtitleSourceKey(i, sourceIndex);
+      out[i] = currentLyricsIndexBySourceKey[key] ?? [];
+    }
+    return out;
+  }, [currentSourceIndexByPageIndex, currentLyricsIndexBySourceKey, effectivePages]);
+
   useEffect(() => {
     setCurrentSubtitleIndexBySourceKey((prev) => {
       let changed = false;
@@ -623,6 +650,41 @@ function ReaderContent() {
     });
   }, [currentSourceIndexByPageIndex, effectivePages]);
 
+  useEffect(() => {
+    setCurrentLyricsIndexBySourceKey((prev) => {
+      let changed = false;
+      const next: Record<string, number[]> = {};
+      for (let i = 0; i < effectivePages.length; i += 1) {
+        const page = effectivePages[i];
+        const sourceIndex = currentSourceIndexByPageIndex[i] ?? page?.defaultSourceIndex ?? 0;
+        const key = buildSubtitleSourceKey(i, sourceIndex);
+        const lyricsAttachments = ArchiveService.getLyricsAttachments(page.effectiveMetadata || page.metadata);
+        const lyricsCount = lyricsAttachments.length;
+        const existing = prev[key];
+        if (lyricsCount <= 0) {
+          if (existing !== undefined) changed = true;
+          continue;
+        }
+
+        // Filter existing indexes to keep only valid ones
+        let resolved = (existing || []).filter((idx) => idx >= 0 && idx < lyricsCount);
+
+        // Auto-select first lyrics attachment if none selected
+        if (resolved.length === 0) {
+          resolved = [0];
+        }
+
+        next[key] = resolved;
+        if (JSON.stringify(prev[key] || []) !== JSON.stringify(resolved)) changed = true;
+      }
+
+      const prevKeys = Object.keys(prev);
+      if (!changed && prevKeys.length === Object.keys(next).length) {
+        return prev;
+      }
+      return next;
+    });
+  }, [currentSourceIndexByPageIndex, effectivePages]);
 
   useEffect(() => {
     nextArchiveCandidateCacheRef.current.clear();
@@ -1662,6 +1724,30 @@ function ReaderContent() {
     [currentSourceIndexByPageIndex, currentSubtitleIndexBySourceKey, effectivePages]
   );
 
+  const handleChangePageLyrics = useCallback(
+    (pageIndex: number, lyricsIndex: number) => {
+      const page = effectivePages[pageIndex];
+      const lyricsAttachments = ArchiveService.getLyricsAttachments(page?.effectiveMetadata || page?.metadata);
+      const lyricsCount = lyricsAttachments.length;
+      if (!page || lyricsCount <= 0) return;
+      
+      const sourceIndex = currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0;
+      const key = buildSubtitleSourceKey(pageIndex, sourceIndex);
+      const currentIndexes = currentLyricsIndexBySourceKey[key] || [];
+      
+      // Toggle lyrics index: remove if exists, add if not exists
+      let nextIndexes: number[];
+      if (currentIndexes.includes(lyricsIndex)) {
+        nextIndexes = currentIndexes.filter((idx) => idx !== lyricsIndex);
+      } else {
+        nextIndexes = [...currentIndexes, lyricsIndex].sort((a, b) => a - b);
+      }
+
+      setCurrentLyricsIndexBySourceKey((prev) => ({ ...prev, [key]: nextIndexes }));
+    },
+    [currentSourceIndexByPageIndex, currentLyricsIndexBySourceKey, effectivePages]
+  );
+
   useEffect(() => {
     const pendingEntries = Object.entries(pendingSourceRestoreRef.current);
     if (pendingEntries.length <= 0) return;
@@ -1951,8 +2037,16 @@ function ReaderContent() {
             label: buildSubtitleOptionLabel(attachment, subtitleIndex),
           }))
         : undefined;
+      const lyricsAttachments = ArchiveService.getLyricsAttachments(effectivePage?.effectiveMetadata || effectivePage?.metadata);
+      const lyricsOptions = lane.kind === 'video' || lane.kind === 'audio'
+        ? lyricsAttachments.map((attachment, lyricsIndex) => ({
+            value: lyricsIndex,
+            label: t('reader.lyricsExternal', { label: buildLyricsOptionLabel(attachment, lyricsIndex) }),
+          }))
+        : undefined;
       const activeSourceIndex = pageIndex >= 0 ? currentSourceIndexByPageIndex[pageIndex] ?? page?.defaultSourceIndex ?? 0 : 0;
       const activeSubtitleIndexes = pageIndex >= 0 ? currentSubtitleIndexByPageIndex[pageIndex] ?? [] : [];
+      const activeLyricsIndexes = pageIndex >= 0 ? currentLyricsIndexByPageIndex[pageIndex] ?? [] : [];
       const currentTime = snapshot?.currentTime ?? 0;
       const duration = snapshot?.duration ?? 0;
       const isPlaying = snapshot ? !snapshot.paused : false;
@@ -2001,8 +2095,11 @@ function ReaderContent() {
         activeSourceIndex,
         subtitleOptions,
         activeSubtitleIndexes,
+        lyricsOptions,
+        activeLyricsIndexes,
         onSourceChange: (nextSourceIndex: number) => handleChangePageSource(pageIndex, nextSourceIndex),
         onSubtitleChange: (nextSubtitleIndex: number) => handleChangePageSubtitle(pageIndex, nextSubtitleIndex),
+        onLyricsChange: (nextLyricsIndex: number) => handleChangePageLyrics(pageIndex, nextLyricsIndex),
         onTogglePlay: () => {
           const videoElement = pageIndex >= 0 ? videoRefs.current[pageIndex] : null;
           if (!videoElement) return;
@@ -2038,8 +2135,10 @@ function ReaderContent() {
   }, [
     currentSourceIndexByPageIndex,
     currentSubtitleIndexByPageIndex,
+    currentLyricsIndexByPageIndex,
     effectivePages,
     handleChangePageSubtitle,
+    handleChangePageLyrics,
     handleChangePageSource,
     handleSliderChangePage,
     pages,
@@ -2047,6 +2146,7 @@ function ReaderContent() {
     sliderCurrentPage,
     sliderTotalPages,
     videoTimelineByPageIndex,
+    t,
   ]);
 
   useEffect(() => {
@@ -2484,6 +2584,7 @@ function ReaderContent() {
 
     const warmup = () => {
       void loadReaderSidebar();
+      void loadReaderPageEditDialog();
     };
 
     if (typeof window.requestIdleCallback === 'function') {
@@ -2494,6 +2595,38 @@ function ReaderContent() {
     const timer = window.setTimeout(warmup, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  const handleSavePageMetadata = useCallback(async (pageIndex: number, data: PageEditData) => {
+    const archiveId = activeArchiveId ?? sourceArchiveId;
+    if (!archiveId) return;
+    const page = effectivePages[pageIndex] as PageInfo | undefined;
+    if (!page) return;
+
+    setIsPageEditSaving(true);
+    try {
+      const patch: Record<string, unknown> = {
+        page_number: pageIndex + 1,
+        entry_path: ArchiveService.getPagePath(page),
+      };
+      if (data.title) patch.title = data.title;
+      if (data.description) patch.description = data.description;
+      if (data.thumb) patch.thumb = data.thumb;
+      if (data.release_at) patch.release_at = data.release_at;
+      if (data.order_index > 0) patch.order_index = data.order_index;
+      patch.hidden_in_files = data.hidden_in_files;
+      patch.attachments = data.attachments;
+
+      await ArchiveService.updateMetadata(archiveId, {
+        pages: [patch] as any,
+      });
+      toast.success(t('reader.pageEditSuccess'));
+      setEditingPageIndex(null);
+    } catch {
+      toast.error(t('common.error'));
+    } finally {
+      setIsPageEditSaving(false);
+    }
+  }, [activeArchiveId, effectivePages, sourceArchiveId, t]);
 
   if (loading) {
     return (
@@ -2587,6 +2720,7 @@ function ReaderContent() {
           onSelectPage={sidebar.handleSidebarPageSelect}
           onLoadMore={sidebar.handleLoadMoreSidebarPages}
           onOpenChange={sidebar.setSidebarOpen}
+          onEditPage={setEditingPageIndex}
           t={t}
         />
 
@@ -2599,6 +2733,7 @@ function ReaderContent() {
             longPageEnabled={longPageEnabled}
  	          pages={effectivePages as any}
             currentSubtitleIndexByPageIndex={currentSubtitleIndexByPageIndex}
+            currentLyricsIndexByPageIndex={currentLyricsIndexByPageIndex}
  	          cachedPages={imageLoading.cachedPages}
  	          currentPage={currentPage}
  	          doublePageMode={doublePageMode}
@@ -2660,6 +2795,7 @@ function ReaderContent() {
 	          onScroll={handleWebtoonScroll}
 	          pages={streamPages}
             currentSubtitleIndexByPageIndex={currentSubtitleIndexByPageIndex}
+            currentLyricsIndexByPageIndex={currentLyricsIndexByPageIndex}
 	          finishedId={activeArchiveId}
 	          finishedTitle={displayArchiveTitle}
 	          finishedCoverAssetId={getArchiveAssetId(archive.archiveMetadata, 'cover')}
@@ -2697,6 +2833,33 @@ function ReaderContent() {
 	          t={t}
 	        />
       </div>
+
+      {editingPageIndex != null ? (
+        (() => {
+          const page = effectivePages[editingPageIndex] as PageInfo | undefined;
+          const pageMeta = ArchiveService.getPageDisplayMetadata(page);
+          const rawPage = page as any;
+          return (
+            <ReaderPageEditDialog
+              open
+              onOpenChange={() => setEditingPageIndex(null)}
+              pageNumber={editingPageIndex + 1}
+              title={ArchiveService.getPageDisplayTitle(page)}
+              description={pageMeta?.description?.trim() || ''}
+              thumb={pageMeta?.thumb?.trim() || ''}
+              releaseAt={pageMeta?.release_at?.trim() || ''}
+              orderIndex={Number(rawPage?.metadata?.order_index || rawPage?.order_index || 0)}
+              hiddenInFiles={!!(rawPage?.metadata?.hidden_in_files ?? rawPage?.hidden_in_files ?? false)}
+              attachments={pageMeta?.attachments || []}
+              isSaving={isPageEditSaving}
+              onSave={(data) => {
+                void handleSavePageMetadata(editingPageIndex, data);
+              }}
+              t={t}
+            />
+          );
+        })()
+      ) : null}
     </div>
   );
 }

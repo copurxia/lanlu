@@ -3,7 +3,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils/utils';
-import { Heart, Pause, Play, Rewind, FastForward, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo, Captions, Check } from 'lucide-react';
+import { Heart, Pause, Play, Rewind, FastForward, ChevronLeft, ChevronRight, Volume2, VolumeX, SlidersHorizontal, Book, ListVideo, Captions, Music2, Check } from 'lucide-react';
 import { ReaderSettingsSheet, type ReaderMediaSourceOption, type ReaderSettingButton } from '@/components/reader/components/ReaderSettingsSheet';
 import type { ArchiveMetadata } from '@/types/archive';
 import { useEffect, useMemo, useState } from 'react';
@@ -35,6 +35,9 @@ export type ReaderProgressLane = {
   subtitleOptions?: ReaderMediaSourceOption[];
   activeSubtitleIndexes?: number[];
   onSubtitleChange?: (value: number) => void;
+  lyricsOptions?: ReaderMediaSourceOption[];
+  activeLyricsIndexes?: number[];
+  onLyricsChange?: (value: number) => void;
 };
 
 const floatingSurfaceClass = 'bg-[hsl(var(--background)/0.55)] backdrop-blur-xl border border-[hsl(var(--border)/0.8)] shadow-lg';
@@ -69,7 +72,17 @@ function MobileBookControls({
   onChangePage: (page: number) => void;
 }) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2.5">
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => onChangePage(currentPage - 1)}
+        disabled={currentPage <= 0}
+        className={mobileMediaButtonClass}
+        title="Previous page"
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </Button>
       <Slider
         value={[currentPage]}
         onValueChange={(value) => onChangePage(value[0])}
@@ -81,6 +94,16 @@ function MobileBookControls({
       <span className="min-w-[44px] text-right text-sm font-medium tabular-nums text-foreground/95">
         {currentPage + 1}/{totalPages}
       </span>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => onChangePage(currentPage + 1)}
+        disabled={currentPage + 1 >= totalPages}
+        className={mobileMediaButtonClass}
+        title="Next page"
+      >
+        <ChevronRight className="h-4 w-4" />
+      </Button>
     </div>
   );
 }
@@ -268,6 +291,9 @@ export function ReaderFloatingControls({
                     subtitleOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.subtitleOptions : undefined}
                     activeSubtitleIndexes={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndexes : undefined}
                     onSubtitleChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSubtitleChange : undefined}
+                    lyricsOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.lyricsOptions : undefined}
+                    activeLyricsIndexes={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeLyricsIndexes : undefined}
+                    onLyricsChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onLyricsChange : undefined}
                     t={t}
                   />
                 </div>
@@ -448,6 +474,37 @@ export function ReaderFloatingControls({
                     </div>
                   </div>
                 ) : null}
+
+                {resolvedActiveLane.lyricsOptions && resolvedActiveLane.lyricsOptions.length > 0 ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-3 text-sm font-medium">
+                      <span className="text-muted-foreground">Lyrics</span>
+                      <span className="text-xs text-muted-foreground">
+                        {(resolvedActiveLane.activeLyricsIndexes?.length ?? 0) > 0
+                          ? `${resolvedActiveLane.activeLyricsIndexes?.length || 0}/${resolvedActiveLane.lyricsOptions.length}`
+                          : 'Off'}
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {resolvedActiveLane.lyricsOptions.map((option) => {
+                        const isSelected = (resolvedActiveLane.activeLyricsIndexes ?? []).includes(option.value);
+                        return (
+                          <Button
+                            key={`media-lyrics-${option.value}`}
+                            type="button"
+                            variant={isSelected ? 'default' : 'outline'}
+                            size="sm"
+                            className="rounded-lg"
+                            onClick={() => resolvedActiveLane.onLyricsChange?.(option.value)}
+                          >
+                            <Check className={cn("w-3 h-3 mr-1", isSelected ? "opacity-100" : "opacity-0")} />
+                            <span className="max-w-[14rem] truncate">{option.label}</span>
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </SheetContent>
@@ -525,7 +582,30 @@ export function ReaderFloatingControls({
                           <FastForward className="w-4 h-4" />
                         </Button>
                       </>
-                    ) : null}
+                    ) : (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onChangePage(currentPage - 1)}
+                          disabled={currentPage <= 0}
+                          className="rounded-full h-8 w-8 p-0 text-foreground/80 transition-all duration-150 ease-out hover:bg-transparent hover:border-transparent hover:shadow-none hover:text-foreground"
+                          title="Previous page"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onChangePage(currentPage + 1)}
+                          disabled={currentPage + 1 >= totalPages}
+                          className="rounded-full h-8 w-8 p-0 text-foreground/80 transition-all duration-150 ease-out hover:bg-transparent hover:border-transparent hover:shadow-none hover:text-foreground"
+                          title="Next page"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </Button>
+                      </>
+                    )}
 
                     <Slider
                       value={[lane.value]}
@@ -631,6 +711,43 @@ export function ReaderFloatingControls({
                             </PopoverContent>
                           </Popover>
                         ) : null}
+                        {lane.lyricsOptions && lane.lyricsOptions.length > 0 ? (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className={cn(
+                                  "rounded-full h-8 w-8 p-0 transition-all duration-150 ease-out hover:bg-transparent hover:border-transparent hover:shadow-none hover:text-foreground",
+                                  (lane.activeLyricsIndexes?.length ?? 0) > 0 ? "text-foreground" : "text-foreground/80"
+                                )}
+                                title="Switch lyrics"
+                              >
+                                <Music2 className="w-4 h-4" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent align="end" className="w-72 rounded-xl p-2">
+                              <div className="space-y-1">
+                                {lane.lyricsOptions.map((option) => {
+                                  const isSelected = (lane.activeLyricsIndexes ?? []).includes(option.value);
+                                  return (
+                                    <Button
+                                      key={`${lane.id}-popover-lyrics-${option.value}`}
+                                      type="button"
+                                      variant={isSelected ? 'default' : 'ghost'}
+                                      size="sm"
+                                      className="w-full justify-start rounded-lg"
+                                      onClick={() => lane.onLyricsChange?.(option.value)}
+                                    >
+                                      <Check className={cn("w-4 h-4 mr-2", isSelected ? "opacity-100" : "opacity-0")} />
+                                      <span className="truncate">{option.label}</span>
+                                    </Button>
+                                  );
+                                })}
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        ) : null}
                       </>
                     ) : null}
                   </div>
@@ -660,6 +777,9 @@ export function ReaderFloatingControls({
           subtitleOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.subtitleOptions : undefined}
           activeSubtitleIndexes={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeSubtitleIndexes : undefined}
           onSubtitleChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onSubtitleChange : undefined}
+          lyricsOptions={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.lyricsOptions : undefined}
+          activeLyricsIndexes={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.activeLyricsIndexes : undefined}
+          onLyricsChange={isMediaLane(resolvedActiveLane) ? resolvedActiveLane.onLyricsChange : undefined}
           t={t}
         />
       </div>

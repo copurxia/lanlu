@@ -5,6 +5,7 @@ import { StepUpDialog } from '@/components/auth/StepUpDialog';
 
 export function useStepUpDialog() {
   const [open, setOpen] = useState(false);
+  const [purpose, setPurpose] = useState<string>('');
   const resolverRef = useRef<((verified: boolean) => void) | null>(null);
 
   const closeWithResult = useCallback((verified: boolean) => {
@@ -14,7 +15,16 @@ export function useStepUpDialog() {
     resolver?.(verified);
   }, []);
 
-  const requestStepUp = useCallback(() => {
+  const requestStepUp = useCallback((purposeText?: string) => {
+    // If a pending step-up exists, resolve it as cancelled before starting a new one
+    const staleResolver = resolverRef.current;
+    if (staleResolver) {
+      resolverRef.current = null;
+      staleResolver(false);
+    }
+    if (purposeText) {
+      setPurpose(purposeText);
+    }
     return new Promise<boolean>((resolve) => {
       resolverRef.current = resolve;
       setOpen(true);
@@ -24,6 +34,7 @@ export function useStepUpDialog() {
   const dialog = useMemo(() => (
     <StepUpDialog
       open={open}
+      purpose={purpose}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) {
           closeWithResult(false);
@@ -33,7 +44,7 @@ export function useStepUpDialog() {
       }}
       onVerified={() => closeWithResult(true)}
     />
-  ), [closeWithResult, open]);
+  ), [closeWithResult, open, purpose]);
 
   return {
     requestStepUp,

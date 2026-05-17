@@ -1,4 +1,4 @@
-import { Book, ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, List, Music } from 'lucide-react';
+import { Book, ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, List, Music, Pencil } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
@@ -98,6 +98,7 @@ export function ReaderSidebar({
   onSelectPage,
   onLoadMore,
   onOpenChange,
+  onEditPage,
   t,
 }: {
   open: boolean;
@@ -112,6 +113,7 @@ export function ReaderSidebar({
   onSelectPage: (pageIndex: number) => void;
   onLoadMore: () => void;
   onOpenChange: (nextOpen: boolean) => void;
+  onEditPage?: (pageIndex: number) => void;
   t: (key: string) => string;
 }) {
   const [sidebarScrollTop, setSidebarScrollTop] = useState(0);
@@ -627,42 +629,61 @@ export function ReaderSidebar({
         : <ImageIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />;
 
     return (
-      <button
+      <div
         key={index}
         data-sidebar-item-index={index}
-        onClick={() => onSelectPage(index)}
-        className={`w-full flex items-center gap-2 p-2 rounded-lg transition-colors text-left ${
+        className={`group flex items-center gap-2 p-2 rounded-lg transition-colors ${
           currentPage === index ? 'bg-accent text-accent-foreground' : 'hover:bg-muted'
         }`}
       >
-        {metadataThumb ? (
-          <MemoizedImage
-            src={metadataThumb}
-            alt={displayTitle}
-            className="w-14 h-10 rounded-md object-cover bg-muted shrink-0"
-            decoding="async"
-            loading="lazy"
-            draggable={false}
-          />
-        ) : (
-          <span className="shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">
-            {index + 1}
+        <button
+          onClick={() => onSelectPage(index)}
+          className="flex items-center gap-2 min-w-0 flex-1 text-left"
+        >
+          {metadataThumb ? (
+            <MemoizedImage
+              src={metadataThumb}
+              alt={displayTitle}
+              className="w-14 h-10 rounded-md object-cover bg-muted shrink-0"
+              decoding="async"
+              loading="lazy"
+              draggable={false}
+            />
+          ) : (
+            <span className="shrink-0 w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-medium">
+              {index + 1}
+            </span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-xs sm:text-sm">{displayTitle}</span>
+            {description ? (
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {description}
+              </span>
+            ) : subtitle ? (
+              <span className="block truncate text-[11px] text-muted-foreground">
+                {subtitle}
+              </span>
+            ) : null}
           </span>
-        )}
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-xs sm:text-sm">{displayTitle}</span>
-          {description ? (
-            <span className="block truncate text-[11px] text-muted-foreground">
-              {description}
-            </span>
-          ) : subtitle ? (
-            <span className="block truncate text-[11px] text-muted-foreground">
-              {subtitle}
-            </span>
+        </button>
+        <span className="shrink-0 opacity-80 flex items-center gap-1">
+          {pageIcon}
+          {onEditPage ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onEditPage(index);
+              }}
+              className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-background/80 text-muted-foreground hover:text-foreground"
+              title={t('common.edit')}
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
           ) : null}
         </span>
-        <span className="shrink-0 opacity-80">{pageIcon}</span>
-      </button>
+      </div>
     );
   };
 

@@ -54,6 +54,9 @@ export function ReaderSettingsSheet({
   subtitleOptions,
   activeSubtitleIndexes,
   onSubtitleChange,
+  lyricsOptions,
+  activeLyricsIndexes,
+  onLyricsChange,
   t,
 }: {
   open: boolean;
@@ -73,6 +76,9 @@ export function ReaderSettingsSheet({
   subtitleOptions?: ReaderMediaSourceOption[];
   activeSubtitleIndexes?: number[];
   onSubtitleChange?: (value: number) => void;
+  lyricsOptions?: ReaderMediaSourceOption[];
+  activeLyricsIndexes?: number[];
+  onLyricsChange?: (value: number) => void;
   t: (key: string) => string;
 }) {
   const router = useRouter();
@@ -339,6 +345,37 @@ export function ReaderSettingsSheet({
                       size="sm"
                       className="rounded-lg"
                       onClick={() => onSubtitleChange?.(option.value)}
+                    >
+                      <Check className={cn("w-3 h-3 mr-1", isSelected ? "opacity-100" : "opacity-0")} />
+                      <span className="max-w-[14rem] truncate">{option.label}</span>
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {isNarrowScreen && lyricsOptions && lyricsOptions.length > 0 ? (
+            <div className="space-y-3 rounded-xl border border-border/60 bg-muted/20 p-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{t('reader.lyrics')}</span>
+                <span className="text-xs text-muted-foreground">
+                  {(activeLyricsIndexes?.length ?? 0) > 0
+                    ? `${activeLyricsIndexes?.length || 0}/${lyricsOptions.length}`
+                    : t('reader.lyricsOff')}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {lyricsOptions.map((option) => {
+                  const isSelected = (activeLyricsIndexes ?? []).includes(option.value);
+                  return (
+                    <Button
+                      key={`settings-lyrics-${option.value}`}
+                      type="button"
+                      variant={isSelected ? 'default' : 'outline'}
+                      size="sm"
+                      className="rounded-lg"
+                      onClick={() => onLyricsChange?.(option.value)}
                     >
                       <Check className={cn("w-3 h-3 mr-1", isSelected ? "opacity-100" : "opacity-0")} />
                       <span className="max-w-[14rem] truncate">{option.label}</span>

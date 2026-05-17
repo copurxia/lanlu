@@ -148,6 +148,7 @@ const DialogContent: React.FC<{
         "fixed inset-0 z-modal-overlay flex motion-reduce:transition-none",
         isMobile ? "items-end justify-center" : "items-center justify-center p-4"
       )}
+      onWheel={(e) => e.stopPropagation()}
     >
       {showOverlay ? (
         <div
@@ -157,6 +158,7 @@ const DialogContent: React.FC<{
             overlayClassName
           )}
           onClick={() => onOpenChange?.(false)}
+          onWheel={(e) => e.stopPropagation()}
         />
       ) : null}
       <div
@@ -177,6 +179,7 @@ const DialogContent: React.FC<{
           className
         )}
         onClick={(e) => e.stopPropagation()}
+        onWheel={(e) => e.stopPropagation()}
       >
         {isMobile && <div className="mx-auto mt-2 h-1.5 w-12 rounded-full bg-muted" />}
         {children}

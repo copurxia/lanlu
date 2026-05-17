@@ -20,6 +20,7 @@ export function ReaderSingleModeView({
   longPageEnabled,
   pages,
   currentSubtitleIndexByPageIndex,
+  currentLyricsIndexByPageIndex,
   cachedPages,
   currentPage,
   doublePageMode,
@@ -51,6 +52,7 @@ export function ReaderSingleModeView({
   longPageEnabled: boolean;
   pages: PageInfo[];
   currentSubtitleIndexByPageIndex: Record<number, number[]>;
+  currentLyricsIndexByPageIndex: Record<number, number[]>;
   cachedPages: string[];
   currentPage: number;
   doublePageMode: boolean;
@@ -114,6 +116,15 @@ export function ReaderSingleModeView({
       .filter((idx) => idx >= 0 && idx < allAttachments.length)
       .map((idx) => allAttachments[idx]);
   }, [currentSubtitleIndexByPageIndex, pages]);
+
+  const getLyricsAttachmentsForPage = useCallback((pageIndex: number) => {
+    const metadata = ArchiveService.getPageDisplayMetadata(pages[pageIndex]);
+    const allAttachments = ArchiveService.getLyricsAttachments(metadata);
+    const currentIndexes = currentLyricsIndexByPageIndex[pageIndex] ?? [];
+    return currentIndexes
+      .filter((idx) => idx >= 0 && idx < allAttachments.length)
+      .map((idx) => allAttachments[idx]);
+  }, [currentLyricsIndexByPageIndex, pages]);
 
   const getSubtitleAssetIds = useCallback((pageIndex: number) => {
     return getSubtitleAttachments(pageIndex)
@@ -479,7 +490,7 @@ export function ReaderSingleModeView({
                     }
                     description={ArchiveService.getPageDisplayMetadata(pages[currentPage])?.description}
                     thumb={ArchiveService.getPageDisplayMetadata(pages[currentPage])?.thumb}
-                    lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(ArchiveService.getPageDisplayMetadata(pages[currentPage]))?.asset_id}
+                    lyricsAttachmentAssetId={getLyricsAttachmentsForPage(currentPage)[0]?.asset_id}
                     subtitleAttachmentAssetId={getSubtitleAttachments(currentPage)[0]?.asset_id}
                     audioUrl={ArchiveService.getResolvedPageUrl(pages[currentPage])}
                     audioRef={(el) => {
@@ -672,7 +683,7 @@ export function ReaderSingleModeView({
                       }
                       description={ArchiveService.getPageDisplayMetadata(pages[currentPage + 1])?.description}
                       thumb={ArchiveService.getPageDisplayMetadata(pages[currentPage + 1])?.thumb}
-                      lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(ArchiveService.getPageDisplayMetadata(pages[currentPage + 1]))?.asset_id}
+                      lyricsAttachmentAssetId={getLyricsAttachmentsForPage(currentPage + 1)[0]?.asset_id}
                       subtitleAttachmentAssetId={getSubtitleAttachments(currentPage + 1)[0]?.asset_id}
                       audioUrl={ArchiveService.getResolvedPageUrl(pages[currentPage + 1])}
                       audioRef={(el) => {

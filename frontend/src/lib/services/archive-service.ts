@@ -476,10 +476,21 @@ export class ArchiveService {
     return attachments.filter((attachment) => attachment.slot === normalizedSlot);
   }
 
+  static getLyricsAttachments(
+    metadata: { attachments?: MetadataPageAttachment[] } | null | undefined
+  ): MetadataPageAttachment[] {
+    return this.getPageAttachments(metadata, 'lyrics').slice().sort((a, b) => {
+      const orderA = typeof a.order_index === 'number' ? a.order_index : 0;
+      const orderB = typeof b.order_index === 'number' ? b.order_index : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }
+
   static getPreferredLyricsAttachment(
     metadata: { attachments?: MetadataPageAttachment[] } | null | undefined
   ): MetadataPageAttachment | undefined {
-    return this.getPageAttachments(metadata, 'lyrics')[0];
+    return this.getLyricsAttachments(metadata)[0];
   }
 
   static getSubtitleAttachments(

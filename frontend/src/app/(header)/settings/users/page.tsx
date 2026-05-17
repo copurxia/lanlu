@@ -153,6 +153,8 @@ export default function UsersSettingsPage() {
   const handleResetPassword = async () => {
     if (!resetPasswordUser) return;
 
+    const targetUser = resetPasswordUser;
+
     if (resetPasswordForm.newPassword !== resetPasswordForm.confirmPassword) {
       showError(t('auth.passwordMismatch'));
       return;
@@ -165,10 +167,12 @@ export default function UsersSettingsPage() {
 
     setLoading(true);
     try {
-      if (!(await requestStepUp())) {
+      const stepUpVerified = await requestStepUp(t('auth.resetPasswordFor', { username: targetUser.username }));
+      if (!stepUpVerified) {
+        showError(t('auth.stepUpCancelled'));
         return;
       }
-      await apiClient.post(`/api/auth/admin/users/${resetPasswordUser.id}/reset-password`, {
+      await apiClient.post(`/api/auth/admin/users/${targetUser.id}/reset-password`, {
         newPassword: resetPasswordForm.newPassword,
       });
       success(t('auth.passwordResetSuccess'));

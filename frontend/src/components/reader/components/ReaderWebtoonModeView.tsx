@@ -29,6 +29,7 @@ export function ReaderWebtoonModeView({
   onScroll,
   pages,
   currentSubtitleIndexByPageIndex,
+  currentLyricsIndexByPageIndex,
   finishedId,
   finishedTitle,
   finishedCoverAssetId,
@@ -72,6 +73,7 @@ export function ReaderWebtoonModeView({
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   pages: ReaderWebtoonPage[];
   currentSubtitleIndexByPageIndex: Record<number, number[]>;
+  currentLyricsIndexByPageIndex: Record<number, number[]>;
   finishedId: string | null;
   finishedTitle: string;
   finishedCoverAssetId?: number;
@@ -260,7 +262,13 @@ export function ReaderWebtoonModeView({
                           title={pageTitle}
                           description={pageMetadata?.description}
                           thumb={pageMetadata?.thumb}
-                          lyricsAttachmentAssetId={ArchiveService.getPreferredLyricsAttachment(pageMetadata)?.asset_id}
+                          lyricsAttachmentAssetId={(() => {
+                            const allAttachments = ArchiveService.getLyricsAttachments(pageMetadata);
+                            const lyricsIndexes = currentLyricsIndexByPageIndex[actualIndex] ?? [];
+                            const firstIndex = lyricsIndexes.find((idx) => idx >= 0 && idx < allAttachments.length);
+                            if (firstIndex === undefined) return undefined;
+                            return allAttachments[firstIndex]?.asset_id;
+                          })()}
                           subtitleAttachmentAssetId={activeSubtitleAttachments[0]?.asset_id}
                           audioUrl={pageUrl}
                           audioRef={(el) => {

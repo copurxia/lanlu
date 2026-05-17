@@ -13,11 +13,12 @@ type StepUpMethod = 'password' | 'totp' | 'passkey';
 
 interface StepUpDialogProps {
   open: boolean;
+  purpose?: string;
   onOpenChange: (open: boolean) => void;
   onVerified: () => void;
 }
 
-export function StepUpDialog({ open, onOpenChange, onVerified }: StepUpDialogProps) {
+export function StepUpDialog({ open, purpose, onOpenChange, onVerified }: StepUpDialogProps) {
   const [loading, setLoading] = useState(false);
   const [options, setOptions] = useState<StepUpOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +94,7 @@ export function StepUpDialog({ open, onOpenChange, onVerified }: StepUpDialogPro
         </DialogHeader>
         <DialogBody className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            这是高风险操作，请先完成一次身份确认。
+            {purpose || '这是高风险操作，请先完成一次身份确认。'}
           </p>
 
           <div className="flex flex-wrap gap-2">
