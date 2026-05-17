@@ -7,6 +7,8 @@ import {
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {PanResponder, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {enableScreens} from 'react-native-screens';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {BlurView} from '@sbaiahmed1/react-native-blur';
 import {Heart, Home, Settings} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
@@ -59,6 +61,20 @@ function SettingsTabIcon({color, size}: {color: string; size: number}) {
   return <Settings color={color} size={size} />;
 }
 
+function BlurTabBarBackground() {
+  const {effectiveScheme, colors} = useTheme();
+  return (
+    <View style={StyleSheet.absoluteFill}>
+      <BlurView
+        blurType={effectiveScheme === 'dark' ? 'dark' : 'light'}
+        blurAmount={24}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={[StyleSheet.absoluteFill, {backgroundColor: colors.surface + '80'}]} />
+    </View>
+  );
+}
+
 function StaticTabButton({
   children,
   style,
@@ -74,14 +90,19 @@ function StaticTabButton({
 function MainTabs() {
   const {t} = useI18n();
   const {colors} = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(
     () =>
       StyleSheet.create({
         tabBar: {
-          backgroundColor: colors.surface,
+          backgroundColor: 'transparent',
           borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
+          bottom: 0,
           elevation: 0,
+          left: 0,
+          position: 'absolute',
+          right: 0,
           shadowOpacity: 0,
         },
       }),
@@ -92,9 +113,10 @@ function MainTabs() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,
+        tabBarBackground: () => <BlurTabBarBackground />,
         tabBarButton: StaticTabButton,
         tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: styles.tabBar,
+        tabBarStyle: [styles.tabBar, {paddingBottom: insets.bottom}],
       }}>
       <Tabs.Screen
         name="Home"

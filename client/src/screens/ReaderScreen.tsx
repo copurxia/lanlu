@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {BlurView} from '@sbaiahmed1/react-native-blur';
 import {
   Dimensions,
   FlatList,
@@ -3834,6 +3835,10 @@ export function ReaderScreen({route, navigation}: Props) {
         pointerEvents={chromeVisible ? 'auto' : 'none'}
         style={[styles.bottomBar, {paddingBottom: stableInsets.bottom + 10}, bottomBarAnimatedStyle]}>
             <View style={styles.laneShell}>
+              <View style={styles.laneShellBlur}>
+                <BlurView blurType="dark" blurAmount={20} style={StyleSheet.absoluteFill} />
+                <View style={[StyleSheet.absoluteFill, {backgroundColor: 'rgba(0,0,0,0.55)'}]} />
+              </View>
               <View style={styles.laneRow}>
                 {lanes.map(lane => {
                   const isExpanded = activeLane.id === lane.id;
@@ -5377,15 +5382,21 @@ function createStyles(colors: ThemeColors) {
   },
   laneShell: {
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.48)',
+    backgroundColor: 'transparent',
     borderColor: 'rgba(255,255,255,0.18)',
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 6,
     minHeight: 40,
+    overflow: 'hidden',
     padding: 6,
     width: '100%',
+  },
+  laneShellBlur: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+    overflow: 'hidden',
   },
   laneRow: {
     flex: 1,

@@ -297,7 +297,7 @@ export function FavoritesScreen() {
         },
         content: {
           paddingHorizontal: spacing.lg,
-          paddingBottom: spacing.lg,
+          paddingBottom: spacing.lg + 56,
         },
         emptyContent: {
           flexGrow: 1,

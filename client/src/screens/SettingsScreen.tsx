@@ -281,7 +281,7 @@ export function SettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline), {paddingBottom: Math.max(insets.bottom, spacing.lg) + 56}]}
         showsVerticalScrollIndicator={false}>
         {/* 概览 */}
         <View style={styles.overviewRow}>

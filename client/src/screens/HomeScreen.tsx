@@ -1418,7 +1418,7 @@ export function HomeScreen() {
         },
         rowsContent: {
           paddingTop: spacing.xs,
-          paddingBottom: spacing.lg,
+          paddingBottom: spacing.lg + 56,
         },
         rowSection: {
           marginBottom: spacing.md,
@@ -1489,7 +1489,7 @@ export function HomeScreen() {
         listContent: {
           flexGrow: 1,
           paddingHorizontal: spacing.lg,
-          paddingBottom: spacing.lg,
+          paddingBottom: spacing.lg + 56,
         },
         column: {
           gap: spacing.md,

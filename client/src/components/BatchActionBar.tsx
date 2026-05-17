@@ -1,5 +1,6 @@
 import React, {useMemo} from 'react';
 import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {BlurView} from '@sbaiahmed1/react-native-blur';
 import {Check, Download, Edit, Heart, RotateCcw, Trash2, X} from 'lucide-react-native';
 
 import {useTheme} from '../theme/ThemeContext';
@@ -24,7 +25,7 @@ type Props = {
 };
 
 export function BatchActionBar({visible, selectedCount, actions, onExit, t}: Props) {
-  const {colors} = useTheme();
+  const {colors, effectiveScheme} = useTheme();
 
   const defaultActions: BatchAction[] = useMemo(
     () => [
@@ -67,16 +68,26 @@ export function BatchActionBar({visible, selectedCount, actions, onExit, t}: Pro
 
   if (!visible) return null;
 
+  const tintColor = colors.background + '80';
+
   return (
     <View style={[styles.container, {paddingBottom: 24}]} pointerEvents="box-none">
       <View style={styles.bar}>
-        <View style={[styles.countBadge, {backgroundColor: colors.background, borderColor: colors.border}]}>
+        <View style={styles.barBlur}>
+          <BlurView
+            blurType={effectiveScheme === 'dark' ? 'dark' : 'light'}
+            blurAmount={20}
+            style={StyleSheet.absoluteFill}
+          />
+          <View style={[StyleSheet.absoluteFill, {backgroundColor: tintColor}]} />
+        </View>
+        <View style={[styles.countBadge, {backgroundColor: 'transparent', borderColor: colors.border}]}>
           <Text style={[styles.countText, {color: colors.text}]}>
             {t('common.selected')}: {selectedCount}
           </Text>
         </View>
 
-        <View style={[styles.actionsRow, {backgroundColor: colors.background, borderColor: colors.border}]}>
+        <View style={[styles.actionsRow, {backgroundColor: 'transparent', borderColor: colors.border}]}>
           {resolvedActions.map(action => (
             <TouchableOpacity
               key={action.id}
@@ -93,7 +104,7 @@ export function BatchActionBar({visible, selectedCount, actions, onExit, t}: Pro
         </View>
 
         <TouchableOpacity
-          style={[styles.exitButton, {backgroundColor: colors.background, borderColor: colors.border}]}
+          style={[styles.exitButton, {backgroundColor: 'transparent', borderColor: colors.border}]}
           onPress={onExit}>
           <X color={colors.text} size={18} />
         </TouchableOpacity>
@@ -116,6 +127,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     gap: 8,
+    padding: 4,
+  },
+  barBlur: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 24,
+    overflow: 'hidden',
   },
   countBadge: {
     borderRadius: 20,
