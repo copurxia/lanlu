@@ -37,7 +37,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 ENV LD_LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
-ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libmimalloc.so
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libmimalloc.so.3
 ENV PATH="/app/bin:${PATH}"
 
 ENV TZ=Asia/Shanghai
