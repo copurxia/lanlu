@@ -18,6 +18,7 @@ RUN set -eux; \
       libheif1 \
       libssl3t64 \
       librocksdb9.11 \
+      libmimalloc3 \
       libvips42t64 \
       tzdata \
       unzip; \
@@ -36,6 +37,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 ENV LD_LIBRARY_PATH=/app:/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libmimalloc.so
 ENV PATH="/app/bin:${PATH}"
 
 ENV TZ=Asia/Shanghai
