@@ -955,7 +955,6 @@ public class ArchiveController {
         // 设置响应头（在获取 writer 之前设置）
         ctx.setHeader("Content-Type", "application/octet-stream")
         ctx.setHeader("Content-Disposition", "attachment; filename=\"${filename}\"")
-        ctx.setHeader("Content-Length", "${fileSize}")
         ctx.status(HttpStatusCode.STATUS_OK)
 
         // 获取 writer
@@ -1204,9 +1203,6 @@ public class ArchiveController {
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
-        if (fileSize > 0 && shouldSendPageContentLength(contentType)) {
-            ctx.setHeader("Content-Length", "${fileSize}")
-        }
         ctx.status(HttpStatusCode.STATUS_OK)
         logger.info(
             "serve page response",
@@ -1216,7 +1212,7 @@ public class ArchiveController {
             ("status", "200"),
             ("content_type", contentType),
             ("range", "none"),
-            ("content_length", if (fileSize > 0 && shouldSendPageContentLength(contentType)) { "${fileSize}" } else { "chunked" })
+            ("content_length", "chunked")
         )
 
         let writer = ctx.writer()
@@ -1316,9 +1312,6 @@ public class ArchiveController {
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
         ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
-        if (!streamRangeWithoutContentLength) {
-            ctx.setHeader("Content-Length", "${rangeLength}")
-        }
         ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
         logger.info(
             "serve page response",
@@ -1333,6 +1326,7 @@ public class ArchiveController {
 
         match (eagerBody) {
             case Some(body) =>
+                ctx.setHeader("Content-Length", "${rangeLength}")
                 try {
                     ctx.send(body)
                 } finally {
