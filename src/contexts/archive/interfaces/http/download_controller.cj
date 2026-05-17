@@ -5,7 +5,6 @@ import std.io.*
 import std.io.{ByteBuffer, readToEnd}
 import stdx.encoding.json.stream.*
 import ignite.*
-import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.application.*
 import lanlu.shared.utils.*

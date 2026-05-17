@@ -154,14 +154,6 @@ public class ArchiveController {
         return value.trimAscii().toAsciiLower()
     }
 
-    private static func shouldSendPageContentLength(contentType: String): Bool {
-        let normalized = contentType.trimAscii().toAsciiLower()
-        if (normalized.startsWith("image/")) {
-            return false
-        }
-        return true
-    }
-
     private static func zeroPad2(value: Int64): String {
         if (value < 10) {
             return "0${value}"
@@ -1173,7 +1165,7 @@ public class ArchiveController {
                     ("if_range_header", ifRangeHeader),
                     ("etag", etag)
                 )
-                sendWithReaderChunked(ctx, reader, contentType, etag, fileSize, id, path, archiveType)
+                sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
                 return
             }
             sendWithReaderChunkedRange(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd, id, path, archiveType)
@@ -1182,7 +1174,7 @@ public class ArchiveController {
 
         // 统一使用流式传输，避免大缓冲区占用内存
         // 小文件也可以使用流式传输，性能影响可忽略，但能避免内存峰值问题
-        sendWithReaderChunked(ctx, reader, contentType, etag, fileSize, id, path, archiveType)
+        sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
     }
 
     /**
@@ -1193,7 +1185,6 @@ public class ArchiveController {
         reader: EntryReader,
         contentType: String,
         etag: String,
-        fileSize: Int64,
         arcid: String,
         entryPath: String,
         archiveType: String
