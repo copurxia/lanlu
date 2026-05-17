@@ -1,10 +1,9 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {BlurView} from '@sbaiahmed1/react-native-blur';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {
   Dimensions,
   FlatList,
-  Image,
-  ImageSourcePropType,
   LayoutAnimation,
   ListRenderItemInfo,
   Modal,
@@ -108,8 +107,8 @@ type ReaderPage = PageInfo & {
   sourceArchiveId: string;
   activeSource?: PageSourceInfo | null;
   backendUri?: string;
-  imageSource?: ImageSourcePropType;
-  thumbnailSource?: ImageSourcePropType;
+  imageSource?: FastImageSource;
+  thumbnailSource?: FastImageSource;
   uri?: string;
   vlcUri?: string;
   headers?: Record<string, string>;
@@ -118,6 +117,12 @@ type ReaderPage = PageInfo & {
   effectiveType: 'image' | 'video' | 'audio' | 'html';
   hydratedSourceIndex?: number;
 };
+
+function getFastImageSource(source?: FastImageSource | null): FastImageSource | undefined {
+  const uri = source && typeof source === 'object' ? source.uri : undefined;
+  if (typeof uri !== 'string' || !uri.trim()) return undefined;
+  return source as FastImageSource;
+}
 
 const EPUB_HTML_INJECTION = `
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
@@ -769,6 +774,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const mediaProxyKeys = useRef<Set<string>>(new Set());
   const mediaProbeKeys = useRef<Set<string>>(new Set());
   const hydratingPageKeys = useRef<Set<string>>(new Set());
+  const imageSourceDebugKeys = useRef<Set<string>>(new Set());
   const pendingLocalSubtitleByAssetId = useRef<Record<number, Promise<string | undefined> | undefined>>({});
   const htmlLoadingKeys = useRef<Set<string>>(new Set());
   const appendedArchiveIds = useRef<Set<string>>(new Set());
@@ -958,8 +964,44 @@ export function ReaderScreen({route, navigation}: Props) {
         displayMetadata?.thumb?.trim() ||
         assetPath(displayMetadata?.thumb_asset_id) ||
         (effectiveType === 'image' ? url : '');
-      const imageSource = effectiveType === 'image' && authorized.uri ? await buildAuthorizedImageSource_(url) : undefined;
-      const thumbnailSource = thumbnailPath ? await buildAuthorizedImageSource_(thumbnailPath) : imageSource;
+      const imageSource =
+        effectiveType === 'image' && authorized.uri
+          ? {
+              uri: authorized.uri,
+              ...(authorized.headers ? {headers: authorized.headers} : {}),
+              cache: FastImage.cacheControl.immutable,
+              priority: FastImage.priority.normal,
+            }
+          : undefined;
+      const thumbnailAuthorized = thumbnailPath ? await buildAuthorizedImageSource_(thumbnailPath) : null;
+      const thumbnailSource =
+        thumbnailAuthorized && typeof thumbnailAuthorized.uri === 'string' && thumbnailAuthorized.uri.trim()
+          ? {
+              uri: thumbnailAuthorized.uri,
+              ...(thumbnailAuthorized.headers ? {headers: thumbnailAuthorized.headers} : {}),
+              cache: FastImage.cacheControl.immutable,
+              priority: FastImage.priority.low,
+            }
+          : imageSource;
+      if (effectiveType === 'image') {
+        const debugKey = `${pageArchiveId}:${basePage.pageNumber}`;
+        if (!imageSourceDebugKeys.current.has(debugKey)) {
+          imageSourceDebugKeys.current.add(debugKey);
+          appendDiagnosticLog('reader.imageSource.hydrate', {
+            archiveId: pageArchiveId,
+            page: basePage.pageNumber,
+            sourceIndex,
+            path,
+            url,
+            authorizedUri: authorized.uri,
+            imageSourceUri: imageSource?.uri || '',
+            imageSourceHeaders: Boolean(imageSource?.headers),
+            thumbnailPath,
+            thumbnailUri: thumbnailSource?.uri || '',
+            thumbnailHeaders: Boolean(thumbnailSource?.headers),
+          }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+        }
+      }
       return {
         ...basePage,
         backendUri: authorized.uri,
@@ -1692,15 +1734,6 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const styles = useMemo(() => createStyles(colors), [colors]);
-
-  const imageLoadProgress = useMemo(() => {
-    const imagePages = pages.filter(
-      (p) => p.effectiveType === 'image' && p.imageSource,
-    );
-    if (imagePages.length === 0) return 100;
-    const loaded = imagePages.filter((p) => loadedPages[p.pageNumber]).length;
-    return Math.round((loaded / imagePages.length) * 100);
-  }, [pages, loadedPages]);
 
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<ReaderItem>[]}) => {
@@ -2848,9 +2881,9 @@ export function ReaderScreen({route, navigation}: Props) {
                 {height: audioBackdropHeight, width: audioBackdropWidth},
               ]}>
               {page.thumbnailSource ? (
-                <Image
+                <FastImage
                   blurRadius={22}
-                  resizeMode="cover"
+                  resizeMode={FastImage.resizeMode.cover}
                   source={page.thumbnailSource}
                   style={styles.audioBackdropImage}
                 />
@@ -3509,32 +3542,56 @@ export function ReaderScreen({route, navigation}: Props) {
           zoomedPages[page.pageNumber] && styles.zoomedMedia,
         ]
       : [styles.pageImage, zoomedPages[page.pageNumber] && styles.zoomedMedia];
+    if (page.effectiveType === 'image') {
+      const debugKey = `${page.sourceArchiveId || archiveId}:${page.pageNumber}:render`;
+      if (!imageSourceDebugKeys.current.has(debugKey)) {
+        imageSourceDebugKeys.current.add(debugKey);
+        appendDiagnosticLog('reader.imageSource.render', {
+          archiveId: page.sourceArchiveId || archiveId,
+          page: page.pageNumber,
+          sourceUri: page.imageSource?.uri || '',
+          hasHeaders: Boolean(page.imageSource?.headers),
+          thumbnailUri: page.thumbnailSource?.uri || '',
+          thumbnailHasHeaders: Boolean(page.thumbnailSource?.headers),
+          currentPage,
+        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+      }
+    }
     return (
       <View style={frameStyle}>
         {page.imageSource ? (
           <>
-            {!loadedPages[page.pageNumber] && !commonError ? (
+            {!loadedPages[page.pageNumber] && !commonError && page.pageNumber === currentPage ? (
               <View style={styles.loadingOverlay}>
-                <CircularProgress value={imageLoadProgress} color={colors.white} />
+                <CircularProgress value={0} color={colors.white} showLabel={false} />
               </View>
             ) : null}
-            <Image
+            <FastImage
+              onLoadStart={() => {
+              }}
               onError={event => {
+                const message =
+                  event?.nativeEvent && typeof event.nativeEvent === 'object' && 'error' in event.nativeEvent
+                    ? (event.nativeEvent as {error?: unknown}).error
+                    : undefined;
                 setFailedPages(current => ({
                   ...current,
-                  [page.pageNumber]: event.nativeEvent.error || 'Image failed to load.',
+                  [page.pageNumber]:
+                    typeof message === 'string' && message.trim() ? message : 'Image failed to load.',
                 }));
               }}
               onLoad={event => {
                 setLoadedPages(current => ({...current, [page.pageNumber]: true}));
-                const src = event.nativeEvent?.source;
+                const src = (event.nativeEvent as {source?: {width?: number; height?: number}}).source;
                 if (src && typeof src.width === 'number' && typeof src.height === 'number' && src.width > 0 && src.height > 0) {
+                  const imageWidth = src.width;
+                  const imageHeight = src.height;
                   const previousSize = imageSizeByPage[page.pageNumber];
                   const previousHeight =
                     previousSize?.width && previousSize.height
                       ? width * (previousSize.height / previousSize.width)
                       : width / 0.72;
-                  const nextHeight = width * (src.height / src.width);
+                  const nextHeight = width * (imageHeight / imageWidth);
                   if (
                     webtoon &&
                     settings.longPage &&
@@ -3548,13 +3605,13 @@ export function ReaderScreen({route, navigation}: Props) {
                   }
                   setImageSizeByPage(prev => {
                     const existing = prev[page.pageNumber];
-                    if (existing && existing.width === src.width && existing.height === src.height) return prev;
-                    return {...prev, [page.pageNumber]: {width: src.width, height: src.height}};
+                    if (existing && existing.width === imageWidth && existing.height === imageHeight) return prev;
+                    return {...prev, [page.pageNumber]: {width: imageWidth, height: imageHeight}};
                   });
                 }
               }}
               resizeMode="contain"
-              source={page.imageSource}
+              source={getFastImageSource(page.imageSource)}
               style={webtoonImageStyle}
             />
             {commonError ? (
@@ -3564,7 +3621,7 @@ export function ReaderScreen({route, navigation}: Props) {
         ) : (
           !page.uri && !commonError ? (
             <View style={styles.loadingOverlay}>
-              <CircularProgress value={imageLoadProgress} color={colors.white} />
+              <CircularProgress value={0} color={colors.white} showLabel={false} />
             </View>
           ) : (
             <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
@@ -4728,7 +4785,7 @@ function AudioCoverArtwork({
 }: {
   paused: boolean;
   size: number;
-  source?: ImageSourcePropType;
+  source?: FastImageSource;
 }) {
   const {colors} = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -4755,7 +4812,7 @@ function AudioCoverArtwork({
     <View style={[styles.audioCoverFrame, {height: size, width: size}]}>
       <Animated.View style={[styles.audioCoverShell, coverAnimatedStyle]}>
         {source ? (
-          <Image resizeMode="cover" source={source} style={styles.audioCover} />
+          <FastImage resizeMode={FastImage.resizeMode.cover} source={source} style={styles.audioCover} />
         ) : (
           <View style={styles.audioCoverFallback}>
             <Volume2 color="rgba(255,255,255,0.72)" size={Math.max(38, Math.round(size * 0.22))} />

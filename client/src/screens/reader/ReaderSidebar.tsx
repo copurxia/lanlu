@@ -1,14 +1,13 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   FlatList,
-  Image,
-  type ImageSourcePropType,
   StyleSheet,
   Text,
   TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
+import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, Music} from 'lucide-react-native';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import {spacing} from '../../theme/colors';
@@ -28,8 +27,8 @@ function loadSidebarTab(): SidebarTab {
 type SbPage = {
   pageNumber: number;
   effectiveType: string;
-  imageSource?: ImageSourcePropType | null;
-  thumbnailSource?: ImageSourcePropType | null;
+  imageSource?: FastImageSource | null;
+  thumbnailSource?: FastImageSource | null;
   uri?: string;
   vlcUri?: string;
   headers?: Record<string, string>;
@@ -87,10 +86,14 @@ function pageTypeIcon(type: string, size: number, color: string) {
   }
 }
 
-function getImageUri(source?: ImageSourcePropType | null) {
+function getImageUri(source?: {uri?: string} | null) {
   return source && typeof source === 'object' && 'uri' in source && typeof source.uri === 'string'
     ? source.uri
     : '';
+}
+
+function getFastImageSource(source?: FastImageSource | null): FastImageSource | undefined {
+  return source && typeof source.uri === 'string' && source.uri.trim() ? source : undefined;
 }
 
 function getPagePathSegments(path: string): string[] {
@@ -531,9 +534,9 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
                 volume={0}
               />
             ) : thumbSrc ? (
-              <Image
+              <FastImage
                 resizeMode="cover"
-                source={thumbSource || {uri: thumbSrc, headers: item.headers}}
+                source={getFastImageSource(thumbSource) || {uri: thumbSrc, ...(item.headers ? {headers: item.headers} : {})}}
                 style={[styles.thumbImage, {width: thumbWidth, height: thumbHeight}]}
               />
             ) : (
@@ -574,7 +577,7 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
           onPress={() => handleSelect(pageIdx)}
           style={[styles.listRow, isCurrent && styles.listRowActive]}>
           {thumbSource ? (
-            <Image resizeMode="cover" source={thumbSource} style={styles.listThumb} />
+            <FastImage resizeMode="cover" source={getFastImageSource(thumbSource)} style={styles.listThumb} />
           ) : (
             <View style={styles.listIcon}>
               {pageTypeIcon(item.effectiveType, 16, isCurrent ? colors.primary : '#8a8a8a')}
@@ -737,4 +740,3 @@ export function ReaderSidebar({open, pages, currentPage, onClose, onSelectPage, 
     </Drawer>
   );
 }
-

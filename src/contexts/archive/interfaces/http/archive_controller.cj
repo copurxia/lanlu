@@ -154,6 +154,14 @@ public class ArchiveController {
         return value.trimAscii().toAsciiLower()
     }
 
+    private static func shouldSendPageContentLength(contentType: String): Bool {
+        let normalized = contentType.trimAscii().toAsciiLower()
+        if (normalized.startsWith("image/")) {
+            return false
+        }
+        return true
+    }
+
     private static func zeroPad2(value: Int64): String {
         if (value < 10) {
             return "0${value}"
@@ -1196,7 +1204,9 @@ public class ArchiveController {
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
-        ctx.setHeader("Content-Length", "${fileSize}")
+        if (fileSize > 0 && shouldSendPageContentLength(contentType)) {
+            ctx.setHeader("Content-Length", "${fileSize}")
+        }
         ctx.status(HttpStatusCode.STATUS_OK)
         logger.info(
             "serve page response",
@@ -1205,7 +1215,8 @@ public class ArchiveController {
             ("archive_type", archiveType),
             ("status", "200"),
             ("content_type", contentType),
-            ("range", "none")
+            ("range", "none"),
+            ("content_length", if (fileSize > 0 && shouldSendPageContentLength(contentType)) { "${fileSize}" } else { "chunked" })
         )
 
         let writer = ctx.writer()
