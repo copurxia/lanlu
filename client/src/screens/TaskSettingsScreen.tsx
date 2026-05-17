@@ -6,6 +6,7 @@ import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
 import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
+import {useAuth} from '../auth/AuthContext';
 import {extractApiError} from '../api/client';
 import {
   adminListTasks,
@@ -31,6 +32,7 @@ export function TaskSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const {isOffline} = useAuth();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -134,7 +136,7 @@ export function TaskSettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}>
         <View style={styles.header}>

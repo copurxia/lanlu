@@ -6,19 +6,19 @@ import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, screenSafeAreaPadding} from '../components/SafeAreaSurface';
 import {FluentButton, FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
+import {useAuth} from '../auth/AuthContext';
 import {extractApiError} from '../api/client';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 import {getTagCloud} from '../api/admin';
 import type {TagCloudItem} from '../api/admin';
-import {useAuth} from '../auth/AuthContext';
 
 export function StatsSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const {activeServer} = useAuth();
+  const {activeServer, isOffline} = useAuth();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [tagCloud, setTagCloud] = useState<TagCloudItem[]>([]);
@@ -56,7 +56,7 @@ export function StatsSettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <View style={styles.header}>

@@ -136,7 +136,7 @@ async function waitForTaskChain(taskId: number): Promise<void> {
 export function AccountSecurityScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
-  const {user, signOut, refreshMe} = useAuth();
+  const {user, signOut, refreshMe, isOffline} = useAuth();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -746,7 +746,7 @@ export function AccountSecurityScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}

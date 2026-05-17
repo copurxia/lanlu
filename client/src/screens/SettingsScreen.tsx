@@ -11,11 +11,12 @@ import {ModalBackdrop, ScreenRoot, screenSafeAreaPadding} from '../components/Sa
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
 import type {RootStackParamList} from '../navigation/types';
-import {buildAuthorizedAssetImageSource} from '../api/client';
+import {buildAuthorizedAssetImageSource, isNetworkError} from '../api/client';
 import {fetchUserStats, fetchReadingTrend, type UserStats, type ReadingTrendItem} from '../api/lanlu';
 import {DashboardStats} from '../components/DashboardStats';
 import {ReadingTrendChart} from '../components/ReadingTrendChart';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
+import {useOfflineSettingsStore} from '../stores/offlineSettingsStore';
 import {shareLocalTextFile} from '../native/LanluMediaProxy';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
@@ -61,7 +62,10 @@ function SettingsGroup({title, items}: {title?: string; items: SettingsItem[]}) 
 
 export function SettingsScreen() {
   const {t} = useI18n();
-  const {activeServer, user, showServerList, signOut} = useAuth();
+  const {activeServer, user, showServerList, signOut, isOffline} = useAuth();
+  const serverId = activeServer?.id || '';
+  const cacheDashboard = useOfflineSettingsStore(s => s.cacheDashboard);
+  const getCachedDashboard = useOfflineSettingsStore(s => s.getCachedDashboard);
   const {colors, themePreference, setThemePreference} = useTheme();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const insets = useSafeAreaInsets();
@@ -92,19 +96,47 @@ export function SettingsScreen() {
     let cancelled = false;
     async function loadDashboard() {
       setDashboardLoading(true);
-      const [statsData, trendData] = await Promise.all([
-        fetchUserStats(),
-        fetchReadingTrend(30),
-      ]);
-      if (!cancelled) {
-        setStats(statsData);
-        setTrend(trendData);
-        setDashboardLoading(false);
+
+      if (isOffline && serverId) {
+        const cached = getCachedDashboard(serverId);
+        if (cached) {
+          setStats(cached.stats);
+          setTrend(cached.trend);
+          setDashboardLoading(false);
+          return;
+        }
+      }
+
+      try {
+        const [statsData, trendData] = await Promise.all([
+          fetchUserStats(),
+          fetchReadingTrend(30),
+        ]);
+        if (!cancelled) {
+          const cached = serverId ? getCachedDashboard(serverId) : null;
+          const useStats = cached && statsData.favoriteCount === 0 && statsData.totalArchives === 0 ? cached.stats : statsData;
+          const useTrend = cached && trendData.length === 0 ? cached.trend : trendData;
+          setStats(useStats);
+          setTrend(useTrend);
+          if (serverId && (useStats.favoriteCount > 0 || useStats.totalArchives > 0 || useTrend.length > 0)) {
+            cacheDashboard(serverId, {stats: useStats, trend: useTrend});
+          }
+          setDashboardLoading(false);
+        }
+      } catch (err) {
+        if (!cancelled && serverId) {
+          const cached = getCachedDashboard(serverId);
+          if (cached) {
+            setStats(cached.stats);
+            setTrend(cached.trend);
+          }
+          setDashboardLoading(false);
+        }
       }
     }
     loadDashboard();
     return () => {cancelled = true;};
-  }, []);
+  }, [isOffline, serverId, cacheDashboard, getCachedDashboard]);
 
   function confirmSignOut() {
     Alert.alert(t('settings.signOutTitle'), t('settings.signOutMessage'), [
@@ -181,6 +213,11 @@ export function SettingsScreen() {
       label: t('settings.diagnostics'),
       onPress: () => navigation.navigate('DiagnosticsSettings'),
     },
+    {
+      icon: <Database color={colors.textMuted} size={20} />,
+      label: t('settings.cache'),
+      onPress: () => navigation.navigate('CacheSettings'),
+    },
   ];
 
   const serverSettings: SettingsItem[] = [
@@ -244,7 +281,7 @@ export function SettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}>
         {/* 概览 */}
         <View style={styles.overviewRow}>

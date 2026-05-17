@@ -30,9 +30,9 @@ type ModalBackdropProps = {
   style?: StyleProp<ViewStyle>;
 };
 
-export function screenSafeAreaPadding(insets: EdgeInsets) {
+export function screenSafeAreaPadding(insets: EdgeInsets, includeTopInset = true) {
   return {
-    paddingTop: insets.top + spacing.lg,
+    paddingTop: (includeTopInset ? insets.top : 0) + spacing.lg,
     paddingRight: Math.max(insets.right, spacing.lg),
     paddingBottom: Math.max(insets.bottom, spacing.lg),
     paddingLeft: Math.max(insets.left, spacing.lg),
@@ -89,5 +89,4 @@ export function ModalBackdrop({animatedStyle, children, style}: ModalBackdropPro
     </Animated.View>
   );
 }
-
 

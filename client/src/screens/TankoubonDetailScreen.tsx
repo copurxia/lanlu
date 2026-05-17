@@ -24,12 +24,14 @@ import {
   searchArchives,
   setTankoubonFavorite,
 } from '../api/lanlu';
-import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
+import {buildAuthorizedAssetImageSource, extractApiError, isNetworkError} from '../api/client';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {getStoredStringSync, setStoredStringSync} from '../storage/mmkv';
 import {useTheme} from '../theme/ThemeContext';
+import {useAuth} from '../auth/AuthContext';
+import {useOfflineTankoubonStore} from '../stores/offlineTankoubonStore';
 import {spacing} from '../theme/colors';
 import type {Archive, Tankoubon, TankoubonMetadata} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
@@ -55,6 +57,10 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   const {language, t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const {activeServer, isOffline} = useAuth();
+  const serverId = activeServer?.id || '';
+  const cacheTankoubon = useOfflineTankoubonStore(s => s.cacheTankoubon);
+  const getCachedTankoubon = useOfflineTankoubonStore(s => s.getCachedTankoubon);
   const {tankoubonId, tankoubon} = route.params;
 
   const [metadata, setMetadata] = useState<TankoubonMetadata | null>(null);
@@ -83,10 +89,29 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   const loadMetadata = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setError('');
+
+    if (isOffline && serverId) {
+      const cached = getCachedTankoubon(serverId, tankoubonId);
+      if (cached && cached.metadata.tankoubon_id) {
+        setMetadata(cached.metadata);
+        setFavorite(Boolean(cached.metadata.isfavorite));
+        const coverAsset = archiveCoverAsset(cached.metadata) || archiveCoverAsset(tankoubon);
+        buildAuthorizedAssetImageSource(coverAsset, {priority: FastImage.priority.high})
+          .then(src => { if (src) setCover(src); });
+        buildAuthorizedAssetImageSource(cached.metadata.assets?.backdrop, {priority: FastImage.priority.low})
+          .then(src => { if (src) setBackdrop(src); });
+        if (showLoading) setLoading(false);
+        return;
+      }
+    }
+
     try {
       const result = await fetchTankoubonMetadata(tankoubonId, language);
       setMetadata(result);
       setFavorite(Boolean(result.isfavorite));
+      if (serverId) {
+        cacheTankoubon(serverId, tankoubonId, {metadata: result});
+      }
 
       const coverAsset = archiveCoverAsset(result) || archiveCoverAsset(tankoubon);
       setCover(
@@ -101,15 +126,36 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         }),
       );
     } catch (err) {
-      setError(extractApiError(err));
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedTankoubon(serverId, tankoubonId);
+        if (cached && cached.metadata.tankoubon_id) {
+          setMetadata(cached.metadata);
+          setFavorite(Boolean(cached.metadata.isfavorite));
+          setError('');
+        } else {
+          setError(extractApiError(err));
+        }
+      } else {
+        setError(extractApiError(err));
+      }
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [language, tankoubon, tankoubonId]);
+  }, [language, tankoubon, tankoubonId, isOffline, serverId, cacheTankoubon, getCachedTankoubon]);
 
   const loadArchives = useCallback(async () => {
     if (!tankoubonId) return;
     setArchivesLoading(true);
+
+    if (isOffline && serverId) {
+      const cached = getCachedTankoubon(serverId, tankoubonId);
+      if (cached?.archives.length) {
+        setArchives(cached.archives);
+        setArchivesLoading(false);
+        return;
+      }
+    }
+
     try {
       const result = await searchArchives({
         tankoubon_id: tankoubonId,
@@ -123,25 +169,59 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
         .filter((item): item is Archive => 'arcid' in item)
         .map(item => item as Archive);
       setArchives(items);
-    } catch {
-      setArchives([]);
+      if (serverId) {
+        cacheTankoubon(serverId, tankoubonId, {archives: items});
+      }
+    } catch (err) {
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedTankoubon(serverId, tankoubonId);
+        if (cached?.archives.length) {
+          setArchives(cached.archives);
+        } else {
+          setArchives([]);
+        }
+      } else {
+        setArchives([]);
+      }
     } finally {
       setArchivesLoading(false);
     }
-  }, [language, tankoubonId]);
+  }, [language, tankoubonId, isOffline, serverId, cacheTankoubon, getCachedTankoubon]);
 
   const loadRelated = useCallback(async () => {
     if (!tankoubonId) return;
     setRelatedLoading(true);
+
+    if (isOffline && serverId) {
+      const cached = getCachedTankoubon(serverId, tankoubonId);
+      if (cached?.related.length) {
+        setRelated(cached.related);
+        setRelatedLoading(false);
+        return;
+      }
+    }
+
     try {
       const items = await fetchTankoubonRelated(tankoubonId, 8);
       setRelated(items);
-    } catch {
-      setRelated([]);
+      if (serverId) {
+        cacheTankoubon(serverId, tankoubonId, {related: items});
+      }
+    } catch (err) {
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedTankoubon(serverId, tankoubonId);
+        if (cached?.related.length) {
+          setRelated(cached.related);
+        } else {
+          setRelated([]);
+        }
+      } else {
+        setRelated([]);
+      }
     } finally {
       setRelatedLoading(false);
     }
-  }, [tankoubonId]);
+  }, [tankoubonId, isOffline, serverId, cacheTankoubon, getCachedTankoubon]);
 
   useEffect(() => {
     loadMetadata().catch(err => console.warn('Failed to load tankoubon:', err));
@@ -400,7 +480,7 @@ export function TankoubonDetailScreen({route, navigation}: Props) {
   return (
     <View style={styles.screen}>
       <ScrollView
-        contentContainerStyle={[styles.content, {paddingTop: insets.top + 12}]}
+        contentContainerStyle={[styles.content, {paddingTop: 12 + (isOffline ? 0 : insets.top)}]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl

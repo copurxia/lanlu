@@ -15,6 +15,7 @@ import {
   FluentSpinner,
 } from '../components/fluent';
 import {useI18n} from '../i18n';
+import {useAuth} from '../auth/AuthContext';
 import {extractApiError} from '../api/client';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
@@ -55,6 +56,7 @@ export function PluginSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const {isOffline} = useAuth();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -266,7 +268,7 @@ export function PluginSettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}>
         <View style={styles.header}>

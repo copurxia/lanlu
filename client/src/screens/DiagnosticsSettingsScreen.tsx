@@ -17,6 +17,7 @@ import {
 } from '../components/SafeAreaSurface';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
+import {useAuth} from '../auth/AuthContext';
 import {clearDiagnosticLog, getDiagnosticLog} from '../storage/diagnostics';
 import {shareLocalTextFile} from '../native/LanluMediaProxy';
 import {spacing, type ThemeColors} from '../theme/colors';
@@ -26,6 +27,7 @@ export function DiagnosticsSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const {isOffline} = useAuth();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [diagnosticLog, setDiagnosticLog] = useState('');
@@ -81,7 +83,7 @@ export function DiagnosticsSettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <TouchableOpacity

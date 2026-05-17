@@ -25,7 +25,7 @@ export function setOnlineHandler(handler: OnlineHandler | null) {
 }
 
 export const apiClient = axios.create({
-  timeout: 15000,
+  timeout: 8000,
   headers: {'Content-Type': 'application/json'},
 });
 

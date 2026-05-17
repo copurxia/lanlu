@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   FlatList,
   RefreshControl,
@@ -14,7 +14,7 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BookOpen, Heart} from 'lucide-react-native';
 
-import {extractApiError} from '../api/client';
+import {extractApiError, isNetworkError} from '../api/client';
 import {
   fetchFavoriteTankoubons,
   isTankoubon,
@@ -27,6 +27,8 @@ import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {spacing} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
+import {useAuth} from '../auth/AuthContext';
+import {useOfflineGeneralStore} from '../stores/offlineGeneralStore';
 import type {Archive, MediaItem} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -72,6 +74,11 @@ export function FavoritesScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const {activeServer, isOffline} = useAuth();
+  const serverId = activeServer?.id || '';
+  const cacheFavorites = useOfflineGeneralStore(s => s.cacheFavorites);
+  const getCachedFavorites = useOfflineGeneralStore(s => s.getCachedFavorites);
+  const loadIdRef = useRef(0);
   const [tab, setTab] = useState<Tab>('favorites');
   const [favoriteItems, setFavoriteItems] = useState<MediaItem[]>([]);
   const [historyItems, setHistoryItems] = useState<MediaItem[]>([]);
@@ -80,7 +87,18 @@ export function FavoritesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
 
-  const openItem = useCallback(
+  const openDetail = useCallback(
+    (item: MediaItem) => {
+      if (isTankoubon(item)) {
+        navigation.navigate('TankoubonDetail', {tankoubonId: item.tankoubon_id, tankoubon: item});
+      } else {
+        navigation.navigate('ArchiveDetail', {archiveId: item.arcid, archive: item});
+      }
+    },
+    [navigation],
+  );
+
+  const openReader = useCallback(
     (item: MediaItem) => {
       if (isTankoubon(item)) {
         const firstArchive = item.children?.[0];
@@ -93,14 +111,22 @@ export function FavoritesScreen() {
             childIndex: 0,
           });
         }
-        return;
+      } else {
+        navigation.navigate('Reader', {archiveId: item.arcid});
       }
-      navigation.navigate('ArchiveDetail', {archiveId: item.arcid, archive: item});
     },
     [navigation],
   );
 
   const loadFavorites = useCallback(async () => {
+    if (isOffline && serverId) {
+      const cached = getCachedFavorites(serverId);
+      if (cached?.favorites.length) {
+        setFavoriteItems(cached.favorites);
+        return;
+      }
+    }
+
     const [archivesResult, tankoubonsResult] = await Promise.allSettled([
       searchArchives({
         favoriteonly: true,
@@ -112,19 +138,40 @@ export function FavoritesScreen() {
       }),
       fetchFavoriteTankoubons(),
     ]);
+
+    if (archivesResult.status === 'rejected' && tankoubonsResult.status === 'rejected') {
+      if (serverId) {
+        const cached = getCachedFavorites(serverId);
+        if (cached?.favorites.length) {
+          setFavoriteItems(cached.favorites);
+          return;
+        }
+      }
+      throw archivesResult.reason;
+    }
+
     const archives =
       archivesResult.status === 'fulfilled' ? archivesResult.value.data : [];
     const tankoubons =
       tankoubonsResult.status === 'fulfilled' ? tankoubonsResult.value : [];
-    setFavoriteItems(
-      [...archives, ...tankoubons].sort(
-        (a, b) => timeValue(b, 'favorites') - timeValue(a, 'favorites'),
-      ),
+    const items = [...archives, ...tankoubons].sort(
+      (a, b) => timeValue(b, 'favorites') - timeValue(a, 'favorites'),
     );
-    if (archivesResult.status === 'rejected') throw archivesResult.reason;
-  }, []);
+    setFavoriteItems(items);
+    if (serverId && items.length) {
+      cacheFavorites(serverId, {favorites: items});
+    }
+  }, [isOffline, serverId, cacheFavorites, getCachedFavorites]);
 
   const loadHistory = useCallback(async () => {
+    if (isOffline && serverId) {
+      const cached = getCachedFavorites(serverId);
+      if (cached?.history.length) {
+        setHistoryItems(cached.history);
+        return;
+      }
+    }
+
     const result = await searchArchives({
       sortby: 'lastread',
       order: 'desc',
@@ -132,21 +179,45 @@ export function FavoritesScreen() {
       pageSize: 1000,
     });
     setHistoryItems(result.data);
-  }, []);
+    if (serverId) {
+      cacheFavorites(serverId, {history: result.data});
+    }
+  }, [isOffline, serverId, cacheFavorites, getCachedFavorites]);
 
   const load = useCallback(async () => {
+    const loadId = ++loadIdRef.current;
     setError('');
     if (!refreshing) setLoading(true);
     try {
       if (tab === 'favorites') await loadFavorites();
       else await loadHistory();
     } catch (err) {
-      setError(extractApiError(err));
+      if (loadId !== loadIdRef.current) return;
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedFavorites(serverId);
+        if (cached) {
+          if (tab === 'favorites' && cached.favorites.length) {
+            setFavoriteItems(cached.favorites);
+            setError('');
+          } else if (tab === 'history' && cached.history.length) {
+            setHistoryItems(cached.history);
+            setError('');
+          } else {
+            setError(extractApiError(err));
+          }
+        } else {
+          setError(extractApiError(err));
+        }
+      } else {
+        setError(extractApiError(err));
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (loadId === loadIdRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [loadFavorites, loadHistory, refreshing, tab]);
+  }, [loadFavorites, loadHistory, refreshing, tab, serverId, getCachedFavorites]);
 
   useEffect(() => {
     load().catch(err => console.warn('Failed to load library:', err));
@@ -154,7 +225,11 @@ export function FavoritesScreen() {
 
   const refresh = useCallback(() => {
     setRefreshing(true);
-    load().catch(err => console.warn('Failed to refresh library:', err));
+    load().catch(() => {});
+  }, [load]);
+
+  useEffect(() => {
+    load().catch(() => {});
   }, [load]);
 
   const filteredItems = useMemo(() => {
@@ -256,7 +331,15 @@ export function FavoritesScreen() {
   }
 
   return (
-    <View style={[styles.screen, {paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
+    <View
+      style={[
+        styles.screen,
+        {
+          paddingTop: isOffline ? 0 : insets.top,
+          paddingLeft: insets.left,
+          paddingRight: insets.right,
+        },
+      ]}>
       <View style={styles.header}>
         <View style={styles.tabs}>
           <TouchableOpacity
@@ -301,7 +384,7 @@ export function FavoritesScreen() {
             keyExtractor={item => mediaItemId(item)}
             numColumns={2}
             renderItem={({item}) => (
-              <ArchiveCard archive={item} onChanged={refresh} onPress={() => openItem(item)} />
+              <ArchiveCard archive={item} onChanged={refresh} onOpenDetail={() => openDetail(item)} onOpenReader={() => openReader(item)} />
             )}
             scrollEnabled={false}
           />

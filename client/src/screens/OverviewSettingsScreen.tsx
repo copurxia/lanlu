@@ -16,12 +16,12 @@ export function OverviewSettingsScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const {user, activeServer} = useAuth();
+  const {user, activeServer, isOffline} = useAuth();
 
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <TouchableOpacity

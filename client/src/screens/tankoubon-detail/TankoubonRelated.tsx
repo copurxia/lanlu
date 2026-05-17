@@ -67,6 +67,7 @@ export function TankoubonRelated({related, loading, t, onPress}: Props) {
               archive={item}
               variant="related"
               onOpenReader={() => onPress(item)}
+              onOpenDetail={() => onPress(item)}
             />
           )}
         />

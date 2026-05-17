@@ -22,7 +22,7 @@ import {useTheme} from '../theme/ThemeContext';
 export function UserSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
-  const {user: currentUser} = useAuth();
+  const {user: currentUser, isOffline} = useAuth();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -151,7 +151,7 @@ export function UserSettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}>
         <View style={styles.header}>

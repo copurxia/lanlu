@@ -11,6 +11,7 @@ export type RootStackParamList = {
   ThemeSettings: undefined;
   LanguageSettings: undefined;
   DiagnosticsSettings: undefined;
+  CacheSettings: undefined;
   OverviewSettings: undefined;
   CategorySettings: undefined;
   TagSettings: undefined;

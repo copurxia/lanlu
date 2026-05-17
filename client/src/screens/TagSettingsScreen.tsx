@@ -6,6 +6,7 @@ import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, ModalBackdrop, screenSafeAreaPadding} from '../components/SafeAreaSurface';
 import {FluentButton, FluentCard, FluentCaption, FluentTextField, FluentTitle, FluentSpinner} from '../components/fluent';
 import {useI18n} from '../i18n';
+import {useAuth} from '../auth/AuthContext';
 import {extractApiError} from '../api/client';
 import {adminListTags, adminCreateTag, adminUpdateTag, adminDeleteTag, listTagNamespaces} from '../api/admin';
 import type {AdminTag} from '../api/admin';
@@ -18,6 +19,7 @@ export function TagSettingsScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const {isOffline} = useAuth();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
@@ -188,7 +190,7 @@ export function TagSettingsScreen() {
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         refreshControl={

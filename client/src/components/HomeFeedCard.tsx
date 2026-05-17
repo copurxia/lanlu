@@ -41,6 +41,7 @@ type Props = {
   onDetailPress?: () => void;
   onChanged?: () => void;
   onTagPress?: (tag: string) => void;
+  isOffline?: boolean;
 };
 
 type PreviewItem = ChannelPreviewLayoutItem & {
@@ -185,7 +186,7 @@ async function loadPreviewItems(archiveId: string): Promise<PreviewItem[]> {
   return request;
 }
 
-export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onTagPress}: Props) {
+export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onTagPress, isOffline = false}: Props) {
   const {colors} = useTheme();
   const {t} = useI18n();
   const {width} = useWindowDimensions();
@@ -386,6 +387,10 @@ export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onT
     if (cachedItems) {
       setPreviewItems(cachedItems);
     }
+    if (isOffline) {
+      setLoadingPreview(false);
+      return;
+    }
     let cancelled = false;
     setLoadingPreview(!cachedItems);
     loadPreviewItems(id)
@@ -399,7 +404,7 @@ export function HomeFeedCard({item, mode, onPress, onDetailPress, onChanged, onT
     return () => {
       cancelled = true;
     };
-  }, [currentPreviewArchiveId]);
+  }, [currentPreviewArchiveId, isOffline]);
 
   async function toggleFavorite() {
     if (!archive) return;

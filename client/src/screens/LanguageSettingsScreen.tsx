@@ -11,6 +11,7 @@ import {
 } from '../components/SafeAreaSurface';
 import {FluentCard, FluentCaption, FluentTitle} from '../components/fluent';
 import {useI18n} from '../i18n';
+import {useAuth} from '../auth/AuthContext';
 import {spacing, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 
@@ -19,13 +20,14 @@ export function LanguageSettingsScreen() {
   const {colors} = useTheme();
   const {languagePreference, setLanguagePreference} = useI18n();
   const insets = useSafeAreaInsets();
+  const {isOffline} = useAuth();
   const navigation = useNavigation();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   return (
     <ScreenRoot padded={false}>
       <ScrollView
-        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets)]}
+        contentContainerStyle={[styles.content, screenSafeAreaPadding(insets, !isOffline)]}
         showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <TouchableOpacity

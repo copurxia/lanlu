@@ -394,9 +394,10 @@ export async function login(params: {
   return response.data;
 }
 
-export async function fetchMe(): Promise<AuthUser> {
+export async function fetchMe(config?: {timeout?: number; signal?: AbortSignal}): Promise<AuthUser> {
   const response = await apiClient.get<ApiEnvelope<{user: AuthUser}>>(
     '/api/auth/me',
+    config?.timeout ? {timeout: config.timeout, signal: config.signal} : {signal: config?.signal},
   );
   if (!response.data.data?.user) {
     throw new Error(response.data.message || 'Missing current user');

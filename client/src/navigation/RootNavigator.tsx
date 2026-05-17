@@ -14,6 +14,7 @@ import {ScreenState} from '../components/ScreenState';
 import {AccountSecurityScreen} from '../screens/AccountSecurityScreen';
 import {AddServerScreen} from '../screens/AddServerScreen';
 import {ArchiveDetailScreen} from '../screens/ArchiveDetailScreen';
+import {CacheSettingsScreen} from '../screens/CacheSettingsScreen';
 import {CategorySettingsScreen} from '../screens/CategorySettingsScreen';
 import {CronSettingsScreen} from '../screens/CronSettingsScreen';
 import {DiagnosticsSettingsScreen} from '../screens/DiagnosticsSettingsScreen';
@@ -213,6 +214,11 @@ export function RootNavigator() {
             <Stack.Screen
               name="DiagnosticsSettings"
               component={DiagnosticsSettingsScreen}
+              options={{headerShown: false}}
+            />
+            <Stack.Screen
+              name="CacheSettings"
+              component={CacheSettingsScreen}
               options={{headerShown: false}}
             />
             <Stack.Screen

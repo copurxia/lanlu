@@ -58,6 +58,7 @@ import {
   apiClient,
   buildAuthorizedUri,
   extractApiError,
+  isNetworkError,
 } from '../api/client';
 import {
   assetPath,
@@ -92,6 +93,9 @@ import {
 import {useI18n} from '../i18n';
 import {spacing, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
+import {useAuth} from '../auth/AuthContext';
+import {useOfflineArchiveStore} from '../stores/offlineArchiveStore';
+import {useOfflineProgressQueue} from '../stores/offlineProgressQueue';
 import type {RootStackParamList} from '../navigation/types';
 import type {MetadataPageAttachment, PageInfo, PageSourceInfo} from '../types/api';
 
@@ -714,6 +718,11 @@ const StableVlcPlayer = React.memo(
 export function ReaderScreen({route, navigation}: Props) {
   const {colors} = useTheme();
   const {t} = useI18n();
+  const {activeServer, isOffline} = useAuth();
+  const serverId = activeServer?.id || '';
+  const cacheArchive = useOfflineArchiveStore(s => s.cacheArchive);
+  const getCachedArchive = useOfflineArchiveStore(s => s.getCachedArchive);
+  const enqueueProgress = useOfflineProgressQueue(s => s.enqueueProgress);
   const {archiveId, initialPage = 1, children, childIndex, tankoubonId, resumeCollection = false} = route.params;
   const windowDimensions = useWindowDimensions();
   const [screenDimensions, setScreenDimensions] = useState(() => Dimensions.get('screen'));
@@ -995,11 +1004,23 @@ export function ReaderScreen({route, navigation}: Props) {
     if (resumeCollection && tankoubonId && children?.length) {
       try {
         const metas = await Promise.all(
-          children.map(id => fetchArchiveMetadata(id).catch(() => null)),
+          children.map(id => {
+            if (serverId) {
+              const cached = getCachedArchive(serverId, id);
+              if (cached?.metadata.arcid) return Promise.resolve(cached.metadata);
+            }
+            return fetchArchiveMetadata(id).then(meta => {
+              if (serverId) {
+                cacheArchive(serverId, id, {metadata: meta});
+              }
+              return meta;
+            }).catch(() => null);
+          }),
         );
         let resumeIdx = 0;
         for (let i = metas.length - 1; i >= 0; i--) {
-          if (metas[i]?.progress && metas[i].progress > 0) {
+          const meta = metas[i];
+          if (meta?.progress && meta.progress > 0) {
             resumeIdx = i;
             break;
           }
@@ -1027,12 +1048,29 @@ export function ReaderScreen({route, navigation}: Props) {
       setSidebarPages(readerPages);
       const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
       setCurrentPage(startIndex + 1);
+      if (serverId) {
+        cacheArchive(serverId, targetArchiveId, {pages: files});
+      }
     } catch (err) {
-      setError(extractApiError(err));
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedArchive(serverId, targetArchiveId);
+        if (cached && cached.pages.length) {
+          const readerPages = cached.pages.map((page, index) => createReaderPage(page, index, targetArchiveId));
+          setPages(readerPages);
+          setSidebarPages(readerPages);
+          const startIndex = Math.max(0, Math.min(targetInitialPage - 1, readerPages.length - 1));
+          setCurrentPage(startIndex + 1);
+          setError('');
+        } else {
+          setError(extractApiError(err));
+        }
+      } else {
+        setError(extractApiError(err));
+      }
     } finally {
       setLoading(false);
     }
-  }, [archiveId, createReaderPage, initialPage, tankoubonId, children, childIndex, resumeCollection]);
+  }, [archiveId, createReaderPage, initialPage, tankoubonId, children, childIndex, resumeCollection, serverId, cacheArchive, getCachedArchive]);
 
   const ensureMediaProxy = useCallback(
     (page: ReaderPage) => {
@@ -1160,27 +1198,36 @@ export function ReaderScreen({route, navigation}: Props) {
       if (!target) return;
       const key = `${target.archiveId}:${target.page}`;
       if (lastSavedProgressKey.current === key) return;
-      try {
-        await updateArchiveProgress(target.archiveId, target.page);
+      if (isOffline && serverId) {
+        enqueueProgress(serverId, target.archiveId, target.page);
         lastSavedProgressKey.current = key;
-        await appendDiagnosticLog('reader.progress.saved', {
-          reason,
-          archiveId: target.archiveId,
-          page: target.page,
-          globalPage: target.globalPage,
-        });
-      } catch (err) {
-        await appendDiagnosticLog('reader.progress.error', {
-          reason,
-          archiveId: target.archiveId,
-          page: target.page,
-          globalPage: target.globalPage,
-          message: extractApiError(err),
-        });
-        console.warn(extractApiError(err, 'Failed to save progress'));
+      } else {
+        try {
+          await updateArchiveProgress(target.archiveId, target.page);
+          lastSavedProgressKey.current = key;
+          await appendDiagnosticLog('reader.progress.saved', {
+            reason,
+            archiveId: target.archiveId,
+            page: target.page,
+            globalPage: target.globalPage,
+          });
+        } catch (err) {
+          if (serverId && isNetworkError(err)) {
+            enqueueProgress(serverId, target.archiveId, target.page);
+            lastSavedProgressKey.current = key;
+          }
+          await appendDiagnosticLog('reader.progress.error', {
+            reason,
+            archiveId: target.archiveId,
+            page: target.page,
+            globalPage: target.globalPage,
+            message: extractApiError(err),
+          });
+          console.warn(extractApiError(err, 'Failed to save progress'));
+        }
       }
     },
-    [resolveProgressTarget],
+    [resolveProgressTarget, isOffline, serverId, enqueueProgress],
   );
 
   useEffect(() => {
@@ -1663,7 +1710,17 @@ export function ReaderScreen({route, navigation}: Props) {
       const routeNextId = routeIndex >= 0 ? archiveChildren[routeIndex + 1] : undefined;
       if (routeNextId && routeNextId !== targetArchiveId && !excludedIds.has(routeNextId)) {
         try {
-          const meta = await fetchArchiveMetadata(routeNextId);
+          let meta;
+          if (serverId) {
+            const cached = getCachedArchive(serverId, routeNextId);
+            meta = cached?.metadata;
+          }
+          if (!meta) {
+            meta = await fetchArchiveMetadata(routeNextId);
+            if (serverId) {
+              cacheArchive(serverId, routeNextId, {metadata: meta});
+            }
+          }
           const candidate = {
             id: routeNextId,
             title: meta.title?.trim() || meta.filename || routeNextId,
@@ -1678,8 +1735,26 @@ export function ReaderScreen({route, navigation}: Props) {
         }
       }
 
-      try {
-        const tanks = await fetchTankoubonsForArchive(targetArchiveId);
+      let tanks;
+      if (serverId) {
+        const cached = getCachedArchive(serverId, targetArchiveId);
+        tanks = cached?.tankoubons;
+      }
+      if (!tanks) {
+        try {
+          tanks = await fetchTankoubonsForArchive(targetArchiveId);
+          if (serverId) {
+            cacheArchive(serverId, targetArchiveId, {tankoubons: tanks});
+          }
+        } catch (err) {
+          appendDiagnosticLog('reader.next.tankoubon.error', {
+            archiveId: targetArchiveId,
+            message: extractApiError(err),
+          }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
+          tanks = null;
+        }
+      }
+      if (tanks) {
         const chosen = [...tanks].sort((a, b) => {
           const favorite = Number(Boolean(b.isfavorite)) - Number(Boolean(a.isfavorite));
           if (favorite !== 0) return favorite;
@@ -1689,7 +1764,17 @@ export function ReaderScreen({route, navigation}: Props) {
         const nextId = index >= 0 ? chosen?.children?.[index + 1] : undefined;
         if (nextId && nextId !== targetArchiveId && !excludedIds.has(nextId)) {
           try {
-            const meta = await fetchArchiveMetadata(nextId);
+            let meta;
+            if (serverId) {
+              const cached = getCachedArchive(serverId, nextId);
+              meta = cached?.metadata;
+            }
+            if (!meta) {
+              meta = await fetchArchiveMetadata(nextId);
+              if (serverId) {
+                cacheArchive(serverId, nextId, {metadata: meta});
+              }
+            }
             const candidate = {
               id: nextId,
               title: meta.title?.trim() || meta.filename || nextId,
@@ -1703,16 +1788,21 @@ export function ReaderScreen({route, navigation}: Props) {
             return candidate;
           }
         }
-      } catch (err) {
-        appendDiagnosticLog('reader.next.tankoubon.error', {
-          archiveId: targetArchiveId,
-          message: extractApiError(err),
-        }).catch(reason => console.warn('Failed to write diagnostic log:', reason));
       }
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          const related = await fetchArchiveRelated(targetArchiveId, 8);
+          let related;
+          if (serverId) {
+            const cached = getCachedArchive(serverId, targetArchiveId);
+            related = cached?.related;
+          }
+          if (!related) {
+            related = await fetchArchiveRelated(targetArchiveId, 8);
+            if (serverId) {
+              cacheArchive(serverId, targetArchiveId, {related});
+            }
+          }
           const item = related.find(candidate => candidate.arcid !== targetArchiveId && !excludedIds.has(candidate.arcid));
           if (item) {
             const candidate = {
@@ -1735,7 +1825,7 @@ export function ReaderScreen({route, navigation}: Props) {
       nextArchiveCache.current[targetArchiveId] = null;
       return null;
     },
-    [archiveChildren],
+    [archiveChildren, serverId, cacheArchive, getCachedArchive],
   );
 
   const appendNextArchiveToStream = useCallback(async () => {
@@ -1747,7 +1837,17 @@ export function ReaderScreen({route, navigation}: Props) {
       const candidate = await resolveNextArchiveCandidate(tailArchiveId, excluded);
       setNextArchiveById(current => ({...current, [tailArchiveId]: candidate}));
       if (!candidate?.id || appendedArchiveIds.current.has(candidate.id)) return false;
-      const files = await fetchArchiveFiles(candidate.id);
+      let files;
+      if (serverId) {
+        const cached = getCachedArchive(serverId, candidate.id);
+        files = cached?.pages;
+      }
+      if (!files) {
+        files = await fetchArchiveFiles(candidate.id);
+        if (serverId) {
+          cacheArchive(serverId, candidate.id, {pages: files});
+        }
+      }
       if (!files.length) return false;
       const start = pages.length;
       const readerPages = files.map((page, index) => createReaderPage(page, start + index, candidate.id));
@@ -1767,7 +1867,7 @@ export function ReaderScreen({route, navigation}: Props) {
     } finally {
       setAppendingNext(false);
     }
-  }, [appendingNext, createReaderPage, pages.length, resolveNextArchiveCandidate, settings.seamlessNext, tailArchiveId]);
+  }, [appendingNext, createReaderPage, pages.length, resolveNextArchiveCandidate, settings.seamlessNext, tailArchiveId, serverId, cacheArchive, getCachedArchive]);
 
   useEffect(() => {
     if (!settings.seamlessNext || !tailArchiveId || nextArchiveById[tailArchiveId] !== undefined) return;

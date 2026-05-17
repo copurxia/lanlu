@@ -36,7 +36,7 @@ import {
   X,
 } from 'lucide-react-native';
 
-import {extractApiError} from '../api/client';
+import {extractApiError, isNetworkError} from '../api/client';
 import {
   fetchCategories,
   fetchDiscover,
@@ -58,6 +58,7 @@ import {
   type SmartFilter,
   type TagSuggestion,
 } from '../api/lanlu';
+import {useAuth} from '../auth/AuthContext';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {HomeFeedCard} from '../components/HomeFeedCard';
 import {ScreenState} from '../components/ScreenState';
@@ -74,6 +75,7 @@ import {
 } from '../storage/preferences';
 import {spacing} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
+import {useOfflineFeedStore} from '../stores/offlineFeedStore';
 import type {Category, MediaItem} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -183,6 +185,10 @@ export function HomeScreen() {
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
+  const {activeServer, isOffline} = useAuth();
+  const serverId = activeServer?.id || '';
+  const cacheFeed = useOfflineFeedStore(s => s.cacheFeed);
+  const getCachedFeed = useOfflineFeedStore(s => s.getCachedFeed);
   const [viewMode, setViewMode] = useState<HomeViewMode>(() => loadHomeViewModeSync());
   const [items, setItems] = useState<MediaItem[]>([]);
   const [randomItems, setRandomItems] = useState<MediaItem[]>([]);
@@ -361,6 +367,20 @@ export function HomeScreen() {
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
       const activeFilter = submittedFilter.trim();
+      const cacheKey = activeFilter ? `search:${activeFilter}` : 'home';
+
+      if (isOffline && mode === 'replace' && serverId) {
+        const cached = getCachedFeed(serverId, cacheKey);
+        if (cached && cached.items.length) {
+          setItems(cached.items);
+          setTotal(cached.total);
+          setPage(cached.page);
+          setError('');
+          setLoading(false);
+          return;
+        }
+      }
+
       const params = {
         filter: activeFilter,
         page: nextPage,
@@ -393,6 +413,13 @@ export function HomeScreen() {
         setTotal(result.recordsFiltered || result.recordsTotal || 0);
         setPage(nextPage);
         setItems(current => (mode === 'append' ? [...current, ...result.data] : result.data));
+        if (serverId && mode === 'replace') {
+          cacheFeed(serverId, cacheKey, {
+            items: result.data,
+            total: result.recordsFiltered || result.recordsTotal || 0,
+            page: nextPage,
+          });
+        }
         await appendDiagnosticLog('home.feed.done', {
           requestId,
           mode,
@@ -406,7 +433,19 @@ export function HomeScreen() {
           requestId,
           message: err instanceof Error ? err.message : String(err),
         });
-        setError(extractApiError(err));
+        if (serverId && isNetworkError(err) && mode === 'replace') {
+          const cached = getCachedFeed(serverId, cacheKey);
+          if (cached && cached.items.length) {
+            setItems(cached.items);
+            setTotal(cached.total);
+            setPage(cached.page);
+            setError('');
+          } else {
+            setError(extractApiError(err));
+          }
+        } else {
+          setError(extractApiError(err));
+        }
       } finally {
         if (requestId !== requestIdRef.current) return;
         setLoading(false);
@@ -419,6 +458,7 @@ export function HomeScreen() {
       dateTo,
       favoriteOnly,
       groupByTanks,
+      isOffline,
       language,
       newOnly,
       refreshing,
@@ -427,12 +467,28 @@ export function HomeScreen() {
       sortby,
       submittedFilter,
       untaggedOnly,
+      cacheFeed,
+      getCachedFeed,
+      serverId,
     ],
   );
 
   const loadRows = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
+
+    if (isOffline && serverId) {
+      const cached = getCachedFeed(serverId, 'home');
+      if (cached && (cached.items.length || cached.categories.length)) {
+        setCategories(cached.categories);
+        setCategoryRows(cached.categoryRows);
+        setRandomItems(cached.randomItems);
+        setError('');
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     setError('');
     try {
@@ -444,6 +500,14 @@ export function HomeScreen() {
       const enabled = cats.filter(category => category.enabled !== false);
       setCategories(enabled);
       setRandomItems(discover);
+
+      if (serverId) {
+        cacheFeed(serverId, 'home', {
+          items: discover,
+          categories: enabled,
+          randomItems: discover,
+        });
+      }
 
       if (enabled.length) {
         const rows: Record<string, MediaItem[]> = {};
@@ -512,18 +576,38 @@ export function HomeScreen() {
           }
         }
         setCategoryRows(rows);
+        if (serverId) {
+          cacheFeed(serverId, 'home', {
+            items: discover,
+            categories: enabled,
+            categoryRows: rows,
+            randomItems: discover,
+          });
+        }
       } else {
         setCategoryRows({});
       }
     } catch (err) {
       if (requestId !== requestIdRef.current) return;
-      setError(extractApiError(err));
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedFeed(serverId, 'home');
+        if (cached && (cached.items.length || cached.categories.length)) {
+          setCategories(cached.categories);
+          setCategoryRows(cached.categoryRows);
+          setRandomItems(cached.randomItems);
+          setError('');
+        } else {
+          setError(extractApiError(err));
+        }
+      } else {
+        setError(extractApiError(err));
+      }
     } finally {
       if (requestId !== requestIdRef.current) return;
       setLoading(false);
       setRefreshing(false);
     }
-  }, [dateFrom, dateTo, favoriteOnly, groupByTanks, language, newOnly, sortOrder, sortby, untaggedOnly]);
+  }, [dateFrom, dateTo, favoriteOnly, groupByTanks, isOffline, language, newOnly, sortOrder, sortby, untaggedOnly, cacheFeed, getCachedFeed, serverId]);
 
   const load = useCallback(
     async (nextPage = 1, mode: 'replace' | 'append' = 'replace') => {
@@ -541,13 +625,39 @@ export function HomeScreen() {
 
   useEffect(() => {
     let cancelled = false;
+
+    if (isOffline && serverId) {
+      const cached = getCachedFeed(serverId, 'chips');
+      if (cached) {
+        setCategories(cached.categories.filter(c => c.enabled !== false));
+        setSmartFilters(cached.smartFilters || []);
+      }
+      return;
+    }
+
     Promise.all([fetchCategories(), fetchSmartFilters()])
       .then(([nextCategories, nextSmartFilters]) => {
         if (cancelled) return;
-        setCategories(nextCategories.filter(category => category.enabled !== false));
+        const enabled = nextCategories.filter(category => category.enabled !== false);
+        setCategories(enabled);
         setSmartFilters(nextSmartFilters);
+        if (serverId) {
+          cacheFeed(serverId, 'chips', {
+            items: [],
+            categories: enabled,
+            smartFilters: nextSmartFilters,
+          });
+        }
       })
       .catch(chipError => {
+        if (cancelled) return;
+        if (serverId && isNetworkError(chipError)) {
+          const cached = getCachedFeed(serverId, 'chips');
+          if (cached) {
+            setCategories(cached.categories.filter(c => c.enabled !== false));
+            setSmartFilters(cached.smartFilters || []);
+          }
+        }
         appendDiagnosticLog('home.chips.load.error', {
           message: chipError instanceof Error ? chipError.message : String(chipError),
         }).catch(() => undefined);
@@ -555,7 +665,7 @@ export function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isOffline, serverId, cacheFeed, getCachedFeed]);
 
   useEffect(() => {
     load(1, 'replace').catch(err => console.warn('Failed to load home:', err));
@@ -1578,7 +1688,7 @@ export function HomeScreen() {
   };
 
   return (
-    <View style={[styles.screen, {paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
+    <View style={[styles.screen, {paddingTop: isOffline ? spacing.md : insets.top, paddingLeft: insets.left, paddingRight: insets.right}]}>
       <View style={styles.toolbar}>
         <TextInput
           autoCapitalize="none"
@@ -1713,6 +1823,7 @@ export function HomeScreen() {
               <HomeFeedCard
                 item={item}
                 mode={itemVariant}
+                isOffline={isOffline}
                 onChanged={refresh}
                 onDetailPress={() => openDetail(item)}
                 onPress={() => openReader(item)}

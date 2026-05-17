@@ -14,7 +14,7 @@ import {useFocusEffect} from '@react-navigation/native';
 import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {buildAuthorizedAssetImageSource, extractApiError} from '../api/client';
+import {buildAuthorizedAssetImageSource, extractApiError, isNetworkError} from '../api/client';
 import {
   archiveCoverAsset,
   deleteArchive,
@@ -31,6 +31,7 @@ import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
 import {useI18n} from '../i18n';
 import {useTheme} from '../theme/ThemeContext';
+import {useOfflineArchiveStore} from '../stores/offlineArchiveStore';
 import type {Archive, ArchiveMetadata, Tankoubon} from '../types/api';
 import type {RootStackParamList} from '../navigation/types';
 import {ArchiveDetailActions} from './archive-detail/ArchiveDetailActions';
@@ -47,8 +48,11 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const {language, t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
-  const {user, status: authStatus} = useAuth();
+  const {user, status: authStatus, activeServer, isOffline} = useAuth();
   const {archiveId, archive, tankoubonId, children, childIndex} = route.params;
+  const serverId = activeServer?.id || '';
+  const cacheArchive = useOfflineArchiveStore(s => s.cacheArchive);
+  const getCachedArchive = useOfflineArchiveStore(s => s.getCachedArchive);
   const [metadata, setMetadata] = useState<ArchiveMetadata | null>(null);
   const [cover, setCover] = useState<FastImageSource | null>(null);
   const [backdrop, setBackdrop] = useState<FastImageSource | null>(null);
@@ -70,11 +74,31 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     setError('');
+
+    if (isOffline && serverId) {
+      const cached = getCachedArchive(serverId, archiveId);
+      if (cached && cached.metadata.arcid) {
+        setMetadata(cached.metadata);
+        setFavorite(Boolean(cached.metadata.isfavorite));
+        setIsNew(Boolean(cached.metadata.isnew));
+        const coverAsset = archiveCoverAsset(cached.metadata) || archiveCoverAsset(archive);
+        buildAuthorizedAssetImageSource(coverAsset, {priority: FastImage.priority.high})
+          .then(src => { if (src) setCover(src); });
+        buildAuthorizedAssetImageSource(cached.metadata.assets?.backdrop, {priority: FastImage.priority.low})
+          .then(src => { if (src) setBackdrop(src); });
+        if (showLoading) setLoading(false);
+        return;
+      }
+    }
+
     try {
       const result = await fetchArchiveMetadata(archiveId, language);
       setMetadata(result);
       setFavorite(Boolean(result.isfavorite));
       setIsNew(Boolean(result.isnew));
+      if (serverId) {
+        cacheArchive(serverId, archiveId, {metadata: result});
+      }
       const coverAsset = archiveCoverAsset(result) || archiveCoverAsset(archive);
       setCover(
         await buildAuthorizedAssetImageSource(coverAsset, {
@@ -88,34 +112,89 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         }),
       );
     } catch (err) {
-      setError(extractApiError(err));
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedArchive(serverId, archiveId);
+        if (cached && cached.metadata.arcid) {
+          setMetadata(cached.metadata);
+          setFavorite(Boolean(cached.metadata.isfavorite));
+          setIsNew(Boolean(cached.metadata.isnew));
+          setError('');
+        } else {
+          setError(extractApiError(err));
+        }
+      } else {
+        setError(extractApiError(err));
+      }
     } finally {
       if (showLoading) setLoading(false);
     }
-  }, [archive, archiveId, language]);
+  }, [archive, archiveId, isOffline, language, serverId, cacheArchive, getCachedArchive]);
 
   const loadRelatedArchives = useCallback(async () => {
     if (!archiveId) return;
     setRelatedLoading(true);
+
+    if (isOffline && serverId) {
+      const cached = getCachedArchive(serverId, archiveId);
+      if (cached?.related.length) {
+        setRelatedArchives(cached.related);
+        setRelatedLoading(false);
+        return;
+      }
+    }
+
     try {
       const items = await fetchArchiveRelated(archiveId, 8);
       setRelatedArchives(items);
-    } catch {
-      setRelatedArchives([]);
+      if (serverId) {
+        cacheArchive(serverId, archiveId, {related: items});
+      }
+    } catch (err) {
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedArchive(serverId, archiveId);
+        if (cached?.related.length) {
+          setRelatedArchives(cached.related);
+        } else {
+          setRelatedArchives([]);
+        }
+      } else {
+        setRelatedArchives([]);
+      }
     } finally {
       setRelatedLoading(false);
     }
-  }, [archiveId]);
+  }, [archiveId, isOffline, serverId, cacheArchive, getCachedArchive]);
 
   const loadTankoubons = useCallback(async () => {
     if (!archiveId) return;
+
+    if (isOffline && serverId) {
+      const cached = getCachedArchive(serverId, archiveId);
+      if (cached?.tankoubons.length) {
+        setTankoubons(cached.tankoubons);
+        return;
+      }
+    }
+
     try {
       const items = await fetchTankoubonsForArchive(archiveId);
       setTankoubons(items);
-    } catch {
-      setTankoubons([]);
+      if (serverId) {
+        cacheArchive(serverId, archiveId, {tankoubons: items});
+      }
+    } catch (err) {
+      if (serverId && isNetworkError(err)) {
+        const cached = getCachedArchive(serverId, archiveId);
+        if (cached?.tankoubons.length) {
+          setTankoubons(cached.tankoubons);
+        } else {
+          setTankoubons([]);
+        }
+      } else {
+        setTankoubons([]);
+      }
     }
-  }, [archiveId]);
+  }, [archiveId, isOffline, serverId, cacheArchive, getCachedArchive]);
 
   useEffect(() => {
     loadRelatedArchives().catch(err => console.warn('Failed to load related archives:', err));
@@ -340,7 +419,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
   return (
     <ScrollView
       style={styles.screen}
-      contentContainerStyle={[styles.content, {paddingTop: insets.top + 12}]}
+      contentContainerStyle={[styles.content, {paddingTop: 12 + (isOffline ? 0 : insets.top)}]}
       refreshControl={
         <RefreshControl
           refreshing={refreshing}
@@ -412,7 +491,7 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         t={t}
         keyExtractor={item => item.arcid}
         renderItem={item => (
-          <ArchiveCard archive={item} variant="related" onOpenReader={() => handleRelatedPress(item)} />
+          <ArchiveCard archive={item} variant="related" onOpenReader={() => handleRelatedPress(item)} onOpenDetail={() => handleRelatedPress(item)} />
         )}
       />
 
@@ -434,4 +513,3 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
     </ScrollView>
   );
 }
-
