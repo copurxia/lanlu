@@ -1,11 +1,11 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {NavigationContainer, createNavigationContainerRef} from '@react-navigation/native';
+import {NavigationContainer, createNavigationContainerRef, useNavigationState} from '@react-navigation/native';
 import {
   createBottomTabNavigator,
   type BottomTabBarButtonProps,
 } from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {PanResponder, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {Animated, PanResponder, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {enableScreens} from 'react-native-screens';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BlurView} from '@sbaiahmed1/react-native-blur';
@@ -44,8 +44,10 @@ import {useTheme} from '../theme/ThemeContext';
 import type {MainTabParamList, RootStackParamList} from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
+const TAB_NAMES = ['Home', 'Favorites', 'Settings'];
 const Tabs = createBottomTabNavigator<MainTabParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
+const contentSlideAnim = new Animated.Value(0);
 
 enableScreens(true);
 
@@ -91,6 +93,11 @@ function MainTabs() {
   const {t} = useI18n();
   const {colors} = useTheme();
   const insets = useSafeAreaInsets();
+  const activeTab = useNavigationState(state => {
+    const mainRoute = state.routes.find(r => r.name === 'Main');
+    return (mainRoute?.state as any)?.index ?? 0;
+  });
+
   const styles = useMemo(
     () =>
       StyleSheet.create({
@@ -99,25 +106,36 @@ function MainTabs() {
           borderTopColor: colors.border,
           borderTopWidth: StyleSheet.hairlineWidth,
           bottom: 0,
-          elevation: 0,
+          flexDirection: 'row',
           left: 0,
           position: 'absolute',
+          paddingTop: 8,
           right: 0,
-          shadowOpacity: 0,
+        },
+        tabItem: {
+          alignItems: 'center',
+          flex: 1,
+          gap: 4,
+          justifyContent: 'center',
+          paddingBottom: 8,
+        },
+        tabLabel: {
+          fontSize: 10,
+          fontWeight: '600',
         },
       }),
     [colors],
   );
-  return (
+
+  const handleTabPress = useCallback((index: number) => {
+    if (index === activeTab) return;
+    navigationRef.navigate('Main' as never, {screen: TAB_NAMES[index]} as never);
+  }, [activeTab]);
+
+  const tabsContent = (
     <Tabs.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.primary,
-        tabBarBackground: () => <BlurTabBarBackground />,
-        tabBarButton: StaticTabButton,
-        tabBarInactiveTintColor: colors.textMuted,
-        tabBarStyle: [styles.tabBar, {paddingBottom: insets.bottom}],
-      }}>
+      tabBar={() => null}
+      screenOptions={{headerShown: false}}>
       <Tabs.Screen
         name="Home"
         component={HomeScreen}
@@ -146,6 +164,30 @@ function MainTabs() {
         }}
       />
     </Tabs.Navigator>
+  );
+
+  return (
+    <View style={{flex: 1}}>
+      <Animated.View style={{flex: 1, transform: [{translateX: contentSlideAnim}]}}>
+        {tabsContent}
+      </Animated.View>
+      <View style={[styles.tabBar, {paddingBottom: insets.bottom}]}>
+        <BlurTabBarBackground />
+        {TAB_NAMES.map((name, index) => (
+          <Pressable
+            key={name}
+            onPress={() => handleTabPress(index)}
+            style={styles.tabItem}>
+            {index === 0 && <Home color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            {index === 1 && <Heart color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            {index === 2 && <Settings color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            <Text style={[styles.tabLabel, {color: index === activeTab ? colors.primary : colors.textMuted}]}>
+              {index === 0 ? t('tabs.home') : index === 1 ? t('tabs.favorites') : t('tabs.settings')}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
   );
 }
 
@@ -186,13 +228,62 @@ export function RootNavigator() {
     currentRouteNameRef.current = route?.name ?? null;
   }, []);
 
-  const edgePanResponder = useRef(
+  const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gs) =>
-        currentRouteNameRef.current === 'Home' && gs.dx > 15 && gs.moveX > 40,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        const route = currentRouteNameRef.current;
+        if (!TAB_NAMES.includes(route ?? '')) return false;
+        return Math.abs(gs.dx) > Math.abs(gs.dy) * 2 && Math.abs(gs.dx) > 15;
+      },
+      onPanResponderMove: (_, gs) => {
+        const route = currentRouteNameRef.current;
+        const currentIdx = TAB_NAMES.indexOf(route ?? '');
+        if (route === 'Home' && gs.dx > 0 && gs.moveX < 60) return;
+        if ((gs.dx > 0 && currentIdx <= 0) || (gs.dx < 0 && currentIdx >= TAB_NAMES.length - 1)) return;
+        contentSlideAnim.setValue(Math.max(-120, Math.min(120, gs.dx)));
+      },
       onPanResponderRelease: (_, gs) => {
-        if (currentRouteNameRef.current === 'Home' && gs.dx > 50) setSidebarOpen(true);
+        const route = currentRouteNameRef.current;
+        const currentIndex = TAB_NAMES.indexOf(route ?? '');
+        if (currentIndex === -1) return;
+
+        if (route === 'Home' && gs.dx > 50 && gs.moveX < 60) {
+          contentSlideAnim.setValue(0);
+          setSidebarOpen(true);
+          return;
+        }
+
+        if (Math.abs(gs.dx) < 60) {
+          Animated.spring(contentSlideAnim, {
+            toValue: 0,
+            useNativeDriver: true,
+          }).start();
+          return;
+        }
+
+        const targetIdx = gs.dx > 0 ? currentIndex - 1 : currentIndex + 1;
+        if (targetIdx < 0 || targetIdx >= TAB_NAMES.length) {
+          Animated.spring(contentSlideAnim, {toValue: 0, useNativeDriver: true}).start();
+          return;
+        }
+
+        const targetTab = TAB_NAMES[targetIdx];
+        const direction = gs.dx > 0 ? 1 : -1;
+
+        Animated.timing(contentSlideAnim, {
+          toValue: direction * 500,
+          duration: 180,
+          useNativeDriver: true,
+        }).start(() => {
+          navigationRef.navigate('Main' as never, {screen: targetTab} as never);
+          contentSlideAnim.setValue(-direction * 500);
+          Animated.timing(contentSlideAnim, {
+            toValue: 0,
+            duration: 180,
+            useNativeDriver: true,
+          }).start();
+        });
       },
     }),
   ).current;
@@ -239,7 +330,7 @@ export function RootNavigator() {
   }
 
   return (
-    <View style={bannerStyles.wrapper} {...edgePanResponder.panHandlers}>
+    <View style={bannerStyles.wrapper} {...panResponder.panHandlers}>
       {isOffline && status === 'authenticated' ? (
         <View style={bannerStyles.container}>
           <Text style={bannerStyles.text}>{t('common.offline')}</Text>
