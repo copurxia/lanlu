@@ -834,6 +834,7 @@ export function ReaderScreen({route, navigation}: Props) {
   const [pages, setPages] = useState<ReaderPage[]>([]);
   const [failedPages, setFailedPages] = useState<Record<number, string>>({});
   const [loadedPages, setLoadedPages] = useState<Record<number, boolean>>({});
+  const [imageLoadProgressByPage, setImageLoadProgressByPage] = useState<Record<number, number>>({});
   const [htmlContents, setHtmlContents] = useState<Record<number, string>>({});
   const [htmlHeights, setHtmlHeights] = useState<Record<number, number>>({});
   const [currentPage, setCurrentPage] = useState(Math.max(1, initialPage));
@@ -1025,6 +1026,21 @@ export function ReaderScreen({route, navigation}: Props) {
       if (hydratingPageKeys.current.has(key)) return;
       hydratingPageKeys.current.add(key);
 
+      if (page.effectiveType === 'image') {
+        setLoadedPages(current => {
+          if (!current[page.pageNumber]) return current;
+          const next = {...current};
+          delete next[page.pageNumber];
+          return next;
+        });
+        setImageLoadProgressByPage(current => {
+          if (!current[page.pageNumber]) return current;
+          const next = {...current};
+          delete next[page.pageNumber];
+          return next;
+        });
+      }
+
       try {
         const hydrated = await hydratePage(page, index, page.sourceArchiveId);
         setPages(current =>
@@ -1087,6 +1103,9 @@ export function ReaderScreen({route, navigation}: Props) {
     nextArchiveCache.current = {};
     lastSavedProgressKey.current = '';
     setNextArchiveById({});
+    setFailedPages({});
+    setLoadedPages({});
+    setImageLoadProgressByPage({});
     setHtmlContents({});
     setHtmlHeights({});
     setWebtoonHeights({});
@@ -2160,6 +2179,12 @@ export function ReaderScreen({route, navigation}: Props) {
       delete next[pageNumber];
       return next;
     });
+    setImageLoadProgressByPage(current => {
+      if (!current[pageNumber]) return current;
+      const next = {...current};
+      delete next[pageNumber];
+      return next;
+    });
     setFailedPages(current => {
       if (!current[pageNumber]) return current;
       const next = {...current};
@@ -2903,12 +2928,19 @@ export function ReaderScreen({route, navigation}: Props) {
                 {height: audioBackdropHeight, width: audioBackdropWidth},
               ]}>
               {page.thumbnailSource ? (
-                <FastImage
-                  blurRadius={22}
-                  resizeMode={FastImage.resizeMode.cover}
-                  source={page.thumbnailSource}
-                  style={styles.audioBackdropImage}
-                />
+                <>
+                  <FastImage
+                    resizeMode={FastImage.resizeMode.cover}
+                    source={page.thumbnailSource}
+                    style={styles.audioBackdropImage}
+                  />
+                  <BlurView
+                    blurAmount={28}
+                    blurType="extraDark"
+                    overlayColor="rgba(0,0,0,0.08)"
+                    style={StyleSheet.absoluteFill}
+                  />
+                </>
               ) : null}
               <Svg
                 height={audioBackdropHeight}
@@ -3585,11 +3617,40 @@ export function ReaderScreen({route, navigation}: Props) {
           <>
             {!loadedPages[page.pageNumber] && !commonError && page.pageNumber === currentPage ? (
               <View style={styles.loadingOverlay}>
-                <CircularProgress value={0} color={colors.white} showLabel={false} />
+                <CircularProgress
+                  value={imageLoadProgressByPage[page.pageNumber] ?? 0}
+                  color={colors.white}
+                  showLabel={false}
+                />
               </View>
             ) : null}
             <FastImage
               onLoadStart={() => {
+                setLoadedPages(current => {
+                  if (!current[page.pageNumber]) return current;
+                  const next = {...current};
+                  delete next[page.pageNumber];
+                  return next;
+                });
+                setImageLoadProgressByPage(current => {
+                  if (current[page.pageNumber] === 0) return current;
+                  return {...current, [page.pageNumber]: 0};
+                });
+                setFailedPages(current => {
+                  if (!current[page.pageNumber]) return current;
+                  const next = {...current};
+                  delete next[page.pageNumber];
+                  return next;
+                });
+              }}
+              onProgress={event => {
+                const loaded = Number((event?.nativeEvent as {loaded?: unknown})?.loaded || 0);
+                const total = Number((event?.nativeEvent as {total?: unknown})?.total || 0);
+                if (!Number.isFinite(loaded) || !Number.isFinite(total) || total <= 0) return;
+                const nextValue = Math.max(0, Math.min(100, Math.round((loaded / total) * 100)));
+                setImageLoadProgressByPage(current =>
+                  current[page.pageNumber] === nextValue ? current : {...current, [page.pageNumber]: nextValue},
+                );
               }}
               onError={event => {
                 const message =
@@ -3601,9 +3662,16 @@ export function ReaderScreen({route, navigation}: Props) {
                   [page.pageNumber]:
                     typeof message === 'string' && message.trim() ? message : 'Image failed to load.',
                 }));
+                setImageLoadProgressByPage(current => {
+                  if (!current[page.pageNumber]) return current;
+                  const next = {...current};
+                  delete next[page.pageNumber];
+                  return next;
+                });
               }}
               onLoad={event => {
                 setLoadedPages(current => ({...current, [page.pageNumber]: true}));
+                setImageLoadProgressByPage(current => ({...current, [page.pageNumber]: 100}));
                 const src = (event.nativeEvent as {source?: {width?: number; height?: number}}).source;
                 if (src && typeof src.width === 'number' && typeof src.height === 'number' && src.width > 0 && src.height > 0) {
                   const imageWidth = src.width;
@@ -3643,7 +3711,7 @@ export function ReaderScreen({route, navigation}: Props) {
         ) : (
           !page.uri && !commonError ? (
             <View style={styles.loadingOverlay}>
-              <CircularProgress value={0} color={colors.white} showLabel={false} />
+              <CircularProgress value={imageLoadProgressByPage[page.pageNumber] ?? 0} color={colors.white} showLabel={false} />
             </View>
           ) : (
             <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
@@ -3930,8 +3998,13 @@ export function ReaderScreen({route, navigation}: Props) {
         style={[styles.bottomBar, {paddingBottom: stableInsets.bottom + 10}, bottomBarAnimatedStyle]}>
             <View style={styles.laneShell}>
               <View style={styles.laneShellBlur}>
-                <BlurView blurType="dark" blurAmount={20} style={StyleSheet.absoluteFill} />
-                <View style={[StyleSheet.absoluteFill, {backgroundColor: 'rgba(0,0,0,0.55)'}]} />
+                <BlurView
+                  blurAmount={24}
+                  blurType="dark"
+                  overlayColor="rgba(0,0,0,0.12)"
+                  style={StyleSheet.absoluteFill}
+                />
+                <View style={[StyleSheet.absoluteFill, {backgroundColor: 'rgba(0,0,0,0.48)'}]} />
               </View>
               <View style={styles.laneRow}>
                 {lanes.map(lane => {
@@ -5495,7 +5568,11 @@ function createStyles(colors: ThemeColors) {
     width: '100%',
   },
   laneShellBlur: {
-    ...StyleSheet.absoluteFillObject,
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
     borderRadius: 999,
     overflow: 'hidden',
   },
