@@ -73,6 +73,7 @@ import {
   setArchiveFavorite,
   updateArchiveProgress,
 } from '../api/lanlu';
+import {CircularProgress} from '../components/CircularProgress';
 import {Drawer} from '../components/Drawer';
 import {ModalBackdrop} from '../components/SafeAreaSurface';
 import {ReaderSidebar} from './reader/ReaderSidebar';
@@ -1691,6 +1692,16 @@ export function ReaderScreen({route, navigation}: Props) {
 
   const viewabilityConfig = useMemo(() => ({itemVisiblePercentThreshold: 60}), []);
   const styles = useMemo(() => createStyles(colors), [colors]);
+
+  const imageLoadProgress = useMemo(() => {
+    const imagePages = pages.filter(
+      (p) => p.effectiveType === 'image' && p.imageSource,
+    );
+    if (imagePages.length === 0) return 100;
+    const loaded = imagePages.filter((p) => loadedPages[p.pageNumber]).length;
+    return Math.round((loaded / imagePages.length) * 100);
+  }, [pages, loadedPages]);
+
   const onViewableItemsChanged = useRef(
     ({viewableItems}: {viewableItems: ViewToken<ReaderItem>[]}) => {
       if (progressSeekLockedRef.current) return;
@@ -3503,7 +3514,9 @@ export function ReaderScreen({route, navigation}: Props) {
         {page.imageSource ? (
           <>
             {!loadedPages[page.pageNumber] && !commonError ? (
-              <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
+              <View style={styles.loadingOverlay}>
+                <CircularProgress value={imageLoadProgress} color={colors.white} />
+              </View>
             ) : null}
             <Image
               onError={event => {
@@ -3550,7 +3563,9 @@ export function ReaderScreen({route, navigation}: Props) {
           </>
         ) : (
           !page.uri && !commonError ? (
-            <Text style={styles.loadingText}>{t('reader.loadingPage', {page: page.pageNumber})}</Text>
+            <View style={styles.loadingOverlay}>
+              <CircularProgress value={imageLoadProgress} color={colors.white} />
+            </View>
           ) : (
             <ErrorOverlay title={t('reader.noImageSource')} message={page.id} />
           )
@@ -5232,6 +5247,12 @@ function createStyles(colors: ThemeColors) {
   loadingText: {
     color: colors.white,
     position: 'absolute',
+    zIndex: 1,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFill,
+    alignItems: 'center',
+    justifyContent: 'center',
     zIndex: 1,
   },
   imageError: {
