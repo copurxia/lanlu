@@ -39,10 +39,47 @@ export function Sidebar({
   onSwitchServer,
   onSignOut,
 }: SidebarProps) {
-  const {colors, effectiveScheme, setThemePreference} = useTheme();
-  const {language, t, setLanguagePreference} = useI18n();
+  const {colors, effectiveScheme, themePreference, setThemePreference} = useTheme();
+  const {language, languagePreference, t, setLanguagePreference} = useI18n();
   const insets = useSafeAreaInsets();
   const enabled = categories.filter(c => c.enabled !== false);
+
+  const themeStateLabel =
+    themePreference === 'system'
+      ? t('settings.themeSystem')
+      : themePreference === 'dark'
+      ? t('settings.themeDark')
+      : t('settings.themeLight');
+  const languageStateLabel =
+    languagePreference === 'system'
+      ? t('settings.languageSystem')
+      : languagePreference === 'zh'
+      ? t('settings.languageChinese')
+      : t('settings.languageEnglish');
+
+  function toggleThemePreference() {
+    if (themePreference === 'system') {
+      setThemePreference(effectiveScheme === 'dark' ? 'light' : 'dark');
+      return;
+    }
+    if (themePreference === 'light') {
+      setThemePreference('dark');
+      return;
+    }
+    setThemePreference('system');
+  }
+
+  function toggleLanguagePreference() {
+    if (languagePreference === 'system') {
+      setLanguagePreference(language === 'zh' ? 'en' : 'zh');
+      return;
+    }
+    if (languagePreference === 'zh') {
+      setLanguagePreference('en');
+      return;
+    }
+    setLanguagePreference('system');
+  }
 
   const styles = useMemo(
     () =>
@@ -52,13 +89,18 @@ export function Sidebar({
           flex: 1,
           paddingBottom: insets.bottom + 16,
           width: 260,
+          shadowColor: '#000',
+          shadowOffset: {width: 16, height: 0},
+          shadowOpacity: effectiveScheme === 'dark' ? 0.28 : 0.16,
+          shadowRadius: 24,
+          elevation: 18,
         },
         headerArea: {
           flexDirection: 'row',
           alignItems: 'center',
           gap: spacing.sm,
           paddingHorizontal: spacing.lg,
-          paddingTop: spacing.md,
+          paddingTop: insets.top + spacing.md,
           paddingBottom: spacing.md,
         },
         headerInfo: {
@@ -112,6 +154,7 @@ export function Sidebar({
           gap: spacing.sm,
           paddingHorizontal: spacing.lg,
           paddingTop: spacing.sm,
+          paddingBottom: spacing.sm,
         },
         toggleButton: {
           alignItems: 'center',
@@ -120,25 +163,31 @@ export function Sidebar({
           flex: 1,
           flexDirection: 'row',
           gap: spacing.sm,
-          justifyContent: 'center',
+          justifyContent: 'flex-start',
+          paddingHorizontal: spacing.md,
           paddingVertical: 10,
         },
-        toggleText: {
+        toggleIcon: {
+          flexShrink: 0,
+        },
+        toggleValue: {
           color: colors.text,
+          flex: 1,
           fontSize: 13,
-          fontWeight: '700',
+          fontWeight: '800',
         },
         scrollContent: {
           flexGrow: 1,
         },
       }),
-    [colors, insets],
+    [colors, insets, effectiveScheme],
   );
 
   return (
     <Drawer open={open} onClose={onClose} side="left" showHandle={false} enablePanDownToClose={false}
       backdropColor={effectiveScheme === 'dark' ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'}
       blurType={effectiveScheme === 'dark' ? 'dark' : 'light'}
+      respectSideSafeArea={false}
       style={{backgroundColor: colors.surface}}>
       <View style={styles.container}>
         <View style={styles.headerArea}>
@@ -195,15 +244,25 @@ export function Sidebar({
         <View style={styles.bottomRow}>
           <TouchableOpacity
             style={styles.toggleButton}
-            onPress={() => setThemePreference(effectiveScheme === 'dark' ? 'light' : 'dark')}>
-            {effectiveScheme === 'dark' ? <Sun color={colors.text} size={16} /> : <Moon color={colors.text} size={16} />}
-            <Text style={styles.toggleText}>{effectiveScheme === 'dark' ? t('settings.themeLight') : t('settings.themeDark')}</Text>
+            onPress={toggleThemePreference}>
+            <View style={styles.toggleIcon}>
+              {themePreference === 'dark' ? (
+                <Moon color={colors.text} size={16} />
+              ) : themePreference === 'light' ? (
+                <Sun color={colors.text} size={16} />
+              ) : (
+                <Languages color={colors.text} size={16} />
+              )}
+            </View>
+            <Text style={styles.toggleValue}>{themeStateLabel}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.toggleButton}
-            onPress={() => setLanguagePreference(language === 'zh' ? 'en' : 'zh')}>
-            <Languages color={colors.text} size={16} />
-            <Text style={styles.toggleText}>{language === 'zh' ? '中文' : 'EN'}</Text>
+            onPress={toggleLanguagePreference}>
+            <View style={styles.toggleIcon}>
+              <Languages color={colors.text} size={16} />
+            </View>
+            <Text style={styles.toggleValue}>{languageStateLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>

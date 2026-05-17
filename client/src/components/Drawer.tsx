@@ -31,6 +31,7 @@ type DrawerProps = {
   maxHeight?: DimensionValue;
   backdropColor?: string;
   blurType?: 'dark' | 'light' | 'xlight' | 'prominent' | 'regular' | 'extraDark';
+  respectSideSafeArea?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -44,6 +45,7 @@ export function Drawer({
   maxHeight = '82%',
   backdropColor = 'rgba(0,0,0,0.38)',
   blurType = 'regular',
+  respectSideSafeArea = true,
   style,
 }: DrawerProps) {
   const insets = useSafeAreaInsets();
@@ -219,10 +221,12 @@ export function Drawer({
       isBottom ? staticStyles.sheet : isLeft ? staticStyles.sheetLeft : staticStyles.sheetRight,
       isBottom
         ? {paddingBottom: Math.max(insets.bottom, 16)}
-        : {paddingTop: Math.max(insets.top, 16)},
+        : respectSideSafeArea
+        ? {paddingTop: Math.max(insets.top, 16)}
+        : null,
       style,
     ],
-    [isBottom, isLeft, staticStyles, insets, style],
+    [isBottom, isLeft, staticStyles, insets, respectSideSafeArea, style],
   );
 
   if (!visible) return null;

@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {NavigationContainer} from '@react-navigation/native';
+import {NavigationContainer, createNavigationContainerRef} from '@react-navigation/native';
 import {
   createBottomTabNavigator,
   type BottomTabBarButtonProps,
@@ -43,6 +43,7 @@ import type {MainTabParamList, RootStackParamList} from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator<MainTabParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 enableScreens(true);
 
@@ -133,6 +134,7 @@ export function RootNavigator() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCategories, setSidebarCategories] = useState<any[]>([]);
   const [sidebarSmartFilters, setSidebarSmartFilters] = useState<any[]>([]);
+  const currentRouteNameRef = useRef<string | null>(null);
   const getCachedFeed = useOfflineFeedStore(s => s.getCachedFeed);
   const serverId = activeServer?.id || '';
 
@@ -157,14 +159,18 @@ export function RootNavigator() {
   }, [isOffline, serverId, getCachedFeed]);
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+  const handleNavStateChange = useCallback(() => {
+    const route = navigationRef.getCurrentRoute();
+    currentRouteNameRef.current = route?.name ?? null;
+  }, []);
 
   const edgePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) =>
-        gs.dx > 15 && gs.moveX > 40,
+        currentRouteNameRef.current === 'Home' && gs.dx > 15 && gs.moveX > 40,
       onPanResponderRelease: (_, gs) => {
-        if (gs.dx > 50) setSidebarOpen(true);
+        if (currentRouteNameRef.current === 'Home' && gs.dx > 50) setSidebarOpen(true);
       },
     }),
   ).current;
@@ -224,140 +230,140 @@ export function RootNavigator() {
           </TouchableOpacity>
         </View>
       ) : null}
-      <NavigationContainer>
-      <Stack.Navigator
-        screenOptions={{
-          animation: 'slide_from_right',
-          contentStyle: {backgroundColor: colors.background},
-        }}>
-        {status === 'authenticated' ? (
-          <>
+      <NavigationContainer ref={navigationRef} onReady={handleNavStateChange} onStateChange={handleNavStateChange}>
+        <Stack.Navigator
+          screenOptions={{
+            animation: 'slide_from_right',
+            contentStyle: {backgroundColor: colors.background},
+          }}>
+          {status === 'authenticated' ? (
+            <>
+              <Stack.Screen
+                name="Main"
+                component={MainTabs}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="AccountSecurity"
+                component={AccountSecurityScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="ThemeSettings"
+                component={ThemeSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="LanguageSettings"
+                component={LanguageSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="DiagnosticsSettings"
+                component={DiagnosticsSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="CacheSettings"
+                component={CacheSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="CategorySettings"
+                component={CategorySettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="TagSettings"
+                component={TagSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="SmartFilterSettings"
+                component={SmartFilterSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="UserSettings"
+                component={UserSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="SystemSettings"
+                component={SystemSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="TaskSettings"
+                component={TaskSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="CronSettings"
+                component={CronSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="PluginSettings"
+                component={PluginSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="StatsSettings"
+                component={StatsSettingsScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="ArchiveDetail"
+                component={ArchiveDetailScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="TankoubonDetail"
+                component={TankoubonDetailScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="Reader"
+                component={ReaderScreen}
+                options={{headerShown: false}}
+              />
+            </>
+          ) : status === 'login' ? (
             <Stack.Screen
-              name="Main"
-              component={MainTabs}
+              name="Login"
+              component={LoginScreen}
               options={{headerShown: false}}
             />
-            <Stack.Screen
-              name="AccountSecurity"
-              component={AccountSecurityScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="ThemeSettings"
-              component={ThemeSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="LanguageSettings"
-              component={LanguageSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="DiagnosticsSettings"
-              component={DiagnosticsSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="CacheSettings"
-              component={CacheSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="CategorySettings"
-              component={CategorySettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="TagSettings"
-              component={TagSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="SmartFilterSettings"
-              component={SmartFilterSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="UserSettings"
-              component={UserSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="SystemSettings"
-              component={SystemSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="TaskSettings"
-              component={TaskSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="CronSettings"
-              component={CronSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="PluginSettings"
-              component={PluginSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="StatsSettings"
-              component={StatsSettingsScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="ArchiveDetail"
-              component={ArchiveDetailScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="TankoubonDetail"
-              component={TankoubonDetailScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="Reader"
-              component={ReaderScreen}
-              options={{headerShown: false}}
-            />
-          </>
-        ) : status === 'login' ? (
-          <Stack.Screen
-            name="Login"
-            component={LoginScreen}
-            options={{headerShown: false}}
-          />
-        ) : (
-          <>
-            <Stack.Screen
-              name="ServerList"
-              component={ServerListScreen}
-              options={{headerShown: false}}
-            />
-            <Stack.Screen
-              name="AddServer"
-              component={AddServerScreen}
-              options={{headerShown: false}}
-            />
-          </>
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
-    {status === 'authenticated' ? (
-      <Sidebar
-        open={sidebarOpen}
-        onClose={closeSidebar}
-        categories={sidebarCategories}
-        smartFilters={sidebarSmartFilters}
-        selectedCategoryId={null}
-        onSelectCategory={() => {}}
-        serverName={activeServer?.name}
-        onSwitchServer={() => showServerList()}
-        onSignOut={() => signOut()}
-      />
-    ) : null}
+          ) : (
+            <>
+              <Stack.Screen
+                name="ServerList"
+                component={ServerListScreen}
+                options={{headerShown: false}}
+              />
+              <Stack.Screen
+                name="AddServer"
+                component={AddServerScreen}
+                options={{headerShown: false}}
+              />
+            </>
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+      {status === 'authenticated' ? (
+        <Sidebar
+          open={sidebarOpen}
+          onClose={closeSidebar}
+          categories={sidebarCategories}
+          smartFilters={sidebarSmartFilters}
+          selectedCategoryId={null}
+          onSelectCategory={() => {}}
+          serverName={activeServer?.name}
+          onSwitchServer={() => showServerList()}
+          onSignOut={() => signOut()}
+        />
+      ) : null}
     </View>
   );
 }
