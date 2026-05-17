@@ -1,16 +1,19 @@
-import React, {useMemo} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {NavigationContainer} from '@react-navigation/native';
 import {
   createBottomTabNavigator,
   type BottomTabBarButtonProps,
 } from '@react-navigation/bottom-tabs';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
-import {Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {PanResponder, Pressable, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {enableScreens} from 'react-native-screens';
 import {Heart, Home, Settings} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
+import {Sidebar} from '../components/Sidebar';
+import {fetchCategories, fetchSmartFilters} from '../api/lanlu';
+import {useOfflineFeedStore} from '../stores/offlineFeedStore';
 import {AccountSecurityScreen} from '../screens/AccountSecurityScreen';
 import {AddServerScreen} from '../screens/AddServerScreen';
 import {ArchiveDetailScreen} from '../screens/ArchiveDetailScreen';
@@ -124,9 +127,47 @@ function MainTabs() {
 }
 
 export function RootNavigator() {
-  const {status, isOffline, reconnect} = useAuth();
+  const {status, isOffline, reconnect, activeServer, showServerList, signOut} = useAuth();
   const {t} = useI18n();
   const {colors} = useTheme();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCategories, setSidebarCategories] = useState<any[]>([]);
+  const [sidebarSmartFilters, setSidebarSmartFilters] = useState<any[]>([]);
+  const getCachedFeed = useOfflineFeedStore(s => s.getCachedFeed);
+  const serverId = activeServer?.id || '';
+
+  useEffect(() => {
+    if (isOffline && serverId) {
+      const cached = getCachedFeed(serverId, 'chips');
+      if (cached) {
+        setSidebarCategories(cached.categories);
+        setSidebarSmartFilters(cached.smartFilters || []);
+        return;
+      }
+    }
+    Promise.all([
+      fetchCategories(),
+      fetchSmartFilters(),
+    ])
+      .then(([cats, filters]) => {
+        setSidebarCategories(cats);
+        setSidebarSmartFilters(filters);
+      })
+      .catch(() => {});
+  }, [isOffline, serverId, getCachedFeed]);
+
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  const edgePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) =>
+        gs.dx > 15 && gs.moveX > 40,
+      onPanResponderRelease: (_, gs) => {
+        if (gs.dx > 50) setSidebarOpen(true);
+      },
+    }),
+  ).current;
 
   const bannerStyles = useMemo(
     () =>
@@ -170,7 +211,7 @@ export function RootNavigator() {
   }
 
   return (
-    <View style={bannerStyles.wrapper}>
+    <View style={bannerStyles.wrapper} {...edgePanResponder.panHandlers}>
       {isOffline && status === 'authenticated' ? (
         <View style={bannerStyles.container}>
           <Text style={bannerStyles.text}>{t('common.offline')}</Text>
@@ -304,6 +345,19 @@ export function RootNavigator() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    {status === 'authenticated' ? (
+      <Sidebar
+        open={sidebarOpen}
+        onClose={closeSidebar}
+        categories={sidebarCategories}
+        smartFilters={sidebarSmartFilters}
+        selectedCategoryId={null}
+        onSelectCategory={() => {}}
+        serverName={activeServer?.name}
+        onSwitchServer={() => showServerList()}
+        onSignOut={() => signOut()}
+      />
+    ) : null}
     </View>
   );
 }

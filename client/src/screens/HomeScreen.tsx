@@ -181,7 +181,7 @@ function resolveHomeViewSurface(mode: HomeViewMode, isRowsLanding: boolean): Hom
 }
 
 export function HomeScreen() {
-  const {colors} = useTheme();
+  const {colors, effectiveScheme} = useTheme();
   const {language, t} = useI18n();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
@@ -1884,6 +1884,8 @@ export function HomeScreen() {
         open={filtersOpen}
         onClose={closeFilters}
         maxHeight="88%"
+        showHandle={false}
+        backdropColor={effectiveScheme === 'dark' ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'}
         style={{backgroundColor: colors.surface}}>
         <View style={{padding: spacing.lg, gap: spacing.md}}>
           <View style={styles.sheetHeader}>

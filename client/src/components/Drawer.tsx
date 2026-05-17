@@ -9,17 +9,17 @@ import {
   ViewStyle,
   useWindowDimensions,
 } from 'react-native';
+import {BlurView} from '@sbaiahmed1/react-native-blur';
 import {Gesture, GestureDetector} from 'react-native-gesture-handler';
 import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-type DrawerSide = 'bottom' | 'right';
+type DrawerSide = 'bottom' | 'right' | 'left';
 
 type DrawerProps = {
   open: boolean;
@@ -29,11 +29,10 @@ type DrawerProps = {
   showHandle?: boolean;
   enablePanDownToClose?: boolean;
   maxHeight?: DimensionValue;
+  backdropColor?: string;
+  blurType?: 'dark' | 'light' | 'xlight' | 'prominent' | 'regular' | 'extraDark';
   style?: StyleProp<ViewStyle>;
 };
-
-const SPRING_IN = {damping: 22, stiffness: 220, mass: 1};
-const SPRING_OUT = {damping: 20, stiffness: 200, mass: 0.9};
 
 export function Drawer({
   open,
@@ -43,15 +42,18 @@ export function Drawer({
   showHandle = true,
   enablePanDownToClose = true,
   maxHeight = '82%',
+  backdropColor = 'rgba(0,0,0,0.38)',
+  blurType = 'regular',
   style,
 }: DrawerProps) {
   const insets = useSafeAreaInsets();
   const [visible, setVisible] = useState(false);
   const {width: screenWidth, height: screenHeight} = useWindowDimensions();
   const isBottom = side === 'bottom';
+  const isLeft = side === 'left';
 
   const backdropOpacity = useSharedValue(0);
-  const translate = useSharedValue(isBottom ? screenHeight : screenWidth);
+  const translate = useSharedValue(isBottom ? screenHeight : isLeft ? -screenWidth : screenWidth);
   const isClosing = useSharedValue(false);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -60,7 +62,7 @@ export function Drawer({
     'worklet';
     isClosing.value = false;
     backdropOpacity.value = withTiming(1, {duration: 300});
-    translate.value = withSpring(0, SPRING_IN);
+    translate.value = withTiming(0, {duration: 300});
   }, [backdropOpacity, isClosing, translate]);
 
   const animateOut = useCallback(() => {
@@ -68,9 +70,10 @@ export function Drawer({
     if (isClosing.value) return;
     isClosing.value = true;
     backdropOpacity.value = withTiming(0, {duration: 250});
-    translate.value = withSpring(
-      isBottom ? screenHeight : screenWidth,
-      SPRING_OUT,
+    const target = isBottom ? screenHeight : isLeft ? -screenWidth : screenWidth;
+    translate.value = withTiming(
+      target,
+      {duration: 250},
       (finished) => {
         if (finished) {
           runOnJS(setVisible)(false);
@@ -78,7 +81,7 @@ export function Drawer({
         }
       },
     );
-  }, [isBottom, screenHeight, screenWidth, backdropOpacity, isClosing, translate]);
+  }, [isBottom, isLeft, screenHeight, screenWidth, backdropOpacity, isClosing, translate]);
 
   useEffect(() => {
     if (open) {
@@ -90,28 +93,63 @@ export function Drawer({
   }, [open, animateIn, animateOut, visible]);
 
   const panGesture = useMemo(() => {
-    if (!enablePanDownToClose || !isBottom) {
+    if (!enablePanDownToClose) {
       return Gesture.Pan().enabled(false);
+    }
+    if (isBottom) {
+      return Gesture.Pan()
+        .onUpdate((event) => {
+          if (event.translationY > 0) {
+            translate.value = event.translationY;
+            backdropOpacity.value = 1 - (event.translationY / screenHeight) * 0.6;
+          }
+        })
+        .onEnd((event) => {
+          if (event.translationY > screenHeight * 0.25 || event.velocityY > 800) {
+            runOnJS(animateOut)();
+          } else {
+            translate.value = withTiming(0, {duration: 200});
+            backdropOpacity.value = withTiming(1, {duration: 200});
+          }
+        });
+    }
+    if (isLeft) {
+      return Gesture.Pan()
+        .onUpdate((event) => {
+          if (event.translationX > 0) {
+            translate.value = -screenWidth + event.translationX;
+            backdropOpacity.value = 1 - (event.translationX / screenWidth) * 0.6;
+          }
+        })
+        .onEnd((event) => {
+          if (event.translationX > screenWidth * 0.25 || event.velocityX > 800) {
+            runOnJS(animateOut)();
+          } else {
+            translate.value = withTiming(0, {duration: 200});
+            backdropOpacity.value = withTiming(1, {duration: 200});
+          }
+        });
     }
     return Gesture.Pan()
       .onUpdate((event) => {
-        if (event.translationY > 0) {
-          translate.value = event.translationY;
-          backdropOpacity.value = 1 - (event.translationY / screenHeight) * 0.6;
+        if (event.translationX < 0) {
+          translate.value = screenWidth + event.translationX;
+          backdropOpacity.value = 1 - (-event.translationX / screenWidth) * 0.6;
         }
       })
       .onEnd((event) => {
-        if (event.translationY > screenHeight * 0.25 || event.velocityY > 800) {
+        if (event.translationX < -screenWidth * 0.25 || event.velocityX < -800) {
           runOnJS(animateOut)();
         } else {
-          translate.value = withSpring(0, SPRING_IN);
+          translate.value = withTiming(0, {duration: 200});
           backdropOpacity.value = withTiming(1, {duration: 200});
         }
       });
-  }, [enablePanDownToClose, isBottom, screenHeight, animateOut, backdropOpacity, translate]);
+  }, [enablePanDownToClose, isBottom, isLeft, screenHeight, screenWidth, animateOut, backdropOpacity, translate]);
 
   const backdropAnimatedStyle = useAnimatedStyle(() => ({
     opacity: backdropOpacity.value,
+    backgroundColor: backdropColor,
   }));
 
   const sheetAnimatedStyle = useAnimatedStyle(() => {
@@ -119,7 +157,7 @@ export function Drawer({
       return {transform: [{translateY: translate.value}]};
     }
     return {transform: [{translateX: translate.value}]};
-  });
+  }, [isBottom]);
 
   const staticStyles = useMemo(
     () =>
@@ -134,9 +172,12 @@ export function Drawer({
           flexDirection: 'row',
           justifyContent: 'flex-end',
         },
+        rootLeft: {
+          flexDirection: 'row',
+          justifyContent: 'flex-start',
+        },
         backdrop: {
           ...StyleSheet.absoluteFill,
-          backgroundColor: 'rgba(0,0,0,0.38)',
         },
         sheet: {
           backgroundColor: 'transparent',
@@ -151,6 +192,15 @@ export function Drawer({
           borderTopRightRadius: 0,
           height: '100%',
           maxHeight: '100%',
+          width: 260,
+        },
+        sheetLeft: {
+          backgroundColor: 'transparent',
+          borderTopLeftRadius: 0,
+          borderTopRightRadius: 0,
+          height: '100%',
+          maxHeight: '100%',
+          width: 260,
         },
         handle: {
           alignSelf: 'center',
@@ -166,13 +216,13 @@ export function Drawer({
 
   const sheetContainerStyle = useMemo(
     () => [
-      isBottom ? staticStyles.sheet : staticStyles.sheetRight,
+      isBottom ? staticStyles.sheet : isLeft ? staticStyles.sheetLeft : staticStyles.sheetRight,
       isBottom
         ? {paddingBottom: Math.max(insets.bottom, 16)}
         : {paddingTop: Math.max(insets.top, 16)},
       style,
     ],
-    [isBottom, staticStyles, insets, style],
+    [isBottom, isLeft, staticStyles, insets, style],
   );
 
   if (!visible) return null;
@@ -184,12 +234,14 @@ export function Drawer({
       statusBarTranslucent
       transparent
       visible={visible}>
-      <View style={[staticStyles.root, isBottom ? staticStyles.rootBottom : staticStyles.rootRight]}>
+      <View style={[staticStyles.root, isBottom ? staticStyles.rootBottom : isLeft ? staticStyles.rootLeft : staticStyles.rootRight]}>
         <Animated.View style={[staticStyles.backdrop, backdropAnimatedStyle]}>
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={animateOut}
-          />
+          <BlurView blurType={blurType} blurAmount={12} reducedTransparencyFallbackColor={backdropColor} style={StyleSheet.absoluteFill}>
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={animateOut}
+            />
+          </BlurView>
         </Animated.View>
         <GestureDetector gesture={panGesture}>
           <Animated.View style={[sheetContainerStyle, sheetAnimatedStyle]}>
