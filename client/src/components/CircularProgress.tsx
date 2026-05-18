@@ -1,31 +1,54 @@
-import React, {useMemo} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useMemo, useRef} from 'react';
+import {Animated, Easing, StyleSheet, Text, View} from 'react-native';
 import Svg, {Circle, G} from 'react-native-svg';
 
 import {spacing} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 
 interface CircularProgressProps {
-  value: number;
+  value?: number;
   size?: number;
   strokeWidth?: number;
   color?: string;
   trackColor?: string;
   showLabel?: boolean;
+  indeterminate?: boolean;
 }
 
 export function CircularProgress({
-  value,
+  value = 0,
   size = 56,
   strokeWidth = 4,
   color,
   trackColor,
   showLabel = true,
+  indeterminate = false,
 }: CircularProgressProps) {
   const {colors} = useTheme();
   const fillColor = color ?? colors.primary;
   const baseColor = trackColor ?? colors.borderStrong;
   const labelColor = color ?? colors.text;
+
+  const spinValue = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!indeterminate) return;
+    const animation = Animated.loop(
+      Animated.timing(spinValue, {
+        toValue: 1,
+        duration: 1500,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [indeterminate, spinValue]);
+
+  const spin = spinValue.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   const styles = useMemo(
     () =>
@@ -53,7 +76,7 @@ export function CircularProgress({
   const center = size / 2;
 
   return (
-    <View style={styles.wrap}>
+    <Animated.View style={indeterminate ? [styles.wrap, {transform: [{rotate: spin}]}] : styles.wrap}>
       <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         <G rotation={-90} originX={center} originY={center}>
           <Circle
@@ -73,15 +96,15 @@ export function CircularProgress({
             strokeLinecap="round"
             fill="none"
             strokeDasharray={circumference}
-            strokeDashoffset={offset}
+            strokeDashoffset={indeterminate ? circumference / 3 : offset}
           />
         </G>
       </Svg>
-      {showLabel && (
+      {showLabel && !indeterminate && (
         <Text style={styles.label}>
           {Math.round(clampedValue)}%
         </Text>
       )}
-    </View>
+    </Animated.View>
   );
 }

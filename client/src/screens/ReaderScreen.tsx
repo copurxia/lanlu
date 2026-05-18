@@ -946,7 +946,12 @@ export function ReaderScreen({route, navigation}: Props) {
   );
 
   const hydratePage = useCallback(
-    async (page: PageInfo, index: number, pageArchiveId = archiveId): Promise<ReaderPage> => {
+    async (
+      page: PageInfo,
+      index: number,
+      pageArchiveId = archiveId,
+      priority: FastImageSource['priority'] = FastImage.priority.normal,
+    ): Promise<ReaderPage> => {
       const basePage = createReaderPage(page, index, pageArchiveId);
       const sourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
       const source = basePage.activeSource;
@@ -969,7 +974,7 @@ export function ReaderScreen({route, navigation}: Props) {
               uri: authorized.uri,
               ...(authorized.headers ? {headers: authorized.headers} : {}),
               cache: FastImage.cacheControl.immutable,
-              priority: FastImage.priority.normal,
+              priority,
             }
           : undefined;
       const thumbnailAuthorized = thumbnailPath ? await buildAuthorizedImageSource_(thumbnailPath) : null;
@@ -1016,7 +1021,12 @@ export function ReaderScreen({route, navigation}: Props) {
   );
 
   const hydratePageIfNeeded = useCallback(
-    async (page: ReaderPage, index: number, reason: 'focus' | 'sidebar') => {
+    async (
+      page: ReaderPage,
+      index: number,
+      reason: 'focus' | 'sidebar',
+      priority?: FastImageSource['priority'],
+    ) => {
       const desiredSourceIndex = sourceIndexByPage[index] ?? page.defaultSourceIndex ?? 0;
       const needsHydration =
         page.hydratedSourceIndex !== desiredSourceIndex ||
@@ -1045,7 +1055,7 @@ export function ReaderScreen({route, navigation}: Props) {
       }
 
       try {
-        const hydrated = await hydratePage(page, index, page.sourceArchiveId);
+        const hydrated = await hydratePage(page, index, page.sourceArchiveId, priority);
         setPages(current =>
           current.map(item =>
             item.pageNumber === hydrated.pageNumber && item.sourceArchiveId === hydrated.sourceArchiveId
@@ -2033,7 +2043,7 @@ export function ReaderScreen({route, navigation}: Props) {
       const next = Math.max(1, Math.min(page, lastReaderPage));
       setCurrentPage(next);
       if (settings.readingMode === 'webtoon') {
-        queueWebtoonHydration(next, 4);
+        queueWebtoonHydration(next, 2);
         scrollWebtoonToPage(next, true);
         return;
       }
@@ -2085,7 +2095,7 @@ export function ReaderScreen({route, navigation}: Props) {
       setCurrentPage(next);
 
       if (settings.readingMode === 'webtoon') {
-        queueWebtoonHydration(next, 4);
+        queueWebtoonHydration(next, 2);
         scrollWebtoonToPage(Math.min(next, pages.length), false);
         unlockProgressSeekAfter(500);
       } else {
@@ -2477,7 +2487,7 @@ export function ReaderScreen({route, navigation}: Props) {
 
   useEffect(() => {
     if (!pages.length) return;
-    const hydrationRadius = settings.readingMode === 'webtoon' ? 8 : 4;
+    const hydrationRadius = settings.readingMode === 'webtoon' ? 3 : 2;
     pages
       .filter(
         page =>
@@ -2487,7 +2497,14 @@ export function ReaderScreen({route, navigation}: Props) {
       )
       .forEach(page => {
         const index = page.pageNumber - 1;
-        void hydratePageIfNeeded(page, index, 'focus');
+        const distance = Math.abs(page.pageNumber - currentPage);
+        const hydratePriority: FastImageSource['priority'] =
+          distance === 0
+            ? FastImage.priority.high
+            : distance <= 1
+              ? FastImage.priority.normal
+              : FastImage.priority.low;
+        void hydratePageIfNeeded(page, index, 'focus', hydratePriority);
       });
   }, [
     currentPage,
@@ -2497,6 +2514,21 @@ export function ReaderScreen({route, navigation}: Props) {
     sourceSheetPageId,
     webtoonHydrationTargets,
   ]);
+
+  useEffect(() => {
+    if (!pages.length || loadedPages[currentPage] !== true) return;
+    const baseRadius = settings.readingMode === 'webtoon' ? 3 : 2;
+    const extendedRadius = settings.readingMode === 'webtoon' ? 6 : 4;
+    pages
+      .filter(page => {
+        const dist = Math.abs(page.pageNumber - currentPage);
+        return dist > baseRadius && dist <= extendedRadius;
+      })
+      .forEach(page => {
+        const index = page.pageNumber - 1;
+        void hydratePageIfNeeded(page, index, 'focus', FastImage.priority.low);
+      });
+  }, [loadedPages, currentPage, hydratePageIfNeeded, pages, settings.readingMode]);
 
   useEffect(() => {
     nearbyMediaPages.forEach(ensureMediaProxy);
@@ -3954,7 +3986,7 @@ export function ReaderScreen({route, navigation}: Props) {
             if (progressSeekLockedRef.current) {
               return;
             }
-            queueWebtoonHydration(nextPage, 6);
+            queueWebtoonHydration(nextPage, 3);
             setCurrentPage(Math.max(1, Math.min(nextPage, readerProgressTotal)));
           }}
           ref={webtoonRef}
