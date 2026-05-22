@@ -17,3 +17,5 @@ build-script-cache
 *.macrocall
 .codex
 .codeartsdoer
+.deepseek
+todo.md
