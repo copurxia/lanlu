@@ -47,6 +47,9 @@ public class ArchiveRoutes {
         archives.get("/:id/page", { ctx =>
             ArchiveController.getPage(ctx)
         })
+        archives.head("/:id/page", { ctx =>
+            ArchiveController.getPage(ctx)
+        })
 
         // 删除归档
         archives.delete("/:id", audited("archive.delete", { ctx =>

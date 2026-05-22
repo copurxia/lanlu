@@ -20,8 +20,116 @@ import std.fs.*
 import std.convert.*
 import std.collection.*
 import std.database.sql.*
-import std.io.{ByteBuffer, readToEnd}
+import std.io.{ByteBuffer, InputStream, readToEnd}
 import stdx.encoding.json.stream.*
+
+private class PageEntryBody <: InputStream {
+    private let reader: EntryReader
+    private var remaining: Int64
+    private var skipRemaining: Int64
+    private var closed: Bool = false
+
+    public init(reader: EntryReader, remaining!: Int64 = -1, skipBytes!: Int64 = 0) {
+        this.reader = reader
+        this.remaining = remaining
+        this.skipRemaining = if (skipBytes > 0) { skipBytes } else { 0 }
+        if (this.skipRemaining > 0) {
+            if (reader.seek(this.skipRemaining)) {
+                this.skipRemaining = 0
+            }
+        }
+    }
+
+    public func read(buffer: Array<Byte>): Int64 {
+        if (closed) {
+            return 0
+        }
+        if (!drainSkip()) {
+            return 0
+        }
+        if (remaining == 0) {
+            close()
+            return 0
+        }
+
+        let toRead = if (remaining > 0 && remaining < Int64(buffer.size)) {
+            remaining
+        } else {
+            Int64(buffer.size)
+        }
+
+        let readBuffer = if (toRead < Int64(buffer.size)) {
+            Array<Byte>(toRead, {_ => 0})
+        } else {
+            buffer
+        }
+
+        let bytesRead = reader.read(readBuffer)
+        if (bytesRead <= 0) {
+            close()
+            return 0
+        }
+
+        let sendLen = if (remaining > 0 && bytesRead > remaining) { remaining } else { bytesRead }
+        if (readBuffer.size != buffer.size) {
+            for (i in 0..sendLen) {
+                buffer[i] = readBuffer[i]
+            }
+        }
+
+        if (remaining > 0) {
+            remaining -= sendLen
+        }
+        if (remaining == 0) {
+            close()
+        }
+        return sendLen
+    }
+
+    public func close(): Unit {
+        if (closed) {
+            return
+        }
+        closed = true
+        try {
+            reader.close()
+        } catch (_: Exception) {}
+    }
+
+    private func drainSkip(): Bool {
+        if (skipRemaining <= 0) {
+            return true
+        }
+
+        let skipBuffer = Array<Byte>(8192, {_ => 0})
+        while (skipRemaining > 0) {
+            let toRead = if (skipRemaining > Int64(skipBuffer.size)) { Int64(skipBuffer.size) } else { skipRemaining }
+            let scratch = if (toRead == Int64(skipBuffer.size)) {
+                skipBuffer
+            } else {
+                Array<Byte>(toRead, {_ => 0})
+            }
+            let bytesRead = reader.read(scratch)
+            if (bytesRead <= 0) {
+                close()
+                return false
+            }
+            skipRemaining -= bytesRead
+        }
+        return true
+    }
+}
+
+private func isHttp2Protocol(protocol: String): Bool {
+    let normalized = protocol.trimAscii().toAsciiLower()
+    if (normalized.size == 0) {
+        return false
+    }
+    return normalized == "h2" ||
+        normalized == "h2c" ||
+        normalized.contains("http/2") ||
+        normalized.contains("http2")
+}
 
 public class ArchiveController {
     private static let logger = getLogger("archive_controller")
@@ -862,8 +970,6 @@ public class ArchiveController {
     private static let CHUNKED_THRESHOLD: Int64 = 5 * 1024 * 1024
     // 下载分块大小：1MB
     private static let CHUNK_SIZE: Int64 = 1024 * 1024
-    // 页面流式传输分块大小：256KB
-    private static let PAGE_STREAM_CHUNK_SIZE: Int64 = 256 * 1024
 
     public static func downloadArchive(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
@@ -1116,6 +1222,8 @@ public class ArchiveController {
         let fileSize = reader.getSize()
         let contentType = getContentTypeFromPath(path)
         let etag = CacheUtils.generateETag("${id}-${path}-${fileSize}")
+        let method = ctx.method.trimAscii().toAsciiUpper()
+        let isHeadRequest = method == "HEAD"
 
         // 检查缓存
         if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
@@ -1128,6 +1236,11 @@ public class ArchiveController {
         let rangeHeader = (ctx.header("Range") ?? "").trimAscii()
         let ifRangeHeader = (ctx.header("If-Range") ?? "").trimAscii()
         let (rangeState, rangeStart, rangeEnd) = parseRangeHeader(rangeHeader, fileSize)
+        let effectiveRangeState = if (rangeState > 0 && ifRangeHeader.size > 0 && ifRangeHeader != etag) {
+            0i32
+        } else {
+            rangeState
+        }
         logger.info(
             "serve page request",
             ("arcid", id),
@@ -1141,7 +1254,7 @@ public class ArchiveController {
             ("has_auth_cookie", if ((ctx.header("Cookie") ?? "").contains("auth_token=")) { "true" } else { "false" }),
             ("user_agent", ctx.header("User-Agent") ?? "")
         )
-        if (rangeState < 0) {
+        if (effectiveRangeState < 0) {
             logger.warn(
                 "serve page invalid range",
                 ("arcid", id),
@@ -1151,118 +1264,50 @@ public class ArchiveController {
                 ("file_size", fileSize.toString())
             )
             reader.close()
-            sendRangeNotSatisfiable(ctx, fileSize)
-            return
-        }
-        if (rangeState > 0) {
-            if (ifRangeHeader.size > 0 && ifRangeHeader != etag) {
-                logger.info(
-                    "serve page if-range mismatch, ignoring range",
-                    ("arcid", id),
-                    ("entry_path", path),
-                    ("archive_type", archiveType),
-                    ("range_header", rangeHeader),
-                    ("if_range_header", ifRangeHeader),
-                    ("etag", etag)
-                )
-                sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
-                return
-            }
-            sendWithReaderChunkedRange(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd, id, path, archiveType)
+            sendRangeNotSatisfiable(ctx, fileSize, sendBody: !isHeadRequest)
             return
         }
 
-        // 统一使用流式传输，避免大缓冲区占用内存
-        // 小文件也可以使用流式传输，性能影响可忽略，但能避免内存峰值问题
-        sendWithReaderChunked(ctx, reader, contentType, etag, id, path, archiveType)
+        if (isHeadRequest) {
+            sendPageHeadResponse(ctx, contentType, etag, fileSize, effectiveRangeState, rangeStart, rangeEnd)
+            reader.close()
+            return
+        }
+
+        if (effectiveRangeState > 0) {
+            sendPageRangeResponse(ctx, reader, contentType, etag, fileSize, rangeStart, rangeEnd, id, path, archiveType)
+            return
+        }
+
+        // 将字节流交给框架写出线程，避免在 handler 线程里手写阻塞循环。
+        sendPageStreamResponse(ctx, reader, contentType, etag)
     }
 
     /**
      * 大文件：使用 chunked 流式传输
      */
-    private static func sendWithReaderChunked(
+    private static func sendPageStreamResponse(
         ctx: Ctx,
         reader: EntryReader,
         contentType: String,
-        etag: String,
-        arcid: String,
-        entryPath: String,
-        archiveType: String
+        etag: String
     ): Unit {
-        // 设置响应头（在获取 writer 之前）
+        // 设置响应头（在交给 responseBuilder 之前）
         ctx.setHeader("Content-Type", contentType)
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
-        ctx.status(HttpStatusCode.STATUS_OK)
-        logger.info(
-            "serve page response",
-            ("arcid", arcid),
-            ("entry_path", entryPath),
-            ("archive_type", archiveType),
-            ("status", "200"),
-            ("content_type", contentType),
-            ("range", "none"),
-            ("content_length", "chunked")
-        )
-
-        let writer = ctx.writer()
-
-        // 分块读取并发送
-        let chunkBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
-        try {
-            while (true) {
-                let bytesRead = reader.read(chunkBuffer)
-                if (bytesRead <= 0) {
-                    break
-                }
-
-                if (bytesRead == PAGE_STREAM_CHUNK_SIZE) {
-                    writer.write(chunkBuffer[0..bytesRead])
-                } else {
-                    writer.write(chunkBuffer[0..bytesRead])
-                }
-            }
-        } catch (e: Exception) {
-            if (isClientAbortError(e.message)) {
-                logger.info(
-                    "client aborted page stream",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", "none"),
-                    ("error", e.message)
-                )
-            } else {
-                logger.error(
-                    "failed to stream page data",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", "none"),
-                    ("error", e.message)
-                )
-            }
-        } finally {
-            try {
-                reader.close()
-            } catch (e: Exception) {
-                logger.warn(
-                    "failed to close entry reader",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", "none"),
-                    ("error", e.message)
-                )
-            }
+        if (!isHttp2Protocol(ctx.protocol)) {
+            ctx.setHeader("Transfer-Encoding", "chunked")
         }
+        ctx.status(HttpStatusCode.STATUS_OK)
+        ctx.httpContext().responseBuilder.body(PageEntryBody(reader))
     }
 
     /**
      * Range 请求：按指定区间发送数据（206 Partial Content）
      */
-    private static func sendWithReaderChunkedRange(
+    private static func sendPageRangeResponse(
         ctx: Ctx,
         reader: EntryReader,
         contentType: String,
@@ -1274,35 +1319,13 @@ public class ArchiveController {
         entryPath: String,
         archiveType: String
     ): Unit {
-        let rangeExpr = "bytes ${rangeStart}-${rangeEnd}/${fileSize}"
         let rangeLength = rangeEnd - rangeStart + 1
-        let streamRangeWithoutContentLength = rangeLength > PAGE_STREAM_CHUNK_SIZE
-
-        // 先跳过前置字节；EntryReader 不一定支持 seek，这里用读取丢弃实现
-        if (!skipReaderBytes(reader, rangeStart)) {
-            reader.close()
-            sendRangeNotSatisfiable(ctx, fileSize)
-            return
-        }
-
-        // 小 Range（尤其播放器常用的 bytes=0-0 探测）直接读完整后发送。
-        // 这样响应有明确 Content-Length，且避免一字节响应走 writer 流式路径时被框架当作异常。
-        var eagerBody: Option<Array<Byte>> = None
-        if (rangeLength <= PAGE_STREAM_CHUNK_SIZE) {
-            eagerBody = readExactReaderBytes(reader, rangeLength)
-            if (eagerBody.isNone()) {
-                reader.close()
-                sendRangeNotSatisfiable(ctx, fileSize)
-                return
-            }
-        }
-
-        // 设置响应头（在获取 writer 之前）
         ctx.setHeader("Content-Type", contentType)
         ctx.setHeader("ETag", etag)
         ctx.setHeader("Cache-Control", "private, max-age=3600")
         ctx.setHeader("Accept-Ranges", "bytes")
         ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
+        ctx.setHeader("Content-Length", "${rangeLength}")
         ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
         logger.info(
             "serve page response",
@@ -1311,186 +1334,48 @@ public class ArchiveController {
             ("archive_type", archiveType),
             ("status", "206"),
             ("content_type", contentType),
-            ("range", rangeExpr),
-            ("content_length", if (streamRangeWithoutContentLength) { "chunked" } else { "${rangeLength}" })
+            ("range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}"),
+            ("content_length", "${rangeLength}")
         )
-
-        match (eagerBody) {
-            case Some(body) =>
-                ctx.setHeader("Content-Length", "${rangeLength}")
-                try {
-                    ctx.send(body)
-                } finally {
-                    try {
-                        reader.close()
-                    } catch (e: Exception) {
-                        logger.warn(
-                            "failed to close entry reader",
-                            ("arcid", arcid),
-                            ("entry_path", entryPath),
-                            ("archive_type", archiveType),
-                            ("range", rangeExpr),
-                            ("error", e.message)
-                        )
-                    }
-                }
-                return
-            case None => ()
-        }
-
-        let writer = ctx.writer()
-
-        var remaining = rangeLength
-        let chunkBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
-        try {
-            while (remaining > 0) {
-                let toRead = if (remaining > PAGE_STREAM_CHUNK_SIZE) { PAGE_STREAM_CHUNK_SIZE } else { remaining }
-
-                if (toRead == PAGE_STREAM_CHUNK_SIZE) {
-                    let bytesRead = reader.read(chunkBuffer)
-                    if (bytesRead <= 0) {
-                        break
-                    }
-                    if (bytesRead <= remaining) {
-                        writer.write(chunkBuffer.slice(0, bytesRead))
-                        remaining -= bytesRead
-                    } else {
-                        writer.write(chunkBuffer.slice(0, remaining))
-                        remaining = 0
-                    }
-                } else {
-                    let lastChunk = Array<Byte>(toRead, {_ => 0})
-                    let bytesRead = reader.read(lastChunk)
-                    if (bytesRead <= 0) {
-                        break
-                    }
-                    if (bytesRead <= remaining) {
-                        writer.write(lastChunk.slice(0, bytesRead))
-                        remaining -= bytesRead
-                    } else {
-                        writer.write(lastChunk.slice(0, remaining))
-                        remaining = 0
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            if (isClientAbortError(e.message)) {
-                logger.info(
-                    "client aborted page range stream",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", rangeExpr),
-                    ("error", e.message)
-                )
-            } else {
-                logger.error(
-                    "failed to stream page range data",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", rangeExpr),
-                    ("error", e.message)
-                )
-            }
-        } finally {
-            if (remaining > 0) {
-                logger.warn(
-                    "serve page range stream ended before expected length",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", rangeExpr),
-                    ("expected_length", "${rangeLength}"),
-                    ("remaining", "${remaining}"),
-                    ("written", "${rangeLength - remaining}"),
-                    ("content_length", if (streamRangeWithoutContentLength) { "chunked" } else { "${rangeLength}" })
-                )
-            }
-            try {
-                reader.close()
-            } catch (e: Exception) {
-                logger.warn(
-                    "failed to close entry reader",
-                    ("arcid", arcid),
-                    ("entry_path", entryPath),
-                    ("archive_type", archiveType),
-                    ("range", rangeExpr),
-                    ("error", e.message)
-                )
-            }
-        }
+        ctx.httpContext().responseBuilder.body(PageEntryBody(reader, remaining: rangeLength, skipBytes: rangeStart))
     }
 
-    /**
-     * 精确读取指定字节数。用于小 Range 响应，避免 writer 流式路径处理极小响应。
-     */
-    private static func readExactReaderBytes(reader: EntryReader, byteCount: Int64): Option<Array<Byte>> {
-        if (byteCount < 0 || byteCount > PAGE_STREAM_CHUNK_SIZE) {
-            return None
+    private static func sendPageHeadResponse(
+        ctx: Ctx,
+        contentType: String,
+        etag: String,
+        fileSize: Int64,
+        rangeState: Int32,
+        rangeStart: Int64,
+        rangeEnd: Int64
+    ): Unit {
+        ctx.setHeader("Content-Type", contentType)
+        ctx.setHeader("ETag", etag)
+        ctx.setHeader("Cache-Control", "private, max-age=3600")
+        ctx.setHeader("Accept-Ranges", "bytes")
+        if (rangeState > 0) {
+            let rangeLength = rangeEnd - rangeStart + 1
+            ctx.setHeader("Content-Range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}")
+            ctx.setHeader("Content-Length", "${rangeLength}")
+            ctx.status(HttpStatusCode.STATUS_PARTIAL_CONTENT)
+            logger.info(
+                "serve page response",
+                ("status", "206"),
+                ("content_type", contentType),
+                ("range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}"),
+                ("content_length", "${rangeLength}")
+            )
+            return
         }
-        if (byteCount == 0) {
-            return Some(Array<Byte>(0, {_ => 0}))
-        }
-
-        let out = Array<Byte>(byteCount, {_ => 0})
-        var offset: Int64 = 0
-        while (offset < byteCount) {
-            let remaining = byteCount - offset
-            let tmp = Array<Byte>(remaining, {_ => 0})
-            let bytesRead = reader.read(tmp)
-            if (bytesRead <= 0) {
-                return None
-            }
-            for (i in 0..bytesRead) {
-                out[offset + i] = tmp[i]
-            }
-            offset += bytesRead
-        }
-        return Some(out)
-    }
-
-    /**
-     * 跳过指定字节数（通过读取并丢弃）
-     */
-    private static func skipReaderBytes(reader: EntryReader, skipBytes: Int64): Bool {
-        if (skipBytes <= 0) {
-            return true
-        }
-        if (reader.seek(skipBytes)) {
-            return true
-        }
-        let skipBuffer = Array<Byte>(PAGE_STREAM_CHUNK_SIZE, {_ => 0})
-        var remaining = skipBytes
-        while (remaining > 0) {
-            let toRead = if (remaining > PAGE_STREAM_CHUNK_SIZE) { PAGE_STREAM_CHUNK_SIZE } else { remaining }
-            if (toRead == PAGE_STREAM_CHUNK_SIZE) {
-                let bytesRead = reader.read(skipBuffer)
-                if (bytesRead <= 0) {
-                    return false
-                }
-                remaining -= bytesRead
-            } else {
-                let tmp = Array<Byte>(toRead, {_ => 0})
-                let bytesRead = reader.read(tmp)
-                if (bytesRead <= 0) {
-                    return false
-                }
-                remaining -= bytesRead
-            }
-        }
-        return true
-    }
-
-    private static func isClientAbortError(errorMessage: String): Bool {
-        let normalized = errorMessage.trimAscii().toAsciiLower()
-        if (normalized.size == 0) {
-            return false
-        }
-        return normalized.contains("broken pipe") ||
-               normalized.contains("connection reset") ||
-               normalized.contains("client abort") ||
-               normalized.contains("closed channel")
+        ctx.setHeader("Content-Length", "${fileSize}")
+        ctx.status(HttpStatusCode.STATUS_OK)
+        logger.info(
+            "serve page response",
+            ("status", "200"),
+            ("content_type", contentType),
+            ("range", "none"),
+            ("content_length", "${fileSize}")
+        )
     }
 
     /**
@@ -1575,7 +1460,7 @@ public class ArchiveController {
     /**
      * 返回 416 Range Not Satisfiable
      */
-    private static func sendRangeNotSatisfiable(ctx: Ctx, fileSize: Int64): Unit {
+    private static func sendRangeNotSatisfiable(ctx: Ctx, fileSize: Int64, sendBody!: Bool = true): Unit {
         ctx.status(416)
         ctx.setHeader("Accept-Ranges", "bytes")
         if (fileSize >= 0) {
@@ -1587,7 +1472,9 @@ public class ArchiveController {
             ("status", "416"),
             ("file_size", fileSize.toString())
         )
-        ctx.sendString("")
+        if (sendBody) {
+            ctx.sendString("")
+        }
     }
 
     /**
