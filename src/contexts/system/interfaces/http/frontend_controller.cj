@@ -9,12 +9,17 @@ import lanlu.shared.utils.*
  * 处理前端静态文件服务
  */
 public class FrontendController {
-
     private static func resolveRequestPath(ctx: Ctx): (String, String, String) {
         let path = ctx.paramsOpt("*") ?? ctx.path
-        let cleanPath = if (path.contains("?")) { path.split("?")[0] } else { path }
+        let cleanPath = if (path.contains("?")) {
+            path.split("?")[0]
+        } else {
+            path
+        }
         var relativePath = cleanPath
-        while (relativePath.startsWith("/")) { relativePath = relativePath[1..relativePath.size] }
+        while (relativePath.startsWith("/")) {
+            relativePath = relativePath[1..relativePath.size]
+        }
         (path, cleanPath, relativePath)
     }
 
@@ -27,7 +32,8 @@ public class FrontendController {
         try {
             // 获取并清理路径
             let (path, cleanPath, relativePath) = resolveRequestPath(ctx)
-            println("Request path: ${path}, Clean path: ${cleanPath}, Relative path: ${relativePath}, Base dir: ${baseDir}")
+            println(
+                "Request path: ${path}, Clean path: ${cleanPath}, Relative path: ${relativePath}, Base dir: ${baseDir}")
 
             // 处理根路径
             if (relativePath.isEmpty()) {
@@ -49,7 +55,7 @@ public class FrontendController {
                 let dirPath = relativePath.replace(".txt", "")
                 let txtIndexPath = FileUtils.joinPath(FileUtils.joinPath(baseDir, dirPath), "index.txt")
                 println("Trying React route mapping: ${txtIndexPath}")
-                
+
                 if (exists(txtIndexPath)) {
                     return serveFile(ctx, txtIndexPath)
                 }
@@ -66,9 +72,33 @@ public class FrontendController {
             // 所有尝试都失败，返回404
             println("File not found: ${indexPath}")
             FrontendController.serve404(ctx)
-            
         } catch (ex: Exception) {
             ctx.status(500).sendString("Error serving file: ${ex.message}")
+        }
+    }
+
+    /**
+     * 分块读取文件内容并通过 ctx.writer() 写入响应流。
+     * 替换全量 File.readFrom() 的方式，避免并发请求时产生不必要的内存峰值。
+     * 调用方负责设置 Content-Type / Content-Length 等响应头。
+     */
+    private static func sendFileBody(ctx: Ctx, resolvedPath: String, fileSize: Int64): Unit {
+        let f = File(resolvedPath, OpenMode.Read)
+        try {
+            let writer = ctx.writer()
+            let chunkSize: Int64 = 131072 // 128KB
+            let chunkBuffer = Array<UInt8>(chunkSize, repeat: 0)
+            var remaining = fileSize
+            while (remaining > 0) {
+                let bytesRead = f.read(chunkBuffer)
+                if (bytesRead <= 0) {
+                    break
+                }
+                writer.write(chunkBuffer[0..bytesRead])
+                remaining -= bytesRead
+            }
+        } finally {
+            f.close()
         }
     }
 
@@ -87,12 +117,13 @@ public class FrontendController {
         let (resolvedPath, logicalPath, isBrotli, varyAcceptEncoding) = resolveStaticAssetVariant(ctx, filePath)
         let fileInfo = FileInfo(resolvedPath)
         let fileSize = fileInfo.size
-        let lastModified = fileInfo.lastModificationTime
+        let lastModified = fileInfo.lastModificationTime // 保留用于 ETag 生成
 
-        let bytes = File.readFrom(Path(resolvedPath))
+        // 不再全量读取到内存，由 sendFileBody 流式发送
         let contentType = getContentType(logicalPath)
 
-        let etag = CacheUtils.generateETag("${resolvedPath}:${fileSize}:${lastModified}:${if (isBrotli) { "br" } else { "identity" }}")
+        let etag = CacheUtils.generateETag(
+            "${resolvedPath}:${fileSize}:${lastModified}:${if (isBrotli) { "br" } else { "identity" }}")
 
         if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
             applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, false)
@@ -102,9 +133,9 @@ public class FrontendController {
 
         ctx.status(200)
         applyCacheHeadersByPolicy(ctx, logicalPath, etag)
-        applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, true)
+        applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, false)
         ctx.setHeader("Content-Type", contentType)
-        ctx.send(bytes)
+        sendFileBody(ctx, resolvedPath, fileSize)
     }
 
     /**
@@ -116,10 +147,11 @@ public class FrontendController {
             // 尝试使用自定义404页面
             let custom404Path = "${baseDir}/404/index.html"
             if (exists(custom404Path)) {
-                let bytes = File.readFrom(Path(custom404Path))
+                let fileInfo = FileInfo(custom404Path)
                 CacheUtils.setNoCacheHeaders(ctx)
                 ctx.setHeader("Content-Type", "text/html; charset=utf-8")
-                ctx.status(404).send(bytes)
+                ctx.status(404)
+                sendFileBody(ctx, custom404Path, fileInfo.size)
                 return
             }
 
@@ -198,12 +230,8 @@ public class FrontendController {
 
     private static func isBrotliNegotiableTextAsset(filePath: String): Bool {
         let normalized = filePath.trimAscii().toAsciiLower()
-        return normalized.endsWith(".html") ||
-            normalized.endsWith(".txt") ||
-            normalized.endsWith(".json") ||
-            normalized.endsWith(".css") ||
-            normalized.endsWith(".js") ||
-            normalized.endsWith(".svg") ||
+        return normalized.endsWith(".html") || normalized.endsWith(".txt") || normalized.endsWith(".json") ||
+            normalized.endsWith(".css") || normalized.endsWith(".js") || normalized.endsWith(".svg") ||
             normalized.endsWith(".webmanifest")
     }
 
@@ -311,7 +339,8 @@ public class FrontendController {
         try {
             // 获取并清理路径
             let (path, cleanPath, relativePath) = resolveRequestPath(ctx)
-            println("HEAD Request path: ${path}, Clean path: ${cleanPath}, Relative path: ${relativePath}, Base dir: ${baseDir}")
+            println(
+                "HEAD Request path: ${path}, Clean path: ${cleanPath}, Relative path: ${relativePath}, Base dir: ${baseDir}")
 
             // 处理根路径
             if (relativePath.isEmpty()) {
@@ -350,7 +379,6 @@ public class FrontendController {
             // 所有尝试都失败，返回404
             println("HEAD Request file not found: ${indexPath}")
             FrontendController.serve404Head(ctx)
-
         } catch (ex: Exception) {
             ctx.status(500).sendString("Error serving file: ${ex.message}")
         }
@@ -375,7 +403,8 @@ public class FrontendController {
         let lastModified = fileInfo.lastModificationTime
         let contentType = getContentType(logicalPath)
 
-        let etag = CacheUtils.generateETag("${resolvedPath}:${fileSize}:${lastModified}:${if (isBrotli) { "br" } else { "identity" }}")
+        let etag = CacheUtils.generateETag(
+            "${resolvedPath}:${fileSize}:${lastModified}:${if (isBrotli) { "br" } else { "identity" }}")
 
         if (CacheUtils.checkIfNoneMatch(ctx, etag)) {
             applyVariantHeaders(ctx, isBrotli, varyAcceptEncoding, fileSize, false)
@@ -410,7 +439,7 @@ public class FrontendController {
             CacheUtils.setNoCacheHeaders(ctx)
             ctx.setHeader("Content-Type", "text/plain; charset=utf-8")
             ctx.status(404)
-            // HEAD 请求不返回内容
+        // HEAD 请求不返回内容
         } catch (ex: Exception) {
             CacheUtils.setNoCacheHeaders(ctx)
             ctx.setHeader("Content-Type", "text/plain; charset=utf-8")

@@ -22,7 +22,11 @@ public class AssetController {
                 ResponseView.json(ctx, ApiResponse<String>(400, "invalid asset id", None))
                 return
         }
-        let id = try { Int64.parse(idStr) } catch (_: Exception) { 0 }
+        let id = try {
+            Int64.parse(idStr)
+        } catch (_: Exception) {
+            0
+        }
         if (id <= 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
             ResponseView.json(ctx, ApiResponse<String>(400, "invalid asset id", None))
@@ -37,7 +41,11 @@ public class AssetController {
         }
 
         let assetRoot = SystemSettingsService.getPath("ASSET_PATH")
-        let ext = if (asset.fileExt.size > 0) { asset.fileExt } else { "bin" }
+        let ext = if (asset.fileExt.size > 0) {
+            asset.fileExt
+        } else {
+            "bin"
+        }
         let filePath = FileUtils.joinPath(assetRoot, "${asset.id}.${ext}")
 
         if (!exists(Path(filePath))) {
@@ -56,37 +64,30 @@ public class AssetController {
             }
 
             CacheUtils.setStaticCacheHeaders(ctx, etag)
-            let ct = if (asset.contentType.size > 0) { asset.contentType } else { "application/octet-stream" }
+            let ct = if (asset.contentType.size > 0) {
+                asset.contentType
+            } else {
+                "application/octet-stream"
+            }
             ctx.setHeader("Content-Type", ct)
             ctx.status(HttpStatusCode.STATUS_OK)
 
-            // 流式发送：分块读取文件并写入响应流，避免大文件 OOM
-            let streamThreshold: Int64 = 2 * 1024 * 1024 // 2MB
-            if (fileSize <= streamThreshold) {
-                // 小文件直接全量读取
-                let bytes = File.readFrom(Path(filePath))
-                ctx.setHeader("Content-Length", fileSize.toString())
-                ctx.send(bytes)
-            } else {
-                // 大文件流式发送
-                ctx.setHeader("Content-Length", fileSize.toString())
-                let writer = ctx.writer()
-                let f = File(filePath, OpenMode.Read)
+            // 统一流式发送：分块读取文件并写入响应流，避免 OOM
+            let writer = ctx.writer()
+            let f = File(filePath, OpenMode.Read)
+            try {
                 let chunkBufSize: Int64 = 131072 // 128KB
-                var remaining = fileSize
                 let chunkBuffer = Array<UInt8>(chunkBufSize, repeat: 0)
+                var remaining = fileSize
                 while (remaining > 0) {
                     let bytesRead = f.read(chunkBuffer)
                     if (bytesRead <= 0) {
                         break
                     }
-                    if (bytesRead == chunkBufSize) {
-                        writer.write(chunkBuffer[0..bytesRead])
-                    } else {
-                        writer.write(chunkBuffer[0..bytesRead])
-                    }
+                    writer.write(chunkBuffer[0..bytesRead])
                     remaining -= bytesRead
                 }
+            } finally {
                 f.close()
             }
         } catch (e: Exception) {
@@ -94,5 +95,4 @@ public class AssetController {
             ResponseView.json(ctx, ApiResponse<String>(500, e.message, None))
         }
     }
-
 }

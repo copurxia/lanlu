@@ -32,7 +32,11 @@ private class PageEntryBody <: InputStream {
     public init(reader: EntryReader, remaining!: Int64 = -1, skipBytes!: Int64 = 0) {
         this.reader = reader
         this.remaining = remaining
-        this.skipRemaining = if (skipBytes > 0) { skipBytes } else { 0 }
+        this.skipRemaining = if (skipBytes > 0) {
+            skipBytes
+        } else {
+            0
+        }
         if (this.skipRemaining > 0) {
             if (reader.seek(this.skipRemaining)) {
                 this.skipRemaining = 0
@@ -70,7 +74,11 @@ private class PageEntryBody <: InputStream {
             return 0
         }
 
-        let sendLen = if (remaining > 0 && bytesRead > remaining) { remaining } else { bytesRead }
+        let sendLen = if (remaining > 0 && bytesRead > remaining) {
+            remaining
+        } else {
+            bytesRead
+        }
         if (readBuffer.size != buffer.size) {
             for (i in 0..sendLen) {
                 buffer[i] = readBuffer[i]
@@ -103,7 +111,11 @@ private class PageEntryBody <: InputStream {
 
         let skipBuffer = Array<Byte>(8192, {_ => 0})
         while (skipRemaining > 0) {
-            let toRead = if (skipRemaining > Int64(skipBuffer.size)) { Int64(skipBuffer.size) } else { skipRemaining }
+            let toRead = if (skipRemaining > Int64(skipBuffer.size)) {
+                Int64(skipBuffer.size)
+            } else {
+                skipRemaining
+            }
             let scratch = if (toRead == Int64(skipBuffer.size)) {
                 skipBuffer
             } else {
@@ -125,10 +137,7 @@ private func isHttp2Protocol(protocol: String): Bool {
     if (normalized.size == 0) {
         return false
     }
-    return normalized == "h2" ||
-        normalized == "h2c" ||
-        normalized.contains("http/2") ||
-        normalized.contains("http2")
+    return normalized == "h2" || normalized == "h2c" || normalized.contains("http/2") || normalized.contains("http2")
 }
 
 public class ArchiveController {
@@ -136,7 +145,11 @@ public class ArchiveController {
 
     private static func writeArchiveAssetsJson(w: JsonWriter, assetsRaw: String): Unit {
         let raw = assetsRaw.trimAscii()
-        let normalized = if (raw.size > 0) { raw } else { "{}" }
+        let normalized = if (raw.size > 0) {
+            raw
+        } else {
+            "{}"
+        }
         w.writeName("assets").jsonValue(normalized)
     }
 
@@ -221,9 +234,15 @@ public class ArchiveController {
 
         var stem = normalized.trimAscii().toAsciiLower()
         let suffixes: Array<String> = [
-            "-thumb", "_thumb", ".thumb",
-            "-poster", "_poster", ".poster",
-            "-cover", "_cover", ".cover"
+            "-thumb",
+            "_thumb",
+            ".thumb",
+            "-poster",
+            "_poster",
+            ".poster",
+            "-cover",
+            "_cover",
+            ".cover"
         ]
         for (suffix in suffixes) {
             if (stem.endsWith(suffix) && stem.size > suffix.size) {
@@ -239,12 +258,22 @@ public class ArchiveController {
         if (raw.size == 0) {
             return 0
         }
-        let parsed = try { Int32.parse(raw) } catch (_: Exception) { 0i32 }
-        return if (parsed > 0i32) { parsed } else { 0i32 }
+        let parsed = try {
+            Int32.parse(raw)
+        } catch (_: Exception) {
+            0i32
+        }
+        return if (parsed > 0i32) {
+            parsed
+        } else {
+            0i32
+        }
     }
 
     private static func resolveArchiveFileType(archiveType: String, href: String): String {
-        if (ArchiveType.fromDb(archiveType).defaultFileType() == "html") { return "html" }
+        if (ArchiveType.fromDb(archiveType).defaultFileType() == "html") {
+            return "html"
+        }
         if (ArchiveUtils.isVideoFile(href)) {
             return "video"
         }
@@ -301,8 +330,16 @@ public class ArchiveController {
                 continue
             }
 
-            let seasonNo = try { Int64.parse(seasonDigits) } catch (_: Exception) { 0i64 }
-            let episodeNo = try { Int64.parse(episodeDigits) } catch (_: Exception) { 0i64 }
+            let seasonNo = try {
+                Int64.parse(seasonDigits)
+            } catch (_: Exception) {
+                0i64
+            }
+            let episodeNo = try {
+                Int64.parse(episodeDigits)
+            } catch (_: Exception) {
+                0i64
+            }
             if (seasonNo <= 0 || episodeNo <= 0) {
                 continue
             }
@@ -411,7 +448,6 @@ public class ArchiveController {
             return
         }
 
-
         var progress: Int32 = 0i32
         var isNew = false
         var isFavorite = false
@@ -440,7 +476,11 @@ public class ArchiveController {
             lang: lang
         )
         if (!okMetadata) {
-            let err = if (metadataErr.trimAscii().size > 0) { metadataErr } else { "Failed to build archive metadata" }
+            let err = if (metadataErr.trimAscii().size > 0) {
+                metadataErr
+            } else {
+                "Failed to build archive metadata"
+            }
             if (err == "Archive not found") {
                 ctx.status(HttpStatusCode.STATUS_NOT_FOUND)
             } else {
@@ -457,7 +497,8 @@ public class ArchiveController {
         let arcid = ctx.paramsOpt("id") ?? ""
         if (arcid.size == 0) {
             ctx.status(HttpStatusCode.STATUS_BAD_REQUEST)
-            ResponseView.json(ctx, "{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
+            ResponseView.json(ctx,
+                "{\"error\":\"No archive ID specified.\",\"operation\":\"get_archive_tankoubons\",\"success\":0}")
             return
         }
 
@@ -469,10 +510,9 @@ public class ArchiveController {
 
         // 查询收藏状态（登录用户）
         match (userIdOpt) {
-            case Some(userId) =>
-                for (i in 0..tankoubons.size) {
-                    tankoubons[i].isfavorite = UserTankoubonFavoriteDao.isFavorite(userId, tankoubons[i].id)
-                }
+            case Some(userId) => for (i in 0..tankoubons.size) {
+                tankoubons[i].isfavorite = UserTankoubonFavoriteDao.isFavorite(userId, tankoubons[i].id)
+            }
             case None => ()
         }
 
@@ -491,7 +531,7 @@ public class ArchiveController {
         w.flush()
         ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
     }
-    
+
     // PUT /api/archives/{id}/metadata
     public static func updateMetadata(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
@@ -538,7 +578,7 @@ public class ArchiveController {
 
         ResponseView.json(ctx, "{\"operation\":\"update_metadata\",\"success\":1}")
     }
-    
+
     // GET /api/archives/{id}/files
     public static func getFiles(ctx: Ctx): Unit {
         let id = ctx.paramsOpt("id") ?? ""
@@ -565,8 +605,16 @@ public class ArchiveController {
         let includeMetadata = includeMetadataRaw != "false" && includeMetadataRaw != "0"
         let limit = parsePositiveIntQuery(ctx, "limit")
         let offsetRaw = (ctx.query("offset") ?? "").trimAscii()
-        let offsetParsed = try { Int32.parse(offsetRaw) } catch (_: Exception) { 0i32 }
-        let offset = if (offsetParsed > 0i32) { offsetParsed } else { 0i32 }
+        let offsetParsed = try {
+            Int32.parse(offsetRaw)
+        } catch (_: Exception) {
+            0i32
+        }
+        let offset = if (offsetParsed > 0i32) {
+            offsetParsed
+        } else {
+            0i32
+        }
 
         // 检查归档是否存在
         let archive = ArchiveDao.getArchiveById(id)
@@ -706,9 +754,8 @@ public class ArchiveController {
                         continue
                     }
                     let item = withSort[idx]
-                    if (!found ||
-                        item.sortIndex < bestSort ||
-                        (item.sortIndex == bestSort && item.originalIndex < bestOrder)) {
+                    if (!found || item.sortIndex < bestSort || (item.sortIndex == bestSort && item.originalIndex <
+                        bestOrder)) {
                         found = true
                         bestIdx = idx
                         bestSort = item.sortIndex
@@ -737,7 +784,11 @@ public class ArchiveController {
         var groupedPageFiles = ArrayList<ArchiveFilesPageGroup>()
         var groupedIndexByKey = HashMap<String, Int64>()
         let offsetInt = Int64(offset)
-        let endExclusive = if (limit > 0i32) { Int64(offset + limit) } else { Int64(filteredPageFiles.size) }
+        let endExclusive = if (limit > 0i32) {
+            Int64(offset + limit)
+        } else {
+            Int64(filteredPageFiles.size)
+        }
         for (i in 0..filteredPageFiles.size) {
             let item = filteredPageFiles[i]
             let groupKey = extractGroupKey(item)
@@ -802,7 +853,11 @@ public class ArchiveController {
             }
 
             w.startObject()
-            w.writeName("id").writeValue(if (group.groupKey.size > 0) { group.groupKey } else { item.href })
+            w.writeName("id").writeValue(if (group.groupKey.size > 0) {
+                group.groupKey
+            } else {
+                item.href
+            })
             w.writeName("type").writeValue(fileType)
             w.writeName("title").writeValue(title)
             if (group.groupKey.size > 0) {
@@ -896,12 +951,11 @@ public class ArchiveController {
                 // because getArchiveBasePath() queries the archives table.
                 let rootAssetIds = HashSet<Int64>()
                 match (MetadataDao.getMetadataObject("archive", id)) {
-                    case Some(metadata) =>
-                        for (asset in metadata.assets) {
-                            if (asset.asset_id > 0) {
-                                rootAssetIds.add(asset.asset_id)
-                            }
+                    case Some(metadata) => for (asset in metadata.assets) {
+                        if (asset.asset_id > 0) {
+                            rootAssetIds.add(asset.asset_id)
                         }
+                    }
                     case None => ()
                 }
                 let coverAssetId = ArchiveDao.getCoverAssetId(id)
@@ -944,12 +998,15 @@ public class ArchiveController {
                                 "${archivePath}/${archive.filename}"
                             }
                             remove(Path(fullArchivePath))
-                            getLogger("archive_controller").info("Deleted archive file", ("path", fullArchivePath), ("arcid", id))
+                            getLogger("archive_controller").info("Deleted archive file", ("path", fullArchivePath),
+                                ("arcid", id))
                         } else {
-                            getLogger("archive_controller").warn("Archive path is empty, skipping file deletion", ("arcid", id), ("filename", archive.filename))
+                            getLogger("archive_controller").warn("Archive path is empty, skipping file deletion",
+                                ("arcid", id), ("filename", archive.filename))
                         }
                     } catch (e: Exception) {
-                        getLogger("archive_controller").warn("Failed to delete archive file", ("arcid", id), ("error", e.message))
+                        getLogger("archive_controller").warn("Failed to delete archive file", ("arcid", id),
+                            ("error", e.message))
                     }
                 }
 
@@ -961,13 +1018,11 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                     ResponseView.json(ctx, errorResponse)
                 }
-            case None => return  // requireAdmin 已经设置了错误响应
+            case None => return // requireAdmin 已经设置了错误响应
         }
     }
 
     // GET /api/archives/{id}/download
-    // 大文件阈值：5MB
-    private static let CHUNKED_THRESHOLD: Int64 = 5 * 1024 * 1024
     // 下载分块大小：1MB
     private static let CHUNK_SIZE: Int64 = 1024 * 1024
 
@@ -1013,14 +1068,8 @@ public class ArchiveController {
             let fileInfo = file.info
             let fileSize = fileInfo.size
 
-            // 根据文件大小选择传输方式
-            if (fileSize > CHUNKED_THRESHOLD) {
-                // 大文件：使用 chunked 分块传输
-                downloadArchiveChunked(ctx, file, fileSize, archive.filename)
-            } else {
-                // 小文件：一次性读取返回
-                downloadArchiveSmall(ctx, file, fileSize, archive.filename)
-            }
+            // 统一使用分块流式传输，避免一次性分配 fileSize 大小的 buffer
+            downloadArchiveChunked(ctx, file, fileSize, archive.filename)
         } catch (e: Exception) {
             let errorResponse = "{\"operation\":\"download_archive\",\"error\":\"Failed to read archive file: ${e.message}\",\"success\":0}"
             ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
@@ -1029,67 +1078,31 @@ public class ArchiveController {
     }
 
     /**
-     * 小文件下载：一次性读取到内存返回
-     */
-    private static func downloadArchiveSmall(ctx: Ctx, file: File, fileSize: Int64, filename: String): Unit {
-        let buffer = Array<Byte>(fileSize, {_ => 0})
-        file.read(buffer)
-        file.close()
-
-        // 设置响应头
-        ctx.setHeader("Content-Type", "application/octet-stream")
-        ctx.setHeader("Content-Disposition", "attachment; filename=\"${filename}\"")
-        ctx.setHeader("Content-Length", "${fileSize}")
-        ctx.status(HttpStatusCode.STATUS_OK)
-
-        // 返回文件内容
-        ctx.send(buffer)
-    }
-
-    /**
-     * 大文件下载：使用 chunked 分块传输，流式读取不占用大量内存
+     * 统一流式下载：分块读取文件并写入响应流，避免一次性分配大 buffer。
+     * 文件句柄通过 try/finally 确保异常路径也能关闭。
      */
     private static func downloadArchiveChunked(ctx: Ctx, file: File, fileSize: Int64, filename: String): Unit {
-        // 设置响应头（在获取 writer 之前设置）
         ctx.setHeader("Content-Type", "application/octet-stream")
         ctx.setHeader("Content-Disposition", "attachment; filename=\"${filename}\"")
         ctx.status(HttpStatusCode.STATUS_OK)
 
-        // 获取 writer
         let writer = ctx.writer()
 
-        // 分块读取并发送
         var remaining = fileSize
         let chunkBuffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
 
-        while (remaining > 0) {
-            let toRead = if (remaining > CHUNK_SIZE) { CHUNK_SIZE } else { remaining }
-
-            // 读取一块数据
-            if (toRead == CHUNK_SIZE) {
-                // 完整块，直接使用预分配的 buffer
+        try {
+            while (remaining > 0) {
                 let bytesRead = file.read(chunkBuffer)
-                if (bytesRead > 0) {
-                    writer.write(chunkBuffer[0..bytesRead])
-                    remaining -= bytesRead
-                } else {
+                if (bytesRead <= 0) {
                     break
                 }
-            } else {
-                // 最后一块，可能不足 CHUNK_SIZE
-                let lastBuffer = Array<Byte>(toRead, {_ => 0})
-                let bytesRead = file.read(lastBuffer)
-                if (bytesRead > 0) {
-                    writer.write(lastBuffer[0..bytesRead])
-                    remaining -= bytesRead
-                } else {
-                    break
-                }
+                writer.write(chunkBuffer[0..bytesRead])
+                remaining -= bytesRead
             }
+        } finally {
+            file.close()
         }
-
-        // 关闭文件
-        file.close()
     }
 
     // GET /api/archives/{id}/page?path=...
@@ -1179,7 +1192,8 @@ public class ArchiveController {
                         )
                         CacheUtils.setNoCacheHeaders(ctx)
                         ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
-                        ResponseView.json(ctx, "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
+                        ResponseView.json(ctx,
+                            "{\"operation\":\"serve_page\",\"error\":\"Reader is null\",\"success\":0}")
                 }
             } else {
                 logger.error(
@@ -1250,8 +1264,16 @@ public class ArchiveController {
             ("file_size", fileSize.toString()),
             ("range_header", rangeHeader),
             ("if_range_header", ifRangeHeader),
-            ("has_authorization", if ((ctx.header("Authorization") ?? "").trimAscii().size > 0) { "true" } else { "false" }),
-            ("has_auth_cookie", if ((ctx.header("Cookie") ?? "").contains("auth_token=")) { "true" } else { "false" }),
+            ("has_authorization", if ((ctx.header("Authorization") ?? "").trimAscii().size > 0) {
+                    "true"
+                } else {
+                    "false"
+                }),
+            ("has_auth_cookie", if ((ctx.header("Cookie") ?? "").contains("auth_token=")) {
+                    "true"
+                } else {
+                    "false"
+                }),
             ("user_agent", ctx.header("User-Agent") ?? "")
         )
         if (effectiveRangeState < 0) {
@@ -1422,7 +1444,11 @@ public class ArchiveController {
                     if (suffixLen <= 0) {
                         return (-1i32, 0i64, 0i64)
                     }
-                    let start = if (suffixLen >= fileSize) { 0i64 } else { fileSize - suffixLen }
+                    let start = if (suffixLen >= fileSize) {
+                        0i64
+                    } else {
+                        fileSize - suffixLen
+                    }
                     return (1i32, start, fileSize - 1)
                 }
 
@@ -1452,8 +1478,7 @@ public class ArchiveController {
                     }
                 }
                 return (1i32, start, end)
-            case None =>
-                return (-1i32, 0i64, 0i64)
+            case None => return (-1i32, 0i64, 0i64)
         }
     }
 
@@ -1548,27 +1573,28 @@ public class ArchiveController {
     private static func getArchiveInternalId(arcid: String): Int64 {
         let connOpt = DatabaseConfig.createConnection()
         match (connOpt) {
-            case Some(conn) =>
+            case Some(conn) => try {
+                let stmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
                 try {
-                    let stmt = conn.prepareStatement("SELECT id FROM archives WHERE arcid = ?")
+                    stmt.set(0, arcid)
+                    let rs = stmt.query()
                     try {
-                        stmt.set(0, arcid)
-                        let rs = stmt.query()
-                        try {
-                            if (rs.next()) {
-                                return rs.getOrNull<Int64>(0) ?? 0
-                            }
-                        } finally {
-                            rs.close()
+                        if (rs.next()) {
+                            return rs.getOrNull<Int64>(0) ?? 0
                         }
                     } finally {
-                        stmt.close()
+                        rs.close()
                     }
-                } catch (_: Exception) {
-                    return 0
                 } finally {
-                    try { conn.close() } catch (_: Exception) {}
+                    stmt.close()
                 }
+            } catch (_: Exception) {
+                return 0
+            } finally {
+                try {
+                    conn.close()
+                } catch (_: Exception) {}
+            }
             case None => return 0
         }
         return 0
@@ -1621,7 +1647,7 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                     ResponseView.json(ctx, errorResponse)
                 }
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1672,7 +1698,7 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                     ResponseView.json(ctx, errorResponse)
                 }
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1748,7 +1774,7 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                     ResponseView.json(ctx, errorResponse)
                 }
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1798,7 +1824,7 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                     ResponseView.json(ctx, errorResponse)
                 }
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1839,7 +1865,7 @@ public class ArchiveController {
                     ctx.status(HttpStatusCode.STATUS_INTERNAL_SERVER_ERROR)
                     ResponseView.json(ctx, errorResponse)
                 }
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1866,7 +1892,7 @@ public class ArchiveController {
 
                 let result = "{\"operation\":\"get_favorites\",\"favorites\":${arcidsJson},\"success\":1}"
                 ResponseView.json(ctx, result)
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1883,12 +1909,20 @@ public class ArchiveController {
                 let countParam = ctx.query("count")
 
                 let start = match (startParam) {
-                    case Some(s) => try { Int32.parse(s) } catch (_: Exception) { 0i32 }
+                    case Some(s) => try {
+                        Int32.parse(s)
+                    } catch (_: Exception) {
+                        0i32
+                    }
                     case None => 0i32
                 }
 
                 let count = match (countParam) {
-                    case Some(c) => try { Int32.parse(c) } catch (_: Exception) { 100i32 }
+                    case Some(c) => try {
+                        Int32.parse(c)
+                    } catch (_: Exception) {
+                        100i32
+                    }
                     case None => 100i32
                 }
 
@@ -1910,7 +1944,11 @@ public class ArchiveController {
                 w.startArray()
                 for (archive in archives) {
                     let archiveIdInt = getArchiveInternalId(archive.id)
-                    let isNew = if (archiveIdInt > 0) { UserArchiveStatusDao.isNew(userId, archiveIdInt) } else { true }
+                    let isNew = if (archiveIdInt > 0) {
+                        UserArchiveStatusDao.isNew(userId, archiveIdInt)
+                    } else {
+                        true
+                    }
 
                     w.startObject()
                     w.writeName("arcid").writeValue(archive.id)
@@ -1942,7 +1980,7 @@ public class ArchiveController {
                 w.endObject()
                 w.flush()
                 ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 
@@ -1959,12 +1997,20 @@ public class ArchiveController {
                 let countParam = ctx.query("count")
 
                 let start = match (startParam) {
-                    case Some(s) => try { Int32.parse(s) } catch (_: Exception) { 0i32 }
+                    case Some(s) => try {
+                        Int32.parse(s)
+                    } catch (_: Exception) {
+                        0i32
+                    }
                     case None => 0i32
                 }
 
                 let count = match (countParam) {
-                    case Some(c) => try { Int32.parse(c) } catch (_: Exception) { 100i32 }
+                    case Some(c) => try {
+                        Int32.parse(c)
+                    } catch (_: Exception) {
+                        100i32
+                    }
                     case None => 100i32
                 }
 
@@ -1986,7 +2032,11 @@ public class ArchiveController {
                 w.startArray()
                 for (archive in archives) {
                     let archiveIdInt = getArchiveInternalId(archive.id)
-                    let isFavorite = if (archiveIdInt > 0) { UserFavoriteDao.isFavorite(userId, archiveIdInt) } else { false }
+                    let isFavorite = if (archiveIdInt > 0) {
+                        UserFavoriteDao.isFavorite(userId, archiveIdInt)
+                    } else {
+                        false
+                    }
 
                     w.startObject()
                     w.writeName("arcid").writeValue(archive.id)
@@ -2018,7 +2068,7 @@ public class ArchiveController {
                 w.endObject()
                 w.flush()
                 ResponseView.json(ctx, String.fromUtf8(readToEnd(out)))
-            case None => return  // requireUser 已经设置了错误响应
+            case None => return // requireUser 已经设置了错误响应
         }
     }
 }
