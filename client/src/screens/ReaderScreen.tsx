@@ -963,16 +963,21 @@ export function ReaderScreen({route, navigation}: Props) {
         effectiveType === 'html' && path && authorized.uri
           ? await createProxiedPageUrl(authorized.uri, path, authorized.headers)
           : undefined;
+      const proxiedImageUri =
+        effectiveType === 'image' && authorized.uri
+          ? await createProxiedMediaUrl(authorized.uri, authorized.headers)
+          : undefined;
       const displayMetadata = source?.metadata || page.metadata;
       const thumbnailPath =
         displayMetadata?.thumb?.trim() ||
         assetPath(displayMetadata?.thumb_asset_id) ||
         (effectiveType === 'image' ? url : '');
+      const imageUri = proxiedImageUri || authorized.uri;
       const imageSource =
-        effectiveType === 'image' && authorized.uri
+        effectiveType === 'image' && imageUri
           ? {
-              uri: authorized.uri,
-              ...(authorized.headers ? {headers: authorized.headers} : {}),
+              uri: imageUri,
+              ...(!proxiedImageUri && authorized.headers ? {headers: authorized.headers} : {}),
               cache: FastImage.cacheControl.immutable,
               priority,
             }
