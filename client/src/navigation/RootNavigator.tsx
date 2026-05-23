@@ -9,7 +9,7 @@ import {Animated, PanResponder, Pressable, StyleSheet, Text, TouchableOpacity, V
 import {enableScreens} from 'react-native-screens';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {BlurView} from '@sbaiahmed1/react-native-blur';
-import {Heart, Home, Settings} from 'lucide-react-native';
+import {Heart, Home, Settings, Upload} from 'lucide-react-native';
 
 import {useAuth} from '../auth/AuthContext';
 import {ScreenState} from '../components/ScreenState';
@@ -42,9 +42,10 @@ import {UserSettingsScreen} from '../screens/UserSettingsScreen';
 import {useI18n} from '../i18n';
 import {useTheme} from '../theme/ThemeContext';
 import type {MainTabParamList, RootStackParamList} from './types';
+import {UploadScreen} from '../screens/UploadScreen';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const TAB_NAMES = ['Home', 'Favorites', 'Settings'];
+const TAB_NAMES = ['Home', 'Favorites', 'Upload', 'Settings'];
 const Tabs = createBottomTabNavigator<MainTabParamList>();
 const navigationRef = createNavigationContainerRef<RootStackParamList>();
 const contentSlideAnim = new Animated.Value(0);
@@ -61,6 +62,10 @@ function FavoritesTabIcon({color, size}: {color: string; size: number}) {
 
 function SettingsTabIcon({color, size}: {color: string; size: number}) {
   return <Settings color={color} size={size} />;
+}
+
+function UploadTabIcon({color, size}: {color: string; size: number}) {
+  return <Upload color={color} size={size} />;
 }
 
 function BlurTabBarBackground() {
@@ -92,7 +97,12 @@ function StaticTabButton({
 function MainTabs() {
   const {t} = useI18n();
   const {colors} = useTheme();
+  const {user} = useAuth();
   const insets = useSafeAreaInsets();
+  const tabNames = useMemo(
+    () => (user?.isAdmin ? ['Home', 'Favorites', 'Upload', 'Settings'] : ['Home', 'Favorites', 'Settings']),
+    [user?.isAdmin],
+  );
   const activeTab = useNavigationState(state => {
     const mainRoute = state.routes.find(r => r.name === 'Main');
     return (mainRoute?.state as any)?.index ?? 0;
@@ -129,8 +139,8 @@ function MainTabs() {
 
   const handleTabPress = useCallback((index: number) => {
     if (index === activeTab) return;
-    navigationRef.navigate('Main' as never, {screen: TAB_NAMES[index]} as never);
-  }, [activeTab]);
+    navigationRef.navigate('Main' as never, {screen: tabNames[index]} as never);
+  }, [activeTab, tabNames]);
 
   const tabsContent = (
     <Tabs.Navigator
@@ -155,6 +165,15 @@ function MainTabs() {
         }}
       />
       <Tabs.Screen
+        name="Upload"
+        component={UploadScreen}
+        options={{
+          title: t('tabs.upload'),
+          tabBarLabel: t('tabs.upload'),
+          tabBarIcon: UploadTabIcon,
+        }}
+      />
+      <Tabs.Screen
         name="Settings"
         component={SettingsScreen}
         options={{
@@ -173,16 +192,17 @@ function MainTabs() {
       </Animated.View>
       <View style={[styles.tabBar, {paddingBottom: insets.bottom}]}>
         <BlurTabBarBackground />
-        {TAB_NAMES.map((name, index) => (
+        {tabNames.map((name, index) => (
           <Pressable
             key={name}
             onPress={() => handleTabPress(index)}
             style={styles.tabItem}>
-            {index === 0 && <Home color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
-            {index === 1 && <Heart color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
-            {index === 2 && <Settings color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            {name === 'Home' && <Home color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            {name === 'Favorites' && <Heart color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            {name === 'Upload' && <Upload color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
+            {name === 'Settings' && <Settings color={index === activeTab ? colors.primary : colors.textMuted} size={24} />}
             <Text style={[styles.tabLabel, {color: index === activeTab ? colors.primary : colors.textMuted}]}>
-              {index === 0 ? t('tabs.home') : index === 1 ? t('tabs.favorites') : t('tabs.settings')}
+              {name === 'Home' ? t('tabs.home') : name === 'Favorites' ? t('tabs.favorites') : name === 'Upload' ? t('tabs.upload') : t('tabs.settings')}
             </Text>
           </Pressable>
         ))}

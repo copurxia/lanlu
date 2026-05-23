@@ -6,6 +6,13 @@ type LanluMediaProxyModule = {
   setSystemBarsHidden?: (hidden: boolean, edgeToEdge: boolean) => void;
   shareTextFile?: (extension: string, fileName: string, text: string, title: string) => Promise<string>;
   writeTextFile?: (extension: string, text: string) => Promise<string>;
+  uploadFileChunk?: (
+    sourceUri: string,
+    targetUrl: string,
+    headers: Record<string, string> | undefined,
+    start: number,
+    length: number,
+  ) => Promise<string>;
 };
 
 const nativeProxy = NativeModules.LanluMediaProxy as LanluMediaProxyModule | undefined;
@@ -53,4 +60,18 @@ export async function shareLocalTextFile(
 export function setSystemBarsHidden(hidden: boolean, edgeToEdge = true) {
   if (Platform.OS !== 'android' || !nativeProxy?.setSystemBarsHidden) return;
   nativeProxy.setSystemBarsHidden(hidden, edgeToEdge);
+}
+
+export async function uploadLocalFileChunk(
+  sourceUri: string,
+  targetUrl: string,
+  headers: Record<string, string> | undefined,
+  start: number,
+  length: number,
+) {
+  if (Platform.OS !== 'android' || !nativeProxy?.uploadFileChunk) {
+    return false;
+  }
+  await nativeProxy.uploadFileChunk(sourceUri, targetUrl, headers, start, length);
+  return true;
 }

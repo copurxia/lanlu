@@ -17,6 +17,7 @@ export type Archive = {
   filename: string;
   description: string;
   tags: string;
+  relative_path?: string;
   release_at?: string;
   created_at?: string;
   updated_at?: string;

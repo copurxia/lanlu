@@ -38,6 +38,8 @@ import {ArchiveDetailActions} from './archive-detail/ArchiveDetailActions';
 import {ArchiveDetailHero} from './archive-detail/ArchiveDetailHero';
 import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
+import {ArchiveBasicInfo} from './archive-detail/ArchiveBasicInfo';
+import {ArchivePagePreview} from './archive-detail/ArchivePagePreview';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ArchiveRelated} from './archive-detail/ArchiveRelated';
 import {ArchiveEditDialog} from './archive-detail/ArchiveEditDialog';
@@ -461,6 +463,10 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         t={t}
       />
 
+      <ArchivePagePreview archiveId={archiveId} t={t} onSelectPage={(pageIndex) => {
+        navigation.navigate('Reader', {archiveId, initialPage: pageIndex + 1, tankoubonId, children, childIndex});
+      }} />
+
       <ArchiveDescription description={merged.description} t={t} />
       <ArchiveTags tags={tags} onTagPress={handleTagPress} t={t} />
 
@@ -494,6 +500,8 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
           <ArchiveCard archive={item} variant="related" onOpenReader={() => handleRelatedPress(item)} onOpenDetail={() => handleRelatedPress(item)} />
         )}
       />
+
+      <ArchiveBasicInfo metadata={merged} archive={archive} t={t} />
 
       <ArchiveEditDialog
         visible={editDialogOpen}

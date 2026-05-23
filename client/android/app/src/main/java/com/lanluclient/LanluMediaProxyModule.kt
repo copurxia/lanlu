@@ -15,6 +15,7 @@ import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
 import java.io.BufferedReader
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -34,6 +35,8 @@ import javax.net.ssl.X509TrustManager
 
 class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
+
+  private val uploadExecutor = Executors.newCachedThreadPool()
 
   override fun getName(): String = "LanluMediaProxy"
 
@@ -140,6 +143,73 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
+  fun uploadFileChunk(
+      sourceUri: String,
+      targetUrl: String,
+      headers: ReadableMap?,
+      start: Double,
+      length: Double,
+      promise: Promise,
+  ) {
+    uploadExecutor.execute {
+      var connection: HttpURLConnection? = null
+      try {
+        val chunkStart = start.toLong()
+        val chunkLength = length.toLong()
+        if (chunkStart < 0 || chunkLength <= 0) {
+          promise.reject("LANLU_UPLOAD_CHUNK", "Invalid chunk range")
+          return@execute
+        }
+
+        val uri = Uri.parse(sourceUri)
+        val input = reactApplicationContext.contentResolver.openInputStream(uri)
+            ?: throw IllegalArgumentException("Unable to open selected file")
+
+        connection = URL(targetUrl).openConnection() as HttpURLConnection
+        configureTlsIfNeeded(connection!!)
+        connection!!.requestMethod = "PUT"
+        connection!!.doOutput = true
+        connection!!.instanceFollowRedirects = true
+        connection!!.connectTimeout = 15000
+        connection!!.readTimeout = 0
+        connection!!.setRequestProperty("Content-Type", "application/octet-stream")
+        headers?.let {
+          val iterator = it.keySetIterator()
+          while (iterator.hasNextKey()) {
+            val key = iterator.nextKey()
+            if (it.hasKey(key) && !it.isNull(key)) {
+              val value = it.getString(key)
+              if (!value.isNullOrBlank()) {
+                connection!!.setRequestProperty(key, value)
+              }
+            }
+          }
+        }
+        connection!!.setFixedLengthStreamingMode(chunkLength)
+
+        input.use { stream ->
+          skipFully(stream, chunkStart)
+          connection!!.outputStream.use { output ->
+            copyFixedLength(stream, output, chunkLength)
+          }
+        }
+
+        val status = connection!!.responseCode
+        val body = readResponseBody(connection!!)
+        if (status in 200..299) {
+          promise.resolve(body)
+        } else {
+          promise.reject("LANLU_UPLOAD_CHUNK_HTTP_$status", body.ifBlank { "HTTP $status" })
+        }
+      } catch (error: Exception) {
+        promise.reject("LANLU_UPLOAD_CHUNK", error)
+      } finally {
+        connection?.disconnect()
+      }
+    }
+  }
+
+  @ReactMethod
   fun shareTextFile(extension: String, fileName: String, text: String, title: String, promise: Promise) {
     try {
       val safeExtension = sanitizeFilePart(extension, "txt")
@@ -185,10 +255,84 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
           .trim('-', '.', '_')
           .ifBlank { fallback }
 
+  private fun configureTlsIfNeeded(connection: HttpURLConnection) {
+    if (connection !is HttpsURLConnection) return
+    val trustAll = arrayOf<X509TrustManager>(
+        object : X509TrustManager {
+          override fun checkClientTrusted(
+              chain: Array<java.security.cert.X509Certificate>?,
+              authType: String?,
+          ) {
+          }
+
+          override fun checkServerTrusted(
+              chain: Array<java.security.cert.X509Certificate>?,
+              authType: String?,
+          ) {
+          }
+
+          override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> =
+              emptyArray()
+        },
+    )
+    val context = SSLContext.getInstance("TLS")
+    context.init(null, trustAll, java.security.SecureRandom())
+    connection.sslSocketFactory = context.socketFactory
+    connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
+  }
+
   private fun encodeLocalPath(path: String): String =
       path.split("/")
           .filter { it.isNotEmpty() }
           .joinToString("/") { URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
+  private fun skipFully(input: InputStream, bytesToSkip: Long) {
+    var remaining = bytesToSkip
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (remaining > 0) {
+      val skipped = input.skip(remaining)
+      if (skipped > 0) {
+        remaining -= skipped
+        continue
+      }
+      val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+      if (read < 0) {
+        throw java.io.EOFException("Unable to skip to requested chunk offset")
+      }
+      remaining -= read.toLong()
+    }
+  }
+
+  private fun copyFixedLength(input: InputStream, output: java.io.OutputStream, length: Long) {
+    var remaining = length
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    while (remaining > 0) {
+      val read = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+      if (read < 0) {
+        throw java.io.EOFException("Selected file ended before chunk was complete")
+      }
+      output.write(buffer, 0, read)
+      remaining -= read.toLong()
+    }
+  }
+
+  private fun readResponseBody(connection: HttpURLConnection): String {
+    val stream = try {
+      connection.inputStream
+    } catch (_: Exception) {
+      connection.errorStream
+    } ?: return ""
+    stream.use {
+      val out = ByteArrayOutputStream()
+      val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+      while (true) {
+        val read = it.read(buffer)
+        if (read <= 0) break
+        out.write(buffer, 0, read)
+      }
+      return out.toString("UTF-8")
+    }
+  }
 
   private data class ProxyTarget(val uri: String, val headers: Map<String, String>)
 
