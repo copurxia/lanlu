@@ -7,14 +7,16 @@ import lanlu.infrastructure.archiveindex.ArchivePackageEntryRecord
 
 class LimitedFileInputStream <: InputStream & Resource {
     private var file: File
+    private let startOffset: Int64
     private let length: Int64
     private var consumed: Int64 = 0
     private var closed: Bool = false
 
     public init(path: String, offset: Int64, length: Int64) {
         this.file = File(Path(path), Read)
+        this.startOffset = if (offset > 0) { offset } else { 0 }
         this.length = if (length > 0) { length } else { 0 }
-        this.file.seek(SeekPosition.Begin(offset))
+        this.file.seek(SeekPosition.Begin(this.startOffset))
     }
 
     public func read(buffer: Array<Byte>): Int64 {
@@ -50,6 +52,19 @@ class LimitedFileInputStream <: InputStream & Resource {
         file.close()
     }
 
+    public func seek(offset: Int64): Bool {
+        if (closed || offset < 0 || offset > length) {
+            return false
+        }
+        try {
+            file.seek(SeekPosition.Begin(startOffset + offset))
+            consumed = offset
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
     public func isClosed(): Bool {
         return closed
     }
@@ -76,8 +91,8 @@ class ZipStoredEntryReader <: EntryReader {
         rawStream.close()
     }
 
-    public func seek(_: Int64): Bool {
-        return false
+    public func seek(offset: Int64): Bool {
+        return rawStream.seek(offset)
     }
 }
 

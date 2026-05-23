@@ -1,6 +1,6 @@
 package lanlu.contexts.archive.interfaces.http
 
-import stdx.net.http.HttpStatusCode
+import stdx.net.http.{HttpStatusCode, HttpResponseWriter}
 import ignite.*
 import lanlu.contexts.archive.domain.*
 import lanlu.contexts.tankoubon.domain.*
@@ -1323,7 +1323,7 @@ public class ArchiveController {
             ctx.setHeader("Transfer-Encoding", "chunked")
         }
         ctx.status(HttpStatusCode.STATUS_OK)
-        ctx.httpContext().responseBuilder.body(PageEntryBody(reader))
+        writePageEntryBody(ctx, PageEntryBody(reader))
     }
 
     /**
@@ -1359,7 +1359,23 @@ public class ArchiveController {
             ("range", "bytes ${rangeStart}-${rangeEnd}/${fileSize}"),
             ("content_length", "${rangeLength}")
         )
-        ctx.httpContext().responseBuilder.body(PageEntryBody(reader, remaining: rangeLength, skipBytes: rangeStart))
+        writePageEntryBody(ctx, PageEntryBody(reader, remaining: rangeLength, skipBytes: rangeStart))
+    }
+
+    private static func writePageEntryBody(ctx: Ctx, body: PageEntryBody): Unit {
+        let writer = HttpResponseWriter(ctx.httpContext())
+        let buffer = Array<Byte>(CHUNK_SIZE, {_ => 0})
+        try {
+            while (true) {
+                let bytesRead = body.read(buffer)
+                if (bytesRead <= 0) {
+                    break
+                }
+                writer.write(buffer[0..bytesRead])
+            }
+        } finally {
+            body.close()
+        }
     }
 
     private static func sendPageHeadResponse(
