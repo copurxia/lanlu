@@ -9,7 +9,7 @@ import {
   type ViewToken,
 } from 'react-native';
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
-import {ChevronDown, ChevronRight, FileText, Film, Folder, ImageIcon, Music} from 'lucide-react-native';
+import {ChevronDown, ChevronRight, FileText, Film, Folder, FolderTree, ImageIcon, LayoutGrid, List, Music} from 'lucide-react-native';
 import {VLCPlayer} from 'react-native-vlc-media-player';
 import {spacing} from '../../theme/colors';
 import {getStoredStringSync, setStoredStringSync} from '../../storage/mmkv';
@@ -25,7 +25,7 @@ function loadSidebarTab(): SidebarTab {
   return stored === 'thumbnails' || stored === 'list' || stored === 'tree' ? stored : 'thumbnails';
 }
 
-type SbPage = {
+export type SbPage = {
   pageNumber: number;
   effectiveType: string;
   imageSource?: FastImageSource | null;
@@ -66,13 +66,16 @@ type MutableFileTreeFolderNode = {
 };
 
 type Props = {
-  open: boolean;
+  open?: boolean;
   pages: SbPage[];
   currentPage: number;
-  onClose: () => void;
+  onClose?: () => void;
   onSelectPage: (pageIndex: number) => void;
   onVisiblePagesChange?: (pageIndexes: number[]) => void;
   t: (key: string, params?: Record<string, string | number>) => string;
+  inline?: boolean;
+  title?: string;
+  tabIcons?: boolean;
 };
 
 function pageTypeIcon(type: string, size: number, color: string) {
@@ -127,6 +130,9 @@ export function ReaderSidebar({
   onSelectPage,
   onVisiblePagesChange,
   t,
+  inline,
+  tabIcons,
+  title,
 }: Props) {
   const {colors} = useTheme();
   const {width: screenWidth, height: screenHeight} = useWindowDimensions();
@@ -215,6 +221,13 @@ export function ReaderSidebar({
         },
         tabTextActive: {
           color: colors.primary,
+        },
+        tabIcon: {
+          padding: 6,
+          borderRadius: 8,
+        },
+        tabIconActive: {
+          backgroundColor: colors.primaryMuted,
         },
         thumbContent: {
           paddingBottom: spacing.sm,
@@ -383,7 +396,7 @@ export function ReaderSidebar({
   const handleSelect = useCallback(
     (pageIndex: number) => {
       onSelectPage(pageIndex);
-      if (!sidePanel) onClose();
+      if (!sidePanel) onClose?.();
     },
     [onSelectPage, onClose, sidePanel],
   );
@@ -681,10 +694,69 @@ export function ReaderSidebar({
     [currentPage, expandedFolderIds, handleSelect, toggleFolder],
   );
 
+
+  if (inline) {
+    return (
+      <View style={{flex: 1}}>
+        <View style={{flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8}}>
+          {title ? <Text style={{fontSize: 15, fontWeight: "800", color: colors.text}}>{title}</Text> : null}
+          <View style={{flexDirection: "row", backgroundColor: colors.surface, borderRadius: 10, padding: 3, gap: 2}}>
+            <TouchableOpacity onPress={() => setActiveTab("thumbnails")} style={[styles.tabIcon, activeTab === "thumbnails" && styles.tabIconActive]}>
+              <LayoutGrid size={18} color={activeTab === "thumbnails" ? colors.primary : colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setActiveTab("list")} style={[styles.tabIcon, activeTab === "list" && styles.tabIconActive]}>
+              <List size={18} color={activeTab === "list" ? colors.primary : colors.textMuted} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setActiveTab("tree")} style={[styles.tabIcon, activeTab === "tree" && styles.tabIconActive]}>
+              <FolderTree size={18} color={activeTab === "tree" ? colors.primary : colors.textMuted} />
+            </TouchableOpacity>
+          </View>
+        </View>
+        {activeTab === "thumbnails" ? (
+          <FlatList
+            data={pages}
+            key={`thumb-${thumbColumns}`}
+            keyExtractor={keyExtractor}
+            numColumns={thumbColumns}
+            columnWrapperStyle={styles.thumbRow}
+            contentContainerStyle={styles.thumbContent}
+            initialNumToRender={10}
+            maxToRenderPerBatch={12}
+            onViewableItemsChanged={handleVisibleItemsChanged}
+            viewabilityConfig={{itemVisiblePercentThreshold: 50}}
+            renderItem={renderThumbnailItem}
+            removeClippedSubviews
+            showsVerticalScrollIndicator={false}
+          />
+        ) : activeTab === "tree" ? (
+          <FlatList
+            data={fileTree.nodes}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({item}) => renderFileTreeNode(item, 0) as React.ReactElement}
+            removeClippedSubviews
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          <FlatList
+            data={pages}
+            keyExtractor={keyExtractor}
+            contentContainerStyle={styles.listContent}
+            initialNumToRender={12}
+            maxToRenderPerBatch={16}
+            removeClippedSubviews
+            renderItem={renderListItem}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+      </View>
+    );
+  }
+
   return (
     <Drawer
-      open={open}
-      onClose={onClose}
+      open={open ?? false}
+      onClose={onClose ?? (() => {})}
       side={sidePanel ? 'right' : 'bottom'}
       showHandle={!sidePanel}
       enablePanDownToClose={!sidePanel}
@@ -694,7 +766,7 @@ export function ReaderSidebar({
         <View style={styles.sheetHeader}>
           <Text style={styles.sheetTitle}>{t('reader.sidebar')}</Text>
           {sidePanel ? (
-            <TouchableOpacity onPress={onClose} style={styles.sideCloseButton}>
+            <TouchableOpacity onPress={() => onClose?.()} style={styles.sideCloseButton}>
               <Text style={styles.sideCloseButtonText}>x</Text>
             </TouchableOpacity>
           ) : null}
@@ -766,7 +838,7 @@ export function ReaderSidebar({
         )}
 
         {!sidePanel ? (
-          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+          <TouchableOpacity onPress={() => onClose?.()} style={styles.closeButton}>
             <Text style={styles.closeButtonText}>{t('common.close')}</Text>
           </TouchableOpacity>
         ) : null}

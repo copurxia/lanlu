@@ -11,6 +11,7 @@ import {extractApiError} from '../api/client';
 import {spacing, radius, type ThemeColors} from '../theme/colors';
 import {useTheme} from '../theme/ThemeContext';
 import {getTagCloud} from '../api/admin';
+import {fetchServerInfo, type ServerInfo} from '../api/lanlu';
 import type {TagCloudItem} from '../api/admin';
 
 export function StatsSettingsScreen() {
@@ -22,13 +23,18 @@ export function StatsSettingsScreen() {
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   const [tagCloud, setTagCloud] = useState<TagCloudItem[]>([]);
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   async function loadData() {
     try {
-      const res = await getTagCloud();
-      setTagCloud(res.data?.items || []);
+      const [tagRes, infoRes] = await Promise.all([
+        getTagCloud(),
+        fetchServerInfo().catch(() => null),
+      ]);
+      setTagCloud(tagRes.data?.items || []);
+      setServerInfo(infoRes);
     } catch (e) {
       Alert.alert(t('common.error'), extractApiError(e));
     } finally {
@@ -45,8 +51,11 @@ export function StatsSettingsScreen() {
   }, []);
 
   const handleTagPress = useCallback((item: TagCloudItem) => {
-    Alert.alert('Tag Info', `Tag: ${item.display || item.tag}\nCount: ${item.count}`);
-  }, []);
+    (navigation as any).navigate('Main', {
+      screen: 'Home',
+      params: {q: item.tag},
+    });
+  }, [navigation]);
 
   const maxTagCount = useMemo(() => Math.max(...tagCloud.map(t => t.count), 1), [tagCloud]);
 
@@ -71,49 +80,49 @@ export function StatsSettingsScreen() {
         </View>
 
         <FluentCard style={styles.section}>
-          <FluentTitle>Server Info</FluentTitle>
+          <FluentTitle>{t('settings.serverInfo')}</FluentTitle>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Server Name</Text>
-            <Text style={styles.infoValue}>{activeServer?.name || '-'}</Text>
+            <Text style={styles.infoLabel}>{t('settings.serverName')}</Text>
+            <Text style={styles.infoValue}>{serverInfo?.name || activeServer?.name || '-'}</Text>
           </View>
           <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Base URL</Text>
+            <Text style={styles.infoLabel}>{t('settings.baseUrl')}</Text>
             <Text style={styles.infoValue}>{activeServer?.baseUrl || '-'}</Text>
           </View>
-          {(activeServer as any)?.version ? (
+          {serverInfo?.version_desc ? (
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Version</Text>
-              <Text style={styles.infoValue}>{(activeServer as any).version}</Text>
+              <Text style={styles.infoLabel}>{t('settings.version')}</Text>
+              <Text style={styles.infoValue}>{serverInfo.version_desc}</Text>
             </View>
           ) : null}
-          {(activeServer as any)?.archiveCount != null ? (
+          {serverInfo?.total_archives != null ? (
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Archives</Text>
-              <Text style={styles.infoValue}>{(activeServer as any).archiveCount}</Text>
+              <Text style={styles.infoLabel}>{t('settings.totalArchives')}</Text>
+              <Text style={styles.infoValue}>{String(serverInfo.total_archives)}</Text>
             </View>
           ) : null}
-          {(activeServer as any)?.pageCount != null ? (
+          {serverInfo?.total_pages_read != null ? (
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Pages</Text>
-              <Text style={styles.infoValue}>{(activeServer as any).pageCount}</Text>
+              <Text style={styles.infoLabel}>{t('settings.totalPagesRead')}</Text>
+              <Text style={styles.infoValue}>{String(serverInfo.total_pages_read)}</Text>
             </View>
           ) : null}
         </FluentCard>
 
+        {serverInfo?.db_extensions && serverInfo.db_extensions.length > 0 ? (
         <FluentCard style={styles.section}>
-          <FluentTitle>Database Extensions</FluentTitle>
+          <FluentTitle>{t('settings.dbExtensions')}</FluentTitle>
           <View style={styles.badgeRow}>
-            <View style={[styles.extBadge, {backgroundColor: colors.primaryMuted}]}>
-              <Text style={[styles.extBadgeText, {color: colors.primary}]}>pg_trgm</Text>
-            </View>
-            <View style={[styles.extBadge, {backgroundColor: colors.surfaceMuted}]}>
-              <Text style={[styles.extBadgeText, {color: colors.textMuted}]}>vector</Text>
-            </View>
-            <View style={[styles.extBadge, {backgroundColor: colors.surfaceMuted}]}>
-              <Text style={[styles.extBadgeText, {color: colors.textMuted}]}>uuid-ossp</Text>
-            </View>
+            {serverInfo.db_extensions.map(ext => (
+              <View key={ext.name} style={[styles.extBadge, {backgroundColor: ext.enabled ? colors.primaryMuted : colors.surfaceMuted}]}>
+                <Text style={[styles.extBadgeText, {color: ext.enabled ? colors.primary : colors.textMuted}]}>
+                  {ext.name}{ext.version ? ` ${ext.version}` : ''}
+                </Text>
+              </View>
+            ))}
           </View>
         </FluentCard>
+        ) : null}
 
         <FluentCard style={styles.section}>
           <FluentTitle>Tag Cloud</FluentTitle>

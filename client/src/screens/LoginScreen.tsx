@@ -20,10 +20,12 @@ import {useTheme} from '../theme/ThemeContext';
 export function LoginScreen() {
   const {t} = useI18n();
   const {colors} = useTheme();
-  const {activeServer, signIn, showServerList} = useAuth();
+  const {activeServer, signIn, totpChallenge, verifyTotp, dismissTotp, showServerList} = useAuth();
   const insets = useSafeAreaInsets();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [totpCode, setTotpCode] = useState('');
+  const [recoveryCode, setRecoveryCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -36,6 +38,22 @@ export function LoginScreen() {
     setError('');
     try {
       await signIn({username, password});
+    } catch (err) {
+      setError(extractApiError(err, t('auth.loginFailed')));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitTotp() {
+    if (!totpCode.trim() && !recoveryCode.trim()) {
+      setError(t('auth.totpCodeOrRecoveryRequired'));
+      return;
+    }
+    setSubmitting(true);
+    setError('');
+    try {
+      await verifyTotp({code: totpCode, recoveryCode});
     } catch (err) {
       setError(extractApiError(err, t('auth.loginFailed')));
     } finally {
@@ -135,6 +153,15 @@ export function LoginScreen() {
         buttonDisabled: {
           opacity: 0.62,
         },
+        backLink: {
+          alignItems: 'center',
+          paddingVertical: 4,
+        },
+        backLinkText: {
+          color: colors.primary,
+          fontSize: 13,
+          fontWeight: '600',
+        },
       }),
     [colors],
   );
@@ -172,15 +199,47 @@ export function LoginScreen() {
           onChangeText={setUsername}
           placeholder="admin"
           value={username}
+          editable={!totpChallenge}
         />
 
-        <FluentTextField
-          label={t('auth.password')}
-          onChangeText={setPassword}
-          placeholder="Password"
-          secureTextEntry
-          value={password}
-        />
+        {!totpChallenge ? (
+          <FluentTextField
+            label={t('auth.password')}
+            onChangeText={setPassword}
+            placeholder="Password"
+            secureTextEntry
+            value={password}
+          />
+        ) : (
+          <>
+            <FluentTextField
+              autoCapitalize="none"
+              autoCorrect={false}
+              label={t('auth.totpLoginCode')}
+              onChangeText={setTotpCode}
+              placeholder="123456"
+              keyboardType="number-pad"
+              value={totpCode}
+            />
+            <FluentTextField
+              autoCapitalize="none"
+              autoCorrect={false}
+              label={t('auth.recoveryCode')}
+              onChangeText={setRecoveryCode}
+              placeholder={t('auth.recoveryCodePlaceholder')}
+              value={recoveryCode}
+            />
+          </>
+        )}
+
+        {totpChallenge ? (
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={() => { dismissTotp(); setTotpCode(''); setRecoveryCode(''); setError(''); }}
+            style={styles.backLink}>
+            <Text style={styles.backLinkText}>{t('auth.backToPassword')}</Text>
+          </TouchableOpacity>
+        ) : null}
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
@@ -200,14 +259,14 @@ export function LoginScreen() {
           </TouchableOpacity>
           <TouchableOpacity
             activeOpacity={0.82}
-            accessibilityLabel={submitting ? t('auth.signingIn') : t('auth.signIn')}
+            accessibilityLabel={submitting ? t('auth.signingIn') : totpChallenge ? t('auth.verify') : t('auth.signIn')}
             accessibilityRole="button"
             disabled={submitting}
-            onPress={submit}
+            onPress={totpChallenge ? submitTotp : submit}
             style={[styles.primaryButton, submitting && styles.buttonDisabled]}>
             <LogIn color={colors.white} size={16} />
             <Text style={styles.primaryButtonText}>
-              {submitting ? t('auth.signingIn') : t('auth.signIn')}
+              {submitting ? t('auth.signingIn') : totpChallenge ? t('auth.verify') : t('auth.signIn')}
             </Text>
           </TouchableOpacity>
         </View>

@@ -394,6 +394,15 @@ export async function login(params: {
   return response.data;
 }
 
+export async function verifyTotpLogin(params: {challengeId: string; code: string; recoveryCode?: string}): Promise<LoginResponse> {
+  const response = await apiClient.post<LoginResponse>('/api/auth/login/totp/verify', {
+    challengeId: params.challengeId,
+    code: params.code || '',
+    recoveryCode: params.recoveryCode || '',
+  });
+  return response.data;
+}
+
 export async function fetchMe(config?: {timeout?: number; signal?: AbortSignal}): Promise<AuthUser> {
   const response = await apiClient.get<ApiEnvelope<{user: AuthUser}>>(
     '/api/auth/me',
@@ -411,6 +420,22 @@ export async function logout(): Promise<void> {
 
 export async function testServer(baseUrl: string): Promise<void> {
   await axios.get(`${baseUrl.replace(/\/+$/, '')}/api/info`, {timeout: 10000});
+}
+
+export type ServerInfo = {
+  name?: string;
+  motd?: string;
+  version?: string;
+  version_desc?: string;
+  version_name?: string;
+  total_archives?: number;
+  total_pages_read?: number;
+  db_extensions?: Array<{name: string; enabled: boolean; version: string}>;
+};
+
+export async function fetchServerInfo(): Promise<ServerInfo> {
+  const response = await apiClient.get<ServerInfo>('/api/info');
+  return response.data;
 }
 
 export async function searchArchives(

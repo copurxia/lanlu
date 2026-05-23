@@ -14,14 +14,17 @@ import {useFocusEffect} from '@react-navigation/native';
 import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {buildAuthorizedAssetImageSource, extractApiError, isNetworkError} from '../api/client';
+import {buildAuthorizedAssetImageSource, buildAuthorizedImageSource, extractApiError, isNetworkError} from '../api/client';
 import {
   archiveCoverAsset,
   deleteArchive,
+  assetPath,
+  fetchArchiveFiles,
   fetchArchiveMetadata,
   fetchArchiveRelated,
   fetchTankoubonsForArchive,
   getArchiveDownloadUrl,
+  getPageDefaultSource,
   markArchiveAsNew,
   markArchiveAsRead,
   readAssetId,
@@ -39,7 +42,7 @@ import {ArchiveDetailHero} from './archive-detail/ArchiveDetailHero';
 import {ArchiveDescription} from './archive-detail/ArchiveDescription';
 import {ArchiveTags} from './archive-detail/ArchiveTags';
 import {ArchiveBasicInfo} from './archive-detail/ArchiveBasicInfo';
-import {ArchivePagePreview} from './archive-detail/ArchivePagePreview';
+import {ReaderSidebar, type SbPage} from './reader/ReaderSidebar';
 import {ArchiveCard} from '../components/ArchiveCard';
 import {ArchiveRelated} from './archive-detail/ArchiveRelated';
 import {ArchiveEditDialog} from './archive-detail/ArchiveEditDialog';
@@ -69,6 +72,54 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
 
   // Edit dialog state
   const [editDialogOpen, setEditDialogOpen] = useState(false);
+
+  // Sidebar state
+  const [sidebarPages, setSidebarPages] = useState<SbPage[]>([]);
+  const sidebarCurrentPage = useRef(1);
+
+  // Auto-load pages for inline sidebar
+  useEffect(() => {
+    let cancelled = false;
+    fetchArchiveFiles(archiveId)
+      .then(async pages => {
+        const sbPages: SbPage[] = [];
+        for (let idx = 0; idx < pages.length; idx++) {
+          const page = pages[idx];
+          const source = getPageDefaultSource(page);
+          const path = source?.path || page.path || "";
+          const effectiveType = source?.type || page.type || "image";
+          const displayMetadata = source?.metadata || page.metadata;
+          const thumbPath = displayMetadata?.thumb?.trim()
+            || assetPath(displayMetadata?.thumb_asset_id)
+            || (effectiveType === "image" ? (source?.url || `/api/archives/${encodeURIComponent(archiveId)}/page/${encodeURIComponent(page.id || String(idx+1))}`) : "");
+          let thumbnailSource = null;
+          if (thumbPath) {
+            try {
+              const authThumb = await buildAuthorizedImageSource(thumbPath);
+              if (authThumb?.uri) {
+                thumbnailSource = {uri: authThumb.uri, ...(authThumb.headers ? {headers: authThumb.headers} : {}), cache: "immutable"} as any;
+              }
+            } catch (_) {}
+          }
+          sbPages.push({
+            pageNumber: idx + 1,
+            effectiveType,
+            imageSource: thumbnailSource,
+            thumbnailSource,
+            uri: undefined,
+            vlcUri: undefined,
+            headers: undefined,
+            resolvedPath: path,
+            title: page.title || source?.title,
+            metadata: page.metadata,
+            activeSource: source,
+          });
+        }
+        if (!cancelled) setSidebarPages(sbPages);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [archiveId]);
 
   const isAuthenticated = authStatus === 'authenticated';
   const isAdmin = user?.isAdmin === true;
@@ -383,6 +434,11 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
           fontSize: 14,
           fontWeight: '600',
         },
+
+        previewButtonText: {
+          fontSize: 14,
+          fontWeight: "700",
+        },
         relatedCard: {
           width: 120,
         },
@@ -462,13 +518,24 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
         onDelete={isAdmin ? handleDeleteArchive : undefined}
         t={t}
       />
-
-      <ArchivePagePreview archiveId={archiveId} t={t} onSelectPage={(pageIndex) => {
-        navigation.navigate('Reader', {archiveId, initialPage: pageIndex + 1, tankoubonId, children, childIndex});
-      }} />
-
       <ArchiveDescription description={merged.description} t={t} />
       <ArchiveTags tags={tags} onTagPress={handleTagPress} t={t} />
+
+
+      {sidebarPages.length > 0 ? (
+          <ReaderSidebar
+            inline
+            title={`${t("archive.pagePreview")} (${sidebarPages.length})`}
+            tabIcons
+            pages={sidebarPages}
+            currentPage={sidebarCurrentPage.current}
+            onSelectPage={(pageIndex) => {
+              navigation.navigate('Reader', {archiveId, initialPage: pageIndex + 1, tankoubonId, children, childIndex});
+            }}
+            t={t as any}
+          />
+      ) : null}
+
 
       {tankoubons.length > 0 ? (
         <View style={styles.section}>

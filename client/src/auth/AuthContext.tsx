@@ -38,6 +38,9 @@ type AuthContextValue = {
   selectServer: (server: LanluServer) => Promise<void>;
   showServerList: () => Promise<void>;
   signIn: (params: {username: string; password: string}) => Promise<void>;
+  totpChallenge: {challengeId: string} | null;
+  verifyTotp: (params: {code: string; recoveryCode?: string}) => Promise<void>;
+  dismissTotp: () => void;
   signOut: () => Promise<void>;
   refreshMe: () => Promise<void>;
   reconnect: () => Promise<void>;
@@ -69,6 +72,7 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isOffline, setIsOffline] = useState(false);
+  const [totpChallenge, setTotpChallenge] = useState<{challengeId: string} | null>(null);
   const flushQueue = useOfflineProgressQueue(s => s.flushQueue);
 
   const flushProgressIfNeeded = useCallback(async () => {
@@ -234,10 +238,11 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
         username: params.username,
         password: params.password,
       });
-      const nextToken = response.data?.token?.token;
       if (response.code === 202 || response.data?.challengeId) {
-        throw new Error('This mobile client does not support TOTP login yet.');
+        setTotpChallenge({challengeId: response.data?.challengeId!});
+        return;
       }
+      const nextToken = response.data?.token?.token;
       if (!nextToken) {
         throw new Error(response.message || 'Login did not return a token.');
       }
@@ -253,6 +258,35 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
     },
     [activeServer, refreshMe, reloadServers],
   );
+
+  const verifyTotp = useCallback(
+    async (params: {code: string; recoveryCode?: string}) => {
+      if (!totpChallenge) throw new Error('No TOTP challenge in progress');
+      const response = await LanluApi.verifyTotpLogin({
+        challengeId: totpChallenge.challengeId,
+        code: params.code,
+        recoveryCode: params.recoveryCode,
+      });
+      const nextToken = response.data?.token?.token;
+      if (!nextToken) {
+        throw new Error(response.message || 'TOTP verification failed');
+      }
+      setTotpChallenge(null);
+      if (!activeServer) throw new Error('No active server');
+      await setStoredToken(nextToken, activeServer.id);
+      await touchServer(activeServer.id);
+      await reloadServers();
+      setToken(nextToken);
+      setUser(response.data?.user || null);
+      setStatus('authenticated');
+      if (!response.data?.user) {
+        await refreshMe();
+      }
+    },
+    [totpChallenge, activeServer, refreshMe, reloadServers],
+  );
+
+  const dismissTotp = useCallback(() => setTotpChallenge(null), []);
 
   const signOut = useCallback(async () => {
     const serverId = activeServer?.id;
@@ -307,6 +341,9 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       selectServer,
       showServerList,
       signIn,
+      totpChallenge,
+      verifyTotp,
+      dismissTotp,
       signOut,
       refreshMe,
       reconnect,
@@ -323,6 +360,9 @@ export function AuthProvider({children}: {children: React.ReactNode}) {
       servers,
       showServerList,
       signIn,
+      totpChallenge,
+      verifyTotp,
+      dismissTotp,
       signOut,
       status,
       token,
