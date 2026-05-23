@@ -13,10 +13,23 @@ import lanlu.contexts.archive.domain.*
 import lanlu.infrastructure.kv.*
 import lanlu.shared.utils.*
 
+/**
+ * 单个分片信息
+ */
+public class VolumePartInfo {
+    public var path: String = ""
+    public var modifiedAtMs: Int64 = 0
+    public var fileSize: Int64 = 0
+
+    public init() {}
+}
+
 public class ArchivePackageFingerprint {
     public var modifiedAtMs: Int64 = 0
     public var fileSize: Int64 = 0
     public var cacheVersion: Int32 = 1
+    // 分卷归档的分片列表（非分卷时为空）
+    public var volumeParts: Array<VolumePartInfo> = []
 }
 
 public class ArchivePackageEntryRecord {
@@ -67,6 +80,18 @@ class ArchivePackageIndexCodec {
         w.writeName("modified_at_ms").writeValue(index.fingerprint.modifiedAtMs)
         w.writeName("file_size").writeValue(index.fingerprint.fileSize)
         w.writeName("cache_version").writeValue(index.fingerprint.cacheVersion)
+        if (index.fingerprint.volumeParts.size > 0) {
+            w.writeName("volume_parts")
+            w.startArray()
+            for (part in index.fingerprint.volumeParts) {
+                w.startObject()
+                w.writeName("path").writeValue(part.path)
+                w.writeName("modified_at_ms").writeValue(part.modifiedAtMs)
+                w.writeName("file_size").writeValue(part.fileSize)
+                w.endObject()
+            }
+            w.endArray()
+        }
         w.endObject()
         w.writeName("entries")
         w.startArray()
@@ -122,6 +147,26 @@ class ArchivePackageIndexCodec {
                                 case "modified_at_ms" => fingerprint.modifiedAtMs = r.readValue<Int64>()
                                 case "file_size" => fingerprint.fileSize = r.readValue<Int64>()
                                 case "cache_version" => fingerprint.cacheVersion = r.readValue<Int32>()
+                                case "volume_parts" =>
+                                    let parts = ArrayList<VolumePartInfo>()
+                                    r.startArray()
+                                    while (r.peek() != EndArray) {
+                                        let part = VolumePartInfo()
+                                        r.startObject()
+                                        while (r.peek() != EndObject) {
+                                            let partName = r.readName()
+                                            match (partName) {
+                                                case "path" => part.path = r.readValue<String>().trimAscii()
+                                                case "modified_at_ms" => part.modifiedAtMs = r.readValue<Int64>()
+                                                case "file_size" => part.fileSize = r.readValue<Int64>()
+                                                case _ => r.skip()
+                                            }
+                                        }
+                                        r.endObject()
+                                        parts.add(part)
+                                    }
+                                    r.endArray()
+                                    fingerprint.volumeParts = parts.toArray()
                                 case _ => r.skip()
                             }
                         }

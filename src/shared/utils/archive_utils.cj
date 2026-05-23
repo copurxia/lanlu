@@ -37,6 +37,12 @@ public class ArchiveConfig {
     public var tags: String
     public var categoryId: String
     public var folderScanKey: String
+    // 分卷归档相关字段
+    public var volumePattern: String = ""
+    public var volumeDisplayName: String = ""
+    public var volumeTotalSize: Int64 = 0
+    public var volumeUnderlyingFormat: String = ""
+    public var volumeParts: Array<String> = []
 
     public init(
         archivePath: String,

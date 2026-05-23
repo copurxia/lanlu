@@ -7,6 +7,7 @@ import stdx.encoding.json.stream.*
 import lanlu.contexts.task.domain.*
 import lanlu.contexts.task.infrastructure.persistence.*
 import lanlu.shared.utils.*
+import lanlu.shared.utils.VolumeArchiveUtils
 import lanlu.contexts.archive.infrastructure.persistence.*
 import lanlu.contexts.category.infrastructure.persistence.*
 import lanlu.infrastructure.archivehandler.*
@@ -163,6 +164,12 @@ public class ScanSingleCategoryTaskRunner {
                     created += subCreated
                 } else {
                     // Only files can be handled here (pdf/epub/archive files).
+
+                    // 分卷跟随分片跳过
+                    if (VolumeArchiveUtils.isVolumeFollower(fullPath)) {
+                        continue
+                    }
+
                     if (enqueueScanArchiveTask(fullPath, ctx)) {
                         created++
                     }
@@ -217,39 +224,74 @@ public class ScanSingleCategoryTaskRunner {
             case Some(handler) => handler.getType()
         }
 
-        let relativePath = ArchiveUtils.calculateRelativePath(filePath, ctx.basePath)
-        let fileName = ArchiveUtils.getFullFileName(filePath)
+        // 检测是否为分卷归档并获取分卷信息
+        let volumeInfo = VolumeArchiveUtils.detectVolume(filePath)
+        let archivePath = match (volumeInfo) {
+            case Some(info) =>
+                if (info.entryPath.size > 0) { info.entryPath } else { filePath }
+            case None => filePath
+        }
 
-        let existingArchive = ArchiveDao.getByCategoryPathAndFilename(ctx.categoryId, relativePath, fileName)
+        let relativePath = ArchiveUtils.calculateRelativePath(archivePath, ctx.basePath)
+        let fileName = ArchiveUtils.getFullFileName(archivePath)
+
+        // 分卷归档使用归一化显示名；普通文件维持原逻辑
+        let lookupFileName = match (volumeInfo) {
+            case Some(info) =>
+                if (info.displayName.size > 0) {
+                    // Try finding by normalized name first, fallback to raw filename
+                    let normalizedName = info.displayName
+                    let ext = ArchiveUtils.getFileExtension(archivePath)
+                    let lookupName = if (ext.size > 0) { "${normalizedName}.${ext}" } else { normalizedName }
+                    lookupName
+                } else {
+                    fileName
+                }
+            case None => fileName
+        }
+
+        let existingArchive = ArchiveDao.getByCategoryPathAndFilename(ctx.categoryId, relativePath, lookupFileName)
         match (existingArchive) {
             case Some(archive) =>
                 // 档案已存在
                 if (archive.thumbhash.size > 0) {
-                    // 已有缩略图，完全跳过
-                    getLogger("scan_single_category").debug("Archive already exists with thumbnail, skipping: ${filePath}")
+                    getLogger("scan_single_category").debug("Archive already exists with thumbnail, skipping: ${archivePath}")
                     return false
                 }
 
-                let resolvedCoverEntry = resolveThumbnailCoverEntry(filePath, archiveType, coverEntry)
+                let resolvedCoverEntry = resolveThumbnailCoverEntry(archivePath, archiveType, coverEntry)
                 if (shouldSubmitThumbnailTask(archiveType, resolvedCoverEntry, archive.cover_asset_id)) {
-                    // 档案存在但缺少缩略图，直接提交缩略图生成任务
-                    getLogger("scan_single_category").debug("Archive exists but no thumbnail, submitting thumbnail task: ${filePath}")
-                    return submitThumbnailTaskDirectly(filePath, archive.id, archiveType, ctx, resolvedCoverEntry)
+                    getLogger("scan_single_category").debug("Archive exists but no thumbnail, submitting thumbnail task: ${archivePath}")
+                    return submitThumbnailTaskDirectly(archivePath, archive.id, archiveType, ctx, resolvedCoverEntry)
                 }
-                getLogger("scan_single_category").debug("Archive exists but no local cover candidate is available, creating scan_archive task: ${filePath}")
+                getLogger("scan_single_category").debug("Archive exists but no local cover candidate is available, creating scan_archive task: ${archivePath}")
             case None =>
-                // 档案不存在，创建 scan_archive 任务进行完整处理
-                getLogger("scan_single_category").debug("Archive not found, creating scan_archive task: ${filePath}")
+                getLogger("scan_single_category").debug("Archive not found, creating scan_archive task: ${archivePath}")
         }
 
         let out = ByteBuffer()
         let w = JsonWriter(out)
         w.startObject()
-        w.writeName("archive_path").writeValue(filePath)
+        w.writeName("archive_path").writeValue(archivePath)
         w.writeName("category_id").writeValue(ctx.categoryId)
         w.writeName("archive_type").writeValue(archiveType)
         if (folderScanKey.size > 0) {
             w.writeName("folder_scan_key").writeValue(folderScanKey)
+        }
+        // 传递分卷信息到 scan_archive 任务
+        match (volumeInfo) {
+            case Some(info) =>
+                w.writeName("volume_pattern").writeValue(volumePatternToString(info.pattern))
+                w.writeName("volume_display_name").writeValue(info.displayName)
+                w.writeName("volume_total_size").writeValue(info.totalSize)
+                w.writeName("volume_underlying_format").writeValue(info.underlyingFormat)
+                w.writeName("volume_parts")
+                w.startArray()
+                for (part in info.parts) {
+                    w.writeValue(part)
+                }
+                w.endArray()
+            case None => ()
         }
         w.endObject()
         w.flush()
@@ -260,6 +302,15 @@ public class ScanSingleCategoryTaskRunner {
             return true
         }
         return false
+    }
+
+    private static func volumePatternToString(pattern: VolumePattern): String {
+        match (pattern) {
+            case VolumePattern.BinarySlice => return "binary_slice"
+            case VolumePattern.SplitZip => return "split_zip"
+            case VolumePattern.RarVolume => return "rar_volume"
+            case VolumePattern.NotVolume => return ""
+        }
     }
 
     private static func notifyTaskEnqueued(ctx: ScanContext): Unit {

@@ -2,6 +2,7 @@ package lanlu.infrastructure.archivehandler
 
 import std.collection.*
 import lanlu.contexts.archive.domain.ArchiveTypes
+import lanlu.shared.utils.VolumeArchiveUtils
 
 /**
  * 档案处理器工厂
@@ -69,6 +70,21 @@ public class ArchiveHandlerFactory {
      * 如果没有处理器能处理该路径，返回 None
      */
     public func getHandlerByPath(filePath: String): Option<ArchiveHandler> {
+        // 先检查分卷归档入口
+        match (VolumeArchiveUtils.detectVolume(filePath)) {
+            case Some(volumeInfo) =>
+                if (volumeInfo.isEntry && volumeInfo.parts.size > 0) {
+                    let handler = VolumeArchiveHandler(
+                        volumeInfo.entryPath,
+                        volumeInfo.parts,
+                        volumeInfo.pattern,
+                        volumeInfo.underlyingFormat
+                    )
+                    return Some(handler)
+                }
+            case None => ()
+        }
+
         for (handler in handlers) {
             if (handler.canHandle(filePath)) {
                 return Some(handler)

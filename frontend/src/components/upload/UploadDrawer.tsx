@@ -56,7 +56,11 @@ export function UploadDrawer({ open: controlledOpen, onOpenChange, onUploadCompl
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
   const selectedCategoryInternalId = categories.find(cat => cat.catid === selectedCategoryId)?.id
 
-  const supportedFormats = [".zip", ".rar", ".7z", ".tar", ".gz", ".pdf", ".epub", ".mobi", ".cbz", ".cbr"]
+  const supportedFormats = [
+    ".zip", ".rar", ".7z", ".tar", ".gz", ".pdf", ".epub", ".mobi", ".cbz", ".cbr",
+    // 分卷归档入口文件
+    ".001", ".z01", ".part1.rar", ".part01.rar", ".r00",
+  ]
 
   const sortedUploadFiles = useMemo(() => {
     return [...uploadFiles].sort((a, b) => {

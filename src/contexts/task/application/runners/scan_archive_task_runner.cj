@@ -83,6 +83,11 @@ public class ScanArchiveTaskRunner {
         var tags = ""
         var categoryId: String = ""
         var folderScanKey = ""
+        var volumePattern = ""
+        var volumeDisplayName = ""
+        var volumeTotalSize: Int64 = 0
+        var volumeUnderlyingFormat = ""
+        var volumeParts = ArrayList<String>()
 
         if (trimmed.size == 0) {
             return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId, folderScanKey: folderScanKey)
@@ -109,6 +114,21 @@ public class ScanArchiveTaskRunner {
                         case "tags" => tags = r.readValue<String>().trimAscii()
                         case "category_id" => categoryId = r.readValue<String>().trimAscii()
                         case "folder_scan_key" => folderScanKey = r.readValue<String>().trimAscii()
+                        case "volume_pattern" => volumePattern = r.readValue<String>().trimAscii()
+                        case "volume_display_name" => volumeDisplayName = r.readValue<String>().trimAscii()
+                        case "volume_total_size" => volumeTotalSize = r.readValue<Int64>()
+                        case "volume_underlying_format" => volumeUnderlyingFormat = r.readValue<String>().trimAscii()
+                        case "volume_parts" =>
+                            if (r.peek() == Some(BeginArray)) {
+                                r.startArray()
+                                while (r.peek() != EndArray) {
+                                    let part = r.readValue<String>().trimAscii()
+                                    if (part.size > 0) {
+                                        volumeParts.add(part)
+                                    }
+                                }
+                                r.endArray()
+                            }
                         case _ => r.skip()
                     }
                 }
@@ -116,7 +136,13 @@ public class ScanArchiveTaskRunner {
             }
         } catch (_: Exception) {}
 
-        return ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId, folderScanKey: folderScanKey)
+        let config = ArchiveConfig(archivePath, cachePath, thumbnailPath, archiveType, tags, categoryId, folderScanKey: folderScanKey)
+        config.volumePattern = volumePattern
+        config.volumeDisplayName = volumeDisplayName
+        config.volumeTotalSize = volumeTotalSize
+        config.volumeUnderlyingFormat = volumeUnderlyingFormat
+        config.volumeParts = volumeParts.toArray()
+        return config
     }
 
     private static func resolveCategory(categoryIdOrCatid: String): (Int64, String, Array<String>) {
@@ -275,7 +301,8 @@ public class ScanArchiveTaskRunner {
                 return ProcessResultData(true, "", "")
             }
 
-            let dbResult = addArchiveToDatabase(filePath, archiveBasePath, categoryInternalId, archiveType, pageCount)
+            let dbResult = addArchiveToDatabase(filePath, archiveBasePath, categoryInternalId, archiveType, pageCount,
+                titleOverride: config.volumeDisplayName, totalSizeOverride: config.volumeTotalSize)
             if (!dbResult.success) {
                 return dbResult
             }
@@ -314,13 +341,13 @@ public class ScanArchiveTaskRunner {
         }
     }
 
-    private static func addArchiveToDatabase(filePath: String, archiveBasePath: String, categoryId: Int64, archiveType: String, pageCount: Int32): ProcessResultData {
+    private static func addArchiveToDatabase(filePath: String, archiveBasePath: String, categoryId: Int64, archiveType: String, pageCount: Int32, titleOverride!: String = "", totalSizeOverride!: Int64 = 0): ProcessResultData {
         try {
             let archiveId = ArchiveUtils.generateArchiveId(filePath)
 
             let fileName = ArchiveUtils.getFullFileName(filePath)
-            let defaultTitle = ArchiveUtils.generateDefaultTitle(filePath)
-            let fileSize = ArchiveUtils.getArchiveFileSize(filePath)
+            let defaultTitle = if (titleOverride.size > 0) { titleOverride } else { ArchiveUtils.generateDefaultTitle(filePath) }
+            let fileSize = if (totalSizeOverride > 0) { totalSizeOverride } else { ArchiveUtils.getArchiveFileSize(filePath) }
 
             let relativePath = ArchiveUtils.calculateRelativePath(filePath, archiveBasePath)
 

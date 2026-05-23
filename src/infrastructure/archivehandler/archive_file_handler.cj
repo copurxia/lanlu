@@ -7,6 +7,7 @@ import lanlu.contexts.archive.domain.ArchiveTypes
 import lanlu.shared.utils.DirectoryScanner
 import lanlu.shared.utils.FileUtils
 import lanlu.shared.utils.NaturalSort
+import lanlu.shared.utils.VolumeArchiveUtils
 import lanlu.shared.utils.getLogger
 
 /**
@@ -126,7 +127,23 @@ public class ArchiveFileHandler <: ArchiveHandler {
                 return true
             }
         }
-        return false
+        // 分卷归档入口文件也可以处理
+        // 例如 .zip.part.001 / .7z.001 / .z01 / .part1.rar 等
+        if (VolumeArchiveUtils.isVolumeFollower(filePath)) {
+            // 是跟随分片，不可单独处理
+            return false
+        }
+        // isPotentialVolumeEntry 是轻量级判断（仅检查文件名模式）
+        // 用于 .zip.part.001 这类入口文件
+        // 但需要确保不误判普通文件，所以通过 detectVolume 确认
+        match (VolumeArchiveUtils.detectVolume(filePath)) {
+            case Some(volumeInfo) =>
+                if (volumeInfo.isEntry) {
+                    return true
+                }
+                return false
+            case None => return false
+        }
     }
 
     public func getCoverImage(archivePath: String): (Int64, Array<UInt8>, Array<UInt8>) {

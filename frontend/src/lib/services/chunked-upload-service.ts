@@ -65,6 +65,17 @@ export class ChunkedUploadService {
   // 如果在此时间内没有数据传输活动，则认为连接已断开
   private static readonly UPLOAD_IDLE_TIMEOUT = 600000;
   private static readonly SUPPORTED_EXTENSIONS = ['zip', 'rar', '7z', 'tar', 'gz', 'pdf', 'epub', 'mobi', 'cbz', 'cbr', 'cb7', 'cbt'];
+  // 分卷/分片归档入口文件扩展名
+  private static readonly VOLUME_EXTENSIONS = [
+    'zip.part.001', 'zip.part.01', 'zip.part.1',
+    '7z.001', '7z.01', '7z.1',
+    'tar.001', 'tar.01', 'tar.1',
+    'tar.gz.001', 'tar.gz.01', 'tar.gz.1',
+    'tgz.001', 'tgz.01', 'tgz.1',
+    'z01', 'z02',
+    'part1.rar', 'part01.rar', 'part.1.rar',
+    'r00',
+  ];
   private static readonly MAX_CONCURRENT_CHUNKS = 1; // 顺序上传（与后端顺序写入一致）
 
   /**
@@ -177,16 +188,29 @@ export class ChunkedUploadService {
       return { valid: true };
     }
 
-    // 检查文件扩展名
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    if (!extension || !this.SUPPORTED_EXTENSIONS.includes(extension)) {
-      return {
-        valid: false,
-        error: `不支持的文件格式: ${extension}。支持的格式: ${this.SUPPORTED_EXTENSIONS.join(', ')}`
-      };
+    // 检查文件扩展名（支持多段扩展名如 .zip.part.001）
+    const fullName = file.name.toLowerCase();
+    const extension = fullName.split('.').pop()?.toLowerCase();
+    if (!extension) {
+      return { valid: false, error: '无法识别文件格式' };
     }
 
-    return { valid: true };
+    // 标准扩展名匹配
+    if (this.SUPPORTED_EXTENSIONS.includes(extension)) {
+      return { valid: true };
+    }
+
+    // 分卷扩展名匹配（检查完整文件名）
+    for (const volExt of this.VOLUME_EXTENSIONS) {
+      if (fullName.endsWith(volExt)) {
+        return { valid: true };
+      }
+    }
+
+    return {
+      valid: false,
+      error: `不支持的文件格式: ${extension}。支持的格式: ${this.SUPPORTED_EXTENSIONS.join(', ')}`
+    };
   }
 
   /**
