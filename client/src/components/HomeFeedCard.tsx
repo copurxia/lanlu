@@ -11,6 +11,7 @@ import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-
 import {Eye, Film, Heart} from 'lucide-react-native';
 
 import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
+import {Skeleton} from './Skeleton';
 import {
   buildAuthorizedAssetImageSource,
   buildAuthorizedImageSource,
@@ -157,7 +158,7 @@ async function buildPreviewSource(path?: string): Promise<FastImageSource | unde
     if (proxied) {
       return {uri: proxied, cache: FastImage.cacheControl.web, priority: FastImage.priority.low};
     }
-  } catch (_) {}
+  } catch {}
   return {...source, cache: FastImage.cacheControl.web, priority: FastImage.priority.low};
 }
 
@@ -882,6 +883,10 @@ function PreviewPlaceholder({loading, label}: {loading: boolean; label: string})
   const styles = useMemo(
     () =>
       StyleSheet.create({
+        previewSkeleton: {
+          aspectRatio: 1.6,
+          overflow: 'hidden',
+        },
         previewPlaceholder: {
           alignItems: 'center',
           aspectRatio: 1.6,
@@ -898,9 +903,17 @@ function PreviewPlaceholder({loading, label}: {loading: boolean; label: string})
     [colors],
   );
 
+  if (loading) {
+    return (
+      <View style={styles.previewSkeleton}>
+        <Skeleton height="100%" borderRadius={12} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.previewPlaceholder}>
-      <Text numberOfLines={2} style={styles.placeholderText}>{loading ? '...' : label}</Text>
+      <Text numberOfLines={2} style={styles.placeholderText}>{label}</Text>
     </View>
   );
 }

@@ -27,13 +27,21 @@ import java.net.Socket
 import java.net.URL
 import java.net.URLDecoder
 import java.net.URLEncoder
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
+import okhttp3.Cache
+import okhttp3.CacheControl
+import okhttp3.Headers
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.util.concurrent.TimeUnit
 
 class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -84,7 +92,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
   @ReactMethod
   fun createUrl(uri: String, headers: ReadableMap?, compress: Boolean, promise: Promise) {
     try {
-      val id = UUID.randomUUID().toString()
+      val id = ProxyServer.cacheKey(uri, headers, compress)
       val copiedHeaders = mutableMapOf<String, String>()
       headers?.let {
         val iterator = it.keySetIterator()
@@ -95,7 +103,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      val port = ProxyServer.register(id, uri, copiedHeaders, compress)
+      val port = ProxyServer.register(reactApplicationContext, id, uri, copiedHeaders, compress)
       val encodedId = URLEncoder.encode(id, "UTF-8")
       promise.resolve("http://127.0.0.1:$port/media/$encodedId")
     } catch (error: Exception) {
@@ -117,7 +125,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      val port = ProxyServer.register(id, uri, copiedHeaders)
+      val port = ProxyServer.register(reactApplicationContext, id, uri, copiedHeaders)
       val encodedId = URLEncoder.encode(id, "UTF-8")
       promise.resolve("http://127.0.0.1:$port/page/$encodedId/${encodeLocalPath(path)}")
     } catch (error: Exception) {
@@ -340,17 +348,102 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
 
   private object ProxyServer {
     private const val TAG = "LanluMediaProxy"
+    private const val BUFFER_SIZE = 64 * 1024
+    private const val COMPRESSED_IMAGE_MAX_WIDTH = 480
+    private const val COMPRESSED_IMAGE_JPEG_QUALITY = 80
+    private const val MEDIA_CACHE_SIZE_BYTES = 256L * 1024L * 1024L
     private val targets = ConcurrentHashMap<String, ProxyTarget>()
+    private val trustManager = object : X509TrustManager {
+      override fun checkClientTrusted(
+          chain: Array<java.security.cert.X509Certificate>?,
+          authType: String?,
+      ) {
+      }
+
+      override fun checkServerTrusted(
+          chain: Array<java.security.cert.X509Certificate>?,
+          authType: String?,
+      ) {
+      }
+
+      override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> =
+          emptyArray()
+    }
+    private val sslSocketFactory: SSLSocketFactory by lazy {
+      val context = SSLContext.getInstance("TLS")
+      context.init(null, arrayOf<X509TrustManager>(trustManager), java.security.SecureRandom())
+      context.socketFactory
+    }
+    private val trustAllHostnameVerifier = HostnameVerifier { _, _ -> true }
+    @Volatile private var httpClient: OkHttpClient? = null
+
+    // 同一原始 URI + 相同 compress 参数 → 相同代理路径，实现跨视图缓存共享
+    fun cacheKey(uri: String, headers: ReadableMap?, compress: Boolean): String {
+      val raw = buildString {
+        append(uri)
+        append("|")
+        headers?.let {
+          val iterator = it.keySetIterator()
+          while (iterator.hasNextKey()) {
+            val key = iterator.nextKey()
+            if (it.hasKey(key) && !it.isNull(key)) append(it.getString(key))
+          }
+        }
+        append("||compress=$compress")
+      }
+      val digest = MessageDigest.getInstance("SHA-256")
+      return digest.digest(raw.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    }
+
     private val executor = Executors.newCachedThreadPool()
 
     @Volatile private var serverSocket: ServerSocket? = null
     @Volatile private var port: Int = 0
 
     @Synchronized
-    fun register(id: String, uri: String, headers: Map<String, String>, compress: Boolean = false): Int {
+    fun register(
+        context: ReactApplicationContext,
+        id: String,
+        uri: String,
+        headers: Map<String, String>,
+        compress: Boolean = false,
+    ): Int {
+      ensureHttpClient(context)
       ensureStarted()
-      targets[id] = ProxyTarget(uri, headers, compress)
+      targets.putIfAbsent(id, ProxyTarget(uri, headers, compress))
       return port
+    }
+
+    @Synchronized
+    private fun ensureHttpClient(context: ReactApplicationContext): OkHttpClient {
+      httpClient?.let { return it }
+      val cacheDir = File(context.cacheDir, "lanlu_media_proxy_okhttp")
+      if (!cacheDir.exists()) {
+        cacheDir.mkdirs()
+      }
+      val client = OkHttpClient.Builder()
+          .cache(Cache(cacheDir, MEDIA_CACHE_SIZE_BYTES))
+          .sslSocketFactory(sslSocketFactory, trustManager)
+          .hostnameVerifier(trustAllHostnameVerifier)
+          .connectTimeout(15, TimeUnit.SECONDS)
+          .readTimeout(0, TimeUnit.MILLISECONDS)
+          .followRedirects(true)
+          .followSslRedirects(true)
+          .addNetworkInterceptor { chain ->
+            val response = chain.proceed(chain.request())
+            val cacheControl = response.header("Cache-Control").orEmpty()
+            if (cacheControl.contains("no-store", ignoreCase = true)) {
+              response
+            } else {
+              response.newBuilder()
+                  .header("Cache-Control", "public, max-age=86400")
+                  .header("Vary", appendVary(response.header("Vary"), "Authorization"))
+                  .build()
+            }
+          }
+          .build()
+      httpClient = client
+      return client
     }
 
     @Synchronized
@@ -460,39 +553,40 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
             .build()
             .toString()
       }
-      val connection = URL(targetUri).openConnection() as HttpURLConnection
-      try {
-        configureTlsIfNeeded(connection)
-        connection.requestMethod = method
-        connection.instanceFollowRedirects = true
-        connection.connectTimeout = 15000
-        connection.readTimeout = if (pagePath.isNullOrBlank()) 0 else 15000
-        target.headers.forEach { (key, value) ->
-          if (value.isNotBlank()) connection.setRequestProperty(key, value)
-        }
-        requestHeaders["range"]?.let { connection.setRequestProperty("Range", it) }
-        if (!target.headers.keys.any { it.equals("User-Agent", ignoreCase = true) }) {
-          requestHeaders["user-agent"]?.let { connection.setRequestProperty("User-Agent", it) }
-        }
+      val client = httpClient ?: throw IllegalStateException("Proxy HTTP client is not initialized")
+      val requestBuilder = Request.Builder()
+          .url(targetUri)
+          .method(method, null)
+      target.headers.forEach { (key, value) ->
+        if (value.isNotBlank()) requestBuilder.header(key, value)
+      }
+      requestHeaders["range"]?.let { requestBuilder.header("Range", it) }
+      if (!target.headers.keys.any { it.equals("User-Agent", ignoreCase = true) }) {
+        requestHeaders["user-agent"]?.let { requestBuilder.header("User-Agent", it) }
+      }
+      if (!pagePath.isNullOrBlank()) {
+        requestBuilder.cacheControl(CacheControl.FORCE_NETWORK)
+      }
 
-        val status = connection.responseCode
+      client.newCall(requestBuilder.build()).execute().use { response ->
+        val status = response.code
         val output = socket.getOutputStream()
         output.write("HTTP/1.1 $status ${reasonPhrase(status)}\r\n".toByteArray(Charsets.ISO_8859_1))
         writeHeader(output, "Connection", "close")
 
         if (method == "HEAD") {
-          copyResponseHeader(connection, output, "Content-Type")
-          copyResponseHeader(connection, output, "Content-Length")
-          copyResponseHeader(connection, output, "Content-Range")
-          copyResponseHeader(connection, output, "Accept-Ranges")
-          copyResponseHeader(connection, output, "ETag")
-          copyResponseHeader(connection, output, "Cache-Control")
+          copyResponseHeader(response.headers, output, "Content-Type")
+          copyResponseHeader(response.headers, output, "Content-Length")
+          copyResponseHeader(response.headers, output, "Content-Range")
+          copyResponseHeader(response.headers, output, "Accept-Ranges")
+          copyResponseHeader(response.headers, output, "ETag")
+          copyResponseHeader(response.headers, output, "Cache-Control")
           output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
           output.flush()
           return
         }
 
-        val rawBody = responseStream(connection)
+        val rawBody = response.body
         if (rawBody == null) {
           output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
           output.flush()
@@ -500,93 +594,106 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
         }
 
         // 压缩：仅当 compress=true 且 Content-Type 为 image/* 时触发
-        val contentType = connection.getHeaderField("Content-Type") ?: ""
+        val contentType = response.header("Content-Type").orEmpty()
         val shouldCompress = target.compress && contentType.startsWith("image/", ignoreCase = true) &&
-            !contentType.contains("svg", ignoreCase = true)
+            !contentType.contains("svg", ignoreCase = true) &&
+            !contentType.contains("gif", ignoreCase = true) &&
+            requestHeaders["range"].isNullOrBlank()
 
         if (shouldCompress) {
-          try {
-            val bitmap = BitmapFactory.decodeStream(rawBody)
-            if (bitmap != null) {
-              val maxWidth = 480
-              val scaled = if (bitmap.width > maxWidth) {
-                val ratio = maxWidth.toFloat() / bitmap.width
-                val newHeight = (bitmap.height * ratio).toInt()
-                Bitmap.createScaledBitmap(bitmap, maxWidth, newHeight, true)
-              } else {
-                bitmap
-              }
-              val compressed = ByteArrayOutputStream()
-              scaled.compress(Bitmap.CompressFormat.JPEG, 80, compressed)
-              val bytes = compressed.toByteArray()
-
-              copyResponseHeader(connection, output, "Content-Type")
-              writeHeader(output, "Content-Length", bytes.size.toString())
-              copyResponseHeader(connection, output, "Content-Range")
-              copyResponseHeader(connection, output, "Accept-Ranges")
-              copyResponseHeader(connection, output, "ETag")
-              copyResponseHeader(connection, output, "Cache-Control")
-              output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
-              output.write(bytes)
-              output.flush()
-              if (scaled !== bitmap) scaled.recycle()
-              bitmap.recycle()
-              compressed.close()
-              return
-            }
-          } catch (_: Exception) {}
+          val sourceBytes = rawBody.bytes()
+          val compressedBytes = try {
+            compressImageBytes(sourceBytes)
+          } catch (error: Exception) {
+            Log.w(TAG, "Image recompress failed; falling back to passthrough", error)
+            null
+          }
+          if (compressedBytes != null) {
+            writeHeader(output, "Content-Type", "image/jpeg")
+            writeHeader(output, "Content-Length", compressedBytes.size.toString())
+            copyResponseHeader(response.headers, output, "ETag")
+            copyResponseHeader(response.headers, output, "Cache-Control")
+            output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
+            output.write(compressedBytes)
+            output.flush()
+            return
+          } else {
+            copyResponseHeader(response.headers, output, "Content-Type")
+            writeHeader(output, "Content-Length", sourceBytes.size.toString())
+            copyResponseHeader(response.headers, output, "ETag")
+            copyResponseHeader(response.headers, output, "Cache-Control")
+            output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
+            output.write(sourceBytes)
+            output.flush()
+            return
+          }
         }
 
         // 直传
-        copyResponseHeader(connection, output, "Content-Type")
-        copyResponseHeader(connection, output, "Content-Length")
-        copyResponseHeader(connection, output, "Content-Range")
-        copyResponseHeader(connection, output, "Accept-Ranges")
-        copyResponseHeader(connection, output, "ETag")
-        copyResponseHeader(connection, output, "Cache-Control")
+        copyResponseHeader(response.headers, output, "Content-Type")
+        rawBody.contentLength().takeIf { it >= 0 }?.let { writeHeader(output, "Content-Length", it.toString()) }
+        copyResponseHeader(response.headers, output, "Content-Range")
+        copyResponseHeader(response.headers, output, "Accept-Ranges")
+        copyResponseHeader(response.headers, output, "ETag")
+        copyResponseHeader(response.headers, output, "Cache-Control")
         output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
-        rawBody.use { copyStream(it, output) }
+        rawBody.byteStream().use { copyStream(it, output) }
         output.flush()
-      } finally {
-        connection.disconnect()
       }
     }
 
-    private fun responseStream(connection: HttpURLConnection): InputStream? =
-        try {
-          connection.inputStream
-        } catch (_: Exception) {
-          connection.errorStream
-        }
+    private fun appendVary(current: String?, name: String): String {
+      val values = current
+          ?.split(",")
+          ?.map { it.trim() }
+          ?.filter { it.isNotEmpty() }
+          ?.toMutableList()
+          ?: mutableListOf()
+      if (values.none { it.equals(name, ignoreCase = true) }) {
+        values.add(name)
+      }
+      return values.joinToString(", ")
+    }
 
-    private fun configureTlsIfNeeded(connection: HttpURLConnection) {
-      if (connection !is HttpsURLConnection) return
-      val trustAll = arrayOf<X509TrustManager>(
-          object : X509TrustManager {
-            override fun checkClientTrusted(
-                chain: Array<java.security.cert.X509Certificate>?,
-                authType: String?,
-            ) {
-            }
+    private fun compressImageBytes(sourceBytes: ByteArray): ByteArray? {
+      val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+      BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, bounds)
+      val width = bounds.outWidth
+      val height = bounds.outHeight
+      if (width <= 0 || height <= 0 || width <= COMPRESSED_IMAGE_MAX_WIDTH) return null
 
-            override fun checkServerTrusted(
-                chain: Array<java.security.cert.X509Certificate>?,
-                authType: String?,
-            ) {
-            }
+      val sampleOptions = BitmapFactory.Options().apply {
+        inSampleSize = calculateInSampleSize(width, COMPRESSED_IMAGE_MAX_WIDTH)
+      }
+      val decoded = BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, sampleOptions)
+          ?: return null
+      val scaled = if (decoded.width > COMPRESSED_IMAGE_MAX_WIDTH) {
+        val ratio = COMPRESSED_IMAGE_MAX_WIDTH.toFloat() / decoded.width
+        val targetHeight = maxOf(1, (decoded.height * ratio).toInt())
+        Bitmap.createScaledBitmap(decoded, COMPRESSED_IMAGE_MAX_WIDTH, targetHeight, true)
+      } else {
+        decoded
+      }
+      return try {
+        val compressed = ByteArrayOutputStream()
+        scaled.compress(Bitmap.CompressFormat.JPEG, COMPRESSED_IMAGE_JPEG_QUALITY, compressed)
+        compressed.toByteArray()
+      } finally {
+        if (scaled !== decoded) scaled.recycle()
+        decoded.recycle()
+      }
+    }
 
-            override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> =
-                emptyArray()
-          },
-      )
-      val context = SSLContext.getInstance("TLS")
-      context.init(null, trustAll, java.security.SecureRandom())
-      connection.sslSocketFactory = context.socketFactory
-      connection.hostnameVerifier = HostnameVerifier { _, _ -> true }
+    private fun calculateInSampleSize(sourceWidth: Int, targetWidth: Int): Int {
+      var sampleSize = 1
+      while (sourceWidth / (sampleSize * 2) >= targetWidth) {
+        sampleSize *= 2
+      }
+      return sampleSize
     }
 
     private fun copyStream(input: InputStream, output: java.io.OutputStream) {
-      val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+      val buffer = ByteArray(BUFFER_SIZE)
       while (true) {
         val read = input.read(buffer)
         if (read <= 0) break
@@ -595,11 +702,11 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     }
 
     private fun copyResponseHeader(
-        connection: HttpURLConnection,
+        headers: Headers,
         output: java.io.OutputStream,
         name: String,
     ) {
-      val value = connection.getHeaderField(name) ?: return
+      val value = headers[name] ?: return
       writeHeader(output, name, value)
     }
 
