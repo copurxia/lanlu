@@ -1,7 +1,7 @@
 import {NativeModules, Platform} from 'react-native';
 
 type LanluMediaProxyModule = {
-  createUrl: (uri: string, headers?: Record<string, string>) => Promise<string>;
+  createUrl: (uri: string, headers?: Record<string, string>, compress?: boolean) => Promise<string>;
   createPageUrl?: (uri: string, headers: Record<string, string> | undefined, path: string) => Promise<string>;
   setSystemBarsHidden?: (hidden: boolean, edgeToEdge: boolean) => void;
   shareTextFile?: (extension: string, fileName: string, text: string, title: string) => Promise<string>;
@@ -20,11 +20,12 @@ const nativeProxy = NativeModules.LanluMediaProxy as LanluMediaProxyModule | und
 export async function createProxiedMediaUrl(
   uri: string,
   headers?: Record<string, string>,
+  compress = false,
 ) {
   if (Platform.OS !== 'android' || !nativeProxy || !headers?.Authorization) {
     return undefined;
   }
-  return nativeProxy.createUrl(uri, headers);
+  return nativeProxy.createUrl(uri, headers, compress);
 }
 
 export async function createProxiedPageUrl(

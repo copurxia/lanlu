@@ -2,6 +2,8 @@ package com.lanluclient
 
 import android.content.ClipData
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -80,7 +82,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
   }
 
   @ReactMethod
-  fun createUrl(uri: String, headers: ReadableMap?, promise: Promise) {
+  fun createUrl(uri: String, headers: ReadableMap?, compress: Boolean, promise: Promise) {
     try {
       val id = UUID.randomUUID().toString()
       val copiedHeaders = mutableMapOf<String, String>()
@@ -93,7 +95,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
           }
         }
       }
-      val port = ProxyServer.register(id, uri, copiedHeaders)
+      val port = ProxyServer.register(id, uri, copiedHeaders, compress)
       val encodedId = URLEncoder.encode(id, "UTF-8")
       promise.resolve("http://127.0.0.1:$port/media/$encodedId")
     } catch (error: Exception) {
@@ -334,7 +336,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     }
   }
 
-  private data class ProxyTarget(val uri: String, val headers: Map<String, String>)
+  private data class ProxyTarget(val uri: String, val headers: Map<String, String>, val compress: Boolean = false)
 
   private object ProxyServer {
     private const val TAG = "LanluMediaProxy"
@@ -345,9 +347,9 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
     @Volatile private var port: Int = 0
 
     @Synchronized
-    fun register(id: String, uri: String, headers: Map<String, String>): Int {
+    fun register(id: String, uri: String, headers: Map<String, String>, compress: Boolean = false): Int {
       ensureStarted()
-      targets[id] = ProxyTarget(uri, headers)
+      targets[id] = ProxyTarget(uri, headers, compress)
       return port
     }
 
@@ -477,6 +479,65 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
         val output = socket.getOutputStream()
         output.write("HTTP/1.1 $status ${reasonPhrase(status)}\r\n".toByteArray(Charsets.ISO_8859_1))
         writeHeader(output, "Connection", "close")
+
+        if (method == "HEAD") {
+          copyResponseHeader(connection, output, "Content-Type")
+          copyResponseHeader(connection, output, "Content-Length")
+          copyResponseHeader(connection, output, "Content-Range")
+          copyResponseHeader(connection, output, "Accept-Ranges")
+          copyResponseHeader(connection, output, "ETag")
+          copyResponseHeader(connection, output, "Cache-Control")
+          output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
+          output.flush()
+          return
+        }
+
+        val rawBody = responseStream(connection)
+        if (rawBody == null) {
+          output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
+          output.flush()
+          return
+        }
+
+        // 压缩：仅当 compress=true 且 Content-Type 为 image/* 时触发
+        val contentType = connection.getHeaderField("Content-Type") ?: ""
+        val shouldCompress = target.compress && contentType.startsWith("image/", ignoreCase = true) &&
+            !contentType.contains("svg", ignoreCase = true)
+
+        if (shouldCompress) {
+          try {
+            val bitmap = BitmapFactory.decodeStream(rawBody)
+            if (bitmap != null) {
+              val maxWidth = 480
+              val scaled = if (bitmap.width > maxWidth) {
+                val ratio = maxWidth.toFloat() / bitmap.width
+                val newHeight = (bitmap.height * ratio).toInt()
+                Bitmap.createScaledBitmap(bitmap, maxWidth, newHeight, true)
+              } else {
+                bitmap
+              }
+              val compressed = ByteArrayOutputStream()
+              scaled.compress(Bitmap.CompressFormat.JPEG, 80, compressed)
+              val bytes = compressed.toByteArray()
+
+              copyResponseHeader(connection, output, "Content-Type")
+              writeHeader(output, "Content-Length", bytes.size.toString())
+              copyResponseHeader(connection, output, "Content-Range")
+              copyResponseHeader(connection, output, "Accept-Ranges")
+              copyResponseHeader(connection, output, "ETag")
+              copyResponseHeader(connection, output, "Cache-Control")
+              output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
+              output.write(bytes)
+              output.flush()
+              if (scaled !== bitmap) scaled.recycle()
+              bitmap.recycle()
+              compressed.close()
+              return
+            }
+          } catch (_: Exception) {}
+        }
+
+        // 直传
         copyResponseHeader(connection, output, "Content-Type")
         copyResponseHeader(connection, output, "Content-Length")
         copyResponseHeader(connection, output, "Content-Range")
@@ -484,11 +545,7 @@ class LanluMediaProxyModule(reactContext: ReactApplicationContext) :
         copyResponseHeader(connection, output, "ETag")
         copyResponseHeader(connection, output, "Cache-Control")
         output.write("\r\n".toByteArray(Charsets.ISO_8859_1))
-
-        if (method != "HEAD") {
-          val body = responseStream(connection)
-          body?.use { copyStream(it, output) }
-        }
+        rawBody.use { copyStream(it, output) }
         output.flush()
       } finally {
         connection.disconnect()

@@ -10,6 +10,7 @@ import {
 import FastImage, {type Source as FastImageSource} from '@d11/react-native-fast-image';
 import {Eye, Film, Heart} from 'lucide-react-native';
 
+import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
 import {
   buildAuthorizedAssetImageSource,
   buildAuthorizedImageSource,
@@ -58,6 +59,10 @@ const previewCache = new Map<string, Promise<PreviewItem[]>>();
 const resolvedPreviewCache = new Map<string, PreviewItem[]>();
 const CHANNEL_AVATAR_SIZE = 40;
 const CHANNEL_ARTICLE_HORIZONTAL_PADDING = spacing.xs * 2;
+function getChannelPreviewAspectRatioCacheKey(archiveId: string, pageKey: string): string {
+  return `${archiveId}|${pageKey}`;
+}
+
 
 function parseTags(rawTags: unknown): string[] {
   if (Array.isArray(rawTags)) return rawTags.map(tag => String(tag).trim()).filter(Boolean);
@@ -145,11 +150,15 @@ async function buildPreviewSource(path?: string): Promise<FastImageSource | unde
     })) || undefined;
   }
   const source = await buildAuthorizedImageSource(path);
+  if (!source || typeof source.uri !== "string" || !source.uri.trim()) return undefined;
+  // 接入 mediaproxy（失败时回退直连）
+  try {
+    const proxied = await createProxiedMediaUrl(source.uri, source.headers as Record<string, string> | undefined, true);
+    if (proxied) {
+      return {uri: proxied, cache: FastImage.cacheControl.web, priority: FastImage.priority.low};
+    }
+  } catch (_) {}
   return {...source, cache: FastImage.cacheControl.web, priority: FastImage.priority.low};
-}
-
-function getChannelPreviewAspectRatioCacheKey(archiveId: string, pageKey: string): string {
-  return `${archiveId}|${pageKey}`;
 }
 
 const channelPreviewAspectRatioCache = new Map<string, number>();

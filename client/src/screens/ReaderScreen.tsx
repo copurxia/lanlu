@@ -983,7 +983,7 @@ export function ReaderScreen({route, navigation}: Props) {
             }
           : undefined;
       const thumbnailAuthorized = thumbnailPath ? await buildAuthorizedImageSource_(thumbnailPath) : null;
-      const thumbnailSource =
+      let thumbnailSource =
         thumbnailAuthorized && typeof thumbnailAuthorized.uri === 'string' && thumbnailAuthorized.uri.trim()
           ? {
               uri: thumbnailAuthorized.uri,
@@ -992,6 +992,15 @@ export function ReaderScreen({route, navigation}: Props) {
               priority: FastImage.priority.low,
             }
           : imageSource;
+      // 侧边栏缩略图也走代理压缩
+      if (thumbnailSource && thumbnailAuthorized?.headers) {
+        try {
+          const proxyThumb = await createProxiedMediaUrl(thumbnailSource.uri, thumbnailAuthorized.headers as Record<string, string> | undefined, true);
+          if (proxyThumb) {
+            thumbnailSource = {...thumbnailSource, uri: proxyThumb, headers: undefined};
+          }
+        } catch (_) {}
+      }
       if (effectiveType === 'image') {
         const debugKey = `${pageArchiveId}:${basePage.pageNumber}`;
         if (!imageSourceDebugKeys.current.has(debugKey)) {

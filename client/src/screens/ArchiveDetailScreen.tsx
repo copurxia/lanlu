@@ -15,6 +15,7 @@ import {ArrowLeft} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {buildAuthorizedAssetImageSource, buildAuthorizedImageSource, extractApiError, isNetworkError} from '../api/client';
+import {createProxiedMediaUrl} from '../native/LanluMediaProxy';
 import {
   archiveCoverAsset,
   deleteArchive,
@@ -97,7 +98,12 @@ export function ArchiveDetailScreen({route, navigation}: Props) {
             try {
               const authThumb = await buildAuthorizedImageSource(thumbPath);
               if (authThumb?.uri) {
-                thumbnailSource = {uri: authThumb.uri, ...(authThumb.headers ? {headers: authThumb.headers} : {}), cache: "immutable"} as any;
+                const proxyUri = await createProxiedMediaUrl(authThumb.uri, authThumb.headers as Record<string, string> | undefined, true);
+                thumbnailSource = {
+                  uri: proxyUri || authThumb.uri,
+                  ...(!proxyUri && authThumb.headers ? {headers: authThumb.headers} : {}),
+                  cache: "immutable",
+                } as any;
               }
             } catch {}
           }
