@@ -219,8 +219,13 @@ export function RootNavigator() {
   const [sidebarCategories, setSidebarCategories] = useState<any[]>([]);
   const [sidebarSmartFilters, setSidebarSmartFilters] = useState<any[]>([]);
   const currentRouteNameRef = useRef<string | null>(null);
+  const sidebarOpenRef = useRef(false);
   const getCachedFeed = useOfflineFeedStore(s => s.getCachedFeed);
   const serverId = activeServer?.id || '';
+
+  useEffect(() => {
+    sidebarOpenRef.current = sidebarOpen;
+  }, [sidebarOpen]);
 
   useEffect(() => {
     if (isOffline && serverId) {
@@ -252,11 +257,17 @@ export function RootNavigator() {
     PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gs) => {
+        const horizontal = Math.abs(gs.dx) > Math.abs(gs.dy) * 2 && Math.abs(gs.dx) > 15;
+        if (sidebarOpenRef.current) return horizontal;
         const route = currentRouteNameRef.current;
         if (!TAB_NAMES.includes(route ?? '')) return false;
-        return Math.abs(gs.dx) > Math.abs(gs.dy) * 2 && Math.abs(gs.dx) > 15;
+        return horizontal;
       },
       onPanResponderMove: (_, gs) => {
+        if (sidebarOpenRef.current) {
+          contentSlideAnim.setValue(0);
+          return;
+        }
         const route = currentRouteNameRef.current;
         const currentIdx = TAB_NAMES.indexOf(route ?? '');
         if (route === 'Home' && gs.dx > 0) return;
@@ -264,6 +275,14 @@ export function RootNavigator() {
         contentSlideAnim.setValue(Math.max(-120, Math.min(120, gs.dx)));
       },
       onPanResponderRelease: (_, gs) => {
+        if (sidebarOpenRef.current) {
+          contentSlideAnim.setValue(0);
+          if (gs.dx < -50 || gs.vx < -0.5) {
+            setSidebarOpen(false);
+          }
+          return;
+        }
+
         const route = currentRouteNameRef.current;
         const currentIndex = TAB_NAMES.indexOf(route ?? '');
         if (currentIndex === -1) return;

@@ -100,6 +100,7 @@ export function Drawer({
     }
     if (isBottom) {
       return Gesture.Pan()
+        .activeOffsetY(12)
         .onUpdate((event) => {
           if (event.translationY > 0) {
             translate.value = event.translationY;
@@ -117,14 +118,15 @@ export function Drawer({
     }
     if (isLeft) {
       return Gesture.Pan()
+        .activeOffsetX([-12, screenWidth])
         .onUpdate((event) => {
-          if (event.translationX > 0) {
-            translate.value = -screenWidth + event.translationX;
-            backdropOpacity.value = 1 - (event.translationX / screenWidth) * 0.6;
+          if (event.translationX < 0) {
+            translate.value = event.translationX;
+            backdropOpacity.value = 1 - (-event.translationX / screenWidth) * 0.6;
           }
         })
         .onEnd((event) => {
-          if (event.translationX > screenWidth * 0.25 || event.velocityX > 800) {
+          if (event.translationX < -screenWidth * 0.25 || event.velocityX < -800) {
             runOnJS(animateOut)();
           } else {
             translate.value = withTiming(0, {duration: 200});
@@ -133,14 +135,15 @@ export function Drawer({
         });
     }
     return Gesture.Pan()
+      .activeOffsetX([-screenWidth, 12])
       .onUpdate((event) => {
-        if (event.translationX < 0) {
-          translate.value = screenWidth + event.translationX;
-          backdropOpacity.value = 1 - (-event.translationX / screenWidth) * 0.6;
+        if (event.translationX > 0) {
+          translate.value = event.translationX;
+          backdropOpacity.value = 1 - (event.translationX / screenWidth) * 0.6;
         }
       })
       .onEnd((event) => {
-        if (event.translationX < -screenWidth * 0.25 || event.velocityX < -800) {
+        if (event.translationX > screenWidth * 0.25 || event.velocityX > 800) {
           runOnJS(animateOut)();
         } else {
           translate.value = withTiming(0, {duration: 200});
@@ -231,6 +234,31 @@ export function Drawer({
 
   if (!visible) return null;
 
+  const drawerContent = (
+    <>
+      <Animated.View style={[staticStyles.backdrop, backdropAnimatedStyle]}>
+        <BlurView blurType={blurType} blurAmount={12} reducedTransparencyFallbackColor={backdropColor} style={StyleSheet.absoluteFill}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={animateOut}
+          />
+        </BlurView>
+      </Animated.View>
+      {isBottom ? (
+        <GestureDetector gesture={panGesture}>
+          <Animated.View style={[sheetContainerStyle, sheetAnimatedStyle]}>
+            {showHandle && <View style={staticStyles.handle} />}
+            {children}
+          </Animated.View>
+        </GestureDetector>
+      ) : (
+        <Animated.View style={[sheetContainerStyle, sheetAnimatedStyle]}>
+          {children}
+        </Animated.View>
+      )}
+    </>
+  );
+
   return (
     <Modal
       animationType="none"
@@ -238,22 +266,17 @@ export function Drawer({
       statusBarTranslucent
       transparent
       visible={visible}>
-      <View style={[staticStyles.root, isBottom ? staticStyles.rootBottom : isLeft ? staticStyles.rootLeft : staticStyles.rootRight]}>
-        <Animated.View style={[staticStyles.backdrop, backdropAnimatedStyle]}>
-          <BlurView blurType={blurType} blurAmount={12} reducedTransparencyFallbackColor={backdropColor} style={StyleSheet.absoluteFill}>
-            <Pressable
-              style={StyleSheet.absoluteFill}
-              onPress={animateOut}
-            />
-          </BlurView>
-        </Animated.View>
+      {isBottom ? (
+        <View style={[staticStyles.root, staticStyles.rootBottom]}>
+          {drawerContent}
+        </View>
+      ) : (
         <GestureDetector gesture={panGesture}>
-          <Animated.View style={[sheetContainerStyle, sheetAnimatedStyle]}>
-            {isBottom && showHandle && <View style={staticStyles.handle} />}
-            {children}
-          </Animated.View>
+          <View style={[staticStyles.root, isLeft ? staticStyles.rootLeft : staticStyles.rootRight]}>
+            {drawerContent}
+          </View>
         </GestureDetector>
-      </View>
+      )}
     </Modal>
   );
 }

@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View} from 'react-native';
-import {ArrowLeft} from 'lucide-react-native';
+import {ArrowLeft, Check} from 'lucide-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {useNavigation} from '@react-navigation/native';
 import {ScreenRoot, screenSafeAreaPadding} from '../components/SafeAreaSurface';
@@ -17,6 +17,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   performance: 'settings.system.performance',
   server: 'settings.system.server',
   ssl: 'settings.system.ssl',
+  cron: 'settings.system.cron',
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -146,7 +147,18 @@ export function SystemSettingsScreen() {
             style={styles.backButton}>
             <ArrowLeft color={colors.text} size={24} />
           </TouchableOpacity>
-          <FluentTitle>{t('settings.system.title')}</FluentTitle>
+          <FluentTitle style={{flex: 1}}>{t('settings.system.title')}</FluentTitle>
+          <TouchableOpacity
+            accessibilityLabel={t('common.save')}
+            accessibilityRole="button"
+            disabled={saving || !hasDirty}
+            onPress={handleSaveCategory}
+            style={styles.saveButton}>
+            <Check
+              color={saving || !hasDirty ? colors.textMuted : colors.primary}
+              size={24}
+            />
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -175,15 +187,6 @@ export function SystemSettingsScreen() {
           <FluentCard style={styles.section}><Text style={styles.emptyText}>No settings</Text></FluentCard>
         ) : (
           <FluentCard style={styles.section}>
-            <View style={styles.categoryHeader}>
-              <Text style={styles.categoryTitle}>{activeCategory}</Text>
-              <FluentButton
-                label={saving ? t('common.saving') : t('common.save')}
-                variant="primary"
-                onPress={handleSaveCategory}
-                disabled={saving || !hasDirty}
-              />
-            </View>
             <View style={styles.settingList}>
               {activeSettings.map(setting => {
                 const isDirty = setting.key in dirtyValues;
@@ -245,6 +248,7 @@ function createStyles(colors: ThemeColors) {
     section: {gap: spacing.md},
     header: {flexDirection: 'row', alignItems: 'center', gap: spacing.md},
     backButton: {padding: spacing.xs},
+    saveButton: {padding: spacing.xs},
     chipsRow: {flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs},
     chip: {
       borderRadius: radius.md,

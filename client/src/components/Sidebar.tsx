@@ -184,7 +184,7 @@ export function Sidebar({
   );
 
   return (
-    <Drawer open={open} onClose={onClose} side="left" showHandle={false} enablePanDownToClose={false}
+    <Drawer open={open} onClose={onClose} side="left" showHandle={false}
       backdropColor={effectiveScheme === 'dark' ? 'rgba(0,0,0,0.7)' : 'rgba(255,255,255,0.7)'}
       blurType={effectiveScheme === 'dark' ? 'dark' : 'light'}
       respectSideSafeArea={false}

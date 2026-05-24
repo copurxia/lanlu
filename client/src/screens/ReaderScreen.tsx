@@ -581,7 +581,11 @@ function getActiveSubtitleCues(
 
 const LRC_TIME_TAG = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
 
+const lyricsParseCache = new Map<string, TimedLyricLine[]>();
+
 function parseTimedLyrics(rawLyrics: string): TimedLyricLine[] {
+  const cached = lyricsParseCache.get(rawLyrics);
+  if (cached) return cached;
   const parsed: TimedLyricLine[] = [];
   let lineIndex = 0;
   for (const rawLine of rawLyrics.split(/\r?\n/)) {
@@ -601,7 +605,9 @@ function parseTimedLyrics(rawLyrics: string): TimedLyricLine[] {
     });
     lineIndex += 1;
   }
-  return parsed.sort((a, b) => a.time - b.time);
+  const result = parsed.sort((a, b) => a.time - b.time);
+  lyricsParseCache.set(rawLyrics, result);
+  return result;
 }
 
 function getActiveTimedLyricIndex(lines: TimedLyricLine[], currentTime: number) {
@@ -616,11 +622,17 @@ function getActiveTimedLyricIndex(lines: TimedLyricLine[], currentTime: number) 
   return high;
 }
 
+const plainLyricCache = new Map<string, string[]>();
+
 function getPlainLyricLines(rawLyrics: string) {
-  return rawLyrics
+  const cached = plainLyricCache.get(rawLyrics);
+  if (cached) return cached;
+  const result = rawLyrics
     .split(/\r?\n/)
     .map(line => line.replace(LRC_TIME_TAG, '').trim())
     .filter(Boolean);
+  plainLyricCache.set(rawLyrics, result);
+  return result;
 }
 
 function nextReadingMode(mode: ReaderSettings['readingMode']) {
@@ -1530,6 +1542,15 @@ export function ReaderScreen({route, navigation}: Props) {
     return prefix;
   }, [getEstimatedWebtoonItemHeight, pages.length, webtoonItems]);
 
+  const webtoonOffsetList = useMemo(() => {
+    const list: {pageNum: number; y: number; h: number}[] = [];
+    for (const item of webtoonItems) {
+      const pageNum = 'kind' in item && item.kind === 'collection-end' ? pages.length + 1 : item.pageNumber;
+      list.push({pageNum, y: webtoonPrefix[pageNum] ?? 0, h: getEstimatedWebtoonItemHeight(item)});
+    }
+    return list;
+  }, [getEstimatedWebtoonItemHeight, pages.length, webtoonItems, webtoonPrefix]);
+
   const clampPageNum = useCallback((pn: number): number => {
     return pn > pages.length ? pages.length : Math.max(1, pn);
   }, [pages.length]);
@@ -1537,22 +1558,33 @@ export function ReaderScreen({route, navigation}: Props) {
   const findWebtoonPageAtOffset = useCallback((offsetY: number): number => {
     const center = offsetY + height / 2;
     if (center <= 0 || !webtoonItems.length) return 1;
+    // 二分查找：O(log n)，超长 webtoon 滚动时显著减少扫描
+    const list = webtoonOffsetList;
+    let low = 0;
+    let high = list.length - 1;
     let fallback = 1;
-    for (const item of webtoonItems) {
-      const pageNum = 'kind' in item && item.kind === 'collection-end' ? pages.length + 1 : item.pageNumber;
-      const y = webtoonPrefix[pageNum] ?? 0;
-      const h = getEstimatedWebtoonItemHeight(item);
-      const isTall = h > height * 1.5;
+    while (low <= high) {
+      const mid = Math.floor((low + high) / 2);
+      const entry = list[mid];
+      const isTall = entry.h > height * 1.5;
       if (isTall) {
-        if (offsetY >= y && offsetY < y + h) return clampPageNum(pageNum);
-      } else if (center >= y && center < y + h) {
-        return clampPageNum(pageNum);
+        if (offsetY >= entry.y && offsetY < entry.y + entry.h) return clampPageNum(entry.pageNum);
+      } else if (center >= entry.y && center < entry.y + entry.h) {
+        return clampPageNum(entry.pageNum);
       }
-      if (center < y && h > 0) break;
-      fallback = clampPageNum(pageNum);
+      if (center < entry.y) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+        fallback = clampPageNum(entry.pageNum);
+      }
+    }
+    const previous = list[Math.max(0, Math.min(low - 1, list.length - 1))];
+    if (previous && previous.h > height * 1.5 && offsetY >= previous.y && offsetY < previous.y + previous.h) {
+      return clampPageNum(previous.pageNum);
     }
     return fallback;
-  }, [clampPageNum, getEstimatedWebtoonItemHeight, height, pages.length, webtoonItems, webtoonPrefix]);
+  }, [clampPageNum, height, webtoonItems.length, webtoonOffsetList]);
 
   const getWebtoonOffset = useCallback((pageNum: number): number => {
     if (pageNum <= 1) return 0;
@@ -2640,6 +2672,23 @@ export function ReaderScreen({route, navigation}: Props) {
         .catch(reason => console.warn('Failed to write diagnostic log:', reason));
     });
   }, [activeMediaPages, archiveId, currentPage]);
+
+  const webtoonExtraData = useMemo(() => ({
+    currentPage,
+    failedPages,
+    htmlContents,
+    htmlHeights,
+    loadedPages,
+    longPage: settings.longPage,
+  }), [currentPage, failedPages, htmlContents, htmlHeights, loadedPages, settings.longPage]);
+
+  const pagedExtraData = useMemo(() => ({
+    currentPage,
+    failedPages,
+    htmlContents,
+    htmlHeights,
+    loadedPages,
+  }), [currentPage, failedPages, htmlContents, htmlHeights, loadedPages]);
 
   if (loading) return <ScreenState loading title={t('reader.loading')} />;
 
@@ -3955,14 +4004,7 @@ export function ReaderScreen({route, navigation}: Props) {
       {settings.readingMode === 'webtoon' ? (
         <FlatList
           data={webtoonItems}
-          extraData={{
-            currentPage,
-            failedPages,
-            htmlContents,
-            htmlHeights,
-            loadedPages,
-            longPage: settings.longPage,
-          }}
+          extraData={webtoonExtraData}
           key={`webtoon:${settings.longPage ? 'long' : 'paged'}`}
           keyExtractor={page => {
             if ('kind' in page && page.kind === 'collection-end') return 'collection-end';
@@ -4015,13 +4057,7 @@ export function ReaderScreen({route, navigation}: Props) {
         <FlatList
           data={readerItems}
           decelerationRate="fast"
-          extraData={{
-            currentPage,
-            failedPages,
-            htmlContents,
-            htmlHeights,
-            loadedPages,
-          }}
+          extraData={pagedExtraData}
           getItemLayout={(_, index) => ({
             length: horizontal ? width : height,
             offset: (horizontal ? width : height) * index,

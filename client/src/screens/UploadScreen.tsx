@@ -449,8 +449,6 @@ function UploadScreen() {
   const removeDownloadTask = useUploadStore(s => s.removeDownloadTask);
 
   const [urlInput, setUrlInput] = useState('');
-  const [uploadTitle, setUploadTitle] = useState('');
-  const [uploadTags, setUploadTags] = useState('');
   const styles = useMemo(() => createStyles(colors), [colors]);
 
   useEffect(() => {
@@ -506,8 +504,6 @@ function UploadScreen() {
           chunk_size: chunkSize,
           total_chunks: totalChunks,
           category_id: String(selectedCategoryId ?? ''),
-          title: uploadTitle.trim() || file.name.replace(/\\.[^.]+$/, ''),
-          tags: uploadTags.trim(),
           target_type: 'archive',
           target_id: '',
           overwrite,
@@ -684,20 +680,6 @@ function UploadScreen() {
                 <Text style={styles.filePickerSubHint}>{t('upload.multiFileHint')}</Text>
               </TouchableOpacity>
 
-              <TextInput
-                style={[styles.metaInput, {color: colors.text, borderColor: colors.border, backgroundColor: colors.surface}]}
-                value={uploadTitle}
-                onChangeText={setUploadTitle}
-                placeholder={t('upload.titlePlaceholder')}
-                placeholderTextColor={colors.textMuted}
-              />
-              <TextInput
-                style={[styles.metaInput, {color: colors.text, borderColor: colors.border, backgroundColor: colors.surface}]}
-                value={uploadTags}
-                onChangeText={setUploadTags}
-                placeholder={t('upload.tagsPlaceholder')}
-                placeholderTextColor={colors.textMuted}
-              />
             </FluentCard>
 
             {uploadFiles.map(file => (

@@ -759,7 +759,6 @@ export function ReaderSidebar({
       onClose={onClose ?? (() => {})}
       side={sidePanel ? 'right' : 'bottom'}
       showHandle={!sidePanel}
-      enablePanDownToClose={!sidePanel}
       maxHeight={sidePanel ? '100%' : '82%'}
       style={sidePanel ? {width: panelWidth} : undefined}>
       <View style={sidePanel ? styles.sideSheet : styles.sheet}>
